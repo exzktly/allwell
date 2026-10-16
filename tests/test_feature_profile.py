@@ -45,7 +45,7 @@ def test_thin_profile_matches_this_branch():
     assert reg.get("Segmentation") is not None
     # The features thin still leaves out, so that adding one is a deliberate
     # edit here rather than a silent widening of the subset.
-    for dropped in ("Multivariate", "Spatial", "smFISH", "Review CSV",
+    for dropped in ("Multivariate", "Spatial", "Nanowells", "smFISH", "Review CSV",
                     "Saved Plots", "Batch Export"):
         assert reg.get(dropped) is None, dropped
 

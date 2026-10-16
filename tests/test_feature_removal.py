@@ -141,6 +141,7 @@ class _ImportBlocker:
     ("stats", "Statistics"),
     ("scatter", "Scatter Plot"),
     ("barplot", "Bar Plots"),
+    ("nanowell", "Nanowells"),
     # Home's removable sub-tabs. The container package stays; only the
     # sub-package goes, so these also prove Home reaches its tab bodies through
     # the registry rather than by importing them. QC Triage's exclusions are an

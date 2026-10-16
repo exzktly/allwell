@@ -69,6 +69,10 @@ class Tile:
     #: one. ``None`` writes the bare ``<METADATA/>`` a tile with no timing
     #: carries, which is the fixture's default and the positional-token case.
     acquired: "str | None" = None
+    x: int = 0
+    y: int = 0
+    #: Override the complete subblock XML for missing/invalid metadata tests.
+    metadata_xml: str | None = None
 
 
 def _segment(name: str, data: bytes) -> bytes:
@@ -82,8 +86,8 @@ def _directory_entry(tile: Tile, *, position: int) -> bytes:
     stored_reduced = tile.pyramid in (True, "stored")
     type_set = tile.pyramid in (True, "type")
     dims: list[tuple[str, int, int, int]] = [
-        ("X", 0, width, width // 2 if stored_reduced else width),
-        ("Y", 0, height, height // 2 if stored_reduced else height),
+        ("X", tile.x, width, width // 2 if stored_reduced else width),
+        ("Y", tile.y, height, height // 2 if stored_reduced else height),
     ]
     dims.append(("C", tile.c, 1, 1))
     dims.append(("T", tile.t, 1, 1))
@@ -111,6 +115,8 @@ def _subblock_metadata(tile: Tile) -> bytes:
     because a scanner that found the timestamp only when it was the sole
     element would find nothing in a real file.
     """
+    if tile.metadata_xml is not None:
+        return tile.metadata_xml.encode("utf-8")
     if tile.acquired is None:
         return b"<METADATA/>"
     return (

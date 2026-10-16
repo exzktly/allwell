@@ -196,6 +196,101 @@ batch processing on headless workers:
 python process_microscopy.py --help
 ```
 
+#### Nanowell arrays (Analyze ▸ Nanowells, or the command line)
+
+The section and the Review page belong to the Nanowells feature: a build made from a profile without it
+(`ALLWELL_PROFILE`, as for a feature-subset executable) shows neither. The command-line `--nanowell_format` works in every
+build.
+
+In the Analyze pane, open the **Nanowells** section (folded by default), tick **Nanowell arrays**, and mark the
+channel the tiles are imaged in as **Phase** (Channel Tokens). The section asks for the plate format (100 µm or
+50 µm nanowells, or **Custom size**, which shows two more fields: the nanowell diameter and the lattice pitch,
+centre to centre — the run measures the pitch on the tiles, so it is a starting value) and, optionally, the cell diameter, the margin around a nanowell that must lie inside one tile
+for that tile to own it, the angle of the central square's edges to a lattice row, and the occlusion and
+clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
+While the mode is on, the segmentation method is set to label-free and locked (your choice returns when the mode
+is switched off). Run refuses to start, naming the fix, when a number is out of range or the Phase channel is
+unmarked (unless channel auto-detection will name it), and, for a single run with auto-detection off, when
+there is no acquisition record, the wells are not zips, a tile the record names is missing from an archive, or
+the tiles of a well cannot be placed.
+
+**A dataset without an acquisition record** (converted before the converters wrote one) can still be run: fill in
+**Tile grid** (rows x columns, e.g. `5x5`), **Scan order** (the corner the stage started from and whether it ran
+along rows or columns, back and forth or not), **Tile overlap** and **Pixel size**. Each well's fields are taken
+in the order of their names, numerically (`F2` before `F10`), as the stage visited them; the run logs how it
+placed them, and refuses a well with more fields than the grid holds, or fewer (a scan that stopped short).
+Nothing is written into your input folder.
+A record, when there is one, is always used instead. Use **Test detection** first: a wrong scan order puts tiles
+in the wrong places, and the montage shows it. The record, archive and grid checks are not made when **Detect schema &
+channels at run time** is on, or for a queued job whose input folder does not exist yet; the pipeline itself
+still refuses such a well, naming the reason. An overlap shorter
+than a nanowell needs is logged once as a warning with the expected number of nanowells on a seam, and the
+run goes on.
+
+**Test detection…** runs registration and detection on one well at one timepoint, in the background, and opens a
+window with the montage: every nanowell outlined (green empty, blue holding cells, amber occluded, red
+clipped, grey without an address, dashed purple on a seam), addresses written once you zoom in far enough to
+read them, the origin method, the measured overlap against the one a nanowell needs, and a few
+rim-suppressed nanowells beside their segmentation. Use it before a plate-wide run: if the addresses do not
+land on the right nanowells, the run would not either.
+
+The same run from the command line:
+
+A plate imaged as overlapping tiles of a nanowell array can be analysed one well at one timepoint at a time,
+with every tile of the well together. The input is the usual `in/<WELL>.zip` per well, one phase image per
+tile per timepoint, plus `in/acquisition.json`, the record that says where each tile sits in its well (the
+converters write it). A CZI record places the tiles by itself; an OME-TIFF or ND2 record carries the stage
+positions and pixel size but cannot say which way the stage axes run against the image's, so such a dataset is
+run with the tile grid described, as below. Add the nanowell flags:
+
+```sh
+python process_microscopy.py --input_dir plate/in --output_dir plate/out \
+    --phase_token PHASE --fluor_tokens GFP --nanowell_format 100um
+```
+
+`--nanowell_format` (`100um`, `50um`, or `custom` with `--nanowell_diameter_um` and `--nanowell_pitch_um`) turns
+the mode on and sets the nanowell diameter and the starting lattice pitch (the run measures the pitch on the
+tiles); without `in/acquisition.json`, `--nanowell_grid 5x5`, `--nanowell_scan top-left-row` (a corner, `row` or
+`column`, optionally `-serpentine`), `--nanowell_overlap_percent` and `--nanowell_pixel_size_um` describe the
+tiles instead;
+`--phase_token` names the channel the tiles are imaged in. `--nanowell_cell_diameter_um` (default 15) is the
+cell size the label-free segmenter is given, `--nanowell_margin_um` the margin around a nanowell that must lie
+inside one tile for that tile to own it (default a tenth of the diameter), and `--nanowell_square_edge_deg` the
+angle of the central square's edges to a lattice row (default 0). Wells must be zips.
+
+Besides the usual per-cell CSV (one row per cell, with the owner tile as `fov` and the nanowell's address
+`nw_q`, `nw_r`, `nw_ring`, `nw_label` and its position `well_x_um`, `well_y_um`), the run writes
+`nanowells/<well>.csv`, one row per nanowell and timepoint (its address, position, state, imaged and visible
+fractions, cell count, confluence, and fluorescence over the empty nanowells' background), and
+`nanowells/<well>_grid.json`, the registration, lattice and status of every timepoint. A nanowell no tile could
+see, or that was hidden, has a row with its state and **no number**, never a zero. A timepoint that could not
+be placed, found or addressed is named in the grid record with the reason, and the other timepoints still run.
+When a well's own evidence cannot say which nanowell is which (no visible central square, no readable array
+edge), the end of the run addresses it from the plate's other wells, which move together between timepoints,
+and says how many it anchored and how many remain unaddressed.
+
+`--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile
+record recomputes the timepoint. An incremental nanowell run is refused on a remote host for now — the remote
+would analyse the new timepoints without the earlier ones — so run it on this computer, or run the remote plate
+in full. The same holds when the app would make the run incremental on its own — a plate with an unfinished
+earlier run: the run is refused before anything is sent, and Force runs the plate in full. Wells already
+brought home from an earlier remote run are analysed again with the rest. Test detection is not affected: it
+runs on this computer. A remote nanowell run keeps every well's files on the remote until the run ends, because the
+end-of-run re-anchoring may re-run a well, and then brings the final tables home with the re-anchored wells.
+
+**Datasets tools and nanowell results.** *Subset* carries the nanowell tables of the wells and timepoints it
+keeps; it refuses a selection of fields, because a well's nanowell results are measured over all of its tiles
+together. *Merge Plates* carries both plates' tables, with dataset 2's wells renamed by the remap; it refuses two
+plates analysed under different nanowell settings, and says when only one plate has nanowell results (the
+other's wells then show on the Nanowells page as wells without a table). *Concatenate* supports the
+successive-imaging workflow: concatenate the analysed dataset with the new timepoint's raw images, then run
+Analyze with *Incremental* — the earlier timepoints are kept, and the new one is added onto the same nanowells.
+The new images need an acquisition record of their own when the analysed dataset has one (convert them with
+the CZI, ND2 or OME import); without it the merge is refused, because the merged dataset would have no record
+to add the new timepoint from. Two datasets that both hold nanowell results are refused. Each tool checks the tables before it writes anything,
+and refuses tables it cannot carry whole (a well with a grid record and no sites table, an unreadable record, one
+well under two spellings). *Validate* checks the tables against the grid record and the archives.
+
 ### Windows (from source)
 
 Native Windows runs CPU-only — TensorFlow dropped native Windows GPU
@@ -4166,7 +4261,9 @@ scatter and the phenotype-composition bars.
 
 The **Spatial** tab (Analysis rail, next to Multivariate) analyses per-cell
 positions in the well plane — the pipeline emits `shape_centroid_row` /
-`shape_centroid_col` for every segmented cell, and this tab uses them to
+`shape_centroid_col` for every segmented cell (in pixels of its field), and a
+nanowell run also each cell's position across the whole well in µm, which the
+tab then uses instead, labelling distances in µm. The tab uses them to
 answer questions the plotting and multivariate tabs can't: *"Do my cells
 form colonies, and are they growing or sparse?"*, *"Do edge cells behave
 differently from interior cells?"*, *"How much of the GFP variability is
@@ -4249,6 +4346,105 @@ format: one row per `well × timepoint_hours`), so downstream analysis
 in pandas or Excel isn't restricted to whichever summary is currently
 plotted. The single-timepoint picker in row 1 is disabled at Summary
 level — timepoints are already the X-axis.
+
+### Nanowells
+
+The **Nanowells** page (Analysis rail, after Spatial) draws a dataset analysed in nanowell mode (Analyze ▸
+Nanowells): one dot per nanowell, so you see how the nanowells of a well spread, how that spread changes over
+time, and how wells and replicate groups compare. A dataset without nanowell tables shows a page saying so.
+
+Pick wells on the plate at the left. Replicate sets from Sample Definitions are used exactly as the plot tabs
+use them.
+
+**Controls**
+
+- **View** — *Distribution* (the beeswarm, described below), *Array map*, *Trajectories*, *Position* and
+  *Array QC*. Each view shows only the controls it uses.
+- **Metric** — what each dot is: cell count, confluence, brightness (mean per-cell intensity), site signal
+  (integrated intensity above the empty nanowells' background), their fold changes against the baseline,
+  log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
+  ln count against time, per hour, over at least three timepoints with cells) and occupancy at baseline.
+  Brightness and site signal use the channel chosen in the app's channel selector, and are greyed when that
+  channel has no site intensities.
+- **Along x** — *Time*: one panel per well, or per replicate set with each member well side by side,
+  timepoints along the axis and each well's median joined over time. *Wells*: one timepoint (the latest by
+  default), wells and replicate sets along the axis. Growth rate and occupancy have one value per nanowell,
+  so they are drawn across wells only.
+- **Baseline** — what a fold change is measured from: the well's *earliest* timepoint, or each nanowell's
+  *first measurable* one (for a bubble that clears after the first timepoint).
+- **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
+- **Fixed cohort** (on *Distribution* and *Trajectories*) — use only the nanowells with a value at every
+  timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
+  measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
+  the footer gives the cohort's size.
+- **Well** and the **Timepoint** slider (on *Array map* and *Array QC*) — the one well drawn, from the wells
+  selected, and its timepoint; these views start at the well's first timepoint. One timepoint is shared by
+  every view, so a timepoint chosen on one carries to the next wherever it exists.
+
+**Reading the figure**
+
+- Dots are coloured by the number of cells in the nanowell at baseline: an open ring for 0, then 1, 2 and 3+
+  (the key at the top right names the baseline). Grey ("?") is a nanowell whose count at baseline is unknown.
+  Saved and copied figures use the white-background shades of the same key.
+- Counts and occupancy are whole numbers, so hundreds of nanowells share a value; their dots are packed into
+  a band within ±0.4 of the value, starting on the value itself, and the footer says so.
+- A swarm with more dots than its slot can hold says how many were not drawn under it — "+N at 0", or
+  "+N at 0–4" — beside its exclusions. Every nanowell with a value is either a dot or counted there.
+- A replicate set of more than four wells is drawn as one density per well, with its median, instead of dots;
+  select fewer wells to see (and click) single nanowells.
+- **Nothing without a number is drawn, and nothing is dropped silently.** Under each swarm, "excl. N" counts
+  the nanowells that have no value there, and the footer lists them by reason: occluded, clipped, no address,
+  not located, fused (no count), empty at baseline, seeded later (empty at baseline, cells later), and so on.
+  "Nanowells used U of R" (on *Along x: Time*, "Nanowell × timepoint values", since a nanowell is counted at
+  each timepoint) adds up the panels drawn, and the number of wells; past twelve panels the rest are named,
+  not counted. A selected well with no nanowell table is named in the footer, not drawn.
+- **Wells are the replicate unit, not nanowells.** On *Along x: Wells* each group's diamond and bar are the
+  mean of its wells' medians and a 95% t interval over wells; with two or three wells that interval is wide,
+  and the footer prints its degrees of freedom. "×1.5" beside a group is its centre over the control group's,
+  computed the same way (on log₂ fold change, the difference).
+- Times are each timepoint's recorded start from the acquisition record. When the record cannot give every
+  timepoint a time, the timepoint labels are used and the footer says so.
+
+**The other views**
+
+- **Array map** — one well at one timepoint, every nanowell of the array in its place on the lattice, coloured
+  by the metric (the colour bar names it). Nanowells keep their place as you move the slider, even if the
+  plate went back on the stage rotated. A nanowell without a value is a grey outline, never a colour: hatched
+  where it was occluded, dashed where clipped, dotted where it was not seen; a cross marks a fused nanowell and
+  the square marks the central one. The footer counts the nanowells by state. Click a nanowell to open its
+  site detail, as on the beeswarm. A well whose grid record has no pitch says so instead of drawing a map.
+- **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
+  its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
+  a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.
+- **Position** — the metric by ring (lattice steps from the central nanowell), per well: the median and the
+  interquartile band, and below it the share of each ring's nanowells without a value — including those not
+  seen at that timepoint. It checks for an edge effect, and makes no test. A selected well with no addressed
+  nanowells at the timepoint is named in the footer.
+- **Array QC** — the well's stitched phase montage at the chosen timepoint, each tile's outline coloured by how
+  it was placed (green on the lattice, blue by overlap, amber where the acquisition record put it), with its
+  registration residual. Occluded and clipped nanowells are outlined at their measured positions. Beside the
+  image are the grid record of this timepoint (status, how the origin was found, pitch, angle, overlap,
+  nanowells detected of the roster), the empty-nanowell template the counts were divided by, and the status of
+  every other timepoint. A template the run found far from the well's earliest one is shown in amber: most
+  nanowells there may hold cells, and that timepoint's counts and confluence may be biased. A tile whose size the acquisition
+  record does not give is marked at its corner, and the figure says so. The montage is read in the
+  background; the figure says *Reading the montage…* meanwhile.
+
+**Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
+brightness and site signal against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
+six nanowells to compare; clicking empty space clears them, as does *Clear selection*. A timepoint where the
+nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
+Under the plots, a strip of crops shows the first selected nanowell at each timepoint, cut at full resolution
+from the image the run segmented (the well's archive in `in/`). When that archive is not beside the dataset
+(an output folder copied on its own), cannot be read, or the nanowell has no single owner tile (a fused one),
+the crop is cut from the lower-resolution montage instead, and the caption under the strip says so and why; a
+timepoint with no crop says why. Selecting nanowells does not change the plate selection.
+
+**Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the dataset as one
+long CSV, with the baseline and where the times came from. Right after you change the baseline it waits:
+until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
+drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
+is opened again.
 
 ### Image Browser
 
@@ -4968,7 +5164,7 @@ panel-local state so a batch run isn't tied to whatever the on-screen
 plot has set.
 
 Pick the mode from the tab strip in the window's top band — *Line · Bar ·
-Scatter (cells) · Scatter (aggregate) · Response*, beside the Review / Analyze /
+Scatter (cells) · Scatter (aggregate) · Response · Nanowells*, beside the Review / Analyze /
 Datasets selector, where every other page's tabs are. The groups you build are
 **shared by every mode** — define them once and they are there whichever you
 export. They describe your plate's conditions, not the shape of
@@ -4988,9 +5184,25 @@ row per curve's fit — including a fit that was refused, carrying the reason.
 A group with no placeable points writes nothing at all rather than an empty
 figure and an empty file.
 
-Fold change is the one setting the Response panel does not carry: response
+**Nanowells** (on a dataset with nanowell tables) exports the
+[Nanowells](#nanowells) page's figures one group at a time. Choose the **View**
+(Distribution, Array map, Trajectories or Position), tick the **Metrics**, and
+set **Along x**, **Baseline**, **Timepoint** (Latest, Earliest or one of the
+dataset's) and **Fixed cohort** as on the page — each greyed where it does not
+reach the view. Each group writes one figure per metric, drawn exactly as the
+page draws it (the Array map, which shows one well, writes one figure per well),
+and one summary CSV: for each metric, well and timepoint the median, quartiles,
+fraction responding and occupied, the nanowells used, and those excluded by
+reason. A group's replicate sets are drawn as sets and its single wells on their
+own, as on the page. A well of the group with no nanowell table is named on the
+figure and gets its own row in the CSV; a group with none at all is skipped and
+the run says so. Saved Plots records made by this mode restore the Nanowells page
+to the figure's view and metric.
+
+Fold change is a setting the Response panel does not carry: response
 curves normalise through the shared fold-change setting on the plotting band,
-the same one the tabs use, so set it there. Every other mode keeps its own.
+the same one the tabs use, so set it there. Line, Bar and Scatter keep their own; Nanowells measures a
+fold change against the baseline chosen on its panel.
 
 Groups are built on a **plate map**, the same plate control used everywhere else
 in the app rather than a separate grid of squares. Left-drag across it to add
@@ -5593,11 +5805,41 @@ well were taken in the order you expect. It is anchored at whichever well
 position 1 will land in: the **Origin** you typed, or the first well of a
 hand-drawn path.
 
+An OME-TIFF or ND2 conversion also writes `in/acquisition.json`: each tile's
+stage position in µm where the file states one with a unit, the pixel size where
+the file states a calibration, and the tile size. Anything the file does not
+state is left unknown rather than guessed (an ND2 that was never calibrated
+records no pixel size). The log says how many tiles got a stage position. A
+destination that already holds well archives from a different conversion (or
+from another file converted with the same settings) gets no record, and the log
+says which archive is in the way. Every Analyze run checks the record against the
+well archives, so adding or deleting an archive by hand afterwards stops the run
+with a message saying so: convert again, use Datasets → Subset to drop wells, or
+delete `in/acquisition.json` to run without it. For a nanowell run the
+stage positions are not enough to place the tiles, so describe the tile grid in
+Analyze (see *Nanowell mode*).
+
 ### Convert CZI
 
 Turns a Zeiss `.czi` plate scan into an ordinary dataset folder of per-well
 images, the layout Analyze processes. Do this first, then open the result in
 Analyze.
+
+Conversion also writes `in/acquisition.json` with the pixel size and tile size
+for each timepoint, the available mosaic and stage positions, and **one shared
+acquisition start per timepoint**. That start is the earliest recorded tile
+across the whole source acquisition, whichever wells this conversion writes,
+even when scanning the plate takes an hour. Missing
+readings are counted; mixing zoned and unzoned clocks leaves the start unknown
+with a reason. No per-well or per-tile acquisition time is saved downstream.
+Unknown metadata remains unknown, including the selected objective and declared
+overlap whose native declarations have not yet been established.
+
+The record covers the archives actually written, including a stopped conversion
+and complete wells kept by resume. If metadata publication fails or the process
+is interrupted during publication, reading the record reports incomplete
+publication. Resume the matching conversion to rebuild it; do not edit the JSON
+to make an incomplete publication appear complete.
 
 **ZEN saves a plate two ways, and this page reads both.** The ordinary raw save
 is one file holding every scene, mosaic tile, channel, Z-plane and timepoint of
@@ -5906,22 +6148,25 @@ honestly is refused there rather than part-way through a run. What it catches:
   is the image cannot be decided. This is what a file concatenated from two
   acquisitions looks like; convert them separately.
 
-**Timepoints are named by elapsed time when the file records it** — `0h`,
-`4h`, `8h`, the same names the OME-TIFF converter writes. A CZI stamps each
-plane's acquisition time into that plane's own metadata rather than anywhere
-central, so the converter reads one well's series and measures the rest from
-its first image.
+**Timepoints are named by measured elapsed hours** — `0h`, `4h`, `8h`
+when those are the recorded intervals. Each timepoint has one shared start:
+the earliest readable tile instant across every tile of the source acquisition. Every
+well uses that same time, including a scan that takes an hour. The first shared
+start is the elapsed-time origin. Labels use the existing acquisition-jitter rounding rules; the record
+retains the precise absolute starts.
 
-It reads **the first well the scan visited**, and only that one. A plate scan
-crosses its wells in turn, so the last well of a round can be half an hour
-behind the first, and mixing them would fold the time it takes to cross the
-plate into the numbers on your axis. Every well's images therefore carry the
-timepoint names taken from that first well's clock, which is what makes them
-comparable. For a Split Scenes folder the first file is that well, and it is
-the only file read for timing.
+The source preview samples one position and its labels are provisional. Before converting pixels, the converter reads tile metadata across every
+source file and generates labels from the whole acquisition. Partial and full
+conversions therefore use identical labels. A resume re-converts archives named
+under the former sampled-field rule. Native timepoint ordinals in ZIP member comments make a failed
+metadata publication recoverable without guessing which acquisition an hour
+label denoted. A complete resume with unchanged labels leaves archives alone.
 
-**When the times cannot be used, timepoints are named by position** — `t0`,
-`t1`, … — and the page says so before you run, in the line under the settings,
+**A single frame is always named `0h`.** If it has no timestamp, its absolute
+start remains unknown and the record says why. No absolute clock is invented.
+
+**When a multi-frame acquisition has no usable times, timepoints are named by
+position** — `t0`, `t1`, … — and the page identifies the sampled preview before you run, in the line under the settings,
 rather than leaving you to notice afterwards. That happens when the file
 records no acquisition times at all, when some timepoints have one and others
 do not, when two of them work out to the same label, or when the first
@@ -6126,12 +6371,19 @@ from source, `pip install -r requirements.txt` brings it in; without it this
 page says so and names the command, and points at Convert OME-TIFF as the way
 round it, rather than failing part-way through a run.
 
+Like the OME-TIFF converter, an ND2 conversion writes `in/acquisition.json` with
+each position's stage coordinates, the pixel size when the file was calibrated,
+and the tile size — see the end of [Convert OME-TIFF](#convert-ome-tiff).
+
 ### Concatenate datasets
 
 Use this when the *same plate* was imaged in two separate sessions and you want a
 single continuous timelapse instead of two datasets. It appends **dataset 2**
 onto **dataset 1**, shifting dataset 2's timepoints so they carry on after dataset
-1's last one.
+1's last one, by a **time gap you can see and edit**. The two datasets can be
+analysed datasets, or **raw datasets** (just an `in/` folder, straight from the
+CZI import or Import Loose, merged *before* analysis), or an analysed dataset 1
+followed by a raw dataset 2.
 
 How it works:
 
@@ -6139,10 +6391,27 @@ How it works:
    folder icon to pick a folder, and hover a filled-in field to see its full
    path (the box itself shows just the folder name). A field turns up its own
    hint below it if the folder isn't usable — **Dataset 1**/**Dataset 2** must
-   each contain both an `in/` and an `out/` folder; **Destination** must be a
+   each contain an `in/` folder and either an `out/` folder (an analysed
+   dataset) or no results at all (a raw dataset); **Destination** must be a
    new, empty folder, different from both datasets. Both originals are left
    untouched either way.
-2. Once both folders are picked, a status panel appears below showing a
+2. Check the **Gap** field. It is the time between dataset 1's *last*
+   timepoint and dataset 2's *first*, written like `24h`, `90m`, `1.5d`, `1d 6h 30m` or a
+   bare number of hours (a comma works as the decimal point, `1,5`). Anything
+   that could be read two ways, such as `6h30`, `12:30`, `1d6` or `1,500`, is
+   refused with a message and never guessed, and the field works to the whole
+   minute. It comes pre-filled with the best answer available —
+   the gap between the two acquisitions' recorded start times when both
+   datasets carry an acquisition record, otherwise dataset 1's usual interval
+   — and says which it used. Type over it with the real gap whenever you know
+   it (the plate may have been in the incubator for any length of time). If
+   neither source exists, as when dataset 1 has a single timepoint and no
+   record, the field starts empty and Concatenate stays disabled until you
+   enter one. If what you type differs from the recorded gap by more than 2 %
+   (or a minute), the page shows both numbers and goes with yours. Underneath,
+   the page lists dataset 2's resulting timepoint labels, updating as you type,
+   so you can see the result before anything is copied.
+3. Once both folders are picked, a status panel appears below showing a
    "Ready — N well(s)" plate preview of what the merge will actually touch —
    before you've pressed anything. Press **Concatenate** and that same plate
    starts colouring per well as the merge progresses (grey → amber "merging"
@@ -6151,7 +6420,7 @@ How it works:
    phase rail (Validate → Merge → Verify → Finalize) and an overall progress
    bar. The full text log is still there if you want it — tick **Show raw
    log** to reveal it below the plate.
-3. On success, click **Open merged dataset in Review** to load the result
+4. On success, click **Open merged dataset in Review** to load the result
    straight into Review (now the page's highlighted default action, in place
    of Concatenate, until you change one of the source folders again).
 
@@ -6163,8 +6432,8 @@ log is showing.
 What it does to the data:
 
 - **Timepoints.** Dataset 2's first timepoint is relabelled to *dataset 1's last
-  timepoint + dataset 1's imaging interval* (the typical gap between its
-  timepoints), and the rest of dataset 2 keeps its spacing. New labels are
+  timepoint + the gap you entered*, and the rest of dataset 2 keeps its
+  spacing. New labels are
   written in **dataset 1's own format** — so a compound-format dataset 1
   (`00d00h00m`, `00d08h00m`) gets compound-format continuations, not a mix of
   conventions in the same file. Every value a row's timepoint is stored in —
@@ -6174,6 +6443,33 @@ What it does to the data:
 - **Wells.** The union of both datasets' wells is written. A well in both is
   stitched (dataset 1's rows, then dataset 2's shifted rows); a well in only one
   is copied across.
+- **Raw datasets.** Two raw datasets merge into a raw dataset: the
+  destination holds the combined `in/` and no `out/` at all, ready for one
+  Analyze run over every timepoint. The filename pattern is worked out from the
+  image names themselves, and Concatenate **refuses unless that reading is
+  confident and finds a timepoint field** — a wrong guess would shift the
+  wrong part of every name. The two datasets may use different tile plans (a
+  different number of tiles per well) and different pixel sizes: each
+  timepoint keeps its own acquisition record, so Analyze places each
+  timepoint's tiles from its own geometry. A pixel size differing by more than
+  1 % is flagged in the log, because it is almost always a different objective.
+  The merge is verified on the images themselves: every shifted name, with the
+  size and checksum of the original, must be present in the destination
+  archive. When the datasets carry `in/acquisition.json`, the merged record is
+  written and checked against the archives; if only one of them has a record,
+  the log says so and the merged dataset has none rather than a half-true one.
+  A raw merge has no sidecar to record the gap in, so when neither dataset has a
+  record the gap you entered exists only in the run log, and the log says that.
+  An image of dataset 2 whose name carries no timepoint cannot be shifted: it is
+  copied unchanged, named in the log and counted in the summary. Datasets that
+  spell one well differently (`A01.zip` against `A1.zip`) are refused, because
+  the merged file names would carry two spellings of it.
+- **Analysed dataset 1, raw dataset 2.** Dataset 1's results are kept exactly
+  as they are and dataset 2's images are added to `in/`. Nothing of dataset 2
+  is analysed yet; run Analyze on the destination and only the new timepoints
+  are processed. A raw dataset 1 followed by an analysed dataset 2 is refused
+  (put the analysed one first), since the analysed data cannot be kept without
+  also being re-based.
 - **Everything else** — measurement CSVs, per-well QC-image zips, raw input
   images, saved cell-inclusion overrides, and `pipeline_info.json` — is merged
   accordingly, with dataset 2's timepoints rewritten throughout. Gating
@@ -6202,10 +6498,11 @@ What it does to the data:
 
 It refuses (with an explanation on the dashboard headline) when the two datasets
 weren't analysed the same way (different filename schema, channel positions, or
-segmentation method), when a timepoint can't be read as a time, when dataset 1
-has only a single timepoint (so there's no interval to continue), or when a
-dataset stores its QC images as per-well folders rather than zip archives (a
-layout Concatenate doesn't support). A column present in one dataset's
+segmentation method), when a timepoint can't be read as a time, when the gap is
+empty or can't be read (a single-timepoint dataset 1 no longer needs an
+interval: enter the gap), when a raw dataset's filename pattern can't be read
+with confidence, or when a dataset stores its QC images as per-well folders
+rather than zip archives (a layout Concatenate doesn't support). A column present in one dataset's
 measurements but not the other's — a channel one dataset didn't collect,
 say — gets called out too, since those rows will have a blank value for it.
 
@@ -6477,7 +6774,10 @@ It refuses when the two datasets weren't analysed the same way (same checks
 Concatenate applies), when a remap target isn't a valid 96-well position, when a
 remap would push a well past the edge of the plate, or when either dataset
 spells one well two ways (see
-[Concatenate datasets](#concatenate-datasets)). Timepoints
+[Concatenate datasets](#concatenate-datasets)), or when their acquisition
+records cannot be merged — only one dataset has one, or the two disagree about a
+timepoint's start or calibration. All of these are found when you choose the
+datasets, before anything is written. Timepoints
 differing between the two plates is only a warning, not a refusal — the
 merged plate is legitimately ragged in that case, and plots will show gaps
 for the combinations one plate doesn't have.

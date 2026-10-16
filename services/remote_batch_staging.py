@@ -34,6 +34,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from services.remote_run_id import _parse_argv_flags
+from util.well_token import background_well_key as _bg_well_key, blank_wells_for_run
 
 
 def prune_argv(remote_dir: str, names: list[str]) -> list[str]:
@@ -66,3 +68,31 @@ def prune_staged(cache: Any, remote_dir: str, zips: list[Path], label: str,
         log(f"[remote] {label}: {len(kept)} of {len(set(names))} well-zip(s) "
             f"are already on the remote from an earlier attempt — rsync skips "
             f"any that arrived whole and resumes the rest\n")
+
+
+def _empty_well_blanks(argv, well_zips) -> tuple[str, ...]:
+    """The blank well archives this run needs for empty-well correction.
+
+    Returns their stems, or empty when the run asks for no empty-well
+    correction. Batched mode has to know about them because it slices the plate
+    into batches and stages one at a time: the pipeline builds its correction
+    from whatever wells are in the input directory *at that moment*, so a blank
+    sitting in the last batch corrects the last batch and nothing else. Every
+    earlier batch produced numbers with the background left in, and the output
+    carried no sign of it.
+    """
+    flags = _parse_argv_flags(argv, multi=set(), single={
+        "--background", "--flatfield", "--background_well", "--background_well_map"})
+    if "empty_well" not in (flags.get("--background"), flags.get("--flatfield")):
+        return ()
+    # The pipeline's own parser and match key, not a fourth spelling of them.
+    # A local `re.split(r"[,\s]+", ...)` here read "H12 G12" as two wells while
+    # `split_background_wells` reads it as one, so batched mode held out and
+    # uploaded two archives the pipeline then matched neither of — the run died
+    # on the guard in every batch. `blank_wells_for_run` is that reading widened
+    # to the map: a blank named only there is still a blank.
+    wanted = {_bg_well_key(w) for w in blank_wells_for_run(
+        flags.get("--background_well", ""), flags.get("--background_well_map", ""))}
+    if not wanted:
+        return ()
+    return tuple(z.stem for z in well_zips if _bg_well_key(z.stem) in wanted)

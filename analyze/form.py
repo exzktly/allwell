@@ -32,6 +32,7 @@ from analyze.domain.fields import (  # noqa: F401 — re-exported for analyze.ta
     _numeric_option_errors,
 )
 from analyze.pinfo import AnalyzePipelineInfoMixin
+from analyze.nanowell_hook import nanowell_section_mixin
 from analyze.qc_section import AnalyzeQCSectionMixin
 from analyze.schema_section import AnalyzeSchemaSectionMixin
 from analyze.seg_params import AnalyzeSegParamsMixin
@@ -54,7 +55,11 @@ from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP  # noqa: F401
 from util.well_token import canonical_well_label, is_valid_well_name
 
 
-class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
+#: The nanowell section, or a stand-in that is nothing, by the build's profile (``analyze.nanowell_hook``).
+AnalyzeNanowellSectionMixin = nanowell_section_mixin()
+
+
+class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
                           AnalyzePipelineInfoMixin, AnalyzeQCSectionMixin,
                           AnalyzeSchemaSectionMixin, AnalyzeSegParamsMixin):
     """The Analyze-tab Qt form builders. Mixed into ``AnalyzeTab`` (with
@@ -68,6 +73,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         self._build_folders_section(parent)
         self._build_channel_tokens_section(parent)
         self._refresh_schema_preview()
+        self._build_nanowell_section(parent)
         # Quality Control leads the optional sections and stays open: its
         # correction stages are common tuning knobs, not an afterthought.
         self._build_qc_section(parent)
@@ -718,5 +724,6 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             cellpose_flow_threshold=self._cellpose_flow_thr_edit.text().strip(),
             cellpose_cellprob_threshold=self._cellpose_cellprob_thr_edit.text().strip(),
             cellpose_nuclei_channel=self._cellpose_nuclei_channel_edit.text().strip(),
+            **self._nanowell_option_values(),
         )
         return opts

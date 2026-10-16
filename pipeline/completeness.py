@@ -273,6 +273,39 @@ def coverage_for_well(
     )
 
 
+def nanowell_coverage(well: str, *, in_members, grid_path: Path, sites_path: Path, has_out_zip: bool,
+                      schema, sep: str, skip_hidden: bool = False, failed=()) -> WellCoverage:
+    """A nanowell well's coverage, counted in timepoints: the unit of work there is (well, timepoint).
+
+    Intent is the distinct timepoints the input holds; a timepoint is covered when the grid record
+    says it finished ``ok``. The per-cell CSV cannot stand in for it: cells exist only where a
+    nanowell holds one, so a well of empty nanowells is whole and has no cell rows, and the (fov,
+    timepoint) pairs of a CSV are owner tiles, not the input's tiles. ``csv_state`` describes the
+    nanowell table, the file every nanowell plot reads. Missing timepoints are ``("", timepoint)`` pairs.
+    """
+    import json
+
+    intent = {tp for _fov, tp in fov_keys_from_member_names(
+        in_members or (), schema=schema, sep=sep, skip_hidden=skip_hidden, images_only=True)} \
+        if in_members is not None else set()
+    try:
+        blocks = json.loads(Path(grid_path).read_text(encoding="utf-8")).get("timepoints", {})
+    except (OSError, ValueError):
+        blocks = {}
+    ok = {tp for tp, block in blocks.items() if block.get("status") == "ok"}
+    state = "missing"
+    try:
+        with Path(sites_path).open(encoding="utf-8") as fh:
+            state = "ok" if sum(1 for _ in fh) > 1 else "empty"
+    except OSError:
+        state = "missing"
+    return WellCoverage(
+        well=well, intent=len(intent), covered_csv=len(ok & intent), covered_any=len(ok & intent),
+        missing=tuple(sorted(("", tp) for tp in intent - ok)), csv_state=state,
+        has_in_container=in_members is not None, has_out_zip=has_out_zip, has_out_folder=False,
+        failed=tuple(failed))
+
+
 # ── the end-of-run scan ─────────────────────────────────────────────────────
 #
 # Everything above is the rule, shared with the Datasets Validate tool.
@@ -526,6 +559,28 @@ def _csv_prefixes_present(output_dir: Path) -> list[str]:
     return sorted(prefixes)
 
 
+def _scan_well_coverage(well, container, out_dir, csv_prefix, schema, sep, fov_field_present, failed):
+    """One well's coverage: per timepoint when it was run in nanowell mode, per (fov, timepoint) otherwise."""
+    from pipeline.well_skip import existing_csv_for_well, out_folder_path, out_zip_path
+
+    out_zip = out_zip_path(out_dir, well)
+    out_folder = out_folder_path(out_dir, well)
+    in_members = _member_names(container)
+    grid_path = Path(out_dir) / "nanowells" / f"{well}_grid.json"
+    if grid_path.is_file():
+        return nanowell_coverage(well, in_members=in_members, grid_path=grid_path,
+                                 sites_path=grid_path.with_name(f"{well}.csv"),
+                                 has_out_zip=out_zip.exists(), schema=schema, sep=sep,
+                                 skip_hidden=bool(container is not None and container.is_dir()), failed=failed)
+    csv_keys, csv_state = csv_keys_and_state(existing_csv_for_well(out_dir, well, csv_prefix))
+    return coverage_for_well(
+        well, in_members=in_members, csv_keys=csv_keys, csv_state=csv_state,
+        out_zip=out_zip if out_zip.exists() else None,
+        out_folder=out_folder if out_folder.is_dir() else None,
+        schema=schema, sep=sep, fov_field_present=fov_field_present,
+        skip_hidden=bool(container is not None and container.is_dir()), failed=failed)
+
+
 def scan_run(
     *, in_containers, output_dir, schema, sep: str, csv_prefix: str,
     fov_field_present: bool, started_at: float | None = None,
@@ -554,7 +609,6 @@ def scan_run(
     ``partial_scan``, so a truncated record can never be mistaken for a clean
     plate.
     """
-    from pipeline.well_skip import existing_csv_for_well, out_folder_path, out_zip_path
 
     out_dir = Path(output_dir)
     in_map = {str(k): Path(v) for k, v in dict(in_containers or {}).items()}
@@ -577,21 +631,9 @@ def scan_run(
             # this reads it.
             container = resolve_input_container(in_map.get(well))
             recorded_container = in_map.get(well)
-            out_zip = out_zip_path(out_dir, well)
-            out_folder = out_folder_path(out_dir, well)
-            csv_keys, csv_state = csv_keys_and_state(
-                existing_csv_for_well(out_dir, well, csv_prefix))
-            cov = coverage_for_well(
-                well,
-                in_members=_member_names(container),
-                csv_keys=csv_keys,
-                csv_state=csv_state,
-                out_zip=out_zip if out_zip.exists() else None,
-                out_folder=out_folder if out_folder.is_dir() else None,
-                schema=schema, sep=sep, fov_field_present=fov_field_present,
-                skip_hidden=bool(container is not None and container.is_dir()),
-                failed=failed_map.get(well, ()),
-            )
+            cov = _scan_well_coverage(
+                well, container, out_dir, csv_prefix, schema, sep, fov_field_present,
+                failed_map.get(well, ()))
             if recorded_container is not None and cov.intent == 0:
                 # The run named a container for this well and nothing could be
                 # read from it. That is not "nothing was asked for" — it is a

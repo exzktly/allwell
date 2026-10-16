@@ -480,7 +480,7 @@ def test_every_well_state_is_written_by_some_caller(state):
     """
     import ast
 
-    from tests._repo_scan import python_sources
+    from tests._repo_scan import parse_source, python_sources
 
     written: set[str] = set()
     for path in python_sources():
@@ -489,7 +489,7 @@ def test_every_well_state_is_written_by_some_caller(state):
         text = path.read_text()
         if not any(seam in text for seam in _RECORDING_SEAMS):
             continue
-        tree = ast.parse(text, filename=str(path))
+        tree = parse_source(path)
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 name = (getattr(node.func, "attr", None)

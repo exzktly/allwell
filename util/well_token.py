@@ -338,3 +338,27 @@ def safe_well(label: str) -> str:
     skimage at module scope. ``pipeline.io`` re-exports it as ``_safe_well``.
     """
     return label.replace("/", "_").replace("\\", "_")
+
+
+def is_well_archive(path) -> bool:
+    """Whether *path* is a well's input archive as the run reads one: a ``.zip`` in any case, not a hidden file (a
+    macOS ``._A01.zip`` sidecar is not an archive at all), named for a plate well (``A1``, ``a01``, ``A01``)."""
+    from pathlib import Path
+
+    path = Path(path)
+    return (path.suffix.lower() == ".zip" and not path.name.startswith(".")
+            and canonical_well_label(path.stem) is not None)
+
+
+def well_archives(directory) -> list:
+    """The well archives in *directory*, in path order: the one enumeration the run, its start check, the
+    acquisition record's checks, the converters and the Analyze pre-flight share (roll-up review X8, X28).
+    A directory that does not exist has none."""
+    from pathlib import Path
+
+    from util.dir_scan import files_in
+
+    directory = Path(directory)
+    if not directory.is_dir():
+        return []
+    return [p for p in files_in(directory) if is_well_archive(p)]

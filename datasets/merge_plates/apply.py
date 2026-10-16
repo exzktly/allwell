@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import csv
 import json
+from util.acquisition_record import (
+    AcquisitionRecordError, read_record, write_record, merge_plate_records, validate_against_archives,
+)
 import threading
 from datasets.core.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
@@ -24,7 +27,8 @@ from util.aw_safe import swallow
 from util.well_token import canonical_well_label
 from datasets.core.concurrency import pick_workers
 from datasets.core.provenance import record_derivation
-from datasets.core.dataset_paths import split_stem_well
+from datasets.core.dataset_paths import dataset_wells, split_stem_well
+from datasets.core.nanowell_tables import carry_nanowell_tables
 from util.csv_gz import csv_stem, is_gz_csv_name, open_csv_text
 from datasets.core.containers import (
     FILENAME_COLUMN,
@@ -425,6 +429,12 @@ def execute_plan(
         "dataset 2 (after remap)."
     )
 
+    try:
+        acquisition = merge_plate_records(read_record(plan.ds1.root), read_record(plan.ds2.root),
+                                          plan.well_map)
+    except AcquisitionRecordError as error:
+        raise MergePlatesError(str(error)) from error
+
     if plan.dest_is_restart:
         emit("Destination has leftover files from an earlier attempt — clearing.")
         clear_destination(plan.dest)
@@ -491,6 +501,22 @@ def execute_plan(
     _verify(plan, row_counts, mismatches)
 
     _merge_cell_overrides(plan, emit)
+    # Each plate's wells are tagged with their plate, so the end-of-run re-anchoring fits each plate on its own.
+    nanowell_rows = carry_nanowell_tables(plan.ds1.out_dir, plan.dest.out_dir,
+                                          {well: well for well in dataset_wells(plan.ds1)},
+                                          plate=f"dataset 1: {plan.ds1.root.name}")
+    nanowell_rows.update(carry_nanowell_tables(
+        plan.ds2.out_dir, plan.dest.out_dir, {well: plan.well_map.get(well, well) for well in dataset_wells(plan.ds2)},
+        plate=f"dataset 2: {plan.ds2.root.name}"))
+    if nanowell_rows:
+        emit(f"Carried the nanowell tables of {len(nanowell_rows)} well(s) "
+             f"({sum(nanowell_rows.values()):,} site rows).")
+    if acquisition is not None:
+        validation = validate_against_archives(
+            plan.dest.root, acquisition, schema=":".join(plan.schema.fields), sep=plan.schema.sep)
+        if not validation.ok:
+            raise MergePlatesError("; ".join(validation.issues))
+        write_record(plan.dest.root, acquisition)
 
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)

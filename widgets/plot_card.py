@@ -115,6 +115,37 @@ def follows_theme(artist, *, muted: bool = False):
     return artist
 
 
+#: Attribute naming a collection's paired screen / publication colours (see :func:`theme_paired_colours`).
+THEME_PAIR_ATTR = "_aw_theme_pair"
+
+
+def theme_paired_colours(collection, *, screen: tuple, publication: tuple):
+    """Mark *collection* as drawn in data colours that come in a screen / publication pair; return it.
+
+    The rule is that data ink does not change with the theme, and :func:`follows_theme` never tags it. A
+    palette that is *defined* as a pair — the same ordered classes, each shade readable on its own ground —
+    is the stated exception, and without this a capture (which flips the theme with the redraw suppressed)
+    would put the screen shades on publication white. *screen* and *publication* are ``(facecolors,
+    edgecolors)``.
+    """
+    setattr(collection, THEME_PAIR_ATTR, {"screen": screen, "publication": publication})
+    return collection
+
+
+def repaint_theme_pairs(ax, mode: str) -> None:
+    """Give every collection on *ax* marked by :func:`theme_paired_colours` its colours for *mode*."""
+    for coll in ax.collections:
+        pair = getattr(coll, THEME_PAIR_ATTR, None)
+        if pair is None:
+            continue
+        faces, edges = pair["publication" if mode == "publication" else "screen"]
+        try:
+            coll.set_facecolors(faces)
+            coll.set_edgecolors(edges)
+        except Exception:
+            swallowed()
+
+
 def repaint_theme_ink(host, fg: str, muted: str) -> None:
     """Repaint every tagged artist on *host* in the new theme's ink.
 
@@ -905,6 +936,7 @@ if _HAVE_MPL:
                 # they kept the outgoing theme's ink straight into the capture.
                 _, ink_fg, ink_muted, _, _ = _plot_tokens(mode)
                 repaint_theme_ink(ax, ink_fg, ink_muted)
+                repaint_theme_pairs(ax, mode)
                 leg = ax.get_legend()
                 if leg is not None:
                     fg = _plot_tokens(mode)[1]

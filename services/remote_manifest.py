@@ -48,6 +48,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # process_microscopy at module top level, so the remote needs the package.
     "util/__init__.py",
     "util/aw_safe.py",
+    # Versioned acquisition metadata is stdlib-only and shared by input readers.
+    "util/acquisition_record.py",
+    # Nanowell addressing and geometry are Qt-free; the manifest mirrors
+    # these packages even while their only callers are synthetic tests.
+    "util/nanowell_address.py",
     # One `os.scandir` in place of a `stat` per directory entry. Client-side
     # only — its importers are the Analyze input scan and the remote runner's
     # own staging, both of which run here — but the manifest must list every
@@ -114,6 +119,16 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # top level (Torch/TensorFlow stay lazy), so the remote needs the whole
     # package or the run aborts with ModuleNotFoundError.
     "pipeline/__init__.py",
+    "pipeline/nanowell_lattice.py",
+    "pipeline/tile_grid.py",
+    "pipeline/tile_register.py",
+    "pipeline/nanowell_detect.py",
+    "pipeline/nanowell_sites.py",
+    "pipeline/nanowell_measure.py",
+    "pipeline/nanowell_run.py",
+    "pipeline/nanowell_task.py",
+    "pipeline/nanowell_pattern_record.py",
+    "pipeline/nanowell_preview.py",
     "pipeline/auto_threshold.py",
     # The post-run pass over that sampler: which estimator this run's
     # arguments call for, and the merge into pipeline_info.json.
@@ -177,6 +192,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/czi_read.py",
     "pipeline/czi_set.py",
     "pipeline/czi_explode.py",
+    "pipeline/czi_acquisition.py",
+    "pipeline/converter_record.py",
+    "pipeline/ome_acquisition.py",
     # How a plate's files are read at once — across worker processes, because
     # reading one is a Python parser rather than a wait. ``czi_set`` imports
     # it at module scope, so it travels with it whether or not a remote run

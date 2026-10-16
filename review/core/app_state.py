@@ -43,6 +43,7 @@ _FEATURE_STATE_OWNERS = {
     "home": "Home",
     "image_table": "Image Browser",
     "multivariate": "Multivariate",
+    "nanowell": "Nanowells",
     "playground": "Image Browser",
     "preview": "Image Browser",
     "response": "Response Curves",

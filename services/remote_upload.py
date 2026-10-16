@@ -31,6 +31,7 @@ from services.remote_wire import (
     TRANSIENT_PREFIX,
     _well_xfer_line,
 )
+from services.acquisition_transport import acquisition_cache_key, carry_upload_record, carry_subset_record
 from services.remote_staging import (
     ZippedInput,
 )
@@ -44,9 +45,6 @@ from services.remote_transport import (
     _rsync_progress_flags,
     _rsync_ssh_transport,
     _rsync_supports_append_verify,
-)
-from services.remote_scratch import (
-    fingerprint_archives,
 )
 
 
@@ -73,16 +71,8 @@ class DatasetCache:
 
     @staticmethod
     def cache_key(zipped: ZippedInput) -> str:
-        """Stable hash of the (basename, size, mtime) triple for each
-        well zip in ``zipped.zip_dir``. blake2b at 16 bytes is more than
-        enough collision resistance for a per-user cache.
-
-        This hashes the archives as *uploaded*, which for a rewritten upload
-        means files staging created moments ago — see
-        :func:`fingerprint_archives` for the one that hashes what the user
-        actually has.
-        """
-        return fingerprint_archives(zipped.well_zips)
+        """Cache identity includes the exact scoped acquisition record."""
+        return acquisition_cache_key(zipped)
 
     def remote_dataset_dir(self, key: str) -> str:
         """Return the remote-side absolute path for a cache entry.
@@ -91,6 +81,7 @@ class DatasetCache:
         """
         return f"{self.host.remote_staging_dir}/datasets/{key}"
 
+    @carry_upload_record
     def ensure_uploaded(
         self,
         zipped: ZippedInput,
@@ -115,7 +106,7 @@ class DatasetCache:
         # Ensure remote target dir exists.
         self._ssh_run(["mkdir", "-p", remote_path], check=True)
 
-        sources = [to_rsync_path(p) for p in zipped.well_zips]
+        sources = [to_rsync_path(p) for p in (*zipped.well_zips, *getattr(zipped, "extra_upload_files", ()))]
         # The trailing slash on the remote dest is critical for rsync's
         # tree-merge semantics — without it rsync would create
         # `<key>/<key>/` on the second run.
@@ -232,6 +223,7 @@ class DatasetCache:
             )
         return key, sent_bytes, elapsed
 
+    @carry_subset_record
     def upload_subset(
         self,
         well_zips: list[Path],
@@ -240,6 +232,7 @@ class DatasetCache:
         log_fn: Callable[[str], None] | None = None,
         progress_fn: Callable[[float], None] | None = None,
         stop_event: threading.Event | None = None,
+        extra_sources: tuple[Path, ...] = (),
     ) -> tuple[int, float, int]:
         """Upload a chosen subset of zips to ``remote_path``.
 
@@ -255,7 +248,7 @@ class DatasetCache:
         """
         if not well_zips:
             return 0, 0.0, 0
-        sources = [to_rsync_path(p) for p in well_zips]
+        sources = [to_rsync_path(p) for p in (*well_zips, *extra_sources)]
         dest = f"{self.host.ssh_alias}:{remote_path}/"
         cmd = [
             resolve_rsync_binary(),

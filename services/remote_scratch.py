@@ -122,7 +122,15 @@ def source_fingerprint(input_dir: "Path | None") -> str:
     if not archives:
         return ""
     try:
-        return fingerprint_archives(archives)
+        from util.acquisition_record import RECORD_FILENAME, read_record_file
+        record = read_record_file(Path(input_dir) / RECORD_FILENAME)
+        base = fingerprint_archives(archives)
+        if record is None:
+            return base
+        import json
+        digest = hashlib.blake2b(base.encode("ascii"), digest_size=16)
+        digest.update(json.dumps(record, sort_keys=True).encode("utf-8"))
+        return digest.hexdigest()
     except OSError:
         return ""
 

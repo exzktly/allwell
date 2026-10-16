@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import ast
 
-from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source, python_sources, rel
 
 #: The context manager, and the call-inside-except. Both modules define both
 #: names, so a file importing either one is scanned against the same rule.
@@ -43,12 +43,15 @@ def _callee(node: ast.AST) -> str:
     return ""
 
 
-def offenders_in(source: str, path: str) -> list[str]:
-    """Every misuse of the two helpers in *source*."""
-    try:
-        tree = ast.parse(source, path)
-    except SyntaxError:  # pragma: no cover - a file we cannot parse
-        return []
+def offenders_in(source, path: str) -> list[str]:
+    """Every misuse of the two helpers in *source* — its text, or the tree ``parse_source`` already shares."""
+    if isinstance(source, ast.Module):
+        tree = source
+    else:
+        try:
+            tree = ast.parse(source, path)
+        except SyntaxError:  # pragma: no cover - a file we cannot parse
+            return []
     out: list[str] = []
 
     # 1. `with swallowed():` — the shape that raises before its body runs.
@@ -100,7 +103,7 @@ def offenders_in(source: str, path: str) -> list[str]:
 def _offenders() -> list[str]:
     out: list[str] = []
     for path in python_sources():
-        out.extend(offenders_in(path.read_text(), rel(path)))
+        out.extend(offenders_in(parse_source(path), rel(path)))
     return out
 
 

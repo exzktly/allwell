@@ -105,6 +105,7 @@ def _build_stats(ctx, frame) -> None:
 
 _build_multivariate = _lazy_build("review.features.multivariate.tab_view", "build_multivariate_tab")
 _build_spatial = _lazy_build("review.features.spatial.tab_view", "build_spatial_tab")
+_build_nanowell = _lazy_build("review.features.nanowell.tab_view", "build_nanowell_tab")
 _build_saved_plots = _lazy_build("review.features.saved_plots.tab_view", "build_saved_plots_tab")
 _build_batch_export = _lazy_build("review.features.batch_export.tab_view", "build_batch_export_tab")
 
@@ -167,6 +168,7 @@ _state_smfish = _lazy_state("review.features.smfish.state", "SmfishState")
 _state_stats = _lazy_state("review.features.stats.state", "StatsState")
 _state_multivariate = _lazy_state("review.features.multivariate.state", "MultivariateState")
 _state_spatial = _lazy_state("review.features.spatial.state", "SpatialState")
+_state_nanowell = _lazy_state("review.features.nanowell.state", "NanowellState")
 _state_review_image = _lazy_state("review.features.image_browser.review_image.state", "ReviewImageState")
 _state_preview = _lazy_state("review.features.image_browser.review_image.state", "PreviewState")
 _state_image_table = _lazy_state("review.features.image_browser.image_table.state", "ImageTableState")
@@ -271,6 +273,25 @@ def _activate_multivariate(ctx) -> None:
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
     ctx.coordinator.refresh_sidebar_map()
     mv_on_activate(ctx)
+
+
+_NANOWELL = "review.features.nanowell.controller"
+_activate_nanowell = _lazy_hook(_NANOWELL, "nw_on_activate")
+_loaded_nanowell = _lazy_hook(_NANOWELL, "nw_on_dataset_loaded")
+_sel_nanowell = _lazy_hook(_NANOWELL, "nw_on_selection_changed")
+_channel_nanowell = _lazy_hook(_NANOWELL, "nw_on_channel_changed")
+
+
+def _nanowell_view_state_io():
+    """The Nanowells page's (snapshot, apply) view-state pair (lazy): its whole configuration, so a Saved
+    Plot restores the same metric, axis, baseline and selected nanowells."""
+    from review.features.nanowell.view_state_io import apply_nanowell, snapshot_nanowell
+    return snapshot_nanowell, apply_nanowell
+
+
+def _redraw_nanowell():
+    from review.features.nanowell.controller import redraw
+    return redraw
 
 
 def _activate_spatial(ctx) -> None:
@@ -1003,6 +1024,18 @@ def _features() -> list[FeatureDescriptor]:
             on_selection_changed=_sel_spatial,
             on_channel_changed=_channel_spatial,
             redraw=_redraw_spatial,
+            per_well_selection=True,
+        ),
+        FeatureDescriptor(
+            name="Nanowells", group="Analysis", build=_build_nanowell,
+            lazy_only=True,
+            states=(StateSpec("nanowell", _state_nanowell),),
+            on_activate=_activate_nanowell,
+            on_dataset_loaded=_loaded_nanowell,
+            on_selection_changed=_sel_nanowell,
+            on_channel_changed=_channel_nanowell,
+            redraw=_redraw_nanowell,
+            view_state_io=_nanowell_view_state_io,
             per_well_selection=True,
         ),
         # ── Images ────────────────────────────────────────────────────────

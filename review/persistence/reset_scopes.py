@@ -349,7 +349,7 @@ ANALYSIS_SCOPES: tuple[ResetScope, ...] = (
 # ── the view tier ─────────────────────────────────────────────────────────
 
 VIEW_DOMAINS: tuple[str, ...] = (
-    "view_state", "line_order", "heatmap_layouts", "multivariate",
+    "view_state", "line_order", "heatmap_layouts", "multivariate", "nanowell",
 )
 
 
@@ -394,6 +394,11 @@ def reset_view(ctx) -> None:
     if mv is not None:
         restore_slice_defaults(mv, "multivariate")
         _save(ctx, "multivariate")
+
+    nw = ctx.state.feature_slice("nanowell")
+    if nw is not None:
+        nw.apply_config({})                 # the page's choices only; its tables belong to the dataset
+        _save(ctx, "nanowell")
 
     _notify(ctx.runtime.image_table.reset_cb, "the Image Table grid")
 

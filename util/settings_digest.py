@@ -105,6 +105,26 @@ KEYED_ON: dict[str, str] = {
     "no_auto_threshold":           "turns off the on/off gate the CSV columns use",
     "pos_control_well":            "the positive control the gate is fitted to",
     "neg_control_well":            "the negative control the gate is fitted to",
+    # ── nanowell mode ───────────────────────────────────────────────────────
+    "nanowell_format":             "turns the mode on and fixes the lattice pitch and nanowell "
+                                   "diameter every site is found, addressed and measured with",
+    "nanowell_cell_diameter_um":   "the scale the label-free segmenter looks for cells at",
+    "nanowell_margin_um":          "how far inside a tile a nanowell must lie for that tile to "
+                                   "own it, hence which pixels its cells are counted from",
+    "nanowell_square_edge_deg":    "the orientation check that refuses a lattice fitted a sixth "
+                                   "of a turn off, so which timepoints are addressed at all",
+    "nanowell_occluded_below":     "the visibility under which a nanowell carries no count, so "
+                                   "which sites have a number at all",
+    "nanowell_clipped_below":      "the same for a nanowell cut by the edge of the tiles",
+    "nanowell_diameter_um":        "a custom format's nanowell diameter, which every site is found "
+                                   "and measured with",
+    "nanowell_pitch_um":           "a custom format's lattice pitch, which every site is addressed with",
+    "nanowell_grid":               "the described grid a dataset without an acquisition record is "
+                                   "placed from, so where every tile and nanowell sits",
+    "nanowell_scan":               "the order the described grid's fields were taken in, the same",
+    "nanowell_overlap_percent":    "the described grid's tile spacing, the same",
+    "nanowell_pixel_size_um":      "the described grid's pixel size, which scales every distance "
+                                   "and area measured",
     # ── how a filename is read ──────────────────────────────────────────────
     "filename_schema":             "decides which token is the well, fov, timepoint",
     "filename_sep":                "the same, and a wrong one groups nothing",
@@ -166,6 +186,10 @@ NOT_KEYED_ON: dict[str, str] = {
 }
 
 
+#: The keys that describe a nanowell run, and only a nanowell run (:func:`settings_digest`).
+_NANOWELL_PREFIX = "nanowell_"
+
+
 def settings_digest(opts) -> str:
     """A stable short hash of the options in :data:`KEYED_ON` that *opts* sets.
 
@@ -179,7 +203,16 @@ def settings_digest(opts) -> str:
     "unknown", never as "matches".
     """
     payload = {}
+    try:
+        nanowell = bool(opts["nanowell_format"])
+    except (KeyError, TypeError):
+        nanowell = False
     for key in sorted(KEYED_ON):
+        if key.startswith(_NANOWELL_PREFIX) and not nanowell:
+            # The nanowell options carry parser defaults on every run, nanowell or not. Keyed on them
+            # outside the mode, every plate recorded before they existed would read as recorded under
+            # other settings and be re-run (roll-up review X5); they describe nothing such a run did.
+            continue
         try:
             value = opts[key]
         except (KeyError, TypeError):

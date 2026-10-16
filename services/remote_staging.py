@@ -22,6 +22,7 @@ import subprocess
 import time
 import zipfile
 from dataclasses import dataclass
+from services.acquisition_transport import ZippedInput, carry_staged_record
 from pathlib import Path
 from collections.abc import Callable, Iterable
 from services.remote_config import (
@@ -62,40 +63,8 @@ from services.remote_scratch import (
 )
 
 
-@dataclass
-class ZippedInput:
-    """The output of :class:`LocalZipper`: a directory of ``{well}.zip``
-    files plus the local input mode the user would have triggered."""
 
-    zip_dir: Path
-    mode: LocalInputMode
-    well_zips: tuple[Path, ...]
-    """Sorted ``{well}.zip`` paths inside ``zip_dir``."""
-
-    cleanup: Callable[[], None] | None = None
-    """Optional callback that removes any temporary staging directory the
-    zipper created. ``None`` when the input was already in zip form."""
-
-    on_pipeline_success: Callable[[], None] | None = None
-    """Optional callback fired ONLY after a clean pipeline run-to-
-    completion. Used to delete source loose TIFs / well folders that
-    were zipped into ``input_dir`` in-place, so a successful run
-    converts the user's input folder from loose-TIF mode to zip mode
-    (next run sees only zips, skips the zipper entirely). Never
-    fires on failure / cancel / partial completion — loose sources
-    stay intact so the user can re-run from scratch."""
-
-    incremental: bool = False
-    """True when this is an incremental remote run: the staged zips carry only
-    the new-FOV members (client-side split), so the Fetcher must MERGE the
-    partial outputs into the existing local CSV / out-zip rather than overwrite."""
-
-    up_to_date_wells: tuple[str, ...] = ()
-    """Wells dropped from the upload because their local output already covers
-    every input FOV. The runner emits a synthetic ``[remote] ✓ X: up to date``
-    for each so the dashboard marks them complete."""
-
-
+@carry_staged_record
 def stage_local_zips(
     input_dir: Path,
     *,

@@ -25,7 +25,7 @@ from review.features.spatial.cell_scope_compute import cell_scope
 from core.safe import swallowed
 from review.features.spatial import state as sp_state
 from review.features.spatial import controller as sp_ctrl
-from review.features.spatial.collect import available_metric_columns
+from review.features.spatial.collect import available_metric_columns, available_timepoints
 from domain.tp_match import tp_close
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -324,9 +324,10 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     # detection params (which still matter — one DBSCAN per frame).
     summary_metric_cb = QComboBox()
     summary_metric_cb.setMinimumWidth(_SUMMARY_METRIC_CB_MIN_W)
-    for key, label, units in _summary_metric_catalog():
-        summary_metric_cb.addItem(
-            f"{label} ({units})" if units else label, key)
+    # The length unit is the dataset's (px, or a nanowell run's µm), so the combo names the quantity and the
+    # figure states the unit.
+    for key, label, _units in _summary_metric_catalog():
+        summary_metric_cb.addItem(label, key)
     _select_combo_by_data(summary_metric_cb, st.summary_metric_key)
     summary_metric_cb.setToolTip(
         "Which per-frame scalar to summarise across the (well × timepoint) "
@@ -505,14 +506,4 @@ def _select_combo_by_data(combo, value) -> None:
 def _loaded_timepoints(ctx):
     """Unique finite timepoints across every well already in the dataset
     cache. Pure ``ctx.state`` reader; empty when nothing has been loaded."""
-    import pandas as pd
-    from review.data.data_loading import df_included_mask
-    seen: set = set()
-    cache = getattr(ctx.state.dataset, "cache", None) or {}
-    for label, df in cache.items():
-        if df is None or df.empty or "timepoint_hours" not in df.columns:
-            continue
-        mask = df_included_mask(df, include_gate=False)
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
-        seen.update(float(t) for t in tp.dropna().unique())
-    return sorted(seen)
+    return available_timepoints(ctx)

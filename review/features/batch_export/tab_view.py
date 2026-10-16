@@ -24,6 +24,10 @@ from review.core.lazy import lazy as _lazy
 _build_response_panel = _lazy(
     "review.features.batch_export.response_panel",
     "build_response_batch_panel")
+#: The Nanowells mode's panel, the same way: offered only where the Nanowells feature is in the build.
+_build_nanowell_panel = _lazy(
+    "review.features.batch_export.nanowell_panel",
+    "build_nanowell_batch_panel")
 
 
 class _ResponsiveScroll(QScrollArea):
@@ -61,6 +65,7 @@ _MODES = (
     ("Scatter (cells)", "scatter_cells", None),
     ("Scatter (aggregate)", "scatter_agg", None),
     ("Response", "response", "Response Curves"),
+    ("Nanowells", "nanowell", "Nanowells"),
 )
 
 #: The mode the page opens on, and what an unrecognised key falls back to. Line
@@ -113,6 +118,8 @@ def _build_mode_panel(ctx, mode: str, host):
     if mode == "scatter_agg":
         return ScatterBatchExportPanel(
             ctx, host, scatter_mode="aggregate", use_sidebar_groups=False)
+    if mode == "nanowell":
+        return _build_nanowell_panel(ctx, host)
     if mode == "response":
         # Through a proxy rather than an import statement: the panel module
         # reaches Response Curves' collector and renderer, and there is no
@@ -192,6 +199,7 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     from review.core.plot_orchestrator import (
         open_batch_export_shim,
         open_bar_batch_export_shim,
+        open_nanowell_batch_export_shim,
         open_response_batch_export_shim,
         open_scatter_cells_batch_export_shim,
         open_scatter_agg_batch_export_shim,
@@ -203,6 +211,7 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
         "scatter_cells": open_scatter_cells_batch_export_shim,
         "scatter_agg": open_scatter_agg_batch_export_shim,
         "response": open_response_batch_export_shim,
+        "nanowell": open_nanowell_batch_export_shim,
     }
 
     def _on_mode_changed(idx: int) -> None:

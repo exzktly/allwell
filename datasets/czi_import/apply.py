@@ -56,7 +56,9 @@ def convert(
     Raises :class:`pipeline.czi_explode.CziExplodeCancelled` if *is_cancelled*
     fires, :class:`~datasets.czi_import.czi_import_compute.CziImportError` when
     the destination cannot be used, and ``ValueError`` for an unsound source or
-    an inconsistent mapping — all of them before anything is written.
+    an inconsistent mapping before writing. A metadata publication failure after
+    archives are written leaves an explicit publication guard for matching
+    resume, rather than presenting stale acquisition metadata as complete.
     """
     src, dest = Path(src), Path(dest)
 

@@ -79,14 +79,27 @@ _OPTS = {
     "measure_focus": False,
     "focus_min": "0.083",
     "phase_token": "BF",
-    "segmentation_method": "stardist_seeded_watershed_cell",
-    "cytoplasm_token": "GFP",
+    "segmentation_method": "cellpose_labelfree",   # nanowell mode pins the label-free method, so a saved spec states it
+    "cytoplasm_token": "",
     "min_nucleus_area_px": "75",
     "cellpose_model": "nuclei",
     "cellpose_diameter": "30.0",
     "cellpose_flow_threshold": "0.6",
     "cellpose_cellprob_threshold": "0.1",
     "cellpose_nuclei_channel": "1",
+    # Nanowell mode on, with every field away from the form's blank, so the round trip proves each is restored.
+    "nanowell_format": "custom",
+    "nanowell_diameter_um": "60",
+    "nanowell_pitch_um": "90",
+    "nanowell_grid": "3x4",
+    "nanowell_scan": "bottom-right-column-serpentine",
+    "nanowell_overlap_percent": "12",
+    "nanowell_pixel_size_um": "0.8",
+    "nanowell_cell_diameter_um": "22",
+    "nanowell_margin_um": "6",
+    "nanowell_square_edge_deg": "5",
+    "nanowell_occluded_below": "0.6",
+    "nanowell_clipped_below": "0.7",
 }
 
 # ``cleanup_remote`` / ``dry_run_cleanup`` are remote-only settings: nothing
@@ -167,7 +180,10 @@ def test_the_fixture_is_all_non_default(tab):
     exempt — they have no widget to restore them into and cannot vary.
     """
     constants = {"compress_input_well_folders", "compress_output_well_folders",
-                 "move_source_tifs"}
+                 "move_source_tifs",
+                 # nanowell mode pins label-free segmentation, which has no cytoplasm channel, so a saved
+                 # nanowell spec always carries it blank.
+                 "cytoplasm_token"}
     default = tab.collect_spec()["opts"]
     same = [k for k, v in _OPTS.items() if k not in constants and default.get(k) == v]
     assert not same, f"these fixture values match the form default, so they test nothing: {same}"

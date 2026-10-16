@@ -56,6 +56,7 @@ from services.remote_runner import (
 )
 from services import run_journal, run_provenance
 from services.remote_recover import recover_finished_outputs
+from services.remote_run_state import refuse_remote_nanowell_incremental
 from services.subprocess_kill import signal_subprocess
 from pipeline.slurm_node import parse_node_specs
 from util.aw_safe import swallow, swallowed
@@ -1742,11 +1743,18 @@ class PipelineRunner:
             log_fn=lambda m: self._enqueue(("line", m)),
             stop_event=self._stop_requested,
         )
-        if recovery.pulled and not opts.get("incremental", False):
+        if recovery.pulled and not opts.get("incremental", False) and "--nanowell_format" not in args:
             self._enqueue(("line", "[remote] resume: staging incrementally, so "
                                    "the wells just downloaded are not uploaded "
                                    "again\n"))
         if recovery.ok:
+            if recovery.pulled and "--nanowell_format" in args:
+                # A nanowell run cannot add to earlier results on a remote host (NANOWELL_REMOTE_INCREMENTAL_REFUSAL),
+                # so the wells just brought home are recomputed with the rest rather than the run being refused for
+                # an Incremental the user never ticked (roll-up review X29).
+                self._enqueue(("line", "[remote] resume: a nanowell run cannot resume on a remote host, so the plate "
+                                       "is analysed in full\n"))
+                return bool(opts.get("incremental", False))
             return bool(opts.get("incremental", False)) or recovery.pulled
         if self._stop_requested.is_set():
             self._enqueue_stopped(where="Remote run")
@@ -1784,6 +1792,7 @@ class PipelineRunner:
             incremental = self._recover_remote_outputs(output_dir, args, opts)
             if incremental is None:
                 return
+            refuse_remote_nanowell_incremental(args)       # before anything is staged or sent (X29)
             zipped = stage_local_zips(
                 input_dir,
                 filename_schema=opts["filename_schema"],

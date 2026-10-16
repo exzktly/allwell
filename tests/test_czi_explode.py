@@ -155,7 +155,7 @@ def test_a_z_stack_reaches_the_archive_max_projected(tmp_path):
     path = _named_plate(tmp_path, wells=1, fovs=1, timepoints=1, channels=1, z=3)
     out = tmp_path / "dest" / "in"
     explode_czi(path, out, experiment="E")
-    plane = _member(out / "C07.zip", "E_DAPI_C07_f0_t0.tif")
+    plane = _member(out / "C07.zip", "E_DAPI_C07_f0_0h.tif")
     assert plane[0, 0] == _value(0, 0, 0, 0, z=2)
 
 
@@ -164,7 +164,7 @@ def test_the_experiment_token_defaults_to_the_filename(tmp_path):
     out = tmp_path / "dest" / "in"
     explode_czi(path, out)
     assert zipfile.ZipFile(out / "C07.zip").namelist() == [
-        "Plate7_DAPI_C07_f0_t0.tif"]
+        "Plate7_DAPI_C07_f0_0h.tif"]
 
 
 def test_a_grid_mapped_plate_writes_the_grid_s_wells(tmp_path):
@@ -177,8 +177,8 @@ def test_a_grid_mapped_plate_writes_the_grid_s_wells(tmp_path):
     assert result.wells == ["A01", "A02", "B01", "B02"]
     # Serpentine: the third position is B02, not B01 — so the *value* in each
     # archive is what says the order was applied and not merely the labels.
-    assert _member(out / "B02.zip", "G_c0_B02_f0_t0.tif")[0, 0] == _value(2, 0, 0, 0)
-    assert _member(out / "B01.zip", "G_c0_B01_f0_t0.tif")[0, 0] == _value(3, 0, 0, 0)
+    assert _member(out / "B02.zip", "G_c0_B02_f0_0h.tif")[0, 0] == _value(2, 0, 0, 0)
+    assert _member(out / "B01.zip", "G_c0_B01_f0_0h.tif")[0, 0] == _value(3, 0, 0, 0)
 
 
 def test_a_source_short_of_a_plane_converts_and_says_what_it_skipped(tmp_path):
@@ -209,7 +209,7 @@ def test_a_source_short_of_a_plane_converts_and_says_what_it_skipped(tmp_path):
         members = sorted(archive.namelist())
     # The fixture names no channels, so they are the positional c0 / c1 —
     # and what survived is c0, which is the channel the deleted tile was not.
-    assert members == ["E_c0_A01_f0_t0.tif"]
+    assert members == ["E_c0_A01_f0_0h.tif"]
 
 
 def test_what_was_skipped_reaches_the_run_log(tmp_path):
@@ -298,7 +298,7 @@ def test_a_well_written_under_different_settings_is_not_treated_as_finished(
 
     assert result.wells_resumed == []
     assert result.images_written == 1
-    assert "NEW_DAPI_C07_f0_t0.tif" in zipfile.ZipFile(out / "C07.zip").namelist()
+    assert "NEW_DAPI_C07_f0_0h.tif" in zipfile.ZipFile(out / "C07.zip").namelist()
 
 
 def test_cancelling_leaves_no_half_written_archive(tmp_path):
@@ -317,7 +317,7 @@ def test_cancelling_leaves_no_half_written_archive(tmp_path):
 
     for archive in out.glob("*.zip"):
         with zipfile.ZipFile(archive) as zf:
-            assert zf.namelist() == [f"E_DAPI_{archive.stem}_f0_t0.tif"]
+            assert zf.namelist() == [f"E_DAPI_{archive.stem}_f0_0h.tif"]
             assert zf.testzip() is None
 
 
@@ -369,9 +369,9 @@ def test_each_well_gets_the_images_from_its_own_file(tmp_path):
     explode_czi(folder, out, experiment="E")
 
     # File order is by name: Exp7_A02, Exp7_C07, Exp7_H11 → offsets 1, 0, 2.
-    assert _member(out / "C07.zip", "E_DAPI_C07_f0_t0.tif")[0, 0] == 100
-    assert _member(out / "A02.zip", "E_DAPI_A02_f0_t0.tif")[0, 0] == 101
-    assert _member(out / "H11.zip", "E_DAPI_H11_f0_t0.tif")[0, 0] == 102
+    assert _member(out / "C07.zip", "E_DAPI_C07_f0_0h.tif")[0, 0] == 100
+    assert _member(out / "A02.zip", "E_DAPI_A02_f0_0h.tif")[0, 0] == 101
+    assert _member(out / "H11.zip", "E_DAPI_H11_f0_0h.tif")[0, 0] == 102
 
 
 def test_a_named_subset_of_the_folder_converts_only_those_files(tmp_path):
@@ -405,7 +405,7 @@ def test_a_split_plate_takes_its_experiment_token_from_the_folder(
     explode_czi(selected, out, files=members)
 
     assert zipfile.ZipFile(out / "H11.zip").namelist() == [
-        "Exp7split_DAPI_H11_f0_t0.tif"]
+        "Exp7split_DAPI_H11_f0_0h.tif"]
 
 
 def test_a_grid_over_a_split_folder_uses_file_name_order(tmp_path):

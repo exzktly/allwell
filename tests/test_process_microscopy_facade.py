@@ -49,6 +49,8 @@ BINDING_SEAMS = {
     "as_completed": "tests/test_well_worker_pool.py, paired with the executor",
     "preflight_scratch_for_run": "tests/test_capacity.py stubs the scratch preflight",
     "prepare_models": "tests/test_only_wells_run.py wraps the model build",
+    "plan_parallelism": "tests/test_acquisition_remote_transport.py stops main() "
+                        "at the first step after the acquisition-record gate",
     "_write_processed_images": "four process_image_group tests skip the image writes "
                                "(test_phase_passthrough, test_only_wells_run, "
                                "test_field_quality_is_wired_into_a_run, "

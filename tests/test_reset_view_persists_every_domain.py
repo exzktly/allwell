@@ -38,6 +38,7 @@ def stub(monkeypatch):
     """
     from review.features.heatmap.state import HeatmapState
     from review.features.multivariate.state import MultivariateState
+    from review.features.nanowell.state import NanowellState
     from review.persistence import view_state
 
     written: list[tuple[str, list, list]] = []
@@ -51,7 +52,7 @@ def stub(monkeypatch):
                 (domain, list(plot.line_order_rsets), list(plot.line_order_wells))
             )
 
-    slices = {"heatmap": HeatmapState(), "multivariate": MultivariateState()}
+    slices = {"heatmap": HeatmapState(), "multivariate": MultivariateState(), "nanowell": NanowellState()}
     ctx = SimpleNamespace(
         persistence=_Persistence(),
         runtime=SimpleNamespace(

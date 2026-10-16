@@ -125,7 +125,8 @@ def plate_value(pos: int, t: int, c: int, z: int = 0) -> int:
 
 def write_nd2(path, *, n_pos=2, n_t=2, n_c=1, n_z=1, width=8, height=8,
               dtype="uint16", well_names=None, channel_names=None,
-              times_ms=None, drop_probe=False, loop_order="PT"):
+              times_ms=None, drop_probe=False, loop_order="PT", stage_um=None,
+              calibration_um=None):
     """Write a plate scan at *path* and return it.
 
     *times_ms* gives the elapsed milliseconds for each timepoint, written into
@@ -149,6 +150,11 @@ def write_nd2(path, *, n_pos=2, n_t=2, n_c=1, n_z=1, width=8, height=8,
     got wrong. An axis left out of *loop_order* is not written as a loop at
     all; an axis in it whose count is 1 still is, because a one-plane Z stack
     is a real file.
+
+    *stage_um* gives each position loop point's ``(x, y)`` in µm (the default puts
+    position *i* at ``(100 i, 0)``). *calibration_um* sets the pixel calibration and
+    its ``bCalibrated`` flag; ``None`` writes an uncalibrated file, as the default
+    always has.
 
     *n_z* is the Z-stack depth. Z is a **coordinate** axis in ND2, never a
     component of a frame — ``nd2``'s own ``AXIS.frame_coords()`` is
@@ -191,7 +197,8 @@ def write_nd2(path, *, n_pos=2, n_t=2, n_c=1, n_z=1, width=8, height=8,
     names = list(well_names or [])
     points = {}
     for i in range(n_pos):
-        pt = {"dPosX": 100.0 * i, "dPosY": 0.0, "dPosZ": 0.0, "dPFSOffset": -1.0}
+        x, y = stage_um[i] if stage_um is not None else (100.0 * i, 0.0)
+        pt = {"dPosX": float(x), "dPosY": float(y), "dPosZ": 0.0, "dPFSOffset": -1.0}
         if i < len(names):
             pt["dPosName"] = names[i]
         points[f"a{i}"] = pt
@@ -249,8 +256,8 @@ def write_nd2(path, *, n_pos=2, n_t=2, n_c=1, n_z=1, width=8, height=8,
             "dZPos": 0.0,
             # Read unconditionally by ``load_global_metadata`` — these sit on
             # the picture-metadata level, not on each plane.
-            "bCalibrated": False,
-            "dCalibration": 0.0,
+            "bCalibrated": calibration_um is not None,
+            "dCalibration": 0.0 if calibration_um is None else float(calibration_um),
         }}
         put(f"ImageMetadataSeqLV|{seq}!".encode(), clx(meta))
 

@@ -14,7 +14,8 @@ CSV reader would reproduce by hand. What changes with the level is *scope*:
   the eight on screen. Wells the panel cap dropped are counted in the scope
   block rather than left unmentioned.
 
-The centroid columns are required, so a well whose pipeline run did not emit
+The position columns the tab used are required — the well frame in µm on a
+nanowell run, the field centroid otherwise — so a well whose run did not emit
 them contributes nothing rather than contributing rows the tab could not have
 placed. This tab also takes its own answer on the gate layer
 (``spatial/collect.py:86``, ``:254``), which the scope carries rather than
@@ -23,14 +24,14 @@ overriding.
 
 from __future__ import annotations
 
-import pandas as pd
 
 from core.safe import swallowed
 
 from review.features.export.cell_scope_compute import (
     CellScope, plotted_wells, scope_from_ctx,
 )
-from review.features.spatial.collect import CENTROID_COL_COL, CENTROID_ROW_COL
+from review.data.data_loading import resolved_timepoints
+from review.features.spatial.collect import CENTROID_COL_COL, CENTROID_ROW_COL, position_columns
 from review.features.spatial.state import LEVEL_SUMMARY
 
 
@@ -77,26 +78,46 @@ def cell_scope(ctx) -> CellScope | None:
     if not wells:
         return None
 
+    x_col, y_col, unit = _positions(ctx, [w for _g, w in wells])
     return scope_from_ctx(
         ctx,
         plot=f"spatial_{level or 'cell'}",
         timepoints=timepoints,
         include_gate=include_gate,
-        tp_fallback=False,
+        # The tab reads a row's hours through the loader's resolver (``collect._hours``): a nanowell run's cell
+        # table has only the ``timepoint`` label, so without the fallback every one of its rows dropped out.
+        tp_fallback=True,
         wells=tuple(wells),
-        required_columns=(CENTROID_ROW_COL, CENTROID_COL_COL),
+        required_columns=(x_col, y_col),
         notes=tuple(notes) + ((
             "geometry",
-            f"positions are {CENTROID_ROW_COL} / {CENTROID_COL_COL}; every "
+            f"positions are {x_col} / {y_col} ({unit}); every "
             "spatial statistic on this tab is computed from those"),),
     )
+
+
+def _positions(ctx, wells) -> tuple[str, str, str]:
+    """The position columns the tab placed these wells' cells with (``collect.position_columns``): the well
+    frame in µm on a nanowell run, the field centroid in pixels otherwise."""
+    from review.data.data_loading import get_rows
+
+    for well in wells:
+        try:
+            df = get_rows(ctx, well)
+        except Exception:
+            swallowed(f"spatial scope: rows for {well!r}")
+            continue
+        found = position_columns(df) if df is not None and not df.empty else None
+        if found is not None:
+            return found
+    return CENTROID_COL_COL, CENTROID_ROW_COL, "px"
 
 
 def _first_timepoint(ctx, wells) -> float | None:
     """The timepoint an unset picker resolves to — the collector's own rule.
 
-    ``collect_spatial_frame`` takes ``min(finite timepoint_hours)`` of the frame
-    it is drawing, so the export has to ask the same question of the same rows
+    ``collect_spatial_frame`` takes the smallest finite hour of the frame it is
+    drawing — ``timepoint_hours``, else the ``timepoint`` label read as hours — so the export has to ask the same question of the same rows
     rather than falling back to "all", which is a different figure.
     """
     import numpy as np
@@ -110,9 +131,9 @@ def _first_timepoint(ctx, wells) -> float | None:
         except Exception:
             swallowed(f"spatial scope: rows for {well!r}")
             continue
-        if df is None or df.empty or "timepoint_hours" not in df.columns:
+        if df is None or df.empty:
             continue
-        values = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
+        values = np.asarray(resolved_timepoints(df), dtype=float)
         finite = values[np.isfinite(values)]
         if finite.size:
             candidate = float(finite.min())

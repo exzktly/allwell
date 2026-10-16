@@ -23,6 +23,7 @@ listed in ``services.remote_runner._REQUIRED_REMOTE_FILES``.
 from __future__ import annotations
 
 import json
+import shutil
 from util.aw_safe import swallow
 from util.json_write import write_json_atomic
 from pathlib import Path
@@ -130,3 +131,52 @@ def install_provisional_sidecar(tmp: Path, dest: Path, *, run_id: str) -> None:
         json.dump(info, fh, indent=2)
     with swallow("mid-run sidecar temp cleanup"):
         tmp.unlink()
+
+
+def preserve_existing_user_blocks(p, info, *, logger):
+    # Preserve user-side blocks that the GUI writes back into this file
+    # (cell_gating thresholds, saved selections, ratios, notes). Re-running
+    # the pipeline against the same output dir must not clobber them.
+    if p.exists():
+        try:
+            existing = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            # Corrupt existing sidecar: back it up + surface at ERROR rather
+            # than silently overwriting (which drops the user-side blocks —
+            # cell_gating/sample_definitions/ratios/notes — audit E3).
+            backup = p.with_suffix(p.suffix + ".corrupt.bak")
+            try:
+                if not backup.exists():
+                    shutil.copy2(p, backup)
+            except OSError:
+                backup = None
+            logger.error("existing %s unreadable (%s); backed up to %s",
+                      p.name, exc, backup if backup is not None else "(backup failed)")
+            existing = None
+        if isinstance(existing, dict):
+            for preserved_key in USER_SIDE_BLOCKS:
+                if preserved_key in existing and preserved_key not in info:
+                    info[preserved_key] = existing[preserved_key]
+
+
+def check_acquisition_inputs(input_dir, schema, sep):
+    """Read and check acquisition metadata before local or remote image work."""
+    from util.acquisition_record import (
+        AcquisitionRecordError, RECORD_FILENAME, read_record_file, validate_record_paths,
+    )
+    record = read_record_file(Path(input_dir) / RECORD_FILENAME)
+    if record is None:
+        return
+    from util.well_token import well_archives
+
+    # The archives the run reads (X28): an AppleDouble sidecar or an upper-case suffix must not fail a run the
+    # pre-flight passed.
+    validation = validate_record_paths(well_archives(input_dir), record, schema=schema, sep=sep)
+    if not validation.ok:
+        # Said with the way out: the record was written for the archives a conversion (or a Datasets tool)
+        # produced, and archives added or removed by hand since make it describe a different dataset. Running on
+        # anyway would place tiles from positions that belong to other images.
+        raise AcquisitionRecordError(
+            "; ".join(validation.issues) + f". {RECORD_FILENAME} no longer matches the well archives in "
+            f"{Path(input_dir).name}/: if they were changed by hand, convert the plate again or use Datasets → "
+            f"Subset to drop wells, or delete {RECORD_FILENAME} to run without it")

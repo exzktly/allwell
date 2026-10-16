@@ -234,6 +234,9 @@ def test_every_batch_panel_declares_where_its_figures_came_from():
     """
     from review.features.batch_export.bar_panel import BarBatchExportPanel
     from review.features.batch_export.base_panel import BatchExportPanel
+    from review.features.batch_export.nanowell_panel import (
+        NanowellBatchExportPanel,
+    )
     from review.features.batch_export.response_panel import (
         ResponseBatchExportPanel,
     )
@@ -242,14 +245,15 @@ def test_every_batch_panel_declares_where_its_figures_came_from():
     )
 
     for cls in (BarBatchExportPanel, ResponseBatchExportPanel,
-                ScatterBatchExportPanel):
+                ScatterBatchExportPanel, NanowellBatchExportPanel):
         assert "_SOURCE_TAB" in cls.__dict__, cls.__name__
         assert "_mode_key" in cls.__dict__, cls.__name__
     tabs = {BatchExportPanel._SOURCE_TAB, BarBatchExportPanel._SOURCE_TAB,
             ResponseBatchExportPanel._SOURCE_TAB,
-            ScatterBatchExportPanel._SOURCE_TAB}
+            ScatterBatchExportPanel._SOURCE_TAB,
+            NanowellBatchExportPanel._SOURCE_TAB}
     assert tabs == {"Line Graphs", "Bar Plots", "Response Curves",
-                    "Scatter Plot"}, tabs
+                    "Scatter Plot", "Nanowells"}, tabs
 
 
 def test_the_mode_bar_the_dispatch_and_the_panels_agree():
@@ -279,9 +283,11 @@ def test_response_mode_is_offered_only_where_the_feature_is():
 
     present = SimpleNamespace(features=SimpleNamespace(get=lambda name: object()))
     absent = SimpleNamespace(features=SimpleNamespace(get=lambda name: None))
-    assert "response" in {k for _l, k in tab_view._offered_modes(present)}
+    offered = {k for _l, k in tab_view._offered_modes(present)}
+    assert {"response", "nanowell"} <= offered
     offered_without = {k for _l, k in tab_view._offered_modes(absent)}
     assert "response" not in offered_without
+    assert "nanowell" not in offered_without
     # The four that need no other feature stay, so the guard is measuring the
     # gate and not an empty list.
     assert offered_without == {"line", "bar", "scatter_cells", "scatter_agg"}
@@ -530,12 +536,15 @@ def test_each_mode_writes_its_own_deck(tmp_path):
     """
     from review.features.batch_export._destinations import DestinationSpool
 
+    from review.features.batch_export import tab_view
+
+    keys = [key for _label, key, _feature in tab_view._MODES]
     names = {
         DestinationSpool(to_gallery=False, to_deck=True, tab="t",
                          mode_key=key).deck_name
-        for key in ("line", "bar", "scatter_cells", "scatter_agg", "response")
+        for key in keys
     }
-    assert len(names) == 5, names
+    assert len(names) == len(keys) == 6, names
 
 
 # ── the gallery ─────────────────────────────────────────────────────────────

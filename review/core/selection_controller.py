@@ -286,8 +286,15 @@ PLOTTING_TABS = frozenset({
 #: solo wells) like the plotting leaves do, and are not plotting leaves
 #: themselves. Spatial / Multivariate read ``rep_sets_active`` (not
 #: ``selected_wells``, which is empty in passive rep-mode); without this they
-#: fall back to first/all wells.
-_EXTRA_REP_MIRROR_TABS = frozenset({"Spatial", "Multivariate"})
+#: fall back to first/all wells. Nanowells draws ``plot_group_well_lists``, the
+#: same active set; left out, its plate was painted empty in rep-mode while the
+#: figure drew the visible sets, and a click could not toggle a solo well.
+_EXTRA_REP_MIRROR_TABS = frozenset({"Spatial", "Multivariate", "Nanowells"})
+
+#: Per-well tabs whose figure follows the replicate-mode active set and so must
+#: be refreshed by a group edit (:func:`rebuild_all`), which never emits
+#: ``selection_changed``.
+_GROUP_EDIT_FOLLOWERS = ("Cell Browser", "Spatial", "Multivariate", "Nanowells")
 
 
 def _rep_mirror_tabs(ctx) -> frozenset[str]:
@@ -1083,14 +1090,15 @@ def rebuild_all(ctx, *, invalidate: bool = True) -> None:
             __import__("logging").getLogger("review.runtime_app").exception("Scatter redraw failed")
     # Group edits change which wells the plots draw from, and several per-well
     # features follow the same active set (rep_sets_active): the Cell Browser
-    # gallery, the Spatial facets, and the Multivariate projection. Selection-
+    # gallery, the Spatial facets, the Multivariate projection and the
+    # Nanowells figure. Selection-
     # change events already fan out to them, but group mutations come through
     # here and never emit selection_changed — so without this a side-by-side
     # (or focused) Cell Browser / Spatial / Multivariate pane goes stale while
     # the Scatter pane updates. Routed through the feature registry so core
     # stays decoupled from these removable features; each hook self-guards
     # (visibility + Split View), so this is a no-op when the tab isn't shown.
-    for _name in ("Cell Browser", "Spatial", "Multivariate"):
+    for _name in _GROUP_EDIT_FOLLOWERS:
         desc = app._features.get(_name) if hasattr(app, "_features") else None
         if (desc is not None and desc.on_selection_changed is not None
                 and app._is_tab_visible(_name)):

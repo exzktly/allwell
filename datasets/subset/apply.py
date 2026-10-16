@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import json
+from util.acquisition_record import read_record, write_record, filter_record_to_archives
 import threading
 from util.json_write import write_json_atomic
 from collections.abc import Callable
@@ -46,7 +47,9 @@ from datasets.subset.subset_compute import (
     out_csvs,
     out_zips,
     row_verdict,
+    timepoint_kept,
 )
+from datasets.core.nanowell_tables import carry_nanowell_tables
 
 
 def _null_log(_message: str) -> None:
@@ -214,6 +217,8 @@ def execute_plan(
     report = progress or _null_progress
     report_fraction = sub_progress or _null_sub_progress
 
+    acquisition = read_record(plan.src.root)
+
     if plan.dest_is_restart:
         emit("Destination has leftover files from an earlier attempt — clearing.")
         clear_destination(plan.dest)
@@ -331,6 +336,15 @@ def execute_plan(
 
     _verify(plan, well_row_counts, kept_members_by_well, unjudgeable_by_well)
     _copy_filtered_overrides(plan, kept_keys_by_well, emit)
+    nanowell_rows = carry_nanowell_tables(
+        plan.src.out_dir, plan.dest.out_dir, {well: well for well in plan.wells_kept},
+        keep_timepoint=None if plan.filt.timepoint_hours is None else (lambda tp: timepoint_kept(tp, plan.filt)))
+    if nanowell_rows:
+        emit(f"Carried the nanowell tables of {len(nanowell_rows)} well(s) "
+             f"({sum(nanowell_rows.values()):,} site rows).")
+    if acquisition is not None:
+        write_record(plan.dest.root, filter_record_to_archives(
+            plan.dest.root, acquisition, schema=":".join(plan.schema.fields), sep=plan.schema.sep))
 
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)

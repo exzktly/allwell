@@ -49,7 +49,6 @@ Filename convention (underscore-separated):
 from __future__ import annotations
 
 import importlib.util
-import json
 import logging
 import os
 import shutil
@@ -71,7 +70,7 @@ from util.channel_roles import phase_role_conflicts, quantified_channel_tokens
 from util.fov import sort_key as _fov_sort_key
 from pipeline.cli_args import (
     DEFAULT_SEGMENTATION_METHOD,
-    build_parser, qc_options_from_args,
+    build_parser, nanowell_options_from_args, qc_options_from_args,
 )
 from pipeline.input_layout import (
     find_well_folders,
@@ -196,7 +195,8 @@ from pipeline.run_report import (
     record_well_completeness,
 )
 from pipeline.completeness import record_run_check
-from pipeline.sidecar import USER_SIDE_BLOCKS
+from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
+from pipeline.nanowell_task import nanowell_endgame, record_nanowell_info, refuse_nanowell_without_zips
 
 
 def _report_worker_failure(well_label: str, output_dir: Path | None, exc: BaseException) -> None:
@@ -2173,6 +2173,20 @@ def _suspended_before_any_group(well_label: str, records, failed) -> bool:
     return True
 
 
+def _prepare_staging_dir(tmp_images: Path, well_label: str) -> None:
+    """Keep a staging dir that holds per-FOV checkpoints (resume where the last attempt stopped); wipe any other."""
+    if not tmp_images.exists():
+        return
+    if any(tmp_images.glob(".fov_*.done")):
+        log.info(
+            "Well %s: resuming from %d FOV checkpoint(s) in %s",
+            well_label, sum(1 for _ in tmp_images.glob(".fov_*.done")), tmp_images.name,
+        )
+    else:
+        log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_images.name)
+        remove_directory(tmp_images)
+
+
 def process_well_zip_task(
     well_label: str,
     zip_path: Path,
@@ -2228,26 +2242,17 @@ def process_well_zip_task(
         log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_extract.name)
         remove_directory(tmp_extract)
 
-    # tmp_images carries per-FOV checkpoints (v5.2.0). If it holds at
-    # least one ``.fov_*.done`` marker, treat it as a partial-progress
-    # dir for this well and keep its contents — _process_groups_in_worker
-    # will pick up where the previous attempt stopped. Otherwise wipe
-    # it (matches pre-v5.2.0 behavior on a clean restart).
-    if tmp_images.exists():
-        has_checkpoint = any(tmp_images.glob(".fov_*.done"))
-        if has_checkpoint:
-            log.info(
-                "Well %s: resuming from %d FOV checkpoint(s) in %s",
-                well_label,
-                sum(1 for _ in tmp_images.glob(".fov_*.done")),
-                tmp_images.name,
-            )
-        else:
-            log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_images.name)
-            remove_directory(tmp_images)
+    _prepare_staging_dir(tmp_images, well_label)
 
     try:
         try:
+            if shared_kwargs_template.get("_nanowell"):
+                from pipeline.nanowell_task import run_zip_task
+                return run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token,
+                                    fluor_tokens, csv_prefix, schema, sep, settings_key,
+                                    grouper=find_image_groups_in_zip, parse=parse_filename,
+                                    incremental=incremental, incremental_prior_dir=incremental_prior_dir,
+                                    scratch=tmp_extract, staging=tmp_images)
             tmp_extract.mkdir(parents=True, exist_ok=True)
             tmp_images.mkdir(parents=True,  exist_ok=True)
 
@@ -3108,29 +3113,7 @@ def write_pipeline_info(
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     p = output_dir / PIPELINE_INFO_FILENAME
-    # Preserve user-side blocks that the GUI writes back into this file
-    # (cell_gating thresholds, saved selections, ratios, notes). Re-running
-    # the pipeline against the same output dir must not clobber them.
-    if p.exists():
-        try:
-            existing = json.loads(p.read_text())
-        except (OSError, json.JSONDecodeError) as exc:
-            # Corrupt existing sidecar: back it up + surface at ERROR rather
-            # than silently overwriting (which drops the user-side blocks —
-            # cell_gating/sample_definitions/ratios/notes — audit E3).
-            backup = p.with_suffix(p.suffix + ".corrupt.bak")
-            try:
-                if not backup.exists():
-                    shutil.copy2(p, backup)
-            except OSError:
-                backup = None
-            log.error("existing %s unreadable (%s); backed up to %s",
-                      p.name, exc, backup if backup is not None else "(backup failed)")
-            existing = None
-        if isinstance(existing, dict):
-            for preserved_key in USER_SIDE_BLOCKS:
-                if preserved_key in existing and preserved_key not in info:
-                    info[preserved_key] = existing[preserved_key]
+    preserve_existing_user_blocks(p, info, logger=log)
     write_json_atomic(p, info)
     return p
 
@@ -3218,7 +3201,9 @@ def main() -> None:
                 f"{args.segmentation_method}. Name a different {slot} channel, "
                 f"or use --segmentation_method=cellpose_labelfree."
             )
+    nanowell = nanowell_options_from_args(args, parser.error)
     log.info("Schema   : %s  (sep=%r)", args.filename_schema, sep)
+    check_acquisition_inputs(input_dir, args.filename_schema, sep)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -3348,6 +3333,7 @@ def main() -> None:
         cellpose_flow_threshold=args.cellpose_flow_threshold,
         cellpose_cellprob_threshold=args.cellpose_cellprob_threshold,
         cellpose_nuclei_channel=args.cellpose_nuclei_channel,
+        _nanowell=nanowell,
         # Private (leading _) so it's filtered out of the process_image_group
         # kwargs but still read by _run_well_worker_pool to seed each worker's
         # StarDist settings via _worker_init/set_params. Mirrors _fov_threads.
@@ -3377,6 +3363,8 @@ def main() -> None:
     consolidate_mixed_to_zips(input_dir, log_fn=lambda m: log.info("%s", m.rstrip()))
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
+    refuse_nanowell_without_zips(nanowell, well_zips, parser.error)
+    record_nanowell_info(output_dir / PIPELINE_INFO_FILENAME, nanowell, input_dir)
     if well_zips:
         refuse_images_only_in_ignored_folders(input_dir, well_zips)
     refuse_uncovered_wells(blank_groups, well_zips, well_folders)
@@ -3483,6 +3471,9 @@ def main() -> None:
             sep=sep,
             settings_key=settings_key,
         )
+        nanowell_endgame(nanowell, output_dir, well_zips, shared_kwargs, args.nuclear_token,
+                         fluor_tokens_for_quant, args.csv_prefix, schema, sep, settings_key,
+                         grouper=find_image_groups_in_zip, parse=parse_filename)
     elif well_folders:
         log.info("Folder mode: %d well folder(s) detected.", len(well_folders))
         failed_wells = process_well_folders(

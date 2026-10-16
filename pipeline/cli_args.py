@@ -23,6 +23,7 @@ from __future__ import annotations
 from pipeline.field_quality_record import FOCUS_COLUMN as _FOCUS_COLUMN
 
 import argparse
+import math
 from pathlib import Path
 
 from pipeline.background import BACKGROUND_METHODS
@@ -499,7 +500,127 @@ def build_parser() -> argparse.ArgumentParser:
                        "--pos_control_well."
                    ))
 
+    p.add_argument("--nanowell_format", choices=("100um", "50um", "custom"), default=None,
+                   help=(
+                       "Run in nanowell mode: the input holds tiled phase images of an array of nanowells (100 um "
+                       "or 50 um format, or custom with --nanowell_diameter_um and --nanowell_pitch_um) and an "
+                       "in/acquisition.json record that says where each tile sits (or, without one, the grid "
+                       "given by --nanowell_grid and its companions). Each "
+                       "well at each timepoint is processed as one unit (every tile together); nanowells are "
+                       "addressed on the lattice and measured label-free, with fluorescence where present. "
+                       "Needs --phase_token (the tile channel). Writes <output_dir>/nanowells/. Zip mode only."
+                   ))
+    p.add_argument("--nanowell_diameter_um", type=float, default=None,
+                   help="With --nanowell_format custom: the nanowell diameter in micrometres.")
+    p.add_argument("--nanowell_pitch_um", type=float, default=None,
+                   help=("With --nanowell_format custom: the lattice pitch in micrometres, centre to centre. A "
+                         "starting value: the run measures the pitch on the tiles, from half to twice this."))
+    p.add_argument("--nanowell_grid", default=None,
+                   help=("For a dataset with no in/acquisition.json: the tile grid as ROWSxCOLUMNS (e.g. 5x5). "
+                         "Needs --nanowell_overlap_percent and --nanowell_pixel_size_um; fields are taken in the "
+                         "order of their names, numerically, along --nanowell_scan."))
+    p.add_argument("--nanowell_scan", default=None,
+                   help=("With --nanowell_grid: the order the stage visited the tiles, <corner>-<row|column> with an "
+                         "optional -serpentine (default top-left-row)."))
+    p.add_argument("--nanowell_overlap_percent", type=float, default=None,
+                   help="With --nanowell_grid: the nominal tile overlap set in the acquisition software, percent.")
+    p.add_argument("--nanowell_pixel_size_um", type=float, default=None,
+                   help="With --nanowell_grid: the image pixel size in micrometres.")
+    p.add_argument("--nanowell_cell_diameter_um", type=float, default=15.0,
+                   help="Typical cell diameter in micrometres, the scale the label-free segmenter is given.")
+    p.add_argument("--nanowell_margin_um", type=float, default=None,
+                   help=("Margin around a nanowell's disk that must lie inside one tile for that tile to own it. "
+                         "Default: a tenth of the nanowell diameter."))
+    p.add_argument("--nanowell_square_edge_deg", type=float, default=0.0,
+                   help=("Angle of the central square nanowell's edges to a lattice row, degrees (assumed 0: the "
+                         "square is cut parallel to a row). Used to refuse a lattice fitted a sixth of a turn off."))
+    p.add_argument("--nanowell_occluded_below", type=float, default=0.5,
+                   help=("A nanowell visible in less than this share (0 to 1) is occluded and carries no cell count "
+                         "or confluence, only its state."))
+    p.add_argument("--nanowell_clipped_below", type=float, default=0.5,
+                   help=("A nanowell imaged in less than this share (0 to 1) of its disk, because the edge of the "
+                         "tiles cuts it, is clipped and carries no cell count or confluence."))
+
     return p
+
+
+def nanowell_options_from_args(args, error) -> dict | None:
+    """The nanowell settings the run records and the worker receives, or ``None`` when the mode is off.
+
+    Validated here, in the self-sufficient entry point, because a remote run arrives as argv. *error*
+    is ``parser.error``. In nanowell mode the phase channel is the tile channel, so it takes the
+    nuclear slot the grouping machinery reads.
+    """
+    if args.nanowell_format is None:
+        return None
+    if not str(args.phase_token or "").strip():
+        error("--nanowell_format needs --phase_token: the phase channel the tiles are imaged in.")
+    # Finite as well as in range: `inf` passes a comparison, and the form refuses it (roll-up review X20).
+    if not (math.isfinite(args.nanowell_cell_diameter_um) and args.nanowell_cell_diameter_um > 0):
+        error("--nanowell_cell_diameter_um must be a positive number of micrometres.")
+    if args.nanowell_margin_um is not None and not (math.isfinite(args.nanowell_margin_um)
+                                                    and args.nanowell_margin_um >= 0):
+        error("--nanowell_margin_um must be zero or more.")
+    for flag, value in (("--nanowell_occluded_below", args.nanowell_occluded_below),
+                        ("--nanowell_clipped_below", args.nanowell_clipped_below)):
+        if not (0.0 < value <= 1.0):
+            error(f"{flag} must be a share above 0 and at most 1.")
+    if not (-45.0 <= args.nanowell_square_edge_deg <= 45.0):
+        error("--nanowell_square_edge_deg must be within -45 and 45 degrees (a square repeats every 90).")
+    args.nuclear_token = str(args.phase_token).strip()
+    args.segmentation_method = "cellpose_labelfree"      # no StarDist model is built for a run that never calls it
+    options = {"plate_format": args.nanowell_format, "cell_diameter_um": float(args.nanowell_cell_diameter_um),
+               "margin_um": None if args.nanowell_margin_um is None else float(args.nanowell_margin_um),
+               "square_edge_deg": float(args.nanowell_square_edge_deg),
+               "occluded_below": float(args.nanowell_occluded_below),
+               "clipped_below": float(args.nanowell_clipped_below)}
+    # Added only when given, so a run without them keeps the settings (and reuse key) it always had.
+    options.update(_custom_format(args, error))
+    pattern = _grid_pattern(args, error)
+    if pattern:
+        options["pattern"] = pattern
+    return options
+
+
+def _custom_format(args, error) -> dict:
+    """``{"diameter_um", "pitch_um"}`` for ``--nanowell_format custom``; nothing for a known format."""
+    given = args.nanowell_diameter_um is not None or args.nanowell_pitch_um is not None
+    if args.nanowell_format != "custom":
+        if given:
+            error("--nanowell_diameter_um and --nanowell_pitch_um go with --nanowell_format custom; the 100um and "
+                  "50um formats have their own.")
+        return {}
+    diameter, pitch = args.nanowell_diameter_um, args.nanowell_pitch_um
+    if diameter is None or pitch is None or not all(math.isfinite(v) and v > 0 for v in (diameter, pitch)):
+        error("--nanowell_format custom needs --nanowell_diameter_um and --nanowell_pitch_um, both positive.")
+    if diameter >= 0.95 * pitch:
+        error(f"A {diameter:g} um nanowell on a {pitch:g} um pitch would touch its neighbours: the pitch is the "
+              "centre-to-centre distance and must exceed the diameter.")
+    return {"diameter_um": float(diameter), "pitch_um": float(pitch)}
+
+
+def _grid_pattern(args, error) -> dict | None:
+    """The record-less placement (tracker P15): grid, scan, overlap and pixel size, all or none of the grid's."""
+    from pipeline.nanowell_pattern_record import parse_grid, parse_scan
+
+    companions = (args.nanowell_scan, args.nanowell_overlap_percent, args.nanowell_pixel_size_um)
+    if args.nanowell_grid is None:
+        if any(v is not None for v in companions):
+            error("--nanowell_scan, --nanowell_overlap_percent and --nanowell_pixel_size_um describe the tile grid "
+                  "for a dataset without an acquisition record, and go with --nanowell_grid.")
+        return None
+    try:
+        rows, cols = parse_grid(args.nanowell_grid)
+        scan = args.nanowell_scan or "top-left-row"
+        parse_scan(scan)
+    except ValueError as exc:
+        error(str(exc))
+    overlap, pixel = args.nanowell_overlap_percent, args.nanowell_pixel_size_um
+    if overlap is None or not (0 <= overlap < 100):
+        error("--nanowell_grid needs --nanowell_overlap_percent, from 0 to under 100.")
+    if pixel is None or not (math.isfinite(pixel) and pixel > 0):
+        error("--nanowell_grid needs --nanowell_pixel_size_um, a positive number of micrometres.")
+    return {"grid": [rows, cols], "scan": scan, "overlap_percent": float(overlap), "pixel_size_um": float(pixel)}
 
 
 def qc_options_from_args(args) -> dict:

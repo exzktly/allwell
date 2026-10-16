@@ -196,6 +196,11 @@ _GLYPHS: dict[str, str] = {
                       '<circle cx="19.5" cy="12" r="2.5"/>'
                       '<path d="m13.8 17.7 3.9-3.9"/>'
                       '<circle cx="12" cy="19.5" r="2.5"/>'),
+    # Nanowells rail glyph — a hexagon holding three wells: an array of nanowells.
+    "hexagon":       ('<path d="M12 2.5 20.2 7.25v9.5L12 21.5 3.8 16.75v-9.5Z"/>'
+                      '<circle cx="12" cy="8.5" r="1.6"/>'
+                      '<circle cx="8.9" cy="14" r="1.6"/>'
+                      '<circle cx="15.1" cy="14" r="1.6"/>'),
 }
 
 AVAILABLE = tuple(sorted(_GLYPHS))

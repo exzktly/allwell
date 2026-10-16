@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -36,18 +37,26 @@ from datasets.core.dataset_paths import preview_wells
 from datasets.core.equation_row import build_equation_row
 from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from datasets.concatenate.concatenate_compute import (
+    GapPreview,
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
+    gap_preview,
 )
 from datasets.concatenate.dashboard import ConcatDashboard
+from datasets.concatenate.raw_compute import is_raw_dataset
 from datasets.core.dataset_fields import is_dataset, is_free_destination
 from datasets.core.dataset_fields import promote_open_button
 
+# Wide enough for "1d 6h 30m"; the gap is a short duration, not a path.
+_GAP_FIELD_W = 140
 
 
 
 
-_is_dataset = is_dataset
+
+def _is_dataset(root: Path) -> str:
+    """This page's dataset rule: the shared one, or a raw dataset (``in/`` only)."""
+    return "" if is_raw_dataset(root) else is_dataset(root)
 
 
 def _is_destination(root: Path) -> str:
@@ -71,6 +80,11 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         super().__init__(parent)
         self._dest_root = ""
         self._running = False
+        # What the gap field was last pre-filled with. Text equal to it is the
+        # default untouched, and is sent as "no entry" so a run takes whatever
+        # the default is when it runs; anything else is the user's own gap.
+        self._gap_default_text = ""
+        self._gap_preview = GapPreview()
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -103,7 +117,9 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         blurb = QLabel(
             "Append dataset 2 onto dataset 1. The two datasets should be the "
             "same plate imaged in separate sessions; dataset 2's timepoints are "
-            "relabelled to continue after dataset 1's last timepoint. The merged "
+            "relabelled to continue after dataset 1's last timepoint. Both can be "
+            "analysed datasets, or both raw (converted images with no analysis "
+            "yet — merge those first, then analyse the plate once). The merged "
             "result is written to the destination folder — both originals are "
             "left untouched.",
             self,
@@ -113,6 +129,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         outer.addWidget(blurb)
 
         self._build_equation_row(outer)
+        self._build_gap_row(outer)
 
         run_row = QWidget(self)
         run_row_l = QHBoxLayout(run_row)
@@ -158,6 +175,41 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._ds1_field, self._ds2_field = eq.ds1, eq.ds2
         self._dest_field, self._cross_hint = eq.dest, eq.cross_hint
 
+    def _build_gap_row(self, outer: QVBoxLayout) -> None:
+        """The time between the two datasets: a field, what it will do, and why."""
+        self._gap_box = QWidget(self)
+        box = QVBoxLayout(self._gap_box)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(theme.Spacing.xs)
+        row = QHBoxLayout()
+        row.setSpacing(theme.Spacing.sm)
+        caption = QLabel("Dataset 2's first timepoint comes", self._gap_box)
+        row.addWidget(caption)
+        self._gap_edit = QLineEdit(self._gap_box)
+        self._gap_edit.setObjectName("ConcatGapField")
+        self._gap_edit.setPlaceholderText("e.g. 24h")
+        self._gap_edit.setMaximumWidth(_GAP_FIELD_W)
+        self._gap_edit.setToolTip(
+            "The time from dataset 1's last timepoint to dataset 2's first, as "
+            "6, 24h, 1d or 1d2h30m. Pre-filled from the two datasets' recorded "
+            "acquisition times, else from dataset 1's usual interval; type your "
+            "own to override it.")
+        self._gap_edit.textChanged.connect(lambda _text: self._on_gap_changed())
+        row.addWidget(self._gap_edit)
+        row.addWidget(QLabel("after dataset 1's last", self._gap_box))
+        row.addStretch(1)
+        box.addLayout(row)
+        self._gap_hint = QLabel("", self._gap_box)
+        self._gap_hint.setObjectName("Muted")
+        self._gap_hint.setWordWrap(True)
+        box.addWidget(self._gap_hint)
+        self._gap_labels = QLabel("", self._gap_box)
+        self._gap_labels.setObjectName("Muted")
+        self._gap_labels.setWordWrap(True)
+        box.addWidget(self._gap_labels)
+        self._gap_box.setVisible(False)
+        outer.addWidget(self._gap_box)
+
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         self.build_log_header(
             outer, "Concatenate Output",
@@ -194,6 +246,18 @@ class ConcatenatePage(LogPanelMixin, QWidget):
 
     def set_destination_path(self, path: str) -> None:
         self._dest_field.set_path(path)
+
+    def gap_text_if_entered(self) -> str:
+        """The gap field's text when the user chose it, else ``""`` (use the default)."""
+        text = self._gap_edit.text().strip()
+        return "" if text == self._gap_default_text else text
+
+    def set_gap_text(self, text: str) -> None:
+        """Show *text* as the user's own gap; ``""`` puts the default back."""
+        self._gap_edit.setText(text or self._gap_default_text)
+
+    def gap_preview(self) -> GapPreview:
+        return self._gap_preview
 
     def revalidate_fields(self, *, ok: bool = False) -> None:
         """Re-run every field's validator against current disk state.
@@ -236,6 +300,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._ds1_field.setLocked(running)
         self._ds2_field.setLocked(running)
         self._dest_field.setLocked(running)
+        self._gap_edit.setEnabled(not running)
 
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root
@@ -248,6 +313,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
             and self._ds2_field.is_valid()
             and self._dest_field.is_valid()
             and not self._cross_message()
+            and not self._gap_preview.error
         )
 
     def _cross_message(self) -> str:
@@ -270,7 +336,57 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         # doesn't help; only a genuine field edit may clear a shown result.
         set_variant(self._run_btn, "primary")
         self._update_status_preview()
+        self._refresh_gap(datasets_changed=True)
         self._revalidate_cross()
+
+    def _on_gap_changed(self) -> None:
+        set_variant(self._run_btn, "primary")
+        self._refresh_gap(datasets_changed=False)
+        self._refresh_run_enabled()
+
+    def _refresh_gap(self, *, datasets_changed: bool) -> None:
+        """Re-read the two datasets' times and redraw the gap row.
+
+        Runs when a dataset changes (re-pre-filling a field the user has not
+        touched) and on every edit of the field itself.
+        """
+        if self._running:
+            return
+        if not (self._ds1_field.is_valid() and self._ds2_field.is_valid()):
+            self._gap_preview = GapPreview()
+            self._gap_box.setVisible(False)
+            return
+        d1, d2 = self.dataset1_path(), self.dataset2_path()
+        base = gap_preview(d1, d2, "")
+        if datasets_changed:
+            typed = self._gap_edit.text().strip()
+            if not typed or typed == self._gap_default_text:
+                self._gap_default_text = base.default_text
+                blocked = self._gap_edit.blockSignals(True)
+                self._gap_edit.setText(base.default_text)
+                self._gap_edit.blockSignals(blocked)
+            else:
+                self._gap_default_text = base.default_text
+        entered = self.gap_text_if_entered()
+        preview = gap_preview(d1, d2, entered) if entered else base
+        self._gap_preview = preview
+        self._gap_box.setVisible(True)
+        if preview.error:
+            self._gap_hint.setObjectName("Error")
+            self._gap_hint.setText(preview.error)
+        elif preview.warning:
+            self._gap_hint.setObjectName("Warn")
+            self._gap_hint.setText(preview.warning)
+        else:
+            self._gap_hint.setObjectName("Muted")
+            self._gap_hint.setText(preview.note)
+        self._gap_hint.style().unpolish(self._gap_hint)
+        self._gap_hint.style().polish(self._gap_hint)
+        self._gap_hint.setVisible(bool(self._gap_hint.text()))
+        self._gap_labels.setText(
+            "Dataset 2's timepoints become: " + ", ".join(preview.labels)
+            if preview.labels else "")
+        self._gap_labels.setVisible(bool(preview.labels))
 
     def _revalidate_cross(self) -> None:
         message = self._cross_message()

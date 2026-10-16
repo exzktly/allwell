@@ -277,4 +277,9 @@ def build_persistence_registry(ctx) -> PersistenceRegistry:
         registry.register("multivariate",
                           save=multivariate.save_to_data_dir,
                           load=multivariate.load_from_data_dir)
+    if _admits("Nanowells"):
+        from review.persistence import nanowell
+        registry.register("nanowell",
+                          save=nanowell.save_to_data_dir,
+                          load=nanowell.load_from_data_dir)
     return registry

@@ -65,6 +65,7 @@ from pipeline.explode_common import (
     wells_to_convert,
     worker_groups,
 )
+from pipeline.converter_record import discard_record
 from util.filename_token import safe_token
 from util.plate_grid import block_well_labels, normalize_well_order
 from util.zip_write import atomic_zip
@@ -1444,6 +1445,9 @@ def explode_ome_tiff(
     n_kept_t = len(tp_plan)
 
     out_in_dir.mkdir(parents=True, exist_ok=True)
+    # A record left by an earlier conversion describes that conversion; this one publishes its own on
+    # completion (``_publish_record``), and a cancelled one leaves none rather than a stale one.
+    earlier = discard_record(out_in_dir, ome_path.name)
     # Counted over the wells this run writes, not over the plate: a subset run
     # denominated by the whole plate reports a complete conversion as a
     # fraction of one.
@@ -1601,4 +1605,41 @@ def explode_ome_tiff(
         f"({rate:.0f} planes/s; read {read_total:.1f}s, write {write_total:.1f}s "
         f"summed across {n_workers} worker(s)).\n"
     )
+    _publish_record(ome_path, out_in_dir, layout, well_labels, exp_tok, fovs, tp_plan,
+                    (n_positions, n_timepoints, frame_order), _log, written=result.wells, earlier=earlier)
     return result
+
+
+def _publish_record(ome_path: Path, out_in_dir: Path, layout: OmeLayout, well_labels, exp_tok: str,
+                    fovs: int, tp_plan, frames, log_fn, *, written=(), earlier=()) -> None:
+    """Write ``in/acquisition.json`` from the OME-XML's stage positions and calibration (tracker I5).
+
+    A multi-image file's tile is ``(Image pos, TheT ti)``; a single-image file's is frame
+    ``_frame_index(pos, ti, …)`` of its one Image — the same arithmetic the planes were read with.
+    """
+    from pipeline.converter_record import publish_record
+    from pipeline.ome_acquisition import ome_tile_sources, tile_source
+
+    n_positions, n_timepoints, frame_order = frames
+    # Inside the never-raises contract the record keeps: the images are converted either way, so metadata that
+    # cannot be read costs the record, said in the run log, not the conversion (roll-up review X27).
+    try:
+        with tifffile.TiffFile(str(ome_path)) as tf:
+            sources = ome_tile_sources(tf.ome_metadata)
+    except Exception as exc:
+        msg = (f"[record] No acquisition record written: the OME metadata could not be read "
+               f"({type(exc).__name__}: {exc}).")
+        _log.warning("%s", msg)
+        if log_fn is not None:
+            log_fn(msg + "\n")
+        return
+
+    def locate(well_index: int, fov: int, ti: int):
+        pos = well_index * fovs + fov
+        if layout.single_image:
+            return tile_source(sources, 0, _frame_index(pos, ti, n_positions, n_timepoints, frame_order))
+        return tile_source(sources, pos, ti)
+
+    publish_record(out_in_dir, ome_path.name, {label: i for i, label in enumerate(well_labels)},
+                   experiment=exp_tok, channels=layout.channel_names, fovs=fovs, tp_plan=tp_plan,
+                   locate=locate, written=written, earlier=earlier, log_fn=log_fn)

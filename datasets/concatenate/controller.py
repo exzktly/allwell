@@ -18,6 +18,7 @@ from datasets.core.dataset_paths import shorten_headline
 from datasets.concatenate.concatenate_compute import destination_has_marker
 from datasets.concatenate.view import ConcatenatePage
 from datasets.concatenate.worker import ConcatenateWorker
+from datasets.concatenate.raw_compute import is_raw_dataset
 from datasets.core.tool_controller import DestinationToolController
 
 
@@ -60,6 +61,7 @@ class ConcatenateController(DestinationToolController):
             self.page.dataset1_path(),
             self.page.dataset2_path(),
             self.page.destination_path(),
+            gap_text=self.page.gap_text_if_entered(),
         )
         worker.logLine.connect(self.page.append_log)
         worker.wellsPlanned.connect(self._on_wells_planned)
@@ -77,6 +79,10 @@ class ConcatenateController(DestinationToolController):
             "dataset1": self.page.dataset1_path(),
             "dataset2": self.page.dataset2_path(),
             "destination": self.page.destination_path(),
+            # The text only when the user changed it: a queued run that left
+            # the pre-filled default alone should take whatever the default
+            # is when it runs, as a run started now would.
+            "gap": self.page.gap_text_if_entered(),
         }
 
     def _on_queue_requested(self) -> None:
@@ -87,6 +93,7 @@ class ConcatenateController(DestinationToolController):
         self.page.set_dataset1_path(spec.get("dataset1", ""))
         self.page.set_dataset2_path(spec.get("dataset2", ""))
         self.page.set_destination_path(spec.get("destination", ""))
+        self.page.set_gap_text(spec.get("gap", ""))
 
     def start_from_queue(self, spec: dict) -> None:
         """A queued run is unattended by definition, so a destination that
@@ -108,7 +115,11 @@ class ConcatenateController(DestinationToolController):
         # path buried in a sentence — the log line above (and the tooltip)
         # keeps the untouched original.
         self.page.dashboard.set_done(shorten_headline(summary, dest_root), tooltip=summary)
-        self.page.show_open_in_review(dest_root)
+        if is_raw_dataset(dest_root):
+            # Nothing for Review to open yet: a raw plate is analysed first.
+            self.page.append_log("Raw images only — analyse this folder in the Analyze tab.")
+        else:
+            self.page.show_open_in_review(dest_root)
         self._last_result = (True, summary, dest_root)
 
     def _on_failed(self, message: str) -> None:

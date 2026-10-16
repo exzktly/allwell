@@ -325,6 +325,7 @@ class AnalyzePipelineInfoMixin:
         s("_qc_max_area_edit", d.get("qc_max_area"))
         s("_qc_min_solidity_edit", d.get("qc_min_solidity"))
         self._apply_focus_settings(d, chk)
+        self._apply_nanowell_settings(d)
         s("_tophat_radius_nir_edit", d.get("tophat_radius_nir"))
         s("_tophat_radius_fluor_edit", d.get("tophat_radius_fluor"))
         chk("_no_tophat_nir_cb", d.get("no_tophat_nir"))

@@ -60,6 +60,7 @@ class Role(str, Enum):
     OVERLAY = "overlay"
     SMFISH = "smfish"
     PHASE = "phase"
+    MONTAGE = "montage"
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,13 @@ ROLE_CATALOG: Mapping[Role, RoleSpec] = {
     # Phase / brightfield channel designated as the label-free segmentation
     # input (cellpose / classical). Channel-scoped like smFISH; any processed
     # phase output carries a "_phase" suffix.
+    # The downsampled, blended phase montage of one nanowell (well, timepoint): for looking, never measured.
+    Role.MONTAGE: RoleSpec(
+        role=Role.MONTAGE, suffix="_montage",
+        output_exts=(".png",),
+        accept_exts=(),
+        is_channel_scoped=False, precedence=5,
+    ),
     Role.PHASE: RoleSpec(
         role=Role.PHASE, suffix="_phase",
         output_exts=(".tif", ".tiff"),
@@ -150,6 +158,7 @@ def role_for_kind(kind: str) -> Role | None:
         "overlay": Role.OVERLAY,
         "smfish": Role.SMFISH,
         "phase": Role.PHASE,
+        "montage": Role.MONTAGE,
     }
     return aliases.get(str(kind).strip().lower())
 

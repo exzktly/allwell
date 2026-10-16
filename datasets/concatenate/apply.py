@@ -21,6 +21,9 @@ import csv
 import json
 import math
 import threading
+import zipfile
+from datasets.core.dataset_paths import dataset_wells
+from datasets.core.nanowell_tables import carry_nanowell_tables
 from datasets.core.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
 from collections.abc import Callable
@@ -47,10 +50,17 @@ from datasets.core.containers import (
     unstamped_note,
 )
 from datasets.core.member_names import is_os_junk_member
+from util.acquisition_record import (
+    AcquisitionRecordError, concatenate_records, read_record, validate_against_archives,
+    write_record,
+)
+from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
+from util.image_exts import is_run_input_member
 from datasets.concatenate.concatenate_compute import (
     IN_PROGRESS_MARKER,
     ConcatError,
     MergePlan,
+    format_gap,
     in_containers,
     out_csvs,
     out_zips,
@@ -535,7 +545,127 @@ def _verify(
         )
 
 
+def _ds2_members(container: Path) -> dict[str, int | None]:
+    """Dataset 2's image members: name -> CRC (``None`` for a folder's files)."""
+    members: dict[str, int | None] = {}
+    if container.is_dir():
+        for path in sorted(container.rglob("*")):
+            if path.is_file():
+                members[path.name] = None
+        return members
+    with zipfile.ZipFile(container) as archive:
+        for info in archive.infolist():
+            if not info.is_dir():
+                members[info.filename] = info.CRC
+    return members
+
+
+def _merge_acquisition_records(plan: MergePlan, emit: Callable[[str], None]) -> None:
+    """Write the merged ``in/acquisition.json``, or say why none is written.
+
+    Both datasets' records, with dataset 2's timepoints renamed as its images
+    were and the gap recorded beside them. The result is checked against the
+    archives just written: a record that does not describe them would stop the
+    next Analyze run, so it stops the merge here instead.
+    """
+    try:
+        first, second = read_record(plan.ds1.root), read_record(plan.ds2.root)
+    except AcquisitionRecordError as exc:
+        raise ConcatError(f"An acquisition record can't be read, so the merge can't carry it: {exc}") from exc
+    if first is None and second is None:
+        if plan.raw:
+            # An analysed merge records its gap in derived_from; a raw one has no sidecar to hold
+            # that and, with no records either, nothing records it but this log.
+            emit(f"Note: neither dataset has an acquisition record and a raw merge has no sidecar, "
+                 f"so the gap used ({format_gap(plan.gap_hours)}, {plan.gap_source}) is recorded "
+                 f"nowhere except this log.")
+        return
+    if first is None or second is None:
+        which = "dataset 1" if first is None else "dataset 2"
+        emit(f"Note: {which} has no acquisition record, so none is written for the "
+             "merged dataset (tile positions and start times are not carried).")
+        return
+    fmt = plan.tp_format
+
+    def relabel(token: str) -> str:
+        return remap_timepoint_label(token, plan.offset_hours, fmt)
+
+    try:
+        merged = concatenate_records(
+            first, second, relabel=relabel, offset_hours=plan.offset_hours,
+            gap_hours=plan.gap_hours, gap_source=plan.gap_source)
+        write_record(plan.dest.root, merged)
+        problems = validate_against_archives(
+            plan.dest.root, merged, schema=plan.merged_info.get("schema") or DEFAULT_SCHEMA,
+            sep=plan.merged_info.get("separator") or DEFAULT_SEP)
+    except AcquisitionRecordError as exc:
+        raise ConcatError(f"Verification failed: the merged acquisition record is not valid: {exc}") from exc
+    if not problems.ok:
+        raise ConcatError("Verification failed: the merged acquisition record does not match "
+                          "the merged images: " + "; ".join(problems.issues[:3]))
+    emit("Wrote the merged acquisition record.")
+
+
+def _verify_raw(plan: MergePlan, dropped_members: dict[str, frozenset[str]]) -> list[str]:
+    """The raw merge's check, made on the archives it wrote.
+
+    A raw dataset has no measurement rows to cross-check, so the evidence is
+    the images. Independently of the copy: list every dataset-2 member, work
+    out the name the merge should have given it, and require that name in the
+    destination archive carrying the same stored checksum — so a member that
+    went missing, kept its old name, or arrived as someone else's bytes is
+    caught rather than reported as a merge.
+
+    Returns the dataset-2 *images* the filename schema could not shift (the name
+    carries no timepoint field): they land unchanged, which this check cannot
+    call wrong because the expected name is, by the same rule, the original. The
+    caller reports them, since an image with no timepoint in a time-lapse is the
+    kind of thing the user needs to be told about.
+    """
+    unshifted: list[str] = []
+    if dropped_members:
+        well, names = next(iter(dropped_members.items()))
+        raise ConcatError(
+            f"Verification failed: {sum(len(v) for v in dropped_members.values())} "
+            f"file(s) collided by name during the merge and were dropped (e.g. well "
+            f"{well}: {sorted(names)[0]!r}) — dataset 2's images did not all survive.")
+    checked = 0
+    for well, source in in_containers(plan.ds2).items():
+        dest_zip = plan.dest.in_dir / f"{well}.zip"
+        if not dest_zip.exists():
+            raise ConcatError(f"Verification failed: well {well} has no merged archive.")
+        with zipfile.ZipFile(dest_zip) as merged:
+            landed = {i.filename: i.CRC for i in merged.infolist() if not i.is_dir()}
+        for name, crc in _ds2_members(source).items():
+            if is_os_junk_member(name):
+                continue
+            expected, rewrote = rewrite_member_name(
+                name, schema=plan.schema, channels=plan.channels,
+                offset_hours=plan.offset_hours, tp_format=plan.tp_format)
+            if not rewrote and is_run_input_member(name):
+                unshifted.append(f"{well}/{name}")
+            if expected not in landed or (crc is not None and landed[expected] != crc):
+                raise ConcatError(
+                    f"Verification failed: well {well}'s image {name!r} should be "
+                    f"{expected!r} in the merged archive and is "
+                    f"{'missing' if expected not in landed else 'different bytes'}.")
+            checked += 1
+    if not checked and (plan.wells_ds2_only or plan.wells_both):
+        raise ConcatError("Verification failed: no dataset 2 image reached the merged archives.")
+    return unshifted
+
+
 # ── top-level execution ──────────────────────────────────────────────────────
+def _keep_nanowell_tables(plan: MergePlan, emit) -> None:
+    """Analysed + raw: dataset 1's nanowell results stay with its kept outputs; dataset 2's timepoints get theirs
+    from the incremental Analyze run that follows, onto the same roster and earliest template (tracker P10d)."""
+    carried = carry_nanowell_tables(plan.ds1.out_dir, plan.dest.out_dir,
+                                    {well: well for well in dataset_wells(plan.ds1)})
+    if carried:
+        emit(f"Kept dataset 1's nanowell tables for {len(carried)} well(s); Analyze adds dataset 2's "
+             "timepoints to them incrementally.")
+
+
 def execute_plan(
     plan: MergePlan,
     log: Callable[[str], None] | None = None,
@@ -586,13 +716,22 @@ def execute_plan(
     report_fraction = sub_progress or _null_sub_progress
 
     emit(
-        f"Dataset 1 last timepoint {plan.ds1_last_hours:g}h, interval "
-        f"{plan.ds1_interval_hours:g}h → dataset 2 shifted by {plan.offset_hours:g}h."
+        f"Dataset 1 last timepoint {plan.ds1_last_hours:g}h; dataset 2 follows "
+        f"{plan.gap_hours:g}h later ({plan.gap_source}) → dataset 2 shifted by "
+        f"{plan.offset_hours:g}h."
     )
+    if plan.gap_warning:
+        emit(f"Note: {plan.gap_warning}")
+    if plan.scale_warning:
+        emit(f"Note: {plan.scale_warning}")
     if plan.format_warning:
         emit(f"Note: {plan.format_warning}")
     for warning in plan.column_warnings:
         emit(f"Note: {warning}")
+    if plan.ds2_raw:
+        emit("Dataset 2 is raw: dataset 1's measurements and QC images are kept as "
+             "they are, and dataset 2's images are added for an incremental Analyze "
+             "run to process.")
     emit(
         f"Wells: {len(plan.wells_ds1_only)} from dataset 1 only, "
         f"{len(plan.wells_ds2_only)} from dataset 2 only, "
@@ -628,7 +767,8 @@ def execute_plan(
     marker_path = plan.dest.root / IN_PROGRESS_MARKER
     marker_path.write_text("")
     plan.dest.in_dir.mkdir(parents=True, exist_ok=True)
-    plan.dest.out_dir.mkdir(parents=True, exist_ok=True)
+    if not plan.raw:
+        plan.dest.out_dir.mkdir(parents=True, exist_ok=True)
 
     in1, in2 = in_containers(plan.ds1), in_containers(plan.ds2)
     csv1, csv2 = out_csvs(plan.ds1), out_csvs(plan.ds2)
@@ -655,6 +795,11 @@ def execute_plan(
         fraction = WellFraction(report_fraction, well, _SLICES_PER_WELL)
         unmatched_in, in_names, dropped_in, junk_in = merge_input(
             plan, well, in1.get(well), in2.get(well), fraction=fraction)
+        if plan.raw:
+            fraction.skip(_QC_SLICES)
+            fraction.finish()
+            return (well, WellCsvStats(), unmatched_in, dropped_in, [],
+                    bool(dropped_in), junk_in)
         unmatched_qc, dropped_qc, junk_qc = merge_qc_zip(
             plan, well, zip1.get(well), zip2.get(well), fraction=fraction)
         stats = merge_measurements(plan, well, csv1.get(well), csv2.get(well), ds2_in_names=in_names)
@@ -673,7 +818,7 @@ def execute_plan(
         if (in1.get(well) or zip1.get(well)) and not csv1.get(well):
             well_images_without_csv.append(f"{well} (dataset 1)")
             well_warned = True
-        if (in2.get(well) or zip2.get(well)) and not csv2.get(well):
+        if not plan.ds2_raw and (in2.get(well) or zip2.get(well)) and not csv2.get(well):
             well_images_without_csv.append(f"{well} (dataset 2)")
             well_warned = True
         return (well, stats, unmatched_total, well_dropped, well_images_without_csv,
@@ -711,17 +856,40 @@ def execute_plan(
         )
 
     emit("Verifying the merged output before finishing…")
+    if plan.raw:
+        unshifted = _verify_raw(plan, dropped_members)
+        _merge_acquisition_records(plan, emit)
+        marker_path.unlink(missing_ok=True)
+        emit("Raw merge complete: images only, to be analysed once as one plate.")
+        warning = ""
+        if unshifted:
+            shown = ", ".join(unshifted[:5]) + (", …" if len(unshifted) > 5 else "")
+            emit(f"Note: {len(unshifted)} dataset 2 image(s) have no timepoint in their file name, so "
+                 f"they were carried over unshifted and will be read as part of the same timepoint "
+                 f"as dataset 1's images of that name: {shown}.")
+            warning = f" {len(unshifted)} image(s) had no timepoint to shift; see the log."
+        return (
+            f"Concatenated {len(all_wells)} well(s) of raw images into {plan.dest.root} "
+            f"(dataset 2 shifted +{plan.offset_hours:g}h).{warning}"
+        )
     _verify(plan, well_stats, dropped_members)
+    if plan.ds2_raw:
+        _verify_raw(plan, {})        # dataset 2 has images only; check them as a raw merge does
+    _merge_acquisition_records(plan, emit)
 
     _merge_cell_overrides(plan, emit)
+    if plan.ds2_raw:
+        _keep_nanowell_tables(plan, emit)
 
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)
     emit("Wrote merged pipeline_info.json.")
     record_derivation(plan.dest, tool="concatenate", sources=(plan.ds1, plan.ds2),
-                      offset_hours=plan.offset_hours)
+                      offset_hours=plan.offset_hours, gap_hours=plan.gap_hours,
+                      gap_source=plan.gap_source)
 
+    extra = " Run Analyze on it to process dataset 2's timepoints." if plan.ds2_raw else ""
     return (
         f"Concatenated {len(all_wells)} well(s) into {plan.dest.root} "
-        f"(dataset 2 shifted +{plan.offset_hours:g}h)."
+        f"(dataset 2 shifted +{plan.offset_hours:g}h).{extra}"
     )

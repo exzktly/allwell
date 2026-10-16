@@ -301,6 +301,16 @@ def _threshold_errors(opts: dict) -> list[str]:
     return errors
 
 
+def _nanowell_option_errors(opts: dict) -> list[str]:
+    """The nanowell section's field errors, or none in a build that does not ship the section (its rules go with
+    it: ``analyze.nanowell_hook``). Without the section nothing sets the options, so there is nothing to check."""
+    try:
+        from analyze.domain.nanowell_fields import nanowell_option_errors
+    except ModuleNotFoundError:
+        return []
+    return nanowell_option_errors(opts)
+
+
 def _numeric_option_errors(opts: dict) -> list[str]:
     """Return human-readable errors for out-of-range / unparseable numeric run
     options. Empty/blank means "use the pipeline default" and is allowed.
@@ -313,4 +323,5 @@ def _numeric_option_errors(opts: dict) -> list[str]:
     return (_int_field_errors(opts)
             + _mesh_errors(opts)
             + _float_field_errors(opts)
-            + _threshold_errors(opts))
+            + _threshold_errors(opts)
+            + _nanowell_option_errors(opts))

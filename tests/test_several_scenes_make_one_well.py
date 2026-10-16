@@ -319,7 +319,7 @@ def test_the_images_are_real_and_not_a_count(tmp_path):
 
     with zipfile.ZipFile(dest / "in" / "A01.zip") as archive:
         names = sorted(archive.namelist())
-        assert names == ["E_DAPI_A01_f0_t0.tif", "E_DAPI_A01_f1_t0.tif"]
+        assert names == ["E_DAPI_A01_f0_0h.tif", "E_DAPI_A01_f1_0h.tif"]
         with archive.open(names[1]) as handle:
             plane = tifffile.imread(handle)
     assert plane.shape == (4, 6)

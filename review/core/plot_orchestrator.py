@@ -302,6 +302,15 @@ def open_response_batch_export_shim(ctx) -> None:
     _switch_to_batch_export_tab(ctx, "response")
 
 
+def open_nanowell_batch_export_shim(ctx) -> None:
+    """Switch Batch Export tab to the inline Nanowells export builder (tracker I4)."""
+    if not ctx.state.dataset.well_paths:
+        QMessageBox.warning(ctx.window, "No data",
+                            "Load data before opening Nanowells Batch Export.")
+        return
+    _switch_to_batch_export_tab(ctx, "nanowell")
+
+
 def open_batch_export_shim(ctx) -> None:
     if not ctx.state.dataset.well_paths:
         QMessageBox.warning(ctx.window, "No data", "Load data before opening Batch Export.")

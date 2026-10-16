@@ -46,6 +46,7 @@ from pipeline.explode_common import (
     worker_groups,
 )
 from pipeline.nd2_read import Nd2Layout, Nd2Reader, read_nd2_layout
+from pipeline.converter_record import discard_record
 from util.filename_token import safe_token
 from util.plate_grid import block_well_labels
 from util.zip_write import atomic_zip
@@ -227,6 +228,8 @@ def explode_nd2(
     selected = wells_to_convert(well_map.wells, well_subset)
 
     out_in_dir.mkdir(parents=True, exist_ok=True)
+    # The record an earlier conversion left describes that one; this one publishes its own on completion.
+    earlier = discard_record(out_in_dir, nd2_path.name)
     # Counted over the wells this run writes, not over the plate. A subset
     # run denominated by the whole plate would report a complete conversion as
     # a fraction of one.
@@ -369,7 +372,31 @@ def explode_nd2(
         f"{wall:.1f}s ({rate:.0f} planes/s; read {read_total:.1f}s, write "
         f"{write_total:.1f}s summed across {n_workers} worker(s)).\n"
     )
+    _publish_record(nd2_path, out_in_dir, layout, well_map, exp_tok, tp_plan, _log, written=result.wells,
+                    earlier=earlier)
     return result
+
+
+def _publish_record(nd2_path: Path, out_in_dir: Path, layout: Nd2Layout, well_map: WellMap, exp_tok: str,
+                    tp_plan, log_fn, *, written=(), earlier=()) -> None:
+    """Write ``in/acquisition.json`` from the position loop's stage points and the calibration (tracker I5).
+
+    A tile's position is its stage position's loop point, the same at every timepoint: an ND2 position
+    loop states where the stage was sent, once per position.
+    """
+    from pipeline.converter_record import TileSource, publish_record
+    from pipeline.nd2_read import read_stage_calibration
+
+    stages, pixel = read_stage_calibration(nd2_path)
+    size = (layout.width, layout.height) if layout.width and layout.height else None
+
+    def locate(well_index: int, fov: int, _ti: int) -> TileSource:
+        position = well_map.positions[well_index][fov]
+        return TileSource(stages[position] if position < len(stages) else None, pixel, size)
+
+    publish_record(out_in_dir, nd2_path.name, {label: i for i, label in enumerate(well_map.wells)},
+                   experiment=exp_tok, channels=layout.channel_names, fovs=well_map.fovs_per_well,
+                   tp_plan=tp_plan, locate=locate, written=written, earlier=earlier, log_fn=log_fn)
 
 
 def timepoint_tokens(layout: Nd2Layout) -> tuple[list[str], str]:

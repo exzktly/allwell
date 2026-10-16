@@ -443,6 +443,35 @@ def _scan_cache_goes_to_a_scratch_directory(_autouse_scratch_root, monkeypatch):
                        str(_scratch_dir(_autouse_scratch_root, "czi-scans")))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _session_pipeline_scratch(_autouse_scratch_root):
+    """The same isolation for what runs before any test's own fixtures: a module- or session-scoped fixture that
+    runs the pipeline (a whole nanowell run, built once for a file) is set up before the per-test fixture below,
+    so it extracted into ``~/.allwell/scratch`` — shared by every xdist worker, which then deleted each other's
+    ``_tmp_extract_A01`` mid-run (``FileNotFoundError`` on an extracted tile). The session root is per worker,
+    because pytest gives each worker its own base temp directory."""
+    previous = os.environ.get("ALLWELL_SCRATCH_DIR")
+    os.environ["ALLWELL_SCRATCH_DIR"] = str(_scratch_dir(_autouse_scratch_root, "session-pipeline-scratch"))
+    yield
+    if previous is None:
+        os.environ.pop("ALLWELL_SCRATCH_DIR", None)
+    else:
+        os.environ["ALLWELL_SCRATCH_DIR"] = previous
+
+
+@pytest.fixture(autouse=True)
+def _pipeline_scratch_goes_to_a_scratch_directory(_autouse_scratch_root, monkeypatch):
+    """No test extracts a well into the developer's real ``~/.allwell/scratch``.
+
+    ``pipeline.io.scratch_base_for`` defaults there, and the extraction directory is named for the well alone
+    (``_tmp_extract_<well>``) — so two tests processing ``A01`` at the same moment shared one directory, each
+    deleting the other's images out from under it. That happened whenever two lanes ran at once, and it is
+    what every test would do to its neighbour under the parallel lane (``scripts/test.sh``, pytest-xdist).
+    A test that means to measure the default resolution unsets the variable itself (``test_scratch_base.py``).
+    """
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(_scratch_dir(_autouse_scratch_root, "pipeline-scratch")))
+
+
 class ModalDialogInTest(AssertionError):
     """A test reached a modal dialog. See the note above ``_MODAL_CALLS``."""
 
@@ -754,6 +783,10 @@ def _cpp_id(widget) -> int | None:
     return shiboken6.getCppPointer(widget)[0]
 
 
+#: How long the widget reaper waits for each thread a test left running.
+_THREAD_JOIN_SECONDS = 2.0
+
+
 @pytest.fixture(autouse=True)
 def _reap_widgets_the_test_created(request):
     """Delete the top-level widgets a test leaves behind, when the test ends.
@@ -814,10 +847,29 @@ def _reap_widgets_the_test_created(request):
     before = frozenset() if app is None else frozenset(
         addr for addr in (_cpp_id(w) for w in app.topLevelWidgets())
         if addr is not None)
+    threads_before = frozenset(threading.enumerate())
 
     yield
 
     import shiboken6
+
+    # Let a background thread the test started finish before deleting the
+    # widgets it reports to. The Analyze pane's pre-run coverage scan
+    # (`aw-preflight-scan`) emits its answer from a daemon thread; a delete on
+    # this thread while that emit is in flight crashes the interpreter, which
+    # under xdist reads as "node down: Not properly terminated" and a worker
+    # that takes its whole test file down with it. The emit's own
+    # `except RuntimeError` covers a receiver that is already gone, not one
+    # being deleted at that instant. Bounded, so a thread that never ends
+    # costs this test seconds rather than the lane its timeout — a long-lived
+    # worker (the persistence writer, a remote probe's runner) never ends, so
+    # seven tests in the lane each pay the full wait.
+    # A QThread shows up here as a `_DummyThread`, which cannot be joined; Qt's
+    # own threads are not what this waits for.
+    for thread in threading.enumerate():
+        if (thread not in threads_before and thread is not threading.current_thread()
+                and not isinstance(thread, threading._DummyThread)):
+            thread.join(timeout=_THREAD_JOIN_SECONDS)
 
     # Re-read the instance: a test may have been the one to create it.
     app = QApplication.instance()

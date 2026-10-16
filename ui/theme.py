@@ -208,6 +208,21 @@ class Colors:
         "#A8A8A8",
     )
 
+    # The nanowell occupancy ramp: cells in a nanowell at baseline, 0 / 1 / 2 / 3+ (the Nanowells page).
+    # Occupancy is ordinal, so it is one hue with lightness rising with occupancy, not four unrelated hues,
+    # and it sits in the accent family, clear of the metric colour maps and of the status colours.
+    #
+    # **A stated exception to "data ink does not flip".** That rule protects *identity* colours — which
+    # well is which — and occupancy is a magnitude. A ramp that rises in lightness on the dark card must
+    # fall in lightness on publication white, or its top class vanishes (#E6ECFF is 1.18:1 on white), so
+    # ``CPub.occupancy_ramp`` is the same ramp with the order of contrast reversed: more cells, more
+    # contrast, on whichever ground the figure has. Every shade clears 3:1 against its ground, and class 0
+    # is also drawn hollow, so 0 and 1 never rest on colour alone. ``tests/test_nanowell_theme.py`` pins
+    # the contrast, the ordering and the pairing.
+    occupancy_ramp = ("#7C8AA8", "#4E6BD8", "#8FA8FF", "#E6ECFF")
+    # A nanowell whose baseline has no count: occupancy unknown. Neutral, as every no-number mark is.
+    occupancy_unknown = "#727880"
+
     # ── Contrast inks for "always opaque against any background" use ─────
     # Widgets that paint white-on-dark or black-on-light edges should use
     # these instead of hardcoded ``#FFFFFF`` / ``#000000``. They remain
@@ -267,6 +282,10 @@ class CPub:
     # contrast, derive them here from the canonical tuple rather than
     # diverging by hand.
     trace       = WELL_COLORS_TUPLE
+
+    # The nanowell occupancy ramp on publication white (see ``Colors.occupancy_ramp``): the same four
+    # classes, darkening with occupancy so the top class has the most contrast against white.
+    occupancy_ramp = ("#6B7588", "#6F86E8", "#3F5BC4", "#1C2B73")
 
 
 # Convenience alias retained for back-compat with callers that imported

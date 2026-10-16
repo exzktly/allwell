@@ -239,10 +239,17 @@ allwell/
 │   │   ├── input.py            ← run-dir resolver, OME-TIFF redirect, channel rows,
 │   │   │                          browse-time folder scan
 │   │   ├── job_edit.py         ← the inverse of collect_spec, for the queue's edit flow
+│   │   ├── nanowell_fields.py  ← the Nanowells fields' meaning, bounds and errors, Qt-free
 │   │   ├── well_list.py        ← the one parse of a typed well list, and the sentence a
 │   │   │                          --only_wells run announces itself with
 │   │   └── slurm_job.py        ← the run's Slurm job as none / queued / open, folded
 │   │                              from the run's events, and the indicator's tooltip
+│   ├── nanowell_hook.py        ← picks the section or a stand-in by the build's profile
+│   ├── nanowell_section.py     ← the Nanowells section: mode, plate format, the numeric
+│   │                              fields, Test detection, and the run validation
+│   ├── nanowell_preflight.py   ← what is checkable before a nanowell run without reading an
+│   │                              image: record, archives, grids, overlap and seam estimate
+│   ├── nanowell_preview.py     ← the Test detection window and the marks drawn on the montage
 │   ├── qc_section.py           ← the Quality Control section: the pixel
 │   │                              corrections, the debris gate, and the
 │   │                              per-cell focus measurement and its cut
@@ -322,6 +329,12 @@ allwell/
 │   │                              the pipeline still imports without it installed
 │   ├── nd2_explode.py          ← the ND2's per-well explode — stage positions →
 │   │                              wells, Z max-projected, one archive per well
+│   ├── converter_record.py     ← the acquisition record the OME and ND2 exploders
+│   │                              leave beside their archives: stage positions in
+│   │                              µm, calibration, tile size; withheld when the
+│   │                              folder holds an archive they did not produce
+│   ├── ome_acquisition.py      ← an OME-XML's stage positions and PhysicalSize per
+│   │                              (Image, TheT), units honoured, for that record
 │   ├── explode_common.py       ← what all three exploders do identically: the
 │   │                              member-name set, the resume check over it, the
 │   │                              worker split and count, the in-memory TIFF encode,
@@ -383,6 +396,9 @@ allwell/
 │   ├── well_token.py           ← canonical 96-well token parser (single source of truth:
 │   │                              process_microscopy, well_plate_zipper, analyze.tab and
 │   │                              input_resolution_service all parse well names through it)
+│   │                              — and `is_well_archive` / `well_archives`, the one rule for which
+│   │                              files in in/ are well archives: the run, its start check, the
+│   │                              acquisition record's checks, the converters and the pre-flight
 │   ├── filename_token.py       ← reduce a metadata label (a channel name, an
 │   │                              experiment) to a token that survives a filename;
 │   │                              both packed-file converters name images through it
@@ -573,6 +589,7 @@ review/
 │   │   plot_card_actions.py, figure_saver.py
 │   ├── timepoint_sync.py             ← shared "focus timepoint" across plotting tabs
 │   ├── rail_plate.py                 ← the sidebar's one well-picker slot
+│   ├── section_icons.py              ← the glyph beside each rail entry
 │   └── ui_helpers.py, notifications.py, dnd.py
 ├── data/                          ← IO + decode
 │   ├── data_loading.py, image_discovery.py, image_resolver.py,
@@ -682,6 +699,12 @@ review/
 │   │                                 one row each, with the action each admits
 │   │                                 [removable]
 │   ├── spatial/      controller.py, collect.py, renderer.py, state.py, tab_view.py
+│   ├── nanowell/     collect.py, series_compute.py, summary_compute.py,
+│   │                 beeswarm_compute.py, distribution_compute.py, renderer.py,
+│   │                 controller.py, state.py, tab_view.py, view_state_io.py,
+│   │                 cell_scope_compute.py  ← the Nanowells page: nanowell
+│   │                 tables, per-nanowell metrics, the Distribution beeswarm
+│   │                 and site detail [removable]
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
 │   │                 + _svg_shapes.py (the PowerPoint export),
@@ -690,7 +713,8 @@ review/
 │   ├── qc/           controller.py, params.py, tab_view.py   ← support lib
 │   ├── export/       service.py, style.py, sidebar_view.py
 │   ├── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
-│   │                 scatter_panel.py, response_panel.py, service.py,
+│   │                 scatter_panel.py, response_panel.py, nanowell_panel.py,
+│   │                 service.py,
 │   │                 _common.py, _line_series_runner.py,
 │   │                 _destinations.py (gallery + PowerPoint),
 │   │                 _panels.py (which panels, what axes),
@@ -1034,7 +1058,7 @@ and registers every centre page. The current page-list:
 | Images | **smFISH** | — |
 | Data | **Review CSV** | — |
 | Data | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button, and exports the gallery as a PDF report or a PowerPoint deck — each chart as editable shapes, each Image Table grid as one editable group per field of view) |
-| Data | **Batch Export** | — (one figure + CSV per export group, in five modes — Line, Bar, Scatter cells, Scatter aggregate, Response — and optionally into the Saved Plots gallery and a PowerPoint deck as well as into files) |
+| Data | **Batch Export** | — (one figure + CSV per export group, in six modes — Line, Bar, Scatter cells, Scatter aggregate, Response, Nanowells — and optionally into the Saved Plots gallery and a PowerPoint deck as well as into files) |
 
 **Plotting** is a `NamedPageStack`; **Image Browser** (`QTabWidget`: the unified
 home for the disparate image-review surfaces — the review-image **Segmentation**
@@ -3297,8 +3321,9 @@ inherited them silently would file its figures under the line tab's name.
 
 A mode whose figure comes from a **removable** feature names that feature in
 `_MODES`, and `_offered_modes` derives the bar from the registry: Response mode
-reuses Response Curves' own collector and renderer, so a profile that drops that
-leaf gets four tabs rather than a fifth that builds and then raises on Run. The
+reuses Response Curves' own collector and renderer, and Nanowells mode the
+Nanowells page's, so a profile that drops either feature gets no tab for it
+rather than one that builds and then raises on Run. The
 list is derived rather than written twice, and `_show_batch_mode` falls back to
 the default mode for a key this build does not offer — a saved view naming
 `response` in such a build lands on Line rather than on nothing.
@@ -3585,7 +3610,31 @@ was left out**, and a row per fit including a refused one. A group with no
 placeable points writes nothing at all rather than blank axes beside an empty
 CSV.
 
-It is the one mode with **no fold-change controls**, and that is a decision
+**Nanowells mode** (`nanowell_panel.py`) draws each figure through the
+Nanowells page's own composition, `nanowell/controller.draw_view` — the one
+function the page's redraw calls for Distribution, Array map, Trajectories and
+Position, notes and empty states included — and `resolve_metric` for the
+channel and per-nanowell fallbacks. Per export group it writes the chosen view
+for each ticked metric (the Array map, which draws one well, once per well) and
+one CSV of `distribution_compute.wells_summary`, the per-well summary prepared as
+the Distribution view prepares it (per-nanowell metrics at each well's first
+timepoint, the fixed cohort when ticked), with the exclusions spelled out by
+reason and a row naming each of the group's wells with no nanowell table. A
+group's replicate sets stay sets and its solo wells stand alone, as the page
+groups a selection (`_figure_groups`); a group with no nanowell table at all is
+skipped and says so. An Array map asked for a timepoint a well was not imaged at
+is a figure saying exactly that, where the page would fall back to the well's
+first timepoint. The tables and the metrics at the chosen baseline are read
+once per run — from the page's state when it holds this dataset — and every
+control once, before the first job. There is no AXES block (a Nanowells figure
+is several panels the page lays out itself), no per-cell CSV and no fold-change
+or spread control: a nanowell fold change is against the baseline chosen here.
+`_capture_group_params` sets the page's view, metric, axis, baseline, cohort,
+well and timepoint to the figure's for the capture and puts them back, so a
+gallery record restores to the figure beside it rather than to whatever the page
+was showing.
+
+Response mode carries **no fold-change controls** either, and that is a decision
 rather than an omission: the other modes normalise through the panel's own
 fold-change state, while a response curve normalises inside its collector off
 the shared `ctx.state.plot` state every plotting page shares. A panel-local
@@ -5080,7 +5129,11 @@ fourth leaf was on screen left it drawn from the previous groups. And
 which is the same hazard in its most durable form: a list that looks
 authoritative, is wrong, and cannot be caught by any behaviour.
 
-All three are gone. The rep-mirror set is derived (`_rep_mirror_tabs`), the
+All three are gone. The rep-mirror set is derived (`_rep_mirror_tabs`) from the
+Plotting leaves plus the per-well tabs that draw the same active set without
+being leaves (`_EXTRA_REP_MIRROR_TABS`: Spatial, Multivariate, Nanowells); the per-well
+tabs a group edit refreshes are `_GROUP_EDIT_FOLLOWERS` (those three and the Cell
+Browser); the
 group-edit and Property-change repaints go through one fan-out, and the dead
 roster is deleted.
 
@@ -5452,6 +5505,7 @@ The **Spatial** tab (`review/features/spatial/`) is the Review-side
 analysis of **per-cell physical positions in the well plane**. It's the
 only feature that consumes the pipeline's always-on
 `shape_centroid_row` / `shape_centroid_col` columns for anything analytical
+(or, on a nanowell dataset, each cell's `well_x_um` / `well_y_um` — see below)
 — the Multivariate tab treats those centroids as ordinary shape features
 in z-scored feature space, not as physical coordinates. Spatial is a
 one-file-per-role package that mirrors Multivariate (see §5.3 recipe): a
@@ -5465,6 +5519,20 @@ occupant is the shared **Properties (Export-Style) panel** — the
 `ctx.figures.open_style_panel("spatial")`, so the Spatial figure now styles
 identically to every other plotting tab (`render_spatial` re-applies the
 export-style prefs at the end of each recompute so edits survive it).
+
+**Which frame positions are in** (`spatial/collect.position_columns`). A nanowell
+run's cell table states each cell's position in the well frame, `well_x_um` /
+`well_y_um`, shared by every tile of the well; those win, and every payload
+carries `unit="µm"`. Otherwise the segmentation's centroid in its field's pixels
+(`unit="px"`), which places cells correctly only within one field — a nanowell
+well's tiles overlap in pixel space, so reading its centroids put cells from
+different tiles on top of one another. The renderer labels axes, nearest-neighbour
+distances and Ripley's radius with the payload's unit (`renderer.in_unit`). A
+nanowell cell table has a `timepoint` label and no `timepoint_hours`, so
+`collect._hours`, the tab's timepoint list and the per-cell export
+(`spatial/cell_scope_compute.cell_scope`: the same position columns as required
+columns, `tp_fallback=True`, and its first-timepoint rule) all go through
+`data_loading.resolved_timepoints`, the loader's one label-to-hours resolver.
 
 **Multi-well faceting.** The per-frame levels (Cell / Colony /
 Intra-colony) now draw **one panel per selected well** — a faceted grid
@@ -7152,6 +7220,127 @@ a third copy of those three lines under a comment saying it mirrored the first.
 
 ### 6.2a The CZI converter
 
+
+**Acquisition-record primitive.** `util/acquisition_record.py` is stdlib-only and
+stores versioned JSON at `<dataset>/in/acquisition.json`. The reader distinguishes
+an absent record (`None`) from corrupt, unsupported or duplicate-key metadata
+(`AcquisitionRecordError`). The writer validates before calling
+`util.json_write.write_json_atomic`, so invalid metadata or a failed replacement
+preserves the preceding record. Extra provenance keys survive round trips.
+
+Format 1 contains dataset-level `source_files`; `timepoints` keyed by exact
+filename tokens, each with nullable x/y `pixel_size_um`, `tile_size_px` and
+`declared_overlap_percent`, nullable `objective` and ISO 8601 `started_at`,
+nullable `start_reason`, and a nonnegative `tiles_without_time` count; and
+`tiles`, each containing
+canonical `well`, exact `field` and `timepoint`, nullable `mosaic_xy_px` and
+`stage_xy_um` coordinate pairs, and an optional declared `source_file`. Coordinate
+zeros are measured values. Missing metadata remains null, including individual
+scale axes; missing timezones are not invented. Producers must supply values in
+the explicit units and cannot treat unlabelled native overlap as percent.
+
+`validate_against_archives` uses ZIP member headers and the supplied filename
+schema/separator to compare complete well/field/timepoint coverage. Channel
+planes share a tile; opaque field/timepoint spellings are not numerically merged.
+The pipeline's input-image predicate excludes metadata, directories and macOS
+sidecars. Missing/extra wells or tiles, unreadable archives and bad image names
+are explicit issues. An unreadable well's field coverage is not fabricated as
+empty. All three converters produce this record — the CZI converter as below, the
+OME-TIFF and ND2 converters as §6.2b's last paragraph describes; dataset-tool and
+remote input transport integration carry the record as described below.
+
+`pipeline/czi_acquisition.RecordBuilder` catalogs the conversion's filenames and
+source positions, then reads actual published ZIP member headers. Only those
+field/timepoint/channel identities contribute recorded directory/stage positions
+and dimensions. Shared starts and missing-reading counts reduce metadata from
+every spatial tile and timepoint of the whole acquisition before pixel
+conversion, including every file of a Split Scenes set. This keeps labels and
+starts identical across partial and full conversions. Split Scenes files retain their own source
+attribution, including several files naming one well. Unknown scale axes are
+not borrowed from another file, and conflicting known scales are refused before
+pixels are written. Coordinate disagreement across stored channel/Z planes
+leaves the coordinate unknown. Source size/mtime identities must remain unchanged
+during conversion and metadata assembly. Published-image sources retain their
+stats; clock_source_file_stats additionally identifies every source contributing
+the whole-acquisition clock, including files excluded from the image subset.
+
+The record's nullable objective and declared overlap remain unknown because the
+reader does not yet expose an unambiguous native selected-objective or declared-
+overlap tag/unit contract; tracker R3d records the evidence required. Neither an
+instrument inventory nor measured tile spacing is treated as a declaration.
+
+`acquisition_publication` guards the multi-file operation with
+`in/acquisition.pending.json`. Record reads explicitly refuse that state, even
+when JSON is absent. After worker shutdown, also on cancellation, the builder
+reconstructs the exact published roster, atomically replaces the JSON through
+`util/json_write`, and clears the guard. Metadata failure or hard interruption
+leaves the guard and the previous JSON; a matching resume rebuilds it without
+reprojecting pixels when their labels already match. Old-rule archives selected
+for resume are re-converted; an unselected retained old-rule well is refused
+with its name and the instruction to include it. Native ordinals in ZIP member comments and timepoint
+provenance preserve identity through label changes. The final labels use elapsed
+hours from shared starts, using the existing jitter rounding; unknown or incomparable
+starts use ordinal tokens and retain a naming reason. A single frame is always
+0h even if its absolute start remains unknown. Retained ZIPs are rewritten
+only when labels or lineage comments change. ZIP and JSON are individually atomic, not a two-
+file atomic transaction. Dataset-root APIs delegate to explicit file APIs so
+CLI conversions into an arbitrary input-folder name do not append another in/.
+
+Subset keeps exact published identities and their shared timepoint metadata.
+Merge Plates remaps wells and qualifies source-file provenance by input; it
+refuses conflicting shared metadata or a record present in only one input before
+destination writes. Validate reports record presence, corrupt/pending records and
+archive-coverage mismatches using the dataset's schema.
+
+`services/acquisition_transport` carries the record through staged inputs,
+scoped well selections and batched uploads, filtering it to actual uploaded
+identities. Full and batch transfers include a temporary `acquisition.json`,
+removed when the transfer ends. Upload and re-attach identity include record
+content, so metadata-only changes invalidate reuse. `pipeline.sidecar` reads and
+validates the input record before local or remote pipeline image work. Legacy
+inputs without a record retain their existing behavior.
+
+The CZI page shows known/unknown pixel-size axes and identifies preview labels
+as provisional. After a successful conversion, including the final page refresh,
+it shows the record's per-timepoint scale, mosaic/stage coverage and known-start
+coverage before the dataset is opened in Analyze.
+
+**CZI acquisition metadata.** `CziLayout.pixel_size_um` reads x/y scaling from
+`Scaling/Items/Distance[@Id]/Value` during the same cached parse that resolves
+the plate's names. Values are metres according to ZEISS libCZI's `ScalingInfo`;
+`DefaultUnitFormat` is only a display suggestion. Each axis is independently
+nullable, and invalid or conflicting declarations are not filled from its peer.
+
+`CziReader.read_tile_metadata(scene, tile, t, c, z)` reads an exact plane's
+directory X/Y starts and subblock XML without importing NumPy or reading pixel
+bytes. It returns `CziTileMetadata` with signed `mosaic_xy_px`, nullable
+`stage_xy_um`, and a nullable ISO `acquired_at` preserving timezone presence.
+Stage tags are the direct `METADATA/Tags/StageXPosition` and `StageYPosition`
+children. Their native micrometre convention follows OME Bio-Formats'
+`ZeissCZIReader`; it is independent of the metre-valued image scaling. Both
+stage axes must be finite and unambiguous. Absent, invalid or explicitly
+unsupported units leave the pair null. Closed readers and absent planes raise
+`CziReadError` rather than inventing a coordinate. Each requested subblock XML
+is parsed once for its stage coordinates and timestamp under the parsing lock.
+
+Metadata access is lazy: the initial header scan retains its one-position-per-
+timepoint seek budget. `TimeScan.instants_by_index` retains that representative
+position's absolute readings even when missing the first stamp or mixing zoned
+and unzoned stamps prevents calculating elapsed hours. Those instants do not
+claim the earliest start across all plate tiles. The dataset record uses one shared time per timepoint: the earliest recorded
+tile across published wells, with mixed zoned/unzoned readings refused and
+missing tile readings counted. No per-well or per-tile time is stored downstream.
+`CziReader.position_metadata` visits only the planes at a requested spatial tile
+using its existing channel/Z index. `AcquisitionClock` reduces those transient
+readings, counts a missing reading once per spatial tile, compares aware instants
+across offsets, preserves unzoned instants and refuses mixed offset presence.
+Disjoint well clocks merge into one acquisition clock; no raw readings survive
+in its summary. The initial header scan's sampled timing and seek budget remain
+unchanged. The converter integration is tracked in Section R. Synthetic ZISRAW tests establish these
+parser conventions; real ZEN tag population and coordinate comparability across
+acquisitions remain R8/Q7.
+
+
 A Zeiss plate scan arrives as one `.czi` holding every scene, mosaic tile,
 channel, Z-plane and timepoint of the run. *Convert CZI*
 (`datasets/czi_import/`, §6b) is the standalone converter for it, structured
@@ -7681,6 +7870,16 @@ Four things about it are load-bearing:
   substitution, not a crash. Every key carries its written reason in
   `tests/test_reuse_is_keyed_completely.py` and is watched declining in
   `tests/test_the_scan_is_remembered_on_disk.py`.
+  The reader and format signatures include acquisition scaling and absolute
+  sampled timestamps. Entries produced before those fields existed are
+  discarded and reparsed rather than decoded into misleading null values.
+  The complete round-trip fixtures cover `CziLayout`, `_PlateMetadata` and
+  `TimeScan`, including non-default scale and timestamp values. A real cold/
+  warm scan verifies that both survive disk storage without opening the source
+  again; stale-reader and stale-format fixtures independently require reparsing.
+  The reader signature guard covers the scaling and acquisition-time producers,
+  their numeric/timestamp parsers, representative-position selection and
+  `TimeScan`, so a helper-only change cannot retain an old reader signature.
 - **It never writes into the images' own folder.** A plate is routinely on a
   read-only archive, a share somebody else administers, or a cloud-sync root.
   The cache lives beside the boot log — `%LOCALAPPDATA%\allwell\czi-scans` or
@@ -8038,6 +8237,38 @@ ones — `_build_params`, `_build_ui`, `refresh_readout` — diverge substantial
 A common view base would be a base full of flags, which is the shape
 `datasets/core/tool_controller.py`'s own docstring warns against.
 
+**The OME-TIFF and ND2 acquisition records** (`pipeline/converter_record.py`).
+Both exploders remove any `in/acquisition.json` before writing their first
+archive and, once every well is published, write one for the archives in the
+folder that hold exactly the members this conversion's settings call for — the
+wells written, resumed, or written earlier under the same settings. A folder
+that also holds an archive these settings did not produce gets no record, said
+in the run log, because a record must name every archive
+(`validate_against_archives`). An archive this run did not write or resume
+counts only when the record it replaced attributed that well to the same source
+file (`discard_record` returns those wells): the same settings over a different
+file write identical member names, and its tiles would otherwise be filed under
+this file's stage positions. Like a CZI record, the result is checked against the
+archives at the start of every run (`pipeline/sidecar.check_acquisition_inputs`),
+so archives added or removed by hand afterwards stop a run; the refusal names
+the ways out (convert again, Datasets → Subset, or delete the record). Each tile
+carries a stage position in µm and no
+mosaic position: from an OME `<Plane>`'s `PositionX`/`PositionY` only when both
+carry a length unit (`pipeline/ome_acquisition.py`, keyed per `(Image, TheT)`,
+a packed single-image file's frame found by the same `_frame_index` the planes
+were read with), from an ND2's position-loop points (µm by the format,
+`nd2_read.read_stage_calibration`). Pixel size is OME's `PhysicalSizeX`/`Y`
+(defaulting to µm, as the schema does) or the ND2 calibration only when its
+`bCalibrated` flag is set — an uncalibrated ND2 reports `1.0`, a placeholder —
+and tile size the image dimensions, each per timepoint only when every tile
+agrees. `started_at` is `null` with its reason: both converters already name
+timepoints by elapsed time. **A stage position alone does not place a tile for
+nanowell mode**: the run does not know whether a stage axis runs with the
+image's or against it (`place_from_record`'s `stage_to_image`, tracker R8), so
+`nanowell_pattern_record.unplaced_wells` counts such wells unplaceable, the run
+(`nanowell_task._placing_record`), its preview and the Analyze pre-flight place
+them from a described grid, and without one refuse naming it.
+
 ### 6.2c Converting part of a plate
 
 All three packed-file converters take a **well subset**: convert some of the
@@ -8166,6 +8397,828 @@ asserts all of the above at the **boundary** — the strings the readout label i
 actually given — rather than on the reporter calls behind it, because a scan
 that computes a perfect count and never writes it to the label leaves exactly
 the frozen page this fixes.
+
+### 6.2e Nanowell geometry and addressing
+
+`util/nanowell_address.py` is stdlib-only. `NanowellAddress(q, r)` is frozen,
+integer-valued, and hexagonal by default; square addressing requires an explicit
+keyword-only `kind`. Positions, origins, predictions, pitch, radius, diameter and
+margins throughout the geometry API use the caller's units without conversion.
+Image coordinates have x right and y down. Counter-clockwise on screen rotates
+`(x, y)` to `(x cosφ + y sinφ, -x sinφ + y cosφ)`. In the unmirrored frame, a₁ is
+the direction nearest image east and a₂ advances counter-clockwise by 60° for
+hexagonal lattices or 90° for square lattices. Position is `origin + q·a₁ + r·a₂`.
+
+Hexagonal ring `k = max(|q|, |r|, |q+r|)` contains 6k sites. Its corners follow
+`D = [(1,0), (0,1), (-1,1), (-1,0), (0,-1), (1,-1)]`. From corner `k·D[j]`,
+walk k steps along `D[(j+2) % 6]`; offset `j·k+s` identifies the site at step s.
+The first ring is `(1,0)=1.0, (0,1)=1.1, (-1,1)=1.2, (-1,0)=1.3,
+(0,-1)=1.4, (1,-1)=1.5`. Square ring `max(|q|, |r|)` contains 8k sites, walking
+from `(k,0)` up to `(k,k)`, left to `(-k,k)`, down to `(-k,-k)`, right to
+`(k,-k)`, then up to `(k,-1)`. The central site is `0.0`. `(q,r)` is the join
+key; the canonical label `k.i` is derived, and `parse_label` is its exact inverse.
+A label does not identify its lattice kind. Malformed labels raise `ValueError`
+naming the input. Round trips are exhaustive through ring 45 for both kinds;
+explicit labels separately pin each kind's first two rings and direction.
+
+`pipeline/nanowell_lattice.py` is Qt-free. `fit_lattice(points, *,
+expected_pitch=None, kind="hex", mirrored=False, mirror_axis=None)` seeds a
+basis from `cKDTree` nearest-neighbour displacements. Antipodes are folded;
+angular harmonics distinguish three hexagonal axes from two square axes for
+`kind="auto"`, and the direction clusters supply the initial vectors. Circular
+coordinate consensus supplies the phase even when the point nearest the window
+centroid is an outlier. Least squares refines a general 2×2 basis and origin on
+unique, cleanly indexed points, rather than forcing ideal lengths and angles.
+The frozen `LatticeFit` carries `ok`, `reason`, `a1`, `a2`, `pitch`, `angle_deg`,
+`kind`, `phase_origin`, RMS, the inlier mask, the a₁–a₂ angle and length ratio,
+and reflection metadata. `phase_origin` is the fitted lattice site nearest the
+inliers' centroid; it does not designate the central square. Failure carries a
+reason and no fabricated basis or origin.
+
+Mirroring requires an explicit reflected coordinate, `mirror_axis="x"` or
+`"y"`, with `mirrored=True`. Basis selection occurs after unmirroring and the
+basis and phase are returned in the original input frame. Camera reflection is
+never inferred. A hexagonal lattice repeats every 60° and a square one every
+90°, so at 30° / 45° two axes are equally near east, and near those angles
+positional noise decides between them: unguarded, a true 29.99° hexagonal
+rotation fitted as −30.03° and was reported as a success, with every address
+turned by a sixth of a turn. `fit_lattice` therefore accepts a rotation only
+within ±25° (hexagonal) or ±40° (square) of east, `_ORIENTATION_LIMIT_DEG`, and
+refuses anything beyond with a reason naming the measured angle. The lattice
+alone cannot distinguish a rotation θ from θ ± 60° (hex) or ± 90° (square), so
+the limit guards only the band next to the ambiguity: a true rotation between
+35° and 85° (hex) or 50° and 130° (square) folds back inside the limit and is
+fitted on the wrong axis. A plate keyed in its holder sits within a few degrees,
+so that case needs a misaligned camera; nothing in this module can detect it.
+
+`index_points(points, fit, origin)` finds the nearest lattice site in the
+Cartesian metric, not by separately rounding the two oblique coordinates.
+Residuals over a quarter pitch are outliers, with `q=None` and `r=None` rather
+than fabricated addresses. Among duplicate detections on one site only the
+nearer survives; equal residuals retain input order. Results are frozen
+`IndexedPoint` records containing q, r, residual, outlier flag and reason.
+
+`fit_array_boundary(site_xy)` expects lattice-filtered site positions. It fits
+a circle to convex-hull sites using seeded triplet hypotheses and robust radial
+refinement, separating the circular rim from clipping chords and interior sites.
+It reports a frozen `ArrayBoundary` with status, reason, centre, radius and
+measured angular coverage. Radial tolerance is half a nearest-neighbour spacing;
+a 120° arc acceptance allows one spacing of endpoint angular resolution because
+the rim consists of discrete sites. The measured angle is reported without
+rounding it up. Tests include an actual hexagonal 120° cap, continuous arcs and
+insufficient or collinear evidence. All of this is validated on synthetic
+point sets only, not on boundaries detected in real phase images.
+
+`resolve_origin(fit, *, fiducial=None, array_centre=None, plate_rigid=None,
+fiducial_margin)` independently anchors each acquisition. The required score
+margin has no synthetic default or absolute-score calibration. A
+`FiducialCandidate(position, score, runner_up_score)` is accepted only when its
+score exceeds its runner-up by more than the supplied margin. Accepted evidence
+is snapped through the fitted phase in priority order: fiducial, array centre,
+then plate-rigid prediction. A fiducial or array centre more than a quarter
+pitch from every site is refused, with the distance in the reason, because the
+nearest site to a point that lies nowhere near one is arbitrary. Three times the
+prediction's one-sigma uncertainty for the target's *true origin*
+(`uncertainty_with_site`) must be strictly below half a pitch. With no accepted source, the frozen
+`OriginResolution` is `unaddressed` with a reason and no origin. Accepted
+results carry `origin_xy`, the method, and `agreement` (`agree`, `conflict`, or
+`single_source`). Disagreeing sources remain an explicit conflict; the
+higher-priority source is retained, including fiducial over array centre.
+No previous acquisition's origin is silently carried over.
+
+`roster(fit, origin, radius)` enumerates every integer site within
+`radius + 0.25·pitch`, including undetected sites and bubbles. Use one shared
+array-model radius across a well's acquisitions: independently noisy radius
+estimates can change which marginal sites lie inside the model. The function
+does not silently quantise those estimates, and it does not choose the shared
+radius itself. Shifted-window tests recover each origin independently and keep
+the same model roster.
+
+`TileRectangle` carries an id and finite axis-aligned bounds.
+`assign_owners` tests the entire nanowell disk plus the caller's margin against
+each tile and chooses the containing tile nearest its centre; exact distance
+ties use lexical tile-id order. The frozen `OwnershipResult` retains every input
+site with a tile id or `None`. Unowned sites are partitioned into
+`fused_indices`, whose whole physical disks are covered by the tile union, and
+`unimaged_indices`, whose disks have a missing portion. Margin controls
+single-tile ownership; union coverage tests the physical disk. Exact vertical
+slab coverage of the rectangle union detects interior holes and accepts missing
+bounding-box corners outside the circular disk. Outside-coverage sites therefore
+cannot be sent to the seam-fusion path.
+
+`fit_plate_rigid` fits a proper 2-D rotation and translation without scale or
+reflection to at least three common well origins. Pair hypotheses minimise the
+median radial residual; the first cutoff takes its scale from the wells the winning
+pair did not define, because the pair fits exactly and its zero residuals would
+otherwise pull the median toward zero (with three wells it is always zero, which
+rejected the third well of every noisy fit). Consensus is refitted and reselected, permitting genuine
+wells to rejoin, with a conservative six-sigma radial cutoff whose scale is the
+Rayleigh median divided by `sqrt(2 ln 2)`. This avoids the small-sample trimming
+bias from treating radial residuals as signed Gaussian deviations. Frozen
+`PlateRigidFit` results include per-well residuals, consensus ids, RMS and failure
+reasons. `predict_origin` returns an `OriginPrediction` with position and two
+one-sigma radial numbers. `uncertainty` is the standard error of the transform at
+the point; residual variance is SSE/(2n−3); translation and rotational leverage
+give variance times `(2/n + distance²/spread)`. `uncertainty_with_site` adds the
+target well's own scatter about the rigid motion, variance times
+`(1 + 2/n + distance²/spread)`, and is the error of the target's true origin: near
+the centroid of twelve wells the first is under half of the second, and it is the
+second that `resolve_origin` tests against a pitch.
+The seeded 500-fit simulation measures the transform's error at noiseless
+prediction sites independently with 5 µm per-axis noise in each acquisition and
+checks near and far predictions within 10% of empirical RMS; a second simulation
+scatters the target well too and checks `uncertainty_with_site` against the error
+of the target's true origin while retaining all wells in nearly every fit. Separate
+planted-outlier tests require rejection. The uncertainty assumes independent
+isotropic residuals and treats the prediction input as fixed; it excludes new
+measurement noise in that input and stage-calibration uncertainty, and is not a
+guaranteed bound. It has not been calibrated against measured stage data.
+
+Both geometry modules are in the remote manifest and currently have only test
+callers. They do not enable nanowell processing in Analyze or change outputs.
+The synthetic shifted/rotated-window and moved-plate fixtures recover actual
+addresses through these functions; replacing the boundary centre with the
+window centre or carrying an old origin makes the discriminating tests fail.
+
+### 6.2f Tile placement and registration
+
+`pipeline/tile_grid.py` (numpy only) says where each tile of one (well,
+timepoint) sits and how much neighbours overlap; `pipeline/tile_register.py`
+(numpy and scipy) refines those positions and builds the pictures made from
+them. Both are Qt-free, in the remote manifest, and have only test callers: they
+do not change what Analyze runs or writes. Units are micrometres; image axes are
+x right, y down.
+
+**Placement (`tile_grid`).** `tiles_from_record` reads one (well, timepoint)'s
+tiles and that timepoint's own tile size, pixel size and declared overlap from
+the acquisition record, because acquisitions merged later may differ.
+`place_from_record` prefers a tile's mosaic position (pixels, in the image's own
+axes). A stage position is used only when the caller states the sign of each
+stage axis relative to the image's (`stage_to_image`): a stage axis can run
+against the image's, and a guessed sign would mirror the grid. A grid that mixes
+mosaic and stage placed tiles is refused, because they are in different frames.
+The grid's shape is inferred from the positions (tiles within a quarter of an
+extent of each other share a row or column), with one grid index per line that
+tolerates a whole absent line in the middle. A whole absent outer row or column
+cannot be seen from the positions, so `expected_shape` states the plan; the
+record does not say which end of the axis such a line was at, so it is named
+("1 column(s) at an unknown outer end") and not labelled with a position. Tiles
+that do not touch (a negative overlap) are refused with the gap named: a tile is
+missing from between them, or the plan has none, and either way they cannot be
+registered or assembled.
+Data with no record is placed by `place_from_pattern` from one of sixteen
+`ScanPattern`s (four starting corners, row- or column-major, plain or
+serpentine) and a nominal overlap; nothing there is checked against the images.
+A timepoint short of its grid is `incomplete_grid` and names the missing cells
+(`r2c3`); `GridPlan.usable` is true only for a complete, placed grid, which is
+the only kind a montage is built from.
+
+The overlap along each axis is the tile's extent minus the median spacing between
+neighbouring lines, so it is measured per (well, timepoint) and compared with the
+declared one; a difference over two percentage points is reported as one of the
+two being wrong. `ownership_report` classifies sites with `assign_owners` and
+states whether the overlap guarantees that no site straddles a seam: a nanowell
+lies wholly inside some tile with margin *m* only if the overlap along the axis is
+at least `diameter + 2m`, which is the number reported, and not `diameter + m`.
+`assign_owners`' fused class holds two different things, and the report splits
+them: `blend_indices` straddle a seam and need a crop blended from several tiles,
+`edge_indices` lie wholly inside one tile but within the margin of the union's
+outer edge and are measured from that one tile with a thinner margin. Ownership
+takes the registered positions (`Registration.positions()`) when given, and the
+overlap guarantee is then measured from them too; the recorded ones are right
+for a preview and wrong for a run.
+
+**Three sources of position (`tile_register`).** Recorded, lattice phase and
+overlap correlation, combined in one weighted least-squares solve
+(`solve_placements`): each pairwise offset between tiles whose recorded
+rectangles overlap is a constraint with a standard deviation, and a weak prior on
+each tile's recorded position (50 um) fixes the overall translation and anchors a
+tile with no measurement. The two axes share one matrix. Each tile reports the
+source that placed it (`lattice`, `overlap`, or `recorded`), the rms disagreement
+with its own constraints, and how far it moved from the recorded position. That
+distance is measured after removing the median shift of the measured tiles
+(`Registration.common_shift_um`), because the solve's frame is pinned by the mean
+of the recorded positions and one badly recorded tile would otherwise show as a
+correction on every other. The residual says little about a tile with a single
+constraint, which it can always satisfy; a pair measured by both lattice phase
+and overlap correlation that disagree beyond three overlap uncertainties is
+warned about instead, since the lattice value is far tighter and wins the solve.
+The lattice uncertainty is statistical (fit rms over the square root of the
+sites fitted) plus a stated 0.25 um allowance for a lattice that is not perfectly
+uniform; the allowance is a choice and awaits real data (tracker T10). A tile
+that no constraint reaches, such as a corner tile over a circular array, keeps its
+recorded position and says so; it never fails the solve.
+
+*Lattice phase.* A tile's fit gives a site position `p` in tile-local coordinates;
+for one physical lattice `o_j - o_i == p_i - p_j` modulo a lattice vector, where
+`o` is a tile's origin. The recorded offset chooses the vector (searched among
+the neighbouring integer pairs, because rounding in lattice coordinates is not
+always the nearest lattice point). This uses every nanowell in the tile and is
+unaffected by a bubble in the overlap. It is right while the recorded error
+*between two tiles* is under half a pitch; a pair whose recorded error passes 40 %
+of a pitch is warned about, and past 50 % it is wrong by exactly one lattice
+vector with nothing in the data to say so, a limit the tests pin rather than hide.
+Two fits whose bases differ by more than 5 % of a pitch are not treated as one
+lattice and give no constraint.
+
+*Overlap correlation.* An array is periodic, so correlating two tiles of it has a
+peak at the true shift and at every lattice vector from it, and an unconstrained
+search can lock one pitch off with a higher correlation than the right answer
+has. `correlate_overlap` scores only offsets within `search_radius_px` of the
+recorded one, just under half a pitch, so the wrong peaks are outside the window
+rather than rejected afterwards. At each offset the score is the Pearson
+correlation of the pixels the two tiles share at that offset, so the shared region
+shrinks as the offset grows and an offset leaving less than 24 px on either axis
+scores nothing. A fixed template cut from inside the overlap cannot be used: the
+usual 10 % overlap is narrower than one pitch, and a template that must stay
+inside it at every shift of up to half a pitch does not fit. The sums over the
+shared pixels come from summed-area tables and only the cross term needs an FFT;
+`downsample` block-averages both tiles first and shrinks the window by the
+half-cell that rounding the expected offset can add, so the stated radius still
+bounds every offset tried. A flat overlap (variance a negligible fraction of the
+level) and one holding NaN or inf are refused for those reasons. A match with
+correlation under 0.4, or whose best peak does not beat the best peak elsewhere
+by 5 %, is not used and its reason is listed in `Registration.skipped`. The
+correlation over a shrinking window is biased toward the thinnest overlaps, which
+is why the gate is not lower: unrelated smooth images reached 0.18 at a lower one.
+
+**Pictures built from the registered tiles.** `build_montage` blends tiles by
+distance from each tile's edge into an 8-bit image whose long side is at most
+4,096 px (tiles are block-averaged by one integer factor and placed at the nearest
+montage pixel); it returns the percentile stretch it applied and a coverage mask,
+so uncovered pixels are marked and not painted as data. `fused_crop` samples every
+tile covering a seam site bilinearly at the crop's pixel centres and blends them
+by distance from each tile's edge; the site's cells belong to the tile holding the
+most of its disk (a tie goes to the lexically first id),
+and the crop reports the share of the disk no tile covers. Neither does any
+photometric matching between tiles: a gain or vignetting difference between
+neighbours shows as a seam in a blend.
+
+**What is and is not established.** All of this is checked on tiles rendered by
+`tests/_nanowell_synth.render_tiles`, which draws one array into overlapping
+tiles with stage jitter, camera rotation, vignetting, noise, cells, debris, a
+bubble and a square central nanowell, at more than one tile plan. Detection is a
+later section, so the lattice-phase tests fit sites taken from the ground truth
+plus noise. Nothing has run on real phase-contrast images or stage coordinates.
+
+### 6.2g Finding nanowells in the phase channel
+
+`pipeline/nanowell_detect.py` (numpy and scipy) finds the lattice and its sites in one
+phase image; `pipeline/nanowell_sites.py` (numpy and scipy) describes the state of
+each site. Both are Qt-free, in the remote manifest, and have only test callers: they
+do not change what Analyze runs or writes. Positions in micrometres are in the frame
+where pixel `i` covers `[i, i + 1) * pixel_size`, the frame the tile placements use,
+so the centre of pixel `i` is `(i + 0.5) * pixel_size` and an array index is
+`position / pixel_size - 0.5`; the first version of the detector was half a pixel off
+in it, and the tests now measure that.
+
+**Lattice first.** `estimate_lattice_fft` reads the pitch, angle and kind of the
+lattice from the peaks of the image's spectrum: a Hann-windowed `rfft2`, the strongest
+peaks in the ring a pitch range allows, each refined with a local DFT on a grid a tenth
+of a bin wide (the FFT's own bin is a one-in-a-hundred step in pitch at 40 px per
+pitch), and the first-order peaks identified as hexagonal (partners at 60 degrees) or
+square (partners at 90). It uses the whole array at once, so a bubble over a tenth of
+it moves nothing, and it needs no expected pitch (an expected pitch only narrows the
+search to a factor of two either side; one outside that range is not ignored but
+excluded), which is why it can run before any matched filter is chosen. A lattice's
+harmonics are peaks too and a high-pass image can make one stronger than the
+fundamental, so the strongest peak is switched for a lower-frequency family only when
+that family has real power, has both of a hexagonal family's partners, and has the
+strongest peak on its own reciprocal lattice (an integer combination of its vectors);
+a lower family that does not explain the strongest peak is not used, because one chosen
+only for being lowest put the pitch 3.6 % off on a small array. Fewer lattice periods
+across the image give a wider peak: 0.6 % at 13 periods. `detect_sites` then runs a matched filter (a light disk at the
+plate format's radius inside a dark annulus; the template sums to zero, so an
+additive illumination offset or ramp changes no candidate; a multiplicative ramp does,
+since it scales the response), takes local maxima a half-pitch apart that clear half the
+typical site's response, refines the lattice with `fit_lattice` on them and fits the
+array boundary. The typical site's response comes from a two-class split of the maxima
+on a log scale, because in a small array most local maxima are noise outside it and a
+percentile of all of them sits in the noise. A fitted lattice whose basis is stretched
+(length ratio or angle off by more than 5 %) is refused as anisotropic pixels or a wrong
+kind, not used with the wrong pitch. A site under a bubble responds weakly, is not a
+candidate, and is predicted from the lattice later.
+
+**The central square.** `square_score` is the four-fold coherence of the outline's
+gradient directions around a site: each outline pixel adds `exp(4ia)` weighted by its
+gradient magnitude, so a circle (all directions) cancels toward zero and a square (two
+directions 90 degrees apart) adds toward one, and the argument of the sum is four times
+the edge direction, so the same number is the orientation. `score_fiducial` scores the
+sites near the array centre and returns a `FiducialCandidate` carrying the best score
+and the runner-up's for `resolve_origin`'s margin test; the margin is the caller's. With
+the square under a bubble no site is square, `score_fiducial` returns no candidate, and
+the array centre anchors the well, giving the same addresses. The score is the four-fold
+sum minus the two-fold one: a bubble's rim crossing a circle concentrates its gradients in
+one direction, which the four-fold sum alone scores as high as a square (one such case
+anchored a well 1.7 pitches off), but a straight edge has a two-fold sum and a square's two
+edges cancel in it. A fiducial must also be at least 0.4 square in absolute terms, whatever
+its margin. `check_orientation` (tracker N3a)
+compares the square's edge direction with the lattice axis the fit chose: a hexagonal
+array rotated 40 degrees is fitted at -20, inside the limit and wrong by a sixth of a
+turn, and the square still reads 40, so the well is refused with the reason. The angle
+from the lattice axis to the square's edge on the mask is a parameter and its default
+of zero (edges parallel to a lattice row) is an assumption real data has to confirm
+(tracker Q11).
+
+**Per-site geometry.** `refine_sites` casts rays from each site's lattice position,
+finds the outward intensity fall along each, fits a circle by least squares to the edge
+points with outlier rejection, and accepts the fit as `fitted` only when at least 60 %
+of the rays found an edge, the scatter is under 6 % of the radius plus a quarter of the
+rim's width beyond a sharp edge's (20 % for the square, named in `relaxed`), the radius is
+within 30 % of nominal and the centre within a radius of where the lattice put it. An edge
+must show the disk's plateau over the lattice's, not a drop across two pixels: a defocused
+or haloed rim is soft and wide with the same plateaus, and the two-pixel form fitted none
+from a blur of 2.5 px. Below a 10 px radius the fit is refused (a `ValueError`) rather than
+returning every site predicted: 8 % of sites fit at 5.8 px, 24 % at 7.1 px, and all but one
+of 313 at 11.6 px. At a 10x objective a 50 um nanowell is 38 px in radius, so this bites
+only on a heavily downsampled montage, which is not what refinement reads. Any other site keeps its lattice position, takes the well's
+median fitted radius and is `predicted`; no site is dropped. The ray-fraction rule is a
+conservatism, not a necessity: a fit through half of a clean rim is accurate, and the rule
+exists so that it is never reported as a measurement.
+
+**Site state (`nanowell_sites`).** Nothing here drops a site and an unmeasurable number is
+`None`, never zero. `bubble_mask` demodulates the image at the lattice's first-order
+frequencies and flags where that amplitude is under 30 % of the array's typical, inside the
+array only (the flat floor outside is not a bubble). The typical amplitude is read at the
+detected sites when they are given, because the array's own 80th percentile is itself bubble
+when most of the array is hidden, and the demodulation runs on an image block-averaged to
+about 8 px per pitch. `site_visibility` gives each site the share of its disk that is
+bright against the lattice (above the midpoint of the *local* typical site and floor, the
+median over the twelve nearest fitted sites, so illumination falling to a third at the rim
+is not read as a bubble) and outside any bubble, and a contrast relative to the local
+typical site, so a black disk on the black lattice reads 0. `occluded` is a visible
+fraction under one half: a dark cell covering most of a nanowell reads as occluded, as a
+bubble does, and telling them apart is the contents section's job.
+`site_coverage` gives the shares of a site's disk inside the union of the tiles, inside the
+fitted array boundary and inside the well wall; the last two are `None` without a boundary.
+`rim_focus` calls `pipeline.field_quality.edge_focus` on the fitted disk and is `None` for a
+predicted site or one off the image. `check_consistency` compares a timepoint's pitch (0.5 %),
+angle after the plate's measured rotation (0.5 degrees, folded into the lattice's 60-degree
+period) and roster with a reference, and names the first violated check as the status.
+`shared_array_radius` takes the median of the timepoints whose boundary fitted as one
+radius per well, records each timepoint's deviation, and flags a timepoint more than half a
+pitch away `radius_disagrees` and one with no boundary `no_boundary`. `check_format` refuses
+a plate-format setting two ways: a nanowell nearly as wide as the measured pitch cannot be
+right, which is decidable from the Fourier estimate alone before any filter is chosen, and
+fitted nanowells more than 25 % off the setting's diameter are a mismatch. Passing the pitch
+test alone proves little (a setting too small for the array passes it), so with no fitted
+nanowell the answer is `unverified` (`ok` is `None`), never `ok`; an unreadable pitch is
+unverified too. A 100 um array read with the 50 um setting fits no site and is unverified:
+only the 50 um array with the 100 um setting is reported as a mismatch. The run asks it twice: while locating
+with the pitch alone (a mismatch refuses the timepoint), and in `measure_timepoint` with the sites fitted at full
+resolution, where a mismatch — or, at a pixel size that could fit, no fitted site at all — is written as a note
+on the timepoint rather than a refusal, until real plates have calibrated it.
+
+**What is and is not established.** All of this is checked on tiles rendered by
+`tests/_nanowell_synth.render_tiles` at both plate formats (100 um, pitch 172 um; 50 um,
+pitch 86 um, both imaged at 40 px per pitch, and each also at another pixel scale so that
+nothing assumes 40 px per pitch), including a bubble over a tenth of the array
+and over the square, and the chain from image to addresses assigns every detected
+nanowell the address it was drawn with. The 50 um format's nominal pitch in
+`nanowell_run.PLATE_FORMATS` is 143 um — what the ~1,600 nanowells per well the user reports
+imply in a 3.0 mm array. A nominal pitch is a guess at the plate, and the per-tile fits keep
+only neighbours within 20 % of the pitch they are seeded with, so `locate_timepoint` first
+measures it: `working_pitch` runs the lattice search (half to twice the nominal) on the
+`PITCH_PROBE_TILES` tiles nearest the grid's centre and takes their median, and that pitch, then
+the lattice fit's own, seeds the per-tile fits, registration, the stage tolerance, the fiducial
+search, site de-duplication and the roster radius. The grid record states it
+(`pitch_seed_um`, `pitch_seed_source` — `tiles` or `nominal`) with `tile_lattice_fits` (fitted,
+of tiles), and a timepoint where no tile's lattice fits says so in `registration_warnings`. A
+rendered 50 um array registers every tile on its lattice at a true pitch of 143 um or 86 um. The renderer's bubble is a flat grey disk; what a real bubble does to a phase image is
+not established. The user reports the square's edges parallel to the plate's, which matches
+a lattice row (modulo the square's 90°) for either regular placement of a hex lattice on the
+plate. Nothing has run on real phase-contrast images (tracker N10, blocked on Q7).
+
+### 6.2h What is inside each nanowell
+
+`pipeline/nanowell_measure.py` (numpy, scipy and scikit-image) turns the sites of
+6.2g into contents. It is Qt-free, in the remote manifest, and has only test callers:
+it does not change what Analyze runs or writes. Phase contrast is the primary readout
+and fluorescence is added when it exists; every function takes the segmenter or the
+image it needs as an argument, so none of it needs Cellpose to be tested.
+
+**The template.** `site_crops` samples a square crop around each site centre
+bilinearly, so crops of sites at different sub-pixel positions line up. `build_template`
+ranks the visible crops by texture and takes the median of the least-textured quarter.
+The texture that ranks them is the departure of a crop inside its disk from its *own*
+radial mean, which needs no reference, because the obvious reference (the median of all
+crops) is the loaded crop when more than half of the sites hold cells; a second pass
+re-ranks against the template the first pass made, which removes a round cell sitting
+exactly at the centre (radially symmetric, so the first ranking cannot see it). With
+fewer than `MIN_TEMPLATE_SITES` sites in the quarter it returns the well's earliest
+template through `as_fallback` — the same pixels, `source="earliest"` and no `used` crops,
+because the earliest's crop indices index another timepoint's crops — or the quarter marked
+`own_sparse` when there is none. The earliest template survives between runs: the task keeps
+it as `nanowells/<well>_template.npz` (`save_template` / `load_template`, the first own
+template in time, fetched back from a remote run with the tables) and passes it to `run_well`
+on an incremental run, a checkpoint keeps each timepoint's own template beside it, and
+`run_well` measures its timepoints in time order, so "earliest" means the earliest; `Template.used` says which crops formed it. Above about three quarters
+of the sites loaded the quarter reaches into loaded sites and the template turns
+cell-coloured while still `own`; from one timepoint's crops alone that cannot be told from a
+well of unusually bright cells, so the run compares it with the well's earliest. `floor_ratio`
+is the median of the template's floor (inside 0.6 of the site radius) over the median of its
+surround (beyond 1.2 radii, the lattice floor between nanowells): cells on the floor move it,
+while exposure (a ratio) and focus (both regions flat, away from the rim) barely do. Each
+measured template's ratio is stored on its timepoint's `template` block, and
+`nanowell_run.flag_template_drift` — called at the end of `run_well` and again by the task
+after an incremental run merges its kept timepoints — takes the first timepoint **in time**
+with a ratio of its own as the earliest, whichever run measured it, and records each later
+timepoint's `drift_vs_earliest` (`|ln|` of the ratio of ratios) and `earliest_timepoint`. Beyond a
+factor of two (`TEMPLATE_DRIFT_LIMIT`; measured on rendered 40-site wells: 0.012 or less up to 34
+loaded, 1.12 or more from 35, a 1.6x exposure 0.002, noise up to 0.15 at most 0.009, a 2.5 px
+defocus 0.17) it is `suspect`, a note says the counts may be biased, and Array QC shows it. The
+pass is recomputed whole each time, so a kept block is never flagged twice or against a stale
+earliest. The measurement itself is not changed.
+
+**Rim suppression.** `rim_suppress` divides every site's pixels (out to 1.05 times its
+radius, which takes in the rim) by the template at the same offset from the site centre,
+and sets everything else to exactly 1.0. An empty site comes out within about 0.2 of 1
+including its rim and a cell stands out as a departure from it. The divisor is floored at
+a tenth of the template's central level. It refuses (`ValueError`) a template whose
+central level is not positive and finite, one covering less than the largest site's
+reach, or one with a non-finite value inside that reach, because each would leave part
+of a site at 1.0, which reads as "empty". Build the template with
+`template_half(nominal_radius)` as the crop half-width (it leaves 30 % headroom, the most the site
+fit lets a radius differ from nominal) and `interior_radius_px = SUPPRESSION_RADIUS` times the
+nominal radius; `fits_template` splits off the sites a template cannot cover, so one oversize
+site is reported unmeasured instead of failing the tile.
+
+**Confluence without segmentation.** `texture_threshold` is the median plus five robust
+standard deviations of the smoothed departure from 1 (never under 0.02, so a noise-free flat tile does not call a
+whisper a cell; a site with a non-finite pixel is neither calibration nor measured) over the interiors (0.9 of the
+radius) of the sites known to be empty; `site_confluence` is the share of a site's
+interior above it. It is `None`, not zero, with no empty site to calibrate against or with under half
+the interior on the image (a quadrant is not a site); 0.0 is a measurement. Because "departs from an empty nanowell"
+includes the optical halo of a cell, it reads high: on the synthetic scene it lies
+between the painted coverage and the coverage of a disk 3 px larger in radius, which
+makes it a monotone measure of loading rather than an area.
+
+**Counts.** `segment_tile` makes one segmenter call on the whole rim-suppressed tile
+(`cellpose_segmenter` is the production segmenter and imports `pipeline.cellpose` only
+when called). `count_cells` keeps a label only when its centroid lies in the interior of
+a site the tile **owns** (`owned_indices(report.owners, tile)` from the `ownership_report` of
+6.2f; fused sites have no owner and are counted by no tile until they are segmented on a blended
+crop, tracker C14, so `site_state` sees an undefined count for them); a cell in the overlap of two tiles
+is therefore counted by the one tile that owns the site, and a cell on a rim or between
+sites belongs to none. A site with no cell is a zero, not an absence; an owned site with no geometry in the
+tile is an error, not a missing key.
+
+**The second count.** `area_estimate` divides each site's labelled interior area by the
+median area of isolated cells (touching no other cell and no image edge; a clump that
+touches nothing still passes as one cell, so where clumps predominate the area count
+inherits their undercount) and flags `count_disagreement` when it differs from the
+segmented count by at least one cell and by more than 30 % of the larger, because a clump
+segmented as one cell undercounts without any error. With no isolated cell anywhere the
+estimate and the flag are `None`.
+
+**Records.** `cell_table` gives one row per counted cell with the site, its address
+(`None` for an unaddressed timepoint, so the row exists but cannot be joined over time),
+the well-frame position, the area, and the mean of any intensity images passed.
+`site_fluorescence` gives the integrated and mean interior intensity minus the median
+interior mean of the empty sites; with no image, under half the interior on the image,
+or any non-finite pixel in it, the site's fields are `None`, and with no empty
+site the background and everything derived from it are `None`. `site_state` is the §3.5
+state of a site: `clipped` (imaged fraction under half) and `occluded` (visible fraction
+under half) carry no count and no confluence whatever was passed; a seen site with zero
+cells is `empty` with `n_cells == 0` and the confluence it was given (never filled in); a
+non-finite fraction is unknown; a partly seen site keeps its
+metrics with `partially_visible` set. An empty site and an occluded one therefore cannot
+be confused. The imaged fraction is measured on the tiles' rectangles in um while the
+contents are read from image pixels, so the run also passes `interior_imaged` — the share of
+the interior on the owner tile's image, the pixels the count and confluence read — and a
+site under `MIN_INTERIOR_COVERED` there is `clipped` whatever the rectangles say: a count of
+zero from a half-seen interior is not an empty nanowell.
+
+
+### 6.2i The nanowell run
+
+`--nanowell_format` switches a run into nanowell mode. `process_microscopy.process_well_zip_task` hands the
+well to `pipeline/nanowell_task.run_zip_task` (a four-line hook), and the unit of work becomes one well at one
+timepoint with every tile of its grid together, not one field. `pipeline/nanowell_run.py` is the chain the
+earlier sections built, with every refusal a named status (`incomplete_grid`, `bad_grid`, `no_record`,
+`no_images`, `no_lattice`, `format_mismatch`, `orientation_refused`, `unaddressed`) and never an exception, so a
+bad timepoint costs its rows and not the well.
+
+**A dataset without a record, and a custom format.** With no `in/acquisition.json`, the run's `pattern` option
+(`--nanowell_grid`, `--nanowell_scan`, `--nanowell_overlap_percent`, `--nanowell_pixel_size_um`; validated in
+`cli_args._grid_pattern`, all or none) makes `pipeline/nanowell_pattern_record.record_from_pattern` build the
+record in memory: each field's mosaic position from where `tile_grid.scan_cells` puts it, fields in the order of
+their names numerically (the name itself breaking a tie such as `F1`/`F001`, so the order never depends on
+the archive's; a name that encodes a cell, `r0c1`, is dealt like any other), each timepoint's tile size read from
+one image header (`nanowell_task._pattern_record`). The run places such a record against the grid's own shape
+(`run_well(expected_shape=…)`): positions alone cannot show a missing outer row or column, so without it a well a
+line short — or one whose surplus fields fell below the grid — would be measured as a smaller complete grid. A
+well short of the grid is `incomplete_grid`, one with more fields than it holds `bad_grid`. Nothing is written into the input folder; registration corrects the nominal positions as it does recorded ones;
+there are no acquisition times, so Review times timepoints from their labels, and `collect` gives each timepoint
+the pattern's pixel size (no tile size, so Array QC marks corners). `--nanowell_format custom` takes
+`--nanowell_diameter_um` and `--nanowell_pitch_um` (`NanowellSettings.custom`); only a custom format adds them to
+`NanowellSettings.key()`, so a known format's grid-record key is unchanged. The `pattern` option is added only
+when given, for the same reason. All six options are in `util.settings_digest.KEYED_ON`, so a re-run with a
+different geometry or grid recomputes rather than keeping the old numbers under a sidecar that names the new
+settings; the CLI refuses a non-finite number for any of them.
+
+**Locate, then measure.** `locate_timepoint` places the tiles from the acquisition record (`tile_grid`),
+registers them (`tile_register`, with each tile's own lattice fit as the lattice-phase constraint), builds the
+montage, estimates the lattice from its spectrum, detects the sites, scores the central square, checks the
+square's orientation and the plate format, resolves the origin (fiducial, array centre, or a plate-rigid
+prediction handed in) and indexes the sites. `run_well` locates every timepoint first, takes **one shared array
+radius per well** (`shared_array_radius`) so every timepoint has the same roster, and only then
+— with each located montage spilled meanwhile to a memory-mapped `.npy` under the well's scratch
+(`spill_dir`, `<scratch>/.montages`), so a long time-course does not hold every montage in memory at once —
+`measure_timepoint`s each: owner-tile geometry at full resolution (fused sites on the montage),
+visibility on the montage, coverage from the registered rectangles, one template per timepoint pooled over
+the owner tiles, then `nanowell_measure` per tile. A timepoint with no origin is still measured on the sites
+detected, with no address. Consistency of pitch and roster across timepoints is a named status on each
+timepoint; the lattice angle is not checked within one well, because the plate's rotation between timepoints
+is only measurable across wells.
+
+**Outputs** (`pipeline/nanowell_task.py`). The per-cell CSV keeps the existing columns (`fov` is the owner
+tile) and adds `nw_q`, `nw_r`, `nw_ring`, `nw_label`, `well_x_um`, `well_y_um`; it is written with its header and
+no rows for a well none of whose nanowells holds a cell, because a missing CSV reads as an unfinished well
+everywhere else. Like any finished well's CSV it is gzipped once written (`pipeline/io.write_well_csv`,
+`compress_well_csv` for the empty one), and an incremental run reads the kept timepoints' cells back from
+whichever spelling is there (`util/csv_gz.existing_csv`, plain winning). The site tables in `nanowells/` stay
+plain. `nanowells/<well>.csv` and `nanowells/<well>_grid.json` hold the site rows and the per-timepoint
+record (they live in a subdirectory because Review loads every top-level `*.csv` as a cell table).
+`<well>_out.zip` holds one montage PNG per located timepoint (role `montage` in `ROLE_CATALOG`).
+`pipeline_info.json` gains a `nanowell` block (settings, conventions, scheme version, and the end-of-run
+re-anchoring summary: `anchored`, `remaining` with each reason, and `wells_considered`, the wells whose grid
+records the plate fit read — every well in the output folder, which in a batched remote run is this batch's and
+every earlier batch's, though only this run's wells can be re-run) and an `acquisition` block (pixel and tile
+size per timepoint). A re-run by the re-anchoring logs `Well X — re-anchored.`, not a second `— done.`.
+
+**Incremental, resume, completeness.** The done unit is a timepoint whose grid status is `ok` under the same
+settings (every `nanowell_*` option is in `util.settings_digest.KEYED_ON`, and is digested only on a run with
+`nanowell_format` set: the options carry parser defaults on every run, and keyed outside the mode they would
+make every plate recorded before they existed read as recorded under other settings) and the same digest of the
+record's tiles and calibration for it; others are recomputed, onto the roster radius the earlier run shared.
+Resume checkpoints are written per timepoint through the per-field path's atomic record-then-marker files
+(`.fov_nw_<timepoint>.done`), and taken back only under the same radius and record digest. Completeness counts
+timepoints, not (fov, timepoint) pairs (`completeness.nanowell_coverage`): a well of empty nanowells has no
+cell rows and is whole.
+
+**End of run.** `nanowell_endgame` re-runs each unaddressed (well, timepoint) the rest of the plate can anchor:
+the wells anchored on their own evidence at a reference timepoint and at this one fix the plate's rigid
+motion (`fit_plate_rigid`), and the well's origin at the reference carried through it is handed to
+`resolve_origin` as a prediction, accepted only when its error is under a third of half a pitch. It needs a
+stage position for every tile (otherwise the reason is recorded) and treats the stage and image axes as
+parallel. Only those wells' rows for those timepoints are rewritten.
+
+**The Analyze form.** The section ships with the removable Nanowells feature: `profiles/full.toml` lists
+`analyze/nanowell_section.py`, `nanowell_preview.py`, `nanowell_preflight.py` and `domain/nanowell_fields.py` under
+it beside Review's page, and the form reaches them only through `analyze/nanowell_hook.py`, which picks the real
+mixin or `NoNanowellSection` (builds nothing, no options, no validation, no restore) by the profile and by whether
+the module imports; `domain/fields.py` imports the field rules the same guarded way. An absent `nanowell_format`
+already means the mode off to every reader, so the stripped form's argv is the one it had before the section
+existed (`tests/test_nanowell_removable.py`). The pipeline's nanowell mode and the Datasets tools' table carrying
+stay in every build: Qt-free, sent to remote hosts, and what keeps a dataset with nanowell tables whole. The
+Nanowells section (`analyze/nanowell_section.py`, folded by default) holds the mode
+checkbox, the plate format, the cell diameter, the margin, the square's edge angle and the occlusion and
+clipping thresholds; a blank number sends no flag and the pipeline's default applies. Its option keys are
+the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's
+`execution_options` all name the same things and the edit-a-queued-job round trip and the sidecar restore
+need no translation; a sidecar that states `nanowell_format: null` switches the mode off, and one that
+predates the keys leaves it alone. Switching the mode on sets the segmentation selector to label-free and locks it (the
+choice returns when the mode goes off); a build with no label-free method disables the mode. Run validation adds
+`nanowell_option_errors` (bounds; a Phase channel only when channel auto-detection is off, since detection names it
+at run time) to the numeric checks, then, with an input folder, `nanowell_input_report`: **problems** stop the run (no
+well zips, no acquisition record and no tile grid, a tile the record names that an archive lacks, a grid that
+cannot be placed, and — without a record — a well with more fields at a timepoint than the tile grid holds,
+read from the archives' member names (`_pattern_report`, which also logs how the tiles will be placed); a
+custom format's diameter and pitch, and the tile grid's fields, are checked in `nanowell_option_errors`, and the
+form shows the diameter and pitch rows only for Custom) and **warnings** are logged and the run goes on (an overlap shorter than a nanowell needs, with the
+expected seam-site count from `ownership_report` laid over an ideal lattice at several phases; an upper
+bound, since the array may be smaller than the tiles). **Test detection** opens a non-modal window that
+runs `pipeline.nanowell_preview.preview_timepoint` on a parentless `QThread` held in a module-level set until it
+finishes (a window or tab closed mid-run cannot destroy a running thread; `aboutToQuit` waits for it): the same locate-and-measure the run does for
+one (well, timepoint), returning the montage, every site with its address, state and fused flag, the origin
+method, the measured overlap against the needed one, and a few rim-suppressed crops beside their
+segmentation. What is drawn is `site_marks` of the result, a pure function in continuous micrometre/pixel-size coordinates, coloured
+from `ui.theme.Colors`; the pixmap side is capped and "Fit" follows the window; addresses are written only
+where a nanowell is drawn at least 34 pixels across. The square's edge angle and the two thresholds are
+read by the analysis (`check_orientation`'s `square_to_axis_deg`, `site_state`'s cut-offs), not only
+validated and keyed.
+
+**Remote and Datasets tools.** The acquisition record already travels with the upload; the fetch brings
+`nanowells/<well>.csv`, `_grid.json` and the template back as each well finishes (`services/remote_fetch_nanowells`).
+A nanowell well announces itself with the same `Well X — done.` marker a field-mode well does, which is what the
+Fetcher and Analyze's progress count. The run record knows it is a nanowell run from its argv
+(`_RemoteRun.nanowell`), and three things follow. Nothing of a well is deleted from the remote mid-run
+(`well_files_to_delete`), because the end-of-run re-anchoring re-runs some wells from their input archives and
+earlier output. At verification the whole `nanowells/` directory and every re-anchored well's CSV and
+`<well>_out.zip` are pulled again — the wells with a timepoint anchored `plate_rigid` in their pulled grid
+records, not the sidecar's summary, which each batch of a batched run writes over the last —
+(`pull_nanowell_results`). A well whose sites table or grid record did not arrive fails verification
+(`missing_nanowell_tables`), which keeps the remote copy. An incremental nanowell run is refused on a remote host,
+in Analyze and as a backstop in the run record (`NANOWELL_REMOTE_INCREMENTAL_REFUSAL`): the remote would analyse
+only the new timepoints, without the earlier ones' roster and template, and its tables would replace the local
+ones. In
+`datasets/core/nanowell_tables`, `carry_nanowell_tables` copies a dataset's tables through a well map (canonical
+wells, so an unpadded `A1_grid.json` is found) and an optional timepoint predicate, rewriting the grid
+record's `well` and keeping the sites table and the grid record to the same timepoints; a well left with no
+timepoint writes nothing rather than an empty table. The well's kept earliest template
+(`<well>_template.npz`) goes with them when the timepoint it was built at is still in the destination. Every
+tool checks the tables at plan time, before anything is written (`refuse_unusable_tables`): each well needs
+both its grid record and its sites table, a grid record that reads, and one spelling. The sidecar's
+`nanowell` block is carried without its `reanchor` record (`carried_nanowell_block`), which describes one
+run's plate by its wells. **Subset** carries the tables of the wells it keeps, cut
+by `subset_compute.timepoint_kept` — the same test its images are cut by — and refuses a field selection,
+because the tables are per well and measured over all of its tiles together. **Merge Plates** carries both
+plates' tables, dataset 2's through the well remap, and tags each well's grid record with its `plate`; it
+refuses two plates whose sidecar `nanowell` blocks name different schemes or settings
+(`nanowell_block_conflict`) or whose `acquisition` blocks calibrate a shared timepoint differently, takes the
+block from whichever plate has one, unions the `acquisition` block, and says in its summary when only one plate
+has nanowell results. The end-of-run re-anchoring (`nanowell_task.reanchor_plate`) fits one rigid motion per
+`plate` (`plates_of`), so a merged dataset's two plates are never fitted together, and a re-run keeps a well's
+`plate` (`write_grid_json`). **Concatenate** of an analysed dataset with a raw one keeps dataset 1's tables as
+they are, and an incremental Analyze adds dataset 2's timepoints onto the same nanowells and earliest template —
+the successive-imaging workflow, pinned end to end by `tests/test_nanowell_merge_endtoend.py`. The merge writes
+an acquisition record only when both datasets have one, so raw images without a record are refused onto a
+dataset 1 whose tables were addressed from its record (`_refuse_dropping_the_nanowell_record`, at plan time):
+the destination would keep tables nothing could extend. Two analysed
+datasets with nanowell tables are refused (`refuse_nanowell_tables`): each analysis addressed its own nanowells,
+and the message names the two routes that work. Validate checks the tables against the grid record and the input
+archives.
+
+### 6.2j Nanowells in Review: data and calculations
+
+`review/features/nanowell/` reads what a nanowell-mode run wrote and computes everything the Nanowells page
+draws (§6.2k). The modules this section describes are Qt-free.
+
+**Loading** (`collect.load_nanowell_data`). The tables are `nanowells/<well>.csv` and `_grid.json` beside
+the per-cell CSVs; the well loader (`review/core/load_controller.load_directory`) lists only top-level
+`*.csv` files, and its header sniff rejects a nanowell table anyway (no `_mean_intensity` column). The
+reader states which scheme versions it understands (`collect.SUPPORTED_SCHEMES`; a test holds the
+pipeline's `SCHEME_VERSION` in it). A sidecar with another version refuses the whole dataset with
+`NanowellSchemeError`; a grid record with another version, or a table that repeats an address at one timepoint, leaves that well out
+and names it in `NanowellData.problems`. The phase channel's site intensities, which the pipeline writes like any other
+channel's, are not offered as fluorescence. Brightness is the mean `<token>_mean_intensity` of the cells the
+per-cell CSVs beside `nanowells/` place at each `(well, timepoint, q, r)`, whichever of the output folder and
+its parent was loaded; a CSV is read in either spelling through `util/csv_gz.glob_csvs`, the plain one winning
+when both exist.
+
+**Time** is each timepoint's recorded start from `in/acquisition.json` (looked for beside the data dir and
+one level up), in hours since the earliest. All timepoints must have a start on comparable clocks; otherwise
+every timepoint's label is parsed instead (`util.timepoint.parse_hours`), never a mixture, and
+`NanowellData.time_source` / `time_note` say which and why. With neither, no timepoint has a time — not even
+those whose labels happen to parse — and the growth rate is undefined.
+
+**Joining** (`series_compute.site_metrics`). Each addressed nanowell is followed by `(well, q, r)` across
+every timepoint of its well. A timepoint where it has no row still has one, with a state saying why:
+`unaddressed` (the timepoint was located but given no origin), `not_located` (the grid record names the
+timepoint and the table has no row for it) or `absent` (addressed, not in that roster), plus the grid's
+reason, or its status, or a sentence saying the grid lists the timepoint and the table has no rows. Contents values are used only in a measurable state (`measured` / `empty`), whatever the table
+holds. `site_series` is one nanowell's rows in time order; an address the well never had is an empty frame.
+
+**Metrics** are the nanowell tracker's per-nanowell metrics table, NaN where undefined, with `exclusion_reason` naming the cause per
+row (the state at the timepoint, the value missing there, the baseline's state or value, a baseline at zero:
+`seeded later` when cells arrive later, `empty at baseline` when not). The site signal is
+background-subtracted, so a ratio over a baseline at or below zero is undefined. The baseline is the well's
+earliest timepoint, or, per measurement, each nanowell's first timepoint in a measurable state at which that
+measurement exists (the pipeline records `measured` with no count where no template could be built, and a
+fused nanowell has a confluence but no count). The growth rate is the least-squares slope of
+ln n against hours over at least three timepoints with n > 0. A plate of 96 wells × 1,000 nanowells × 10
+timepoints takes about 5 s to compute.
+
+**The fixed cohort** (`distribution_compute.fixed_cohort`, `NanowellState.cohort`, the *Fixed cohort* box on
+*Distribution* and *Trajectories*). Off, the median at each timepoint is over whichever nanowells could be
+measured then, so it can move with no nanowell changing. On, a nanowell's values count only when it has a value
+at every timepoint of its well; any other value becomes undefined with the reason "not measured at every
+timepoint" (labelled "outside the fixed cohort"), so it is counted among the exclusions rather than vanishing,
+and the footer states the cohort as kept of sites. `well_summary(reasons=…)`, `distribution_model(cohort=…)`
+and `views_compute.trajectory_panels(cohort=…)` all apply it, so the beeswarm, the summaries and the trajectory
+medians follow the same nanowells.
+
+**Summaries** (`summary_compute`). `well_summary` describes one well per timepoint: median, interquartile
+range, fraction responding (above 1 for a fold change, above 0 for a log₂ fold change, undefined for a
+measurement; a nanowell seeded later has no count fold change, so it is excluded by name on `count_fc` and
+counted on `log2_count_fc`), occupancy classes as ordinals with "3+" at 3, fraction occupied over nanowells with a count, and the nanowells used and excluded by reason.
+`group_summary` takes that table, one row per well, so a nanowell cannot be counted as a replicate: a
+group's centre is the mean of its wells' medians, its interval a 95% Student-t interval over wells, a member well with no row at a timepoint named in
+`wells_without_value`, and
+versus-control is the centre over the control group's centre computed the same way (the difference, on the
+log₂ metric). `controller.replicate_groups` takes the groups from `review.domain.plot_members.plot_replicate_sets`,
+as every plot tab does, with each well in no set standing alone.
+
+**Export** (`controller.export_long_csv`) writes `series_compute.long_format` plus the time source and the
+baseline, one row per nanowell and timepoint, through a temporary file.
+
+**Persistence** (`review/persistence/nanowell.py`). The page's choices (`state.NanowellState.to_config`) are
+the `nanowell` section of `persistence.json`; a dataset without one lands on the defaults, and
+`apply_config` takes only values the page can show. The `nanowell` slice is registered by the page's feature
+descriptor, the domain by `persistence/registry.py` (when the build profile includes the page), and the
+section sits in the view tier of `persistence/reset_scopes.py`, which resets the configuration and leaves the
+loaded tables alone.
+
+### 6.2k The Nanowells page
+
+The **Nanowells** rail entry (Analysis, after Spatial; `FeatureDescriptor("Nanowells")`, slice `nanowell`,
+lazy-built, removable by profile) draws §6.2j's numbers. It was planned before it was built:
+`_Docs/design/nanowell_page/PLAN.md` holds the interface plan and wireframes, and the nanowell tracker's page section the
+decisions taken on it (U1–U13). This section describes what the page does; the decisions say why.
+
+**Layers.** `beeswarm_compute.swarm_layout` places one swarm's dots in data units: a continuous metric keeps
+each value exact, each dot taking the free slot nearest the centre line, so no two overlap; a whole-number
+metric is packed into a band within ±0.4 of its value (U1). A dot that does not fit the slot is counted by
+value in `SwarmLayout.overflow` (once per swarm, with its range, for an exact-value swarm), never dropped.
+Band rows fill centre-out, so a value with few dots is drawn on it; a dot taller than the band falls back to
+the exact layout, which cannot overlap across values. `distribution_compute.distribution_model` turns the metrics
+frame into a `DistributionModel` — panels, swarms with their sites, exclusions labelled by `reason_label`
+(which raises on a reason it has no label for, so a new reason cannot reach a figure unnamed), the per-well
+medians joined over time, and the per-group statistics from `group_summary`. *Along x: Time* is one panel per
+well, or per replicate set with each member well its own sub-swarm (U2); *Along x: Wells* is one timepoint
+(the latest by default, U13), groups along x with sub-swarms per well, the centre and 95% interval over wells
+and the comparison with a control group (U11). A metric with one value per nanowell (growth rate, occupancy) is
+drawn across wells only, each well's first timepoint summarised under one label so wells imaged from different
+first timepoints stay one comparison. Whether a metric is packed is decided by the metric (`INTEGER_METRICS`),
+not by its values. `renderer.render_distribution` draws the model and returns a `HitMap` of every dot
+drawn; every number a reader can count is a text artist with a `gid` (`nw-used`, `nw-excluded`, `nw-hidden`,
+`nw-footer-used`), so tests read the figure, not the model. A swarm's hidden dots are counted under it, in the
+gutter beside its exclusions; a slot too narrow for level labels writes them rotated. The footer sums the
+panels drawn only, names the panels past `MAX_PANELS`, counts the wells, and a key at the top right decodes
+the occupancy colours and names the baseline. A set of more than `DENSITY_ABOVE` wells is drawn as densities.
+Every text and line is in the plot's ink and tagged `follows_theme`; the dots take `occupancy_ramp` from
+`Colors` or `CPub` by the figure's ground (U7), class 0 hollow, and carry both through
+`widgets.plot_card.theme_paired_colours`, the hook `PlotCard.setPlotTheme` uses to repaint a paired data
+palette — so a capture, which flips the theme without a redraw, puts the publication shades on white. `render_site_detail` draws the selected nanowells' series
+against recorded time, a timepoint without a number as a gap and a hatched band, with each timepoint's state
+written above, and a strip of crops of the first selected nanowell, one per timepoint.
+
+**The other views.** `views_compute` holds what they draw as data. `lattice_xy` places an axial address on
+an ideal lattice of the well's measured pitch (`well_pitch`, the median of its timepoints' grid records): `q`
+east, `r` 60° counter-clockwise from east on screen with y down, the central square at the origin — the
+pipeline's convention, which `tests/test_nanowell_page_views.py` checks against a real run by fitting a
+rotation from the lattice positions to the measured ones (no reflection, the grid record's angle, residuals of
+localisation size). The **Array map** (`map_model`, `render_array_map`) draws lattice positions rather than
+measured ones (U4), so a nanowell keeps its place as the timepoint moves even when the plate was put back
+rotated; measured positions belong to Array QC. A nanowell without a value is a grey outline styled by its
+state (`_STATE_STYLE`), never a colour of the scale; the map's `HitMap` makes it clickable like the beeswarm,
+and a well whose grid record has no pitch is a `render_message` figure saying so. **Trajectories**
+(`trajectory_panels`) are a line per nanowell over time and a median per occupancy class at baseline; a metric
+with one value per nanowell is greyed in the Metric list there, and a saved one is drawn as cell count with a
+footer line saying so. **Position** (`position_series`) is the metric's median and interquartile range by ring,
+with the share of each ring's nanowells without a value; it makes no test. The ring comes from the address
+(`hex_ring`, the pipeline's `(|q| + |r| + |q + r|) / 2`), not from a row's `nw_ring`, because the rows Review adds
+for a roster nanowell not seen at a timepoint carry the address and no ring — reading the column dropped them,
+so a ring nobody saw vanished instead of reading as wholly excluded. A drawn well with no addressed nanowell at
+the timepoint is named in the footer. `numeric_values` reads the
+occupancy class as its lower bound (3+ as 3) for all three. **Array QC** (`render_array_qc`) draws
+`image_compute.read_montage` — the run's downsampled phase montage, `<well>_<timepoint>_montage.png` in
+`<well>_out.zip`, placed by the grid record's `montage_origin_um` and `montage_um_per_px` — with
+`tile_boxes`, each tile's placement coloured by its `source` (lattice, overlap, recorded) and labelled with
+its residual. A tile size comes from the acquisition record's `tile_size_px` and `pixel_size_um`; without them
+the tile's corner is marked and the figure says the outline is unknown, never a guessed rectangle. The grid
+record of every timepoint is listed beside the image. The montage (a PNG of up to 4096 px) is read on a
+worker; the figure says *Reading the montage…* until it arrives, and the last `MONTAGES_KEPT` are kept.
+
+**Crops.** `image_compute.site_crops` cuts a nanowell at each timepoint from its **owner tile**, read from
+the input archive the run segmented (`in/<well>.zip`; the member found by the run's filename schema, separator
+and phase token, which `collect` puts on `NanowellData`, judging only TIFF members so directory entries,
+sidecars and AppleDouble files cannot match), at full resolution: the tile-local centre is the well-frame
+position less the tile's placement, over the x pixel size on both axes as the pipeline places them. A crop is
+a copy, so a cached crop does not keep its whole tile in memory. Without the archive (an output folder copied
+alone), with an archive that cannot be opened, for a nanowell with no owner tile (fused or shared), or when the
+owner tile's image cannot be found, it cuts from the montage and the crop's note says which; the strip's
+caption carries the note and where the crops came from. A timepoint with no position or off the montage is a
+`Crop` with no image and the reason.
+
+**Reads on a worker.** `controller._fetch` reads crops and montages off the UI thread, once per key: the
+result goes on the state and the figure is redrawn; a failure stores a value saying why, so the figure states it
+and the read is not relaunched on every redraw; a result for a dataset loaded since is dropped without touching
+the new dataset's bookkeeping; each worker bridge is kept on the state until it delivers, then released.
+
+**The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (the five
+views, U3), Metric, Along x, Baseline, Timepoint and *vs* (both shown on *Along x: Wells*), Well and a
+timepoint slider (on the one-well views, `ONE_WELL_VIEWS`), Save and Properties; `refresh_controls` shows each
+view only the controls it uses. One `timepoint` on the state serves every view: `shown_timepoint` gives the
+timepoints a view offers and the one it draws — the one-well views offer their well's timepoints and start at
+the first, Position and *Along x: Wells* offer every timepoint and start at the latest (U13) — so the combo,
+the slider and the figure always agree. `page_well` is the chosen well when it is drawn, else the first drawn
+well. Wells are what `data_loading.plot_group_well_lists(ctx, fallback_to_all=False)` says every plotting tab
+draws — so a group-by variable, hidden sets and the solo-well toggles mean the same here as elsewhere — never
+every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and site signal follow the app's shared channel (U6); the Metric entries are greyed, with the
+reason, when that channel has no site intensities. `ensure_loaded` reads the tables and computes the metrics
+on `core.worker_bridge.run_off_thread`; each request is numbered and a result for an older one is discarded,
+so a slow load can never replace a newer baseline's figure — including when the baseline goes back to the one
+already loaded, which invalidates the request in flight. `redraw` never computes; when the state's baseline
+is not the one the metrics were computed for (a reset or restore wrote it directly), it asks for them and draws
+nothing stale meanwhile. The page's saved choices are loaded once per dataset, on the dataset load and on first
+activation (`_load_config`), so one dataset's choices never carry into another. `nanowell_empty_reason`
+names each state: no dataset, tables unreadable (with the refused scheme version), reading, no nanowell
+tables, no usable well, and no nanowell wells selected (listing the wells that have tables). A click on the
+figure selects the nearest drawn dot within 6 px; Shift, ⌘ or Ctrl adds (up to six, read from matplotlib's
+`event.modifiers`); empty space clears; the plate selection is never touched.
+
+**Shared machinery.** The page is on every roster a plot page joins: `plot_style._FIG_PREF_KEY_MAP`
+(`nanowell`, `nanowell_detail`), the Properties dock and open-panel maps in `features/export/style.py`, the
+feature redraw in `features/export/sidebar_view._FIGURE_OWNING_FEATURES`, and `plot_card_actions._CARDS` for
+both cards. `view_state_io` makes a Saved Plot restore the whole configuration, the selected nanowells
+included. *Save nanowell data…* writes `long_format`, and is refused with a status while the metrics on hand
+were computed for another baseline than the one chosen (`loaded_for[1] != baseline`, or a load in flight); *Save cell data…* exports the per-cell rows of the drawn
+wells that carry a nanowell address (`cell_scope_compute`). The rail glyph map lives in
+`review/core/section_icons.py`. The Properties panel's Lines & Markers controls restyle the median line and
+the statistic marks; the beeswarm dots are deliberately not tagged `_aw_marker_collection`, because a dot's
+size is the unit the layout packs by, and a larger dot from the panel would overlap its neighbours.
 
 ### 6.2 `process_microscopy.py`
 
@@ -10334,7 +11387,8 @@ five tools' run rows.
 **Concatenate Datasets** (`datasets/concatenate/`) appends one dataset's
 timepoints after another's. Two datasets of the same plate, imaged in separate
 sessions, are stitched into one longer timelapse: dataset 2's timepoints are
-relabelled to continue after dataset 1's last timepoint, and the union of both
+relabelled to continue after dataset 1's last timepoint by a user-visible time
+gap (see *The time gap and raw datasets* below), and the union of both
 datasets' wells is written to a fresh destination folder (both originals
 untouched).
 
@@ -10344,12 +11398,57 @@ is unit-testable without the app (`tests/test_concatenate_compute.py`):
 
 | Module | Role |
 |--------|------|
-| `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method, and on dataset 1 and dataset 2 being the same folder), detects dataset 1's timepoint label format, computes the hour offset, enumerates wells, and returns a `MergePlan`. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
+| `raw_compute.py` | Qt-free reading of a *raw* dataset (`in/` present, `out/` missing or empty): `is_raw_dataset`, `raw_paths`, and `raw_info`, which infers the filename schema from the archives' member names (`util/schema_infer`) and returns a sidecar-shaped dict **only when the inference is confident and has a timepoint slot** — a guessed schema would shift the wrong filename field. `check_raw_compatible` compares separator and schema fields (`RAW_COMPAT_KEYS`) where analysed datasets compare the full sidecar. |
+| `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method, and on dataset 1 and dataset 2 being the same folder), detects dataset 1's timepoint label format, computes the hour offset from the gap (`compute_offset(…, gap_hours=)`), enumerates wells, and returns a `MergePlan`. Also owns the gap model (`default_gap`, `choose_gap`, `gap_preview`, `parse_gap_hours`), `scale_warning`, and `open_pair`, which classifies the pair as analysed, raw, or analysed + raw. The page calls `gap_preview` on every keystroke of the gap field, so it reads the pair through `_open_pair_for_preview`, which keeps the last few pairs' readings (a refusal included) keyed on the path as given and resolved, the sidecars, and each input container's size and modification time (an archive written in place, or an image added to a well folder, moves its own time and not the folder's): a raw pair's schema is inferred by opening every archive, which measured about 75 ms on two 60-well plates, and only the typed gap changes between keystrokes. The run never reads through it. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
 | `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. Copying goes through `core.containers.copy_container_members`, so a well that comes from one dataset only is a whole-file copy, and a merged well moves each member's compressed bytes straight from whichever side holds it — dataset 2's under a name whose timepoint field has been shifted, dataset 1's under its own. A timepoint offset changes the name in the member's header and nothing else, so there is nothing to decode on either side. It tracks which member names collided and were dropped rather than silently discarding them; a nonzero drop count marks that well `"warned"` and fails `_verify` outright, since a name that "looks fine" in the merged archive can be the wrong dataset's bytes under it (see Verification below). Progress via a `log` callback, a `progress(well, stage)` callback (`"merging"` → `"merged"`/`"warned"`) that drives the live dashboard, and a `sub_progress(well, done, total)` callback that drives that well's dial *within* the stage (fused across the well's two container passes by `core.containers.WellFraction`). `sub_progress` is the one callback deliberately left outside the callback lock: every call names its own well, so interleaving is harmless, and taking the lock once per member would serialise the parallel copy it reports on. Wells merge in parallel through a `ThreadPoolExecutor` (`pick_workers`) — each owns its own destination files, so `log`/`progress` calls before a well's work starts are the only thing serialised behind a lock; aggregating each future's result into `well_stats`/`dropped_members`/etc. and reporting the terminal `"merged"`/`"warned"` state both happen back on `execute_plan`'s own thread as futures complete, so that bookkeeping needs no lock at all. |
 | `worker.py` | Thin `ConcatenateWorker(QThread)`; runs planning + `execute_plan` off the UI thread, marshalling progress/result/errors through queued signals (`logLine`, `wellsPlanned`, `wellStage`, `wellFraction`, `succeeded`, `failed`), and forwards `isInterruptionRequested` as a cancellation check. `wellFraction(well, done, total)` is the per-well sub-progress signal every Datasets tool's worker that copies data carries beside `wellStage` (Validate has none — it inspects rather than copies, so a well has no sub-steps); it is what lets a well render as a progress dial rather than a flat in-progress colour. A controller connects it to its dashboard's `set_well_progress` when that dashboard owns a plate, and straight to its page's own plate otherwise — Subset's dashboard is built `show_plate=False`, so `SubsetController._on_well_fraction` drives the picker plate's `setWellFraction` instead. |
-| `view.py` | `ConcatenatePage(QWidget)` — a one-line equation row (dataset 1 + dataset 2 = destination; compact `_FolderField`s showing a basename with the full path on hover, each with its own inline validity hint) above a `ConcatDashboard`, with the raw text log demoted to a collapsible "Show raw log" checkbox (the same furniture as `analyze/log_pane.py`'s log panel, started closed rather than open — see §6.1). Emits `runRequested` / `openInReviewRequested`. |
+| `view.py` | `ConcatenatePage(QWidget)` — a one-line equation row (dataset 1 + dataset 2 = destination; compact `_FolderField`s showing a basename with the full path on hover, each with its own inline validity hint) above a `ConcatDashboard`, with the raw text log demoted to a collapsible "Show raw log" checkbox (the same furniture as `analyze/log_pane.py`'s log panel, started closed rather than open — see §6.1). Emits `runRequested` / `openInReviewRequested`. Between the equation row and the dashboard sits `ConcatGapField`, a line edit pre-filled from `default_gap` with a label naming the source and a preview of dataset 2's resulting timepoint labels; an unreadable gap blocks Run. |
 | `controller.py` | `ConcatenateController` — wires the page to the worker, drives the dashboard's per-well and per-run state at each signal, distinguishes a cancelled run from a failed one, and confirms before resuming into a destination with leftovers from an interrupted attempt. |
 | `dashboard.py` | `ConcatDashboard`, built on `widgets/plate_progress.py::PlateProgress` (shared with Analyze's `RunDashboard` — see §7). Two independent state axes: **per well** (`pending`/`merging`/`merged`/`warned` — image data survived on one side with no matching measurements CSV) and **per run**, a phase rail (Validate → Merge → Verify → Finalize) with a terminal Done/Failed/Cancelled outcome painted on the headline. The per-run axis exists because `apply._verify` and the cell-override carry-over run *after* every well already shows green — without it, a verification failure would leave the plate looking like a complete success. Every well's terminal states carry a marker glyph too, not just its colour — `merged` gets `✓`, `warned` gets `!` — so state is legible without relying on distinguishing success-green from accent-blue by colour alone. A well still `merging` carries no glyph: it is drawn as a progress dial, and a glyph would sit in the middle of exactly the area the dial fills. `set_done(summary, *, tooltip=None)` shows a caller-shortened headline (via `core.dataset_paths.shorten_headline`, stripping the destination path down to its basename) while the full original text — the one still written to the log — survives as the headline's own tooltip. |
+
+**The time gap and raw datasets.** Dataset 2's offset is `dataset 1's last
+timepoint + gap − dataset 2's first timepoint`, where the gap is the user's
+entry (`MergePlan.gap_hours`, `gap_source` of `entered`, `recorded` or
+`interval`). The page pre-fills it from the two acquisition records' shared
+starts when both exist on comparable clocks (`default_gap`), else dataset 1's
+median interval, else leaves it empty and required; `choose_gap` warns, and
+goes with the entry, when it differs from the recorded gap by more than
+max(2 %, 1 minute). `parse_gap_hours` has its own strict grammar (a bare number of
+hours, or `<number><unit>` parts in descending order, a comma as the decimal
+point, nothing else) and is deliberately not the timepoint-label parser, whose
+trailing-digit fallback read `1,5` as 5 hours and `6h30` as 30. The gap is shown,
+stored and used at minute resolution (`format_gap`; the interval default is
+rounded to the minute) so the page shows exactly what the merge uses. The worker
+parses the text in-thread so
+the queue spec carries the text the user typed, and `show_job` restores it.
+`record_derivation` stores the gap and its source.
+
+A **raw** dataset has `in/` and no results (`raw_compute.is_raw_dataset`). Two
+raw datasets merge to a raw destination: `execute_plan` takes a branch that
+writes `in/` only, with no `out/` and no sidecar, and `_verify_raw` checks the
+destination archives against the *expected* shifted name and CRC of each
+dataset-2 member computed independently of what the copy reported as written
+(the copy's own `written` set includes dataset 1's members and is not evidence
+about dataset 2). It also returns the dataset-2 images the schema could not shift
+(no timepoint field), which `execute_plan` names in the log and counts in the
+summary, since they land unchanged and verification cannot call that wrong. Two
+datasets that name one well differently (`A01.zip`, `A1.zip`) are refused at
+planning (`_refuse_mixed_spelling`), because the merged archive's members would
+carry both spellings. A raw merge writes no `derived_from` (there is no sidecar);
+with no acquisition records either, the log says the gap is recorded nowhere else.
+An analysed dataset 1 followed by a raw dataset 2
+(`plan.ds2_raw`) keeps dataset 1's outputs untouched, adds dataset 2's images
+to `in/`, writes no "missing CSV" warning for dataset 2, and leaves its
+timepoints for an incremental Analyze run. A raw dataset 1 before an analysed
+dataset 2 is refused. The tile plan and pixel size may differ between the two
+datasets because `in/acquisition.json` is per timepoint: `_merge_acquisition_records`
+(via `util/acquisition_record.concatenate_records`) relabels dataset 2's
+timepoints, keeps each one's own calibration and positions, validates the
+merged record against the merged archives so Analyze's pre-run check accepts
+it, and notes when only one dataset had a record (the destination then has
+none). Merging several datasets in one run, to avoid one full copy per added
+timepoint, is not implemented: every layer here (plan, execute, verify) is
+two-way.
 
 **A measurement row's timepoint is carried by three values, not one**, and a
 zip member's timepoint lives in its filename — a fourth. The `timepoint` CSV
@@ -14545,6 +15644,38 @@ help while `qtbot` still holds the app).
    on the same machine. A test that asks for `tmp_path` itself still pays the
    listing, which is fine at the scale a test's own request happens.
    `test_the_fast_lane_stays_fast.py` holds the rule.
+
+11. **The lane runs in parallel, a file per worker.** `scripts/test.sh` adds
+   `-n auto --dist loadfile` when pytest-xdist is installed (it is pinned in
+   `tests/requirements-dev.txt`): one worker process per CPU, and every test of
+   a file on the same worker, so a module-scoped fixture is still built once and
+   tests that rely on running in order within their file still do.
+   `ALLWELL_TEST_WORKERS=0` runs serially — the setting for a `--durations`
+   profile, which a parallel run splits across workers — and any other number
+   sets the worker count. Parallel workers share the machine, so a test may not
+   share a path with another test: the pipeline's scratch directory defaults to
+   `~/.allwell/scratch` and names a well's extraction directory for the well
+   alone, so two tests processing `A01` at once deleted each other's images.
+   `conftest._pipeline_scratch_goes_to_a_scratch_directory` gives every test its
+   own `ALLWELL_SCRATCH_DIR` (a test measuring the default resolution unsets
+   it), and `_session_pipeline_scratch` gives the worker one before any module-
+   or session-scoped fixture runs — those are set up before a test's own
+   fixtures, and a module fixture that ran a whole nanowell plate otherwise
+   extracted into the shared default. The same collision is what two lanes run side by side used to hit. CI
+   gates on the JUnit report, which the controller writes from every worker's
+   results.
+
+   A worker that crashes takes its file down with it ("node down: Not properly
+   terminated"), and the controller can then hang at 99 % waiting on it, so a
+   crash a serial run survives by luck is a stopped lane here. The one seen was
+   the widget reaper (rule 7) deleting the Analyze pane while the pre-run
+   coverage scan's daemon thread (`aw-preflight-scan`) was emitting its answer
+   to it; the faulthandler stack in the boot log showed both threads. So the
+   reaper first joins every thread the test started, for up to
+   `_THREAD_JOIN_SECONDS` (2 s) each, skipping Qt's own threads, which
+   `threading` sees as unjoinable dummies. A long-lived worker such as the
+   persistence writer never ends, and the sixteen tests that leave one pay the
+   full wait — about 8 s of the lane's wall time.
 
 **The slow lane runs on demand, not on PRs and not on a schedule** —
 `.github/workflows/slow-lane.yml`, six sharded runners, dispatched by hand from

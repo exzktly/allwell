@@ -98,6 +98,18 @@ OTHER = {
     "neg_control_well": "H12",
     "filename_schema": "experiment:well:fov:timepoint:channel",
     "filename_sep": "-",
+    "nanowell_format": "50um",
+    "nanowell_cell_diameter_um": 20.0,
+    "nanowell_margin_um": 5.0,
+    "nanowell_square_edge_deg": 3.0,
+    "nanowell_occluded_below": 0.7,
+    "nanowell_clipped_below": 0.7,
+    "nanowell_diameter_um": 60.0,
+    "nanowell_pitch_um": 90.0,
+    "nanowell_grid": "3x7",
+    "nanowell_scan": "bottom-right-column-serpentine",
+    "nanowell_overlap_percent": 25.0,
+    "nanowell_pixel_size_um": 1.3,
 }
 
 
@@ -162,9 +174,13 @@ def test_the_roster_covers_every_key_the_digest_reads():
 
 @pytest.mark.parametrize("key", sorted(KEYED_ON))
 def test_changing_one_key_alone_moves_the_digest(key):
-    """Mutated individually, so a key carried by another cannot mask it."""
-    baseline = settings_digest(BASE)
-    changed = settings_digest({**BASE, key: OTHER[key]})
+    """Mutated individually, so a key carried by another cannot mask it. A nanowell option is mutated on a
+    nanowell run, the only kind it describes (roll-up review X5)."""
+    base = dict(BASE)
+    if key.startswith("nanowell_") and key != "nanowell_format":
+        base["nanowell_format"] = "100um"
+    baseline = settings_digest(base)
+    changed = settings_digest({**base, key: OTHER[key]})
 
     assert changed != baseline, (
         f"{key!r} does not move the settings digest, so a run that changed it "
@@ -183,6 +199,20 @@ def test_the_same_configuration_gives_the_same_digest():
     assert settings_digest(BASE) == settings_digest({**BASE, "workers": 8}), (
         "an option outside KEYED_ON moved the digest; only what changes the "
         "output belongs in it")
+
+
+def test_a_run_outside_nanowell_mode_is_not_keyed_on_the_nanowell_defaults():
+    """The nanowell options carry parser defaults on every run. Keyed on them outside the mode, a plate recorded
+    before they existed reads as recorded under other settings and is re-run (roll-up review X5). Built from the
+    real parser, so the defaults are the ones every run carries."""
+    from pipeline.cli_args import build_parser
+
+    parsed = vars(build_parser().parse_args(["--input_dir", "in", "--output_dir", "out"]))
+    carried = {k: v for k, v in parsed.items() if k.startswith("nanowell_") and v is not None}
+    assert carried, "the parser no longer defaults any nanowell option; this test measures nothing"
+    plain = {k: v for k, v in BASE.items() if not k.startswith("nanowell_")}
+    assert settings_digest({**plain, **carried}) == settings_digest(plain)
+    assert settings_digest({**plain, **carried, "nanowell_format": "100um"}) != settings_digest(plain)
 
 
 def test_list_order_counts_but_dict_order_does_not():

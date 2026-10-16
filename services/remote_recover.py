@@ -152,6 +152,7 @@ def _recover_from(runner, remote_dir: str, local_output_dir: Path,
         local_input_dir=_local_input_dir_from_argv(pipeline_argv),
         output_filter=output_filter,
         pre_run_artifacts=_snapshot_local_artifacts(local_output_dir),
+        nanowell="--nanowell_format" in pipeline_argv,
     )
     verifier = FetchedOutputVerifier(runner.host, run, runner._cache, stop)
     host = runner.host.ssh_alias

@@ -29,6 +29,9 @@ pytest-qt>=4.2
 pytest-mock>=3.10
 pytest-timeout>=2.1
 pytest-cov>=4.0
+# The fast lane runs one worker per CPU (scripts/test.sh, --dist loadfile); without it the lane
+# runs serially, which took it past CI's 15-minute job cap.
+pytest-xdist==3.8.0
 # Differential coverage: which lines THIS diff adds that no test executes.
 # A percentage over ~500 files is a number to game; the diff is the question
 # a reviewer actually has.

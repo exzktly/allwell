@@ -210,8 +210,9 @@ def _render_spatial_map(ax, payload, st) -> None:
     if pts is None or pts.shape[0] == 0:
         _msg_ax(ax, "No cells at the selected timepoint.")
         return
+    unit = payload.get("unit") or "px"
     _style_axes(ax, title=f"t={payload.get('timepoint', 0):.2g} h",
-                xlabel="x (px)", ylabel="y (px)")
+                xlabel=f"x ({unit})", ylabel=f"y ({unit})")
 
     level = st.level
     metric = payload.get("metric")
@@ -317,11 +318,12 @@ def _render_nnd_histogram(ax, payload) -> None:
     if finite.size == 0:
         _msg_ax(ax, "No finite nearest-neighbour distances.")
         return
+    unit = payload.get("unit") or "px"
     _style_axes(ax, title="Nearest-neighbour distance",
-                xlabel="Distance (px)", ylabel="Cells")
+                xlabel=f"Distance ({unit})", ylabel="Cells")
     ax.hist(finite, bins=30, color=_OBSERVED_COLOR, alpha=0.8)
     ax.axvline(float(np.median(finite)), color=_REFERENCE_COLOR, lw=1.2,
-               label=f"median = {np.median(finite):.1f} px")
+               label=f"median = {np.median(finite):.1f} {unit}")
     style_legend(ax.legend(fontsize=8, frameon=False), ax)
 
 
@@ -341,7 +343,7 @@ def _render_ripley(ax, payload) -> None:
         return
     _style_axes(ax,
                 title=f"Ripley L(r) − r · n={ripley.n_points}",
-                xlabel="r (px)", ylabel="L(r) − r")
+                xlabel=f"r ({payload.get('unit') or 'px'})", ylabel="L(r) − r")
     _, _, _muted, _, _spine = _tokens(ax)
     ax.fill_between(ripley.r, ripley.csr_lo, ripley.csr_hi,
                     color=_muted, alpha=0.25, label="CSR envelope")
@@ -544,6 +546,12 @@ def sp_state_metric_catalog():
     return SUMMARY_METRICS
 
 
+def in_unit(units: str, payload: dict) -> str:
+    """A summary metric's units with the positions' length unit put in: the catalog states lengths in px, and a
+    nanowell run's positions are in the well frame's µm (tracker I2)."""
+    return units.replace("px", payload.get("unit") or "px") if units else units
+
+
 def _render_summary_panel(fig, st, rescale=tr_OFF, *, names=None) -> None:
     payload = st.last_result
     key = payload.get("summary_metric_key") or "nnd_median"
@@ -555,6 +563,7 @@ def _render_summary_panel(fig, st, rescale=tr_OFF, *, names=None) -> None:
         _draw_message(fig, "The summary produced no wells or timepoints.")
         return
     label, units = _summary_metric_label(key)
+    units = in_unit(units, payload)
     ylabel = f"{label} ({units})" if units else label
 
     # One name per well for both displays, so the heatmap's y axis and the

@@ -98,6 +98,9 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
             remote = spec.resolve_remote()
         except RunSpecError as exc:
             return str(exc)
+        refusal = _nanowell_remote_resume_refusal(spec.opts, remote)
+        if refusal:
+            return refusal
         self._run_ok = False
         self._run_error = None
         self._set_running_ui_state(remote=remote)
@@ -294,6 +297,10 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         if at_err:
             QMessageBox.critical(self, "Control Well Error", at_err)
             return None
+        nanowell_err = self._nanowell_validation_error(check_input=check_input)
+        if nanowell_err:
+            QMessageBox.critical(self, "Nanowell Error", nanowell_err)
+            return None
         pipeline = find_pipeline_script()
         if pipeline is None:
             QMessageBox.critical(self, "Configuration Error",
@@ -420,3 +427,20 @@ def _earlier_run_still_alive(spec: RunSpec) -> str | None:
             "app that started it has closed, which takes about as long as one "
             "field; wait for it to finish, then try again. Starting now would "
             "race it for the same files.")
+
+
+def _nanowell_remote_resume_refusal(opts: dict, remote) -> str | None:
+    """Why a remote nanowell run that has become incremental cannot start, or ``None``.
+
+    The form refuses a remote nanowell run with Incremental ticked; this is the same refusal for the runs the app
+    makes incremental on its own — ``resume_aware_spec`` on a plate with an unfinished run, and a resume after a
+    suspend — read from the options the run will really use, before anything reaches the remote (roll-up review
+    X29). The key is read directly rather than through the nanowell field rules, which ship with the removable
+    Nanowells feature; in a build without it nothing sets the key.
+    """
+    from services.remote_run_state import NANOWELL_REMOTE_RESUME_REFUSAL
+
+    nanowell = bool(str(opts.get("nanowell_format") or "").strip())
+    if remote is None or not nanowell or not opts.get("incremental") or opts.get("force"):
+        return None
+    return NANOWELL_REMOTE_RESUME_REFUSAL

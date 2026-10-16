@@ -134,6 +134,11 @@ def test_the_elapsed_hours_come_from_the_first_scene_scanned(tmp_path):
     assert scan.scene == 0
     assert scan.hours_by_index == {0: 0.0, 1: 4.0, 2: 8.0}
     assert scan.reasons == []
+    assert scan.instants_by_index == {
+        0: "2024-06-12T10:00:00.483000+00:00",
+        1: "2024-06-12T14:00:00.483000+00:00",
+        2: "2024-06-12T18:00:00.483000+00:00",
+    }
 
 
 def test_the_series_is_measured_from_its_own_first_reading(tmp_path):
@@ -195,6 +200,9 @@ def test_a_missing_first_stamp_declines_rather_than_shifting_the_origin(tmp_path
     scan = read_timepoint_hours(src, _blocks_of(src), 2)
     assert scan.hours_by_index == {}
     assert "the first is not among them" in " ".join(scan.reasons)
+    assert scan.instants_by_index == {
+        1: "2024-06-12T14:00:00.483000+00:00",
+    }
 
 
 def test_mixing_zoned_and_unzoned_instants_is_refused(tmp_path):
@@ -208,6 +216,10 @@ def test_mixing_zoned_and_unzoned_instants_is_refused(tmp_path):
     ]
     src = write_czi(tmp_path / "Mixed.czi", tiles)
     scan = read_timepoint_hours(src, _blocks_of(src), 2)
+    assert scan.instants_by_index == {
+        0: "2024-06-12T10:00:00+00:00",
+        1: "2024-06-12T14:00:00",
+    }
     assert scan.hours_by_index == {}
     assert "zoned and unzoned" in " ".join(scan.reasons)
 

@@ -174,6 +174,7 @@ def apply_filters(ctx, *, live_sync: bool = False) -> None:
     # keeps the top-ordered cells).
     cells = collect_cells(ctx, st.criteria, st.timepoints, st.fovs, st.sort_keys,
                           live_sync=live_sync)
+    st.n_matched = len(cells)
     if len(cells) > MAX_TOTAL:
         cells = cells[:MAX_TOTAL]
     st.cells = cells
@@ -349,8 +350,21 @@ def _update_count(ctx) -> None:
     lbl = getattr(ctx.runtime.cell_browser, "count_label", None)
     if lbl is None:
         return
-    st = ctx.runtime.cell_browser.state
-    lbl.setText(f"Showing {st.loaded} / {len(st.cells)} cells")
+    lbl.setText(count_text(ctx.runtime.cell_browser.state))
+
+
+def count_text(st) -> str:
+    """The count label: what is shown, of what was kept, of what matched.
+
+    The gallery keeps the first ``MAX_TOTAL`` matching cells in sort order — a
+    ranking, not a sample — and the label used to name that kept length as the
+    total, so 5,000 of 80,000 matches read as 5,000 matches.
+    """
+    kept = len(st.cells)
+    matched = max(int(getattr(st, "n_matched", 0) or 0), kept)
+    if matched > kept:
+        return f"Showing {st.loaded} / {kept} cells (the first {kept:,} of {matched:,} matching, in sort order)"
+    return f"Showing {st.loaded} / {kept} cells"
 
 
 def _set_status(ctx, msg: str) -> None:

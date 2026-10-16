@@ -1634,10 +1634,20 @@ What this means in use:
   the crop's status line and Cell Gating's "Included for analysis" are
   recalculated on every edit, so they count the wells in memory; when those are
   not all of them the line ends with "counted over N of M wells in memory".
-- **Views that draw individual cells** (Scatter, Multivariate, Distribution, the
-  bar chart's beeswarm, the Cell Browser) still hold the cells of every well you
-  select. Selecting most of a very large plate in one of them asks for that many
-  points.
+- **Scatter, Distribution and the bar chart's beeswarm and violin** still hold
+  the cells of every well you select. Selecting most of a very large plate in one
+  of them asks for that many points.
+- **Cell Gating's distribution curves** are drawn through 2,000 of their points
+  when a curve has more cells than that; every point drawn is on the full curve,
+  and the figure says so.
+- **The Cell Browser names how many cells matched.** It shows at most 5,000 cells
+  — the first 5,000 in sort order — and its count now reads, for example,
+  "Showing 50 / 5000 cells (the first 5,000 of 81,200 matching, in sort order)".
+- **Multivariate** still holds the cells of every well you select, because its
+  correlations, clusters and summaries are each over every cell. It reads only the
+  columns it uses and leaves the other wells in memory alone, but selecting most
+  of a very large plate there still asks for that many cells (about 64 bytes a
+  cell at five features).
 - **If one well alone does not fit**, Review first gives back every well it is
   holding and tries again; if that fails too, the error names the well, its size
   on disk and what was held, instead of a bare out-of-memory message.

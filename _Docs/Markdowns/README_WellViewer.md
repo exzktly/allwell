@@ -1640,10 +1640,14 @@ What this means in use:
   it drew of how many. Clicking a point still opens that cell. Gate percentages
   always count every cell, not the sample, and an exported CSV always holds every
   cell.
-- **The other views that draw individual cells** (Multivariate, Distribution,
-  the bar chart's beeswarm, the Cell Browser) still hold the cells of every well
-  you select. Selecting most of a very large plate in one of them asks for that
-  many points.
+- **The Distribution plot draws its curves from a sample above 200,000 values.**
+  The counts in the legend and title, the histogram's bars and bin range, and the
+  violin's median line still use every value; only the KDE and CDF curves and
+  the violin's outline are drawn from the sample, and the figure says so. The
+  exported CSV holds every value.
+- **The other views that draw individual cells** (Multivariate, the bar chart's
+  beeswarm, the Cell Browser) still hold the cells of every well you select.
+  Selecting most of a very large plate in one of them asks for that many points.
 - **If one well alone does not fit**, Review first gives back every well it is
   holding and tries again; if that fails too, the error names the well, its size
   on disk and what was held, instead of a bare out-of-memory message.

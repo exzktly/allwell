@@ -248,3 +248,38 @@ def test_recovering_a_remote_nanowell_plate_does_not_make_the_run_incremental(mo
     assert runner._recover_remote_outputs(Path("out"), plain + ["--nanowell_format", "100um"], {}) is False
     assert any("cannot resume on a remote host" in line[1] for line in lines)
     assert runner._recover_remote_outputs(Path("out"), plain, {})          # the pulled wells: incremental
+
+
+def test_the_array_geometry_is_sent_only_when_inferred_and_a_sidecar_restores_it(tab):  # noqa: F811
+    """Tracker X35: the form's Array geometry reaches the argv, the run's settings and back from a sidecar."""
+    from analyze.nanowell_section import settings_from_opts
+
+    tab._nanowell_cb.setChecked(True)
+    assert tab._nanowell_geometry_cb.currentData() == "hex_circle"
+    assert "--nanowell_geometry" not in _argv(tab)                      # the default keeps the run's key
+    tab._nanowell_geometry_cb.setCurrentIndex(tab._nanowell_geometry_cb.findData("infer"))
+    assert _flag(_argv(tab), "--nanowell_geometry") == "infer"
+    opts = tab._collect_run_spec().opts
+    assert settings_from_opts(opts).infer                                # Test detection locates the same way
+    tab._nanowell_cb.setChecked(False)
+    assert not tab._nanowell_geometry_cb.isEnabled()
+
+
+def test_the_sidecar_a_real_inferred_run_writes_restores_the_array_geometry(tab, tmp_path, monkeypatch):  # noqa: F811
+    """Through the real path (review X35-R10): ``process_microscopy.main`` writes ``pipeline_info.json`` and the
+    form's own sidecar reader restores it, rather than a dictionary written for the test."""
+    import json
+
+    from tests.test_nanowell_cli import _run_main, _square_plate
+
+    plate, _ = _square_plate(tmp_path)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--nanowell_geometry", "infer")
+    info = json.loads((out / "pipeline_info.json").read_text())
+    tab._nanowell_cb.setChecked(True)
+    tab._nanowell_geometry_cb.setCurrentIndex(tab._nanowell_geometry_cb.findData("hex_circle"))
+    tab._apply_pipeline_info(info, source=out / "pipeline_info.json")
+    assert tab._nanowell_cb.isChecked() and tab._nanowell_geometry_cb.currentData() == "infer"
+    assert _flag(_argv(tab), "--nanowell_geometry") == "infer"
+    plain = _run_main(monkeypatch, _square_plate(tmp_path / "plain")[0], "--nanowell_format", "100um")
+    tab._apply_pipeline_info(json.loads((plain / "pipeline_info.json").read_text()))
+    assert tab._nanowell_geometry_cb.currentData() == "hex_circle"       # a run that did not choose

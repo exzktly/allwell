@@ -531,6 +531,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--nanowell_margin_um", type=float, default=None,
                    help=("Margin around a nanowell's disk that must lie inside one tile for that tile to own it. "
                          "Default: a tenth of the nanowell diameter."))
+    p.add_argument("--nanowell_geometry", choices=("hex_circle", "infer"), default=None,
+                   help=("How the array is found. hex_circle (the default): a hexagonal lattice in a circular array, "
+                         "found at the plate format's diameter. infer: the nanowells are found by their contrast "
+                         "alone (light wells on a dark lattice), and the lattice kind (hexagonal or square), pitch, "
+                         "orientation and the array's outline are inferred from where they are; the format's pitch "
+                         "and diameter are compared with what is measured and a disagreement is reported."))
     p.add_argument("--nanowell_square_edge_deg", type=float, default=0.0,
                    help=("Angle of the central square nanowell's edges to a lattice row, degrees (assumed 0: the "
                          "square is cut parallel to a row). Used to refuse a lattice fitted a sixth of a turn off."))
@@ -576,6 +582,8 @@ def nanowell_options_from_args(args, error) -> dict | None:
                "clipped_below": float(args.nanowell_clipped_below)}
     # Added only when given, so a run without them keeps the settings (and reuse key) it always had.
     options.update(_custom_format(args, error))
+    if args.nanowell_geometry == "infer":
+        options["geometry"] = "infer"
     pattern = _grid_pattern(args, error)
     if pattern:
         options["pattern"] = pattern

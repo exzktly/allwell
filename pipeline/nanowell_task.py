@@ -50,7 +50,17 @@ def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
         else None
     return nr.NanowellSettings(spec["plate_format"], spec.get("margin_um"), spec.get("cell_diameter_um", 15.0),
                                spec.get("square_edge_deg", 0.0), spec.get("occluded_below", 0.5),
-                               spec.get("clipped_below", 0.5), custom)
+                               spec.get("clipped_below", 0.5), custom,
+                               spec.get("geometry") or nr.GEOMETRY_HEX_CIRCLE)
+
+
+def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
+    """``(radius, roster)`` an earlier run of the well shared across its timepoints, for an incremental run to keep:
+    a circle's radius, or an inferred array's addresses (tracker X35); ``(None, None)`` with no earlier run."""
+    if prior is None:
+        return None, None
+    block = prior["grid"].get("array_radius", {})
+    return block.get("radius_um"), (block.get("roster") or None)      # empty: the earlier run anchored nothing
 
 
 def timepoint_order(record: dict, well: str) -> list[str]:
@@ -305,8 +315,11 @@ def _reference_of(prior: dict | None) -> dict | None:
     for tp in sorted(prior["kept"], key=lambda t: prior["order"].get(t, 0)):
         block = blocks[tp]
         if all(block.get(k) is not None for k in ("pitch_um", "angle_deg", "roster_size")):
+            # An inferred well's kept lattice kind and diameter too: the new timepoints are refused if of another
+            # kind, and measured at the same diameter (review X35-R13, R14).
             return {"timepoint": tp, "pitch_um": block["pitch_um"], "angle_deg": block["angle_deg"],
-                    "roster_size": block["roster_size"]}
+                    "roster_size": block["roster_size"], "lattice_kind": block.get("lattice_kind"),
+                    "diameter_used_um": (block.get("geometry") or {}).get("diameter_used_um")}
     return None
 
 
@@ -407,11 +420,12 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         return load
 
     channels = {t: channel_loader(k) for k, t in enumerate(fluor_tokens)}
-    fixed = None if prior is None else prior["grid"].get("array_radius", {}).get("radius_um")
+    fixed, fixed_roster = _prior_array(prior)
     template_path = output_dir / NANOWELL_DIR / f"{well_label}{TEMPLATE_SUFFIX}"
     saved = nm.load_template(Path(prior_dir or output_dir) / NANOWELL_DIR / template_path.name) if prior else None
     outcome = nr.run_well(well_label, record, todo, load_phase, settings, segmenter=segmenter, channels=channels,
-                          fixed_radius_um=fixed, plate_rigid=plate_rigid, reference=_reference_of(prior),
+                          fixed_radius_um=fixed, fixed_roster=fixed_roster, plate_rigid=plate_rigid,
+                          reference=_reference_of(prior),
                           checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key),
                           earliest_template=None if saved is None else saved[0],
                           spill_dir=Path(scratch_dir) / ".montages",     # removed with the scratch (X23)
@@ -423,7 +437,8 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)
     if prior is not None:
         outcome.timepoints = {**{tp: prior["grid"]["timepoints"][tp] for tp in prior["kept"]}, **outcome.timepoints}
-        outcome.radius = prior["grid"].get("array_radius", outcome.radius) if fixed is not None else outcome.radius
+        outcome.radius = (prior["grid"].get("array_radius", outcome.radius)
+                          if fixed is not None or fixed_roster is not None else outcome.radius)
         # The earliest template may be a kept timepoint's: compare every timepoint against it, in time order.
         nr.flag_template_drift(outcome.timepoints, timepoints)
     rank = {tp: k for k, tp in enumerate(timepoints)}
@@ -533,7 +548,9 @@ def record_nanowell_info(info_path, options: dict, input_dir) -> None:
                           "conventions": {"origin": "top-left of the well frame, y down",
                                           "angle": "counter-clockwise on screen, degrees, from image east",
                                           "mirror": "recorded per timepoint in nanowells/<well>_grid.json",
-                                          "address": "axial (q, r); (0, 0) is the central square"}}}
+                                          "address": "axial (q, r) on the lattice the grid record's lattice_kind "
+                                                     "names (hex or square); (0, 0) is the central square, or "
+                                                     "the array's centre"}}}
     try:
         record = read_record_file(Path(input_dir) / "acquisition.json")
     except Exception as exc:                        # an unreadable record fails the wells, not the sidecar

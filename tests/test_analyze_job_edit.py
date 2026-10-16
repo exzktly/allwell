@@ -100,6 +100,7 @@ _OPTS = {
     "nanowell_square_edge_deg": "5",
     "nanowell_occluded_below": "0.6",
     "nanowell_clipped_below": "0.7",
+    "nanowell_geometry": "infer",
 }
 
 # ``cleanup_remote`` / ``dry_run_cleanup`` are remote-only settings: nothing

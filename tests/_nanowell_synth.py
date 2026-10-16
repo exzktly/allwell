@@ -162,8 +162,16 @@ def render_tiles(plan: TilePlan, *, pitch_um: float, diameter_um: float, radius_
                  rotation_deg: float = 0.0, stage_jitter_um: float = 0.0, vignette: float = 0.0,
                  noise_sigma: float = 0.0, cells: int = 0, debris: int = 0,
                  bubble=None, blur_px: float = 1.2, seed: int = 0,
-                 array_shift_um=(0.0, 0.0)) -> RenderedTiles:
-    """Phase-contrast-like tiles of one hexagonal array: bright nanowells on a dark lattice.
+                 array_shift_um=(0.0, 0.0), lattice: str = "hex", array_shape: str = "circle",
+                 dark_sites=(), square_centre: bool = True, illumination: float = 0.0) -> RenderedTiles:
+    """Phase-contrast-like tiles of one array: bright nanowells on a dark lattice.
+
+    *lattice* is ``"hex"`` (the plates the pipeline was written for) or ``"square"``; *array_shape* is
+    ``"circle"`` (sites within *radius_um* of the centre) or ``"square"`` (within *radius_um* of it along
+    both of the array's own axes, so it turns with the lattice). *dark_sites* are addresses whose
+    nanowell is drawn as dark as the lattice, as a bubble over that one well leaves it; their roster
+    entries stay. *square_centre* draws the central nanowell square; *illumination* is a multiplicative
+    left-to-right ramp across the whole acquisition (0.4 is 0.8 at the left edge to 1.2 at the right).
 
     The array is the same physical object in every tile: the nanowells, cells,
     debris and bubble are drawn in the common frame at the tiles' *true*
@@ -176,20 +184,31 @@ def render_tiles(plan: TilePlan, *, pitch_um: float, diameter_um: float, radius_
 
     rng = np.random.default_rng(seed)
     pose = _screen_rotation(rotation_deg)
-    native_basis = np.array([[pitch_um, pitch_um / 2], [0.0, -math.sqrt(3) * pitch_um / 2]])
+    if lattice not in ("hex", "square") or array_shape not in ("circle", "square"):
+        raise ValueError("lattice is hex or square, array_shape circle or square")
+    native_basis = (np.array([[pitch_um, pitch_um / 2], [0.0, -math.sqrt(3) * pitch_um / 2]]) if lattice == "hex"
+                    else np.array([[pitch_um, 0.0], [0.0, -pitch_um]]))
     basis = pose @ native_basis                        # columns a1, a2
     inverse = np.linalg.inv(basis)
     union_w = plan.step_um[0] * (plan.cols - 1) + plan.extent_um[0]
     union_h = plan.step_um[1] * (plan.rows - 1) + plan.extent_um[1]
     centre = np.array([union_w / 2, union_h / 2]) + np.asarray(array_shift_um, dtype=float)
 
+    def inside(native_xy):
+        """Whether a site at *native_xy* (the array's own frame, centre at 0) is in the array."""
+        native_xy = np.asarray(native_xy, dtype=float)
+        reach_of = (np.linalg.norm(native_xy, axis=-1) if array_shape == "circle"
+                    else np.abs(native_xy).max(axis=-1))
+        return reach_of <= radius_um + pitch_um * 1e-12
+
     reach = math.ceil(2 * radius_um / pitch_um)
     roster = [(q, r) for q in range(-reach, reach + 1) for r in range(-reach, reach + 1)
-              if np.linalg.norm(native_basis @ (q, r)) <= radius_um + pitch_um * 1e-12]
+              if inside(native_basis @ (q, r))]
     sites = np.array([basis @ q_r for q_r in roster]) + centre
     array = SyntheticArray(sites, tuple(roster), tuple(roster), tuple(centre), tuple(basis[:, 0]),
-                           tuple(basis[:, 1]), tuple(a == (0, 0) for a in roster),
+                           tuple(basis[:, 1]), tuple(square_centre and a == (0, 0) for a in roster),
                            diameter_um, pitch_um, radius_um)
+    darkened = [basis @ q_r + centre for q_r in dark_sites]
 
     blobs = []
     for _ in range(cells):                              # non-periodic content: cells ...
@@ -224,7 +243,7 @@ def render_tiles(plan: TilePlan, *, pitch_um: float, diameter_um: float, radius_
                     better = dist < best
                     best = np.where(better, dist, best)
                     nearest = np.where(better[..., None], site, nearest)
-            in_array = np.linalg.norm(nearest, axis=-1) <= radius_um + pitch_um * 1e-12
+            in_array = inside(nearest @ pose)            # pose is orthogonal: this unrotates to the native frame
             hidden = np.zeros((h, w), dtype=bool)
             if bubble is not None:
                 bx, by, br = bubble
@@ -234,10 +253,12 @@ def render_tiles(plan: TilePlan, *, pitch_um: float, diameter_um: float, radius_
             local = pos - nearest
             unrot = local @ pose                        # back into the array's own frame
             square = 1 / (1 + np.exp(-(diameter_um / 2 - np.abs(unrot).max(axis=-1)) / edge))
-            is_square = np.linalg.norm(nearest, axis=-1) < pitch_um * 1e-6
+            is_square = (np.linalg.norm(nearest, axis=-1) < pitch_um * 1e-6) & square_centre
             shape = np.where(is_square, square, disc)
             image = np.where(in_array, _FLOOR + (_NANOWELL - _FLOOR) * shape, _BACKGROUND)
             image = np.where(hidden, _BACKGROUND, image)
+            for dx, dy in darkened:                     # one nanowell occluded: as dark as the lattice round it
+                image = np.where(np.hypot(gx - dx, gy - dy) <= 0.6 * diameter_um, _FLOOR, image)
             for x, y, sigma, amp in blobs:
                 if left - 4 * sigma <= x <= left + w * px + 4 * sigma and top - 4 * sigma <= y <= top + h * px + 4 * sigma:
                     image = image + amp * np.exp(-((gx - x) ** 2 + (gy - y) ** 2) / (2 * sigma ** 2))
@@ -245,6 +266,8 @@ def render_tiles(plan: TilePlan, *, pitch_um: float, diameter_um: float, radius_
             if vignette:
                 rr = np.hypot((np.arange(w) - w / 2)[None, :], (np.arange(h) - h / 2)[:, None]) / math.hypot(w / 2, h / 2)
                 image = image * (1 - vignette * rr ** 2)
+            if illumination:
+                image = image * (1 + illumination * (gx / union_w - 0.5))
             if noise_sigma:
                 image = image + rng.normal(0, noise_sigma, image.shape)
             images[name] = image.astype(np.float32)

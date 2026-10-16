@@ -117,12 +117,13 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
     if located.fit is not None:
         result.pitch_um, result.angle_deg = located.fit.pitch, located.fit.angle_deg
     result.origin_method, result.origin_agreement = located.origin_method, located.origin_agreement
-    if located.status not in (nr.OK, nr.UNADDRESSED) or located.boundary is None:
+    if located.status not in (nr.OK, nr.UNADDRESSED) or (located.boundary is None and located.array_sites is None):
         return result
     px = located.pixel_size_um
     try:
         segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
-        measured = nr.measure_timepoint(located, images, settings, located.boundary["radius_um"], segmenter=segment)
+        radius, own = nr.own_array_model(located)
+        measured = nr.measure_timepoint(located, images, settings, radius, roster=own, segmenter=segment)
     except Exception as exc:          # the location above is still worth showing; the reason goes with it (X27)
         log.warning("Test detection: measuring %s %s failed", well, timepoint, exc_info=True)
         result.notes = [f"Measuring failed ({type(exc).__name__}: {exc}); the lattice and addresses above stand."]

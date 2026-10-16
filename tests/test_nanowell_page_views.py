@@ -244,3 +244,59 @@ def test_a_capture_repaints_the_class_medians_in_their_publication_shades():
     assert to_hex(median.get_edgecolor()[0]) == to_hex(screen)
     repaint_theme_pairs(ax, "publication")
     assert to_hex(median.get_edgecolor()[0]) == to_hex(publication)
+
+
+def test_a_square_lattice_well_is_mapped_on_a_square_lattice_and_ringed_by_square_rings(tmp_path):
+    """Tracker X35: a well whose grid records say its lattice is square is laid out square and ringed by
+    ``max(|q|, |r|)``; a hexagonal well beside it keeps the hexagonal layout and hex distance."""
+    rows = [_row("t_c", 0, 0, n=1, c=0.1), _row("t_c", 1, 1, n=3, c=0.1), _row("t_c", 0, 1, n=5, c=0.1)]
+    grids = {w: {"t_c": {"status": "ok", "pitch_um": 100.0, "lattice_kind": kind}}
+             for w, kind in (("A01", "square"), ("B01", "hex"))}
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": rows, "B01": rows}, starts={"t_c": STARTS["t_c"]},
+                                       grids=grids))
+    metrics = site_metrics(data)
+    assert (vc.lattice_kind(data, "A01", "t_c"), vc.lattice_kind(data, "B01", "t_c")) == ("square", "hex")
+    square = vc.map_model(metrics, data, "A01", "t_c", "n")
+    at = {site[1:]: (x, y) for site, x, y in zip(square.sites, square.x, square.y)}
+    assert at[(1, 1)] == pytest.approx((100.0, -100.0)) and at[(0, 1)] == pytest.approx((0.0, -100.0))
+    hexagonal = vc.map_model(metrics, data, "B01", "t_c", "n")
+    at = {site[1:]: (x, y) for site, x, y in zip(hexagonal.sites, hexagonal.x, hexagonal.y)}
+    assert at[(1, 1)] == pytest.approx((150.0, -100.0 * math.sqrt(3) / 2))
+    found, _ = vc.position_series(metrics, ["A01", "B01"], "t_c", "n",
+                                  kinds={w: vc.lattice_kind(data, w, "t_c") for w in ("A01", "B01")})
+    rings = {s.well: list(s.rings) for s in found}
+    assert rings == {"A01": [0.0, 1.0], "B01": [0.0, 1.0, 2.0]}       # (1, 1) is one square step, two hex steps
+
+
+def test_the_page_s_position_view_rings_a_square_well_by_square_rings(tmp_path, monkeypatch):
+    """The same, through the page's one composition (``controller.draw_view``), which is what passes each well's
+    lattice kind to the ring computation."""
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import controller
+
+    rows = [_row("t_c", 0, 0, n=1, c=0.1), _row("t_c", 1, 1, n=3, c=0.1), _row("t_c", 0, 1, n=5, c=0.1)]
+    grids = {"A01": {"t_c": {"status": "ok", "pitch_um": 100.0, "lattice_kind": "square"}}}
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": rows}, starts={"t_c": STARTS["t_c"]}, grids=grids))
+    drawn = []
+    monkeypatch.setattr(controller, "render_position", lambda fig, series, **k: drawn.append(series))
+    controller.draw_view(Figure(), "position", site_metrics(data), data, groups={"g": ["A01"]}, metric="n",
+                         channel=None, axis="groups", timepoint="t_c", control="", baseline="", cohort=False,
+                         well="A01", well_timepoint="t_c")
+    (series,), = drawn
+    assert list(series.rings) == [0.0, 1.0]
+
+
+def test_each_timepoint_is_laid_out_on_the_lattice_its_own_grid_record_names(tmp_path):
+    """Review X35-R4: the kind is read per timepoint, never guessed for the well (a well whose records disagree was
+    drawn hexagonal at every timepoint)."""
+    rows = [_row(tp, q, r, n=1, c=0.1) for tp in ("t_c", "t_a") for q, r in ((0, 0), (1, 1))]
+    grids = {"A01": {"t_c": {"status": "ok", "pitch_um": 100.0, "lattice_kind": "square"},
+                     "t_a": {"status": "ok", "pitch_um": 100.0, "lattice_kind": "hex"}}}
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": rows}, starts={k: STARTS[k] for k in ("t_c", "t_a")},
+                                       grids=grids))
+    metrics = site_metrics(data)
+    for tp, expected in (("t_c", (100.0, -100.0)), ("t_a", (150.0, -100.0 * math.sqrt(3) / 2))):
+        model = vc.map_model(metrics, data, "A01", tp, "n")
+        at = {site[1:]: (x, y) for site, x, y in zip(model.sites, model.x, model.y)}
+        assert at[(1, 1)] == pytest.approx(expected), tp

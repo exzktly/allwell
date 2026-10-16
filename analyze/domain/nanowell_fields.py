@@ -20,6 +20,10 @@ CUSTOM_FORMAT = "custom"
 PLATE_FORMAT_CHOICES = (("100um", "100 µm nanowells"), ("50um", "50 µm nanowells"),
                         (CUSTOM_FORMAT, "Custom size"))
 
+#: How the array is found (``pipeline.nanowell_run.GEOMETRIES``), as (option value, label); the first is the default
+#: and sends no flag, so a run that does not choose keeps the settings (and reuse key) it always had (tracker X35).
+GEOMETRY_CHOICES = (("hex_circle", "Hexagonal lattice in a circle"), ("infer", "Infer from the image"))
+
 #: ``--nanowell_scan`` spellings (``pipeline.nanowell_pattern_record.parse_scan``), the first the default.
 SCAN_CHOICES = tuple(f"{corner}-{major}{'-serpentine' if serpentine else ''}"
                      for corner in ("top-left", "top-right", "bottom-left", "bottom-right")
@@ -134,6 +138,9 @@ def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]
     if str(opts["nanowell_format"]).strip() not in known:
         errors.append(f"Nanowell plate format {opts['nanowell_format']!r} is not one of {sorted(known)}.")
     errors += _format_errors(opts) + _grid_errors(opts)
+    geometry = str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]).strip()
+    if geometry not in {value for value, _label in GEOMETRY_CHOICES}:
+        errors.append(f"Nanowell geometry {geometry!r} is not one this version knows.")
     if need_phase and not str(opts.get("phase_token") or "").strip():
         errors.append("Nanowell mode needs a Phase channel: tick Phase on the channel the tiles are imaged in.")
     custom = str(opts.get("nanowell_format") or "").strip() == CUSTOM_FORMAT

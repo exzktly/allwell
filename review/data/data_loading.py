@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
+from contextlib import nullcontext
 import re
 from pathlib import Path
 from collections.abc import Iterator
@@ -483,10 +484,12 @@ def get_rows(ctx, label: str) -> pd.DataFrame:
     pass also calls: one path in, so a lazily reloaded well carries exactly the
     layers a freshly opened dataset's well does.
     """
-    cache = ctx.state.dataset.cache
-    if label not in cache:
-        load_and_project(ctx, label)
-    return cache[label]
+    # One lookup, not ``in`` then ``[]``: the cache is bounded, and a well held at
+    # the first may be evicted by another thread's read before the second.
+    try:
+        return ctx.state.dataset.cache[label]
+    except KeyError:
+        return load_and_project(ctx, label)
 
 
 def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
@@ -515,27 +518,39 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     dataset = ctx.state.dataset
     if path is not None:
         dataset.well_paths[label] = path
-    dataset.cache[label] = read_well_frame(dataset.well_paths[label])
-    for _project in iter_cache_projectors():
-        # **Guarded per projector, matching ``qc.controller.recompute_qc_all``.**
-        # The same registry list is walked from two places, and until now the
-        # two had different failure contracts: a raise there lost one verdict
-        # column, a raise here lost the whole WELL, because this is the call
-        # that decides whether a frame enters the cache at all. One layer must
-        # never take down the others, and losing a well is the larger of the
-        # two failures, so the unguarded one was the wrong side of the
-        # asymmetry. Each projector already reports its own per-well failures
-        # through ``project_verdict_column``; this catches a projector that
-        # raises outside that walk.
-        try:
-            _project(ctx, label)
-        except Exception:
-            _logger.exception(
-                "cache projector %r failed for well %r", _project, label)
+    frame = read_well_frame(dataset.well_paths[label])
+    pinned = getattr(dataset.cache, "pinned", None)
+    # Pinned while the projectors run: they find the frame by label, and one that
+    # found it evicted meanwhile (a read on the gating worker's thread) would
+    # skip its verdict and leave the well looking fully included.
+    with (pinned(label) if pinned is not None else nullcontext()):
+        dataset.cache[label] = frame
+        for _project in iter_cache_projectors():
+            # **Guarded per projector, matching ``qc.controller.recompute_qc_all``.**
+            # The same registry list is walked from two places, and until now the
+            # two had different failure contracts: a raise there lost one verdict
+            # column, a raise here lost the whole WELL, because this is the call
+            # that decides whether a frame enters the cache at all. One layer must
+            # never take down the others, and losing a well is the larger of the
+            # two failures, so the unguarded one was the wrong side of the
+            # asymmetry. Each projector already reports its own per-well failures
+            # through ``project_verdict_column``; this catches a projector that
+            # raises outside that walk.
+            try:
+                _project(ctx, label)
+            except Exception:
+                _logger.exception(
+                    "cache projector %r failed for well %r", _project, label)
     # The loader used to have to record this itself, having built the frame
     # outside this function; the verdict now travels with the load.
-    record_fov_verdict(ctx, label, dataset.cache[label])
-    return dataset.cache[label]
+    record_fov_verdict(ctx, label, frame)
+    # The projectors added columns in place; the budget should count them. The
+    # local *frame* is what is returned: a frame larger than the budget is held
+    # alone, and another thread's read may have evicted it since the unpin.
+    remeasure = getattr(dataset.cache, "remeasure", None)
+    if remeasure is not None:
+        remeasure(label)
+    return frame
 
 
 def record_fov_verdict(ctx, label: str, df) -> None:

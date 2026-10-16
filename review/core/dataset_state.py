@@ -20,6 +20,7 @@ import pandas as pd
 
 from util.fov import sort_key as _fov_sort_key
 from review.data.data_loading import parse_timepoint_hours
+from review.data.row_cache import RowCache
 from review.data.image_resolver import normalize_numeric_token
 from domain.text_columns import text_column, timepoint_text
 
@@ -43,7 +44,9 @@ class DatasetState:
     tmp_dir: Path | None = None
 
     well_paths: dict[str, Path] = field(default_factory=dict)
-    cache: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # Bounded by a memory budget (``review/data/row_cache.py``): iterating it
+    # yields the wells held, not the plate — ask ``get_rows`` for each well.
+    cache: RowCache = field(default_factory=RowCache)
 
     all_timepoints_cache: list[float] = field(default_factory=list)
     all_fovs_cache: list[str] = field(default_factory=list)

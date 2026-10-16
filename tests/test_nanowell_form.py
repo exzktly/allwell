@@ -412,3 +412,11 @@ def test_test_detection_offers_the_wells_the_run_will_read(tab, tmp_path):
     tab._input_edit.setText(str(root))
     wells, timepoints, problem = _wells_and_timepoints(tab)
     assert (wells, timepoints, problem) == ({"A01": lower}, {"A01": ["0h"]}, "")
+
+
+def test_the_nanowells_section_sits_directly_below_quality_control(tab):
+    """The user's layout: Quality Control leads the optional sections, Nanowells follows it."""
+    titles = list(tab._section_widgets)
+    layout = tab._section_widgets["Quality Control"].parentWidget().layout()
+    order = sorted(titles, key=lambda t: layout.indexOf(tab._section_widgets[t]))
+    assert order.index("Nanowells") == order.index("Quality Control") + 1, order

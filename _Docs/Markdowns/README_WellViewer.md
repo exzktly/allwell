@@ -202,7 +202,7 @@ The section and the Review page belong to the Nanowells feature: a build made fr
 (`ALLWELL_PROFILE`, as for a feature-subset executable) shows neither. The command-line `--nanowell_format` works in every
 build.
 
-In the Analyze pane, open the **Nanowells** section (folded by default), tick **Nanowell arrays**, and mark the
+In the Analyze pane, open the **Nanowells** section (below Quality Control, folded by default), tick **Nanowell arrays**, and mark the
 channel the tiles are imaged in as **Phase** (Channel Tokens). The section asks for the plate format (100 µm or
 50 µm nanowells, or **Custom size**, which shows two more fields: the nanowell diameter and the lattice pitch,
 centre to centre — the run measures the pitch on the tiles, so it is a starting value) and, optionally, the cell diameter, the margin around a nanowell that must lie inside one tile

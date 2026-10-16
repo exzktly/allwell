@@ -9006,7 +9006,7 @@ the module imports; `domain/fields.py` imports the field rules the same guarded 
 already means the mode off to every reader, so the stripped form's argv is the one it had before the section
 existed (`tests/test_nanowell_removable.py`). The pipeline's nanowell mode and the Datasets tools' table carrying
 stay in every build: Qt-free, sent to remote hosts, and what keeps a dataset with nanowell tables whole. The
-Nanowells section (`analyze/nanowell_section.py`, folded by default) holds the mode
+Nanowells section (`analyze/nanowell_section.py`, folded by default, directly below Quality Control) holds the mode
 checkbox, the plate format, the cell diameter, the margin, the square's edge angle and the occlusion and
 clipping thresholds; a blank number sends no flag and the pipeline's default applies. Its option keys are
 the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's

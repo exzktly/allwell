@@ -75,7 +75,7 @@ _HELD_ONLY_READERS: dict[str, str] = {
     "review/persistence/reset_scopes.py::_clear_gating": (
         "Clears the cache so frames reload ungated; restore_gating_block forgets the applied gating first, so a "
         "well read before the restarted pass runs is not re-gated with the cleared configuration."),
-    "review/core/dataset_state.py::well_summaries": (
+    "review/data/well_summary.py::well_summaries": (
         "Summarises a held frame for a well that has no stored summary — a supplement to the summaries, which "
         "cover every opened well, never a substitute for them."),
     "review/runtime_app.py::_invalidate_dataset_cache": "Clears the cache.",

@@ -11,8 +11,8 @@ Each run is its own process, because peak resident memory (``ru_maxrss``) is a
 high-water mark that never falls: two measurements in one process report the
 first one's peak as the second's. Run it once per configuration::
 
-    python scripts/bench_large_plate.py --dir /tmp/plate --wells 24 --rows 1104480
-    ALLWELL_ROW_CACHE_MB=2048 python scripts/bench_large_plate.py --dir /tmp/plate --wells 24
+    python tests/perf/bench_large_plate.py --dir /tmp/plate --wells 24 --rows 1104480
+    ALLWELL_ROW_CACHE_MB=2048 python tests/perf/bench_large_plate.py --dir /tmp/plate --wells 24
 
 The plate is written once, on first use: one well CSV, hard-linked under each
 well's name, so a plate of 24 large wells costs one CSV on disk (plus the Parquet
@@ -33,7 +33,7 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 

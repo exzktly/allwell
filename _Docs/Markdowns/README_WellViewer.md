@@ -1635,7 +1635,7 @@ What this means in use:
 
 To change the budget, set the environment variable `ALLWELL_ROW_CACHE_MB` before
 starting the app, for example `ALLWELL_ROW_CACHE_MB=8192 python allwell.py` for
-8 GB. `python scripts/bench_large_plate.py --dir <folder> --wells 24` writes a
+8 GB. `python tests/perf/bench_large_plate.py --dir <folder> --wells 24` writes a
 synthetic plate of large wells and reports the time and peak memory of opening
 it and of one plate-wide plot.
 

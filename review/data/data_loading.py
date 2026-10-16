@@ -628,8 +628,9 @@ def held_wells_note(ctx) -> str:
     all of it is the silent shortfall CLAUDE.md §7 forbids.
     """
     dataset = ctx.state.dataset
-    total = len(dataset.well_paths)
-    held = sum(1 for label in dataset.cache.keys() if label in dataset.well_paths)
+    wells = getattr(dataset, "well_paths", None) or {}
+    total = len(wells)
+    held = sum(1 for label in dataset.cache.keys() if label in wells)
     if total == 0 or held >= total:
         return ""
     return f" — counted over {held} of {total} wells in memory"

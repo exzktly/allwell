@@ -232,3 +232,27 @@ def _cached_column_names(csv_path: Path) -> list[str] | None:
     if (schema.metadata or {}).get(_FINGERPRINT_KEY, b"").decode() != want:
         return None
     return [n for n in schema.names if not n.startswith("__index_level_")]
+
+
+def well_summaries(dataset) -> list[WellSummary]:
+    """A summary for every well of *dataset*: the stored one, else one of its held frame.
+
+    Every well, not every held frame: the row cache is bounded, so the plate's
+    timepoints and FOVs come from the summaries ``WellRepository.open_well``
+    records. A well that reached the cache some other way — a test seeding it
+    with frames it built — is summarised from its frame, so nothing held is
+    missed. Reads ``well_paths`` / ``summaries`` defensively, for the hand-built
+    dataset namespaces the pure-logic tests pass.
+    """
+    stored = getattr(dataset, "summaries", None) or {}
+    cache = getattr(dataset, "cache", None) or {}
+    out: list[WellSummary] = []
+    for label in dict.fromkeys([*(getattr(dataset, "well_paths", None) or {}), *cache.keys()]):
+        summary = stored.get(label)
+        if summary is None:
+            frame = cache.get(label) if label in cache else None
+            if frame is None:
+                continue
+            summary = summarize_frame(frame)
+        out.append(summary)
+    return out

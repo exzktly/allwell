@@ -91,13 +91,15 @@ def channel_options(ctx) -> list[str]:
 def cache_column_tokens(ctx, column: str) -> list[str]:
     """Unique normalised ``fov`` or ``timepoint`` tokens across every well.
 
-    From the per-well summaries (``DatasetState.well_summaries``), not the row
+    From the per-well summaries (``well_summary.well_summaries``), not the row
     cache: the cache is bounded and holds the wells that fit, so the options it
     offered depended on what happened to be in memory. Tokens keep the order the
     wells and their rows present them, as the scan of the cached frames did.
     """
     seen: dict[str, None] = {}
-    for summary in ctx.state.dataset.well_summaries():
+    from review.data.well_summary import well_summaries
+
+    for summary in well_summaries(ctx.state.dataset):
         for tok in summary.tokens(column):
             seen.setdefault(tok, None)
     return list(seen)

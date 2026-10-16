@@ -20,7 +20,7 @@ from collections.abc import Callable
 from util.fov import sort_key as _fov_sort_key
 from review.data.data_loading import parse_timepoint_hours
 from review.data.row_cache import RowCache
-from review.data.well_summary import WellSummary, summarize_frame
+from review.data.well_summary import WellSummary, well_summaries
 from review.data.image_resolver import normalize_numeric_token
 
 # Local alias for the shared numeric-token normaliser: a raw FOV token collapses
@@ -198,24 +198,8 @@ class DatasetState:
         self.crop_scope_tps = None
 
     def well_summaries(self) -> list[WellSummary]:
-        """A summary for every well: the stored one, else one of its held frame.
-
-        Every well, not every held frame: the row cache is bounded, so the plate's
-        timepoints and FOVs come from the summaries ``open_well`` records. A well
-        that reached the cache some other way — a test seeding it, a reload after
-        a write-back — is summarised from its frame, so nothing held is missed.
-        """
-        out: list[WellSummary] = []
-        labels = list(dict.fromkeys([*self.well_paths, *self.cache.keys()]))
-        for label in labels:
-            summary = self.summaries.get(label)
-            if summary is None:
-                frame = self.cache.get(label) if label in self.cache else None
-                if frame is None:
-                    continue
-                summary = summarize_frame(frame)
-            out.append(summary)
-        return out
+        """A summary for every well, held or not (``well_summary.well_summaries``)."""
+        return well_summaries(self)
 
     def rebuild_timepoints(self) -> None:
         """Recompute the canonical numeric timepoint list.

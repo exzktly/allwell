@@ -248,7 +248,7 @@ class GatingWorker(QThread):
 
 # ── public API ────────────────────────────────────────────────────────────
 
-def _first_frame_values(df, channels, ratios):
+def _first_frame_values(df, channels, ratios) -> tuple | None:
     """One well's first-frame cell areas, positive channel values and ratios, or ``None``.
 
     Respects the crop region and the QC debris gate, not the fluorescence gate —

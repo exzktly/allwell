@@ -443,6 +443,22 @@ def _scan_cache_goes_to_a_scratch_directory(_autouse_scratch_root, monkeypatch):
                        str(_scratch_dir(_autouse_scratch_root, "czi-scans")))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _session_pipeline_scratch(_autouse_scratch_root):
+    """The same isolation for what runs before any test's own fixtures: a module- or session-scoped fixture that
+    runs the pipeline (a whole nanowell run, built once for a file) is set up before the per-test fixture below,
+    so it extracted into ``~/.allwell/scratch`` — shared by every xdist worker, which then deleted each other's
+    ``_tmp_extract_A01`` mid-run (``FileNotFoundError`` on an extracted tile). The session root is per worker,
+    because pytest gives each worker its own base temp directory."""
+    previous = os.environ.get("ALLWELL_SCRATCH_DIR")
+    os.environ["ALLWELL_SCRATCH_DIR"] = str(_scratch_dir(_autouse_scratch_root, "session-pipeline-scratch"))
+    yield
+    if previous is None:
+        os.environ.pop("ALLWELL_SCRATCH_DIR", None)
+    else:
+        os.environ["ALLWELL_SCRATCH_DIR"] = previous
+
+
 @pytest.fixture(autouse=True)
 def _pipeline_scratch_goes_to_a_scratch_directory(_autouse_scratch_root, monkeypatch):
     """No test extracts a well into the developer's real ``~/.allwell/scratch``.

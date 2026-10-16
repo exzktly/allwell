@@ -125,6 +125,10 @@ class PlaygroundState:
     # only long-running thing this tab starts: M segmentations rather than one.
     sweep_stop: bool = False
     sweep_status: str = ""
+    # The sampled threshold last clicked on the curve, ringed there. Reset by
+    # every new sweep, since a ring carried over would mark a point that curve
+    # never had clicked.
+    sweep_picked: float | None = None
     # Set when the frame segmented was not the stage on screen (segmentation
     # always runs on the corrected frame, as the pipeline does). Reported with
     # the nucleus count so a count can never be read as belonging to a picture
@@ -178,5 +182,6 @@ class PlaygroundState:
         self.sweep_running = False
         self.sweep_stop = False
         self.sweep_status = ""
+        self.sweep_picked = None
         self.seg_key = None
         self.seg_status = ""

@@ -588,7 +588,7 @@ def test_the_threshold_curve_button_is_built_and_connected(playground_app):
     orig_show = scv.show_threshold_curve
     try:
         pw.request_threshold_sweep = _fake_request
-        scv.show_threshold_curve = lambda ctx, curve: shown.update(curve=curve)
+        scv.show_threshold_curve = lambda ctx, curve, **_k: shown.update(curve=curve)
         btn.click()
     finally:
         pw.request_threshold_sweep = orig
@@ -733,7 +733,7 @@ def test_the_sweeps_result_survives_the_repaint_that_follows_it(playground_app):
         pc._segmentation_frame = lambda ctx: (
             _np.zeros((32, 32), _np.float32), "")
         pw.request_threshold_sweep = _fake_request
-        scv.show_threshold_curve = lambda ctx, curve: None
+        scv.show_threshold_curve = lambda ctx, curve, **_k: None
         app._playground_sweep_btn.click()
     finally:
         pc._segmentation_frame = orig_frame
@@ -818,7 +818,7 @@ def test_the_curve_is_attributed_to_the_frame_it_was_dispatched_on(
         pc._segmentation_frame = lambda ctx: (
             _np.zeros((32, 32), _np.float32), "")
         pw.request_threshold_sweep = _fake_request
-        scv.show_threshold_curve = lambda ctx, curve: None
+        scv.show_threshold_curve = lambda ctx, curve, **_k: None
         app._playground_sweep_btn.click()
     finally:
         pc._segmentation_frame = orig_frame

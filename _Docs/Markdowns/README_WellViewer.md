@@ -729,6 +729,20 @@ else, or once a run has written there again.
     on screen rather than leaving the old counts sitting under a new picture.
     Changing the Probability value does **not** stale it: that is the number
     the curve exists to help you choose.
+  - **Click a point on the curve to see what that threshold finds.** The count
+    alone cannot tell you whether the nuclei are the right ones, so clicking a
+    point puts its threshold into the Playground's **Probability** box and
+    segments the frame on screen at it, exactly as if you had typed the value
+    and pressed **Segment**. The outlines on the image are then that
+    threshold's, the read-out under the image says `prob=` with the value
+    shown, and the point you picked is ringed on the curve. A click snaps to
+    the nearest of the nineteen measured points; a click away from the line,
+    or with the plot toolbar's zoom or pan switched on, does nothing. If the
+    curve no longer describes the frame on screen — you moved to another frame
+    or changed the correction or the Overlap threshold — the click is refused
+    and the read-out says to sweep again, rather than showing one frame at a
+    threshold read off another frame's curve. Clicks are also ignored while a
+    segmentation or a sweep is still running.
   - **Segment** and **Threshold curve…** cannot run at the same time — they
     share one loaded detector — so each greys the other out while it works.
   - A frame with no contrast at all is not swept, and says so in those words

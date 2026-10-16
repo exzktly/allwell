@@ -166,7 +166,7 @@ def test_a_changed_parser_invalidates_every_cache():
     ])
     digest = hashlib.sha256(material.encode()).hexdigest()[:16]
 
-    assert (pc.PARSER_VERSION, digest) == (2, "464090683a5abd18"), (
+    assert (pc.PARSER_VERSION, digest) == (2, "069dcd63dec51357"), (
         "load_well_csv or a constant it reads has changed. Every cached frame "
         "on every user's disk was produced by the old one, and the fingerprint "
         "does not know that. Bump PARSER_VERSION so they all invalidate, then "

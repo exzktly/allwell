@@ -44,7 +44,7 @@ CORPUS = {
         'A01,,NA,x.tif,3,abc,,DAPI,exp,null\n'
         'A01,2,24h,y.tif,4,1e3,300.0,DAPI,exp,NaN\n'
         'A01,2,24h,y.tif,5,-0.0,9007199254740993,DAPI,exp,7\n', True),
-    "na_text_in_numbers": ("well,fov,timepoint,v,w\nA01,1,0h,NA,nan\nA01,1,0h,1.5,NaN\nA01,1,0h,N/A,-inf\n", False),
+    "na_text_in_numbers": ("well,fov,timepoint,v,w\nA01,1,0h,NA,nan\nA01,1,0h,1.5,NaN\nA01,1,0h,N/A,-inf\n", True),
     "na_text_without_infinity": ("well,fov,timepoint,v,w\nA01,1,0h,NA,nan\nA01,1,0h,1.5,NaN\nA01,1,0h,N/A,2\n", True),
     "timestamps": ("well,fov,timepoint,acquired,d\nA01,1,0h,2024-01-01 10:00:00,2024-01-01\n"
                    "A01,1,0h,2024-01-02 11:00:00,2024-01-03\n", True),
@@ -59,7 +59,7 @@ CORPUS = {
     "unnamed_column": ("well,,timepoint,v\nA01,1,0h,1\n", True),
     "trailing_comma": ("well,fov,timepoint,v,\nA01,1,0h,1,\n", True),
     "bom_and_crlf": ("﻿well,fov,timepoint,v\r\nA01,1,0h,1.25\r\n", True),
-    "infinities_and_plus": ("well,fov,timepoint,v\nA01,1,0h,inf\nA01,1,0h,-Infinity\nA01,1,0h,+3\n", False),
+    "infinities_and_plus": ("well,fov,timepoint,v\nA01,1,0h,inf\nA01,1,0h,-Infinity\nA01,1,0h,+3\n", True),
     "header_only": ("well,fov,timepoint,gfp_mean_intensity\n", True),
     "short_row": ("well,fov,timepoint,v,w\nA01,1,0h,1\nA01,1,0h,1,2\n", False),
     # Review findings: pyarrow's own boolean spellings include 1/0, and it reads
@@ -68,6 +68,11 @@ CORPUS = {
     "true_and_zero": ("well,fov,timepoint,v\nA01,1,0h,True\nA01,1,0h,0\n", True),
     "overflowing_literal": ("well,fov,timepoint,v\nA01,1,0h,1e400\nA01,1,0h,1\n", False),
     "negative_overflow": ("well,fov,timepoint,v\nA01,1,0h,-1e400\nA01,1,0h,1\n", False),
+    # An infinity written as one reads alike in both and stays on pyarrow; one
+    # overflowing literal beside it, in any column, still sends the file back.
+    "infinity_spellings": ("well,fov,timepoint,v\nA01,1,0h,iNf\nA01,1,0h,+INFINITY\nA01,1,0h,-inf\nA01,1,0h,2\n", True),
+    "infinity_beside_overflow": ("well,fov,timepoint,v\nA01,1,0h,inf\nA01,1,0h,1e400\n", False),
+    "overflow_in_another_column": ("well,fov,timepoint,v,w\nA01,1,0h,inf,1e400\nA01,1,0h,1,2\n", False),
 }
 
 

@@ -331,3 +331,20 @@ def test_every_registered_projector_declares_its_columns():
     build_feature_registry()
     undeclared = [getattr(p, "__name__", p) for p, cols in iter_projector_declarations() if cols is None]
     assert undeclared == []
+
+
+@pytest.mark.parametrize("spelling", ["time", "tp", "time_h", "Time"])
+def test_every_timepoint_spelling_the_identity_resolver_accepts_is_read(ctx, spelling):
+    """Review finding: the narrow read kept ``timepoint`` but not ``time`` / ``tp``
+    / ``time_h``, which the identity resolver also reads. Dropped, the curation
+    keys and the crop scope built from it matched nothing and the manually
+    excluded cell counted again."""
+    path = ctx.state.dataset.well_paths[WELL]
+    frame = _frame().rename(columns={"timepoint": spelling})
+    frame.to_csv(path, index=False)
+    dl.read_well_frame(path)
+    _switch_on(ctx, "curation")
+    full, narrow = _full(ctx), _narrow(ctx)
+    assert spelling in narrow.columns
+    assert _excluded(full) == {CURATED_CELL}, "the override matched nothing in the full frame either"
+    assert _excluded(narrow) == _excluded(full)

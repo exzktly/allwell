@@ -629,6 +629,19 @@ class CellKey:
         )
 
 
+#: The spellings :func:`resolve_identity_column` accepts for each identity
+#: column, in preference order and matched case-insensitively. Named once so
+#: every reader that must carry these columns — ``review/data/narrow_rows.py``
+#: reads only the columns it is told to — takes them from here: a spelling
+#: missing there drops the column, and the curation keys and crop scope built
+#: from it then match nothing, which lets excluded cells back in.
+WELL_COLUMN_NAMES = ("well", "Well")
+FOV_COLUMN_NAMES = ("fov", "FOV")
+TIMEPOINT_COLUMN_NAMES = ("timepoint", "tp", "time", "time_h", "timepoint_hours")
+NUCLEUS_ID_COLUMN_NAMES = ("nucleus_id", "nucleus id", "nucleusId", "nucleusID")
+IDENTITY_COLUMN_NAMES = (*WELL_COLUMN_NAMES, *FOV_COLUMN_NAMES, *TIMEPOINT_COLUMN_NAMES, *NUCLEUS_ID_COLUMN_NAMES)
+
+
 def resolve_identity_column(df, *names: str) -> str | None:
     """The first of *names* present in ``df.columns``, case-insensitively.
 
@@ -666,10 +679,8 @@ def frame_token_series(df):
     if df is None or df.empty:
         empty = pd.Series([], dtype=object)
         return empty, empty
-    fov_col = resolve_identity_column(df, "fov", "FOV")
-    tp_col = resolve_identity_column(
-        df, "timepoint", "tp", "time", "time_h", "timepoint_hours",
-    )
+    fov_col = resolve_identity_column(df, *FOV_COLUMN_NAMES)
+    tp_col = resolve_identity_column(df, *TIMEPOINT_COLUMN_NAMES)
     fov_n = (normalize_fov_series(as_text(df[fov_col]))
              if fov_col else
              pd.Series(["1"] * len(df), index=df.index))
@@ -697,10 +708,8 @@ def cell_keys_for_dataframe(
     def _resolve_col(*names: str) -> str | None:
         return resolve_identity_column(df, *names)
 
-    well_col = _resolve_col("well", "Well")
-    nid_col = _resolve_col(
-        "nucleus_id", "nucleus id", "nucleusId", "nucleusID",
-    )
+    well_col = _resolve_col(*WELL_COLUMN_NAMES)
+    nid_col = _resolve_col(*NUCLEUS_ID_COLUMN_NAMES)
 
     if well_col is not None:
         well_series = as_text(df[well_col])

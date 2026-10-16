@@ -240,7 +240,8 @@ def on_page_finished(ctx, payload: dict) -> None:
     # re-enables the buttons; it deliberately doesn't touch the status so it can't
     # clobber the empty-gallery hint on the no-cells path, which never gets here.)
     st = ctx.runtime.cell_browser.state
-    _set_status(ctx, f"Showing {st.loaded} / {len(st.cells)} cell(s).")
+    # The same sentence as the count label, so the two cannot disagree about the total.
+    _set_status(ctx, count_text(st) + ".")
     btn = getattr(ctx.runtime.cell_browser, "load_more_btn", None)
     if btn is not None:
         btn.setEnabled(ctx.runtime.cell_browser.state.remaining > 0)

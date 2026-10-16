@@ -44,7 +44,8 @@ CORPUS = {
         'A01,,NA,x.tif,3,abc,,DAPI,exp,null\n'
         'A01,2,24h,y.tif,4,1e3,300.0,DAPI,exp,NaN\n'
         'A01,2,24h,y.tif,5,-0.0,9007199254740993,DAPI,exp,7\n', True),
-    "na_text_in_numbers": ("well,fov,timepoint,v,w\nA01,1,0h,NA,nan\nA01,1,0h,1.5,NaN\nA01,1,0h,N/A,-inf\n", True),
+    "na_text_in_numbers": ("well,fov,timepoint,v,w\nA01,1,0h,NA,nan\nA01,1,0h,1.5,NaN\nA01,1,0h,N/A,-inf\n", False),
+    "na_text_without_infinity": ("well,fov,timepoint,v,w\nA01,1,0h,NA,nan\nA01,1,0h,1.5,NaN\nA01,1,0h,N/A,2\n", True),
     "timestamps": ("well,fov,timepoint,acquired,d\nA01,1,0h,2024-01-01 10:00:00,2024-01-01\n"
                    "A01,1,0h,2024-01-02 11:00:00,2024-01-03\n", True),
     "clock_times": ("well,fov,timepoint,v\nA01,1,0h,10:00:00\nA01,1,0h,11:00:00\n", True),
@@ -58,9 +59,15 @@ CORPUS = {
     "unnamed_column": ("well,,timepoint,v\nA01,1,0h,1\n", True),
     "trailing_comma": ("well,fov,timepoint,v,\nA01,1,0h,1,\n", True),
     "bom_and_crlf": ("﻿well,fov,timepoint,v\r\nA01,1,0h,1.25\r\n", True),
-    "infinities_and_plus": ("well,fov,timepoint,v\nA01,1,0h,inf\nA01,1,0h,-Infinity\nA01,1,0h,+3\n", True),
+    "infinities_and_plus": ("well,fov,timepoint,v\nA01,1,0h,inf\nA01,1,0h,-Infinity\nA01,1,0h,+3\n", False),
     "header_only": ("well,fov,timepoint,gfp_mean_intensity\n", True),
     "short_row": ("well,fov,timepoint,v,w\nA01,1,0h,1\nA01,1,0h,1,2\n", False),
+    # Review findings: pyarrow's own boolean spellings include 1/0, and it reads
+    # an over-large literal as inf where pandas reads text that becomes NaN.
+    "true_and_one": ("well,fov,timepoint,v\nA01,1,0h,True\nA01,1,0h,1\n", True),
+    "true_and_zero": ("well,fov,timepoint,v\nA01,1,0h,True\nA01,1,0h,0\n", True),
+    "overflowing_literal": ("well,fov,timepoint,v\nA01,1,0h,1e400\nA01,1,0h,1\n", False),
+    "negative_overflow": ("well,fov,timepoint,v\nA01,1,0h,-1e400\nA01,1,0h,1\n", False),
 }
 
 
@@ -93,7 +100,11 @@ def test_pyarrow_gives_the_pandas_frame(tmp_path, monkeypatch, name):
     assert taken is arrow_reads, (
         f"pyarrow {'fell back on' if arrow_reads else 'read'} {name}; "
         "an equality with the pandas frame measures nothing about pyarrow when pandas did the read")
-    expected = _pandas_frame(path, monkeypatch, float_precision="round_trip")
+    # pyarrow's reads are held to pandas' correctly-rounded parse (the stated
+    # float difference); a file it hands to pandas is held to pandas' own default
+    # parse, which is what the app then runs.
+    expected = (_pandas_frame(path, monkeypatch, float_precision="round_trip") if arrow_reads
+                else _pandas_frame(path, monkeypatch))
     pd.testing.assert_frame_equal(dl.load_well_csv(path), expected, check_exact=True)
 
 
@@ -156,3 +167,24 @@ def test_without_pyarrow_the_pandas_parse_is_used(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "pyarrow.csv", None)
     assert _arrow(path) is None
     pd.testing.assert_frame_equal(dl.load_well_csv(path), _pandas_frame(path, monkeypatch), check_exact=True)
+
+
+def test_running_out_of_memory_is_raised_not_fallen_back_from(tmp_path, monkeypatch):
+    """A pandas parse needs more memory, not less; the caller's retry must see it."""
+    import pyarrow as pa
+    import pyarrow.csv as pcsv
+
+    path = _write(tmp_path, "messy", CORPUS["messy"][0])
+
+    def out_of_memory(*_a, **_k):
+        raise pa.ArrowMemoryError("malloc of size 512 failed")
+
+    monkeypatch.setattr(pcsv, "read_csv", out_of_memory)
+    with pytest.raises(MemoryError):
+        dl.load_well_csv(path)
+
+
+def test_a_hexadecimal_literal_is_the_stated_difference(tmp_path, monkeypatch):
+    path = _write(tmp_path, "hex", "well,fov,timepoint,v\nA01,1,0h,0x10\nA01,1,0h,1\n")
+    assert dl.load_well_csv(path)["v"].tolist() == [16, 1]
+    assert np.isnan(_pandas_frame(path, monkeypatch)["v"].tolist()[0])

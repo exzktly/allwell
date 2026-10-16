@@ -104,6 +104,9 @@ def _read_well_table(path: Path) -> pd.DataFrame:
     * **An integer above ``int64`` but within ``uint64``** stays ``uint64``
       under pandas and becomes the nearest ``float64`` under pyarrow. No
       measurement column holds one.
+    * **A hexadecimal literal** (``0x10``) is the integer 16 under pyarrow and
+      text that coerces to NaN under pandas. The pipeline writes decimal only,
+      and the difference cannot be detected after the read.
 
     Everything else was held equal on a corpus of the mess these files carry
     (``tests/test_typed_csv_parse.py``). The settings that make it so:
@@ -118,9 +121,11 @@ def _read_well_table(path: Path) -> pd.DataFrame:
     * A column pyarrow reads as a date or time is handed on as its text, which
       that coercion turns to NaN — what pandas, which reads none, gives.
 
-    A row with the wrong number of fields, a file pyarrow cannot decode, and an
-    empty file all fall back to pandas, which reads or rejects them as it always
-    has. pyarrow is measured 13x faster on a 1,104,480-row, 513 MB well (5.0 s
+    A row with the wrong number of fields, a file pyarrow cannot decode, an
+    empty file, and a float column holding an infinity (``inf`` text, or a
+    literal like ``1e400`` that pyarrow reads as inf and pandas as NaN) all fall
+    back to pandas, which reads or rejects them as it always has. Running out of
+    memory is raised as ``MemoryError``, not fallen back from. pyarrow is measured 13x faster on a 1,104,480-row, 513 MB well (5.0 s
     against 64.8 s) at about the same peak (1,417 MiB against 1,334 MiB).
     """
     # The header alone (``nrows=0``), read once for both readers. An empty file
@@ -147,8 +152,17 @@ def _arrow_read(path: Path, names: list[str], text_dtypes: dict) -> pd.DataFrame
             read_options=pcsv.ReadOptions(column_names=names, skip_rows=1),
             convert_options=pcsv.ConvertOptions(
                 column_types={c: pa.string() for c in text_dtypes},
-                null_values=[""], strings_can_be_null=True, quoted_strings_can_be_null=True),
+                null_values=[""], strings_can_be_null=True, quoted_strings_can_be_null=True,
+                # pandas' own boolean spellings. pyarrow's defaults add "1" and
+                # "0", which read a column holding "True" and "1" as booleans
+                # where pandas reads text (the "True" then coerces to NaN).
+                true_values=list(_PANDAS_TRUE), false_values=list(_PANDAS_FALSE)),
         )
+    except pa.ArrowMemoryError as exc:
+        # Out of memory is not "pyarrow cannot read this file": a pandas parse
+        # would only need more. Raised as the MemoryError it is, so the caller's
+        # release-the-row-cache-and-retry (``_read_making_room``) runs.
+        raise MemoryError(str(exc)) from exc
     except (pa.ArrowException, ValueError, OSError) as exc:
         _logger.info("pyarrow could not read %s (%s); parsing it with pandas",
                      Path(path).name, str(exc).splitlines()[0][:200] if str(exc) else type(exc).__name__)
@@ -156,7 +170,19 @@ def _arrow_read(path: Path, names: list[str], text_dtypes: dict) -> pd.DataFrame
     for i, field in enumerate(table.schema):
         if pa.types.is_temporal(field.type):
             table = table.set_column(i, field.name, pc.cast(table.column(i), pa.string()))
+        elif pa.types.is_floating(field.type) and pc.any(pc.is_inf(table.column(i))).as_py():
+            # An infinity is either the text "inf" or a literal too large for a
+            # double ("1e400"), which pyarrow reads as inf and pandas as text
+            # that coerces to NaN. The two cannot be told apart from here, and a
+            # file carrying either is rare, so it is parsed by pandas instead.
+            _logger.info("%s holds an infinite value in %s; parsing it with pandas", Path(path).name, field.name)
+            return None
     return table.to_pandas()
+
+
+#: pandas' boolean spellings (its C parser's defaults), given to pyarrow.
+_PANDAS_TRUE = ("True", "TRUE", "true")
+_PANDAS_FALSE = ("False", "FALSE", "false")
 
 #: A text column is worth storing as codes only while it repeats. Above this
 #: share of distinct values the codes array stops paying for itself and starts

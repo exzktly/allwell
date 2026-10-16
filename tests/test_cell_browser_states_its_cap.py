@@ -28,7 +28,9 @@ def _ctx():
     runtime = AppRuntime(None, store={})
     runtime.cell_browser.state = CellBrowserState()
     runtime.cell_browser.count_label = _Label()
-    return SimpleNamespace(runtime=runtime, notify=SimpleNamespace(set_status=lambda *_: None))
+    statuses: list[str] = []
+    runtime.cell_browser.statuses = statuses
+    return SimpleNamespace(runtime=runtime, notify=SimpleNamespace(set_status=statuses.append))
 
 
 def _run(monkeypatch, n):
@@ -51,3 +53,19 @@ def test_a_capped_gallery_names_how_many_matched(monkeypatch):
 def test_an_uncapped_gallery_reads_as_before(monkeypatch):
     cb = _run(monkeypatch, 40)
     assert cb.count_label.text == "Showing 0 / 40 cells"
+
+
+def test_the_status_line_names_the_same_total_as_the_label(monkeypatch):
+    """Review finding: when a page of thumbnails finished, the status line read
+    ``Showing 50 / 5000 cell(s).`` beside a label naming every match. Driven
+    through ``on_page_finished``, the handler that writes it."""
+    cb = _run(monkeypatch, MAX_TOTAL + 1234)
+    cb.state.loaded = 50
+    ctx = SimpleNamespace(runtime=_owner(cb), notify=SimpleNamespace(set_status=cb.statuses.append))
+    controller.on_page_finished(ctx, {"gen": cb.gen or 0})
+    assert cb.statuses[-1] == (f"Showing 50 / {MAX_TOTAL} cells (the first {MAX_TOTAL:,} of "
+                               f"{MAX_TOTAL + 1234:,} matching, in sort order).")
+
+
+def _owner(cb):
+    return SimpleNamespace(cell_browser=cb)

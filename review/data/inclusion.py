@@ -25,7 +25,7 @@ import logging
 
 from review.data.data_loading import df_included_mask, get_rows
 from domain.image_identity import (
-    frame_token_series, normalize_fov, normalize_tp, resolve_identity_column,
+    NUCLEUS_ID_COLUMN_NAMES, frame_token_series, normalize_fov, normalize_tp, resolve_identity_column,
 )
 
 _logger = logging.getLogger("review")
@@ -61,8 +61,7 @@ def _build_excluded_map(df, well: str) -> dict[tuple[str, str], frozenset]:
     # expensive part, a per-row normalisation — are never computed at all.
     if bool(mask.all()):
         return {}
-    nid_col = resolve_identity_column(
-        df, "nucleus_id", "nucleus id", "nucleusId", "nucleusID")
+    nid_col = resolve_identity_column(df, *NUCLEUS_ID_COLUMN_NAMES)
     if nid_col is None:
         # Without ids there is no way to say *which* objects to drop, so the
         # view draws every cell — which is what it did before this module

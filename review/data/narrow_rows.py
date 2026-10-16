@@ -44,6 +44,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from domain.image_identity import IDENTITY_COLUMN_NAMES
 from domain.text_columns import TEXT_COLUMNS
 from review.data.cache_projectors import iter_projector_declarations
 from review.domain.ratio_models import is_ratio_key
@@ -51,11 +52,12 @@ from review.domain.ratio_models import is_ratio_key
 _logger = logging.getLogger("review")
 
 #: Lower-cased names every narrow read carries when the file has them: the text
-#: columns, the identity spellings ``domain.image_identity.resolve_identity_column``
-#: accepts, the numeric timepoint, and the ``Included`` layer the projectors write.
+#: columns, every spelling ``domain.image_identity.resolve_identity_column`` is
+#: asked for (``IDENTITY_COLUMN_NAMES``, the one list its callers use), the
+#: numeric timepoint, and the ``Included`` layer the projectors write.
 IDENTITY_COLUMNS = frozenset({
     *TEXT_COLUMNS, "timepoint_hours", "included",
-    "nucleus_id", "nucleus id", "nucleusid",
+    *(name.lower() for name in IDENTITY_COLUMN_NAMES),
 })
 
 #: What :func:`data_loading.aggregate_with_threshold_df` reads besides the value

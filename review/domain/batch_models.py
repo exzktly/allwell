@@ -23,13 +23,27 @@ class ReplicateSet:
     and one derived from the *well tokens* — a user's own typed ``3`` is
     deliberately on the second side of it, which is why ``sel_rename`` clears
     the flag.
+
+    *solo* marks a set of one well that stands for itself: a well in no
+    replicate group that the user clicked onto the plots. It is named by the
+    well's token, which is the key every per-well member already uses, and
+    labelled through ``well_display_label`` rather than the group-name rules.
+    It is not one of the user's groups, so counts of "sets visible" leave it
+    out.
+
+    *value_id* is the sample-variable value a set pools, when the set comes
+    from grouping the plots by a variable; empty otherwise. It is what a plate
+    click hides or shows while the plots are grouped by that variable.
     """
 
     def __init__(self, name: str, wells: list[str] | None = None, *,
-                 name_is_verbatim: bool = False) -> None:
+                 name_is_verbatim: bool = False, solo: bool = False,
+                 value_id: str = "") -> None:
         self.name: str = name
         self.wells: list[str] = list(wells or [])
         self.name_is_verbatim: bool = bool(name_is_verbatim)
+        self.solo: bool = bool(solo)
+        self.value_id: str = str(value_id or "")
 
     def __repr__(self) -> str:
         return f"ReplicateSet({self.name!r}, {self.wells!r})"

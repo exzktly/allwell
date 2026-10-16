@@ -68,7 +68,7 @@ def _plate_passive_in_group_mode(ctx) -> bool:
 
     Outside Split View ``visible_centre_tabs`` collapses to the current leaf, so
     a single plotting tab in group mode stays passive exactly as before."""
-    if not app._app_state.selection.selections:
+    if not app._app_state.selection.selections and not _grouping_variable(ctx):
         return False
     try:
         from review.core.tab_controller import visible_centre_tabs
@@ -276,6 +276,66 @@ def _set_groups_hidden(ctx, sels, *, target=None) -> None:
         app._rebuild_all(invalidate=False)
 
 
+def _grouping_variable(ctx) -> str:
+    """The variable the plots pool by, or ``""`` when they pool by the groups.
+
+    Asked through ``variable_grouping_in_force`` rather than read off the
+    setting, because a chosen variable that groups nothing falls back to the
+    user's groups — and then the plate has to toggle those, not values.
+
+    **While a variable grouping is in force, a value is the plate's unit.**
+    The plots draw one member per value and never consult a replicate group's
+    ``hidden`` flag, so a click that toggled the group — which is what every
+    handler below used to do — wrote state nothing read: the plate dimmed the
+    group and no plot changed.
+    """
+    from review.domain.plot_members import variable_grouping_in_force
+    if not variable_grouping_in_force(ctx):
+        return ""
+    return str(ctx.state.plot.group_by_variable or "")
+
+
+def _value_sets(ctx) -> list:
+    """Every value set of the Group-by variable, hidden ones included."""
+    from review.domain.plot_members import variable_replicate_sets
+    variable_id = _grouping_variable(ctx)
+    return variable_replicate_sets(ctx, variable_id) if variable_id else []
+
+
+def _set_values_hidden(ctx, value_ids, *, target=None) -> None:
+    """Hide or show the Group-by values *value_ids* — ``_set_groups_hidden``'s
+    counterpart for a variable grouping, with the same toggle rule: ``target``
+    None hides them all if any is visible, else shows them all."""
+    app = ctx.window  # transitional bridge (A3)
+    ids = {v for v in value_ids if v}
+    if not ids:
+        return
+    hidden = set(getattr(ctx.state.plot, "group_by_hidden_values", None) or ())
+    if target is None:
+        target = any(v not in hidden for v in ids)
+    new = (hidden | ids) if target else (hidden - ids)
+    if new == hidden:
+        return
+    ctx.state.plot.group_by_hidden_values = new
+    app._rebuild_all(invalidate=False)
+
+
+def _toggle_value_of_well(ctx, well_id: str) -> None:
+    """A plate click while grouped by a variable: hide or show the well's value."""
+    for rset in _value_sets(ctx):
+        if well_id in rset.wells:
+            _set_values_hidden(ctx, [rset.value_id])
+            return
+    # Not drawn under this grouping at all, so there is nothing to toggle — and
+    # a click that silently does nothing is the bug this path exists to fix.
+    vset = getattr(ctx.state.selection, "variables", None)
+    variable = vset.by_id(ctx.state.plot.group_by_variable) if vset else None
+    name = variable.name if variable is not None else "the Group by variable"
+    ctx.notify.set_status(
+        f"{well_id} has no {name} value, so it is not plotted while the plots "
+        f"are grouped by {name}. Give it one on Home → Sample Map → Variables.")
+
+
 #: The fallback plotting-leaf names, for a context with no feature registry to
 #: ask — see :func:`_rep_mirror_tabs`, which is what callers use.
 PLOTTING_TABS = frozenset({
@@ -331,6 +391,11 @@ def _select_plate_line(ctx, value: str, rc_index: int) -> None:
       what makes a second click on a fully-selected row clear it.
     """
     app = ctx.window  # transitional bridge (A3)
+    if _grouping_variable(ctx):  # grouped by a variable: values cross the line
+        _set_values_hidden(ctx, [
+            r.value_id for r in _value_sets(ctx)
+            if any(_well_rc(ctx, w)[rc_index] == value for w in r.wells)])
+        return
     if app._app_state.selection.selections:  # rep-mode
         crossing = [
             s for s in app._app_state.selection.selections
@@ -364,7 +429,9 @@ def select_col(ctx, col: str) -> None:
 
 def select_all(ctx) -> None:
     app = ctx.window  # transitional bridge (A3)
-    if app._app_state.selection.selections:  # rep-mode: show every group
+    if _grouping_variable(ctx):  # grouped by a variable: show every value
+        _set_values_hidden(ctx, [r.value_id for r in _value_sets(ctx)], target=False)
+    elif app._app_state.selection.selections:  # rep-mode: show every group
         _set_groups_hidden(ctx, app._app_state.selection.selections, target=False)
     else:
         app._app_state.selection.select_wells(app._app_state.dataset.well_paths.keys())
@@ -392,8 +459,14 @@ def select_none(ctx) -> None:
         _tab = app._current_centre_tab()
     except Exception:
         _tab = ""
-    rep_mode = bool(sel.selections) and not _is_per_well_tab(ctx, _tab)
-    if rep_mode:  # group mode: hide every group
+    grouping = bool(_grouping_variable(ctx))
+    rep_mode = (bool(sel.selections) or grouping) and not _is_per_well_tab(ctx, _tab)
+    if rep_mode and grouping:  # grouped by a variable: hide every value
+        _set_values_hidden(ctx, [r.value_id for r in _value_sets(ctx)], target=True)
+        if cleared_solo:
+            app._refresh_sidebar_map()
+            app._event_bus.selection_changed.emit(sel)
+    elif rep_mode:  # group mode: hide every group
         # _set_groups_hidden only refreshes when a group's hidden flag actually
         # flips; if every group was already hidden (or there were none to flip)
         # but we cleared solo wells, repaint + redraw explicitly so the button
@@ -458,6 +531,11 @@ def on_sidebar_plate_corner_toggled(ctx, select_all_target: bool) -> None:
     groups are defined, though the corner only emits this in passive mode.)
     """
     sels = app._app_state.selection.selections
+    if _grouping_variable(ctx):
+        hidden = set(getattr(ctx.state.plot, "group_by_hidden_values", None) or ())
+        any_visible = any(r.value_id not in hidden for r in _value_sets(ctx))
+        select_none(ctx) if any_visible else select_all(ctx)
+        return
     if sels:
         any_visible = any(not s.get("hidden") for s in sels)
         select_none(ctx) if any_visible else select_all(ctx)
@@ -471,6 +549,9 @@ def on_sidebar_plate_well_activated(ctx, well_id: str) -> None:
     # and (if it belongs to a saved group) every other well in the same
     # group. Solo-well clicks toggle membership in active_solo_wells.
     if well_id not in app._app_state.dataset.well_paths:
+        return
+    if _grouping_variable(ctx):
+        _toggle_value_of_well(ctx, well_id)
         return
     try:
         tab = app._current_centre_tab()
@@ -501,7 +582,7 @@ def on_sidebar_plate_well_activated(ctx, well_id: str) -> None:
 
 def on_sidebar_plate_row_activated(ctx, row: str) -> None:
     app = ctx.window  # transitional bridge (A3)
-    if app._app_state.selection.selections:
+    if app._app_state.selection.selections or _grouping_variable(ctx):
         select_row(ctx, row)
     else:
         # The widget already toggled the row and synced _selected_wells via
@@ -511,7 +592,7 @@ def on_sidebar_plate_row_activated(ctx, row: str) -> None:
 
 def on_sidebar_plate_col_activated(ctx, col: str) -> None:
     app = ctx.window  # transitional bridge (A3)
-    if app._app_state.selection.selections:
+    if app._app_state.selection.selections or _grouping_variable(ctx):
         select_col(ctx, col)
     else:
         on_plate_sel_change(ctx)
@@ -732,10 +813,31 @@ def refresh_sidebar_map_now(ctx) -> None:
     # Passive (group-visibility) only when no per-well pane is on screen — must
     # stay in lock-step with the plate handlers, or the next refresh tick would
     # repaint passive and wipe the per-well selection the handler just committed.
+    from review.domain.plot_members import plot_replicate_sets
+    from review.domain.selections_model import color_for_replicate_set
+
     rep_mode = _plate_passive_in_group_mode(ctx)
+    grouping = _grouping_variable(ctx) if rep_mode else ""
+    # What the plots draw, from the seam they draw it from. The plate's
+    # highlight and its counts are read off this rather than re-derived from
+    # the groups' ``hidden`` flags, which is how the plate and the plots came to
+    # disagree under a variable grouping: one read the flags, the other values.
+    plotted = list(plot_replicate_sets(ctx)) if rep_mode else []
+    plotted_wells = {w for r in plotted for w in r.wells
+                     if w in app._app_state.dataset.well_paths}
 
     colors: dict[str, object] = {}
-    if rep_mode:
+    if grouping:
+        # One colour per value, muted when hidden, so the plate is the legend
+        # of what a click will toggle.
+        hidden = set(getattr(ctx.state.plot, "group_by_hidden_values", None) or ())
+        for rset in _value_sets(ctx):
+            full_c = color_for_replicate_set(rset, app._app_state.selection.selections)
+            shade = app._mute_color(full_c) if rset.value_id in hidden else full_c
+            for tok in rset.wells:
+                if tok in app._app_state.dataset.well_paths:
+                    colors[tok] = shade
+    elif rep_mode:
         for s in app._app_state.selection.selections:
             full_c = app._sel_color(s)
             shade = app._mute_color(full_c) if s.get("hidden") else full_c
@@ -787,55 +889,42 @@ def refresh_sidebar_map_now(ctx) -> None:
     if rep_mode and not mirror_tab:
         plate.setSelectedWellIds([])
     elif rep_mode and mirror_tab:
-        # In rep-mode the "active" set is exactly the union of every non-hidden
-        # group's wells (+ solo wells). ``_selected_wells`` is not used here —
-        # clicks toggle each group's ``hidden`` flag so the visual state and the
-        # plot's ``_rep_sets_active()`` filter stay in lock-step.
-        visible_wells = {
-            w for s in app._app_state.selection.selections if not s.get("hidden")
-            for w in (s.get("wells") or []) if w in app._app_state.dataset.well_paths
-        }
-        visible_wells |= {
-            w for w in (app._app_state.selection.active_solo_wells or set())
-            if w in app._app_state.dataset.well_paths
-        }
-        plate.setSelectedWellIds(list(visible_wells))
+        # In rep-mode the "active" set is exactly the wells the plots draw:
+        # every visible group's (+ solo wells), or every visible value's under a
+        # variable grouping. ``_selected_wells`` is not used here — clicks
+        # toggle visibility, so the highlight and the plots stay in lock-step.
+        plate.setSelectedWellIds(list(plotted_wells))
     else:
         plate.setSelectedWellIds(list(app._app_state.selection.selected_wells))
 
-    # Count label / hint
+    # Count label / hint. Sets, not solo wells: a solo well is not one of the
+    # user's groups, and counting it as visible made "3/2 sets visible".
     loaded  = app._rep_sets_loaded() if rep_mode else []
-    n_vis   = len(app._rep_sets_active()) if rep_mode else len(app._app_state.selection.selected_wells)
+    n_vis   = (sum(1 for r in plotted if not getattr(r, "solo", False)) if rep_mode
+               else len(app._app_state.selection.selected_wells))
     n_loaded = len(loaded)
+    unit = "value(s)" if grouping else "set(s)"
     if hasattr(app, "_sel_count_lbl"):
         if rep_mode:
             n_hid = n_loaded - n_vis
-            app._sel_count_lbl.setText((f"{n_vis}/{n_loaded} set(s) visible"
-                      if n_hid else f"{n_loaded} set(s) — all visible"))
+            app._sel_count_lbl.setText((f"{n_vis}/{n_loaded} {unit} visible"
+                      if n_hid else f"{n_loaded} {unit} — all visible"))
         else:
             app._sel_count_lbl.setText((f"{n_vis} well{'s' if n_vis != 1 else ''} selected"
                       if n_vis else "No wells selected"))
     if hasattr(app, "_sel_count_chip"):
         total = len(app._app_state.dataset.well_paths)
         if rep_mode:
-            # Count *wells* across every visible group + active solo
-            # well, not groups. Earlier we showed group count here,
-            # which read as "1 / 96" for a group with 4 members.
-            active_wells: set = set()
-            for s in app._app_state.selection.selections:
-                if s.get("hidden"):
-                    continue
-                for w in (s.get("wells") or []):
-                    if w in app._app_state.dataset.well_paths:
-                        active_wells.add(w)
-            for w in (app._app_state.selection.active_solo_wells or set()):
-                if w in app._app_state.dataset.well_paths:
-                    active_wells.add(w)
-            app._sel_count_chip.setText(f"{len(active_wells)} / {total or 96}")
+            # Count the *wells* the plots draw, not the groups — a group count
+            # read as "1 / 96" for a group with 4 members.
+            app._sel_count_chip.setText(f"{len(plotted_wells)} / {total or 96}")
         else:
             app._sel_count_chip.setText(f"{n_vis} / {total or 96}")
     if hasattr(app, "_line_group_hint"):
-        if rep_mode:
+        if grouping:
+            app._line_group_hint.setText(
+                "Click a well to show or hide its value on the plot.")
+        elif rep_mode:
             app._line_group_hint.setText("Click a well to toggle its set's visibility on the plot.")
         else:
             app._line_group_hint.setText("")

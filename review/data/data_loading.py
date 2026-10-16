@@ -1422,17 +1422,14 @@ def plot_group_well_lists(ctx, fallback_to_all: bool = True) -> list[tuple[str, 
 
     out: list[tuple[str, list[str], Any]] = []
     if rep_sets:
-        in_any_group: set = set()
         for rset in rep_sets:
             wells = [w for w in rset.wells if w in well_paths]
-            in_any_group.update(wells)
             if not wells:
                 continue
-            out.append((rset.name, wells, rset))
-        active_solo = ctx.state.selection.active_solo_wells or set()
-        for w in sorted(w for w in active_solo
-                        if w in well_paths and w not in in_any_group):
-            out.append((w, [w], None))
+            # A solo well arrives from the seam as a set of one; it is still a
+            # well standing for itself, which is what ``None`` says here.
+            out.append((rset.name, wells,
+                        None if getattr(rset, "solo", False) else rset))
         return out
 
     if not selected:

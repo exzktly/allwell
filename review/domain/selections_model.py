@@ -187,6 +187,11 @@ def replicate_display_label(ctx, rset: Any) -> str:
     when that name looks auto-generated (``"1"`` / ``"Replicate 2"`` / ``"R3"``) —
     its member well labels so the axis stays interpretable. A8 teardown: pure
     ``ctx.state`` + ``well_display_label``, with no feature-side wrapper."""
+    if getattr(rset, "solo", False) and getattr(rset, "wells", None):
+        # A solo well stands for itself, so it is named the way the per-well
+        # plots name it — its Well Labels name or its variable values — rather
+        # than by its bare token.
+        return well_display_label(ctx, rset.wells[0])
     name = str(getattr(rset, "name", "") or "").strip()
     if not name:
         name = "Replicate"

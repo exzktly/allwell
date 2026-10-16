@@ -54,19 +54,66 @@ def plot_replicate_sets(ctx):
     already is, so every collector's existing grouped branch is reused — which
     is what keeps fifty-odd call sites and every saved per-sample control
     reference working.
+
+    **Visibility is decided here too, for both kinds of set.** The user's
+    groups carry a ``hidden`` flag; a variable's values are hidden through
+    ``ctx.state.plot.group_by_hidden_values``, which is what a plate click
+    writes while the plots are grouped by a variable. Hiding every value
+    empties the plots — it does not fall back to the user's groups, because
+    the fallback is for a variable that groups nothing, not for one whose
+    groups the user has switched off.
+
+    **A solo well is a set of one.** With groups defined, a click on a well in
+    no group adds it to ``active_solo_wells``; it is returned here, after the
+    groups, as a :class:`ReplicateSet` with ``solo=True``, keyed by its own
+    token. Every plot used to decide for itself whether solo wells existed, and
+    Bar Plots and Line Graphs decided they did not — the plate lit the well
+    and neither plot changed. Returning them from the one seam is what makes
+    "which wells are plotted" one answer again.
     """
     variable_id = _group_by_variable(ctx)
     if variable_id:
         sets = variable_replicate_sets(ctx, variable_id)
         if sets:
-            return sets
+            hidden = hidden_values(ctx)
+            return [s for s in sets if s.value_id not in hidden]
         # A variable that groups nothing — every well unassigned, or the
         # variable deleted while it was selected — falls back to the user's own
         # sets rather than emptying every plot in the app. The Variables tab is
         # where that shortfall is reported; a blank Bar tab three clicks away is
         # not an explanation.
-    return active_replicate_sets(
-        ctx.state.selection.selections, ctx.state.dataset.well_paths or {})
+    well_paths = ctx.state.dataset.well_paths or {}
+    sets = active_replicate_sets(ctx.state.selection.selections, well_paths)
+    return sets + solo_well_sets(ctx, sets)
+
+
+def hidden_values(ctx) -> frozenset[str]:
+    """The value ids of the Group-by variable that the user has hidden."""
+    plot = getattr(ctx.state, "plot", None)
+    return frozenset(getattr(plot, "group_by_hidden_values", None) or ())
+
+
+def solo_well_sets(ctx, rsets) -> list:
+    """One ``solo`` :class:`ReplicateSet` per active solo well, in plate order.
+
+    Only while the user has groups defined — solo wells are the per-well
+    clicks of group mode and mean nothing outside it. A well already inside
+    one of *rsets* is drawn there and is not repeated, and a well whose token
+    is also a group's name is skipped rather than given a second member under
+    the same key.
+    """
+    from review.domain.batch_models import ReplicateSet
+
+    sel = ctx.state.selection
+    if not getattr(sel, "selections", None):
+        return []
+    well_paths = ctx.state.dataset.well_paths or {}
+    taken_wells = {w for r in rsets for w in r.wells}
+    taken_names = {r.name for r in rsets}
+    solo = sorted((w for w in (getattr(sel, "active_solo_wells", None) or ())
+                   if w in well_paths and w not in taken_wells
+                   and w not in taken_names), key=parse_rc)
+    return [ReplicateSet(w, [w], solo=True) for w in solo]
 
 
 def plot_replicate_sets_loaded(ctx):
@@ -418,7 +465,7 @@ def variable_replicate_sets(ctx, variable_id: str):
             # auto-generated-name heuristic must not rewrite a dose of "10"
             # into the tokens of the wells that received it.
             out.append(ReplicateSet(variable.display_label(value.id), wells,
-                                    name_is_verbatim=True))
+                                    name_is_verbatim=True, value_id=value.id))
     return out
 
 

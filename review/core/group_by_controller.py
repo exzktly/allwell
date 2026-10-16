@@ -128,6 +128,7 @@ def refresh_group_by_combo(ctx) -> None:
         # variable the combo no longer offers and the two describe different
         # plots.
         ctx.state.plot.group_by_variable = ""
+        ctx.state.plot.group_by_hidden_values = set()
 
     group = ctx.widgets.get_or_none("_plotting_groupby_grp")
     if group is not None:
@@ -266,6 +267,9 @@ def set_decoration_variable(ctx, field: str, variable_id: str) -> None:
 def set_group_by_variable(ctx, variable_id: str) -> None:
     """Apply the choice, report what it leaves out, and redraw everything."""
     ctx.state.plot.group_by_variable = str(variable_id or "")
+    # Hidden values belong to the variable they were hidden under; carried
+    # over, they would hide whichever values of the next one share an id.
+    ctx.state.plot.group_by_hidden_values = set()
     _announce(ctx)
     # Through the bus rather than by calling a redraw directly: every tab pools
     # its wells through the same seam, so every tab's picture changed, and

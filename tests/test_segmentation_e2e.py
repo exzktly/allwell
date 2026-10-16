@@ -189,7 +189,8 @@ def _assert_clean_run(tab, completed: list[Path], out_dir: Path) -> None:
 
 
 def _read_rows(csv_path: Path) -> list[dict]:
-    with csv_path.open(newline="") as fh:
+    from util.csv_gz import open_csv_text
+    with open_csv_text(csv_path) as fh:
         return list(csv.DictReader(fh))
 
 
@@ -206,8 +207,10 @@ def _assert_outputs(
 
     per_well: dict[str, list[dict]] = {}
     for well in WELLS:
-        csv_path = out_dir / f"measurements_{well}.csv"
-        assert csv_path.exists(), (
+        # A finished well's CSV is gzipped; ``existing_csv`` finds either spelling.
+        from util.csv_gz import existing_csv
+        csv_path = existing_csv(out_dir / f"measurements_{well}.csv")
+        assert csv_path is not None, (
             f"no CSV for {well} in {sorted(p.name for p in out_dir.iterdir())}"
         )
         rows = _read_rows(csv_path)

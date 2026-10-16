@@ -18,6 +18,8 @@ Run with::
 """
 from __future__ import annotations
 
+import dataclasses
+
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -48,6 +50,12 @@ def _give_the_plate_focus(app, soft_share=0.35, sharp=0.30, soft=0.02):
             rng.normal(soft, 0.006, n_soft).clip(0.004, None)])
         rng.shuffle(vals)
         df[FOCUS_COLUMN] = vals[:n]
+        # The plate-wide "is the column there?" reads each well's open-time
+        # summary first, so the injected column has to be declared there too.
+        summaries = app._app_state.dataset.summaries
+        if label in summaries and FOCUS_COLUMN not in summaries[label].columns:
+            summaries[label] = dataclasses.replace(
+                summaries[label], columns=(*summaries[label].columns, FOCUS_COLUMN))
 
 
 # ── finding 3: a reset must not make the panel deny the measurement ─────────

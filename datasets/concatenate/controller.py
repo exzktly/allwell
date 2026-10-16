@@ -62,6 +62,7 @@ class ConcatenateController(DestinationToolController):
             self.page.dataset2_path(),
             self.page.destination_path(),
             gap_text=self.page.gap_text_if_entered(),
+            in_place=self.page.in_place(),
         )
         worker.logLine.connect(self.page.append_log)
         worker.wellsPlanned.connect(self._on_wells_planned)
@@ -73,6 +74,15 @@ class ConcatenateController(DestinationToolController):
         self._worker = worker
         worker.start()
 
+    def _on_run(self) -> None:
+        # In place there is no destination folder, so nothing to resume into
+        # and nothing to confirm: dataset 1 itself is the target, and the run
+        # is journalled rather than staged (datasets.concatenate.in_place).
+        if self.page.in_place():
+            self._launch()
+            return
+        super()._on_run()
+
     # ── job queue ────────────────────────────────────────────────────────────
     def collect_spec(self) -> dict:
         return {
@@ -83,6 +93,9 @@ class ConcatenateController(DestinationToolController):
             # the pre-filled default alone should take whatever the default
             # is when it runs, as a run started now would.
             "gap": self.page.gap_text_if_entered(),
+            # Add dataset 2 to dataset 1 in place rather than writing the
+            # destination; absent in a spec queued before the option existed.
+            "in_place": self.page.in_place(),
         }
 
     def _on_queue_requested(self) -> None:
@@ -94,6 +107,7 @@ class ConcatenateController(DestinationToolController):
         self.page.set_dataset2_path(spec.get("dataset2", ""))
         self.page.set_destination_path(spec.get("destination", ""))
         self.page.set_gap_text(spec.get("gap", ""))
+        self.page.set_in_place(bool(spec.get("in_place", False)))
 
     def start_from_queue(self, spec: dict) -> None:
         """A queued run is unattended by definition, so a destination that

@@ -60,6 +60,7 @@ from services.remote_run_state import refuse_remote_nanowell_incremental
 from services.subprocess_kill import signal_subprocess
 from pipeline.slurm_node import parse_node_specs
 from util.aw_safe import swallow, swallowed
+from util.zip_append import recover as recover_appends
 from pipeline.suspend import LOG_MARKER as _SUSPEND_LOG_MARKER
 
 _LOG = logging.getLogger("allwell.pipeline_runner")
@@ -1361,6 +1362,15 @@ class PipelineRunner:
                 input_dir, output_dir, on_success = resolved  # type: ignore[misc]
             else:
                 input_dir, output_dir = resolved  # type: ignore[misc]
+            # An in-place append (Concatenate's "add to dataset 1") that a crash
+            # left unfinished is undone before any archive is read; one still
+            # running elsewhere stops this run rather than reading half of it.
+            recovered = recover_appends(input_dir)
+            for line in recovered.lines:
+                self._enqueue(("line", f"[recover] {line}\n"))
+            if recovered.blocked:
+                self._enqueue_error(f"{recovered.blocked}\n")
+                return
             # A *well* archive, not any archive. ``has_well_zip`` asks the
             # well-token canonicaliser, which is the same question the pipeline
             # asks when it decides to segment from ``in/<WELL>.zip`` — so a

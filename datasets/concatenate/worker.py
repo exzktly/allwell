@@ -18,6 +18,7 @@ from datasets.concatenate.apply import execute_plan
 from datasets.concatenate.concatenate_compute import (
     ConcatError, build_merge_plan, parse_gap_hours,
 )
+from datasets.concatenate.in_place import append_in_place, build_append_plan, recover_dataset
 
 
 class ConcatenateWorker(QThread):
@@ -34,19 +35,32 @@ class ConcatenateWorker(QThread):
     failed = Signal(str)           # user-facing error message
 
     def __init__(self, ds1_root: str, ds2_root: str, dest_root: str,
-                 gap_text: str = "", parent=None) -> None:
+                 gap_text: str = "", parent=None, *, in_place: bool = False) -> None:
         super().__init__(parent)
         self._ds1_root = ds1_root
         self._ds2_root = ds2_root
         self._dest_root = dest_root
         self._gap_text = gap_text        # "" → the pre-filled default
+        # Append dataset 2 to dataset 1's own archives instead of writing a new
+        # dataset (datasets.concatenate.in_place); the destination is unused.
+        self._in_place = in_place
 
     def run(self) -> None:  # noqa: D401 — QThread entry point
         try:
+            # Either dataset may hold an in-place append a crash left unfinished;
+            # it is undone before anything reads the archives.
+            for root in (self._ds1_root, self._ds2_root):
+                recover_dataset(root, self.logLine.emit)
             self.logLine.emit("Validating datasets…")
             gap = parse_gap_hours(self._gap_text) if self._gap_text.strip() else None
-            plan = build_merge_plan(self._ds1_root, self._ds2_root, self._dest_root,
-                                    gap_hours=gap)
+            if self._in_place:
+                plan = build_append_plan(self._ds1_root, self._ds2_root, gap_hours=gap)
+            elif not self._dest_root.strip():
+                # Path("") is the working directory: a new dataset needs a folder named.
+                raise ConcatError("Choose a destination folder for the new dataset.")
+            else:
+                plan = build_merge_plan(self._ds1_root, self._ds2_root, self._dest_root,
+                                        gap_hours=gap)
         except ConcatError as exc:
             self.failed.emit(str(exc))
             return
@@ -55,11 +69,12 @@ class ConcatenateWorker(QThread):
             self.failed.emit(f"Unexpected error while planning: {exc}")
             return
 
-        all_wells = sorted(set(plan.wells_ds1_only) | set(plan.wells_ds2_only) | set(plan.wells_both))
-        self.wellsPlanned.emit(all_wells)
+        # In place, only the wells dataset 2 adds to are touched.
+        touched = set(plan.wells_ds2_only) | set(plan.wells_both)
+        self.wellsPlanned.emit(sorted(touched if plan.in_place else touched | set(plan.wells_ds1_only)))
 
         try:
-            summary = execute_plan(
+            summary = (append_in_place if plan.in_place else execute_plan)(
                 plan, self.logLine.emit, self.isInterruptionRequested,
                 progress=self.wellStage.emit,
                 sub_progress=self.wellFraction.emit,

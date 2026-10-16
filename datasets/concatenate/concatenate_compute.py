@@ -669,6 +669,16 @@ def _open_pair_for_preview(ds1_root, ds2_root):
     return value
 
 
+def open_pair_cached(ds1_root: Path | str, ds2_root: Path | str):
+    """:func:`open_pair` through the page's remembered reading (:func:`_open_pair_for_preview`).
+
+    For the page's other per-keystroke question, whether the pair can be added
+    in place (:func:`datasets.concatenate.in_place.in_place_refusal`). GUI thread
+    only; a run never reads through it.
+    """
+    return _open_pair_for_preview(ds1_root, ds2_root)
+
+
 def gap_preview(ds1_root: Path | str, ds2_root: Path | str, text: str) -> GapPreview:
     """The default, the resulting labels and any warning, before anything is copied.
 
@@ -852,6 +862,19 @@ class MergePlan:
     #: non-empty, so a plate's replicate sets, groups, notes and ratios simply
     #: were not in the merged dataset with nothing saying they had been left.
     ds2_blocks_dropped: tuple[str, ...] = ()
+    #: Dataset 2's images are appended to dataset 1's own archives rather than
+    #: copied with dataset 1 into a new folder: ``dest`` *is* dataset 1. See
+    #: :mod:`datasets.concatenate.in_place`.
+    in_place: bool = False
+
+
+def refuse_same_folder(ds1: DatasetPaths, ds2: DatasetPaths) -> None:
+    if ds1.root == ds2.root:
+        raise ConcatError(
+            "Dataset 1 and Dataset 2 are the same folder — concatenating a "
+            "dataset with itself isn't supported. Pick two different source "
+            "folders."
+        )
 
 
 def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path | str,
@@ -864,20 +887,13 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
     Reads only — the destination is not created or cleared here.
     """
     ds1, ds2, info1, info2, kind = open_pair(ds1_root, ds2_root)
-    raw = kind == KIND_RAW
-    ds2_raw = kind == KIND_ANALYSED_RAW
     dest_root = Path(dest_root)
     dest = DatasetPaths(root=dest_root, in_dir=dest_root / "in", out_dir=dest_root / "out")
 
     if dest.root in (ds1.root, ds2.root):
         raise ConcatError("The destination must be a different folder from both datasets.")
 
-    if ds1.root == ds2.root:
-        raise ConcatError(
-            "Dataset 1 and Dataset 2 are the same folder — concatenating a "
-            "dataset with itself isn't supported. Pick two different source "
-            "folders."
-        )
+    refuse_same_folder(ds1, ds2)
 
     if destination_is_complete_dataset(dest):
         raise ConcatError(
@@ -892,8 +908,23 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
             "into it risks overwriting or mixing in unrelated data. Choose "
             "an empty folder."
         )
-    dest_is_restart = destination_is_failed_run(dest)
+    return plan_pair(ds1, ds2, info1, info2, kind, dest=dest, gap_hours=gap_hours,
+                     dest_is_restart=destination_is_failed_run(dest))
 
+
+def plan_pair(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict, info2: dict, kind: str, *,
+              dest: DatasetPaths, gap_hours: float | None, dest_is_restart: bool = False,
+              in_place: bool = False) -> MergePlan:
+    """Validate an opened pair (:func:`open_pair`) and plan the merge into *dest*.
+
+    The half of planning that does not depend on where the result goes, shared
+    by :func:`build_merge_plan` (a new destination folder) and
+    :func:`datasets.concatenate.in_place.build_append_plan` (dataset 1 itself),
+    so the two can never disagree about which pairs are compatible, what the
+    gap is, or how dataset 2's timepoints are renamed.
+    """
+    raw = kind == KIND_RAW
+    ds2_raw = kind == KIND_ANALYSED_RAW
     if kind == KIND_ANALYSED:
         check_compatible(info1, info2)
     else:
@@ -973,4 +1004,5 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         dest_is_restart=dest_is_restart,
         format_warning=format_warning,
         column_warnings=() if (raw or ds2_raw) else column_warnings(ds1, ds2, wells_both),
+        in_place=in_place,
     )

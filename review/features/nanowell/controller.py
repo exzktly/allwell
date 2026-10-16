@@ -608,6 +608,12 @@ def export_page_csv(ctx) -> None:
     if st is None or st.metrics is None:
         ctx.notify.set_status("There are no nanowell tables loaded to save.")
         return
+    if st.computing or st.loaded_for is None or st.loaded_for[1] != st.baseline:
+        # The metrics on hand were computed for another baseline; written now, the file would label them with
+        # the new one (roll-up review X12).
+        ctx.notify.set_status(f"The nanowell metrics for baseline {st.baseline!r} are still being computed; "
+                              "save again once the page has drawn them.")
+        return
     path = ask_save_csv(ctx, "Save nanowell data", "nanowell_metrics.csv")
     if not path:
         return

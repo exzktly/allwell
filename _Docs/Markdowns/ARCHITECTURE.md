@@ -9188,7 +9188,8 @@ figure selects the nearest drawn dot within 6 px; Shift, ⌘ or Ctrl adds (up to
 (`nanowell`, `nanowell_detail`), the Properties dock and open-panel maps in `features/export/style.py`, the
 feature redraw in `features/export/sidebar_view._FIGURE_OWNING_FEATURES`, and `plot_card_actions._CARDS` for
 both cards. `view_state_io` makes a Saved Plot restore the whole configuration, the selected nanowells
-included. *Save nanowell data…* writes `long_format`; *Save cell data…* exports the per-cell rows of the drawn
+included. *Save nanowell data…* writes `long_format`, and is refused with a status while the metrics on hand
+were computed for another baseline than the one chosen (`loaded_for[1] != baseline`, or a load in flight); *Save cell data…* exports the per-cell rows of the drawn
 wells that carry a nanowell address (`cell_scope_compute`). The rail glyph map lives in
 `review/core/section_icons.py`. The Properties panel's Lines & Markers controls restyle the median line and
 the statistic marks; the beeswarm dots are deliberately not tagged `_aw_marker_collection`, because a dot's

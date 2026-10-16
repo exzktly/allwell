@@ -4374,7 +4374,8 @@ the crop is cut from the lower-resolution montage instead, and the caption under
 timepoint with no crop says why. Selecting nanowells does not change the plate selection.
 
 **Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the dataset as one
-long CSV, with the baseline and where the times came from. *Save cell data…* writes the per-cell rows of the
+long CSV, with the baseline and where the times came from. Right after you change the baseline it waits:
+until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
 drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
 is opened again.
 

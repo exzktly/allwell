@@ -354,3 +354,28 @@ def test_the_page_draws_the_wells_every_plotting_tab_draws(page, hidden, solo, e
     sel.active_solo_wells = solo
     assert nwc.active_wells(page) == expected
     assert sorted(w for _n, ws, _r in plot_group_well_lists(page, fallback_to_all=False) for w in ws) == expected
+
+
+def test_saving_while_another_baseline_is_being_computed_is_refused_and_says_so(page, qtbot, monkeypatch):
+    """Roll-up review X12: the file labelled the metrics with the baseline just chosen while they were still the
+    previous one's. Saving then is refused with the reason; once the page has them, it writes."""
+    import pandas as pd
+
+    import review.core.csv_export as csv_export
+
+    st = _loaded(qtbot, page)
+    st.apply_config({"baseline": "first_measurable"})          # chosen; the metrics are still the earliest's
+    from pathlib import Path
+
+    out = str(Path(page.state.dataset.data_dir) / "export.csv")
+    monkeypatch.setattr(csv_export, "ask_save_csv", lambda *_a, **_k: out)
+    statuses = []
+    monkeypatch.setattr(page.notify, "set_status", lambda text, *a, **k: statuses.append(text))
+    nwc.export_page_csv(page)
+    assert statuses[-1].startswith("The nanowell metrics for baseline 'first_measurable' are still being computed")
+    nwc.redraw(page)
+    qtbot.waitUntil(lambda: st.loaded_for[1] == "first_measurable" and not st.computing, timeout=20000)
+    nwc.export_page_csv(page)
+    written = pd.read_csv(out)
+    assert set(written["baseline"]) == {"first_measurable"}
+    assert set(written["baseline_timepoint"].dropna()) == set(st.metrics["baseline_timepoint"].dropna())

@@ -268,6 +268,54 @@ python allwell.py
 python allwell.py --data_dir C:\path\to\results
 ```
 
+#### rsync for remote runs (Windows)
+
+Only needed to run the pipeline on a remote host. Git for Windows ships
+`ssh.exe` but not `rsync.exe`, so rsync is added by hand. What matters is
+that `rsync.exe` and the `ssh.exe` it launches come from the **same**
+MSYS/Cygwin runtime (the same `msys-2.0.dll`). A mismatched pair fails
+before ssh even starts, with `dup() in/out/err failed` / `error in IPC
+code (code 14)` or exit 12 "connection unexpectedly closed". All-Well
+always uses the `ssh.exe` sitting beside the `rsync.exe` it found, so
+putting the two in one folder is the whole fix.
+
+**Option A — copy rsync into Git for Windows.** From
+<https://repo.msys2.org/msys/x86_64/> download the latest `.pkg.tar.zst`
+of each package below, extract it (7-Zip with zstd support, or
+`tar -I zstd -xf <file>` in Git Bash), and copy the listed file from its
+`usr/bin/` into `C:\Program Files\Git\usr\bin\`:
+
+| Package | File |
+|---|---|
+| `rsync` | `rsync.exe` |
+| `libxxhash` | `msys-xxhash-0.dll` |
+| `libzstd` | `msys-zstd-1.dll` |
+| `liblz4` | `msys-lz4-1.dll` |
+| `libopenssl` | `msys-crypto-3.dll` (only if Git lacks it) |
+
+Skip any DLL Git already has, and never copy `msys-2.0.dll` — Git's own
+copy is the runtime its `ssh.exe` uses. Then, in Git Bash, list anything
+still missing (no output means done):
+
+```bash
+ldd /usr/bin/rsync.exe | grep "not found"
+```
+
+**Option B — install MSYS2** (<https://www.msys2.org/>, default
+`C:\msys64`), then in an MSYS2 shell run `pacman -S rsync openssh`. Install
+both: without MSYS2's `openssh`, All-Well falls back to Git's `ssh.exe`,
+which is the mismatched pair above. Remove any `rsync.exe` from Git's
+`usr\bin` first, because All-Well looks there before `C:\msys64`.
+
+All-Well's search order for `rsync.exe` is Git for Windows `usr\bin`,
+cwRsync, `C:\msys64`, `C:\tools\msys64`, `C:\cygwin64`, then `PATH`. To
+check which pair it will use, run this from the repo root; both lines must
+name the same folder:
+
+```powershell
+python -c "from services.remote_config import resolve_rsync_binary as r, resolve_ssh_for_rsync as s; print(r()); print(s())"
+```
+
 To produce a distributable Windows bundle (optional — only if you want
 `AllWell.exe` for users who don't have the env), run this from the same
 Miniforge Prompt you have been using:

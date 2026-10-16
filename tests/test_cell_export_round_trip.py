@@ -62,6 +62,11 @@ def run_export(ctx, qtbot, monkeypatch, tmp_path, scope_fn, name="cells.csv"):
                         staticmethod(lambda *a, **k: (str(out), "")))
     export_cell_data_from(ctx, scope_fn)
     qtbot.waitUntil(lambda: out.exists(), timeout=30000)
+    # The file lands before the export finishes: its end-of-run handler is a
+    # queued callback, and until it runs a second export is refused as "already
+    # running" (a modal, here). Waiting for the file alone made the tests that
+    # export twice fail about one run in three.
+    qtbot.waitUntil(lambda: getattr(ctx.runtime.export, "cell_cancel", None) is None, timeout=30000)
     return read_export(out)
 
 

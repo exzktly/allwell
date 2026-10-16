@@ -107,7 +107,9 @@ _FINGERPRINT_KEY = b"aw_source_fingerprint"
 #: is what makes this a rule rather than a note: it pins the number against a
 #: hash of ``load_well_csv``'s own source and the constants it reads, so editing
 #: the parser without bumping this fails.
-PARSER_VERSION = 1
+#: 2: the parse moved to ``pyarrow.csv`` (``data_loading._read_well_table``), whose
+#: floats are correctly rounded where pandas' default parser was not.
+PARSER_VERSION = 2
 
 #: Set once a missing engine has been reported, so a 96-well load says it once.
 _engine_warned = False

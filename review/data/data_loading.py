@@ -72,17 +72,91 @@ def normalize_fov_series(fov: pd.Series) -> pd.Series:
     return _normalize_fov_series(fov)
 
 
-def _string_column_dtypes(path: Path) -> dict:
-    """``{column: str}`` for the text columns, keyed on their on-disk names.
+def _string_column_dtypes(names) -> dict:
+    """``{column: str}`` for the text columns among the header *names*.
 
-    A one-row-free header read, so the main read below can be told which
-    columns are text and left to type the rest itself. The names are the
-    *unrenamed* ones because the rename happens after the read.
+    The names are the on-disk, *unrenamed* ones, because the rename happens
+    after the read; the main read is told which columns are text and left to
+    type the rest itself.
     """
-    header = pd.read_csv(path, nrows=0)
-    return {c: str for c in header.columns
-            if str(c).strip().lower() in _STRING_COLS}
+    return {c: str for c in names if str(c).strip().lower() in _STRING_COLS}
 
+
+def _read_well_table(path: Path) -> pd.DataFrame:
+    """The raw table of a well CSV: text columns as text, the rest typed by the reader.
+
+    Read by ``pyarrow.csv`` when pyarrow is installed, and by ``pd.read_csv``
+    otherwise or whenever pyarrow cannot read the file. The two give the same
+    frame once :func:`load_well_csv` has finished with it, with two measured
+    exceptions, both where pandas is the one that is wrong:
+
+    * **Decimal floats.** pandas' default C parser does not round correctly;
+      pyarrow parses every value to ``float(text)``, as pandas'
+      ``float_precision="round_trip"`` does. Measured on 200,000 full-precision
+      values per range: pandas differs on 12% of values in [0, 1e4), all within
+      5 ULP, but on 91% in [0, 1e-3) and 32% of standard-normal values, where it
+      is up to ~7,400 ULP off — a relative error of up to 1e-12. Values written
+      to six decimals parse identically. On the benchmark's 1,104,480-row well
+      the pyarrow frame equals the round-trip pandas frame exactly, and 28.8%
+      of its float values differ from the default pandas parse. An integer too big for ``int64`` is
+      the same case: pandas reads ``99999999999999999999`` as
+      ``1.0000000000000002e+20``, pyarrow as ``1e+20``.
+    * **An integer above ``int64`` but within ``uint64``** stays ``uint64``
+      under pandas and becomes the nearest ``float64`` under pyarrow. No
+      measurement column holds one.
+
+    Everything else was held equal on a corpus of the mess these files carry
+    (``tests/test_typed_csv_parse.py``). The settings that make it so:
+
+    * The column names are pandas' own, read from the header and handed over,
+      so an unnamed column is ``Unnamed: 4`` and a repeated one ``v.1`` exactly
+      as before.
+    * The text columns are given ``string``, so a field label ``01`` or ``-1``
+      stays text — the defect that sank ``engine="pyarrow"`` (tracker M8).
+    * ``""`` is the only null, so ``NA`` / ``null`` stay text in a text column
+      and become NaN in a numeric one through ``load_well_csv``'s coercion.
+    * A column pyarrow reads as a date or time is handed on as its text, which
+      that coercion turns to NaN — what pandas, which reads none, gives.
+
+    A row with the wrong number of fields, a file pyarrow cannot decode, and an
+    empty file all fall back to pandas, which reads or rejects them as it always
+    has. pyarrow is measured 13x faster on a 1,104,480-row, 513 MB well (5.0 s
+    against 64.8 s) at about the same peak (1,417 MiB against 1,334 MiB).
+    """
+    # The header alone (``nrows=0``), read once for both readers. An empty file
+    # raises pandas' ``EmptyDataError`` here, as it always has.
+    names = [str(c) for c in pd.read_csv(path, nrows=0).columns]
+    text_dtypes = _string_column_dtypes(names)
+    table = _arrow_read(path, names, text_dtypes)
+    if table is not None:
+        return table
+    return pd.read_csv(path, dtype=text_dtypes, keep_default_na=False, na_values=[""])
+
+
+def _arrow_read(path: Path, names: list[str], text_dtypes: dict) -> pd.DataFrame | None:
+    """:func:`_read_well_table`'s pyarrow read, or ``None`` to fall back to pandas."""
+    try:
+        import pyarrow as pa
+        import pyarrow.compute as pc
+        import pyarrow.csv as pcsv
+    except ImportError:
+        return None
+    try:
+        table = pcsv.read_csv(
+            path,
+            read_options=pcsv.ReadOptions(column_names=names, skip_rows=1),
+            convert_options=pcsv.ConvertOptions(
+                column_types={c: pa.string() for c in text_dtypes},
+                null_values=[""], strings_can_be_null=True, quoted_strings_can_be_null=True),
+        )
+    except (pa.ArrowException, ValueError, OSError) as exc:
+        _logger.info("pyarrow could not read %s (%s); parsing it with pandas",
+                     Path(path).name, str(exc).splitlines()[0][:200] if str(exc) else type(exc).__name__)
+        return None
+    for i, field in enumerate(table.schema):
+        if pa.types.is_temporal(field.type):
+            table = table.set_column(i, field.name, pc.cast(table.column(i), pa.string()))
+    return table.to_pandas()
 
 #: A text column is worth storing as codes only while it repeats. Above this
 #: share of distinct values the codes array stops paying for itself and starts
@@ -171,8 +245,7 @@ def load_well_csv(path: Path) -> pd.DataFrame:
     ``NA`` / ``NaN`` / ``null`` stays that text in a string column and still
     coerces to NaN in a numeric one, exactly as before.
     """
-    df = pd.read_csv(path, dtype=_string_column_dtypes(path),
-                     keep_default_na=False, na_values=[""])
+    df = _read_well_table(path)
     if df.empty:
         return df
     for col in df.columns:

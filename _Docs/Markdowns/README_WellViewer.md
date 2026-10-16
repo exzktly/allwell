@@ -1613,10 +1613,17 @@ What this means in use:
 - **Every number is the same.** A well read back from disk carries everything
   you did to it — QC, gating, crop, manual exclusions, field and focus
   exclusions — because those are re-applied whenever a well is read.
-- **The first open of a dataset is the slow one.** Each CSV is parsed once and
-  kept beside it in a hidden `.aw_parquet` folder, with each well's summary;
-  later opens read those instead (a 1.1M-cell well reads back in about a fifth of
-  a second instead of fifteen).
+- **The first open of a dataset is the slow one.** Each CSV is parsed once
+  (about 4 seconds for a 1.1M-cell well) and kept beside it in a hidden
+  `.aw_parquet` folder, with each well's summary; later opens read those instead
+  (that well reads back in about a fifth of a second). A new version of All-Well
+  that parses differently re-parses each well once.
+- **Decimal values are read exactly.** Each number in a CSV is read as the
+  closest value the computer can hold to what is written. Earlier versions were
+  sometimes off by a tiny amount: up to about one part in a trillion
+  (1e-12) for values below 0.001, and in the last digit or so for larger ones. A
+  statistic or exported value may therefore differ from an earlier version's in
+  its last few significant digits.
 - **Plate-wide views read every well the first time**, then remember the few
   numbers they need per well until something changes them (a QC threshold, a
   gate, a crop). On a plate that does not fit, the first draw after such a change

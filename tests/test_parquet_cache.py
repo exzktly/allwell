@@ -158,12 +158,14 @@ def test_a_changed_parser_invalidates_every_cache():
         inspect.getsource(dl.load_well_csv),
         inspect.getsource(dl._categorize_text_columns),
         inspect.getsource(dl._string_column_dtypes),
+        inspect.getsource(dl._read_well_table),
+        inspect.getsource(dl._arrow_read),
         repr(sorted(dl._STRING_COLS)),
         repr(dl._CATEGORY_MAX_UNIQUE_SHARE),
     ])
     digest = hashlib.sha256(material.encode()).hexdigest()[:16]
 
-    assert (pc.PARSER_VERSION, digest) == (1, "2769ca5409532701"), (
+    assert (pc.PARSER_VERSION, digest) == (2, "ecad37e9dccb809c"), (
         "load_well_csv or a constant it reads has changed. Every cached frame "
         "on every user's disk was produced by the old one, and the fingerprint "
         "does not know that. Bump PARSER_VERSION so they all invalidate, then "

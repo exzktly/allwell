@@ -20,6 +20,7 @@ Positions are in micrometres in the registration's common frame (the "well frame
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 import numpy as np
 
@@ -686,10 +687,21 @@ def _consistency(located: dict, anchored, radius_um: float, reference: dict | No
     return {c.timepoint: c for c in check_consistency(lattices)}
 
 
+def _spill_montage(montage, folder: Path, stem: str):
+    """*montage* with its two arrays moved to ``.npy`` files in *folder* and read back as memory maps."""
+    folder.mkdir(parents=True, exist_ok=True)
+    arrays = {}
+    for name in ("image", "covered"):
+        path = folder / f"{stem}_{name}.npy"
+        np.save(path, getattr(montage, name))
+        arrays[name] = np.load(path, mmap_mode="r")
+    return replace(montage, **arrays)
+
+
 def run_well(well: str, record: dict, timepoints, load_phase, settings: NanowellSettings, *,
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
              expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None,
-             reference: dict | None = None, earliest_template=None) -> WellOutcome:
+             reference: dict | None = None, earliest_template=None, spill_dir=None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -703,7 +715,10 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     shared radius and the record's digest), because a different roster or tile placement makes it wrong.
     *reference* is a timepoint an earlier run kept (``timepoint``, ``pitch_um``, ``angle_deg``,
     ``roster_size`` from its grid block): the new timepoints are checked for consistency against it, as they
-    would have been had they run together.
+    would have been had they run together. *spill_dir*, when given, is where each timepoint's montage goes once
+    it is located: every timepoint is located before any is measured, so held in memory a long time-course
+    holds them all at once (~32 MB a timepoint at the 4096-pixel cap; roll-up review X23). Spilled, each is a
+    read-only memory map of a file there, which the caller removes with the rest of its scratch.
     """
     outcome = WellOutcome(well)
     timepoints = list(timepoints)
@@ -711,6 +726,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         images = _images_for(record, well, tp, load_phase)
         located = locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape,
                                    plate_rigid=(plate_rigid or {}).get(tp))
+        if spill_dir is not None and located.montage is not None:
+            located.montage = _spill_montage(located.montage, Path(spill_dir), f"{well}_{tp}")
         outcome.located[tp] = located
         outcome.timepoints[tp] = dict(located.grid) or {"status": located.status, "reason": located.reason}
         outcome.timepoints[tp]["record_digest"] = record_digest(record, well, tp)

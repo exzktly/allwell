@@ -14,6 +14,7 @@ import sys
 import zipfile
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from tifffile import imwrite
 
@@ -400,3 +401,27 @@ def test_a_custom_format_is_validated_with_a_message(tmp_path, monkeypatch, rend
     with pytest.raises(SystemExit):
         _run_main(monkeypatch, plate, *flags)
     assert message in capsys.readouterr().err
+
+
+def test_a_well_s_montages_are_spilled_into_its_scratch_and_go_with_it(tmp_path, monkeypatch, rendered_well):
+    """Roll-up review X23, through the real task: the montages are memory maps under the well's scratch while it
+    runs, the montage archive is still written from them, and nothing of them is left once the well is done."""
+    from pipeline import nanowell_run as nr
+
+    rendered, record, _ = rendered_well
+    plate = _write_plate(tmp_path, rendered, record)
+    seen = []
+    real = nr.run_well
+
+    def spy(*args, **kwargs):
+        outcome = real(*args, **kwargs)
+        seen.append((kwargs.get("spill_dir"), [type(l.montage.image) for l in outcome.located.values()]))
+        return outcome
+
+    monkeypatch.setattr(nr, "run_well", spy)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
+    (spill, kinds), = seen
+    assert spill is not None and spill.name == ".montages" and kinds == [np.memmap]
+    assert not spill.exists()
+    with zipfile.ZipFile(out / f"{WELL}_out.zip") as zf:
+        assert f"{WELL}_0h_montage.png" in zf.namelist()

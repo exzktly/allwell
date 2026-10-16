@@ -414,6 +414,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
                           fixed_radius_um=fixed, plate_rigid=plate_rigid, reference=_reference_of(prior),
                           checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key),
                           earliest_template=None if saved is None else saved[0],
+                          spill_dir=Path(scratch_dir) / ".montages",     # removed with the scratch (X23)
                           # A described grid states its shape, so a well short of a whole row or column is
                           # incomplete; a record's positions alone could not show the line that is missing.
                           expected_shape=tuple(pattern["grid"]) if described else None)

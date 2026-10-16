@@ -8915,6 +8915,8 @@ montage, estimates the lattice from its spectrum, detects the sites, scores the 
 square's orientation and the plate format, resolves the origin (fiducial, array centre, or a plate-rigid
 prediction handed in) and indexes the sites. `run_well` locates every timepoint first, takes **one shared array
 radius per well** (`shared_array_radius`) so every timepoint has the same roster, and only then
+— with each located montage spilled meanwhile to a memory-mapped `.npy` under the well's scratch
+(`spill_dir`, `<scratch>/.montages`), so a long time-course does not hold every montage in memory at once —
 `measure_timepoint`s each: owner-tile geometry at full resolution (fused sites on the montage),
 visibility on the montage, coverage from the registered rectangles, one template per timepoint pooled over
 the owner tiles, then `nanowell_measure` per tile. A timepoint with no origin is still measured on the sites

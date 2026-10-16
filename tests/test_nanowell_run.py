@@ -1,5 +1,7 @@
 """The (well, timepoint) task body on rendered tiles, against the array that was drawn."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -323,3 +325,23 @@ def test_a_bubble_over_the_central_square_does_not_refuse_the_timepoint_on_orien
     located = nr.locate_timepoint("T0", record_for(rendered), "A01", rendered.images, SETTINGS)
     assert (located.status, located.reason if located.status != nr.OK else "") == (nr.OK, "")
     assert located.origin_method != "fiducial"
+
+
+def test_a_spilled_well_holds_its_montages_on_disk_and_measures_the_same(tmp_path):
+    """Roll-up review X23: every timepoint is located before any is measured, so held in memory a time-course held
+    every montage at once. With *spill_dir* each located montage is a memory map of a file there, and the
+    numbers do not change."""
+    rendered, record = build_well()
+    again, again_record = build_well(rotation=9.0, array_shift_um=(120.0, -80.0), seed=2, timepoint="T1")
+    record["timepoints"].update(again_record["timepoints"])
+    record["tiles"] += again_record["tiles"]
+    images = {("T0", t): v for t, v in rendered.images.items()} | {("T1", t): v for t, v in again.images.items()}
+    run = lambda **kw: nr.run_well("A01", record, ["T0", "T1"], lambda tp, tile: images.get((tp, tile)),  # noqa: E731
+                                   SETTINGS, segmenter=threshold_segmenter(), **kw)
+    held, spilled = run(), run(spill_dir=tmp_path / "spill")
+    for tp in ("T0", "T1"):
+        montage = spilled.located[tp].montage
+        assert isinstance(montage.image, np.memmap) and isinstance(montage.covered, np.memmap)
+        assert Path(montage.image.filename).parent == tmp_path / "spill"
+        np.testing.assert_array_equal(montage.image, held.located[tp].montage.image)
+    assert spilled.sites == held.sites and spilled.cells == held.cells

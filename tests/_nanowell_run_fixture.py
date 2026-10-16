@@ -25,13 +25,14 @@ def record_for(rendered, *, well="A01", timepoint="T0", drop=(), started_at=None
     from util.acquisition_record import new_record, new_timepoint
 
     plan = rendered.plan
+    px = plan.pixel_size_um          # the plan's own, not the module's PX: a record must describe its tiles (X34)
     record = new_record()
     meta = new_timepoint(started_at=started_at)
-    meta.update(pixel_size_um={"x": PX, "y": PX}, tile_size_px={"x": plan.tile_px[0], "y": plan.tile_px[1]},
+    meta.update(pixel_size_um={"x": px, "y": px}, tile_size_px={"x": plan.tile_px[0], "y": plan.tile_px[1]},
                 declared_overlap_percent={"x": plan.overlap * 100, "y": plan.overlap * 100})
     record["timepoints"][timepoint] = meta
     record["tiles"] = [{"well": well, "timepoint": timepoint, "field": name,
-                        "mosaic_xy_px": [left / PX, top / PX], "stage_xy_um": None}
+                        "mosaic_xy_px": [left / px, top / px], "stage_xy_um": None}
                        for name, (left, top) in rendered.recorded_left_top_um.items() if name not in drop]
     return record
 

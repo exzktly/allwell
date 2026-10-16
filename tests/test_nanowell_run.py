@@ -389,3 +389,38 @@ def test_without_a_shared_radius_an_unaddressed_timepoint_is_a_failed_one_too(mo
     assert outcome.located["T0"].status == nr.UNADDRESSED
     assert outcome.timepoints["T0"]["status"] == nr.NO_LATTICE and outcome.sites == []
     assert outcome.timepoints["T0"]["status"] in nr.TERMINAL_WITHOUT_ROWS
+
+
+@pytest.mark.parametrize("pitch_um, diameter_um, px, fmt", [
+    (172.0, 100.0, 1.3, "100um"),       # the 100 um plate at a finer pixel size than the other tests use
+    (143.0, 50.0, 1.3, "50um"),
+    (120.0, 70.0, 1.3, "custom"),       # a plate no preset describes
+    (300.0, 200.0, 2.0, "custom"),
+])
+def test_a_plate_is_located_at_its_own_pitch_and_pixel_size(pitch_um, diameter_um, px, fmt):
+    """Tracker X34: the fixture's record wrote 4.3 um/px whatever the tiles' pixel size, so no test ever placed
+    tiles at another one — and a probe that looked like the pipeline failing at 2 um/px was the fixture. A plate of
+    any hex geometry, given as the custom format, is located and its addresses are the ones drawn."""
+    from tests._nanowell_run_fixture import record_for
+    from tests._nanowell_synth import TilePlan, render_tiles
+
+    extent_um = 3000.0
+    tile = int(round(extent_um / 1.9 / px))
+    plan = TilePlan(2, 2, (tile, tile), 0.1, px)
+    full = (plan.step_um[0] + plan.extent_um[0], plan.step_um[1] + plan.extent_um[1])
+    rendered = render_tiles(plan, pitch_um=pitch_um, diameter_um=diameter_um, radius_um=0.3 * min(full),
+                            rotation_deg=5.0, noise_sigma=0.05, blur_px=1.0, seed=3)
+    settings = (nr.NanowellSettings("custom", custom=(pitch_um, diameter_um)) if fmt == "custom"
+                else nr.NanowellSettings(fmt))
+    located = nr.locate_timepoint("T0", record_for(rendered), "A01", rendered.images, settings)
+    assert (located.status, located.reason) == (nr.OK, "")
+    assert located.fit.pitch == pytest.approx(pitch_um, rel=0.01)
+    truth = {tuple(map(float, s)): a for s, a in zip(rendered.sites_um, rendered.array.addresses)}
+    sites = np.array(list(truth))
+    addressed = wrong = 0
+    for point, entry in zip(located.detected_common, located.indexed):
+        if entry.q is None:
+            continue
+        addressed += 1
+        wrong += (entry.q, entry.r) != truth[tuple(sites[np.argmin(np.linalg.norm(sites - point, axis=1))])]
+    assert wrong == 0 and addressed >= 0.9 * len(located.indexed)

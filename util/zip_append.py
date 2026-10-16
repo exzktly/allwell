@@ -67,12 +67,15 @@ import logging
 import os
 import socket
 import struct
+import subprocess
+import sys
 import threading
 import time
 import uuid
 import zipfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 from util.aw_safe import swallow
@@ -89,6 +92,7 @@ __all__ = [
     "locate_tail",
     "pending_journals",
     "recover",
+    "recover_paths",
 ]
 
 _LOG = logging.getLogger("allwell.zip_append")
@@ -120,10 +124,12 @@ class AppendJournalError(Exception):
 
 @dataclass(frozen=True)
 class Tail:
-    """Where an archive's central directory starts, and how long the file is."""
+    """Where an archive's central directory starts, how long the file is, and
+    how many entries its end record declares."""
 
     offset: int
     length: int
+    entries: int = -1
 
 
 def journal_path(archive: Path) -> Path:
@@ -174,7 +180,7 @@ def locate_tail(archive: Path) -> Tail:
         else:
             raise AppendJournalError(f"{archive.name} is not a readable zip archive "
                                      "(no end-of-central-directory record).")
-        _sig, disk, cd_disk, _n_disk, _n_total, cd_size, cd_offset, _comment = fields
+        _sig, disk, cd_disk, _n_disk, entries, cd_size, cd_offset, _comment = fields
         eocd_at = size - back + pos
         record_at = eocd_at
         if eocd_at >= _Z64_LOCATOR.size:
@@ -187,7 +193,7 @@ def locate_tail(archive: Path) -> Tail:
                 if len(record) != _Z64_EOCD.size or record[:4] != _Z64_EOCD_SIG:
                     raise AppendJournalError(f"{archive.name}: its ZIP64 end record is missing "
                                              "or damaged.")
-                (_s, _sz, _vm, _vn, disk, cd_disk, _nd, _nt,
+                (_s, _sz, _vm, _vn, disk, cd_disk, _nd, entries,
                  cd_size, cd_offset) = _Z64_EOCD.unpack(record)
                 record_at = z64_at
     if disk or cd_disk:
@@ -197,12 +203,83 @@ def locate_tail(archive: Path) -> Tail:
             f"{archive.name} has data before its first member (or a damaged central "
             "directory), so appending would rewrite more than its end; it can't be "
             "appended to in place.")
-    return Tail(offset=cd_offset, length=size)
+    return Tail(offset=cd_offset, length=size, entries=entries)
+
+
+# ── who wrote a journal ──────────────────────────────────────────────────────
+def _host() -> str:
+    return socket.gethostname()
+
+
+@lru_cache(maxsize=1)
+def _machine_id() -> str | None:
+    """A stable identity for this computer, or ``None`` when none can be read.
+
+    The hostname is not one: macOS changes ``gethostname()`` with the network
+    it is on, and a journal judged "from another computer" because the laptop
+    moved from the office to home could never be undone in the app.
+    """
+    if sys.platform.startswith("linux"):
+        for candidate in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            try:
+                text = Path(candidate).read_text().strip()
+            except OSError:
+                continue
+            if text:
+                return f"linux:{text}"
+        return None
+    if sys.platform == "darwin":  # pragma: no cover - exercised on macOS only
+        try:
+            out = subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                                 capture_output=True, text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for line in out.splitlines():
+            if "IOPlatformUUID" in line and "=" in line:
+                return "mac:" + line.split("=", 1)[1].strip().strip('"')
+        return None
+    if os.name == "nt":  # pragma: no cover - exercised on Windows only
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"SOFTWARE\Microsoft\Cryptography") as key:
+                return "win:" + str(winreg.QueryValueEx(key, "MachineGuid")[0])
+        except OSError:
+            return None
+    return None
+
+
+def _process_started(pid: int) -> str | None:
+    """When process *pid* started, as an opaque token, or ``None`` when unknown.
+
+    Recorded beside the pid so that a pid the system has since given to another
+    process is recognised as a dead run rather than a live one.
+    """
+    if sys.platform.startswith("linux"):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+        except OSError:
+            return None
+        fields = stat.rsplit(")", 1)[-1].split()
+        return f"linux:{fields[19]}" if len(fields) > 19 else None
+    if os.name == "nt":  # pragma: no cover - Windows: no start time, liveness only
+        return None
+    try:  # pragma: no cover - macOS and other POSIX systems
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return f"ps:{out}" if out else None
+
+
+def _identity() -> dict:
+    pid = os.getpid()
+    return {"pid": pid, "pstart": _process_started(pid), "host": _host(),
+            "machine": _machine_id()}
 
 
 # ── journal files ────────────────────────────────────────────────────────────
-def _host() -> str:
-    return socket.gethostname()
 
 
 def _publish(path: Path, payload: bytes) -> None:
@@ -214,6 +291,61 @@ def _publish(path: Path, payload: bytes) -> None:
         os.fsync(handle.fileno())
     os.replace(tmp, path)
     fsync_path(path.parent)
+
+
+def _publish_exclusive(path: Path, payload: bytes) -> None:
+    """Like :func:`_publish`, but fail when *path* already exists.
+
+    Two appends into one folder can both pass "no journal here yet"; only one
+    may then claim it. A hard link is atomic and refuses an existing target;
+    where links are unsupported, an exclusive create (not atomic in content,
+    which :func:`recover` tolerates while no archive has been touched).
+    """
+    tmp = path.with_name(path.name + _TMP_SUFFIX + f".{os.getpid()}")
+    with open(tmp, "wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        try:
+            os.link(tmp, path)
+        except FileExistsError as exc:
+            raise AppendJournalError(f"Another in-place append into {path.parent} has just "
+                                     "started; this one was not begun.") from exc
+        except OSError:
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            except FileExistsError as exc:
+                raise AppendJournalError(f"Another in-place append into {path.parent} has "
+                                         "just started; this one was not begun.") from exc
+            try:
+                os.write(fd, payload)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+    finally:
+        tmp.unlink(missing_ok=True)
+    fsync_path(path.parent)
+
+
+def _local_headers(archive: Path, offsets: list[int]) -> str:
+    """SHA-256 over the local header (fixed part, name, extra) at each offset.
+
+    What an undo checks before writing anything: the members it would restore
+    a central directory for must still be where, and what, they were. A
+    whole-file rewrite by any other writer moves or re-spells them.
+    """
+    digest = hashlib.sha256()
+    size = archive.stat().st_size
+    with open(archive, "rb") as handle:
+        for offset in offsets:
+            if offset + 30 > size:
+                return "missing"
+            handle.seek(offset)
+            fixed = handle.read(30)
+            name_len, extra_len = struct.unpack("<HH", fixed[26:30])
+            digest.update(fixed + handle.read(name_len + extra_len))
+    return digest.hexdigest()
 
 
 def _read_journal(journal: Path) -> tuple[dict, bytes]:
@@ -244,6 +376,10 @@ def _restore(journal: Path) -> str:
     if header["kind"] == _KIND_CREATED:
         existed = archive.exists()
         archive.unlink(missing_ok=True)
+        # The staging file a create that died mid-write leaves beside it
+        # (util.zip_write's ``__aw_tmp_<name>.pid<N>``).
+        for staging in archive.parent.glob(f"__aw_tmp_{archive.name}.pid*"):
+            staging.unlink(missing_ok=True)
         journal.unlink()
         fsync_path(journal.parent)
         return (f"{archive.name}: removed the archive the unfinished append had created."
@@ -252,9 +388,7 @@ def _restore(journal: Path) -> str:
     if not archive.exists():
         raise AppendJournalError(f"{archive.name} is missing; its journal is kept in "
                                  f"{journal.name} so it can still be restored.")
-    if archive.stat().st_size < offset:
-        raise AppendJournalError(f"{archive.name} is shorter than it was before the append "
-                                 "began, so its earlier members are damaged; its journal is kept.")
+    _refuse_unless_untouched(archive, header)
     with open(archive, "r+b") as handle:
         handle.seek(offset)
         handle.write(tail)
@@ -269,13 +403,55 @@ def _restore(journal: Path) -> str:
         raise AppendJournalError(f"{archive.name} did not read back as it was after the "
                                  "restore; its journal is kept.")
     with zipfile.ZipFile(archive) as check:
-        members = len(check.infolist())
-    if members != int(header["members"]):
-        raise AppendJournalError(f"{archive.name} lists {members} member(s) after the restore, "
-                                 f"not its original {header['members']}; its journal is kept.")
+        infos = check.infolist()
+        if len(infos) != int(header["members"]):
+            raise AppendJournalError(f"{archive.name} lists {len(infos)} member(s) after the "
+                                     f"restore, not its original {header['members']}; its "
+                                     "journal is kept.")
+        for info in infos:
+            # Opening reads the member's local header and checks its signature
+            # and name against the restored directory; no data is read.
+            try:
+                check.open(info).close()
+            except (zipfile.BadZipFile, OSError) as exc:
+                raise AppendJournalError(f"{archive.name}: member {info.filename!r} does not "
+                                         f"open after the restore ({exc}); its journal is "
+                                         "kept.") from exc
     journal.unlink()
     fsync_path(journal.parent)
     return f"{archive.name}: restored to its {header['members']} member(s) from before the append."
+
+
+def _refuse_unless_untouched(archive: Path, header: dict) -> None:
+    """Raise unless every byte below the saved tail is still what the journal saw.
+
+    Writing the old tail back is only an undo when the members in front of it
+    are the ones it describes. Something else may have rewritten the archive
+    whole since — Analyze folding a loose image into it is one — and writing a
+    stale directory into that file reports "restored" over an archive that no
+    longer reads. Two checks, both cheap on a multi-gigabyte file: the size and
+    modification time recorded once the append had finished (absent when the
+    process died part-way, when nothing but that process wrote the file), and
+    a hash of every old member's local header at its old offset.
+    """
+    offset = int(header["tail_offset"])
+    stat = archive.stat()
+    keep = "; its journal is kept and nothing was changed."
+    if stat.st_size < offset:
+        raise AppendJournalError(f"{archive.name} is shorter than it was before the append "
+                                 f"began, so its earlier members are damaged{keep}")
+    stamp = header.get("appended")
+    if stamp and (stat.st_size, stat.st_mtime_ns) != (stamp["size"], stamp["mtime_ns"]):
+        raise AppendJournalError(
+            f"{archive.name} was changed by something else after the unfinished append "
+            f"(size {stat.st_size}, was {stamp['size']}), so undoing it would damage it{keep} "
+            "Check the archive, then delete the journal files by hand.")
+    if "headers_sha256" in header and _local_headers(
+            archive, list(header.get("offsets") or [])) != header["headers_sha256"]:
+        raise AppendJournalError(
+            f"{archive.name}'s earlier members are no longer where or what they were when the "
+            f"append began, so undoing it would damage the archive{keep} Check the archive, "
+            "then delete the journal files by hand.")
 
 
 # ── the write guard ──────────────────────────────────────────────────────────
@@ -364,9 +540,8 @@ class AppendRun:
                 preserved[rel] = (base64.b64encode(path.read_bytes()).decode("ascii")
                                   if path.exists() else None)
             payload = {"format": _RUN_FORMAT, "version": _VERSION, "run": self._run_id,
-                       "pid": os.getpid(), "host": _host(), "started": time.time(),
-                       "preserved": preserved}
-            _publish(self.in_dir / RUN_JOURNAL_NAME, json.dumps(payload).encode("utf-8"))
+                       **_identity(), "started": time.time(), "preserved": preserved}
+            _publish_exclusive(self.in_dir / RUN_JOURNAL_NAME, json.dumps(payload).encode("utf-8"))
         except BaseException:
             self._release()
             raise
@@ -395,7 +570,7 @@ class AppendRun:
     # work ------------------------------------------------------------------
     def _header(self, archive: Path, kind: str) -> dict:
         return {"format": _FORMAT, "version": _VERSION, "kind": kind, "archive": archive.name,
-                "run": self._run_id, "pid": os.getpid(), "host": _host()}
+                "run": self._run_id, **_identity()}
 
     def append(self, archive: Path, write: Callable[[zipfile.ZipFile], None]) -> None:
         """Journal *archive*, open it for append, let *write* add members, then check.
@@ -407,7 +582,17 @@ class AppendRun:
         archive = Path(archive)
         tail = locate_tail(archive)
         with zipfile.ZipFile(archive) as before_zf:
-            before = _member_identity(before_zf.infolist())
+            infos = before_zf.infolist()
+        before = _member_identity(infos)
+        if tail.entries != len(before):
+            # zipfile found a different end record from ours — a comment that
+            # happens to hold the end-record signature — and would append
+            # against a directory that is not the archive's.
+            raise AppendJournalError(
+                f"{archive.name}'s end record declares {tail.entries} member(s) but zipfile "
+                f"reads {len(before)} (a comment that looks like an end record?); it can't be "
+                "appended to in place.")
+        offsets = [info.header_offset for info in infos]
         with open(archive, "rb") as handle:
             handle.seek(tail.offset)
             saved = handle.read()
@@ -415,7 +600,8 @@ class AppendRun:
             raise AppendJournalError(f"{archive.name} changed while its journal was being written.")
         header = self._header(archive, _KIND_TAIL)
         header.update(length=tail.length, tail_offset=tail.offset, members=len(before),
-                      tail_sha256=hashlib.sha256(saved).hexdigest())
+                      tail_sha256=hashlib.sha256(saved).hexdigest(), offsets=offsets,
+                      headers_sha256=_local_headers(archive, offsets))
         _publish(journal_path(archive), json.dumps(header).encode("utf-8") + b"\n" + saved)
         with open(archive, "r+b") as raw:
             guard = _FloorGuard(raw, tail.offset)
@@ -423,6 +609,10 @@ class AppendRun:
                 write(zf)
             raw.flush()
             os.fsync(raw.fileno())
+        # The archive as this run left it; an undo refuses a file that differs.
+        stat = archive.stat()
+        header["appended"] = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+        _publish(journal_path(archive), json.dumps(header).encode("utf-8") + b"\n" + saved)
         with zipfile.ZipFile(archive) as after_zf:
             after = _member_identity(after_zf.infolist())
         if after[:len(before)] != before:
@@ -524,46 +714,93 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def _same_computer(header: dict) -> bool:
+    """Whether *header* was written on this computer: by machine id when both
+    sides have one (the hostname drifts with the network on macOS), else by name."""
+    recorded, here = header.get("machine"), _machine_id()
+    if recorded and here:
+        return recorded == here
+    return header.get("host") == _host()
+
+
 def _owner_blocks(header: dict, where: Path) -> str:
-    """Why the process that wrote *header* may still be working, or ``""``."""
-    host, pid = header.get("host"), int(header.get("pid") or 0)
-    if host != _host():
-        return (f"An in-place append into {where} was started on {host!r} and not finished. "
-                "Open the dataset on that computer to undo it, or wait for it to finish.")
-    if pid != os.getpid() and _pid_alive(pid):
-        return (f"An in-place append into {where} is still running in process {pid}; "
-                "it was left alone.")
-    return ""
+    """Why the process that wrote *header* may still be working, or ``""``.
+
+    A pid that is alive but started at a different time from the one recorded
+    is a recycled pid, so its run is dead. A pid that is alive and whose start
+    time cannot be compared is treated as alive: an undo under a live append
+    would destroy it, and the page's "undo anyway" exists for that case.
+    """
+    if not _same_computer(header):
+        return (f"An in-place append into {where} was started on {header.get('host')!r} and "
+                "not finished. Open the dataset on that computer to undo it, or undo it anyway "
+                "from the Concatenate page if that computer is not still running it.")
+    pid = int(header.get("pid") or 0)
+    if pid == os.getpid() or not _pid_alive(pid):
+        return ""
+    recorded, current = header.get("pstart"), _process_started(pid)
+    if recorded and current and recorded != current:
+        return ""                                   # the pid now belongs to another process
+    return (f"An in-place append into {where} is still running in process {pid}; it was "
+            "left alone. If that process is not All-Well, undo it anyway from the "
+            "Concatenate page.")
 
 
-def recover(in_dir: Path) -> Recovery:
+def recover(in_dir: Path, *, force: bool = False) -> Recovery:
     """Undo an unfinished in-place append in *in_dir*, or clear a finished one's leftovers.
 
     Safe to call on every open: with nothing to do it reads one directory
     listing. Never raises for a run it must leave alone — it returns
     :attr:`Recovery.blocked` — and raises :class:`AppendJournalError` only when
-    an undo it attempted could not complete.
+    an undo it attempted could not complete or was refused as unsafe.
+
+    *force* skips the judgement of whether the recorded process may still be
+    running (another computer, a live pid): the page's "undo anyway", asked
+    only after the user has confirmed. It never overrides a run this process
+    holds, and never the checks that the archive is still the one journalled.
+
+    The folder is claimed in the in-process registry for the whole recovery, so
+    an append cannot start in it — and a second recovery cannot run — meanwhile.
     """
     in_dir = Path(in_dir)
     result = Recovery()
-    if not in_dir.is_dir():
+    if not in_dir.is_dir() or not _has_journal_files(in_dir):
         return result
-    run = in_dir / RUN_JOURNAL_NAME
-    journals = sorted(in_dir.glob(f".*{JOURNAL_SUFFIX}"))
-    stray_tmp = sorted(in_dir.glob(f".*{JOURNAL_SUFFIX}{_TMP_SUFFIX}"))
-    run_tmp = in_dir / (RUN_JOURNAL_NAME + _TMP_SUFFIX)
-    if not (run.exists() or journals or stray_tmp or run_tmp.exists()):
-        return result
+    key = _key(in_dir)
     with _ACTIVE_LOCK:
-        if _key(in_dir) in _ACTIVE:
+        if key in _ACTIVE:
             result.blocked = f"An in-place append into {in_dir} is running in this window; it was left alone."
             return result
+        _ACTIVE.add(key)
+    try:
+        return _recover_claimed(in_dir, force=force)
+    finally:
+        with _ACTIVE_LOCK:
+            _ACTIVE.discard(key)
+
+
+def _has_journal_files(in_dir: Path) -> bool:
+    return any(in_dir.glob(f".*{JOURNAL_SUFFIX}*")) or any(in_dir.glob(f"{RUN_JOURNAL_NAME}*"))
+
+
+def _recover_claimed(in_dir: Path, *, force: bool) -> Recovery:
+    result = Recovery()
+    run = in_dir / RUN_JOURNAL_NAME
+    journals = sorted(in_dir.glob(f".*{JOURNAL_SUFFIX}"))
+    stray_tmp = sorted([*in_dir.glob(f".*{JOURNAL_SUFFIX}{_TMP_SUFFIX}"),
+                        *in_dir.glob(f"{RUN_JOURNAL_NAME}{_TMP_SUFFIX}*")])
     if run.exists():
         try:
             header = json.loads(run.read_text(encoding="utf-8"))
         except (ValueError, OSError) as exc:
-            raise AppendJournalError(f"{run} is damaged ({exc}); nothing was changed.") from exc
-        result.blocked = _owner_blocks(header, in_dir)
+            if journals:
+                raise AppendJournalError(f"{run} is damaged ({exc}); nothing was changed.") from exc
+            # Torn while being created, before any archive was touched.
+            run.unlink()
+            result.lines.append(f"{RUN_JOURNAL_NAME}: removed an unfinished run journal; no "
+                                "archive had been touched.")
+            return result
+        result.blocked = "" if force else _owner_blocks(header, in_dir)
         if result.blocked:
             return result
         # A journal still being published was never followed by a write to its
@@ -573,14 +810,14 @@ def recover(in_dir: Path) -> Recovery:
         result.lines = ["An in-place append into this dataset did not finish; undoing it."]
         result.lines += _rollback(in_dir)
         return result
-    for tmp in [*stray_tmp, *([run_tmp] if run_tmp.exists() else [])]:
+    for tmp in stray_tmp:
         tmp.unlink(missing_ok=True)
     for journal in journals:
         try:
             header, _tail = _read_journal(journal)
         except AppendJournalError:
             header = {}
-        blocked = _owner_blocks(header, in_dir) if header else ""
+        blocked = _owner_blocks(header, in_dir) if header and not force else ""
         if blocked:
             result.blocked = blocked
             continue
@@ -588,3 +825,25 @@ def recover(in_dir: Path) -> Recovery:
         result.lines.append(f"{_archive_for(journal).name}: its in-place append had finished; "
                             "removed the leftover journal.")
     return result
+
+
+def recover_paths(*paths: Path | str) -> Recovery:
+    """:func:`recover` every folder a run may read: each path, and its ``in/`` beside it.
+
+    For a caller that holds a dataset root, an ``in/`` folder, or a raw input
+    folder and does not yet know which — the Analyze runner before it resolves
+    its input. Lines from every folder are kept; the first block is returned.
+    """
+    total = Recovery()
+    seen: set[str] = set()
+    for raw in paths:
+        if not raw:
+            continue
+        for folder in (Path(raw), Path(raw) / "in"):
+            if not folder.is_dir() or _key(folder) in seen:
+                continue
+            seen.add(_key(folder))
+            one = recover(folder)
+            total.lines += one.lines
+            total.blocked = total.blocked or one.blocked
+    return total

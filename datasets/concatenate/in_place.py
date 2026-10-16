@@ -45,6 +45,7 @@ Qt-free; :mod:`~datasets.concatenate.worker` runs it off the UI thread.
 
 from __future__ import annotations
 
+import logging
 import threading
 import zipfile
 import zlib
@@ -74,6 +75,7 @@ from datasets.core.provenance import record_derivation
 from datasets.core.zip_passthrough import copy_member_raw, member_is_raw_copyable
 from util.acquisition_record import AcquisitionRecordError, read_record, record_path
 from util.image_exts import is_run_input_member
+from util.aw_safe import swallowed
 from util.zip_append import AppendJournalError, AppendRun, recover
 
 #: How many colliding names a refusal spells out before it says "and N more".
@@ -175,6 +177,8 @@ class WellAppend:
     target: Path                       # dataset 1's archive (created when absent)
     source: Path                       # dataset 2's container, a zip or a folder
     members: list[tuple[str, str]] = field(default_factory=list)   # (source name, destination name)
+    #: Destination name → dataset 2's (CRC, size), as planned: what verification expects.
+    expected: dict[str, tuple[int, int]] = field(default_factory=dict)
     junk_skipped: int = 0
     unshifted: list[str] = field(default_factory=list)
 
@@ -183,11 +187,31 @@ class WellAppend:
         return not self.target.exists()
 
 
+def _file_content(path: Path) -> tuple[int, int]:
+    """(CRC-32, size) of a loose file, read in chunks."""
+    crc, size = 0, 0
+    with open(path, "rb") as handle:
+        while chunk := handle.read(_READ_CHUNK):
+            crc = zlib.crc32(chunk, crc)
+            size += len(chunk)
+    return crc & 0xFFFFFFFF, size
+
+
 def _source_members(source: Path) -> list[tuple[str, tuple[int, int] | None]]:
-    """``(name, (crc, size))`` of every file in *source*; ``None`` content for a folder's."""
+    """``(name, (crc, size))`` of every file in *source*.
+
+    A zip's come from its central directory. A folder's are read: a folder has
+    no stored checksum, and without one a second run of the same append would
+    pass the content check and add the timepoint again under new names. OS
+    debris is not read (``None``); it is never appended.
+    """
     if source.is_dir():
-        return [(path.relative_to(source).as_posix(), None)
-                for path in sorted(source.rglob("*")) if path.is_file()]
+        out = []
+        for path in sorted(source.rglob("*")):
+            if path.is_file():
+                name = path.relative_to(source).as_posix()
+                out.append((name, None if is_os_junk_member(name) else _file_content(path)))
+        return out
     with zipfile.ZipFile(source) as archive:
         return [(i.filename, (i.CRC, i.file_size)) for i in archive.infolist() if not i.is_dir()]
 
@@ -220,6 +244,8 @@ def _plan_one(plan: MergePlan, well: str, source: Path, target: Path,
         else:
             names.add(dest)
             item.members.append((name, dest))
+            if content is not None:
+                item.expected[dest] = content
     return item
 
 
@@ -277,13 +303,12 @@ def _write_members(zf: zipfile.ZipFile, item: WellAppend, progress,
 
 
 def _expected(item: WellAppend) -> dict[str, tuple[int, int]]:
-    """Destination name → (CRC, size) of dataset 2's original, computed from the source."""
+    """Destination name → (CRC, size) of dataset 2's original.
+
+    A folder's were read while planning; a zip's are its central directory's.
+    """
     if item.source.is_dir():
-        out = {}
-        for name, dest in item.members:
-            data = (item.source / name).read_bytes()
-            out[dest] = (zlib.crc32(data) & 0xFFFFFFFF, len(data))
-        return out
+        return dict(item.expected)
     with zipfile.ZipFile(item.source) as src:
         return {dest: (src.getinfo(name).CRC, src.getinfo(name).file_size)
                 for name, dest in item.members}
@@ -317,9 +342,11 @@ def _append_well(run: AppendRun, item: WellAppend, *, halt: Callable[[], bool],
     slice_progress = progress.slice_progress()
     if item.creates:
         rename = dict(item.members)
+        # Durable like the appends beside it: committed as part of the run, so
+        # it must be on disk when the run journal goes.
         run.create(item.target, lambda: copy_container_members(
             item.target, [item.source], lambda _c, name: rename.get(name),
-            progress=slice_progress))
+            progress=slice_progress, durable=True))
     else:
         run.append(item.target, lambda zf: _write_members(zf, item, slice_progress, halt))
     verify_well(item)
@@ -407,13 +434,17 @@ def append_in_place(
             run.commit()
     except Exception as exc:
         _report_rollback(run, emit)
-        if isinstance(exc, _Stopped) or cancelled():
+        stopped = isinstance(exc, _Stopped) or cancelled()
+        # A failed undo is checked first: "restored exactly" is only ever said
+        # of an undo that completed, whatever ended the run.
+        if run.rollback_error:
+            cause = "it was cancelled" if stopped else f"it failed ({exc})"
+            raise ConcatError(f"Adding in place stopped because {cause}, and undoing it did not "
+                              f"complete: {run.rollback_error} The journals were kept; opening "
+                              "dataset 1 again retries the undo.") from exc
+        if stopped:
             raise ConcatError("Cancelled — dataset 1 was restored exactly as it was; nothing "
                               "was appended.") from exc
-        if run.rollback_error:
-            raise ConcatError(f"Adding in place failed ({exc}), and undoing it did not complete: "
-                              f"{run.rollback_error} The journals were kept; opening dataset 1 "
-                              "again retries the undo.") from exc
         raise ConcatError(f"Adding in place failed: {exc} Dataset 1 was restored exactly as it "
                           "was; nothing was appended.") from exc
     return _finish(plan, items, emit)
@@ -426,6 +457,17 @@ def _report_rollback(run: AppendRun, emit) -> None:
             emit(f"  {line}")
 
 
+def _record_provenance(plan: MergePlan) -> bool:
+    """Append dataset 1's ``derived_from`` line; ``False`` when it did not reach disk."""
+    try:
+        return record_derivation(plan.ds1, tool="concatenate", sources=(plan.ds2,),
+                                 mode="in_place", offset_hours=plan.offset_hours,
+                                 gap_hours=plan.gap_hours, gap_source=plan.gap_source)
+    except (OSError, ValueError):
+        swallowed("recording the in-place append in the provenance log", level=logging.WARNING)
+        return False
+
+
 def _finish(plan: MergePlan, items: list[WellAppend], emit) -> str:
     unshifted = [name for item in items for name in item.unshifted]
     if unshifted:
@@ -433,10 +475,12 @@ def _finish(plan: MergePlan, items: list[WellAppend], emit) -> str:
         emit(f"Note: {len(unshifted)} dataset 2 image(s) have no timepoint in their file name, so "
              f"they were added unshifted: {shown}.")
     analysed = not is_raw_dataset(plan.ds1.root)
-    if analysed:
-        record_derivation(plan.ds1, tool="concatenate", sources=(plan.ds2,), mode="in_place",
-                          offset_hours=plan.offset_hours, gap_hours=plan.gap_hours,
-                          gap_source=plan.gap_source)
+    if analysed and not _record_provenance(plan):
+        # The append is committed: a history line that could not be written
+        # must not turn it into a reported failure (a retry would be refused
+        # as a duplicate).
+        emit("Note: the dataset's provenance log could not be written, so this addition is "
+             "not in its history; the images themselves were added and verified.")
     for line in _source_report(plan, items):
         emit(line)
     images = sum(len(item.members) for item in items)

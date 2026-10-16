@@ -22,7 +22,8 @@ import pytest
 
 from datasets.concatenate import in_place
 from datasets.concatenate import concatenate_compute as cc
-from util.zip_append import AppendRun, locate_tail
+from tests._append_crash import crash_append
+from util.zip_append import locate_tail
 
 JUNK = {".DS_Store": b"\x00\x01junk", "__MACOSX/._sidecar": b"appledouble"}
 
@@ -292,13 +293,8 @@ def test_cancelling_restores_dataset_1(pair):
 
 # ── a crash, undone by the next open ─────────────────────────────────────────
 def _crash_mid_append(archive: Path) -> None:
-    """Leave *archive* as a killed append would: journalled, cut off part-way through a member."""
-    floor = locate_tail(archive).offset
-    run = AppendRun(archive.parent)
-    run.__enter__()
-    run.append(archive, lambda zf: zf.writestr("E_GFP_A01_f0_48h.tif", b"half" * 100))
-    os.truncate(archive, floor + 60)          # no central directory on disk any more
-    run._release()                            # the process is gone: nothing rolled back, nothing held
+    """Leave *archive* as a killed append would: a child process dies part-way through a member."""
+    crash_append(archive, "mid")
 
 
 def test_the_next_concatenate_run_undoes_a_crashed_append_then_appends(pair):
@@ -523,3 +519,179 @@ def test_a_new_dataset_run_with_no_destination_is_refused_not_written_to_the_cwd
     worker.run()
     assert failed == ["Choose a destination folder for the new dataset."]
     assert not (pair / "in").exists()
+
+
+# ── review findings (tracker M14-R*) ─────────────────────────────────────────
+def test_analyze_through_the_real_resolver_undoes_the_crash_before_folding_loose_images(pair):
+    """M14-R1. The resolver Analyze really runs folds a loose image into ``A01.zip`` by
+    rewriting it whole. Undoing a crashed append *after* that wrote the old directory
+    into the rewritten file; it has to happen before, and the loose image must survive."""
+    from analyze.domain.input import AnalyzeInputMixin
+    from services.pipeline_runner import PipelineRunner
+
+    class _Form(AnalyzeInputMixin):
+        def _expected_well_count(self, _opts):
+            return 0
+
+    in_dir = pair / "d1" / "in"
+    archive = in_dir / "A01.zip"
+    with zipfile.ZipFile(archive) as reader:
+        original = {n: reader.read(n) for n in reader.namelist() if not n.endswith("/")}
+    _crash_mid_append(archive)
+    loose = in_dir / "E_GFP_A01_f5_0h.tif"
+    loose.write_bytes(b"a loose image dropped in by the user" * 30)
+
+    runner = PipelineRunner()
+    runner.start(Path("pm.py"), {"raw": pair / "d1", "filename_schema":
+                                 "experiment:channel:well:fov:timepoint", "filename_sep": "_"},
+                 resolve_dirs=_Form()._resolve_run_dirs_for_runner)
+    runner._thread.join(timeout=60)
+    events = []
+    while not runner.log_q.empty():
+        events.append(runner.log_q.get_nowait())
+    text = "".join(str(e[1]) for e in events if e[0] in ("line", "error"))
+    assert "[recover]" in text and "changed by something else" not in text, text
+    with zipfile.ZipFile(archive) as reader:
+        for name, data in original.items():
+            assert reader.read(name) == data                    # every original member reads back
+        assert loose.name in reader.namelist(), text
+        assert reader.read(loose.name) == b"a loose image dropped in by the user" * 30
+        assert "E_GFP_A01_f0_48h.tif" not in reader.namelist()  # the crashed append is gone
+
+
+def _folder_pair(tmp_path):
+    _raw(tmp_path / "d1", wells=("A01",))
+    folder = tmp_path / "d2" / "in" / "A01"
+    folder.mkdir(parents=True)
+    for name in ("E_GFP_A01_f0_0h.tif", "E_DAPI_A01_f0_0h.tif"):
+        (folder / name).write_bytes(f"d2 folder {name}".encode())
+    (folder / ".DS_Store").write_bytes(b"junk")
+
+
+def test_running_the_same_append_twice_from_a_folder_well_is_refused(tmp_path):
+    """M14-R6: a folder has no stored checksum, so the content check was skipped and a
+    second run added the timepoint again under 72h names."""
+    _folder_pair(tmp_path)
+    _append(tmp_path, gap_hours=24.0)
+    after_first = _hashes(tmp_path / "d1")
+    with pytest.raises(cc.ConcatError, match="same bytes as 'E_GFP_A01_f0_48h.tif'"):
+        _append(tmp_path, gap_hours=24.0)
+    assert _hashes(tmp_path / "d1") == after_first
+
+
+def test_a_stop_whose_undo_fails_does_not_claim_dataset_1_was_restored(pair, monkeypatch):
+    """M14-R7: the cancel message was chosen before the undo's own failure was looked at."""
+    from util import zip_append
+
+    def undo_fails(_in_dir):
+        raise zip_append.AppendJournalError("disk went read-only")
+
+    monkeypatch.setattr(zip_append, "_rollback", undo_fails)
+    plan = in_place.build_append_plan(pair / "d1", pair / "d2", gap_hours=24.0)
+    asked = {"n": 0}
+
+    def stop_after_copying_began():
+        asked["n"] += 1
+        return asked["n"] > 2
+
+    with pytest.raises(cc.ConcatError) as caught:
+        in_place.append_in_place(plan, is_cancelled=stop_after_copying_began, workers=1)
+    message = str(caught.value)
+    assert "restored exactly" not in message
+    assert "cancelled" in message and "disk went read-only" in message and "journals were kept" in message
+
+
+def test_other_tools_refuse_a_dataset_with_an_unfinished_addition(tmp_path):
+    """M14-R8: Subset (and every tool through resolve_dataset) would copy a partial
+    timepoint into a new dataset; Import Loose's in-place mode would zip beside it."""
+    from datasets.import_loose.apply import convert_in_place
+    from datasets.subset.subset_compute import SubsetError, SubsetFilter, build_subset_plan
+    from tests.fixtures.dataset_builder import build_dataset
+    build_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"])
+    crash_append(tmp_path / "d1" / "in" / "A01.zip", "after")
+    with pytest.raises(SubsetError, match="unfinished in-place addition"):
+        build_subset_plan(tmp_path / "d1", tmp_path / "dest", SubsetFilter())
+    with pytest.raises(ValueError, match="unfinished in-place addition"):
+        convert_in_place(tmp_path / "d1" / "in", filename_schema="experiment:channel:well:fov:timepoint",
+                         filename_sep="_")
+
+
+def test_a_created_well_archive_is_written_durably(pair, monkeypatch):
+    """M14-R5: committed with the run, so it must be fsynced like the appends beside it."""
+    seen = []
+    real = in_place.copy_container_members
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("durable"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(in_place, "copy_container_members", spy)
+    _append(pair, gap_hours=24.0)
+    assert seen == [True]                                   # C03, the one new archive
+
+
+def test_a_provenance_failure_after_the_commit_is_a_note_not_a_failure(tmp_path, monkeypatch):
+    """M14-R9: the append is committed by then; reporting failure would make the retry a
+    refused duplicate."""
+    from tests.fixtures.dataset_builder import build_dataset
+    build_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"])
+    _raw(tmp_path / "d2", wells=("A01",), timepoints=("0h",), fields=("F001",),
+         channels=("GFP", "NIR"), tag="d2")
+
+    def read_only_out(*_a, **_k):
+        raise OSError("Read-only file system")
+
+    monkeypatch.setattr(in_place, "record_derivation", read_only_out)
+    try:
+        _plan, summary, lines = _append(tmp_path, gap_hours=24.0)
+    except OSError as exc:
+        raise AssertionError(f"a committed append was reported as failed: {exc}") from exc
+    assert "Added" in summary
+    assert any("provenance log could not be written" in line for line in lines)
+    assert "E_GFP_A01_F001_48h.tif" in _names(tmp_path / "d1" / "in" / "A01.zip")
+
+
+def test_the_page_undoes_an_unfinished_addition_from_another_computer_after_two_yeses(
+        qapp, pair, monkeypatch):
+    """M14-R10: a run recorded by a computer that will not come back (or a recycled pid)
+    is undone from the page, only after confirming twice."""
+    from PySide6.QtWidgets import QMessageBox
+    from datasets.concatenate.controller import ConcatenateController
+    from util.zip_append import RUN_JOURNAL_NAME, pending_journals
+    archive = pair / "d1" / "in" / "A01.zip"
+    original = _sha(archive)
+    crash_append(archive, "after")
+    run_journal = pair / "d1" / "in" / RUN_JOURNAL_NAME
+    payload = json.loads(run_journal.read_text())
+    payload.update(host="old-lab-mac", machine="mac:GONE")
+    run_journal.write_text(json.dumps(payload))
+
+    ctrl = ConcatenateController()
+    page = _page_with(ctrl, pair / "d1", pair / "d2")
+    assert page._undo_row.isVisibleTo(page) and "d1 holds" in page._undo_note.text()
+    questions: list[str] = []
+
+    def answer(_parent, title, _text, *_a):
+        questions.append(title)
+        return QMessageBox.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", answer)
+    page._undo_btn.click()
+    assert questions == ["Undo the unfinished addition?", "Undo it anyway?"]
+    assert _sha(archive) == original and pending_journals(pair / "d1" / "in") == []
+    assert page._undo_row.isVisibleTo(page) is False
+    ctrl.shutdown()
+
+
+def test_the_page_s_undo_does_nothing_when_the_user_says_no(qapp, pair, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from datasets.concatenate.controller import ConcatenateController
+    archive = pair / "d1" / "in" / "A01.zip"
+    crash_append(archive, "after")
+    appended = _sha(archive)
+    ctrl = ConcatenateController()
+    page = _page_with(ctrl, pair / "d1", pair / "d2")
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.No)
+    page._undo_btn.click()
+    assert _sha(archive) == appended
+    ctrl.shutdown()

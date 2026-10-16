@@ -13,13 +13,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
-import sys
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from tests._append_crash import crash_append
 from util import zip_append
 from util.zip_append import (
     RUN_JOURNAL_NAME,
@@ -192,21 +191,10 @@ def test_an_old_member_described_differently_afterwards_fails_the_append(tmp_pat
     assert _sha(archive) == original
 
 
-def _crashed_run(archive: Path, *, then=None) -> None:
-    """Leave *archive* the way a killed process would: journalled, appended, never committed."""
-    run = AppendRun(archive.parent, preserve=[archive.parent / "acquisition.json"])
-    run.__enter__()
-    run.append(archive, _add)
-    if then is not None:
-        then()
-    run._release()          # the process is gone: no rollback ran, nothing is held
-
-
 def test_the_next_open_undoes_an_append_a_crash_left_behind(tmp_path):
     archive = _messy(tmp_path / "in" / "A01.zip")
     original = _sha(archive)
-    # Killed mid-member: the new central directory never made it to disk.
-    _crashed_run(archive, then=lambda: os.truncate(archive, archive.stat().st_size - 300))
+    crash_append(archive, "mid")                         # killed part-way through a member
     with pytest.raises(zipfile.BadZipFile):
         zipfile.ZipFile(archive)
     result = recover(archive.parent)
@@ -217,22 +205,23 @@ def test_the_next_open_undoes_an_append_a_crash_left_behind(tmp_path):
     assert recover(archive.parent).lines == []           # nothing left to do
 
 
-def test_recovery_of_a_dead_process_s_run_restores_the_preserved_record(tmp_path):
+def test_a_run_killed_after_its_append_is_undone_with_its_record(tmp_path):
     archive = _messy(tmp_path / "in" / "A01.zip")
     record = tmp_path / "in" / "acquisition.json"
     record.write_text('{"old": true}')
     original = _sha(archive)
-    _crashed_run(archive, then=lambda: record.write_text('{"new": true}'))
-    dead = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"],
-                          capture_output=True, text=True, check=True)
-    run_journal = archive.parent / RUN_JOURNAL_NAME
-    payload = json.loads(run_journal.read_text())
-    payload["pid"] = int(dead.stdout)
-    run_journal.write_text(json.dumps(payload))
+    crash_append(archive, "after-then", str(record), '{"new": true}')
     result = recover(archive.parent)
     assert result.blocked == ""
     assert _sha(archive) == original
     assert record.read_text() == '{"old": true}'
+
+
+def _edit_run_journal(archive: Path, **changes) -> None:
+    run_journal = archive.parent / RUN_JOURNAL_NAME
+    payload = json.loads(run_journal.read_text())
+    payload.update(changes)
+    run_journal.write_text(json.dumps(payload))
 
 
 def test_recovery_leaves_a_running_append_alone(tmp_path):
@@ -246,28 +235,49 @@ def test_recovery_leaves_a_running_append_alone(tmp_path):
         run.commit()
 
 
-def test_a_live_process_on_this_host_is_not_undone(tmp_path):
+def test_a_live_process_on_this_computer_is_not_undone(tmp_path):
     archive = _messy(tmp_path / "in" / "A01.zip")
-    _crashed_run(archive)
-    run_journal = archive.parent / RUN_JOURNAL_NAME
-    payload = json.loads(run_journal.read_text())
-    payload["pid"] = os.getppid()                         # alive, and not us
-    run_journal.write_text(json.dumps(payload))
+    crash_append(archive, "after")
+    parent = os.getppid()
+    _edit_run_journal(archive, pid=parent, pstart=zip_append._process_started(parent))
     appended = _sha(archive)
     result = recover(archive.parent)
-    assert f"process {os.getppid()}" in result.blocked
+    assert f"process {parent}" in result.blocked
     assert _sha(archive) == appended
 
 
-def test_another_host_s_run_is_reported_not_undone(tmp_path):
+def test_a_recycled_pid_is_a_dead_run_and_is_undone(tmp_path):
+    """The run's pid now belongs to a process that started at another time."""
     archive = _messy(tmp_path / "in" / "A01.zip")
-    _crashed_run(archive)
-    run_journal = archive.parent / RUN_JOURNAL_NAME
-    payload = json.loads(run_journal.read_text())
-    payload["host"] = "some-other-mac"
-    run_journal.write_text(json.dumps(payload))
+    original = _sha(archive)
+    crash_append(archive, "after")
+    _edit_run_journal(archive, pid=os.getppid(), pstart="linux:0")
+    result = recover(archive.parent)
+    assert result.blocked == ""
+    assert _sha(archive) == original
+
+
+def test_a_hostname_that_drifted_on_the_same_computer_is_not_another_computer(tmp_path):
+    archive = _messy(tmp_path / "in" / "A01.zip")
+    original = _sha(archive)
+    crash_append(archive, "after")
+    _edit_run_journal(archive, host="Zaks-MacBook-Pro.local")      # same machine id
+    result = recover(archive.parent)
+    assert result.blocked == ""
+    assert _sha(archive) == original
+
+
+def test_another_computer_s_run_is_reported_not_undone_unless_forced(tmp_path):
+    archive = _messy(tmp_path / "in" / "A01.zip")
+    original = _sha(archive)
+    crash_append(archive, "after")
+    _edit_run_journal(archive, host="some-other-mac", machine="mac:OTHER-UUID")
+    appended = _sha(archive)
     result = recover(archive.parent)
     assert "'some-other-mac'" in result.blocked
+    assert _sha(archive) == appended
+    forced = recover(archive.parent, force=True)
+    assert forced.blocked == "" and _sha(archive) == original
 
 
 def test_a_committed_append_s_leftover_journal_is_removed_and_the_append_kept(tmp_path):
@@ -289,7 +299,7 @@ def test_a_committed_append_s_leftover_journal_is_removed_and_the_append_kept(tm
 
 def test_a_damaged_journal_is_refused_and_the_archive_left_as_it_is(tmp_path):
     archive = _messy(tmp_path / "in" / "A01.zip")
-    _crashed_run(archive)
+    crash_append(archive, "after")
     journal = journal_path(archive)
     journal.write_bytes(journal.read_bytes()[:-5] + b"XXXXX")
     appended = _sha(archive)
@@ -317,3 +327,133 @@ def test_an_archive_with_data_before_its_first_member_is_refused(tmp_path):
     archive.write_bytes(b"#!/bin/sh\nexit 0\n" + archive.read_bytes())
     with pytest.raises(AppendJournalError, match="data before its first member"):
         locate_tail(archive)
+
+
+# ── review findings (tracker M14-R*) ─────────────────────────────────────────
+def _rewrite_whole(archive: Path, *, extra: dict | None = None, compression=zipfile.ZIP_STORED) -> None:
+    """Another writer replacing the archive whole, as Analyze's loose-image fold does."""
+    with zipfile.ZipFile(archive) as reader:
+        members = [(i, reader.read(i.filename)) for i in reader.infolist()
+                   if not i.filename.endswith("/")]
+    tmp = archive.with_name("rewrite.tmp")
+    with zipfile.ZipFile(tmp, "w", compression) as writer:
+        for info, data in members:
+            writer.writestr(info.filename, data)
+        for name, data in (extra or {}).items():
+            writer.writestr(name, data)
+    os.replace(tmp, archive)
+
+
+def test_an_archive_rewritten_after_the_append_is_not_undone_over(tmp_path):
+    """M14-R1(b): the append finished (its size and time are journalled), then something
+    rewrote the file whole. Writing the old tail into it would report "restored" over an
+    archive that no longer reads; the undo refuses instead, changes nothing, keeps the journal."""
+    archive = _messy(tmp_path / "in" / "A01.zip")
+    crash_append(archive, "after")
+    _rewrite_whole(archive, extra={"E_GFP_A01_f9_0h.tif": b"loose" * 50})
+    rewritten = _sha(archive)
+    with pytest.raises(AppendJournalError, match="changed by something else"):
+        recover(archive.parent)
+    assert _sha(archive) == rewritten
+    assert journal_path(archive).exists() and (archive.parent / RUN_JOURNAL_NAME).exists()
+
+
+def test_old_members_that_moved_since_a_mid_member_crash_are_not_undone_over(tmp_path):
+    """M14-R1(b), the case with no after-append stamp: the process died mid-member,
+    then the archive was rebuilt with its members re-spelled (deflated)."""
+    archive = _messy(tmp_path / "in" / "A01.zip")
+    crash_append(archive, "mid")
+    _messy(tmp_path / "rebuilt" / "A01.zip")
+    _rewrite_whole(tmp_path / "rebuilt" / "A01.zip", compression=zipfile.ZIP_DEFLATED,
+                   extra={"E_GFP_A01_f9_0h.tif": os.urandom(4000)})   # as long as before, or longer
+    os.replace(tmp_path / "rebuilt" / "A01.zip", archive)
+    rebuilt = _sha(archive)
+    with pytest.raises(AppendJournalError, match="no longer where or what they were"):
+        recover(archive.parent)
+    assert _sha(archive) == rebuilt
+    assert journal_path(archive).exists()
+
+
+def test_the_restored_archive_s_members_are_each_opened_before_the_journal_goes(tmp_path, monkeypatch):
+    """The second line of defence: with the pre-check bypassed, a restore over a moved
+    archive is caught by opening each member's local header, and the journal is kept."""
+    archive = _messy(tmp_path / "in" / "A01.zip")
+    crash_append(archive, "mid")
+    _messy(tmp_path / "rebuilt" / "A01.zip")
+    _rewrite_whole(tmp_path / "rebuilt" / "A01.zip", compression=zipfile.ZIP_DEFLATED,
+                   extra={"E_GFP_A01_f9_0h.tif": os.urandom(4000)})
+    os.replace(tmp_path / "rebuilt" / "A01.zip", archive)
+    monkeypatch.setattr(zip_append, "_refuse_unless_untouched", lambda *_a: None)
+    with pytest.raises(AppendJournalError, match="does not open after the restore"):
+        recover(archive.parent)
+    assert journal_path(archive).exists()
+
+
+def test_a_comment_holding_an_end_record_signature_is_refused_untouched(tmp_path):
+    """M14-R2: zipfile reads the fake end record in the comment (0 members) while ours
+    finds the real one; appending against zipfile's view would drop every member."""
+    archive = tmp_path / "in" / "A01.zip"
+    archive.parent.mkdir()
+    with zipfile.ZipFile(archive, "w") as writer:
+        for i in range(3):
+            writer.writestr(f"f{i}.tif", bytes([i]) * 500)
+        writer.comment = b"xx PK\x05\x06" + b"\0" * 18 + b"yy"
+    original = _sha(archive)
+    with pytest.raises(AppendJournalError, match="declares 3 member"):
+        with AppendRun(archive.parent) as run:
+            run.append(archive, _add)
+    assert _sha(archive) == original
+
+
+def test_only_one_of_two_appends_starting_together_claims_the_folder(tmp_path, monkeypatch):
+    """M14-R3: both passed "no journal here"; the run journal is created exclusively."""
+    archive = _messy(tmp_path / "in" / "A01.zip")
+    (archive.parent / RUN_JOURNAL_NAME).write_text('{"format": "allwell-zip-append-run"}')
+    monkeypatch.setattr(zip_append, "pending_journals", lambda _d: [])   # the race window
+    with pytest.raises(AppendJournalError, match="has just started"):
+        AppendRun(archive.parent).__enter__()
+    assert (archive.parent / RUN_JOURNAL_NAME).read_text() == '{"format": "allwell-zip-append-run"}'
+
+
+def test_no_append_can_start_while_a_recovery_is_undoing(tmp_path, monkeypatch):
+    """M14-R4: the folder is claimed for the whole recovery, not only while it is checked."""
+    archive = _messy(tmp_path / "in" / "A01.zip")
+    crash_append(archive, "after")
+    real = zip_append._rollback
+    seen = {}
+
+    def rollback_while_someone_starts_an_append(in_dir):
+        try:
+            AppendRun(in_dir).__enter__()
+        except AppendJournalError as exc:
+            seen["refused"] = str(exc)
+        return real(in_dir)
+
+    monkeypatch.setattr(zip_append, "_rollback", rollback_while_someone_starts_an_append)
+    recover(archive.parent)
+    assert "already running" in seen.get("refused", "")
+
+
+def test_a_create_that_died_mid_write_leaves_no_staging_file(tmp_path):
+    """M14-R5: atomic_zip's staging file beside a created archive is removed with it."""
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+    created = in_dir / "C03.zip"
+    staging = in_dir / "__aw_tmp_C03.zip.pid99999"
+    run = AppendRun(in_dir)
+    run.__enter__()
+    run.create(created, lambda: staging.write_bytes(b"half an archive"))
+    run._release()
+    recover(in_dir)
+    assert not staging.exists() and not created.exists()
+
+
+def test_a_torn_run_journal_with_no_archive_touched_is_cleared(tmp_path):
+    in_dir = tmp_path / "in"
+    archive = _messy(in_dir / "A01.zip")
+    (in_dir / RUN_JOURNAL_NAME).write_text('{"format": "allwell-zip-ap')
+    result = recover(in_dir)
+    assert "no archive had been touched" in result.lines[0]
+    with AppendRun(in_dir) as run:                       # usable again
+        run.append(archive, _add)
+        run.commit()

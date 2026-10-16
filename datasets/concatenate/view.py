@@ -46,6 +46,7 @@ from datasets.concatenate.concatenate_compute import (
 )
 from datasets.concatenate.dashboard import ConcatDashboard
 from datasets.concatenate.in_place import in_place_refusal
+from util.zip_append import pending_journals
 from datasets.concatenate.raw_compute import is_raw_dataset
 from datasets.core.dataset_fields import is_dataset, is_free_destination
 from datasets.core.dataset_fields import promote_open_button
@@ -84,6 +85,8 @@ class ConcatenatePage(LogPanelMixin, QWidget):
 
     runRequested = Signal()
     queueRequested = Signal()
+    #: The dataset root whose unfinished in-place addition the user asked to undo.
+    undoAppendRequested = Signal(str)
     openInReviewRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -211,6 +214,24 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._mode_hint.setWordWrap(True)
         for widget in (self._mode_new, self._mode_in_place, self._mode_hint):
             box.addWidget(widget)
+        # Shown only while a picked dataset holds an in-place addition a crash
+        # left unfinished; the controller confirms before undoing anything.
+        self._undo_row = QWidget(box_widget)
+        undo = QHBoxLayout(self._undo_row)
+        undo.setContentsMargins(0, 0, 0, 0)
+        undo.setSpacing(theme.Spacing.sm)
+        self._undo_note = QLabel("", self._undo_row)
+        self._undo_note.setObjectName("Warn")
+        self._undo_note.setWordWrap(True)
+        self._undo_btn = QPushButton("Undo the unfinished addition…", self._undo_row)
+        self._undo_btn.setObjectName("ConcatUndoAppend")
+        self._undo_btn.setProperty("variant", "secondary")
+        self._undo_btn.clicked.connect(lambda: self.undoAppendRequested.emit(self._undo_root))
+        undo.addWidget(self._undo_note, 1)
+        undo.addWidget(self._undo_btn)
+        self._undo_root = ""
+        self._undo_row.setVisible(False)
+        box.addWidget(self._undo_row)
         outer.addWidget(box_widget)
         self._refresh_mode_hint()
 
@@ -336,6 +357,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         # An in-place run changed dataset 1, so whether the pair can (still)
         # be appended is a new question.
         self._refresh_in_place_gate()
+        self._refresh_undo_row()
         self._revalidate_cross()
 
     def set_running(self, running: bool) -> None:
@@ -358,6 +380,8 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._gap_edit.setEnabled(not running)
         self._mode_new.setEnabled(not running)
         self._mode_in_place.setEnabled(not running and not self._in_place_reason)
+        if running:
+            self._undo_row.setVisible(False)
 
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root
@@ -404,7 +428,23 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._update_status_preview()
         self._refresh_gap(datasets_changed=True)
         self._refresh_in_place_gate()
+        self._refresh_undo_row()
         self._revalidate_cross()
+
+    def datasets_changed_on_disk(self) -> None:
+        """Re-read both datasets after something outside the fields changed them."""
+        self._on_field_changed()
+
+    def _refresh_undo_row(self) -> None:
+        """Offer the undo for the first picked dataset holding an unfinished addition."""
+        root = next((path for path in (self.dataset1_path(), self.dataset2_path())
+                     if path and pending_journals(Path(path) / "in")), "")
+        self._undo_root = root
+        if root:
+            self._undo_note.setText(
+                f"{Path(root).name} holds an in-place addition that did not finish. It is "
+                "undone the next time the dataset is opened or analysed, or now:")
+        self._undo_row.setVisible(bool(root) and not self._running)
 
     def _refresh_in_place_gate(self) -> None:
         """Offer "in place" only for a pair that can be appended, and say why not otherwise."""

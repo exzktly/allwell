@@ -56,6 +56,7 @@ import shutil
 import tempfile
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
+from types import ModuleType
 
 import numpy as np
 
@@ -73,7 +74,7 @@ SCAN_CHUNK_ROWS = 1 << 20
 _engine_warned = False
 
 
-def _duckdb():
+def _duckdb() -> ModuleType | None:
     """``duckdb``, or ``None`` when it is not installed or switched off."""
     global _engine_warned
     if os.environ.get("ALLWELL_CELL_POOL", "").strip().lower() == "numpy":

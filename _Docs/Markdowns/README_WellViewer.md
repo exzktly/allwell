@@ -1655,8 +1655,11 @@ What this means in use:
 - **The Cell Browser names how many cells matched.** It shows at most 5,000 cells
   — the first 5,000 in sort order — and its count now reads, for example,
   "Showing 50 / 5000 cells (the first 5,000 of 81,200 matching, in sort order)".
-- **Multivariate** still holds the cells of every well you select. Selecting most
-  of a very large plate there asks for that many cells.
+- **Multivariate** still holds the cells of every well you select, because its
+  correlations, clusters and summaries are each over every cell. It reads only the
+  columns it uses and leaves the other wells in memory alone, but selecting most
+  of a very large plate there still asks for that many cells (about 64 bytes a
+  cell at five features).
 - **If one well alone does not fit**, Review first gives back every well it is
   holding and tries again; if that fails too, the error names the well, its size
   on disk and what was held, instead of a bare out-of-memory message.

@@ -278,7 +278,9 @@ plates analysed under different nanowell settings, and says when only one plate 
 other's wells then show on the Nanowells page as wells without a table). *Concatenate* supports the
 successive-imaging workflow: concatenate the analysed dataset with the new timepoint's raw images, then run
 Analyze with *Incremental* — the earlier timepoints are kept, and the new one is added onto the same nanowells.
-Two datasets that both hold nanowell results are refused. Each tool checks the tables before it writes anything,
+The new images need an acquisition record of their own when the analysed dataset has one (convert them with
+the CZI, ND2 or OME import); without it the merge is refused, because the merged dataset would have no record
+to add the new timepoint from. Two datasets that both hold nanowell results are refused. Each tool checks the tables before it writes anything,
 and refuses tables it cannot carry whole (a well with a grid record and no sites table, an unreadable record, one
 well under two spellings). *Validate* checks the tables against the grid record and the archives.
 

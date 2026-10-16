@@ -57,7 +57,9 @@ from datasets.core.dataset_paths import (
     known_channel_tokens as _known_channel_tokens,
 )
 from datasets.core.member_names import rewrite_member_field
-from datasets.core.nanowell_tables import carried_nanowell_block, refuse_nanowell_tables, refuse_unusable_tables
+from datasets.core.nanowell_tables import (
+    carried_nanowell_block, has_nanowell_tables, refuse_nanowell_tables, refuse_unusable_tables,
+)
 from datasets.concatenate.raw_compute import (
     check_raw_compatible, is_raw_dataset, raw_info, raw_paths,
 )
@@ -428,6 +430,28 @@ def parse_gap_hours(text: str) -> float:
     if hours > _MAX_GAP_HOURS:
         raise ConcatError(f"The time gap {original.strip()!r} is more than ten years; check the units.")
     return hours
+
+
+def _refuse_dropping_the_nanowell_record(ds1: DatasetPaths, ds2: DatasetPaths) -> None:
+    """Refuse an analysed + raw merge that would leave dataset 1's nanowell tables without their record.
+
+    The merge writes an acquisition record only when both datasets have one. Dataset 1's nanowell tables were
+    addressed from its record, and the incremental Analyze that adds dataset 2's timepoints places them from the
+    destination's — so a destination without one keeps tables nothing can extend, under a sidecar describing
+    a record that is gone (roll-up review X13). A dataset 1 placed from a described grid has no record to lose.
+    """
+    if not has_nanowell_tables(ds1):
+        return
+    try:
+        first, second = read_record(ds1.root), read_record(ds2.root)
+    except AcquisitionRecordError:
+        return                     # the merge itself refuses an unreadable record, with the reason
+    if first is not None and second is None:
+        raise ConcatError(
+            "Dataset 1 has nanowell tables addressed from its acquisition record, and dataset 2 has no "
+            "acquisition record, so the merged dataset would have none and dataset 2's timepoints could not be "
+            "added to those nanowells. Convert dataset 2 with the CZI, ND2 or OME import so it carries a "
+            "record, then concatenate again.")
 
 
 def _recorded_start(ds: DatasetPaths, token: str) -> tuple[datetime | None, str]:
@@ -892,6 +916,7 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         # Dataset 1's results are kept as they are, nanowell tables included, and an incremental Analyze adds
         # dataset 2's timepoints onto the same nanowells: the successive-imaging workflow (tracker P10d).
         refuse_unusable_tables(ds1, "Dataset 1", ConcatError)
+        _refuse_dropping_the_nanowell_record(ds1, ds2)
 
     if not raw and (has_folder_mode_output(ds1) or (not ds2_raw and has_folder_mode_output(ds2))):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"

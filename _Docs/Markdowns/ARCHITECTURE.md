@@ -9010,7 +9010,10 @@ has nanowell results. The end-of-run re-anchoring (`nanowell_task.reanchor_plate
 `plate` (`plates_of`), so a merged dataset's two plates are never fitted together, and a re-run keeps a well's
 `plate` (`write_grid_json`). **Concatenate** of an analysed dataset with a raw one keeps dataset 1's tables as
 they are, and an incremental Analyze adds dataset 2's timepoints onto the same nanowells and earliest template —
-the successive-imaging workflow, pinned end to end by `tests/test_nanowell_merge_endtoend.py`. Two analysed
+the successive-imaging workflow, pinned end to end by `tests/test_nanowell_merge_endtoend.py`. The merge writes
+an acquisition record only when both datasets have one, so raw images without a record are refused onto a
+dataset 1 whose tables were addressed from its record (`_refuse_dropping_the_nanowell_record`, at plan time):
+the destination would keep tables nothing could extend. Two analysed
 datasets with nanowell tables are refused (`refuse_nanowell_tables`): each analysis addressed its own nanowells,
 and the message names the two routes that work. Validate checks the tables against the grid record and the input
 archives.

@@ -126,3 +126,19 @@ def test_two_analysed_nanowell_datasets_are_refused_with_the_route_that_works(tm
     with pytest.raises(cc.ConcatError, match="cannot carry them when both datasets are analysed") as raised:
         cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=24.0)
     assert "Concatenate the analysed dataset with dataset 2's raw images instead" in str(raised.value)
+
+
+def test_raw_images_without_a_record_are_refused_onto_an_analysed_nanowell_dataset(tmp_path, monkeypatch):
+    """Roll-up review X13: the merge writes a record only when both datasets have one, so dataset 1's nanowell
+    tables would arrive in a destination with no record to extend them from. Refused at plan time, before
+    anything is written, naming the remedy."""
+    first, record1 = build_well(rows=1, cols=1, tile=(900, 900), timepoint="0h", radius_fraction=0.26)
+    second, record2 = build_well(rows=1, cols=1, tile=(900, 900), timepoint="0h", radius_fraction=0.26, seed=5)
+    _raw_dataset(tmp_path / "d1", first, record1, "0h")
+    _run_main(monkeypatch, tmp_path / "d1", "--nanowell_format", "100um")
+    _raw_dataset(tmp_path / "d2", second, record2, "0h")
+    (tmp_path / "d2" / "in" / "acquisition.json").unlink()
+    with pytest.raises(cc.ConcatError, match="dataset 2 has no acquisition record") as raised:
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=24.0)
+    assert "Convert dataset 2 with the CZI, ND2 or OME import" in str(raised.value)
+    assert not (tmp_path / "dest").exists()

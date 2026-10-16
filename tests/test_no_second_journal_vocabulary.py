@@ -46,7 +46,7 @@ from __future__ import annotations
 import ast
 
 from services.run_journal import WELL_STATES
-from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source, python_sources, rel
 
 #: Below this many of the six names, a collection is something else — a tuple
 #: grouping two related states for one count, or one state beside unrelated
@@ -71,8 +71,7 @@ def test_no_module_restates_the_journal_well_states():
         # The definition itself, and nothing else, is allowed to spell them out.
         if path.parts[-2:] == ("services", "run_journal.py"):
             continue
-        source = path.read_text()
-        tree = ast.parse(source, filename=str(path))
+        tree = parse_source(path)
         # A module that reaches for the canonical roster may also carry a table
         # of words for the states; one that never does is holding the only copy
         # it has, which is what makes a missing state unrecoverable there.

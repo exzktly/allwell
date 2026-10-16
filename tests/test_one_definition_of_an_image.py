@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import ast
 
-from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_source, python_sources, rel
 
 #: The one definition, and the two helpers every caller should reach for.
 _FUNNEL = ("GROUP_IMAGE_EXTS", "is_group_image", "is_run_input_member")
@@ -171,7 +171,7 @@ def test_no_second_spelling_of_the_image_extension_set():
             continue
         try:
             text = path.read_text(encoding="utf-8")
-            tree = ast.parse(text)
+            tree = parse_source(path)
         except (OSError, SyntaxError):
             continue
         for lineno, hits in _image_ext_literals(tree, text.splitlines()):
@@ -200,7 +200,7 @@ def test_the_file_level_exemptions_still_name_a_real_literal():
             continue
         try:
             text = path.read_text(encoding="utf-8")
-            tree = ast.parse(text)
+            tree = parse_source(path)
         except (OSError, SyntaxError):
             continue
         if _image_ext_literals(tree):

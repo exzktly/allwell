@@ -55,7 +55,19 @@ if [[ -n "${ALLWELL_COVERAGE:-}" ]]; then
     export COVERAGE_FILE="${COVERAGE_FILE:-.coverage.fast}"
 fi
 
+# Parallel by default (pytest-xdist): one worker per CPU, each test FILE kept on one worker
+# (``--dist loadfile``) so module-scoped fixtures are built once and tests that run in order
+# within a file still do. ALLWELL_TEST_WORKERS=0 runs serially — the right setting for
+# ``--durations`` profiling, which a parallel run reports per worker; any other number sets the
+# worker count. Without xdist installed the lane runs serially, as it always did.
+XDIST=()
+workers="${ALLWELL_TEST_WORKERS:-auto}"
+if [[ "$workers" != "0" ]] && python -c "import xdist" 2>/dev/null; then
+    XDIST=(-n "$workers" --dist loadfile)
+fi
+
 exec python -m pytest -m "not slow" -q \
+    "${XDIST[@]+"${XDIST[@]}"}" \
     --timeout=90 --timeout-method=signal \
     "${COV[@]+"${COV[@]}"}" \
     "$@"

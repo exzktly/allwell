@@ -414,9 +414,15 @@ class CellPool:
         sql = f"SELECT count(*) FROM cells{where}{' AND ' if where else ' WHERE '}{clause}"
         return int(self._con.execute(sql, [*params, *(float(t) for t in tps)]).fetchone()[0])
 
-    def sample(self, n: int, *, seed: int = 0) -> dict[str, Sampled]:
-        """A proportional sample of *n* cells, per group; every cell when the pool holds no more."""
-        parts = _allocate(n, self._sizes)
+    def sample(self, n: int, *, seed: int = 0, per_group: bool = False) -> dict[str, Sampled]:
+        """A proportional sample of *n* cells, per group; every cell when the pool holds no more.
+
+        With *per_group*, *n* is each group's own cap instead: a group of no
+        more than *n* cells is returned whole, a larger one sampled to *n* —
+        for a figure whose columns are drawn side by side rather than pooled.
+        """
+        parts = ({g: min(n, size) for g, size in self._sizes.items()} if per_group
+                 else _allocate(n, self._sizes))
         out: dict[str, Sampled] = {}
         for group in self._groups:
             k = parts.get(group, 0)

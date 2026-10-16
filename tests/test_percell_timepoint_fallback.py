@@ -50,8 +50,14 @@ def _frame(*, parsed_column: bool) -> pd.DataFrame:
 
 
 def _mean_panel_artists(monkeypatch, draw_name, *, parsed_column: bool) -> int:
-    monkeypatch.setattr(renderer, "get_rows",
-                        lambda _c, _l: _frame(parsed_column=parsed_column))
+    from review.features.barplot import _pooled
+
+    # Both renderers take a column's cells from ``_pooled.column_cells``, which
+    # reads each well narrowly (or whole); either way it is this frame.
+    frame = lambda *_a, **_k: _frame(parsed_column=parsed_column)  # noqa: E731
+    monkeypatch.setattr(_pooled, "narrow_rows", frame)
+    monkeypatch.setattr(_pooled, "get_rows", frame)
+    monkeypatch.setattr(_pooled, "cells_upper_bound", lambda _c, _w: 0)
     fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
     try:
         kw = {"bw": 0.5} if draw_name == "draw_violin" else {}
@@ -77,17 +83,27 @@ def test_the_parsed_column_is_still_the_one_that_is_read(monkeypatch, draw_name)
 
 
 def test_the_two_renderers_share_one_timepoint_reader():
-    """The guard: two copies of this is how they came to disagree."""
+    """The guard: two copies of this is how they came to disagree.
+
+    Both renderers now take a column's cells from ``_pooled.column_cells``,
+    whose one per-well filter (``_well_values``) reads the timepoint through
+    ``_timepoint_hours``; neither renderer reads a row itself any more.
+    """
     import ast
     import inspect
     import textwrap
 
+    from review.features.barplot import _pooled
+
+    def calls(fn, name):
+        src = textwrap.dedent(inspect.getsource(fn))
+        return [n for n in ast.walk(ast.parse(src))
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == name]
+
     for name in ("draw_violin", "draw_beeswarm"):
-        src = textwrap.dedent(inspect.getsource(getattr(renderer, name)))
-        calls = [n for n in ast.walk(ast.parse(src))
-                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-                 and n.func.id == "_timepoint_hours"]
-        assert calls, f"{name} reads the timepoint column itself again"
+        src = inspect.getsource(getattr(renderer, name))
+        assert calls(getattr(renderer, name), "column_cells"), f"{name} filters its cells itself again"
         assert "timepoint_hours" not in src.replace("_timepoint_hours", ""), (
-            f"{name} still names the parsed column directly"
+            f"{name} names the parsed column directly"
         )
+    assert calls(_pooled._well_values, "_timepoint_hours"), "the shared filter reads the timepoint itself"

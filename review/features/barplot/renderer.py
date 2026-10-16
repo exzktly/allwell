@@ -23,16 +23,12 @@ from review.domain.bar_colors import apply_bar_color_mode, mono_bar_color
 from review.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from review.core.empty_state_copy import NO_DATASET_MESSAGE
 from review.data.data_loading import get_rows
-from domain.text_columns import timepoint_text
 from review.domain.time_rescale import format_scaled as _rescale_tp
 from review.domain.time_rescale import rescale_for as _time_rescale_for
 from review.domain import fold_change_pairing as _pairing_mod
 from review.domain import plot_members as _members
 from review.data.data_loading import (
     _beeswarm_jitter,
-    df_included_mask,
-    parse_timepoint_hours,
-    resolve_value_series,
 )
 from review.core.plot_style import (
     apply_ax_style,
@@ -59,7 +55,8 @@ from review.core.plot_annotations import (
     LABEL_SPAN_HEADROOM as _LABEL_HEADROOM,
     value_label_settings,
 )
-from domain.tp_match import tp_close, tp_close_mask
+from domain.tp_match import tp_close
+from review.features.barplot._pooled import ColumnCells, column_cells, finish_columns
 from review.features.barplot._annotations import (
     cluster_header_pad,
     label_bar,
@@ -145,27 +142,6 @@ def _pooled_rows(ctx, lbl: str, pool_groups: dict[str, list[str]] | None) -> pd.
     return get_rows(ctx, lbl)
 
 
-def _timepoint_hours(df) -> np.ndarray:
-    """Numeric timepoint-in-hours per row, falling back to the text column.
-
-    ``timepoint_hours`` is the parsed column and is present on anything the
-    current pipeline wrote, but older CSVs — and any row whose parse failed —
-    carry only the text ``timepoint``. The beeswarm renderer had this fallback
-    and the violin renderer did not: it required ``timepoint_hours`` outright
-    and drew nothing without it, so the same well showed a populated beeswarm
-    and an empty violin, one toggle apart, with nothing saying why.
-    """
-    if "timepoint_hours" in df.columns:
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy(dtype=float)
-    else:
-        tp = np.full(len(df), np.nan)
-    need = ~np.isfinite(tp)
-    if need.any() and "timepoint" in df.columns:
-        fallback = timepoint_text(df.loc[need]).map(parse_timepoint_hours)
-        tp[need] = fallback.fillna(np.nan).to_numpy(dtype=float)
-    return tp
-
-
 def draw_violin(
     ctx,
     ax_mean,
@@ -227,24 +203,14 @@ def draw_violin(
     else:
         target_ts_per_col = [float(target_t)] * n
     frac_vals: list[float] = []
-    ratios = ctx.state.channel.ratio_index
 
+    columns: list[ColumnCells] = []
     for i, (lbl, color) in enumerate(zip(wells, colors)):
         col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
-        df = _pooled_rows(ctx, lbl, pool_groups)
-        vals = np.empty(0, dtype=float)
-        n_total = n_above = 0
-        if df is not None and not df.empty:
-            mask = df_included_mask(df).to_numpy(copy=True)
-            tp = _timepoint_hours(df)
-            with np.errstate(invalid="ignore"):
-                mask &= np.isfinite(tp) & tp_close_mask(tp, col_tp)
-            v = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()
-            mask &= np.isfinite(v)
-            v_sel = v[mask]
-            n_total = int(v_sel.size)
-            vals = v_sel[v_sel > threshold]
-            n_above = int(vals.size)
+        cells = column_cells(ctx, lbl, pool_groups, col_tp, threshold)
+        columns.append(cells)
+        vals, n_total, n_above = cells.vals, cells.n_total, cells.n_above
+        spec = None
 
         frac_vals.append(n_above / n_total if n_total else float("nan"))
 
@@ -290,12 +256,14 @@ def draw_violin(
         ax_mean.plot(xi - density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
         ax_mean.plot(xi + density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
 
-        median = float(np.median(arr))
+        # Every cell's median when the body was drawn from a sample.
+        median = cells.median(spec) if cells.sampled else float(np.median(arr))
         ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
                        colors="white", lw=2.0, zorder=5)
         ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
                        colors=color, lw=1.2, zorder=6)
 
+    finish_columns(ax_mean, columns)
     for i, (fv, color) in enumerate(zip(frac_vals, colors)):
         xi = xs[i] if i < len(xs) else i
         if not math.isnan(fv):
@@ -397,27 +365,16 @@ def draw_beeswarm(
     else:
         target_ts_per_col = [float(target_t)] * n
     bar_w = min(0.35, 3.0 / max(n, 1))
-    ratios = ctx.state.channel.ratio_index
+    columns: list[ColumnCells] = []
 
     for i, (lbl, color) in enumerate(zip(wells, colors)):
         col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
         xi = xs[i] if i < len(xs) else i
-        df = _pooled_rows(ctx, lbl, pool_groups)
-        cell_vals = np.empty(0, dtype=float)
-        frac_val: float | None = None
-        if df is not None and not df.empty:
-            mask = df_included_mask(df).to_numpy(copy=True)
-            tp = _timepoint_hours(df)
-            with np.errstate(invalid="ignore"):
-                mask &= np.isfinite(tp) & tp_close_mask(tp, col_tp)
-            val = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()
-            mask &= np.isfinite(val)
-            v_sel = val[mask]
-            n_total = int(v_sel.size)
-            cell_vals = v_sel[v_sel > threshold]
-            n_above = int(cell_vals.size)
-            if n_total > 0:
-                frac_val = n_above / n_total
+        cells = column_cells(ctx, lbl, pool_groups, col_tp, threshold)
+        columns.append(cells)
+        cell_vals = cells.vals
+        frac_val: float | None = cells.n_above / cells.n_total if cells.n_total else None
+        spec = None
 
         # Fold-change per-cell scaling — same contract as draw_violin: a
         # ``scale_for(well, tp)`` resolver honouring per-axis operator / order
@@ -446,7 +403,8 @@ def draw_beeswarm(
             # were styled, so beeswarm dots silently ignored the
             # user's Marker pref changes.
             sc._aw_marker_collection = True
-            m = float(cell_vals.mean())
+            # Every cell's mean when the points are a sample of them.
+            m = cells.mean(spec) if cells.sampled else float(cell_vals.mean())
             ax_mean.plot([xi - bar_w * 0.6, xi + bar_w * 0.6],
                          [m, m], color=color, lw=1.5, zorder=4)
         else:
@@ -460,6 +418,7 @@ def draw_beeswarm(
             ax_frac.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
                             marker="x", zorder=3, linewidths=1)
 
+    finish_columns(ax_mean, columns)
     if getattr(ctx.state.plot, "show_threshold_line", False):
         ax_frac.axhline(0.5, color=theme.Colors.border, lw=0.8, ls="--",
                         alpha=0.5, zorder=1)

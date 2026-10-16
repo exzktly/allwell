@@ -18,7 +18,9 @@ from PySide6.QtWidgets import (
 from review.features.export.service import export_cell_data_from
 from review.features.nanowell import controller as nwc
 from review.features.nanowell.cell_scope_compute import cell_scope
-from review.features.nanowell.distribution_compute import BASELINE_METRICS, METRICS, PER_NANOWELL, match_channel
+from review.features.nanowell.distribution_compute import (
+    BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut, match_channel,
+)
 from widgets.control_band import ControlBand
 
 #: The views the page draws, in the order the switch lists them.
@@ -280,7 +282,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_control.setVisible(wells_axis)
             column = nwc.drawn_metric_column(ctx)
             cut = st.thresholds.get(column) if column else None
-            responding_edit.setText("" if cut is None else f"{cut:g}")
+            responding_edit.setText("" if cut is None else format_cut(cut))
             grp_responding.setVisible(distribution)
             grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position")
             grp_well.setVisible(view in ONE_WELL_VIEWS)

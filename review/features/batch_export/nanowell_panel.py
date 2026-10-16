@@ -58,6 +58,7 @@ _wells_summary = _lazy("review.features.nanowell.distribution_compute", "wells_s
 _metric_labels = _lazy("review.features.nanowell.distribution_compute", "metric_labels")
 _metric_column = _lazy("review.features.nanowell.distribution_compute", "metric_column")
 _match_channel = _lazy("review.features.nanowell.distribution_compute", "match_channel")
+_format_cut = _lazy("review.features.nanowell.distribution_compute", "format_cut")
 _parse_threshold = _lazy("review.features.nanowell.controller", "parse_threshold")
 _load_nanowell_data = _lazy("review.features.nanowell.collect", "load_nanowell_data")
 _site_metrics = _lazy("review.features.nanowell.series_compute", "site_metrics")
@@ -206,7 +207,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
             cut = getattr(st, "thresholds", {}).get(_metric_column(metric, channel))
         except ValueError:                               # a channel metric with no channel to resolve
             return ""
-        return "" if cut is None else f"{cut:g}"
+        return "" if cut is None else _format_cut(cut)
 
     def _thresholds(self) -> tuple[dict, list]:
         """``(metric -> cut, the ticked metrics without a readable cut)``."""

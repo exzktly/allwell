@@ -364,3 +364,28 @@ def test_the_format_s_diameter_is_checked_against_the_nanowells_fitted_at_full_r
     notes = outcome.timepoints["T0"]["notes"]
     format_notes = [n for n in notes if "plate format" in n or "No nanowell was fitted" in n]
     assert [n[:len(finding)] for n in format_notes] == ([] if finding is None else [finding])
+
+
+def test_without_a_shared_radius_an_unaddressed_timepoint_is_a_failed_one_too(monkeypatch):
+    """Roll-up review X27: with no roster radius to share, the addressed timepoints were marked ``no_lattice`` and the
+    unaddressed ones kept their status — with no rows, outside what the caller counts as failed."""
+    from types import SimpleNamespace
+
+    from pipeline import nanowell_lattice as lattice
+    from tests._nanowell_run_fixture import build_well
+
+    rendered, record = build_well()
+    real_resolve = lattice.resolve_origin
+
+    def no_origin(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin):
+        return real_resolve(fit, fiducial=None, array_centre=None, plate_rigid=plate_rigid,
+                            fiducial_margin=fiducial_margin)
+
+    monkeypatch.setattr(lattice, "resolve_origin", no_origin)
+    monkeypatch.setattr(nr, "_shared_radius", lambda *a, **k: SimpleNamespace(
+        radius_um=None, status="none", deviations_um={}, flags={}))
+    outcome = nr.run_well("A01", record, ["T0"], lambda tp, tile: rendered.images.get(tile), SETTINGS,
+                          segmenter=threshold_segmenter())
+    assert outcome.located["T0"].status == nr.UNADDRESSED
+    assert outcome.timepoints["T0"]["status"] == nr.NO_LATTICE and outcome.sites == []
+    assert outcome.timepoints["T0"]["status"] in nr.TERMINAL_WITHOUT_ROWS

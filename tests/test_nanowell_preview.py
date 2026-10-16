@@ -87,3 +87,24 @@ def test_test_detection_refuses_a_described_grid_the_well_s_fields_do_not_fill(t
     pattern = {"grid": [3, 2], "scan": "top-left-row", "overlap_percent": 10.0, "pixel_size_um": 4.3}
     result = _preview((root / "in" / f"{WELL}.zip", tmp_path), tmp_path, pattern=pattern)
     assert result.status == nr.INCOMPLETE_GRID
+
+
+def test_a_measuring_failure_keeps_the_location_and_says_why(plate, tmp_path):
+    """Roll-up review X27: a segmenter that raised took the whole preview with it, the lattice it had found
+    included. The location stands, with the failure named in the notes."""
+    def broken(_tile):
+        raise RuntimeError("the segmenter is not installed")
+
+    result = preview_timepoint(plate[0], WELL, "0h", SETTINGS, grouper=pm.find_image_groups_in_zip,
+                               parse=pm.parse_filename, schema=SCHEMA, sep="_", phase_token="PHASE",
+                               scratch=_scratch(tmp_path), segmenter=broken)
+    assert result.status == nr.OK and result.montage is not None and result.pitch_um == pytest.approx(172.0, rel=0.01)
+    assert result.sites == []
+    assert result.notes == ["Measuring failed (RuntimeError: the segmenter is not installed); the lattice and "
+                            "addresses above stand."]
+
+
+def _scratch(tmp_path):
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    return scratch

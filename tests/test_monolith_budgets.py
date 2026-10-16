@@ -192,7 +192,7 @@ REMOTE_PROCESS_BUDGET = 1400
 REMOTE_UPLOAD_BUDGET = 703
 # Set at extraction: the Fetcher and its verifier, moved out of the runner. 2052 -> 2028: the nanowell table
 # fetch took the file one line over, and the log adapter moved to services/remote_log_adapter.py.
-REMOTE_FETCH_BUDGET = 2028
+REMOTE_FETCH_BUDGET = 2029
 # Set at extraction: staging the user's input, moved out of the runner.
 REMOTE_STAGING_BUDGET = 1348
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,

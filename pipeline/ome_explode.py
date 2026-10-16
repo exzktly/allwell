@@ -1621,8 +1621,18 @@ def _publish_record(ome_path: Path, out_in_dir: Path, layout: OmeLayout, well_la
     from pipeline.ome_acquisition import ome_tile_sources, tile_source
 
     n_positions, n_timepoints, frame_order = frames
-    with tifffile.TiffFile(str(ome_path)) as tf:
-        sources = ome_tile_sources(tf.ome_metadata)
+    # Inside the never-raises contract the record keeps: the images are converted either way, so metadata that
+    # cannot be read costs the record, said in the run log, not the conversion (roll-up review X27).
+    try:
+        with tifffile.TiffFile(str(ome_path)) as tf:
+            sources = ome_tile_sources(tf.ome_metadata)
+    except Exception as exc:
+        msg = (f"[record] No acquisition record written: the OME metadata could not be read "
+               f"({type(exc).__name__}: {exc}).")
+        _log.warning("%s", msg)
+        if log_fn is not None:
+            log_fn(msg + "\n")
+        return
 
     def locate(well_index: int, fov: int, ti: int):
         pos = well_index * fovs + fov

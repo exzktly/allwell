@@ -304,3 +304,16 @@ def test_an_archive_another_file_converted_under_the_same_settings_withholds_the
     _explode(_write_multi(tmp_path / "second.ome.tif"), out, well_subset=("A02",), log_fn=logged.append)
     assert not (out / "acquisition.json").exists()
     assert any("A01.zip is not this conversion's output" in line for line in logged)
+
+
+def test_ome_metadata_that_cannot_be_read_costs_the_record_not_the_conversion(tmp_path):
+    """Roll-up review X27: opening the OME file for its metadata sat outside the record's never-raises contract, so
+    an unreadable one failed a conversion whose images were already written. It is said in the run log instead."""
+    from pipeline.ome_explode import _publish_record
+
+    said = []
+    _publish_record(tmp_path / "gone.ome.tif", tmp_path / "in", None, ["A01"], "exp", 1, [(0, "0h")],
+                    (1, 1, "TZ"), said.append)
+    assert len(said) == 1 and said[0].startswith(
+        "[record] No acquisition record written: the OME metadata could not be read (FileNotFoundError")
+    assert not (tmp_path / "in" / "acquisition.json").exists()

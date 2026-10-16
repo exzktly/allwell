@@ -8,6 +8,7 @@ rim-suppressed crops beside their segmentation. It writes nothing under the outp
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,6 +16,8 @@ import numpy as np
 
 from pipeline import nanowell_run as nr
 from pipeline import nanowell_task as nt
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -117,8 +120,13 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
     if located.status not in (nr.OK, nr.UNADDRESSED) or located.boundary is None:
         return result
     px = located.pixel_size_um
-    segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
-    measured = nr.measure_timepoint(located, images, settings, located.boundary["radius_um"], segmenter=segment)
+    try:
+        segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
+        measured = nr.measure_timepoint(located, images, settings, located.boundary["radius_um"], segmenter=segment)
+    except Exception as exc:          # the location above is still worth showing; the reason goes with it (X27)
+        log.warning("Test detection: measuring %s %s failed", well, timepoint, exc_info=True)
+        result.notes = [f"Measuring failed ({type(exc).__name__}: {exc}); the lattice and addresses above stand."]
+        return result
     result.notes = list(measured.notes)
     for row in measured.sites:
         q, r = row["nw_q"], row["nw_r"]

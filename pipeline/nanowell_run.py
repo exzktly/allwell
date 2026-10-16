@@ -750,7 +750,9 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     outcome.radius = {"radius_um": shared.radius_um, "status": shared.status,
                       "deviations_um": shared.deviations_um, "flags": shared.flags}
     if shared.radius_um is None:
-        for tp in anchored:
+        # Unaddressed timepoints too: they are measured against the shared radius, so without one they have no rows
+        # and must say so in a status the caller counts as failed (roll-up review X27).
+        for tp in anchored + unaddressed:
             outcome.timepoints[tp].update(status=NO_LATTICE, reason="No timepoint fitted an array boundary, so "
                                                                    "no roster radius could be shared")
         return outcome

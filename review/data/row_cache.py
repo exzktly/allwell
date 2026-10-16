@@ -196,6 +196,22 @@ class RowCache(MutableMapping):
             self.evictions = 0
             self._reported_full = False
 
+    def release(self) -> int:
+        """Drop every frame not pinned, counted as evictions; return how many.
+
+        For a read that ran out of memory: unlike :meth:`clear` (a dataset swap,
+        which starts the count again), this is the budget giving way, so the
+        count — and the dataset loader's "stop reading rows" decision built on
+        it — has to see it.
+        """
+        with self._lock:
+            dropped = [label for label in self._frames if label not in self._pins]
+            for label in dropped:
+                del self._frames[label]
+                self._held -= self._sizes.pop(label, 0)
+            self.evictions += len(dropped)
+            return len(dropped)
+
     # ── the budget ───────────────────────────────────────────────────────────
 
     @property

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from contextlib import nullcontext
 import re
 from pathlib import Path
@@ -466,6 +467,58 @@ def read_well_frame(path: Path) -> pd.DataFrame:
     return frame
 
 
+class WellDoesNotFitInMemory(MemoryError):
+    """A well's rows could not be read for lack of memory, even with the row cache emptied.
+
+    A ``MemoryError`` subclass, so every handler that already catches one still
+    does; what changes is the sentence. The bare error names a numpy allocation —
+    "Unable to allocate 8.43 MiB for an array with shape (1104480,)" — which says
+    nothing about which well, how large it is, or what was already held, and an
+    8 MiB allocation failing reads as a bug rather than as a machine out of
+    memory. This one names all three.
+    """
+
+
+def _mib(n: float) -> str:
+    return f"{n / 2**20:,.0f} MiB"
+
+
+def _read_making_room(dataset, label: str, path: Path) -> pd.DataFrame:
+    """:func:`read_well_frame`, retried once with the row cache emptied on a ``MemoryError``.
+
+    The held frames are the one large thing this layer can give back. Dropping
+    them costs re-reading those wells later (0.22 s each from the Parquet cache);
+    not dropping them costs the well being asked for. A second failure is raised
+    as :class:`WellDoesNotFitInMemory`, naming the well, its size on disk, what
+    the cache held when the first attempt failed, and its budget.
+    """
+    try:
+        return read_well_frame(path)
+    except MemoryError as first:
+        cache = dataset.cache
+        held = cache.describe() if hasattr(cache, "describe") else f"{len(cache)} well(s) held"
+        _logger.warning("Out of memory reading well %s (%s); emptying the row cache and trying once more",
+                        label, held)
+        release = getattr(cache, "release", None)
+        if release is not None:
+            release()
+        else:
+            cache.clear()
+        try:
+            return read_well_frame(path)
+        except MemoryError as second:
+            try:
+                on_disk = _mib(os.path.getsize(path))
+            except OSError:
+                on_disk = "an unknown size"
+            raise WellDoesNotFitInMemory(
+                f"Well {label} could not be read: the computer ran out of memory. Its CSV is {on_disk} on disk; "
+                f"when the read began the {held}. Emptying that cache and retrying did not help, so this well "
+                f"alone needs more memory than is free. Close other programs, or open the plate on a machine "
+                f"with more memory. (The failing allocation: {first})"
+            ) from second
+
+
 def get_rows(ctx, label: str) -> pd.DataFrame:
     """Return the measurement frame for well *label*, loading + projecting lazily.
 
@@ -487,9 +540,14 @@ def get_rows(ctx, label: str) -> pd.DataFrame:
     # One lookup, not ``in`` then ``[]``: the cache is bounded, and a well held at
     # the first may be evicted by another thread's read before the second.
     try:
-        return ctx.state.dataset.cache[label]
+        frame = ctx.state.dataset.cache[label]
     except KeyError:
-        return load_and_project(ctx, label)
+        frame = None
+    # Loaded outside the ``except``: a failure there would otherwise be reported
+    # as raised "during handling of" a KeyError, which reads as a second fault.
+    if frame is None:
+        frame = load_and_project(ctx, label)
+    return frame
 
 
 def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
@@ -518,7 +576,7 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     dataset = ctx.state.dataset
     if path is not None:
         dataset.well_paths[label] = path
-    frame = read_well_frame(dataset.well_paths[label])
+    frame = _read_making_room(dataset, label, dataset.well_paths[label])
     pinned = getattr(dataset.cache, "pinned", None)
     # Pinned while the projectors run: they find the frame by label, and one that
     # found it evicted meanwhile (a read on the gating worker's thread) would

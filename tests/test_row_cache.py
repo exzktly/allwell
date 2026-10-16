@@ -228,3 +228,62 @@ def test_a_well_is_held_while_its_projectors_run(ctx, monkeypatch):
     monkeypatch.setattr(dl, "iter_cache_projectors", lambda: [another_read, later_layer])
     frame = dl.load_and_project(ctx, "A01")
     assert "Later_Pass" in frame.columns
+
+
+# ── running out of memory (tracker M7) ─────────────────────────────────────
+
+
+def _failing_reads(monkeypatch, failures: int):
+    from review.data import data_loading as dl
+
+    real = dl.read_well_frame
+    calls = {"n": 0}
+
+    def read(path):
+        calls["n"] += 1
+        if calls["n"] <= failures:
+            raise MemoryError("Unable to allocate 8.43 MiB for an array with shape (1104480,) and data type object")
+        return real(path)
+
+    monkeypatch.setattr(dl, "read_well_frame", read)
+    return calls
+
+
+def test_a_read_that_runs_out_of_memory_is_retried_with_the_cache_emptied(ctx, monkeypatch):
+    get_rows(ctx, "A02")
+    get_rows(ctx, "A03")
+    calls = _failing_reads(monkeypatch, failures=1)
+    frame = get_rows(ctx, "A01")
+    assert len(frame) == 400 and calls["n"] == 2
+    cache = ctx.state.dataset.cache
+    assert cache.keys() == ["A01"], "the held wells were not given back for the retry"
+    assert cache.evictions == 2, "the release must count, or the loader would go on reading rows"
+
+
+def test_a_well_that_cannot_fit_says_which_and_why(ctx, monkeypatch):
+    from review.data.data_loading import WellDoesNotFitInMemory
+
+    get_rows(ctx, "A02")
+    _failing_reads(monkeypatch, failures=2)
+    with pytest.raises(WellDoesNotFitInMemory) as raised:
+        get_rows(ctx, "A01")
+    message = str(raised.value)
+    assert isinstance(raised.value, MemoryError)
+    assert message.startswith("Well A01 could not be read: the computer ran out of memory. Its CSV is 0 MiB on disk")
+    assert "row cache: 1 well(s) held" in message and "budget" in message
+    assert "Unable to allocate 8.43 MiB" in message
+
+
+def test_a_failed_load_is_not_reported_as_a_missing_key(ctx, monkeypatch):
+    """The dialog shows the traceback; one that opens with a KeyError sends the
+    reader after a fault that is not there."""
+    from review.data.data_loading import WellDoesNotFitInMemory
+
+    _failing_reads(monkeypatch, failures=2)
+    with pytest.raises(WellDoesNotFitInMemory) as raised:
+        get_rows(ctx, "A01")
+    chain, exc = [], raised.value
+    while exc is not None:
+        chain.append(type(exc).__name__)
+        exc = exc.__cause__ or exc.__context__
+    assert "KeyError" not in chain, chain

@@ -42,7 +42,7 @@ def test_the_spatial_tab_draws_a_nanowell_run_s_cells_at_their_well_frame_positi
     ctx.state.selection.selected_wells = {"A01"}
     assert collect.available_timepoints(ctx) == [0.0]                         # "0h", read from the label
     spc.sp_recompute(ctx)
-    cells = pd.read_csv(run_with_a_cell / "measurements_A01.csv")
+    cells = pd.read_csv(run_with_a_cell / "measurements_A01.csv.gz")
     st = ctx.state.feature_slice("spatial")
     points = st.frames[0]["points"]
     assert np.allclose(points, cells[["well_x_um", "well_y_um"]].to_numpy())
@@ -72,7 +72,7 @@ def test_the_spatial_cell_export_holds_the_nanowell_run_s_cells_it_drew(qtbot, r
     ctx.state.selection.selected_wells = {"A01"}
     spc.sp_recompute(ctx)
     scope = cell_scope(ctx)
-    cells = pd.read_csv(run_with_a_cell / "measurements_A01.csv")
+    cells = pd.read_csv(run_with_a_cell / "measurements_A01.csv.gz")
     assert scope.required_columns == ("well_x_um", "well_y_um") and scope.timepoints == (0.0,)
     assert int(population_mask(cells, scope).sum()) == len(st_points := ctx.state.feature_slice("spatial").frames[0]
                                                            ["points"]) == len(cells)

@@ -8,6 +8,7 @@ stand-in for Cellpose (the real one is exercised in the slow segmentation lane):
 from __future__ import annotations
 
 import csv
+import gzip
 import json
 import sys
 import zipfile
@@ -88,7 +89,8 @@ def test_a_nanowell_run_writes_the_three_tables_and_the_cell_lands_at_its_addres
     assert set(truth) <= set(by_address)
     assert by_address[(1, 2)]["n_cells"] == "1" and by_address[(1, 2)]["state"] == "measured"
     assert by_address[(0, 1)]["n_cells"] == "0"
-    cells = list(csv.DictReader((out / f"measurements_{WELL}.csv").open()))
+    assert not (out / f"measurements_{WELL}.csv").exists()                   # a finished well is gzipped (D11)
+    cells = list(csv.DictReader(gzip.open(out / f"measurements_{WELL}.csv.gz", "rt", newline="")))
     assert len(cells) == 1
     assert (cells[0]["nw_q"], cells[0]["nw_r"], cells[0]["well"], cells[0]["timepoint"]) == ("1", "2", WELL, "0h")
     assert cells[0]["fov"] in {"F0", "F1", "F2", "F3"}
@@ -137,12 +139,17 @@ def test_nanowell_mode_needs_a_phase_channel(tmp_path, monkeypatch, rendered_wel
 
 
 # ── incremental ──────────────────────────────────────────────────────────────
-def _two_timepoint_plate(tmp_path, *, with_second=True):
+def _two_timepoint_plate(tmp_path, *, with_second=True, cell=False):
+    """*cell* paints one cell into nanowell (1, 2) at each timepoint, so the well's cell CSV has rows to keep."""
     first, record = build_well(rows=1, cols=1, tile=(900, 900), timepoint="0h", radius_fraction=0.26)
+    if cell:
+        paint_cell(first, dict(zip(first.array.addresses, first.sites_um))[(1, 2)], dx_um=3.0, dy_um=-2.0)
     items = [("0h", first)]
     if with_second:
         second, second_record = build_well(rows=1, cols=1, tile=(900, 900), rotation=9.0, array_shift_um=(120.0, -80.0),
                                            seed=2, timepoint="24h", radius_fraction=0.26)
+        if cell:
+            paint_cell(second, dict(zip(second.array.addresses, second.sites_um))[(1, 2)], dx_um=3.0, dy_um=-2.0)
         record["timepoints"].update(second_record["timepoints"])
         record["tiles"] += second_record["tiles"]
         items.append(("24h", second))
@@ -171,18 +178,24 @@ def located_calls(monkeypatch):
     return calls
 
 
+def _cells(out):
+    return list(csv.DictReader(gzip.open(out / f"measurements_{WELL}.csv.gz", "rt", newline="")))
+
+
 def _rows(out, name):
     return list(csv.DictReader((out / "nanowells" / name).open()))
 
 
 def test_an_incremental_run_adds_only_the_new_timepoint_onto_the_same_roster(tmp_path, monkeypatch, located_calls):
-    plate, record, rendered = _two_timepoint_plate(tmp_path, with_second=False)
+    plate, record, rendered = _two_timepoint_plate(tmp_path, with_second=False, cell=True)
     out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--fluor_tokens", "GFP")
     first_rows = _rows(out, f"{WELL}.csv")
+    first_cells = _cells(out)
+    assert [c["timepoint"] for c in first_cells] == ["0h"]
     assert located_calls["measure"] == ["0h"]
 
     # The plate is imaged again: a second timepoint joins the zip and the record.
-    plate2, record2, _ = _two_timepoint_plate(tmp_path / "second")
+    plate2, record2, _ = _two_timepoint_plate(tmp_path / "second", cell=True)
     (plate / "in" / f"{WELL}.zip").write_bytes((plate2 / "in" / f"{WELL}.zip").read_bytes())
     write_record_file(plate / "in" / "acquisition.json", record2)
     located_calls["locate"].clear(), located_calls["measure"].clear()
@@ -190,6 +203,10 @@ def test_an_incremental_run_adds_only_the_new_timepoint_onto_the_same_roster(tmp
     assert located_calls["locate"] == ["24h"] and located_calls["measure"] == ["24h"]      # 0h was not touched
     rows = _rows(out, f"{WELL}.csv")
     assert [r for r in rows if r["timepoint"] == "0h"] == first_rows                    # kept verbatim
+    # The kept timepoint's cells too, read back from the gzipped well CSV the first run left (D11).
+    cells = _cells(out)
+    assert [c for c in cells if c["timepoint"] == "0h"] == first_cells and {c["timepoint"] for c in cells} == {
+        "0h", "24h"}
     by_tp = {tp: {(r["nw_q"], r["nw_r"]) for r in rows if r["timepoint"] == tp} for tp in ("0h", "24h")}
     assert by_tp["0h"] == by_tp["24h"] and len(by_tp["0h"]) > 100                         # one roster
     grid = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())
@@ -230,7 +247,7 @@ def test_a_well_with_no_cells_still_has_its_cell_csv_so_it_reads_as_finished(tmp
     rendered, record = build_well(timepoint="0h")            # nothing painted: every nanowell is empty
     plate = _write_plate(tmp_path, rendered, record)
     out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", run_check=True)
-    lines = (out / f"measurements_{WELL}.csv").read_text().splitlines()
+    lines = gzip.open(out / f"measurements_{WELL}.csv.gz", "rt").read().splitlines()   # gzipped, even empty
     assert len(lines) == 1 and lines[0].startswith("well,fov,timepoint,nucleus_id,area_px,PHASE_mean_intensity,GFP_mean_intensity,nw_q")
     sites = _rows(out, f"{WELL}.csv")
     assert sites and all(r["n_cells"] == "0" for r in sites if r["state"] == "empty")

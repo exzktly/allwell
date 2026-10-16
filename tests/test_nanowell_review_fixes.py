@@ -202,7 +202,9 @@ def test_a_token_is_not_found_by_looking_for_it_in_the_filename(tmp_path, monkey
     write_record_file(plate / "in" / "acquisition.json", record)
     out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
     import csv
-    row = next(csv.DictReader((out / f"measurements_{WELL}.csv").open()))
+    import gzip
+
+    row = next(csv.DictReader(gzip.open(out / f"measurements_{WELL}.csv.gz", "rt", newline="")))
     assert float(row["GFP_mean_intensity"]) > 100.0            # the glow, not the phase image under the same stem
 
 

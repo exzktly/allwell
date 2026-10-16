@@ -8921,7 +8921,10 @@ is only measurable across wells.
 **Outputs** (`pipeline/nanowell_task.py`). The per-cell CSV keeps the existing columns (`fov` is the owner
 tile) and adds `nw_q`, `nw_r`, `nw_ring`, `nw_label`, `well_x_um`, `well_y_um`; it is written with its header and
 no rows for a well none of whose nanowells holds a cell, because a missing CSV reads as an unfinished well
-everywhere else. `nanowells/<well>.csv` and `nanowells/<well>_grid.json` hold the site rows and the per-timepoint
+everywhere else. Like any finished well's CSV it is gzipped once written (`pipeline/io.write_well_csv`,
+`compress_well_csv` for the empty one), and an incremental run reads the kept timepoints' cells back from
+whichever spelling is there (`util/csv_gz.existing_csv`, plain winning). The site tables in `nanowells/` stay
+plain. `nanowells/<well>.csv` and `nanowells/<well>_grid.json` hold the site rows and the per-timepoint
 record (they live in a subdirectory because Review loads every top-level `*.csv` as a cell table).
 `<well>_out.zip` holds one montage PNG per located timepoint (role `montage` in `ROLE_CATALOG`).
 `pipeline_info.json` gains a `nanowell` block (settings, conventions, scheme version, and the end-of-run
@@ -9009,8 +9012,8 @@ pipeline's `SCHEME_VERSION` in it). A sidecar with another version refuses the w
 and names it in `NanowellData.problems`. The phase channel's site intensities, which the pipeline writes like any other
 channel's, are not offered as fluorescence. Brightness is the mean `<token>_mean_intensity` of the cells the
 per-cell CSVs beside `nanowells/` place at each `(well, timepoint, q, r)`, whichever of the output folder and
-its parent was loaded; a CSV is read in either spelling, `x.csv` or `x.csv.gz`, the plain one winning when both
-exist.
+its parent was loaded; a CSV is read in either spelling through `util/csv_gz.glob_csvs`, the plain one winning
+when both exist.
 
 **Time** is each timepoint's recorded start from `in/acquisition.json` (looked for beside the data dir and
 one level up), in hours since the earliest. All timepoints must have a start on comparable clocks; otherwise

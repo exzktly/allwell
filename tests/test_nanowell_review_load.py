@@ -59,8 +59,8 @@ def test_the_well_loader_scans_only_the_top_level_and_would_not_take_a_nanowell_
             load_controller.load_directory(SimpleNamespace(window=None), run_output)
     finally:
         load_controller._opening_set_phase = original
-    top_level = sorted(p.name for p in run_output.glob("*.csv"))
-    assert scanned[-1] == f"Scanning {len(top_level)} file(s)…" and top_level == [f"measurements_{WELL}.csv"]
+    top_level = sorted(p.name for p in run_output.glob("*.csv*"))
+    assert scanned[-1] == f"Scanning {len(top_level)} file(s)…" and top_level == [f"measurements_{WELL}.csv.gz"]
     table = run_output / "nanowells" / f"{WELL}.csv"
     assert table.exists() and not load_controller._looks_like_well_measurement_csv(table)
 
@@ -86,7 +86,7 @@ def test_brightness_comes_from_the_cells_the_run_placed_in_each_nanowell(run_wit
     import pandas as pd
 
     sites = load_nanowell_data(run_with_a_cell).sites
-    cells = pd.read_csv(run_with_a_cell / f"measurements_{WELL}.csv")
+    cells = pd.read_csv(run_with_a_cell / f"measurements_{WELL}.csv.gz")
     assert len(cells) == 1
     lit = sites[(sites["nw_q"] == 1) & (sites["nw_r"] == 2)]
     assert lit["brightness_GFP"].tolist() == pytest.approx([cells["GFP_mean_intensity"].iloc[0]])

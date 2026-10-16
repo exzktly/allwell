@@ -22,6 +22,7 @@ import numpy as np
 
 from pipeline import nanowell_measure as nm
 from pipeline import nanowell_run as nr
+from util.csv_gz import existing_csv
 
 log = logging.getLogger("allwell.nanowell")
 
@@ -245,7 +246,8 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
     if not kept:
         return None
     sites_path = Path(prior_dir) / NANOWELL_DIR / f"{well_label}.csv"
-    cells_path = Path(prior_dir) / f"{csv_prefix}_{well_label}.csv"
+    # A finished well's CSV is gzipped (``write_well_csv``): either spelling, plain winning (``util/csv_gz``).
+    cells_path = existing_csv(Path(prior_dir) / f"{csv_prefix}_{well_label}.csv")
     sites = [r for r in _read_rows(sites_path) if r["timepoint"] in kept]
     cells = [r for r in _read_rows(cells_path) if r["timepoint"] in kept]
     return {"grid": grid, "kept": kept, "sites": sites, "cells": cells,
@@ -308,10 +310,13 @@ def _reference_of(prior: dict | None) -> dict | None:
     return None
 
 
-def _read_rows(path: Path) -> list[dict]:
-    if not path.is_file():
+def _read_rows(path: Path | None) -> list[dict]:
+    """The rows of a ``.csv`` or ``.csv.gz``; none when there is no file."""
+    from util.csv_gz import open_csv_text
+
+    if path is None or not Path(path).is_file():
         return []
-    with path.open(newline="", encoding="utf-8") as fh:
+    with open_csv_text(path, encoding="utf-8") as fh:
         return list(csv.DictReader(fh))
 
 
@@ -426,7 +431,12 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     if all_cells:
         write_csv(all_cells, output_dir / f"{csv_prefix}_{well_label}.csv")
     else:
+        from pipeline.io import compress_well_csv
+
+        # Gzipped like any finished well's CSV (``write_well_csv``), so a well with no cells is not the one plain
+        # file in a folder of ``.csv.gz``.
         write_empty_cells_csv(output_dir / f"{csv_prefix}_{well_label}.csv", fluor_tokens)
+        compress_well_csv(output_dir / f"{csv_prefix}_{well_label}.csv")
     write_sites_csv(output_dir / NANOWELL_DIR / f"{well_label}.csv", all_sites, fluor_tokens)
     write_grid_json(output_dir / NANOWELL_DIR / f"{well_label}_grid.json", well_label, outcome, settings)
     rank_of = {tp: k for k, tp in enumerate(timepoints)}
@@ -461,7 +471,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
     per-field well; a caller without them (the end-of-run pass) gets directories of its own, removed after.
     """
     from pipeline.fov_checkpoint import _staging_dir_for
-    from pipeline.io import _write_single_csv, extract_zip, remove_directory, scratch_base_for
+    from pipeline.io import extract_zip, remove_directory, scratch_base_for, write_well_csv
     from pipeline.run_report import write_well_report
     from pipeline.settings_record import record_well_settings
 
@@ -478,7 +488,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
         records, failed = process_well_zip(
             well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
             schema, sep, grouper=grouper, parse=parse, extract=extract_zip, scratch_dir=scratch,
-            write_csv=_write_single_csv, segmenter=segmenter, incremental=incremental,
+            write_csv=write_well_csv, segmenter=segmenter, incremental=incremental,
             prior_dir=incremental_prior_dir, settings_key=settings_key, staging_dir=staging, plate_rigid=plate_rigid)
         grid_path = output_dir / NANOWELL_DIR / f"{well_label}_grid.json"
         if not grid_path.is_file():

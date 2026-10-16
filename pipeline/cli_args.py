@@ -555,9 +555,11 @@ def nanowell_options_from_args(args, error) -> dict | None:
         return None
     if not str(args.phase_token or "").strip():
         error("--nanowell_format needs --phase_token: the phase channel the tiles are imaged in.")
-    if not (args.nanowell_cell_diameter_um > 0):
+    # Finite as well as in range: `inf` passes a comparison, and the form refuses it (roll-up review X20).
+    if not (math.isfinite(args.nanowell_cell_diameter_um) and args.nanowell_cell_diameter_um > 0):
         error("--nanowell_cell_diameter_um must be a positive number of micrometres.")
-    if args.nanowell_margin_um is not None and not (args.nanowell_margin_um >= 0):
+    if args.nanowell_margin_um is not None and not (math.isfinite(args.nanowell_margin_um)
+                                                    and args.nanowell_margin_um >= 0):
         error("--nanowell_margin_um must be zero or more.")
     for flag, value in (("--nanowell_occluded_below", args.nanowell_occluded_below),
                         ("--nanowell_clipped_below", args.nanowell_clipped_below)):

@@ -4,7 +4,7 @@ A remediation tracker (CLAUDE.md §6.1): the plan for the follow-up PR that stac
 (`claude/nanowell-rollup`, #982), written before any code. One row per item, updated in the same commit as the
 work, closed only with evidence, and deleted by the PR that closes its last row.
 
-**Status, derived from the rows below:** 16 rows — 4 `done` (evidence), 4 `open` (questions), 8 `todo` (plan).
+**Status, derived from the rows below:** 16 rows — 4 `done` (evidence), 4 `answered` (questions), 8 `todo` (plan).
 Recount with `grep -c '| \`done\` |'` and so on; never edit this line by hand alone.
 
 ## The report
@@ -36,10 +36,10 @@ columns to `float32` halves what is held (201 → 100 MiB at 300 MB; 294 → 146
 
 | # | Question | Why it matters | State | Answer |
 |---|---|---|---|---|
-| Q1 | The full traceback (`%LOCALAPPDATA%\allwell\allwell-boot.log`) | Confirms E2 is the path that crashed, or names another (a pooling view, the curation pass at load, the FOV integrity check) | `open` | |
-| Q2 | How many wells, how many rows and columns in the largest, and the machine's RAM | Sets the memory budget (M4) and whether any view can pool every cell at all (M7) | `open` | |
-| Q3 | Whether the user's environment has pyarrow (`python -c "import pyarrow"` in the `allwell` env) | Without it the Parquet cache is off and every open parses every CSV — 7.7 s a well at this size before any memory question — and M2 must fall back to CSV `usecols` | `open` | |
-| Q4 | Which plots, if any, the user needs over every cell of the plate at once | M7: a whole-plate per-cell view at this size cannot be drawn from all rows; it has to aggregate or sample, and the user should choose which | `open` | |
+| Q1 | The full traceback (`%LOCALAPPDATA%\allwell\allwell-boot.log`) | Confirms E2 is the path that crashed, or names another (a pooling view, the curation pass at load, the FOV integrity check) | `answered` | Not needed (user): E2 is accepted as the path. M1's test checks that opening reads no full frame, so it holds whatever the exact frame was |
+| Q2 | How many wells, how many rows and columns in the largest, and the machine's RAM | Sets the memory budget (M4) and whether any view can pool every cell at all (M7) | `answered` | User: assume a full 96-well plate of ~300 MB CSVs, ~1.1M rows each — about 19 GB held today by E3's measurement. The budget (M4) defaults to a share of physical RAM read at runtime rather than a figure for one machine |
+| Q3 | Whether the user's environment has pyarrow (`python -c "import pyarrow"` in the `allwell` env) | Without it the Parquet cache is off and every open parses every CSV — 7.7 s a well at this size before any memory question — and M2 must fall back to CSV `usecols` | `answered` | Not needed: M2 serves both — the Parquet cache's column reads with pyarrow, and CSV `usecols` reads without it — and M8's benchmark measures both |
+| Q4 | Which plots, if any, the user needs over every cell of the plate at once | M7: a whole-plate per-cell view at this size cannot be drawn from all rows; it has to aggregate or sample, and the user should choose which | `answered` | Not needed: M7 aggregates where a view's output is an aggregate and samples, with the n on the figure, where it draws cells; the choice is a setting, not a question |
 
 ## Plan — the follow-up PR
 

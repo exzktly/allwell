@@ -198,6 +198,10 @@ python process_microscopy.py --help
 
 #### Nanowell arrays (Analyze ▸ Nanowells, or the command line)
 
+The section and the Review page belong to the Nanowells feature: a build made from a profile without it
+(`ALLWELL_PROFILE`, as for a feature-subset executable) shows neither. The command-line `--nanowell_format` works in every
+build.
+
 In the Analyze pane, open the **Nanowells** section (folded by default), tick **Nanowell arrays**, and mark the
 channel the tiles are imaged in as **Phase** (Channel Tokens). The section asks for the plate format (100 µm or
 50 µm nanowells, or **Custom size**, which shows two more fields: the nanowell diameter and the lattice pitch,

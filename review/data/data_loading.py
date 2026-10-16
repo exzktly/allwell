@@ -1464,29 +1464,35 @@ def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, s
     Which wells each group holds comes from :func:`plot_group_well_lists`; only
     the pooling and the colours are this function's own.
     """
-    from review.domain.selections_model import (
-        _DEFAULT_COLOR,
-        color_for_replicate_set,
-        color_for_wells,
-    )
-
-    selections = ctx.state.selection.selections
-
-    def _color_rset(rset) -> str:
-        try:
-            return color_for_replicate_set(rset, selections)
-        except Exception:
-            swallowed()  # was: pass (silent except)
-        return _DEFAULT_COLOR
-
     for name, wells, rset in plot_group_well_lists(ctx, fallback_to_all):
         frames = [get_rows(ctx, w) for w in wells]
         pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
         # Released before the yield: the consumer holds the pooled copy while it
         # draws, and the list beside it doubled the group's rows for that time.
         del frames
-        color = _color_rset(rset) if rset is not None else color_for_wells([name])
-        yield name, color, pooled
+        yield name, plot_group_color(ctx, name, rset), pooled
+
+
+def plot_group_color(ctx, name: str, rset) -> str:
+    """The colour :func:`iter_plot_groups` gives a group: its replicate set's, else its well's.
+
+    Its own function so a view that walks :func:`plot_group_well_lists` without
+    pooling (the Distribution tab's large-selection path) colours each group
+    exactly as this does.
+    """
+    from review.domain.selections_model import (
+        _DEFAULT_COLOR,
+        color_for_replicate_set,
+        color_for_wells,
+    )
+
+    if rset is None:
+        return color_for_wells([name])
+    try:
+        return color_for_replicate_set(rset, ctx.state.selection.selections)
+    except Exception:
+        swallowed()  # was: pass (silent except)
+    return _DEFAULT_COLOR
 
 
 def iter_plot_group_wells(

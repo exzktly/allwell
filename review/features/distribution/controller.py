@@ -14,6 +14,7 @@ from collections.abc import Iterable, Sequence
 import numpy as np
 
 from review.data.data_loading import _all_fluor_values_filtered, iter_plot_groups
+from review.features.distribution._pooled import collect_distribution, exact_range, sampled_note
 from core.safe import swallowed
 from review.core.plot_style import (
     apply_export_style_to_current, figure_prefs, style_legend,
@@ -108,17 +109,21 @@ def _gaussian_kde(values: Sequence[float], grid: np.ndarray) -> np.ndarray:
     return kernel.sum(axis=1) / (n * h)
 
 
-def _grid_for(values_lists: Iterable[Sequence[float]], n_pts: int = 200, log_x: bool = False) -> np.ndarray:
-    """Build an x-axis grid spanning all per-group min/max."""
-    chunks = [np.asarray(vs, dtype=float) for vs in values_lists]
-    if not chunks:
-        return np.linspace(0.0, 1.0, n_pts)
-    pooled = np.concatenate(chunks)
-    pooled = pooled[np.isfinite(pooled)]
-    if pooled.size == 0:
-        return np.linspace(0.0, 1.0, n_pts)
-    lo = float(pooled.min())
-    hi = float(pooled.max())
+def _grid_for(values_lists: Iterable[Sequence[float]], n_pts: int = 200, log_x: bool = False,
+              value_range: tuple[float, float] | None = None) -> np.ndarray:
+    """Build an x-axis grid spanning all per-group min/max (*value_range* when given)."""
+    if value_range is not None:
+        lo, hi = value_range
+    else:
+        chunks = [np.asarray(vs, dtype=float) for vs in values_lists]
+        if not chunks:
+            return np.linspace(0.0, 1.0, n_pts)
+        pooled = np.concatenate(chunks)
+        pooled = pooled[np.isfinite(pooled)]
+        if pooled.size == 0:
+            return np.linspace(0.0, 1.0, n_pts)
+        lo = float(pooled.min())
+        hi = float(pooled.max())
     if hi <= lo:
         hi = lo + 1.0
     if log_x and lo > 0:
@@ -179,6 +184,7 @@ def _apply_card_style(ctx, ax) -> None:
 
 def _shared_bin_edges(
     values_lists: Iterable[Sequence[float]], bins: int, log_x: bool,
+    value_range: tuple[float, float] | None = None,
 ) -> np.ndarray:
     """Compute a single set of bin edges spanning every group's data.
 
@@ -189,16 +195,20 @@ def _shared_bin_edges(
     combined range, then pass the edge array to every per-group hist
     call so the same x-axis bins are shared across groups.
     """
-    chunks = [np.asarray(vs, dtype=float) for vs in values_lists]
-    if not chunks:
-        return np.linspace(0.0, 1.0, max(2, bins) + 1)
-    pooled = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
-    pooled = pooled[np.isfinite(pooled)]
     n_edges = max(2, int(bins)) + 1
-    if pooled.size == 0:
-        return np.linspace(0.0, 1.0, n_edges)
-    lo = float(pooled.min())
-    hi = float(pooled.max())
+    if value_range is not None:
+        # A sampled selection: the range of every value, not of the sample.
+        lo, hi = value_range
+    else:
+        chunks = [np.asarray(vs, dtype=float) for vs in values_lists]
+        if not chunks:
+            return np.linspace(0.0, 1.0, n_edges)
+        pooled = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
+        pooled = pooled[np.isfinite(pooled)]
+        if pooled.size == 0:
+            return np.linspace(0.0, 1.0, n_edges)
+        lo = float(pooled.min())
+        hi = float(pooled.max())
     if hi <= lo:
         hi = lo + 1.0
     if log_x and lo > 0:
@@ -343,9 +353,18 @@ def redraw_distribution(ctx) -> None:
     layout_cb = ctx.widgets.get_or_none("_distribution_layout_var")
     layout_choice = layout_cb.currentText() if layout_cb is not None else "Overlay"
 
+    tp_filter = tp_h if math.isfinite(tp_h) else None
+    pooled = collect_distribution(ctx, val_col=val_col, fluor_gates=fluor_gates, ratios=ratios,
+                                  tp_filter=tp_filter, display_label=_display_label_for)
+    if pooled is not None:
+        groups, exact, pool = pooled
+        try:
+            _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, exact)
+        finally:
+            pool.close()
+        return
     groups: list[tuple[str, str, np.ndarray]] = []
     for name, color, df in iter_plot_groups(ctx, fallback_to_all=False):
-        tp_filter = tp_h if math.isfinite(tp_h) else None
         vals = _all_fluor_values_filtered(
             df, val_col=val_col,
             fluor_gates=fluor_gates,
@@ -357,6 +376,11 @@ def redraw_distribution(ctx) -> None:
             # label when one is defined (the raw name stays the CSV identity in
             # iter_plot_groups, which the export path keys on).
             groups.append((_display_label_for(ctx, name), color, vals))
+    _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, None)
+
+
+def _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, exact) -> None:
+    """Draw *groups*; *exact* (see ``distribution/_pooled.py``) when they are a sample."""
 
     if not groups:
         axes = _setup_axes(ctx, 1)
@@ -376,12 +400,13 @@ def redraw_distribution(ctx) -> None:
     )
 
     if is_faceted:
-        _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, log_y=log_y)
+        _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, log_y=log_y, exact=exact)
     else:
         axes = _setup_axes(ctx, 1)
         ax = axes[0]
         ax.set_axis_on()
-        _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, log_y=log_y)
+        _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, log_y=log_y, exact=exact)
+    _note_sampled(ctx, groups, exact)
 
     # Re-apply theme text colours after the renderers set titles/labels.
     # `apply_axes_style` is called inside `_setup_axes` *before* the title
@@ -456,12 +481,69 @@ def _retint_axes_text(ctx) -> None:
             swallowed()  # was: pass (silent except)
 
 
-def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) -> None:
-    """Single-axis renderer covering every mode (Hist / Hist+KDE / KDE / CDF / Violin)."""
+def _n_of(exact, i: int, vals) -> int:
+    """How many values group *i* has: every one when it was sampled (*exact*), else its drawn count."""
+    e = exact[i] if exact else None
+    return e.n if e is not None else int(np.asarray(vals).size)
+
+
+def _hist(ax, exact, i: int, vals, edges, **kw) -> None:
+    """``ax.hist`` of group *i* — counted over every value when it was sampled.
+
+    A sampled group's bars are its whole histogram, drawn as weights on the bin
+    left edges, which matplotlib turns into the same density as ``hist`` of the
+    values themselves.
+    """
+    e = exact[i] if exact else None
+    if e is None:
+        ax.hist(vals, bins=edges, **kw)
+        return
+    ax.hist(edges[:-1], bins=edges, weights=e.hist(edges).astype(float), **kw)
+
+
+def _state_every_value(parts, exact) -> None:
+    """Redraw a sampled violin's marks from every value: the median line, the
+    extrema caps and the bar between them. Only the body stays the sample's."""
+    def _move(name, ys):
+        coll = parts.get(name)
+        if coll is None:
+            return
+        segs = coll.get_segments()
+        for i, e in enumerate(exact):
+            if e is None:
+                continue
+            (x0, _a), (x1, _b) = segs[i]
+            y0, y1 = ys(e)
+            segs[i] = [[x0, y0], [x1, y1]]
+        coll.set_segments(segs)
+
+    _move("cmedians", lambda e: (e.median, e.median))
+    _move("cmins", lambda e: (e.lo, e.lo))
+    _move("cmaxes", lambda e: (e.hi, e.hi))
+    # The bar is vertical: same x at both ends, from every value's min to max.
+    _move("cbars", lambda e: (e.lo, e.hi))
+    # ``set_segments`` leaves the axes' data limits at the sample's range, so a
+    # heavy tail's true maximum would be drawn above the top of the figure.
+    ax = next((c.axes for c in parts.values() if hasattr(c, "axes") and c.axes is not None), None)
+    if ax is not None:
+        ax.update_datalim([(i + 1, y) for i, e in enumerate(exact) if e is not None for y in (e.lo, e.hi)])
+        ax.autoscale_view()
+
+
+def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False, exact=None) -> None:
+    """Single-axis renderer covering every mode (Hist / Hist+KDE / KDE / CDF / Violin).
+
+    *exact*, when given, is aligned with *groups* (``distribution/_pooled.py``):
+    their values are then a sample, and the counts, ranges, bars and medians
+    drawn come from it instead.
+    """
+    rng = exact_range(exact)
     if mode == "Violin (per group)":
         data = [vals for _, _, vals in groups]
         labels = [name for name, _, _ in groups]
         parts = ax.violinplot(data, showmeans=False, showmedians=True)
+        if exact:
+            _state_every_value(parts, exact)
         for i, body in enumerate(parts.get("bodies", [])):
             body.set_facecolor(groups[i][1])
             body.set_edgecolor(groups[i][1])
@@ -470,7 +552,7 @@ def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
         ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
         ax.set_ylabel("Value")
     elif mode == "CDF":
-        for name, color, vals in groups:
+        for i, (name, color, vals) in enumerate(groups):
             arr = np.asarray(vals, dtype=float)
             arr = arr[np.isfinite(arr)]
             n = arr.size
@@ -480,7 +562,7 @@ def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
             ys = np.arange(1, n + 1, dtype=float) / float(n)
             ax.step(
                 xs, ys, where="post", color=color, lw=1.6,
-                label=f"{name} (n={n:,})",
+                label=f"{name} (n={_n_of(exact, i, arr):,})",
             )
         if log_x:
             try:
@@ -506,23 +588,21 @@ def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
     else:
         # Histogram / Histogram + KDE / KDE only — shared bin edges so
         # every group's bars line up on the same x-grid.
-        edges = _shared_bin_edges((vs for _, _, vs in groups), bins, log_x)
-        grid = _grid_for((vs for _, _, vs in groups), log_x=log_x)
-        for name, color, vals in groups:
+        edges = _shared_bin_edges((vs for _, _, vs in groups), bins, log_x, value_range=rng)
+        grid = _grid_for((vs for _, _, vs in groups), log_x=log_x, value_range=rng)
+        for i, (name, color, vals) in enumerate(groups):
             if mode in ("Histogram", "Histogram + KDE"):
                 # Pass ``log=log_y`` into hist so matplotlib computes proper
                 # log-scaled bars/limits. Calling ``set_yscale("log")`` after
                 # drawing density bars from a 0 baseline (log(0) undefined) made
                 # the bar heights render wrong — this is the correct entry point.
-                ax.hist(
-                    vals, bins=edges, density=True, alpha=0.45, log=log_y,
-                    color=color, label=f"{name} (n={int(vals.size)})",
-                )
+                _hist(ax, exact, i, vals, edges, density=True, alpha=0.45, log=log_y,
+                      color=color, label=f"{name} (n={_n_of(exact, i, vals)})")
             if mode in ("KDE only", "Histogram + KDE"):
                 kde = _gaussian_kde(vals, grid)
                 if np.any(kde > 0):
                     ax.plot(grid, kde, color=color, lw=1.6,
-                            label=None if mode == "Histogram + KDE" else f"{name} (n={len(vals)})")
+                            label=None if mode == "Histogram + KDE" else f"{name} (n={_n_of(exact, i, vals)})")
         if log_x:
             try:
                 ax.set_xscale("log")
@@ -559,11 +639,11 @@ def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
         except Exception:
             swallowed()  # was: pass (silent except)
 
-    title = _title_for(ctx, tp_h, int(sum(int(vs.size) for _, _, vs in groups)), len(groups))
+    title = _title_for(ctx, tp_h, sum(_n_of(exact, i, vs) for i, (_, _, vs) in enumerate(groups)), len(groups))
     ax.set_title(title, fontsize=9)
 
 
-def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=False) -> None:
+def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=False, exact=None) -> None:
     """One axis per group, stacked vertically with minimal padding.
 
     Shared x-axis (``sharex=True`` via ``_setup_axes``) + shared bin
@@ -572,8 +652,9 @@ def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=Fa
     differences swamping the comparison.
     """
     axes = _setup_axes(ctx, len(groups))
-    edges = _shared_bin_edges((vs for _, _, vs in groups), bins, log_x)
-    grid = _grid_for((vs for _, _, vs in groups), log_x=log_x)
+    rng = exact_range(exact)
+    edges = _shared_bin_edges((vs for _, _, vs in groups), bins, log_x, value_range=rng)
+    grid = _grid_for((vs for _, _, vs in groups), log_x=log_x, value_range=rng)
 
     # Metrics with no ON cutoff draw no line — see ``_has_on_cutoff``.
     if not _has_on_cutoff(ctx):
@@ -594,10 +675,7 @@ def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=Fa
         if mode in ("Histogram", "Histogram + KDE"):
             # ``log=log_y`` — see the overlay renderer note: drawing density bars
             # from a 0 baseline then setting log-Y afterward renders wrong heights.
-            ax.hist(
-                vals, bins=edges, density=True, alpha=0.55, log=log_y,
-                color=color,
-            )
+            _hist(ax, exact, i, vals, edges, density=True, alpha=0.55, log=log_y, color=color)
         if mode == "Histogram + KDE":
             kde = _gaussian_kde(vals, grid)
             if np.any(kde > 0):
@@ -618,7 +696,7 @@ def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=Fa
         # vertical stack reads top-to-bottom without consuming a slot
         # in a legend or stretching the layout horizontally.
         ax.text(
-            0.99, 0.92, f"{name} (n={int(vals.size):,})",
+            0.99, 0.92, f"{name} (n={_n_of(exact, i, vals):,})",
             transform=ax.transAxes,
             ha="right", va="top", fontsize=8, color=color,
             fontweight="bold",
@@ -637,9 +715,26 @@ def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=Fa
     # Use a figure-level suptitle so the title isn't duplicated per axis.
     fig = ctx.widgets.get("_distribution_fig")
     title = _title_for(
-        ctx, tp_h, int(sum(int(vs.size) for _, _, vs in groups)), len(groups),
+        ctx, tp_h, sum(_n_of(exact, i, vs) for i, (_, _, vs) in enumerate(groups)), len(groups),
     )
     fig.suptitle(title, fontsize=9)
+
+
+#: Tag on the sampled-figure note, so a test (and a redraw) can find it.
+SAMPLED_NOTE_TAG = "_aw_distribution_sampled_note"
+
+
+def _note_sampled(ctx, groups, exact) -> None:
+    """Say on the figure that its curves are drawn from a sample, when they are."""
+    text = sampled_note(groups, exact)
+    fig = ctx.widgets.get_or_none("_distribution_fig")
+    if not text or fig is None or not fig.axes:
+        return
+    from review.core.plot_style import follows_theme, tokens_for
+    ax = fig.axes[-1]
+    note = follows_theme(ax.text(0.01, 0.01, text, transform=ax.transAxes, ha="left", va="bottom",
+                                 fontsize=7, color=tokens_for(ax)[2], zorder=6, clip_on=False), muted=True)
+    setattr(note, SAMPLED_NOTE_TAG, True)
 
 
 def _xlabel_for(ctx) -> str:

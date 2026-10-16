@@ -23,16 +23,12 @@ from review.domain.bar_colors import apply_bar_color_mode, mono_bar_color
 from review.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from review.core.empty_state_copy import NO_DATASET_MESSAGE
 from review.data.data_loading import get_rows
-from domain.text_columns import timepoint_text
 from review.domain.time_rescale import format_scaled as _rescale_tp
 from review.domain.time_rescale import rescale_for as _time_rescale_for
 from review.domain import fold_change_pairing as _pairing_mod
 from review.domain import plot_members as _members
 from review.data.data_loading import (
     _beeswarm_jitter,
-    df_included_mask,
-    parse_timepoint_hours,
-    resolve_value_series,
 )
 from review.core.plot_style import (
     apply_ax_style,
@@ -59,7 +55,9 @@ from review.core.plot_annotations import (
     LABEL_SPAN_HEADROOM as _LABEL_HEADROOM,
     value_label_settings,
 )
-from domain.tp_match import tp_close, tp_close_mask
+from domain.tp_match import tp_close
+from review.features.barplot._pooled import ColumnCells, column_cells, finish_columns
+from review.features.barplot._pooled import release_previous as _release_previous
 from review.features.barplot._annotations import (
     cluster_header_pad,
     label_bar,
@@ -145,27 +143,6 @@ def _pooled_rows(ctx, lbl: str, pool_groups: dict[str, list[str]] | None) -> pd.
     return get_rows(ctx, lbl)
 
 
-def _timepoint_hours(df) -> np.ndarray:
-    """Numeric timepoint-in-hours per row, falling back to the text column.
-
-    ``timepoint_hours`` is the parsed column and is present on anything the
-    current pipeline wrote, but older CSVs — and any row whose parse failed —
-    carry only the text ``timepoint``. The beeswarm renderer had this fallback
-    and the violin renderer did not: it required ``timepoint_hours`` outright
-    and drew nothing without it, so the same well showed a populated beeswarm
-    and an empty violin, one toggle apart, with nothing saying why.
-    """
-    if "timepoint_hours" in df.columns:
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy(dtype=float)
-    else:
-        tp = np.full(len(df), np.nan)
-    need = ~np.isfinite(tp)
-    if need.any() and "timepoint" in df.columns:
-        fallback = timepoint_text(df.loc[need]).map(parse_timepoint_hours)
-        tp[need] = fallback.fillna(np.nan).to_numpy(dtype=float)
-    return tp
-
-
 def draw_violin(
     ctx,
     ax_mean,
@@ -227,75 +204,69 @@ def draw_violin(
     else:
         target_ts_per_col = [float(target_t)] * n
     frac_vals: list[float] = []
-    ratios = ctx.state.channel.ratio_index
 
-    for i, (lbl, color) in enumerate(zip(wells, colors)):
-        col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
-        df = _pooled_rows(ctx, lbl, pool_groups)
-        vals = np.empty(0, dtype=float)
-        n_total = n_above = 0
-        if df is not None and not df.empty:
-            mask = df_included_mask(df).to_numpy(copy=True)
-            tp = _timepoint_hours(df)
-            with np.errstate(invalid="ignore"):
-                mask &= np.isfinite(tp) & tp_close_mask(tp, col_tp)
-            v = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()
-            mask &= np.isfinite(v)
-            v_sel = v[mask]
-            n_total = int(v_sel.size)
-            vals = v_sel[v_sel > threshold]
-            n_above = int(vals.size)
+    columns: list[ColumnCells] = []
+    try:
+        for i, (lbl, color) in enumerate(zip(wells, colors)):
+            col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
+            _release_previous(columns)
+            cells = column_cells(ctx, lbl, pool_groups, col_tp, threshold)
+            columns.append(cells)
+            vals, n_total, n_above = cells.vals, cells.n_total, cells.n_above
+            spec = None
 
-        frac_vals.append(n_above / n_total if n_total else float("nan"))
+            frac_vals.append(n_above / n_total if n_total else float("nan"))
 
-        # Apply fold-change scaling to the per-cell values (above-threshold
-        # set only). The threshold filter ran on raw values above, so we
-        # scale post-filter — that keeps the "above-threshold" semantics
-        # consistent across the bar / line / violin renderers. ``cell_scale``
-        # is a ``scale_for(well, tp)`` resolver: it honours the per-axis
-        # operator / order / baseline-tp of the bars (audit S1) at this
-        # column's own timepoint (S3).
-        if cell_scale is not None:
-            from review.domain import fold_change as _fc
-            spec = cell_scale(lbl, col_tp)
-            if spec.missing:
-                # Baseline unresolved — render a blank slot instead of
-                # misleading raw values. The fraction panel below is
-                # deliberately unaffected: it is the raw ``n_above / n_total``
-                # off the rows whatever the fold-change state says (see the
-                # note beside ``_set_frac_ylim``), so it stays a real
-                # measurement even when this column has no baseline.
+            # Apply fold-change scaling to the per-cell values (above-threshold
+            # set only). The threshold filter ran on raw values above, so we
+            # scale post-filter — that keeps the "above-threshold" semantics
+            # consistent across the bar / line / violin renderers. ``cell_scale``
+            # is a ``scale_for(well, tp)`` resolver: it honours the per-axis
+            # operator / order / baseline-tp of the bars (audit S1) at this
+            # column's own timepoint (S3).
+            if cell_scale is not None:
+                from review.domain import fold_change as _fc
+                spec = cell_scale(lbl, col_tp)
+                if spec.missing:
+                    # Baseline unresolved — render a blank slot instead of
+                    # misleading raw values. The fraction panel below is
+                    # deliberately unaffected: it is the raw ``n_above / n_total``
+                    # off the rows whatever the fold-change state says (see the
+                    # note beside ``_set_frac_ylim``), so it stays a real
+                    # measurement even when this column has no baseline.
+                    continue
+                vals = _fc.apply_cell_scale(vals, spec)
+                vals = vals[np.isfinite(vals)]
+
+            xi = xs[i] if i < len(xs) else i
+            if vals.size < 3:
+                if vals.size:
+                    ax_mean.scatter([xi], [vals[0]], c=color, s=20, zorder=4)
                 continue
-            vals = _fc.apply_cell_scale(vals, spec)
-            vals = vals[np.isfinite(vals)]
 
-        xi = xs[i] if i < len(xs) else i
-        if vals.size < 3:
-            if vals.size:
-                ax_mean.scatter([xi], [vals[0]], c=color, s=20, zorder=4)
-            continue
+            arr = vals
+            kde = gaussian_kde(arr, bw_method=bw)
+            y_min, y_max = float(arr.min()), float(arr.max())
+            y_pad = (y_max - y_min) * 0.05
+            ys_grid = np.linspace(y_min - y_pad, y_max + y_pad, 200)
+            density = kde(ys_grid)
+            max_d = density.max()
+            if max_d > 0:
+                density = density / max_d * bar_w
 
-        arr = vals
-        kde = gaussian_kde(arr, bw_method=bw)
-        y_min, y_max = float(arr.min()), float(arr.max())
-        y_pad = (y_max - y_min) * 0.05
-        ys_grid = np.linspace(y_min - y_pad, y_max + y_pad, 200)
-        density = kde(ys_grid)
-        max_d = density.max()
-        if max_d > 0:
-            density = density / max_d * bar_w
+            ax_mean.fill_betweenx(ys_grid, xi - density, xi + density,
+                                  color=color, alpha=0.55, zorder=2)
+            ax_mean.plot(xi - density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
+            ax_mean.plot(xi + density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
 
-        ax_mean.fill_betweenx(ys_grid, xi - density, xi + density,
-                              color=color, alpha=0.55, zorder=2)
-        ax_mean.plot(xi - density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
-        ax_mean.plot(xi + density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
-
-        median = float(np.median(arr))
-        ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
-                       colors="white", lw=2.0, zorder=5)
-        ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
-                       colors=color, lw=1.2, zorder=6)
-
+            # Every cell's median when the body was drawn from a sample.
+            median = cells.median(spec) if cells.sampled else float(np.median(arr))
+            ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
+                           colors="white", lw=2.0, zorder=5)
+            ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
+                           colors=color, lw=1.2, zorder=6)
+    finally:
+        finish_columns(ax_mean, columns)
     for i, (fv, color) in enumerate(zip(frac_vals, colors)):
         xi = xs[i] if i < len(xs) else i
         if not math.isnan(fv):
@@ -397,69 +368,62 @@ def draw_beeswarm(
     else:
         target_ts_per_col = [float(target_t)] * n
     bar_w = min(0.35, 3.0 / max(n, 1))
-    ratios = ctx.state.channel.ratio_index
+    columns: list[ColumnCells] = []
 
-    for i, (lbl, color) in enumerate(zip(wells, colors)):
-        col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
-        xi = xs[i] if i < len(xs) else i
-        df = _pooled_rows(ctx, lbl, pool_groups)
-        cell_vals = np.empty(0, dtype=float)
-        frac_val: float | None = None
-        if df is not None and not df.empty:
-            mask = df_included_mask(df).to_numpy(copy=True)
-            tp = _timepoint_hours(df)
-            with np.errstate(invalid="ignore"):
-                mask &= np.isfinite(tp) & tp_close_mask(tp, col_tp)
-            val = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()
-            mask &= np.isfinite(val)
-            v_sel = val[mask]
-            n_total = int(v_sel.size)
-            cell_vals = v_sel[v_sel > threshold]
-            n_above = int(cell_vals.size)
-            if n_total > 0:
-                frac_val = n_above / n_total
+    try:
+        for i, (lbl, color) in enumerate(zip(wells, colors)):
+            col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
+            xi = xs[i] if i < len(xs) else i
+            _release_previous(columns)
+            cells = column_cells(ctx, lbl, pool_groups, col_tp, threshold)
+            columns.append(cells)
+            cell_vals = cells.vals
+            frac_val: float | None = cells.n_above / cells.n_total if cells.n_total else None
+            spec = None
 
-        # Fold-change per-cell scaling — same contract as draw_violin: a
-        # ``scale_for(well, tp)`` resolver honouring per-axis operator / order
-        # / baseline-tp (audit S1) at this column's timepoint (S3).
-        skipped_scale = False
-        if cell_scale is not None:
-            from review.domain import fold_change as _fc
-            spec = cell_scale(lbl, col_tp)
-            if spec.missing:
-                skipped_scale = True
+            # Fold-change per-cell scaling — same contract as draw_violin: a
+            # ``scale_for(well, tp)`` resolver honouring per-axis operator / order
+            # / baseline-tp (audit S1) at this column's timepoint (S3).
+            skipped_scale = False
+            if cell_scale is not None:
+                from review.domain import fold_change as _fc
+                spec = cell_scale(lbl, col_tp)
+                if spec.missing:
+                    skipped_scale = True
+                elif cell_vals.size:
+                    cell_vals = _fc.apply_cell_scale(cell_vals, spec)
+                    cell_vals = cell_vals[np.isfinite(cell_vals)]
+
+            if skipped_scale:
+                ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
+                                marker="x", zorder=3, linewidths=1)
             elif cell_vals.size:
-                cell_vals = _fc.apply_cell_scale(cell_vals, spec)
-                cell_vals = cell_vals[np.isfinite(cell_vals)]
+                jx, jy = _beeswarm_jitter(cell_vals.tolist(), x_center=float(xi),
+                                           max_spread=bar_w)
+                sc = ax_mean.scatter(jx, jy, c=color, s=6, alpha=0.55,
+                                     zorder=3, linewidths=0)
+                # v5.2.31: tag so the export-style override picks up the
+                # collection and applies marker-size / open-vs-filled /
+                # edge-width prefs. Pre-v5.2.31 only ``ax.lines`` artists
+                # were styled, so beeswarm dots silently ignored the
+                # user's Marker pref changes.
+                sc._aw_marker_collection = True
+                # Every cell's mean when the points are a sample of them.
+                m = cells.mean(spec) if cells.sampled else float(cell_vals.mean())
+                ax_mean.plot([xi - bar_w * 0.6, xi + bar_w * 0.6],
+                             [m, m], color=color, lw=1.5, zorder=4)
+            else:
+                ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
+                                marker="x", zorder=3, linewidths=1)
 
-        if skipped_scale:
-            ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
-                            marker="x", zorder=3, linewidths=1)
-        elif cell_vals.size:
-            jx, jy = _beeswarm_jitter(cell_vals.tolist(), x_center=float(xi),
-                                       max_spread=bar_w)
-            sc = ax_mean.scatter(jx, jy, c=color, s=6, alpha=0.55,
-                                 zorder=3, linewidths=0)
-            # v5.2.31: tag so the export-style override picks up the
-            # collection and applies marker-size / open-vs-filled /
-            # edge-width prefs. Pre-v5.2.31 only ``ax.lines`` artists
-            # were styled, so beeswarm dots silently ignored the
-            # user's Marker pref changes.
-            sc._aw_marker_collection = True
-            m = float(cell_vals.mean())
-            ax_mean.plot([xi - bar_w * 0.6, xi + bar_w * 0.6],
-                         [m, m], color=color, lw=1.5, zorder=4)
-        else:
-            ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
-                            marker="x", zorder=3, linewidths=1)
-
-        if frac_val is not None:
-            ax_frac.scatter([xi], [frac_val], c=color, s=30,
-                            zorder=3, linewidths=0)
-        else:
-            ax_frac.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
-                            marker="x", zorder=3, linewidths=1)
-
+            if frac_val is not None:
+                ax_frac.scatter([xi], [frac_val], c=color, s=30,
+                                zorder=3, linewidths=0)
+            else:
+                ax_frac.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
+                                marker="x", zorder=3, linewidths=1)
+    finally:
+        finish_columns(ax_mean, columns)
     if getattr(ctx.state.plot, "show_threshold_line", False):
         ax_frac.axhline(0.5, color=theme.Colors.border, lw=0.8, ls="--",
                         alpha=0.5, zorder=1)

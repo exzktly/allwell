@@ -4,7 +4,8 @@ A dataset's measurement frames used to be held in a plain ``dict`` with no limit
 one ``DataFrame`` per well, filled for every well as the dataset opened. A
 well of 1.1M cells (a 300 MB CSV) holds about 200 MiB once parsed, so a 96-well
 plate of them asked for about 19 GB and the open died with a ``MemoryError``
-(``_Docs/Markdowns/LARGE_DATASET_TRACKER.md``, E1–E3).
+(the large-dataset tracker's rows E1–E3, in the git history of
+``_Docs/Markdowns/LARGE_DATASET_TRACKER.md``).
 
 :class:`RowCache` is a mapping with the same interface that keeps the frames it
 holds under a byte budget by evicting the least recently used well. Evicting is

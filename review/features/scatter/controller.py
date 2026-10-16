@@ -46,9 +46,13 @@ from review.data.metric_labels import (
 from review.features.scatter._annotations import (
     annotate_agg_points,
     draw_scatter_agg_legends,
+    note_sampled,
     note_value_labels_unavailable,
 )
-from review.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix
+from review.features.scatter._pooled import SCATTER_MAX_POINTS
+from review.features.scatter._layout import (
+    _render_scatter_faceted, _scatter_col_label, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix,
+)
 
 
 #: Written onto an otherwise-empty figure so an *exported* copy states its
@@ -136,6 +140,7 @@ def redraw_scatter(
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
         gates=gates_for_axes(ctx, col_x, col_y) if scatter_points_gated(ctx) else None,
+        max_points=SCATTER_MAX_POINTS,
     )
 
     # Stack one group per panel (>1 group) when Layout is "Separate axes", or
@@ -162,20 +167,8 @@ def redraw_scatter(
         color_by_tp=color_by_tp,
     )
 
-    # Format axes — derive readable label from column name
-    def _col_label(col: str) -> str:
-        from review.data.metric_labels import split_metric_col
-        if is_shape_column(col):
-            from pipeline.shape_features import label_for as _shape_label_for
-            return _shape_label_for(col) or col
-        parts = split_metric_col(col)
-        if parts is None:
-            return col
-        _ch, metric_key, label = parts
-        if metric_key == "smfish_count":
-            ch = label.split(" ")[0]
-            return f"{ch} smFISH Count"
-        return label
+    # Format axes — the same readable label the faceted layout uses.
+    _col_label = _scatter_col_label
 
     ax_scatter.set_xlabel(_col_label(col_x) + log1p_axis_suffix(bool(prefs.get("scatter_x_log", True))))
     ax_scatter.set_ylabel(_col_label(col_y) + log1p_axis_suffix(bool(prefs.get("scatter_y_log", True))))
@@ -213,6 +206,7 @@ def redraw_scatter(
     # broken; see ``_annotations`` for why it is a figure note and not a
     # status-bar message.
     note_value_labels_unavailable(value_label_settings(ctx), ax_scatter)
+    note_sampled(scatter_data, ax_scatter)
 
     # Redraw canvas
     ctx.runtime.scatter.interaction_cache = {

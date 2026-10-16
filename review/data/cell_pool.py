@@ -360,6 +360,60 @@ class CellPool:
             counts += np.histogram(chunk[column], edges)[0]
         return counts
 
+    def distinct(self, column: str, group: str | None = None) -> np.ndarray:
+        """The distinct values of *column* over every cell of *group* (or the pool), sorted."""
+        if self.count(group) == 0:
+            return np.array([])
+        col = self._col(column)
+        if self._con is None:
+            return np.unique(self._numpy([col], group)[col])
+        where, params = self._where(group)
+        got = self._con.execute(f"SELECT DISTINCT {col} FROM cells{where} ORDER BY 1", params).fetchall()
+        return np.array([v for (v,) in got], dtype=float)
+
+    def count_box(self, xcol: str, ycol: str, box: dict, group: str | None = None,
+                  tps: Sequence[float] | None = None) -> int:
+        """How many cells of *group* lie inside *box*, optionally only at the timepoints *tps*.
+
+        The box is ``{"x0", "x1", "y0", "y1"}`` with ``x0 <= x1`` and ``y0 <= y1``,
+        and its edges are inclusive — the same four comparisons as the scatter's
+        ``_in_gate``, which SQL evaluates identically on finite doubles. *tps*
+        are values exactly as the pool holds them (see :meth:`distinct`), so a
+        tolerant match is decided by the caller's own rule, not here.
+        """
+        if self.count(group) == 0 or (tps is not None and len(tps) == 0):
+            return 0
+        x, y = self._col(xcol), self._col(ycol)
+        if self._con is None:
+            data = self._numpy([x, y, "tp"], group)
+            keep = ((data[x] >= box["x0"]) & (data[x] <= box["x1"])
+                    & (data[y] >= box["y0"]) & (data[y] <= box["y1"]))
+            if tps is not None:
+                keep &= np.isin(data["tp"], np.asarray(tps, dtype=float))
+            return int(keep.sum())
+        where, params = self._where(group)
+        clause = (f"{x} >= ? AND {x} <= ? AND {y} >= ? AND {y} <= ?")
+        params = [*params, float(box["x0"]), float(box["x1"]), float(box["y0"]), float(box["y1"])]
+        if tps is not None:
+            clause += f" AND tp IN ({', '.join('?' for _ in tps)})"
+            params += [float(t) for t in tps]
+        sql = f"SELECT count(*) FROM cells{where}{' AND ' if where else ' WHERE '}{clause}"
+        return int(self._con.execute(sql, params).fetchone()[0])
+
+    def count_at(self, group: str | None = None, tps: Sequence[float] | None = None) -> int:
+        """How many cells of *group* there are, optionally only at the exact timepoints *tps*."""
+        if tps is None:
+            return self.count(group)
+        if self.count(group) == 0 or len(tps) == 0:
+            return 0
+        if self._con is None:
+            data = self._numpy(["tp"], group)
+            return int(np.isin(data["tp"], np.asarray(tps, dtype=float)).sum())
+        where, params = self._where(group)
+        clause = f"tp IN ({', '.join('?' for _ in tps)})"
+        sql = f"SELECT count(*) FROM cells{where}{' AND ' if where else ' WHERE '}{clause}"
+        return int(self._con.execute(sql, [*params, *(float(t) for t in tps)]).fetchone()[0])
+
     def sample(self, n: int, *, seed: int = 0) -> dict[str, Sampled]:
         """A proportional sample of *n* cells, per group; every cell when the pool holds no more."""
         parts = _allocate(n, self._sizes)
@@ -390,6 +444,33 @@ class CellPool:
                 total=self._sizes[group],
             )
         return out
+
+
+def cells_upper_bound(ctx, wells) -> int:
+    """An upper bound on how many cells *wells* hold: their row counts.
+
+    From the per-well summaries an open records, so it reads nothing; a well
+    with no summary counts its held frame, or is read. A view compares this with
+    its cap to decide, before reading anything, whether a selection can be
+    drawn whole — every included cell is a row, so a selection whose rows fit
+    under the cap fits whatever the filters remove.
+    """
+    from review.data.data_loading import get_rows
+
+    dataset = ctx.state.dataset
+    summaries = getattr(dataset, "summaries", None) or {}
+    cache = getattr(dataset, "cache", None) or {}
+    total = 0
+    for well in dict.fromkeys(wells):
+        summary = summaries.get(well)
+        if summary is not None:
+            total += int(summary.n_rows)
+            continue
+        frame = cache.get(well) if well in cache else None
+        if frame is None:
+            frame = get_rows(ctx, well)
+        total += 0 if frame is None else len(frame)
+    return total
 
 
 def _hash(seq: np.ndarray, seed: int) -> np.ndarray:

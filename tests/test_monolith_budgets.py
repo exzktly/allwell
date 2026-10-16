@@ -206,8 +206,10 @@ IMAGE_TABLE_CONTROLLER_BUDGET = 1333
 # ``scatter/_annotations.py`` beside the value-label overlay — both are text
 # written over the points rather than anything deciding what a point is, the
 # same seam ``barplot/_annotations.py`` draws. Genuine extraction — ratchet
-# down to the new size.
-SCATTER_CONTROLLER_BUDGET = 831
+# down to the new size. 831 -> 823: the axis-label closure, a word-for-word copy
+# of ``_layout._scatter_col_label``, was replaced by that function, which paid
+# for the sampled-figure note and the drawing cap.
+SCATTER_CONTROLLER_BUDGET = 823
 # The drag-to-reorder handlers (press / motion / release, the Reset Order
 # button, and the event-to-data-x helper) moved into
 # ``barplot/_drag_reorder.py``. A clean seam: nothing there draws a bar or

@@ -138,6 +138,38 @@ def note_value_labels_unavailable(settings: tuple[bool, str], ax) -> None:
     setattr(note, VALUE_LABEL_NOTE_TAG, True)
 
 
+def sampled_note(scatter_data) -> str:
+    """The sentence a sampled figure carries, or ``""`` when every cell is drawn."""
+    total = sum(int(d.get("n_total", 0)) for d in scatter_data.values())
+    drawn = sum(int(d.get("n_drawn", 0)) for d in scatter_data.values())
+    if not any("n_total" in d for d in scatter_data.values()) or drawn >= total:
+        return ""
+    return (f"Drawn: a sample of {drawn:,} of {total:,} cells, in proportion per group; "
+            "gate percentages count every cell")
+
+
+#: Tag on the sampled-figure note, so a test (and a redraw) can find it.
+SAMPLED_NOTE_TAG = "_aw_scatter_sampled_note"
+
+
+def note_sampled(scatter_data, ax) -> None:
+    """Say on the figure that its points are a sample, when they are.
+
+    The sentence comes from :func:`sampled_note`; a figure that
+    draws every cell carries nothing. Bottom-left, clear of the value-label
+    note at the top.
+    """
+    text = sampled_note(scatter_data)
+    if ax is None or not text:
+        return
+    from review.core.plot_style import follows_theme, tokens_for
+    note = follows_theme(ax.text(
+        0.01, 0.01, text, transform=ax.transAxes,
+        ha="left", va="bottom", fontsize=7, color=tokens_for(ax)[2],
+        zorder=6, clip_on=False), muted=True)
+    setattr(note, SAMPLED_NOTE_TAG, True)
+
+
 def draw_scatter_agg_legends(ax_agg, scatter_data, marker_fg) -> None:
     """Build the aggregate scatter's two compact legends from proxy handles.
 

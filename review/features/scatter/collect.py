@@ -16,17 +16,18 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass
 from typing import Any
 
 import matplotlib
 import numpy as np
-import pandas as pd
 
 from core import debug_flags as debug_flags
-from review.core.lazy import lazy as _lazy
-from review.data.data_loading import df_included_mask, resolve_value_series, get_rows
+from review.data.cell_pool import cells_upper_bound
+from review.data.data_loading import get_rows
 from review.domain.stats_compute import group_replicate_stats, _reduce_reps
-from review.domain.metric_registry import column_gating_exempt
+from review.features.scatter._cells import well_cloud
+from review.features.scatter._pooled import collect_scatter_pooled
 from review.domain.plot_members import plot_replicate_sets
 from review.domain.selections_model import (
     color_for_replicate_set,
@@ -69,14 +70,6 @@ def timepoint_color_map(timepoints) -> dict[float, Any]:
 # distribution / heat map, so it lives in the data layer now; re-exported here
 # for the existing ``scatter.collect`` / ``scatter.controller`` import paths.
 from review.data.data_loading import get_all_timepoints  # noqa: F401
-from domain.tp_match import tp_close_mask
-
-# Lazy: ``gating`` imports ``timepoint_color_map`` from this module, so a
-# module-scope import back would cycle. Same binding style the Cell Gating
-# compute layer uses for this very function — both sides run the one shared
-# membership test, so "inside a gate" means the same thing everywhere.
-compute_gate_inclusion = _lazy("review.features.scatter.gating",
-                               "compute_gate_inclusion")
 
 
 def scatter_points_gated(ctx) -> bool:
@@ -135,6 +128,43 @@ def gate_filter_title_suffix(ctx) -> str:
     return " · gate-filtered" if scatter_points_gated(ctx) else ""
 
 
+@dataclass(frozen=True)
+class ScatterGroup:
+    """One series of the per-cell scatter: its key, colour, legend label and wells."""
+
+    name: str
+    color: Any
+    label: str
+    wells: tuple[str, ...]
+    #: True for a single selected well (no replicate sets defined).
+    single_well: bool
+
+
+def scatter_groups(ctx) -> list[ScatterGroup]:
+    """The series :func:`collect_scatter_data` draws, in its order, before any cell is read.
+
+    The pooled path reads this; the whole-selection path below walks the same
+    sets and wells inline, and ``tests/test_scatter_draws_a_stated_sample.py``
+    holds the two to the same groups, colours and labels.
+    """
+    active_rsets = plot_replicate_sets(ctx)
+    paths = ctx.state.dataset.well_paths
+    if active_rsets:
+        active_rsets = apply_order(
+            active_rsets,
+            list(ctx.state.plot.line_order_rsets or []),
+            key=lambda r: getattr(r, "name", ""),
+        )
+        return [ScatterGroup(rset.name, color_for_replicate_set(rset, ctx.state.selection.selections),
+                             replicate_display_label(ctx, rset),
+                             tuple(w for w in rset.wells if w in paths), False)
+                for rset in active_rsets]
+    selected = sorted((lbl for lbl in ctx.state.selection.selected_wells if lbl in paths),
+                      key=lambda lbl: parse_rc(lbl))
+    selected = apply_order(selected, list(ctx.state.plot.line_order_wells or []), key=lambda x: x)
+    return [ScatterGroup(w, color_for_well(w), well_display_label(ctx, w), (w,), True) for w in selected]
+
+
 def collect_scatter_data(
     ctx,
     col_x: str,
@@ -146,6 +176,7 @@ def collect_scatter_data(
     fluor_gate_y: float = 0.0,
     ratios: dict[str, Any] | None = None,
     gates: list | None = None,
+    max_points: int | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Collect scatter plot data for the given column names and timepoint(s).
 
@@ -174,6 +205,12 @@ def collect_scatter_data(
             describe a different set of boxes than the ones on screen. Pass the
             gates this plot is drawing (``gates_for_axes``) and the two cannot
             drift apart.
+        max_points: the most cells to draw. ``None`` — every caller but the
+            tab, the exports above all — collects every cell. When the
+            selection's rows exceed it, the cells are pooled
+            (``scatter/_pooled.py``) and a stated proportional sample is drawn;
+            each group then also carries ``n_total`` / ``n_drawn`` and a
+            ``population`` the gate percentages count every cell through.
 
     Returns:
         Dict mapping group/well name → {
@@ -195,61 +232,20 @@ def collect_scatter_data(
         target_tps = [float(t) for t in (timepoints_h or [])]
     target_arr = np.asarray(target_tps, dtype=float)
 
-    # smFISH counts are integer spot tallies and shape features are morphology
-    # values — neither is a fluorescence intensity, so the per-channel
-    # fluor-gate (an intensity floor like 50–1500) would gate out every such
-    # cell. The metric registry owns the "bypass the gate" rule.
-    is_count_x = column_gating_exempt(col_x)
-    is_count_y = column_gating_exempt(col_y)
+    if max_points is not None:
+        plan = scatter_groups(ctx)
+        if cells_upper_bound(ctx, [w for g in plan for w in g.wells]) > max_points:
+            return collect_scatter_pooled(
+                ctx, plan, col_x=col_x, col_y=col_y, target_tps=target_tps,
+                fluor_gate_x=fluor_gate_x, fluor_gate_y=fluor_gate_y,
+                gates=gates, ratios=ratios, max_points=max_points)
 
     def _collect_well(well_label: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, list] | None:
-        df = get_rows(ctx, well_label)
-        if df is None or df.empty:
+        cloud = well_cloud(get_rows(ctx, well_label), col_x=col_x, col_y=col_y, target_tps=target_arr,
+                           fluor_gate_x=fluor_gate_x, fluor_gate_y=fluor_gate_y, gates=gates, ratios=ratios)
+        if cloud is None:
             return None
-        if "timepoint_hours" not in df.columns or "area_px" not in df.columns:
-            return None
-        # The Gate_Pass layer stays off here: the per-cell scatter is where the
-        # gates are drawn, so it shows the full cloud with the boxes over it
-        # while every other view filters via df_included_mask. The tab's
-        # "Apply gates" toggle filters through ``gates`` below instead — against
-        # the boxes on screen, not against a column another tab's worker wrote.
-        mask = df_included_mask(df, include_gate=False).to_numpy(copy=True)
-        # Two masks when the tab is filtering by gate geometry: the drawn one,
-        # and the one the gate percentages have to be denominated by. "42% of
-        # well A fell in this gate" is a statement about the cloud the gate was
-        # drawn over — filter first and every gate reads 100.0%, which is what
-        # "Apply gates" used to do to its own labels.
-        gate_mask = compute_gate_inclusion(df, gates, ratios) if gates else None
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
-        with np.errstate(invalid="ignore"):
-            finite = np.isfinite(tp)
-            if target_arr.size == 0:
-                mask &= False
-            else:
-                # tp ≈ any selected target within tolerance.
-                tp_match = np.zeros_like(tp, dtype=bool)
-                for t in target_arr:
-                    tp_match |= tp_close_mask(tp, t)
-                mask &= finite & tp_match
-        area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
-        with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area)
-        x = resolve_value_series(df, col_x, ratios).to_numpy()
-        y = resolve_value_series(df, col_y, ratios).to_numpy()
-        gate_x_mask = np.ones_like(x, dtype=bool) if is_count_x else (x > fluor_gate_x)
-        gate_y_mask = np.ones_like(y, dtype=bool) if is_count_y else (y > fluor_gate_y)
-        mask &= np.isfinite(x) & np.isfinite(y) & gate_x_mask & gate_y_mask
-        ungated = mask
-        if gate_mask is not None:
-            mask = mask & gate_mask
-        # Test the *pre-gate* population for emptiness. Returning early on an
-        # empty gated mask dropped the whole well, and with it the cells that
-        # belong in the gate percentage's denominator — so a set of two wells
-        # where one had 100 of 1000 cells inside the gate and the other had
-        # none read 10.0% instead of 5.0%. That is the exact number this
-        # denominator exists to produce.
-        if not ungated.any():
-            return None
+        df, x, y, tp, mask, ungated, gated = cloud
         sel = df.loc[mask]
         filenames = (sel["filename"].astype(str).to_numpy()
                      if "filename" in sel.columns else np.array([""] * len(sel)))
@@ -264,7 +260,7 @@ def collect_scatter_data(
         # The fifth element is the pre-gate cloud, and it is ``None`` unless a
         # gate filter is actually in force — an ungated collection must not pay
         # for a second copy of every array.
-        pre_gate = None if gate_mask is None else (x[ungated], y[ungated], tp[ungated])
+        pre_gate = None if not gated else (x[ungated], y[ungated], tp[ungated])
         return x[mask], y[mask], tp[mask], metadata, pre_gate
 
     # Use active replicate sets if defined, otherwise fall back to selected wells

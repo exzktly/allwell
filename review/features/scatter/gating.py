@@ -408,30 +408,44 @@ def compute_gate_stats(
             np.asarray(data.get("tp_ungated", data.get("tp", [])), float),
         )
 
+    def _group_pct(data: dict, target_tp: float | None = None):
+        """``_pct`` over the group's whole population — through the cell pool
+        when the group was sampled (``scatter/_pooled.py``), so a percentage
+        never counts only the cells that happened to be drawn."""
+        pooled = data.get("population")
+        if pooled is not None:
+            return pooled.pct(gate, target_tp)
+        gx, gy, gtp = _population(data)
+        if target_tp is None:
+            return _pct(gx, gy, gate)
+        m = tp_close_mask(gtp, target_tp)
+        return _pct(gx[m], gy[m], gate)
+
     if not multi_groups and not multi_tps:
         if groups:
             _, data = groups[0]
-            gx, gy, _gtp = _population(data)
-            pct, _, _ = _pct(gx, gy, gate)
+            pct, _, _ = _group_pct(data)
             if pct is not None:
                 rows.append((f"{pct:.1f}%", None, 0))
         return rows
 
     for gname, data in groups:
-        xs, ys, tps = _population(data)
         color = data.get("color")
 
         def _tp_rows(indent: int) -> None:
-            if not (multi_tps and tps.size == xs.size):
+            if not multi_tps:
                 return
+            if data.get("population") is None:
+                xs, _ys, tps = _population(data)
+                if tps.size != xs.size:
+                    return
             for t in sorted(tps_list):
-                m = tp_close_mask(tps, t)
-                pct_t, _, tot_t = _pct(xs[m], ys[m], gate)
+                pct_t, _, tot_t = _group_pct(data, t)
                 if pct_t is not None and tot_t > 0:
                     rows.append((f"t={float(t):g}h: {pct_t:.1f}%", color, indent))
 
         if multi_groups:
-            pct, _, _ = _pct(xs, ys, gate)
+            pct, _, _ = _group_pct(data)
             if pct is not None:
                 rows.append((f"{gname}: {pct:.1f}%", color, 0))
             _tp_rows(1)

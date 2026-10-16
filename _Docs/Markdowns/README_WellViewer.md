@@ -1634,10 +1634,16 @@ What this means in use:
   the crop's status line and Cell Gating's "Included for analysis" are
   recalculated on every edit, so they count the wells in memory; when those are
   not all of them the line ends with "counted over N of M wells in memory".
-- **Views that draw individual cells** (Scatter, Multivariate, Distribution, the
-  bar chart's beeswarm, the Cell Browser) still hold the cells of every well you
-  select. Selecting most of a very large plate in one of them asks for that many
-  points.
+- **The Scatter plot draws a sample above 100,000 cells, and says so.** When the
+  selected wells hold more cells than that, the plot draws a sample of 100,000,
+  in proportion per well or group, and the figure carries a note giving how many
+  it drew of how many. Clicking a point still opens that cell. Gate percentages
+  always count every cell, not the sample, and an exported CSV always holds every
+  cell.
+- **The other views that draw individual cells** (Multivariate, Distribution,
+  the bar chart's beeswarm, the Cell Browser) still hold the cells of every well
+  you select. Selecting most of a very large plate in one of them asks for that
+  many points.
 - **If one well alone does not fit**, Review first gives back every well it is
   holding and tries again; if that fails too, the error names the well, its size
   on disk and what was held, instead of a bare out-of-memory message.

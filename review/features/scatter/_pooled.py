@@ -83,7 +83,13 @@ def _narrow_columns(col_x: str, col_y: str, gates, ratios) -> set[str] | None:
     return want
 
 
-def _close_previous(ctx) -> None:
+def close_previous_pools(ctx) -> None:
+    """Release the pool the last pooled collection kept for its gate percentages.
+
+    Called by every tab collection, pooled or not, so a pool does not outlive
+    the figure that read it; a pool dropped any other way (a dataset switch, the
+    app closing) releases itself through ``CellPool``'s finalizer.
+    """
     for pool in ctx.runtime.scatter.cell_pools or ():
         pool.close()
     ctx.runtime.scatter.cell_pools = []
@@ -92,26 +98,36 @@ def _close_previous(ctx) -> None:
 def collect_scatter_pooled(ctx, plan, *, col_x: str, col_y: str, target_tps, fluor_gate_x: float,
                            fluor_gate_y: float, gates, ratios, max_points: int) -> dict[str, dict[str, Any]]:
     """``collect_scatter_data``'s result for *plan*, drawn from a stated sample. See the module docstring."""
-    _close_previous(ctx)
+    close_previous_pools(ctx)
     want = _narrow_columns(col_x, col_y, gates, ratios)
     drawn = CellPool(["x", "y"])
     population = CellPool(["x", "y"]) if gates else drawn
-    for group in plan:
-        for well in group.wells:
-            df = narrow_rows(ctx, well, want) if want is not None else get_rows(ctx, well)
-            cloud = well_cloud(df, col_x=col_x, col_y=col_y, target_tps=target_tps,
-                               fluor_gate_x=fluor_gate_x, fluor_gate_y=fluor_gate_y,
-                               gates=gates, ratios=ratios)
-            if cloud is None:
-                continue
-            df, x, y, tp, mask, ungated, gated = cloud
-            rows = df.index.to_numpy()
-            drawn.add(group.name, well, rows[mask], tp[mask], {"x": x[mask], "y": y[mask]})
-            if gated:
-                population.add(group.name, well, rows[ungated], tp[ungated],
-                               {"x": x[ungated], "y": y[ungated]})
-    sample = drawn.sample(max_points)
-    identity = _identity_for(ctx, sample, want)
+    # Wells that reached the figure, per group, in their order — the
+    # whole-selection path gives each one a breakdown entry even when the gate
+    # filter left it nothing to draw.
+    seen: dict[str, list[str]] = {}
+    try:
+        for group in plan:
+            for well in group.wells:
+                df = narrow_rows(ctx, well, want) if want is not None else get_rows(ctx, well)
+                cloud = well_cloud(df, col_x=col_x, col_y=col_y, target_tps=target_tps,
+                                   fluor_gate_x=fluor_gate_x, fluor_gate_y=fluor_gate_y,
+                                   gates=gates, ratios=ratios)
+                if cloud is None:
+                    continue
+                seen.setdefault(group.name, []).append(well)
+                df, x, y, tp, mask, ungated, gated = cloud
+                rows = df.index.to_numpy()
+                drawn.add(group.name, well, rows[mask], tp[mask], {"x": x[mask], "y": y[mask]})
+                if gated:
+                    population.add(group.name, well, rows[ungated], tp[ungated],
+                                   {"x": x[ungated], "y": y[ungated]})
+        sample = drawn.sample(max_points)
+        identity = _identity_for(ctx, sample, want)
+    except BaseException:
+        population.close()
+        drawn.close()
+        raise
     if population is not drawn:
         drawn.close()
     ctx.runtime.scatter.cell_pools = [population]
@@ -123,7 +139,7 @@ def collect_scatter_pooled(ctx, plan, *, col_x: str, col_y: str, target_tps, flu
         got = sample.get(group.name)
         metadata = [] if got is None else [
             (str(w), *identity.get((str(w), int(r)), ("", "")), int(r)) for w, r in zip(got.well, got.row)]
-        wells: dict[str, dict] = {}
+        wells: dict[str, dict] = {w: {"x": [], "y": [], "tp": [], "metadata": []} for w in seen.get(group.name, ())}
         if got is not None:
             for i, w in enumerate(got.well):
                 entry = wells.setdefault(str(w), {"x": [], "y": [], "tp": [], "metadata": []})

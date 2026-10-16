@@ -43,6 +43,10 @@ from review.domain import fold_change as _fc
 #: grid is a million kernel evaluations.
 BAR_CELL_MAX_POINTS = 5_000
 
+#: Above this many rows a column's cells are pooled in DuckDB, under its memory
+#: limit; at or below it, in numpy — a million values is 8 MB.
+BAR_CELL_DUCKDB_ROWS = 1_000_000
+
 
 @dataclass
 class ColumnCells:
@@ -139,22 +143,35 @@ def column_cells(ctx, lbl: str, pool_groups, col_tp: float, threshold: float) ->
     ratios = ctx.state.channel.ratio_index
     inputs = value_inputs(val_col, ratios)
     want = None if inputs is None else inputs | {"timepoint_hours"}
-    big = cells_upper_bound(ctx, wells) > BAR_CELL_MAX_POINTS
-    pool = CellPool(["v"]) if big else None
+    rows = cells_upper_bound(ctx, wells)
+    # A column is pooled once it may hold more cells than it draws, but only a
+    # very large one is worth a DuckDB connection and a spill directory: an
+    # ordinary well of tens of thousands of cells pools in numpy, which costs
+    # nothing to open. Measured on 96 columns of 20,000 cells: 4.8 s and 574 MB
+    # with a DuckDB pool each.
+    if rows <= BAR_CELL_MAX_POINTS:
+        pool = None
+    else:
+        pool = CellPool(["v"], backend="numpy" if rows <= BAR_CELL_DUCKDB_ROWS else None)
     n_total, parts = 0, []
-    for well in wells:
-        df = narrow_rows(ctx, well, want) if want is not None else get_rows(ctx, well)
-        n, above = _well_values(df, val_col, ratios, col_tp, threshold)
-        n_total += n
+    try:
+        for well in wells:
+            df = narrow_rows(ctx, well, want) if want is not None else get_rows(ctx, well)
+            n, above = _well_values(df, val_col, ratios, col_tp, threshold)
+            n_total += n
+            if pool is not None:
+                pool.add(lbl, well, np.arange(above.size), np.zeros(above.size), {"v": above})
+            else:
+                parts.append(above)
+        if pool is None:
+            vals = np.concatenate(parts) if parts else np.empty(0, dtype=float)
+            return ColumnCells(n_total=n_total, n_above=int(vals.size), vals=vals)
+        n_above = pool.count(lbl)
+        drawn = pool.sample(BAR_CELL_MAX_POINTS, per_group=True).get(lbl)
+    except BaseException:
         if pool is not None:
-            pool.add(lbl, well, np.arange(above.size), np.zeros(above.size), {"v": above})
-        else:
-            parts.append(above)
-    if pool is None:
-        vals = np.concatenate(parts) if parts else np.empty(0, dtype=float)
-        return ColumnCells(n_total=n_total, n_above=int(vals.size), vals=vals)
-    n_above = pool.count(lbl)
-    drawn = pool.sample(BAR_CELL_MAX_POINTS, per_group=True).get(lbl)
+            pool.close()
+        raise
     vals = drawn.values["v"] if drawn is not None else np.empty(0, dtype=float)
     return ColumnCells(n_total=n_total, n_above=n_above, vals=vals, pool=pool)
 

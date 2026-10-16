@@ -205,65 +205,66 @@ def draw_violin(
     frac_vals: list[float] = []
 
     columns: list[ColumnCells] = []
-    for i, (lbl, color) in enumerate(zip(wells, colors)):
-        col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
-        cells = column_cells(ctx, lbl, pool_groups, col_tp, threshold)
-        columns.append(cells)
-        vals, n_total, n_above = cells.vals, cells.n_total, cells.n_above
-        spec = None
+    try:
+        for i, (lbl, color) in enumerate(zip(wells, colors)):
+            col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
+            cells = column_cells(ctx, lbl, pool_groups, col_tp, threshold)
+            columns.append(cells)
+            vals, n_total, n_above = cells.vals, cells.n_total, cells.n_above
+            spec = None
 
-        frac_vals.append(n_above / n_total if n_total else float("nan"))
+            frac_vals.append(n_above / n_total if n_total else float("nan"))
 
-        # Apply fold-change scaling to the per-cell values (above-threshold
-        # set only). The threshold filter ran on raw values above, so we
-        # scale post-filter — that keeps the "above-threshold" semantics
-        # consistent across the bar / line / violin renderers. ``cell_scale``
-        # is a ``scale_for(well, tp)`` resolver: it honours the per-axis
-        # operator / order / baseline-tp of the bars (audit S1) at this
-        # column's own timepoint (S3).
-        if cell_scale is not None:
-            from review.domain import fold_change as _fc
-            spec = cell_scale(lbl, col_tp)
-            if spec.missing:
-                # Baseline unresolved — render a blank slot instead of
-                # misleading raw values. The fraction panel below is
-                # deliberately unaffected: it is the raw ``n_above / n_total``
-                # off the rows whatever the fold-change state says (see the
-                # note beside ``_set_frac_ylim``), so it stays a real
-                # measurement even when this column has no baseline.
+            # Apply fold-change scaling to the per-cell values (above-threshold
+            # set only). The threshold filter ran on raw values above, so we
+            # scale post-filter — that keeps the "above-threshold" semantics
+            # consistent across the bar / line / violin renderers. ``cell_scale``
+            # is a ``scale_for(well, tp)`` resolver: it honours the per-axis
+            # operator / order / baseline-tp of the bars (audit S1) at this
+            # column's own timepoint (S3).
+            if cell_scale is not None:
+                from review.domain import fold_change as _fc
+                spec = cell_scale(lbl, col_tp)
+                if spec.missing:
+                    # Baseline unresolved — render a blank slot instead of
+                    # misleading raw values. The fraction panel below is
+                    # deliberately unaffected: it is the raw ``n_above / n_total``
+                    # off the rows whatever the fold-change state says (see the
+                    # note beside ``_set_frac_ylim``), so it stays a real
+                    # measurement even when this column has no baseline.
+                    continue
+                vals = _fc.apply_cell_scale(vals, spec)
+                vals = vals[np.isfinite(vals)]
+
+            xi = xs[i] if i < len(xs) else i
+            if vals.size < 3:
+                if vals.size:
+                    ax_mean.scatter([xi], [vals[0]], c=color, s=20, zorder=4)
                 continue
-            vals = _fc.apply_cell_scale(vals, spec)
-            vals = vals[np.isfinite(vals)]
 
-        xi = xs[i] if i < len(xs) else i
-        if vals.size < 3:
-            if vals.size:
-                ax_mean.scatter([xi], [vals[0]], c=color, s=20, zorder=4)
-            continue
+            arr = vals
+            kde = gaussian_kde(arr, bw_method=bw)
+            y_min, y_max = float(arr.min()), float(arr.max())
+            y_pad = (y_max - y_min) * 0.05
+            ys_grid = np.linspace(y_min - y_pad, y_max + y_pad, 200)
+            density = kde(ys_grid)
+            max_d = density.max()
+            if max_d > 0:
+                density = density / max_d * bar_w
 
-        arr = vals
-        kde = gaussian_kde(arr, bw_method=bw)
-        y_min, y_max = float(arr.min()), float(arr.max())
-        y_pad = (y_max - y_min) * 0.05
-        ys_grid = np.linspace(y_min - y_pad, y_max + y_pad, 200)
-        density = kde(ys_grid)
-        max_d = density.max()
-        if max_d > 0:
-            density = density / max_d * bar_w
+            ax_mean.fill_betweenx(ys_grid, xi - density, xi + density,
+                                  color=color, alpha=0.55, zorder=2)
+            ax_mean.plot(xi - density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
+            ax_mean.plot(xi + density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
 
-        ax_mean.fill_betweenx(ys_grid, xi - density, xi + density,
-                              color=color, alpha=0.55, zorder=2)
-        ax_mean.plot(xi - density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
-        ax_mean.plot(xi + density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
-
-        # Every cell's median when the body was drawn from a sample.
-        median = cells.median(spec) if cells.sampled else float(np.median(arr))
-        ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
-                       colors="white", lw=2.0, zorder=5)
-        ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
-                       colors=color, lw=1.2, zorder=6)
-
-    finish_columns(ax_mean, columns)
+            # Every cell's median when the body was drawn from a sample.
+            median = cells.median(spec) if cells.sampled else float(np.median(arr))
+            ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
+                           colors="white", lw=2.0, zorder=5)
+            ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
+                           colors=color, lw=1.2, zorder=6)
+    finally:
+        finish_columns(ax_mean, columns)
     for i, (fv, color) in enumerate(zip(frac_vals, colors)):
         xi = xs[i] if i < len(xs) else i
         if not math.isnan(fv):
@@ -367,58 +368,59 @@ def draw_beeswarm(
     bar_w = min(0.35, 3.0 / max(n, 1))
     columns: list[ColumnCells] = []
 
-    for i, (lbl, color) in enumerate(zip(wells, colors)):
-        col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
-        xi = xs[i] if i < len(xs) else i
-        cells = column_cells(ctx, lbl, pool_groups, col_tp, threshold)
-        columns.append(cells)
-        cell_vals = cells.vals
-        frac_val: float | None = cells.n_above / cells.n_total if cells.n_total else None
-        spec = None
+    try:
+        for i, (lbl, color) in enumerate(zip(wells, colors)):
+            col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
+            xi = xs[i] if i < len(xs) else i
+            cells = column_cells(ctx, lbl, pool_groups, col_tp, threshold)
+            columns.append(cells)
+            cell_vals = cells.vals
+            frac_val: float | None = cells.n_above / cells.n_total if cells.n_total else None
+            spec = None
 
-        # Fold-change per-cell scaling — same contract as draw_violin: a
-        # ``scale_for(well, tp)`` resolver honouring per-axis operator / order
-        # / baseline-tp (audit S1) at this column's timepoint (S3).
-        skipped_scale = False
-        if cell_scale is not None:
-            from review.domain import fold_change as _fc
-            spec = cell_scale(lbl, col_tp)
-            if spec.missing:
-                skipped_scale = True
+            # Fold-change per-cell scaling — same contract as draw_violin: a
+            # ``scale_for(well, tp)`` resolver honouring per-axis operator / order
+            # / baseline-tp (audit S1) at this column's timepoint (S3).
+            skipped_scale = False
+            if cell_scale is not None:
+                from review.domain import fold_change as _fc
+                spec = cell_scale(lbl, col_tp)
+                if spec.missing:
+                    skipped_scale = True
+                elif cell_vals.size:
+                    cell_vals = _fc.apply_cell_scale(cell_vals, spec)
+                    cell_vals = cell_vals[np.isfinite(cell_vals)]
+
+            if skipped_scale:
+                ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
+                                marker="x", zorder=3, linewidths=1)
             elif cell_vals.size:
-                cell_vals = _fc.apply_cell_scale(cell_vals, spec)
-                cell_vals = cell_vals[np.isfinite(cell_vals)]
+                jx, jy = _beeswarm_jitter(cell_vals.tolist(), x_center=float(xi),
+                                           max_spread=bar_w)
+                sc = ax_mean.scatter(jx, jy, c=color, s=6, alpha=0.55,
+                                     zorder=3, linewidths=0)
+                # v5.2.31: tag so the export-style override picks up the
+                # collection and applies marker-size / open-vs-filled /
+                # edge-width prefs. Pre-v5.2.31 only ``ax.lines`` artists
+                # were styled, so beeswarm dots silently ignored the
+                # user's Marker pref changes.
+                sc._aw_marker_collection = True
+                # Every cell's mean when the points are a sample of them.
+                m = cells.mean(spec) if cells.sampled else float(cell_vals.mean())
+                ax_mean.plot([xi - bar_w * 0.6, xi + bar_w * 0.6],
+                             [m, m], color=color, lw=1.5, zorder=4)
+            else:
+                ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
+                                marker="x", zorder=3, linewidths=1)
 
-        if skipped_scale:
-            ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
-                            marker="x", zorder=3, linewidths=1)
-        elif cell_vals.size:
-            jx, jy = _beeswarm_jitter(cell_vals.tolist(), x_center=float(xi),
-                                       max_spread=bar_w)
-            sc = ax_mean.scatter(jx, jy, c=color, s=6, alpha=0.55,
-                                 zorder=3, linewidths=0)
-            # v5.2.31: tag so the export-style override picks up the
-            # collection and applies marker-size / open-vs-filled /
-            # edge-width prefs. Pre-v5.2.31 only ``ax.lines`` artists
-            # were styled, so beeswarm dots silently ignored the
-            # user's Marker pref changes.
-            sc._aw_marker_collection = True
-            # Every cell's mean when the points are a sample of them.
-            m = cells.mean(spec) if cells.sampled else float(cell_vals.mean())
-            ax_mean.plot([xi - bar_w * 0.6, xi + bar_w * 0.6],
-                         [m, m], color=color, lw=1.5, zorder=4)
-        else:
-            ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
-                            marker="x", zorder=3, linewidths=1)
-
-        if frac_val is not None:
-            ax_frac.scatter([xi], [frac_val], c=color, s=30,
-                            zorder=3, linewidths=0)
-        else:
-            ax_frac.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
-                            marker="x", zorder=3, linewidths=1)
-
-    finish_columns(ax_mean, columns)
+            if frac_val is not None:
+                ax_frac.scatter([xi], [frac_val], c=color, s=30,
+                                zorder=3, linewidths=0)
+            else:
+                ax_frac.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
+                                marker="x", zorder=3, linewidths=1)
+    finally:
+        finish_columns(ax_mean, columns)
     if getattr(ctx.state.plot, "show_threshold_line", False):
         ax_frac.axhline(0.5, color=theme.Colors.border, lw=0.8, ls="--",
                         alpha=0.5, zorder=1)

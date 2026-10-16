@@ -501,6 +501,29 @@ def _hist(ax, exact, i: int, vals, edges, **kw) -> None:
     ax.hist(edges[:-1], bins=edges, weights=e.hist(edges).astype(float), **kw)
 
 
+def _state_every_value(parts, exact) -> None:
+    """Redraw a sampled violin's marks from every value: the median line, the
+    extrema caps and the bar between them. Only the body stays the sample's."""
+    def _move(name, ys):
+        coll = parts.get(name)
+        if coll is None:
+            return
+        segs = coll.get_segments()
+        for i, e in enumerate(exact):
+            if e is None:
+                continue
+            (x0, _a), (x1, _b) = segs[i]
+            y0, y1 = ys(e)
+            segs[i] = [[x0, y0], [x1, y1]]
+        coll.set_segments(segs)
+
+    _move("cmedians", lambda e: (e.median, e.median))
+    _move("cmins", lambda e: (e.lo, e.lo))
+    _move("cmaxes", lambda e: (e.hi, e.hi))
+    # The bar is vertical: same x at both ends, from every value's min to max.
+    _move("cbars", lambda e: (e.lo, e.hi))
+
+
 def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False, exact=None) -> None:
     """Single-axis renderer covering every mode (Hist / Hist+KDE / KDE / CDF / Violin).
 
@@ -513,14 +536,8 @@ def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False, ex
         data = [vals for _, _, vals in groups]
         labels = [name for name, _, _ in groups]
         parts = ax.violinplot(data, showmeans=False, showmedians=True)
-        if exact and parts.get("cmedians") is not None:
-            # The line is the median of every value, not of the sample drawn.
-            segs = parts["cmedians"].get_segments()
-            for i, e in enumerate(exact):
-                if e is not None:
-                    (x0, _y0), (x1, _y1) = segs[i]
-                    segs[i] = [[x0, e.median], [x1, e.median]]
-            parts["cmedians"].set_segments(segs)
+        if exact:
+            _state_every_value(parts, exact)
         for i, body in enumerate(parts.get("bodies", [])):
             body.set_facecolor(groups[i][1])
             body.set_edgecolor(groups[i][1])

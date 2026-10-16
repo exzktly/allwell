@@ -27,7 +27,7 @@ from review.data.cell_pool import cells_upper_bound
 from review.data.data_loading import get_rows
 from review.domain.stats_compute import group_replicate_stats, _reduce_reps
 from review.features.scatter._cells import well_cloud
-from review.features.scatter._pooled import collect_scatter_pooled
+from review.features.scatter._pooled import close_previous_pools, collect_scatter_pooled
 from review.domain.plot_members import plot_replicate_sets
 from review.domain.selections_model import (
     color_for_replicate_set,
@@ -233,6 +233,7 @@ def collect_scatter_data(
     target_arr = np.asarray(target_tps, dtype=float)
 
     if max_points is not None:
+        close_previous_pools(ctx)
         plan = scatter_groups(ctx)
         if cells_upper_bound(ctx, [w for g in plan for w in g.wells]) > max_points:
             return collect_scatter_pooled(

@@ -82,24 +82,28 @@ def collect_distribution(ctx, *, val_col: str, fluor_gates, ratios, tp_filter, d
         return None
     want = _columns(val_col, fluor_gates, ratios)
     pool = CellPool(["v"])
-    for name, wells, _rset in plan:
-        for well in wells:
-            df = narrow_rows(ctx, well, want) if want is not None else get_rows(ctx, well)
-            vals = _all_fluor_values_filtered(df, val_col=val_col, fluor_gates=fluor_gates,
-                                              ratios=ratios, tp_filter=tp_filter)
-            pool.add(name, well, np.arange(vals.size), np.zeros(vals.size), {"v": vals})
-    sample = pool.sample(DIST_MAX_VALUES)
-    groups, exact = [], []
-    for name, _wells, rset in plan:
-        if pool.count(name) == 0:
-            continue
-        lo, hi = pool.value_range("v", name)
-        groups.append((display_label(ctx, name), plot_group_color(ctx, name, rset), sample[name].values["v"]))
-        exact.append(ExactStats(
-            n=pool.count(name), lo=lo, hi=hi,
-            median=float(pool.quantiles("v", [0.5], name)[0]),
-            hist=lambda edges, _name=name: pool.histogram("v", edges, _name),
-        ))
+    try:
+        for name, wells, _rset in plan:
+            for well in wells:
+                df = narrow_rows(ctx, well, want) if want is not None else get_rows(ctx, well)
+                vals = _all_fluor_values_filtered(df, val_col=val_col, fluor_gates=fluor_gates,
+                                                  ratios=ratios, tp_filter=tp_filter)
+                pool.add(name, well, np.arange(vals.size), np.zeros(vals.size), {"v": vals})
+        sample = pool.sample(DIST_MAX_VALUES)
+        groups, exact = [], []
+        for name, _wells, rset in plan:
+            if pool.count(name) == 0:
+                continue
+            lo, hi = pool.value_range("v", name)
+            groups.append((display_label(ctx, name), plot_group_color(ctx, name, rset), sample[name].values["v"]))
+            exact.append(ExactStats(
+                n=pool.count(name), lo=lo, hi=hi,
+                median=float(pool.quantiles("v", [0.5], name)[0]),
+                hist=lambda edges, _name=name: pool.histogram("v", edges, _name),
+            ))
+    except BaseException:
+        pool.close()
+        raise
     return groups, exact, pool
 
 

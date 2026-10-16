@@ -168,11 +168,71 @@ def test_the_figure_says_it_is_a_sample(ctx):
     assert not [t for t in ax.texts if getattr(t, SAMPLED_NOTE_TAG, False)]
 
 
-def test_the_exports_never_sample(ctx):
-    """They call without ``max_points`` and must keep every cell."""
-    whole = _collect(ctx)
-    assert not any("n_total" in d for d in whole.values())
-    assert _included(whole) > 400
+def test_only_the_tab_asks_for_a_sample():
+    """Every export keeps every cell: of the calls to ``collect_scatter_data`` in
+    the app, the tab's redraw alone passes ``max_points``. Read from the syntax
+    tree, so an export that starts passing one fails here."""
+    import ast
+
+    from tests._repo_scan import REPO_ROOT, parse_source
+
+    callers: dict[str, bool] = {}
+    for path in REPO_ROOT.joinpath("review").rglob("*.py"):
+        for node in ast.walk(parse_source(path)):
+            name = getattr(node.func, "id", getattr(node.func, "attr", None)) if isinstance(node, ast.Call) else None
+            if name and name.endswith("collect_scatter_data"):     # the exports import it under an alias
+                rel = str(path.relative_to(REPO_ROOT))
+                callers[rel] = callers.get(rel, False) or any(k.arg == "max_points" for k in node.keywords)
+    assert callers.pop("review/features/scatter/controller.py") is True, "the tab no longer caps what it draws"
+    assert callers, "no export calls the collector; the scan is looking in the wrong place"
+    assert not any(callers.values()), f"an export samples: {sorted(k for k, v in callers.items() if v)}"
+
+
+def test_a_well_the_gate_leaves_empty_keeps_its_breakdown_entry(ctx, mode):
+    # The gate starts just above A01's largest value, so A01 keeps its pre-gate
+    # cells (the denominator) and draws none.
+    every = _collect(ctx)
+    a01_max = max(x for d in every.values() for (w, *_), x in zip(d["metadata"], d["x"]) if w == "A01")
+    gate = {"name": "g", "x_col": X, "y_col": Y, "x0": a01_max * 1.01, "x1": 1e9, "y0": 0.0, "y1": 1e9}
+    whole = _collect(ctx, gates=[gate])
+    empty = [w for d in whole.values() for w, e in d["wells"].items() if not e["x"]]
+    assert empty, "no well is left empty by the gate; the fixture does not exercise this"
+    pooled = _collect(ctx, gates=[gate], max_points=_included(whole))
+    for key in whole:
+        assert pooled[key]["wells"] == whole[key]["wells"], key
+
+
+def test_a_small_selection_releases_the_previous_pool(ctx):
+    _collect(ctx, max_points=400)
+    held = list(ctx.runtime.scatter.cell_pools)
+    assert held
+    _collect(ctx, max_points=10**9)
+    assert all(p.count() == 0 for p in held) and not ctx.runtime.scatter.cell_pools
+
+
+def test_a_failed_collection_releases_its_pools(ctx, monkeypatch):
+    from review.features.scatter import _pooled
+
+    made, real = [], _pooled.CellPool
+
+    def tracked(*a, **k):
+        made.append(real(*a, **k))
+        return made[-1]
+
+    calls = {"n": 0}
+    real_read = _pooled.narrow_rows
+
+    def failing(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError("disk went away")
+        return real_read(*a, **k)
+
+    monkeypatch.setattr(_pooled, "CellPool", tracked)
+    monkeypatch.setattr(_pooled, "narrow_rows", failing)
+    with pytest.raises(OSError):
+        _collect(ctx, max_points=400)
+    assert made and all(p._con is None and not p._parts for p in made)
 
 
 def test_the_pooled_path_reads_wells_narrowly(ctx, monkeypatch):

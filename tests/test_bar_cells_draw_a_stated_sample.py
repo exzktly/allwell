@@ -193,3 +193,38 @@ def test_a_column_reads_its_wells_narrowly(ctx, monkeypatch):
     cells = _pooled.column_cells(ctx, "pooled", GROUP, 6.0, THRESHOLD)
     cells.close()
     assert len(ctx.state.dataset.cache) == 0
+
+
+def test_an_ordinary_column_pools_in_numpy_and_only_a_huge_one_in_duckdb(ctx, monkeypatch):
+    """A DuckDB connection and spill directory per ordinary column cost 4.8 s and
+    574 MB on 96 columns of 20,000 cells; numpy costs nothing to open."""
+    pytest.importorskip("duckdb")
+    monkeypatch.setattr(_pooled, "BAR_CELL_MAX_POINTS", 400)
+    cells = _pooled.column_cells(ctx, "pooled", GROUP, 6.0, THRESHOLD)
+    assert cells.pool.backend == "numpy"
+    cells.close()
+    monkeypatch.setattr(_pooled, "BAR_CELL_DUCKDB_ROWS", 1000)
+    cells = _pooled.column_cells(ctx, "pooled", GROUP, 6.0, THRESHOLD)
+    assert cells.pool.backend == "duckdb"
+    cells.close()
+
+
+def test_a_failed_draw_releases_every_columns_pool(ctx, monkeypatch):
+    scipy_stats = pytest.importorskip("scipy.stats")
+    monkeypatch.setattr(_pooled, "BAR_CELL_MAX_POINTS", 400)
+    monkeypatch.setattr(_pooled, "BAR_CELL_DUCKDB_ROWS", 1000)      # real DuckDB pools, which must be released
+    made, real = [], _pooled.CellPool
+
+    def tracked(*a, **k):
+        made.append(real(*a, **k))
+        return made[-1]
+
+    def broken(*a, **k):
+        raise np.linalg.LinAlgError("singular matrix")
+
+    monkeypatch.setattr(_pooled, "CellPool", tracked)
+    monkeypatch.setattr(scipy_stats, "gaussian_kde", broken)
+    with pytest.raises(np.linalg.LinAlgError):
+        fig, *_ = _draw(ctx, "draw_violin")
+    plt.close("all")
+    assert made and all(p._con is None and not p._parts for p in made)

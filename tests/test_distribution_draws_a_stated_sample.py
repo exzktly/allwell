@@ -218,3 +218,39 @@ def test_the_ranges_are_every_values(ctx, monkeypatch):
         assert not math.isnan(exact[0].median)
     finally:
         pool.close()
+
+
+def test_below_the_cap_the_violin_extrema_are_every_values(ctx, mode, monkeypatch):
+    whole = _whole(ctx)
+    groups, exact, pool = _pooled_groups(ctx, 300, monkeypatch)
+    try:
+        ax = _render(ctx, groups, "Violin (per group)", exact)
+        lines = [c for c in ax.collections if type(c).__name__ == "LineCollection"]
+        # The caps and the median are horizontal marks, one per group; the bar
+        # is vertical. Each horizontal mark must be every value's, on its own.
+        horizontal = {tuple(round(float(seg[0][1]), 9) for seg in c.get_segments()) for c in lines
+                      if all(seg[0][1] == seg[1][1] for seg in c.get_segments())}
+        r = lambda f: tuple(round(float(f(v)), 9) for _, _, v in whole)  # noqa: E731
+        assert horizontal == {r(np.min), r(np.max), r(np.median)}
+        sample_extrema = {round(float(f(v)), 9) for _, _, v in groups for f in (np.min, np.max)}
+        whole_extrema = {round(float(f(v)), 9) for _, _, v in whole for f in (np.min, np.max)}
+        assert sample_extrema != whole_extrema, "the sample spans the whole range; the test measures nothing"
+    finally:
+        pool.close()
+
+
+def test_a_failed_collection_releases_its_pool(ctx, monkeypatch):
+    made, real = [], _pooled.CellPool
+
+    def tracked(*a, **k):
+        made.append(real(*a, **k))
+        return made[-1]
+
+    def failing(*a, **k):
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(_pooled, "CellPool", tracked)
+    monkeypatch.setattr(_pooled, "narrow_rows", failing)
+    with pytest.raises(OSError):
+        _pooled_groups(ctx, 300, monkeypatch)
+    assert made and all(p._con is None and not p._parts for p in made)

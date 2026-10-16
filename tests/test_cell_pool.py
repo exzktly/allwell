@@ -221,3 +221,25 @@ def test_a_per_group_cap_samples_each_group_to_it(backend):
         got = pool.sample(100, per_group=True)
         assert {g: len(s) for g, s in got.items()} == {"ctrl": 100, "drug": 100, "tiny": 3}
         assert got["tiny"].row.tolist() == truth["tiny"]["row"]
+
+
+def test_a_pool_nobody_closed_still_removes_its_spill_directory():
+    """Dropped by an exception, or held until exit: the directory must not stay behind."""
+    pytest.importorskip("duckdb")
+    import gc
+    import os
+
+    pool = CellPool(["v"], backend="duckdb")
+    spill = pool._spill
+    del pool
+    gc.collect()
+    assert not os.path.exists(spill)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_a_closed_pool_answers_as_empty(backend):
+    pool, _truth = _fill(backend)
+    pool.close()
+    assert pool.count("ctrl") == 0 and pool.count() == 0
+    assert pool.count_at("ctrl", [0.0]) == 0
+    assert pool.count_box("v", "w", {"x0": -1e9, "x1": 1e9, "y0": -1e9, "y1": 1e9}, "ctrl") == 0

@@ -54,6 +54,7 @@ import logging
 import os
 import shutil
 import tempfile
+import weakref
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from types import ModuleType
@@ -176,23 +177,34 @@ class CellPool:
         self._con = None
         self._spill: str | None = None
         self._parts: list[dict[str, np.ndarray]] = []
+        self._finalizer = None
         if duckdb is not None:
             self._spill = tempfile.mkdtemp(prefix="allwell-cellpool-")
             mb = int(os.environ.get("ALLWELL_CELL_POOL_MB") or DEFAULT_MEMORY_MB)
             self._con = duckdb.connect(config={"memory_limit": f"{mb}MB", "temp_directory": self._spill})
+            # A pool nobody closed — dropped by an exception, or held until the
+            # app exits — still releases its connection and removes its spill
+            # directory, when it is collected or at interpreter exit.
+            self._finalizer = weakref.finalize(self, _release, self._con, self._spill)
             cols = "".join(f", c{i} DOUBLE" for i in range(len(self.columns)))
             self._con.execute(f"CREATE TABLE cells (seq BIGINT, grp INTEGER, well INTEGER, rn BIGINT, tp DOUBLE{cols})")
 
     # ── lifetime ────────────────────────────────────────────────────────────
 
     def close(self) -> None:
-        if self._con is not None:
-            self._con.close()
-            self._con = None
-        if self._spill is not None:
-            shutil.rmtree(self._spill, ignore_errors=True)
-            self._spill = None
+        """Release the pool. A closed pool holds no cells and answers as an empty one.
+
+        Answering as empty rather than with the counts it used to hold matters to
+        a caller that kept an object reading it (a scatter group's gate
+        population): a count above zero beside a box count of zero would print
+        "0.0%" for a gate holding cells. Empty, the reading is "no cells".
+        """
+        if self._finalizer is not None:
+            self._finalizer()
+        self._con = None
+        self._spill = None
         self._parts = []
+        self._sizes = {g: 0 for g in self._sizes}
 
     def __enter__(self) -> CellPool:
         return self
@@ -450,6 +462,16 @@ class CellPool:
                 total=self._sizes[group],
             )
         return out
+
+
+def _release(con, spill: str | None) -> None:
+    """Close *con* and remove *spill* — a pool's cleanup, run once by its finalizer."""
+    try:
+        con.close()
+    except Exception as exc:  # noqa: BLE001 - a connection already gone is released
+        _logger.debug("cell pool connection close failed (%s)", exc)
+    if spill:
+        shutil.rmtree(spill, ignore_errors=True)
 
 
 def cells_upper_bound(ctx, wells) -> int:

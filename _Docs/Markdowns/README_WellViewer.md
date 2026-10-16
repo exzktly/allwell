@@ -1634,9 +1634,21 @@ What this means in use:
   the crop's status line and Cell Gating's "Included for analysis" are
   recalculated on every edit, so they count the wells in memory; when those are
   not all of them the line ends with "counted over N of M wells in memory".
-- **Scatter, Distribution and the bar chart's beeswarm and violin** still hold
-  the cells of every well you select. Selecting most of a very large plate in one
-  of them asks for that many points.
+- **The Scatter plot draws a sample above 100,000 cells, and says so.** When the
+  selected wells hold more cells than that, the plot draws a sample of 100,000,
+  in proportion per well or group, and the figure carries a note giving how many
+  it drew of how many. Clicking a point still opens that cell. Gate percentages
+  always count every cell, not the sample, and an exported CSV always holds every
+  cell.
+- **The Distribution plot draws its curves from a sample above 200,000 values.**
+  The counts in the legend and title, the histogram's bars and bin range, and the
+  violin's median line still use every value; only the KDE and CDF curves and
+  the violin's outline are drawn from the sample, and the figure says so. The
+  exported CSV holds every value.
+- **The bar chart's beeswarm and violin draw at most 5,000 cells per column.** A
+  column with more cells draws a sample of 5,000, and the figure says which
+  columns did; the fraction, the mean line and the median line still use every
+  cell.
 - **Cell Gating's distribution curves** are drawn through 2,000 of their points
   when a curve has more cells than that; every point drawn is on the full curve,
   and the figure says so.

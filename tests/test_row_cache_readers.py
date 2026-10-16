@@ -29,6 +29,8 @@ _HELD_ONLY_READERS: dict[str, str] = {
         "Reads the cache's budget, not its frames, to cap the remembered CDF arrays."),
     "review/data/data_loading.py::_read_making_room": (
         "On a MemoryError, releases the held frames for one retry and names what was held in the error."),
+    "review/data/cell_pool.py::cells_upper_bound": (
+        "A row count per well: the summary's, else a held frame's length, else the well is read."),
     "review/data/narrow_rows.py::narrow_rows": (
         "One well: a held frame is returned as held, and a missing one read narrowly from disk."),
     "review/data/data_loading.py::held_wells_note": "Counts the held wells, to say when a readout covers only them.",

@@ -116,15 +116,22 @@ def owned_indices(owners, tile: str) -> set[int]:
 
 
 def fits_template(template: Template, geometries, *, radius: float = SUPPRESSION_RADIUS, pixel_size_um: float):
-    """Split *geometries* into (those the template covers, those it does not).
+    """Split *geometries* into (those the template covers, those it does not): within its crop, and finite out to
+    the site's reach.
 
     :func:`rim_suppress` refuses a site larger than the template, because leaving it flat would read
     as empty; a caller with a mixed list uses this to suppress what fits and to report the rest as
     unmeasured.
     """
+    # Covered means every template pixel the site reaches is a number, not only that the crop is big enough: a NaN
+    # the median kept beyond the interior made rim_suppress refuse, and so fail, the whole well (roll-up review X24).
+    y, x = np.mgrid[-template.half:template.half + 1, -template.half:template.half + 1]
+    holes = np.hypot(x, y)[~np.isfinite(template.array)]
+    finite_within = float(holes.min()) if holes.size else math.inf
     fit, too_large = [], []
     for g in geometries:
-        (fit if radius * g.radius_um / pixel_size_um <= template.half else too_large).append(g)
+        reach = radius * g.radius_um / pixel_size_um
+        (fit if reach <= template.half and reach < finite_within else too_large).append(g)
     return fit, too_large
 
 

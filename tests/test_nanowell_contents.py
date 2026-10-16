@@ -522,3 +522,20 @@ def test_the_floor_ratio_flags_a_mostly_loaded_well_and_not_exposure_noise_or_fo
     for other in (_template_for(30, seed=37), _template_for(30, seed=37, gain=1.6),
                   _template_for(10, seed=11, noise=0.15), _template_for(10, seed=11, blur=2.5)):
         assert nm.template_drift(other, earliest) < 0.5 * nm.TEMPLATE_DRIFT_LIMIT
+
+
+def test_a_site_reaching_a_hole_in_the_template_is_unmeasured_not_a_failed_well():
+    """Roll-up review X24: a NaN the median kept beyond the template's interior made ``rim_suppress`` refuse, which
+    failed the whole well. A site whose reach meets one is now reported as not covered, and the rest suppress."""
+    half = 29
+    y, x = np.mgrid[-half:half + 1, -half:half + 1]
+    array = np.ones((2 * half + 1, 2 * half + 1))
+    array[np.hypot(x, y) > 23.0] = np.nan                            # a hole ring from 23 px out
+    template = nm.Template(array, half, nm.SOURCE_OWN, 10, 10, 0.0, tuple(range(10)))
+    small = SiteGeometry(0, (100.0, 100.0), 20.0, FITTED, 0.2, 64)     # reach 21 px (1.05 R): inside it
+    large = SiteGeometry(1, (200.0, 100.0), 24.0, FITTED, 0.2, 64)     # reach 25.2 px: meets it, within the crop
+    assert nm.SUPPRESSION_RADIUS * 24.0 < half
+    fit, too_large = nm.fits_template(template, [small, large], pixel_size_um=1.0)
+    assert ([g.index for g in fit], [g.index for g in too_large]) == ([0], [1])
+    out = nm.rim_suppress(np.full((300, 300), 5.0), 1.0, template, fit)
+    assert np.isfinite(out).all()

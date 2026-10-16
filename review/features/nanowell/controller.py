@@ -372,6 +372,11 @@ def shown_timepoint(ctx) -> tuple[list, str]:
         well = page_well(ctx)
         return list(st.data.timepoints(well)), page_timepoint(ctx, well)
     tps = list(st.data.timepoints())
+    if st.view == "distribution" and st.axis == "wells":
+        # The figure draws the drawn wells' timepoints, so the combo offers those and names the one drawn — not
+        # the dataset's latest, which the drawn wells may not have (roll-up review X17).
+        have = {tp for wells in page_groups(ctx).values() for well in wells for tp in st.data.timepoints(well)}
+        tps = [tp for tp in tps if tp in have] or tps
     return tps, st.timepoint if st.timepoint in tps else (tps[-1] if tps else "")
 
 

@@ -31,9 +31,10 @@ COUNTS = {"A01": {"t_c": [1, 2, 0, None], "t_a": [2, 4, 3, 1]},
           "B01": {"t_c": [3, 0, 1, 1], "t_a": [3, None, 1, 2]}}
 
 
-def _write_nanowell_dataset(tmp_path, *, scheme: int | None = None):
+def _write_nanowell_dataset(tmp_path, *, scheme: int | None = None, counts: dict | None = None):
+    plate = counts or COUNTS
     wells, cells = {}, []
-    for well, by_tp in COUNTS.items():
+    for well, by_tp in plate.items():
         rows = []
         for tp, counts in by_tp.items():
             for q, n in enumerate(counts):
@@ -44,9 +45,9 @@ def _write_nanowell_dataset(tmp_path, *, scheme: int | None = None):
                 cells += [{"well": well, "fov": "F0", "timepoint": tp, "nucleus_id": len(cells) + 1, "area_px": 50,
                            "GFP_mean_intensity": 10.0 + q, "nw_q": q, "nw_r": 0} for _ in range(n)]
         wells[well] = rows
-    out = _dataset(tmp_path, wells, starts={k: STARTS[k] for k in ("t_c", "t_a")})
+    out = _dataset(tmp_path, wells, starts={k: STARTS[k] for k in sorted({t for c in plate.values() for t in c})})
     frame = pd.DataFrame(cells)
-    for well in WELLS:
+    for well in plate:
         frame[frame["well"] == well].to_csv(out / f"measurements_{well}.csv", index=False)
     info = json.loads((out / "pipeline_info.json").read_text())
     info["nanowell"]["scheme_version"] = scheme or info["nanowell"]["scheme_version"]
@@ -379,3 +380,17 @@ def test_saving_while_another_baseline_is_being_computed_is_refused_and_says_so(
     written = pd.read_csv(out)
     assert set(written["baseline"]) == {"first_measurable"}
     assert set(written["baseline_timepoint"].dropna()) == set(st.metrics["baseline_timepoint"].dropna())
+
+
+def test_along_wells_the_timepoint_named_is_the_one_drawn(qtbot, tmp_path):
+    """Roll-up review X17: with no timepoint chosen the combo named the dataset's latest (t_d, which only B01 has)
+    while the figure drew the drawn wells' latest (t_a). Both now come from the drawn wells."""
+    counts = {"A01": {"t_c": [1, 2, 0, 1], "t_a": [2, 4, 3, 1]},
+              "B01": {"t_c": [3, 0, 1, 1], "t_a": [3, 1, 1, 2], "t_d": [1, 1, 1, 1]}}
+    ctx = _page(qtbot, _write_nanowell_dataset(tmp_path, counts=counts))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    ctx.widgets.get("_nw_axis_seg").setCurrentIndex(1)
+    assert st.timepoint in ("", None)
+    assert (nwc.shown_timepoint(ctx)[1], st.model.timepoint, ctx.widgets.get("_nw_tp_cb").currentData()) == \
+        ("t_a", "t_a", "t_a")

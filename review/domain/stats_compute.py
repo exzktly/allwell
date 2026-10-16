@@ -565,9 +565,8 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
     rather than making this one copy for everybody.
     """
     store = getattr(ctx.state, "stats_cache", None)
-    rows = get_rows(ctx, label)
     if store is None:
-        return compute(rows, val_col=val_col, fluor_gates=fluor_gates,
+        return compute(get_rows(ctx, label), val_col=val_col, fluor_gates=fluor_gates,
                        ratios=ctx.state.channel.ratio_index)
     key = (
         "well_cdf", label, val_col,
@@ -586,10 +585,45 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
     hit = store.cache.get(key)
     if hit is not None:
         return hit
-    result = compute(rows, val_col=val_col, fluor_gates=fluor_gates,
+    # Read only on a miss: the row cache is bounded, and reading a well first
+    # loaded an evicted one from disk only to return the remembered array.
+    result = compute(get_rows(ctx, label), val_col=val_col, fluor_gates=fluor_gates,
                      ratios=ctx.state.channel.ratio_index)
+    _make_room_for_cdf(ctx, store.cache, int(getattr(result, "nbytes", 0)))
     store.cache[key] = result
     return result
+
+
+#: Share of the row-cache budget the remembered CDF arrays may hold together.
+CDF_MEMO_SHARE = 0.25
+
+
+def _make_room_for_cdf(ctx, cache: dict, incoming: int) -> None:
+    """Drop remembered CDF arrays — stale ones, then the oldest — to fit *incoming*.
+
+    These are the one per-cell thing the statistics cache keeps: a well's whole
+    filtered population, tens of megabytes on a large well. Without a bound the
+    dict kept one for every well ever drawn with the CDF on, and one more per
+    ``rows_version`` tick (each gating pass), none of which was ever read again —
+    a second unbounded row cache. Entries from an older ``rows_version`` can never
+    be hit and go first; then the oldest, until the arrays fit within
+    :data:`CDF_MEMO_SHARE` of the row-cache budget.
+    """
+    version = ctx.state.dataset.rows_version
+    budget = getattr(ctx.state.dataset.cache, "budget_bytes", None)
+    entries = [k for k in cache if isinstance(k, tuple) and k and k[0] == "well_cdf"]
+    for key in entries:
+        if key[5] != version:
+            del cache[key]
+    if budget is None:
+        return
+    cap = int(budget * CDF_MEMO_SHARE)
+    live = [k for k in entries if k in cache]
+    held = sum(int(getattr(cache[k], "nbytes", 0)) for k in live)
+    for key in live:
+        if held + incoming <= cap:
+            break
+        held -= int(getattr(cache.pop(key), "nbytes", 0))
 
 
 def _gate_cache_sig(ctx) -> tuple | None:

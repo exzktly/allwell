@@ -180,3 +180,15 @@ def test_the_included_count_says_it_covers_part_of_the_plate(ctx):
     cell_gating_refresh_included_count(ctx)
     assert shown[-1].startswith("Included for analysis: 4 / 4 cells")
     assert shown[-1].endswith(" — counted over 1 of 3 wells in memory")
+
+
+def test_the_tabs_timepoint_menus_read_the_plate_once(ctx, monkeypatch):
+    """Distribution, Heat Map, Multivariate and Statistics ask on every tab
+    activation and channel switch (tracker M6): the plate is read once."""
+    from review.data import data_loading
+
+    _evict(ctx, "A01", "B02")
+    assert data_loading.get_all_timepoints(ctx) == [0.0, 24.0, 48.0, 72.0]
+    monkeypatch.setattr(data_loading, "read_well_frame",
+                        lambda path: pytest.fail(f"{path.name} was read again"))
+    assert data_loading.get_all_timepoints(ctx) == [0.0, 24.0, 48.0, 72.0]

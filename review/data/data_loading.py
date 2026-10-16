@@ -673,18 +673,26 @@ def get_all_timepoints(ctx) -> list[float]:
     ``include_gate=False`` — the per-cell scatter draws gates, so timepoint
     enumeration must see the full cloud, not a gate-filtered subset.
 
-    A8 residuals-ledger R1: fully ctx — the well list reads typed state and rows
-    come from the ctx-native :func:`get_rows` service, so no god-object residual.
+    Every well is read once through :func:`get_rows` and its timepoints remembered
+    (``plate_scan``) until its rows or verdicts change: the tabs ask on every
+    activation and channel switch, and with the row cache bounded each ask would
+    otherwise read the plate from disk.
     """
+    from review.data.plate_scan import every_well
+
     timepoints: set = set()
-    for label in ctx.state.dataset.well_paths:
-        df = get_rows(ctx, label)
-        if df is None or df.empty or "timepoint_hours" not in df.columns:
-            continue
-        mask = df_included_mask(df, include_gate=False)
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
-        timepoints.update(float(t) for t in tp.dropna().unique())
+    for found in every_well(ctx, "included_timepoints", None, _included_timepoints).values():
+        timepoints.update(found)
     return sorted(timepoints)
+
+
+def _included_timepoints(df) -> frozenset:
+    """One well's included ``timepoint_hours`` (gates aside), for :func:`get_all_timepoints`."""
+    if df is None or df.empty or "timepoint_hours" not in df.columns:
+        return frozenset()
+    mask = df_included_mask(df, include_gate=False)
+    tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
+    return frozenset(float(t) for t in tp.dropna().unique())
 
 
 def resolve_value_series(
@@ -1335,6 +1343,9 @@ def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, s
     for name, wells, rset in plot_group_well_lists(ctx, fallback_to_all):
         frames = [get_rows(ctx, w) for w in wells]
         pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+        # Released before the yield: the consumer holds the pooled copy while it
+        # draws, and the list beside it doubled the group's rows for that time.
+        del frames
         color = _color_rset(rset) if rset is not None else color_for_wells([name])
         yield name, color, pooled
 

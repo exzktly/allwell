@@ -896,7 +896,11 @@ def line_status_text(ctx, series_list, fc_misses, active_rsets, selected) -> str
                       for r in active_rsets)
         # threshold + band now live in the always-visible status chips (F1).
         return f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)"
-    n_total = sum(len(get_rows(ctx, lbl)) for lbl in selected)
+    # Every opened well's row count is in its summary, so the line does not read
+    # each selected well — from disk, for one the row cache has evicted — to count.
+    summaries = getattr(ctx.state.dataset, "summaries", None) or {}
+    n_total = sum(summaries[lbl].n_rows if lbl in summaries else len(get_rows(ctx, lbl))
+                  for lbl in selected)
     return f"{len(selected)} well(s)  |  {n_total:,} nuclei"
 
 

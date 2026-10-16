@@ -121,14 +121,19 @@ class CellScope:
 def plotted_wells(ctx, *, fallback_to_all: bool = False) -> tuple[tuple[str, str], ...]:
     """``(group_name, well_label)`` for the wells the plot is drawing.
 
-    Goes through ``data_loading.iter_plot_group_wells``, which shares its
-    selection with the pooled generator the renderers use, so the export cannot
+    Goes through ``data_loading.plot_group_well_lists`` — the lists
+    ``iter_plot_group_wells`` walks, which it shares with the pooled generator
+    the renderers use — so the export cannot
     drift from the figure about which wells are on screen — the failure that
     would otherwise be a plausible file of the wrong wells.
     """
-    from review.data.data_loading import iter_plot_group_wells
+    from review.data.data_loading import plot_group_well_lists
+
+    # The lists ``iter_plot_group_wells`` walks, without its read of each well:
+    # naming the wells needs no rows, and that read loaded every evicted well.
     return tuple((group, well)
-                 for group, well, _df in iter_plot_group_wells(ctx, fallback_to_all))
+                 for group, wells, _rset in plot_group_well_lists(ctx, fallback_to_all)
+                 for well in wells)
 
 
 def scope_from_ctx(ctx, *, plot: str, val_col: str | None = None,

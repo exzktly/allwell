@@ -30,6 +30,7 @@ shared, and the binaries are not spawned.
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 
 import pytest
@@ -326,3 +327,21 @@ def test_the_numbered_dir_guard_bites():
         "b takes a tmp_path fixture",
         "b calls .mktemp()",
     ]
+
+
+@pytest.fixture(scope="module")
+def _scratch_seen_by_a_module_fixture():
+    """What a module-scoped fixture that runs the pipeline would extract into: it is set up before any test's own
+    fixtures, so only a session-scoped one can have pointed it somewhere."""
+    return os.environ.get("ALLWELL_SCRATCH_DIR")
+
+
+def test_a_module_fixture_extracts_into_this_worker_s_own_scratch(_scratch_seen_by_a_module_fixture,
+                                                                 tmp_path_factory):
+    """Without it, two xdist workers each building a nanowell run in a module fixture shared ``~/.allwell/scratch``
+    and deleted each other's ``_tmp_extract_A01`` mid-run."""
+    from pathlib import Path
+
+    seen = _scratch_seen_by_a_module_fixture
+    assert seen, "a module-scoped fixture would extract into ~/.allwell/scratch, shared by every worker"
+    assert Path(seen).resolve().is_relative_to(tmp_path_factory.getbasetemp().resolve())

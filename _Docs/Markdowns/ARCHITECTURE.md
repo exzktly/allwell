@@ -14557,7 +14557,10 @@ help while `qtbot` still holds the app).
    alone, so two tests processing `A01` at once deleted each other's images.
    `conftest._pipeline_scratch_goes_to_a_scratch_directory` gives every test its
    own `ALLWELL_SCRATCH_DIR` (a test measuring the default resolution unsets
-   it). The same collision is what two lanes run side by side used to hit. CI
+   it), and `_session_pipeline_scratch` gives the worker one before any module-
+   or session-scoped fixture runs — those are set up before a test's own
+   fixtures, and a module fixture that ran a whole nanowell plate otherwise
+   extracted into the shared default. The same collision is what two lanes run side by side used to hit. CI
    gates on the JUnit report, which the controller writes from every worker's
    results.
 

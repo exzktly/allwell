@@ -216,11 +216,17 @@ that nanowells are light and the lattice between them dark: it separates light f
 nanowells are, and reads from their positions whether the lattice is hexagonal or square, its pitch and
 orientation, and the array's outline (a circle, or whatever shape the nanowells fill), then gives every nanowell
 its address on that lattice. A nanowell a bubble hides keeps its address and is reported as occluded, and the
-grid record counts how many sites showed no nanowell. The plate format's pitch and diameter are then compared
-with what was measured: a pitch more than 5 % off, or a diameter more than 25 % off, is written as a note on the
-timepoint with both numbers (the addresses use the measured pitch). On a square lattice a nanowell's ring is the
-number of lattice steps along the larger of its two coordinates, and the Nanowells page lays the array map out
-square.
+grid record counts how many sites showed no nanowell. A nanowell seen at any timepoint keeps its address at every
+timepoint, and where a bubble hides it at one it is written as occluded there. The plate format's pitch and
+diameter are then compared with what was measured: a pitch more than 5 % off is written as a note on the timepoint
+with both numbers (the addresses always use the measured pitch), and a diameter more than 25 % off is written the
+same way and the nanowells are then fitted and measured at the measured diameter. A format whose nanowells would
+fill the measured pitch is a note too, not a refusal. A timepoint whose array lost a whole edge row (a bubble along
+the edge) cannot say which edge, so unless the central square anchors it, it is measured without addresses and the
+grid record says why; one whose lattice is a different kind from the well's other timepoints is refused by name. A
+square lattice must sit within 40° of the image's axes: turned nearer 45° its axis cannot be told and the timepoint
+is refused with the angle. On a square lattice a nanowell's ring is the number of lattice steps along the larger of
+its two coordinates, and the Nanowells page lays each timepoint's array map out on the lattice its record names.
 While the mode is on, the segmentation method is set to label-free and locked (your choice returns when the mode
 is switched off). Run refuses to start, naming the fix, when a number is out of range or the Phase channel is
 unmarked (unless channel auto-detection will name it), and, for a single run with auto-detection off, when

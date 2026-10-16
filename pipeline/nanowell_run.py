@@ -40,9 +40,12 @@ FORMAT_MISMATCH = "format_mismatch"
 ORIENTATION_REFUSED = "orientation_refused"
 UNADDRESSED = "unaddressed"
 NO_IMAGES = "no_images"
+#: An inferred lattice of another kind than the well's other timepoints' (tracker X35-R4): its addresses cannot be
+#: joined with theirs, so it writes no rows.
+LATTICE_KIND_MISMATCH = "lattice_kind_mismatch"
 #: Statuses after which nothing downstream of them could run: the timepoint writes no site rows.
 TERMINAL_WITHOUT_ROWS = (INCOMPLETE_GRID, BAD_GRID, NO_RECORD, NO_LATTICE, FORMAT_MISMATCH,
-                         ORIENTATION_REFUSED, NO_IMAGES)
+                         ORIENTATION_REFUSED, NO_IMAGES, LATTICE_KIND_MISMATCH)
 
 #: How far a fiducial's score must clear the runner-up's to anchor an address (assumed; Q-row in the tracker).
 FIDUCIAL_MARGIN = 0.3
@@ -71,6 +74,10 @@ class NanowellSettings:
     clipped_below: float = 0.5          # a site imaged less than this is clipped and carries no count
     custom: tuple[float, float] | None = None   # (nominal pitch, diameter) um for CUSTOM_FORMAT
     geometry: str = GEOMETRY_HEX_CIRCLE         # how the array is found and its geometry decided (GEOMETRIES)
+    #: The nanowell diameter measured on the image, when an inferred geometry found the setting's wrong by more
+    #: than ``nanowell_infer.DIAMETER_AGREEMENT``: sites are then fitted, owned and measured at it. Set per
+    #: timepoint by :func:`measure_timepoint`, never by a caller, and not in the reuse key (tracker X35-R3).
+    diameter_override_um: float | None = None
 
     def __post_init__(self):
         if (self.plate_format == CUSTOM_FORMAT) != (self.custom is not None):
@@ -90,6 +97,8 @@ class NanowellSettings:
 
     @property
     def diameter_um(self) -> float:
+        if self.diameter_override_um is not None:
+            return self.diameter_override_um
         return self.custom[1] if self.custom else PLATE_FORMATS[self.plate_format][1]
 
     @property
@@ -133,6 +142,7 @@ class Located:
     #: wells found, montage frame, found or not — the roster of an array that is not a circle (tracker X35).
     array_sites: np.ndarray | None = None
     array_shape: str | None = None                        # "circle" or "polygon"
+    diameter_um: float | None = None                      # inferred only: the diameter sites are measured at
     notes: list = field(default_factory=list)             # findings of the locating stage that are not refusals
 
 
@@ -164,7 +174,8 @@ def stage_offset(record: dict, well: str, timepoint: str, positions: dict,
     return float(median[0]), float(median[1])
 
 
-def _tile_fit(image, pixel_size_um: float, settings: NanowellSettings, pitch_um: float | None = None):
+def _tile_fit(image, pixel_size_um: float, settings: NanowellSettings, pitch_um: float | None = None,
+              kind: str = "auto"):
     """The lattice fitted to one tile alone (tile-local um), or ``None`` when it has too few sites to fit.
 
     Registration's lattice-phase constraint needs it; a tile of bare floor or a wholly occluded one
@@ -175,7 +186,7 @@ def _tile_fit(image, pixel_size_um: float, settings: NanowellSettings, pitch_um:
     if settings.infer:
         from pipeline.nanowell_infer import contrast_fit
 
-        return contrast_fit(image, pixel_size_um, expected_pitch_um=pitch_um)
+        return contrast_fit(image, pixel_size_um, expected_pitch_um=pitch_um, kind=kind)
     found = detect_sites(image, pixel_size_um, settings.diameter_um, expected_pitch_um=pitch_um or settings.pitch_um)
     return found.fit if found.ok else None
 
@@ -192,14 +203,10 @@ def working_pitch(images: dict, plan, pixel_size_um: float, settings: NanowellSe
     registration then falls back to overlap or recorded positions with no fit at all. So the pitch is first
     measured by the lattice search (half to twice the nominal) on the tiles nearest the grid's centre, and their
     median is used; with none measurable, the nominal pitch, and the grid record says which. An inferred geometry
-    (tracker X35) first fits the lattice to the centre tiles' wells found by contrast, which needs no seed at all.
+    (tracker X35) first tries :func:`_contrast_lattice`, which needs no seed at all.
     """
     from pipeline.nanowell_detect import estimate_lattice_fft
 
-    if settings.infer:
-        found = _contrast_pitch(images, plan, pixel_size_um)
-        if found is not None:
-            return found, "contrast"
     measured = []
     for tile in _centre_tiles(plan):
         estimate = estimate_lattice_fft(images[tile], pixel_size_um, expected_pitch_um=settings.pitch_um)
@@ -215,12 +222,20 @@ def _centre_tiles(plan) -> list[str]:
     return sorted(rects, key=lambda t: (np.hypot(rects[t][0] - cx, rects[t][1] - cy), t))[:PITCH_PROBE_TILES]
 
 
-def _contrast_pitch(images: dict, plan, pixel_size_um: float) -> float | None:
-    """The median pitch of the lattices fitted to the centre tiles' wells found by contrast, with no seed at all."""
+def _contrast_lattice(images: dict, plan, pixel_size_um: float) -> tuple[float, str] | None:
+    """``(pitch, kind)`` of the lattices fitted to the centre tiles' wells found by contrast, with no seed at all:
+    the median pitch and the most common kind (the nearest tile's on a tie), or ``None`` when no centre tile fits.
+    Every tile is then fitted as that kind: a sparse edge tile left to choose can pick the other (review X35-R7)."""
+    from collections import Counter
+
     from pipeline.nanowell_infer import contrast_fit
 
-    measured = [fit.pitch for tile in _centre_tiles(plan) if (fit := contrast_fit(images[tile], pixel_size_um))]
-    return float(np.median(measured)) if measured else None
+    fits = [fit for tile in _centre_tiles(plan) if (fit := contrast_fit(images[tile], pixel_size_um))]
+    if not fits:
+        return None
+    counts = Counter(fit.kind for fit in fits)
+    kind = next(fit.kind for fit in fits if counts[fit.kind] == max(counts.values()))
+    return float(np.median([fit.pitch for fit in fits])), kind
 
 
 def _montage_to_common(point, montage) -> np.ndarray:
@@ -269,9 +284,13 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         return Located(timepoint, NO_IMAGES, f"No image for tile(s) {', '.join(absent)}",
                        _grid_block(plan, None, {"status": NO_IMAGES}), plan)
     px = float(pixel_size["x"])
-    pitch, pitch_source = working_pitch(images, plan, px, settings)
+    probe = _contrast_lattice(images, plan, px) if settings.infer else None
+    if probe is not None:
+        (pitch, kind), pitch_source = probe, "contrast"
+    else:
+        (pitch, pitch_source), kind = working_pitch(images, plan, px, settings), "auto"
     observations = [TileObservation(p.tile_id, (p.left_um, p.top_um), (p.width_um, p.height_um),
-                                    _tile_fit(images[p.tile_id], px, settings, pitch))
+                                    _tile_fit(images[p.tile_id], px, settings, pitch, kind))
                     for p in plan.placements]
     fitted = sum(o.fit is not None for o in observations)
     warnings = [] if fitted else [
@@ -291,26 +310,33 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
                                    warnings)
         return located
 
+    diameter = settings.diameter_um
     if settings.infer:
         detection, inferred, seed["geometry"] = _detect_by_contrast(montage, settings)
         if not detection.ok:
             return refuse(NO_LATTICE, detection.reason)
         lattice_pitch = float(detection.fit.pitch)
+        diameter = located.diameter_um = seed["geometry"]["diameter_used_um"]
     else:
         estimate = estimate_lattice_fft(montage.image, montage.um_per_px, expected_pitch_um=pitch)
         if not estimate.ok:
             return refuse(NO_LATTICE, estimate.reason)
         lattice_pitch = float(estimate.pitch_um)
-    fmt = check_format(lattice_pitch, settings.diameter_um)
+    fmt = check_format(lattice_pitch, diameter)
     if fmt.status == "format_mismatch":
-        return refuse(FORMAT_MISMATCH, fmt.reason if hasattr(fmt, "reason") else
-                      f"The lattice pitch {lattice_pitch:.1f} um is not the {settings.plate_format} format's")
+        reason = (fmt.reason if hasattr(fmt, "reason") else
+                  f"The lattice pitch {lattice_pitch:.1f} um is not the {settings.plate_format} format's")
+        if not settings.infer:
+            return refuse(FORMAT_MISMATCH, reason)
+        # An inferred geometry measured the plate itself: the format is a statement to check, not a reason to
+        # write nothing (review X35-R3).
+        seed["geometry"]["notes"].append(f"{reason}. The inferred geometry addresses the plate as measured")
     if not settings.infer:
         detection = detect_sites(montage.image, montage.um_per_px, settings.diameter_um,
                                  expected_pitch_um=lattice_pitch)
         if not detection.ok:
             return refuse(NO_LATTICE, detection.reason)
-    candidate, scores = score_fiducial(montage.image, montage.um_per_px, settings.diameter_um,
+    candidate, scores = score_fiducial(montage.image, montage.um_per_px, diameter,
                                        detection.points_um, centre_um=detection.boundary_centre_um,
                                        search_radius_um=2.2 * lattice_pitch)
     # Only a square that scored as one: with the central square hidden (a bubble over it) the best-scoring site
@@ -374,9 +400,14 @@ def _detect_by_contrast(montage, settings: NanowellSettings):
     if not geometry.ok:
         return SiteDetection(False, geometry.reason), None, block
     block.update(geometry.summary())
-    block["pitch_check"] = compare_given(geometry.fit.pitch, settings.pitch_um, PITCH_AGREEMENT, "pitch")
+    block["pitch_check"] = compare_given(geometry.fit.pitch, settings.pitch_um, PITCH_AGREEMENT, "pitch",
+                                         "addresses use the measured pitch")
     block["diameter_check"] = compare_given(wells.diameter_um, settings.diameter_um, DIAMETER_AGREEMENT,
-                                            "nanowell diameter")
+                                            "nanowell diameter", "nanowells are fitted, owned and measured at the "
+                                            "measured diameter")
+    # The diameter sites are measured at: the setting's, unless the image shows it is wrong (review X35-R3).
+    block["diameter_used_um"] = (settings.diameter_um if block["diameter_check"]["agrees"] is not False
+                                 else float(wells.diameter_um))
     block["notes"] = [c["note"] for c in (block["pitch_check"], block["diameter_check"]) if c["note"]]
     if geometry.missing:
         block["notes"].append(f"{geometry.missing} of the array's {len(geometry.found)} lattice sites showed no "
@@ -507,6 +538,10 @@ def _visibility_and_coverage(located: Located, geoms: dict, array_radius_um: flo
     rects = [(located.positions[p.tile_id][0], located.positions[p.tile_id][1],
               located.positions[p.tile_id][0] + p.width_um, located.positions[p.tile_id][1] + p.height_um)
              for p in located.plan.placements]
+    # A polygon array has no bubble mask: the mask is the lattice signal's absence inside a circle, and visibility
+    # already reads a nanowell a bubble hides as occluded from its own brightness (light wells, dark lattice), which
+    # is the evidence an inferred geometry rests on. No rendered case shows the mask changing a polygon's states, so
+    # it is not added on faith (review X35-R9, declined).
     if array_radius_um is None and boundary is not None:      # an inferred circle: its own (tracker X35)
         array_radius_um = boundary["radius_um"]
     coverage = {c.index: c for c in site_coverage(
@@ -624,6 +659,8 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     from pipeline.tile_grid import ownership_report
 
     px, montage = located.pixel_size_um, located.montage
+    if located.diameter_um is not None and located.diameter_um != settings.diameter_um:
+        settings = replace(settings, diameter_override_um=located.diameter_um)
     addressed = located.status == OK
     if addressed:
         addresses, points_m = _roster_positions(located, array_radius_um, roster)
@@ -801,32 +838,142 @@ def _own_roster(located: Located) -> frozenset:
 #: A timepoint whose own inferred roster differs from the well's shared one in more than this many sites (or this
 #: share of them, if larger) is flagged: a bubble over the array's edge, or a different array.
 _ROSTER_TOLERANCE = (2, 0.02)
+#: How many lattice steps either way a timepoint's addresses may be moved to overlay its array on the reference's.
+_REGISTER_REACH = 3
 
 
-def _shared_roster(located: dict, anchored, fixed_roster) -> tuple[frozenset, dict]:
-    """One roster for an inferred array (tracker X35): the addresses at least half of the anchored timepoints' own
-    arrays hold, so a bubble over the edge at one timepoint does not take sites out of the well; or the earlier
-    run's *fixed_roster*, so an incremental run adds a timepoint to the same roster. Returns the roster and the
-    block the grid record keeps (``array_radius``, with no radius: a set of sites, not a disk about the origin,
-    because a disk's tolerance adds sites the plate does not have and fits no other outline)."""
+def _refuse_other_kinds(outcome, candidates) -> list:
+    """Timepoints whose inferred lattice kind is not the well's, refused with the reason (review X35-R4).
+
+    The well's kind is the most common among *candidates* (the earliest's on a tie): a hexagonal and a square
+    address cannot name the same nanowell, so a timepoint of the other kind can neither join the vote on the
+    roster nor be joined to the others over time. Returns the timepoints refused."""
     from collections import Counter
 
+    kinds = {tp: outcome.located[tp].fit.kind for tp in candidates}
+    counts = Counter(kinds.values())
+    if len(counts) < 2:
+        return []
+    well_kind = next(kinds[tp] for tp in candidates if counts[kinds[tp]] == max(counts.values()))
+    refused = [tp for tp in candidates if kinds[tp] != well_kind]
+    for tp in refused:
+        reason = (f"Its nanowells fit a {kinds[tp]} lattice, the well's other timepoints ({counts[well_kind]} of "
+                  f"{len(candidates)}) a {well_kind} one: its addresses could not be joined with theirs")
+        outcome.located[tp].status, outcome.located[tp].reason = LATTICE_KIND_MISMATCH, reason
+        outcome.timepoints[tp].update(status=LATTICE_KIND_MISMATCH, reason=reason)
+    return refused
+
+
+def _shift_origin(located: Located, shift, onto: str) -> None:
+    """Move *located*'s addresses by *shift* lattice steps: the same sites, each named ``(q + dq, r + dr)``."""
+    from pipeline.nanowell_lattice import index_points
+
+    basis = np.column_stack((located.fit.a1, located.fit.a2))
+    located.origin_montage = tuple(np.asarray(located.origin_montage) - basis @ np.asarray(shift, dtype=float))
+    located.indexed = index_points(located.detected_common - np.asarray(located.montage.origin_um), located.fit,
+                                   located.origin_montage)
+    located.grid["origin_stage_um"] = _lattice_block(located, OK, "")["origin_stage_um"]
+    located.grid.update(origin_shift=[int(shift[0]), int(shift[1])], origin_registered_to=onto)
+    located.notes.append(f"Addresses moved by ({int(shift[0])}, {int(shift[1])}) lattice steps to overlay this "
+                         f"timepoint's array on {onto}'s: its own middle site was not the array's (a bubble or the "
+                         "image's edge cut its outline short)")
+
+
+def _register_to_reference(located: dict, anchored, fixed_roster) -> tuple[str | None, dict, dict]:
+    """Put every anchored timepoint's addresses in one frame (review X35-R1).
+
+    Returns ``(reference, shifts, ambiguous)``: the reference timepoint, the step each moved timepoint was moved by,
+    and the reason for each timepoint whose step cannot be told.
+
+    A timepoint anchored on its own array's middle site (``array_centre``) names its sites from that middle, and a
+    bubble or an edge cutting its outline short moves the middle by a step: its addresses would then name its
+    neighbours' nanowells, and the well's trajectories would join the wrong ones. So each such timepoint's own
+    sites are overlaid on the reference's by the whole lattice step (within ``_REGISTER_REACH``) that matches the
+    most sites, the smallest such step on a tie, and its origin moves by it. The reference is the earlier run's
+    *fixed_roster* (``None`` is returned for it), else the anchored timepoint that saw the most sites among those
+    anchored on evidence that does not depend on the outline (the central square, the plate), else among all.
+    A timepoint anchored on such evidence is never moved: a disagreement with it is a real one, and is reported as
+    a roster mismatch. When two steps match equally many sites the step cannot be told — an array that lost a whole
+    edge row fits inside the reference's one row from either edge, and nothing in the sites says which edge it lost
+    — so that timepoint is not addressed rather than addressed by a guess (the rest of the plate may still anchor
+    it at the end of the run)."""
+    own = {tp: _own_roster(located[tp]) for tp in anchored}
+    if fixed_roster:
+        reference, onto = frozenset(tuple(map(int, a)) for a in fixed_roster), "the earlier run's roster"
+        reference_tp = None
+    elif anchored:
+        pool = [tp for tp in anchored if located[tp].origin_method != "array_centre"] or list(anchored)
+        reference_tp = max(pool, key=lambda tp: (len(own[tp]), -anchored.index(tp)))
+        reference, onto = own[reference_tp], reference_tp
+    else:
+        return None, {}, {}
+    steps = sorted(((dq, dr) for dq in range(-_REGISTER_REACH, _REGISTER_REACH + 1)
+                    for dr in range(-_REGISTER_REACH, _REGISTER_REACH + 1)),
+                   key=lambda t: (abs(t[0]) + abs(t[1]), t))
+    shifts, ambiguous = {}, {}
+    for tp in anchored:
+        if tp == reference_tp or located[tp].origin_method != "array_centre":
+            continue
+        overlap = {t: len({(q + t[0], r + t[1]) for q, r in own[tp]} & reference) for t in steps}
+        best = max(overlap.values())
+        ties = [t for t in steps if overlap[t] == best]
+        if len(ties) > 1:
+            ambiguous[tp] = (f"Its array's {len(own[tp])} sites fit {onto}'s {len(reference)} equally well moved by "
+                             f"{' or '.join(str(t) for t in ties[:3])} lattice steps: its outline lost sites at an "
+                             "edge, and which edge cannot be told, so its addresses would be a guess")
+        elif ties[0] != (0, 0):
+            _shift_origin(located[tp], ties[0], onto)
+            shifts[tp] = ties[0]
+    return reference_tp, shifts, ambiguous
+
+
+def _shared_roster(located: dict, anchored, fixed_roster) -> tuple[frozenset, dict, dict]:
+    """One roster for an inferred array (tracker X35): every address any anchored timepoint's own array holds, once
+    they are in one frame (:func:`_register_to_reference`), or the earlier run's *fixed_roster*, so an incremental
+    run adds a timepoint to the same roster. Every timepoint's, not a majority's: nanowells do not appear, and a
+    bubble hides them, so a site seen as a nanowell at any timepoint is one at all of them — a majority dropped an
+    edge row hidden at two of three timepoints, so it was never written as occluded (review X35-R1). Returns the
+    roster, the block the grid record keeps (``array_radius``, with no radius: a set of sites, not a disk about the
+    origin, because a disk's tolerance adds sites the plate does not have and fits no other outline), and each
+    anchored timepoint's own address set (what the consistency check compares)."""
     own = {tp: _own_roster(located[tp]) for tp in anchored}
     # An empty one is an earlier run that anchored nothing (a well re-anchored from the rest of the plate): it
     # shared no roster, so this run's anchored timepoints decide one rather than measuring none.
     if fixed_roster:
         shared, status = frozenset(tuple(map(int, a)) for a in fixed_roster), "shared"
     else:
-        counts = Counter(a for sites in own.values() for a in sites)
-        shared = frozenset(a for a, n in counts.items() if 2 * n >= len(own))
+        shared = frozenset().union(*own.values()) if own else frozenset()
         status = "shared" if own else "no_anchored_timepoint"
     differences = {tp: len(sites ^ shared) for tp, sites in own.items()}
     limit = max(_ROSTER_TOLERANCE[0], _ROSTER_TOLERANCE[1] * len(shared))
     flags = {tp: ("roster_disagrees" if n > limit else None) for tp, n in differences.items()}
-    shapes = sorted({located[tp].array_shape for tp in anchored if located[tp].array_shape})
-    return shared, {"radius_um": None, "shape": shapes[0] if len(shapes) == 1 else shapes, "status": status,
+    shapes = {located[tp].array_shape for tp in anchored if located[tp].array_shape}
+    # One outline, or "mixed": a bubble over the rim can make one timepoint's circle read as a polygon.
+    shape = shapes.pop() if len(shapes) == 1 else ("mixed" if shapes else None)
+    return shared, {"radius_um": None, "shape": shape, "status": status,
                     "roster": [list(a) for a in sorted(shared)], "roster_differences": differences,
-                    "deviations_um": {}, "flags": flags}
+                    "deviations_um": {}, "flags": flags}, own
+
+
+def _settle_inferred(outcome, timepoints, anchored, unaddressed, fixed_roster):
+    """Before an inferred well's roster is shared (review X35-R1, R4): refuse timepoints of another lattice kind,
+    put the anchored ones in one frame, and unaddress those whose frame cannot be told. Returns the anchored and
+    unaddressed timepoints that remain, the registration's reference and the steps applied."""
+    refused = _refuse_other_kinds(outcome, anchored + unaddressed)
+    anchored = [tp for tp in anchored if tp not in refused]
+    unaddressed = [tp for tp in unaddressed if tp not in refused]
+    reference_tp, shifts, ambiguous = _register_to_reference(outcome.located, anchored, fixed_roster)
+    for tp, reason in ambiguous.items():                   # measured on the sites seen, with no address
+        located = outcome.located[tp]
+        located.status, located.reason, located.origin_montage, located.indexed = UNADDRESSED, reason, None, ()
+        located.origin_method = located.origin_agreement = None
+        outcome.timepoints[tp].update(status=UNADDRESSED, reason=reason, origin_method=None, origin_agreement=None,
+                                      origin_stage_um=None)
+    for tp in shifts:                                       # the grid block was written before the move
+        outcome.timepoints[tp].update({k: outcome.located[tp].grid[k]
+                                       for k in ("origin_stage_um", "origin_shift", "origin_registered_to")})
+    return ([tp for tp in anchored if tp not in ambiguous],
+            [tp for tp in timepoints if tp in unaddressed or tp in ambiguous], reference_tp, shifts)
 
 
 def own_array_model(located: Located) -> tuple[float | None, frozenset | None]:
@@ -837,18 +984,26 @@ def own_array_model(located: Located) -> tuple[float | None, frozenset | None]:
     return located.boundary["radius_um"], None
 
 
-def _consistency(located: dict, anchored, radius_um: float | None, reference: dict | None, roster=None) -> dict:
-    """``timepoint -> consistency`` of the anchored timepoints' lattices with each other (and an earlier run's)."""
+def _consistency(located: dict, anchored, radius_um: float | None, reference: dict | None,
+                 own_rosters: dict | None = None, reference_tp: str | None = None,
+                 reference_roster: frozenset | None = None) -> dict:
+    """``timepoint -> consistency`` of the anchored timepoints' lattices with each other (and an earlier run's).
+
+    An inferred array passes each timepoint's *own* address set (*own_rosters*), not the shared roster every
+    timepoint is measured against, so a timepoint that saw a different array is a ``roster_mismatch`` (review
+    X35-R1); *reference_tp* is then the registration's reference, and *reference_roster* an earlier run's roster."""
     from pipeline.nanowell_sites import TimepointLattice, check_consistency
 
     lattices = []
     for tp in anchored:
-        addresses, _ = _roster_positions(located[tp], radius_um, roster)
+        addresses = own_rosters[tp] if own_rosters is not None else _roster_positions(located[tp], radius_um)[0]
         lattices.append(TimepointLattice(tp, located[tp].fit.pitch, located[tp].fit.angle_deg, 0.0,
                                          frozenset(addresses)))
+    if reference_tp is not None:
+        lattices.sort(key=lambda t: t.timepoint != reference_tp)          # stable: the reference first
     if reference is not None:
         lattices.insert(0, TimepointLattice(reference["timepoint"], reference["pitch_um"], reference["angle_deg"],
-                                            0.0, None))
+                                            0.0, reference_roster))
     reference_angle = lattices[0].angle_deg if lattices else 0.0
     # The plate's rotation between timepoints is only measurable across wells; within one well the angle
     # is not checked (and the grid block says so), so a plate put back rotated is not called inconsistent.
@@ -906,9 +1061,12 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     anchored = [tp for tp in timepoints if outcome.located[tp].status == OK]
     unaddressed = [tp for tp in timepoints if outcome.located[tp].status == UNADDRESSED]
     # An inferred array has a shared set of addresses instead of a shared radius, whatever its outline (X35).
-    roster = None
+    roster = own = reference_tp = None
+    shifts: dict = {}
     if settings.infer and fixed_radius_um is None:
-        roster, outcome.radius = _shared_roster(outcome.located, anchored, fixed_roster)
+        anchored, unaddressed, reference_tp, shifts = _settle_inferred(outcome, timepoints, anchored, unaddressed,
+                                                                       fixed_roster)
+        roster, outcome.radius, own = _shared_roster(outcome.located, anchored, fixed_roster)
         radius_um = None
     else:
         shared = _shared_radius(outcome.located, anchored + unaddressed, settings, fixed_radius_um)
@@ -923,7 +1081,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
                                                                        "no roster radius could be shared")
             return outcome
 
-    consistency = _consistency(outcome.located, anchored, radius_um, reference, roster)
+    consistency = _consistency(outcome.located, anchored, radius_um, reference, own, reference_tp,
+                               frozenset(map(tuple, fixed_roster)) if fixed_roster and own is not None else None)
 
     # The template a timepoint with too few empty nanowells falls back to: an earlier run's (incremental), else the
     # first this run builds in time. A resumed run gets it back from the checkpoint (tracker C16).
@@ -933,8 +1092,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         located = outcome.located[tp]
         key = {"radius_um": radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
                "located": [located.status, located.origin_method]}
-        if roster is not None:
-            key["roster"] = outcome.radius["roster"]
+        if roster is not None:                  # the roster, and the step the addresses were moved by (X35-R1)
+            key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))))
         measured = checkpoint.load(tp, key) if checkpoint is not None else None
         if measured is None:
             images = _images_for(record, well, tp, load_phase)

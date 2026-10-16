@@ -322,7 +322,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         return None, None
     if view == "position":
         series, missing = vc.position_series(metrics, wells, timepoint, metric_column(metric, channel),
-                                             kinds={w: vc.well_lattice_kind(data, w) for w in wells})
+                                             kinds={w: vc.lattice_kind(data, w, timepoint) for w in wells})
         if missing:
             note = " ".join(filter(None, [note, f"No addressed nanowells at {timepoint}, so not drawn: "
                                                 f"{', '.join(missing)}."]))

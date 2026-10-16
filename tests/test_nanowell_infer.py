@@ -14,7 +14,7 @@ import pytest
 
 from pipeline import nanowell_infer as ni
 from pipeline import nanowell_run as nr
-from tests._nanowell_run_fixture import build_well, threshold_segmenter
+from tests._nanowell_run_fixture import build_well, record_for, threshold_segmenter
 from tests._nanowell_synth import TilePlan, render_tiles
 
 PX, PITCH, DIAMETER = 4.3, 172.0, 100.0
@@ -92,10 +92,14 @@ def test_half_the_image_a_third_as_bright_still_has_its_wells_found():
     assert sum(dim) == len(dim) > 100
 
 
-@pytest.mark.parametrize("noise", [0.05, 0.15])
-def test_a_small_array_on_a_wide_noisy_floor_holds_only_its_own_wells(noise):
-    """Most of the image is flat floor, whose camera noise splits into speckle; none of it may become a well."""
-    rendered, image = _image(radius_um=700.0, rotation_deg=-12.0, noise_sigma=noise, cells=40, debris=40)
+@pytest.mark.parametrize("noise, radius, seed, rotation", [(0.05, 700.0, 0, -12.0), (0.15, 700.0, 0, -12.0),
+                                                           (0.15, 500.0, 1, 8.0)])
+def test_a_small_array_on_a_wide_noisy_floor_holds_only_its_own_wells(noise, radius, seed, rotation):
+    """Most of the image is flat floor, whose camera noise splits into speckle; none of it may become a well. The
+    third case is one where reading the typical well from every blob of the second split, speckle included, found
+    no well at all (review X35-R2)."""
+    rendered, image = _image(radius_um=radius, rotation_deg=rotation, noise_sigma=noise, cells=40 if seed == 0
+                             else 30, debris=40 if seed == 0 else 30, seed=seed, square_centre=seed == 0)
     _, geometry = _infer(image)
     assert geometry.ok and geometry.shape == ni.ARRAY_CIRCLE and geometry.outliers == 0
     _roster_matches_the_drawing(rendered, geometry)
@@ -138,9 +142,9 @@ def test_an_array_the_image_cuts_is_clipped_and_a_polygon_has_no_centre_to_ancho
 
 
 def test_a_given_length_that_disagrees_is_reported_with_both_numbers():
-    off = ni.compare_given(172.0, 200.0, ni.PITCH_AGREEMENT, "pitch")
+    off = ni.compare_given(172.0, 200.0, ni.PITCH_AGREEMENT, "pitch", "addresses use the measured pitch")
     assert off["agrees"] is False and "172.0" in off["note"] and "200" in off["note"]
-    same = ni.compare_given(172.4, 172.0, ni.PITCH_AGREEMENT, "pitch")
+    same = ni.compare_given(172.4, 172.0, ni.PITCH_AGREEMENT, "pitch", "addresses use the measured pitch")
     assert same["agrees"] is True and same["note"] == ""
 
 
@@ -214,23 +218,217 @@ def test_the_geometry_joins_the_reuse_key_only_when_it_is_inferred():
         nr.NanowellSettings("100um", geometry="round")
 
 
-def test_a_corner_hidden_at_one_timepoint_stays_in_the_well_s_roster_and_is_seen_as_occluded_there():
-    """The shared roster is what at least half the timepoints' own arrays hold: one timepoint whose corner wells
-    are all hidden (its own hull is cut short there) keeps them, as not seen, rather than dropping them."""
-    corner = [(7, 7), (7, 6), (6, 7)]
-    common = dict(lattice="square", array_shape="square", radius_fraction=0.22, square_centre=False)
-    clean, record = build_well(rotation=-15.0, timepoint="T0", **common)
-    hidden, later = build_well(rotation=-13.0, timepoint="T1", seed=2, dark_sites=corner, **common)
+# ── review X35-R1: one frame for every timepoint ─────────────────────────────
+_SQUARE = dict(lattice="square", array_shape="square", radius_fraction=0.22, square_centre=False)
+
+
+def _timepoints(hidden=(), at=("T1", "T2"), names=("T0", "T1", "T2")):
+    """The same square array at each of *names*, put back turned a little each time; *hidden* drawn dark at *at*."""
+    record, sources = None, {}
+    for k, tp in enumerate(names):
+        rendered, rec = build_well(rotation=-15.0 + 2 * k, timepoint=tp, seed=1 + k,
+                                   dark_sites=hidden if tp in at else (), **_SQUARE)
+        if record is None:
+            record = rec
+        else:
+            record["timepoints"].update(rec["timepoints"])
+            record["tiles"] += rec["tiles"]
+        sources[tp] = rendered
+    return record, sources
+
+
+def _offsets(outcome, tp, rendered):
+    """``{address - drawn address: count}`` over *tp*'s rows; ``None`` counts the rows with no address."""
+    truth = dict(zip(rendered.array.addresses, rendered.sites_um))
+    keys, points = list(truth), np.asarray(list(truth.values()))
+    out = {}
+    for row in (r for r in outcome.sites if r["timepoint"] == tp):
+        k = int(np.argmin(np.hypot(points[:, 0] - row["well_x_um"], points[:, 1] - row["well_y_um"])))
+        offset = None if row["nw_q"] is None else (row["nw_q"] - keys[k][0], row["nw_r"] - keys[k][1])
+        out[offset] = out.get(offset, 0) + 1
+    return out
+
+
+def _corner(rendered):
+    """The 21 sites of a 15 x 15 square array beyond ``q + r = 8``: hiding them moves the array's middle site."""
+    return [a for a in rendered.array.addresses if a[0] + a[1] >= 9]
+
+
+def test_a_corner_hidden_at_most_timepoints_keeps_every_address_and_is_written_occluded_where_hidden():
+    """Hidden at two timepoints of three, the corner moves those timepoints' own middle site by a step: each is
+    moved back onto the timepoint that saw the whole array, so every address is the drawn one at every
+    timepoint, and the corner — in no majority — is still in the roster and written as occluded where hidden."""
+    clean, _ = build_well(rotation=-15.0, timepoint="T0", seed=1, **_SQUARE)
+    corner = _corner(clean)
+    record, sources = _timepoints(corner)
+    outcome = nr.run_well("A01", record, list(sources), lambda tp, tile: sources[tp].images.get(tile), INFER,
+                          segmenter=threshold_segmenter())
+    for tp, rendered in sources.items():
+        assert outcome.timepoints[tp]["status"] == nr.OK
+        assert _offsets(outcome, tp, rendered) == {(0, 0): len(rendered.array.addresses)}, tp
+    for tp in ("T1", "T2"):
+        block = outcome.timepoints[tp]
+        assert block.get("origin_shift") == [-1, -1] and block.get("origin_registered_to") == "T0"
+        assert block["consistency"] == "roster_mismatch"           # its own array is not T0's: said, not hidden
+        rows = {(r["nw_q"], r["nw_r"]): r for r in outcome.sites if r["timepoint"] == tp}
+        assert all(rows[a]["state"] == "occluded" and rows[a]["detected"] is False for a in corner)
+    assert outcome.timepoints["T0"]["consistency"] == "consistent" and "origin_shift" not in outcome.timepoints["T0"]
+    assert len(outcome.radius["roster"]) == len(sources["T0"].array.addresses)
+
+
+def test_a_timepoint_whose_lost_edge_cannot_be_told_is_not_addressed_rather_than_addressed_by_a_guess():
+    """A whole edge row hidden: the 14-row array fits inside the 15-row one from either edge, and nothing in the
+    sites says which edge was lost. The timepoint is unaddressed with that reason; it is never shifted silently."""
+    clean, _ = build_well(rotation=-15.0, timepoint="T0", seed=1, **_SQUARE)
+    row = [a for a in clean.array.addresses if a[0] == max(q for q, _ in clean.array.addresses)]
+    record, sources = _timepoints(row)
+    outcome = nr.run_well("A01", record, list(sources), lambda tp, tile: sources[tp].images.get(tile), INFER,
+                          segmenter=threshold_segmenter())
+    assert _offsets(outcome, "T0", sources["T0"]) == {(0, 0): len(clean.array.addresses)}
+    for tp in ("T1", "T2"):
+        block = outcome.timepoints[tp]
+        assert block["status"] == nr.UNADDRESSED and "cannot be told" in block["reason"]
+        assert set(_offsets(outcome, tp, sources[tp])) == {None}  # its wells measured, none given an address
+
+
+def test_an_incremental_timepoint_is_moved_onto_the_kept_roster():
+    clean, _ = build_well(rotation=-15.0, timepoint="T0", seed=1, **_SQUARE)
+    record, sources = _timepoints(_corner(clean), at=("T1",), names=("T1",))
+    kept = [list(a) for a in clean.array.addresses]
+    outcome = nr.run_well("A01", record, ["T1"], lambda tp, tile: sources[tp].images.get(tile), INFER,
+                          segmenter=threshold_segmenter(), fixed_roster=kept)
+    assert outcome.timepoints["T1"].get("origin_shift") == [-1, -1]
+    assert _offsets(outcome, "T1", sources["T1"]) == {(0, 0): len(kept)}
+
+
+def test_a_timepoint_of_another_lattice_kind_is_refused_by_name_not_joined():
+    """Review X35-R4: a hexagonal and a square address cannot name the same nanowell."""
+    common = dict(array_shape="circle", square_centre=False, radius_fraction=0.22, rotation=-15.0)
+    hexagonal, record = build_well(timepoint="T0", lattice="hex", **common)
+    square, later = build_well(timepoint="T1", seed=2, lattice="square", **common)
     record["timepoints"].update(later["timepoints"])
     record["tiles"] += later["tiles"]
-    images = {"T0": clean.images, "T1": hidden.images}
+    images = {"T0": hexagonal.images, "T1": square.images}
     outcome = nr.run_well("A01", record, ["T0", "T1"], lambda tp, tile: images[tp].get(tile), INFER,
                           segmenter=threshold_segmenter())
-    assert all(outcome.timepoints[tp]["status"] == nr.OK for tp in ("T0", "T1"))
-    by_tp = {tp: {(r["nw_q"], r["nw_r"]): r for r in outcome.sites if r["timepoint"] == tp} for tp in ("T0", "T1")}
-    assert set(by_tp["T0"]) == set(by_tp["T1"]) == set(clean.array.addresses)
-    assert all(by_tp["T1"][a]["detected"] is False and by_tp["T1"][a]["state"] == "occluded" for a in corner)
-    assert outcome.radius["roster_differences"] == {"T0": 0, "T1": 3}
+    assert outcome.timepoints["T0"]["status"] == nr.OK
+    block = outcome.timepoints["T1"]
+    assert block["status"] == nr.LATTICE_KIND_MISMATCH and "square lattice" in block["reason"]
+    assert nr.LATTICE_KIND_MISMATCH in nr.TERMINAL_WITHOUT_ROWS
+    assert not [r for r in outcome.sites if r["timepoint"] == "T1"]
+
+
+def test_a_format_too_wide_for_the_measured_pitch_is_a_note_on_an_inferred_geometry_not_a_refusal():
+    """Review X35-R3: 80 um nanowells on a 105 um pitch, run as the 100 um format. The diameter is within the 25 %
+    the threshold is trusted to, so the setting's 100 um is kept — and it nearly fills the pitch, which the format
+    check refuses. An inferred geometry measured the plate itself: it addresses it and says what was wrong."""
+    plan = TilePlan(2, 2, (700, 700), 0.1, 2.0)
+    extent = plan.step_um[0] + plan.extent_um[0]
+    rendered = render_tiles(plan, pitch_um=105.0, diameter_um=80.0, radius_um=0.26 * extent, rotation_deg=7.0,
+                            noise_sigma=0.05, blur_px=1.0, seed=1, square_centre=False)
+    record = record_for(rendered)
+    run = lambda settings: nr.run_well("A01", record, ["T0"], lambda tp, tile: rendered.images.get(tile),  # noqa: E731
+                                       settings, segmenter=threshold_segmenter())
+    assert run(nr.NanowellSettings("100um")).timepoints["T0"]["status"] == nr.FORMAT_MISMATCH
+    outcome = run(INFER)
+    block = outcome.timepoints["T0"]
+    assert block["status"] == nr.OK and block["geometry"]["diameter_check"]["agrees"] is True
+    assert {(r["nw_q"], r["nw_r"]) for r in outcome.sites} == set(rendered.array.addresses)
+    assert any("neighbouring nanowells would touch" in n and "addresses the plate as measured" in n
+               for n in block["notes"])
+
+
+def test_a_format_whose_nanowells_are_the_wrong_size_is_measured_at_the_measured_size_and_says_so():
+    """Review X35-R3: a plate of 50 um nanowells on an 86 um pitch run as the 100 um format. The format's own
+    geometry refuses it; an inferred one addresses it, fits the sites at the diameter it measured, and says so."""
+    plan = TilePlan(2, 2, (700, 700), 0.1, 2.0)
+    extent = plan.step_um[0] + plan.extent_um[0]
+    rendered = render_tiles(plan, pitch_um=86.0, diameter_um=50.0, radius_um=0.26 * extent, rotation_deg=7.0,
+                            noise_sigma=0.05, blur_px=1.0, seed=1, square_centre=False)
+    record = record_for(rendered)
+    run = lambda settings: nr.run_well("A01", record, ["T0"], lambda tp, tile: rendered.images.get(tile),  # noqa: E731
+                                       settings, segmenter=threshold_segmenter())
+    assert run(nr.NanowellSettings("100um")).timepoints["T0"]["status"] == nr.FORMAT_MISMATCH
+    outcome = run(INFER)
+    block = outcome.timepoints["T0"]
+    assert block["status"] == nr.OK
+    assert {(r["nw_q"], r["nw_r"]) for r in outcome.sites} == set(rendered.array.addresses)
+    assert np.median([r["radius_um"] for r in outcome.sites]) == pytest.approx(25.0, rel=0.1)
+    assert sum(r["geometry"] == "fitted" for r in outcome.sites) > 0.9 * len(outcome.sites)
+    assert any("measured at the measured diameter" in n for n in block["notes"])
+    assert not any("addresses use the measured nanowell diameter" in n for n in block["notes"])
+
+
+# ── review X35-R2: the montage path, beyond one 900 px tile ──────────────────
+def _hex_2px():
+    plan = TilePlan(2, 2, (700, 700), 0.1, 2.0)
+    rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=0.26 * (plan.step_um[0]
+                            + plan.extent_um[0]), rotation_deg=7.0, noise_sigma=0.05, blur_px=1.0, seed=1,
+                            square_centre=False)
+    return rendered, record_for(rendered)
+
+
+@pytest.mark.parametrize("make", [
+    lambda: build_well(rotation=-15.0, seed=1, lattice="square", array_shape="circle", square_centre=False,
+                       radius_fraction=0.22),
+    lambda: build_well(rotation=-15.0, seed=2, lattice="square", array_shape="circle", square_centre=False,
+                       radius_fraction=0.22),
+    _hex_2px,
+], ids=["square-circle-seed1", "square-circle-seed2", "hex-2x2-at-2um"])
+def test_a_montage_s_wells_are_all_found_whatever_its_floor_does_under_the_local_split(make):
+    """The local split turns the flat floor round the array into large merged blobs, and a ring of them round the
+    array once filled the whole array in as one hole: each of these located nothing (``no_lattice``)."""
+    rendered, record = make()
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, INFER)
+    assert located.status == nr.OK, located.reason
+    geometry = located.grid["geometry"]
+    assert geometry["n_found"] == geometry["n_sites"] == len(rendered.array.roster)
+
+
+def test_a_small_square_array_on_one_tile_is_found_whole():
+    rendered, image = _image(lattice="square", array_shape="circle", rotation_deg=8.0, radius_um=700.0,
+                             square_centre=False, seed=0)
+    _, geometry = _infer(image)
+    assert geometry.shape == ni.ARRAY_CIRCLE and sum(geometry.found) == len(geometry.found) == 49
+    _roster_matches_the_drawing(rendered, geometry)
+
+
+def test_a_square_lattice_turned_past_its_unambiguous_band_is_refused_with_the_limit_named():
+    """Review X35-R6: a square lattice repeats every 90 degrees, so near 45 its axis cannot be chosen the same way
+    at every timepoint. Turned 44 degrees it is refused, naming the limit, rather than addressed on either axis."""
+    rendered, record = build_well(rows=1, cols=1, tile=(900, 900), rotation=44.0, lattice="square",
+                                  array_shape="square", radius_fraction=0.3, square_centre=False)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, INFER)
+    assert located.status == nr.NO_LATTICE and "rotated" in located.reason and "40" in located.reason
+
+
+def test_every_tile_is_fitted_as_the_centre_tiles_lattice_kind(monkeypatch):
+    """Review X35-R7: a sparse edge tile left to choose its kind can choose the other one."""
+    from pipeline import nanowell_infer
+
+    kinds = []
+    real = nanowell_infer.contrast_fit
+    monkeypatch.setattr(nanowell_infer, "contrast_fit",
+                        lambda image, px, **k: (kinds.append(k.get("kind", "auto")), real(image, px, **k))[1])
+    rendered, record = build_well(rotation=-15.0, seed=1, **_SQUARE)
+    nr.locate_timepoint("T0", record, "A01", rendered.images, INFER)
+    assert kinds[-4:] == ["square"] * 4                         # the four tiles' registration fits
+
+
+def test_a_well_whose_timepoints_disagree_on_the_outline_records_mixed():
+    """Review X35-R9: the outline is one defined value, ``mixed`` when the timepoints read different ones."""
+    from types import SimpleNamespace
+
+    from pipeline.nanowell_lattice import fit_lattice
+
+    points = np.array([(x * 10.0, y * 10.0) for x in range(6) for y in range(6)])
+    fit = fit_lattice(points, kind="square")
+    located = {tp: SimpleNamespace(array_sites=points, fit=fit, origin_montage=(0.0, 0.0), array_shape=shape)
+               for tp, shape in (("T0", ni.ARRAY_CIRCLE), ("T1", ni.ARRAY_POLYGON))}
+    _, block, _ = nr._shared_roster(located, ["T0", "T1"], None)
+    assert block["shape"] == "mixed"
+    _, block, _ = nr._shared_roster({"T0": located["T0"]}, ["T0"], None)
+    assert block["shape"] == ni.ARRAY_CIRCLE
 
 
 def test_an_earlier_run_that_anchored_nothing_leaves_no_roster_to_keep():

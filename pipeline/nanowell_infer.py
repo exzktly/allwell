@@ -46,6 +46,8 @@ _MAX_ELONGATION = 1.6
 _MIN_AREA_PX = 6
 #: The local split looks this many well spacings around each pixel for the brightest and darkest.
 _WINDOW_SPACINGS = 2.5
+#: Pass 2's typical nanowell is read from round blobs within these factors of pass 1's nanowell area.
+_NEAR_PASS_ONE = (0.5, 2.0)
 #: The second split smooths the image over this share of a well's diameter first.
 _SMOOTH_WELLS = 0.12
 #: A blob is a nanowell only if it is lighter than the dark around it by at least this share of the typical blob's
@@ -89,9 +91,11 @@ def _components(mask: np.ndarray, edge: np.ndarray, values: np.ndarray):
     if n == 0:
         empty = np.zeros(0)
         return empty, np.zeros((0, 2)), empty, np.zeros(0, dtype=bool), empty
-    flat = labels.ravel()
-    ys, xs = np.indices(mask.shape)
-    ys, xs = ys.ravel().astype(float), xs.ravel().astype(float)
+    # Sums over the labelled pixels only: index grids over a whole 4096-pixel montage cost ~1 GB (review X35-R8).
+    ys, xs = np.nonzero(labels)
+    flat = labels[ys, xs]
+    values = values[ys, xs].astype(np.float64)
+    ys, xs = ys.astype(np.float64), xs.astype(np.float64)
 
     def total(weights=None):
         return np.bincount(flat, weights=weights, minlength=n + 1)[1:]
@@ -106,7 +110,21 @@ def _components(mask: np.ndarray, edge: np.ndarray, values: np.ndarray):
     elongation = np.sqrt(major / np.maximum(minor, 1e-9))
     touching = np.zeros(n + 1, dtype=bool)
     touching[np.unique(labels[edge & (labels > 0)])] = True
-    return area, np.column_stack((mx, my)), elongation, touching[1:], total(values.ravel()) / area
+    return area, np.column_stack((mx, my)), elongation, touching[1:], total(values) / area
+
+
+def _fill_small_holes(mask: np.ndarray, max_area: float) -> np.ndarray:
+    """*mask* with its holes up to *max_area* pixels filled (a cell darkening a nanowell's middle). Larger holes stay:
+    a ring of light speckle on the floor round the array encloses the whole array, and filling every hole made it one
+    component the size of the array (review X35-R2)."""
+    from scipy import ndimage
+
+    holes, n = ndimage.label(ndimage.binary_fill_holes(mask) & ~mask)
+    if n == 0:
+        return mask
+    small = np.bincount(holes.ravel(), minlength=n + 1) <= max_area
+    small[0] = False
+    return mask | small[holes]
 
 
 def _typical_area(area: np.ndarray) -> float:
@@ -151,7 +169,7 @@ def find_wells_by_contrast(image, pixel_size_um: float, *, covered=None) -> Cont
     from scipy import ndimage
     from scipy.spatial import cKDTree
 
-    image = np.asarray(image, dtype=np.float64)
+    image = np.asarray(image, dtype=np.float32)          # float32 throughout: a montage is up to 4096 px
     if image.ndim != 2 or min(image.shape) < 16:
         return ContrastWells(False, "The image must be a 2-D array of at least 16 x 16 px")
     if not math.isfinite(pixel_size_um) or pixel_size_um <= 0:
@@ -184,7 +202,8 @@ def find_wells_by_contrast(image, pixel_size_um: float, *, covered=None) -> Cont
     # well (camera noise in a flat region otherwise splits into well-sized speckle), and each blob against the
     # dark around it: a blob of the flat floor outside the array, or of a bubble, is no lighter than its
     # surround however the split fell, and a nanowell is lighter by the lattice's whole contrast.
-    well_px = 2.0 * math.sqrt(float(np.median(area[keep])) / math.pi)
+    well_area = float(np.median(area[keep]))                 # pass 1's nanowell, the size pass 2 is judged by
+    well_px = 2.0 * math.sqrt(well_area / math.pi)
     sigma_px = max(1.0, _SMOOTH_WELLS * well_px)
     smooth = ndimage.gaussian_filter(filled, sigma_px)
     # The camera noise left after that smoothing: neighbouring pixels' differences (robustly, since the wells'
@@ -192,20 +211,28 @@ def find_wells_by_contrast(image, pixel_size_um: float, *, covered=None) -> Cont
     steps = np.abs(np.diff(filled, axis=1))[valid[:, 1:] & valid[:, :-1]]
     noise = 1.4826 * float(np.median(steps)) / math.sqrt(2) / (2 * math.sqrt(math.pi) * sigma_px) if steps.size else 0.0
     light, low = _local_split(smooth, valid, spacing)
-    area, centre, elongation, touching, mean = _components(ndimage.binary_fill_holes(light), edge, smooth)
+    area, centre, elongation, touching, mean = _components(_fill_small_holes(light, well_area), edge, smooth)
     at = np.clip(np.rint(centre).astype(int), 0, np.array(image.shape)[::-1] - 1)
     lift = mean - low[at[:, 1], at[:, 0]]
     big_enough = area >= _MIN_AREA_PX
     whole = big_enough & ~touching
     if whole.sum() < 6:
         return ContrastWells(False, "Fewer than six whole nanowells stand out of their neighbourhood")
-    typical = _typical_area(area[whole])
-    sized = (area >= _AREA_RANGE[0] * typical) & (area <= _AREA_RANGE[1] * typical)
     round_ = elongation <= _MAX_ELONGATION
+    # The typical nanowell of this pass, from the round blobs near pass 1's size that are lighter than their
+    # surround — never from every blob: the local split turns flat floor into large merged components, which pull
+    # an area-weighted median of all of them to twice a nanowell and reject the real ones (review X35-R2).
+    floor = _MIN_LIFT_NOISE * noise
+    near = whole & round_ & (area >= _NEAR_PASS_ONE[0] * well_area) & (area <= _NEAR_PASS_ONE[1] * well_area)
+    typical = well_area
+    if near.sum() >= 6:
+        lit = near & (lift >= max(_MIN_LIFT * float(np.median(lift[near])), floor))
+        typical = float(np.median(area[lit])) if lit.sum() >= 6 else well_area
+    sized = (area >= _AREA_RANGE[0] * typical) & (area <= _AREA_RANGE[1] * typical)
     shaped = whole & sized & round_
     if shaped.sum() < 6:
         return ContrastWells(False, "Fewer than six light blobs are the size and shape of one nanowell")
-    light_enough = lift >= max(_MIN_LIFT * float(np.median(lift[shaped])), _MIN_LIFT_NOISE * noise)
+    light_enough = lift >= max(_MIN_LIFT * float(np.median(lift[shaped])), floor)
     wells = shaped & light_enough
     cut = big_enough & touching & (area <= _AREA_RANGE[1] * typical) & light_enough
     rejected = {"smaller than a nanowell": int((whole & (area < _AREA_RANGE[0] * typical)).sum()),
@@ -367,13 +394,18 @@ def contrast_fit(image, pixel_size_um: float, *, expected_pitch_um: float | None
     return fit if fit.ok else None
 
 
-def compare_given(measured: float | None, given: float | None, tolerance: float, what: str) -> dict:
-    """A measured length against the one the settings give: both, whether they agree, and the sentence if not."""
+def compare_given(measured: float | None, given: float | None, tolerance: float, what: str,
+                  consequence: str) -> dict:
+    """A measured length against the one the settings give: both, whether they agree, and the sentence if not.
+
+    *consequence* says what the run does with the measured number instead (it differs: a pitch places addresses, a
+    diameter only fits and measures them), so the note never claims more than the run does.
+    """
     if measured is None or given is None or not given > 0:
         return {"given_um": given, "measured_um": measured, "agrees": None, "note": ""}
     agrees = abs(measured / given - 1.0) <= tolerance
     note = "" if agrees else (
         f"The measured {what} ({measured:.1f} um) disagrees with the {given:g} um the settings give (by "
-        f"{(measured / given - 1.0) * 100:+.0f} %, beyond {tolerance * 100:.0f} %): addresses use the measured "
-        f"{what}; check the plate format")
+        f"{(measured / given - 1.0) * 100:+.0f} %, beyond {tolerance * 100:.0f} %): {consequence}; check the plate "
+        "format")
     return {"given_um": given, "measured_um": measured, "agrees": agrees, "note": note}

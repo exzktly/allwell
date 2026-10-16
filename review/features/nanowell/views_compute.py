@@ -1,7 +1,8 @@
 """What the Array map, Trajectories and Position views draw, as data (tracker V2, V2a, V4, V6; decision U4).
 
 **Array map positions are lattice positions** (U4). A nanowell is drawn where its address puts it on an ideal
-lattice of the well's pitch and kind (the grid record's ``lattice_kind``: hexagonal unless it says square), east
+lattice of the well's pitch and the timepoint's kind (its grid record's ``lattice_kind``: hexagonal unless it
+says square), east
 along ``q``, ``r`` 60° (90° on a square lattice) counter-clockwise from it on screen (y down), so a
 nanowell stays in one place while the time slider moves — the plate may have been put back rotated between
 acquisitions, and the measured positions belong to Array QC, the misregistration view. A site has a place
@@ -50,11 +51,13 @@ def well_pitch(data, well: str) -> float | None:
     return float(np.median(pitches)) if pitches else None
 
 
-def well_lattice_kind(data, well: str) -> str:
-    """``"square"`` when the well's grid records say its lattice is square, else ``"hex"`` (the plates before the
-    pipeline could infer a lattice record ``hex`` or nothing). One kind per well: a plate does not change it."""
-    kinds = {b.get("lattice_kind") for b in (data.grids.get(well) or {}).values() if isinstance(b, dict)}
-    return "square" if "square" in kinds and "hex" not in kinds else "hex"
+def lattice_kind(data, well: str, timepoint: str) -> str:
+    """The lattice the addresses of *well* at *timepoint* are on: its own grid record's ``lattice_kind``, ``"hex"``
+    when the record says nothing (a run before the pipeline could infer a lattice). Read per timepoint, not
+    guessed for the well: the pipeline refuses a timepoint whose kind differs from its well's (review X35-R4), so
+    each record names the lattice its own rows are on."""
+    block = (data.grids.get(well) or {}).get(timepoint)
+    return "square" if isinstance(block, dict) and block.get("lattice_kind") == "square" else "hex"
 
 
 @dataclass
@@ -90,7 +93,7 @@ def map_model(metrics: pd.DataFrame, data, well: str, timepoint: str, column: st
     pitch = well_pitch(data, well)
     if not len(rows) or pitch is None:
         return None
-    x, y = lattice_xy(rows["nw_q"].to_numpy(), rows["nw_r"].to_numpy(), pitch, well_lattice_kind(data, well))
+    x, y = lattice_xy(rows["nw_q"].to_numpy(), rows["nw_r"].to_numpy(), pitch, lattice_kind(data, well, timepoint))
     radius = rows["radius_um"].dropna()
     values = numeric_values(rows, column).to_numpy(dtype=float)
     states = list(rows["state"].astype(str))

@@ -5124,7 +5124,11 @@ fourth leaf was on screen left it drawn from the previous groups. And
 which is the same hazard in its most durable form: a list that looks
 authoritative, is wrong, and cannot be caught by any behaviour.
 
-All three are gone. The rep-mirror set is derived (`_rep_mirror_tabs`), the
+All three are gone. The rep-mirror set is derived (`_rep_mirror_tabs`) from the
+Plotting leaves plus the per-well tabs that draw the same active set without
+being leaves (`_EXTRA_REP_MIRROR_TABS`: Spatial, Multivariate, Nanowells); the per-well
+tabs a group edit refreshes are `_GROUP_EDIT_FOLLOWERS` (those three and the Cell
+Browser); the
 group-edit and Property-change repaints go through one fan-out, and the dead
 roster is deleted.
 

@@ -401,6 +401,11 @@ hiddenimports = [
     "pyarrow",
     "pyarrow.parquet",
 
+    # duckdb — the per-cell pool (review/data/cell_pool.py). Imported lazily,
+    # like pyarrow, so it has to be named here. Absent, the pool holds numpy
+    # arrays and large selections cost memory in proportion to their size.
+    "duckdb",
+
     # PIL / Pillow — Qt6 path uses ImageQt instead of ImageTk.
     "PIL",
     "PIL.Image",

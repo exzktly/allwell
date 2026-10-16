@@ -29,6 +29,7 @@ from datasets.core.concurrency import pick_workers
 from datasets.core.provenance import record_derivation
 from datasets.core.dataset_paths import dataset_wells, split_stem_well
 from datasets.core.nanowell_tables import carry_nanowell_tables
+from util.csv_gz import csv_stem, is_gz_csv_name, open_csv_text
 from datasets.core.containers import (
     FILENAME_COLUMN,
     OVERRIDES_FILENAME,
@@ -259,7 +260,7 @@ def _merge_qc_zip(
 
 
 def _read_csv(path: Path) -> tuple[list[dict], list[str]]:
-    with path.open(newline="") as handle:
+    with open_csv_text(path) as handle:
         reader = csv.DictReader(handle)
         rows = list(reader)
         fieldnames = list(reader.fieldnames or [])
@@ -268,7 +269,7 @@ def _read_csv(path: Path) -> tuple[list[dict], list[str]]:
 
 def _write_rows(dest: Path, fieldnames: list[str], rows: list[dict]) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with dest.open("w", newline="") as handle:
+    with open_csv_text(dest, "w") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, restval="", extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
@@ -279,9 +280,9 @@ def _csv_prefix(csv_path: Path) -> str:
     derived from the actual filename (regardless of padding), never
     reconstructed from a canonical well label the way that has silently
     produced a nonexistent path elsewhere in this app."""
-    split = split_stem_well(csv_path.stem)
+    split = split_stem_well(csv_stem(csv_path.name))
     if split is None:
-        return csv_path.stem
+        return csv_stem(csv_path.name)
     return split[0] or "measurements"
 
 
@@ -319,7 +320,10 @@ def _merge_measurements(
                     unrewritten.append(fname)
         _refuse_unrewritten(src_well, dest_well, unrewritten, csv_path.name)
 
-    dest_name = f"{_csv_prefix(csv_path)}_{dest_well}.csv"
+    # The merged CSV keeps the spelling of its source: a gzipped input stays
+    # gzipped, so merging does not undo the compression of a finished dataset.
+    dest_suffix = ".csv.gz" if is_gz_csv_name(csv_path.name) else ".csv"
+    dest_name = f"{_csv_prefix(csv_path)}_{dest_well}{dest_suffix}"
     _write_rows(plan.dest.out_dir / dest_name, fieldnames, rows)
     if dest_in_names is not None:
         for row in rows:

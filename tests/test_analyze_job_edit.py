@@ -46,6 +46,10 @@ _OPTS = {
     "only_wells": ["A1", "B2", "C3"],
     "cpu_only": True,
     "allow_low_disk": True,
+    # The two image-storage options, both off (their defaults are on), in the
+    # pipeline's own spelling — analyze/storage_options.py.
+    "phase_output": "copy",
+    "tophat_dtype": "float32",
     "tf_threads": "4",
     "workers": "3",
     "stardist_tile_px": "512",

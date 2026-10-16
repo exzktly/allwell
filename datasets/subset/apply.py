@@ -25,6 +25,7 @@ from util.aw_safe import swallow
 from domain.image_identity import normalize_fov, normalize_tp
 from datasets.core.concurrency import pick_workers
 from datasets.core.provenance import record_derivation
+from util.csv_gz import open_csv_text
 from datasets.core.containers import (
     FILENAME_COLUMN,
     OVERRIDES_FILENAME,
@@ -76,7 +77,7 @@ _SLICES_PER_WELL = 2
 
 
 def _read_csv(path: Path) -> tuple[list[dict], list[str]]:
-    with path.open(newline="") as handle:
+    with open_csv_text(path) as handle:
         reader = csv.DictReader(handle)
         rows = list(reader)
         fieldnames = list(reader.fieldnames or [])
@@ -85,7 +86,7 @@ def _read_csv(path: Path) -> tuple[list[dict], list[str]]:
 
 def _write_rows(dest: Path, fieldnames: list[str], rows: list[dict]) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with dest.open("w", newline="") as handle:
+    with open_csv_text(dest, "w") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, restval="", extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)

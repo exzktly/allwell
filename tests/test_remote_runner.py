@@ -2006,6 +2006,9 @@ def test_required_files_list_is_what_we_promised():
         # One os.scandir in place of a stat per directory entry; client-side
         # only, listed because the manifest mirrors every util/ file.
         "util/dir_scan.py",
+        # Per-well CSVs are gzipped when a well finishes; every CSV reader and
+        # writer in the pipeline treats .csv / .csv.gz as one file through this.
+        "util/csv_gz.py",
         # Rebinds sys.stdout / sys.stderr when a frozen windowed build nulls them;
         # imported by process_microscopy at module load (and by well_plate_zipper).
         # Reduces a metadata label to a filename token; both packed-file
@@ -2078,6 +2081,7 @@ def test_required_files_list_is_what_we_promised():
         # Worker / thread planning and the Cellpose GPU plan, imported by
         # process_microscopy at module scope.
         "pipeline/parallelism.py",
+        "pipeline/slurm_node.py",
         "pipeline/completeness.py",
         # The blank-well sampler + model builders behind empty_well correction.
         "pipeline/empty_well.py",
@@ -2106,6 +2110,9 @@ def test_required_files_list_is_what_we_promised():
     "pipeline/incremental_keys.py",
         "pipeline/well_skip.py",
         "pipeline/io.py",
+        # The per-FOV image writer and the names of its two storage options.
+        "pipeline/output_images.py",
+        "pipeline/output_policy.py",
         # The Zeiss CZI reader and its per-well explode; client-side for the
         # same reason, listed for the same manifest completeness.
         "pipeline/czi_read.py",

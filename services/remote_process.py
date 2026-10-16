@@ -35,6 +35,7 @@ from services.remote_config import (
 )
 from util.channel_roles import LABELFREE_METHODS, quantified_channel_tokens
 from util.aw_safe import swallow, swallowed
+from util.csv_gz import existing_csv
 from services.remote_run_state import (
     OutputFilter,
     _RemoteRun,
@@ -351,12 +352,9 @@ class _RemoteProcess:
 
 def _auto_threshold_args_from_argv(argv):
     """Reconstruct enough of the pipeline's parsed args to re-run its threshold
-    pass locally after a batched remote run.
-
-    Rebuilding the arg object rather than re-implementing the pass is what keeps
-    the local and remote answers identical when either gains a mode — this path
-    previously drifted into thresholding only the first fluor channel.
-
+    pass locally after a batched remote run. Rebuilding the arg object rather
+    than re-implementing the pass keeps the local and remote answers identical
+    when either gains a mode — this path once thresholded only the first channel.
     ``no_auto_threshold`` is forced False: the flag in *argv* is the batching
     suppression, not the user's choice, so honouring it would mean a batched run
     never got thresholds at all.
@@ -366,7 +364,8 @@ def _auto_threshold_args_from_argv(argv):
     the threshold pass asks ``_segmentation_tokens`` which channel was segmented.
     Applying the same remap here keeps that answer right — without it the pass
     zeroes the channel the form happened to name and leaves the channel actually
-    segmented with a threshold derived from a brightfield image.
+    segmented with a threshold derived from a brightfield image. ``input_dir`` is
+    the local input folder: a referenced phase channel is read from its archives.
     """
     from types import SimpleNamespace
 
@@ -374,9 +373,9 @@ def _auto_threshold_args_from_argv(argv):
         argv,
         multi={"--fluor_tokens"},
         single={
-            "--nuclear_token", "--cytoplasm_token", "--segmentation_method",
-            "--csv_prefix", "--filename_schema", "--filename_sep",
-            "--pos_control_well", "--neg_control_well", "--phase_token",
+            "--nuclear_token", "--cytoplasm_token", "--segmentation_method", "--csv_prefix",
+            "--filename_schema", "--filename_sep", "--pos_control_well", "--neg_control_well",
+            "--phase_token", "--input_dir", "--phase_output",
         },
     )
     nuclear_token = flags.get("--nuclear_token", "")
@@ -395,6 +394,8 @@ def _auto_threshold_args_from_argv(argv):
         filename_sep=flags.get("--filename_sep", "_"),
         pos_control_well=flags.get("--pos_control_well", ""),
         neg_control_well=flags.get("--neg_control_well", ""),
+        input_dir=flags.get("--input_dir") or None,
+        phase_output=flags.get("--phase_output") or None,
     )
 
 
@@ -1001,8 +1002,7 @@ class _BatchedRemoteProcess:
                 kept: list[Path] = []
                 for p in all_zips:
                     well = p.stem.upper()
-                    csv_path = self._local_output_dir / f"{csv_prefix}_{well}.csv"
-                    if csv_path.exists() and csv_path.stat().st_size > 0:
+                    if (found := existing_csv(self._local_output_dir / f"{csv_prefix}_{well}.csv")) and found.stat().st_size > 0:
                         skipped.append(p)
                     else:
                         kept.append(p)

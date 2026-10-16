@@ -117,6 +117,42 @@ def is_variant_token(chan: str) -> bool:
     return any(has_suffix(chan, sfx) for sfx in VARIANT_SUFFIXES)
 
 
+def phase_channel(pipeline_info: dict | None) -> str:
+    """The dataset's phase / brightfield channel, lower-cased, or ``""``.
+
+    The pipeline never corrects this channel (``_correct_image_group`` passes
+    its raw frame through), so its raw frame and its "corrected" frame are the
+    same pixels — which is what lets a missing ``_tophat`` for it be served the
+    raw frame without that being a fallback.
+
+    Every reader that completes a phase channel from its input frames keys on
+    this, never on the sidecar's ``phase_output``. That value records what the
+    *last* run asked for, and a run that found its wells up to date, a run over
+    ``--only_wells``, or a merged dataset all leave archives that do not match
+    it — so a reader trusting it would drop the phase frames of exactly those
+    wells. Since the raw frame is the corrected frame for every dataset, reading
+    it wherever no ``_tophat`` was archived is right whatever any run asked for.
+    """
+    return str((pipeline_info or {}).get("phase_token") or "").strip().lower()
+
+
+def missing_frame_note(ctx, chan: str) -> str:
+    """The placeholder for a cell of *chan* that resolved to no image.
+
+    ``"(no image)"``, except for the phase channel (:func:`phase_channel`): a
+    run under ``--phase_output reference`` (the default) archives no phase
+    frame, so a phase cell with none is almost always a dataset whose ``in/``
+    folder did not come with it — and "(no image)" would send the user looking
+    in ``out/`` for a frame that was never meant to be there.
+    """
+    info = getattr(getattr(getattr(ctx, "state", None), "dataset", None),
+                   "pipeline_info", None)
+    phase = phase_channel(info)
+    if phase and base_channel(chan).strip().lower() == phase:
+        return "(phase input not found — needs in/)"
+    return "(no image)"
+
+
 # Normalize a numeric-or-string FOV/timepoint to a stable form: ``"1"`` and
 # ``"1.0"`` collapse to ``"1"``, non-numeric strings pass through. This matches
 # the form emitted by the filename extractors that key the image dicts in
@@ -455,7 +491,14 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
                                 partial_scans=partial_scans)
         if raw:
             ref, kind = match_image_ref(raw, fov, tp)
-            if ref is not None:
+            if ref is not None and chan_lower == phase_channel(
+                    getattr(ctx.state.dataset, "pipeline_info", None)):
+                # The phase channel is never corrected, so its raw frame IS the
+                # corrected one: under --phase_output reference no _tophat is
+                # archived for it at all. Not a fallback, and not badged as one.
+                logger.debug("frame_load: phase channel %r served from its input "
+                             "frame (well=%r tp=%r fov=%r)", chan_lower, well, tp, fov)
+            elif ref is not None:
                 if raw_fallbacks is not None:
                     raw_fallbacks.add((well, chan_lower, str(tp), str(fov)))
                 logger.info(

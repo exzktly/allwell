@@ -79,6 +79,13 @@ class FakeRemote:
                 return self.root / p[len(prefix):]
         if p in ("~", "$HOME"):
             return self.root
+        # A path the host itself printed is already absolute inside the root:
+        # ``ls ~/x`` answers with the expanded home, exactly as a real worker
+        # does, and the caller then hands that answer to rsync. Re-rooting it
+        # a second time named a directory that does not exist and failed every
+        # pull made from a listing.
+        if p.startswith(str(self.root) + "/") or p == str(self.root):
+            return Path(p)
         return self.root / p.lstrip("/")
 
     def exists(self, remote_path: str) -> bool:

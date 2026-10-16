@@ -48,6 +48,8 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
+from pipeline.slurm_node import node_specs_line
+
 #: The segmentation methods that run Cellpose (mirrors ``_CELLPOSE_METHODS`` in
 #: ``process_microscopy``, restated so this module imports nothing from it).
 CELLPOSE_METHODS = ("cellpose", "cellpose_labelfree")
@@ -160,6 +162,10 @@ def plan_parallelism(args, log: logging.Logger) -> ParallelPlan:
     shortfall = slurm_cpu_shortfall(cpu_count)
     if shortfall:
         log.warning("%s", shortfall)
+    # What the node is, for the app's Slurm-job indicator ("" outside Slurm).
+    specs = node_specs_line()
+    if specs:
+        log.info("%s", specs)
     # Pinning applies whenever workers share cores, --cpu_only or not: an
     # unpinned TF worker takes every core and the workers contend. The default
     # is clamped to the core budget so a 2-core host does not run 4 threads on

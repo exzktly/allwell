@@ -22,6 +22,7 @@ from domain.image_identity import (
     normalize_fov, normalize_nucleus_id, normalize_tp, normalize_well,
 )
 from review.persistence._io import atomic_write_text
+from util.csv_gz import glob_csvs
 from review.features.preview.controller import read_member_bytes
 from review.features.smfish.controller import (
     scan_well_zip,
@@ -97,7 +98,7 @@ def _resolve_csv_path(
         if path is None:
             return None
         return Path(path)
-    csv_matches = list(out_dir.glob(f"*_{well}.csv"))
+    csv_matches = glob_csvs(out_dir, f"*_{well}")
     if not csv_matches:
         return None
     if len(csv_matches) > 1:

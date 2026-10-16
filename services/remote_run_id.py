@@ -91,11 +91,72 @@ def pipeline_argv_digest(
     because nothing local produces them, and leaving them out made two runs
     that compute different numbers hash identically. They are appended rather
     than merged, so the digest is stable in their order.
+
+    Skips every flag that cannot change a byte of what the remote writes —
+    the ones :data:`util.settings_digest.NOT_KEYED_ON` lists as execution or
+    re-processing knobs (:data:`_DIGEST_SKIP_VALUE`, :data:`_DIGEST_SKIP_FLAG`).
+    ``--incremental`` and ``--incremental_prior_dir`` are the ones that
+    mattered: :meth:`RemoteRunner._build_remote_argv` drops both before the
+    host sees the command, yet hashing them made a resumed run (which is always
+    incremental) a "differently configured" run than the one it resumed, so the
+    journal's recorded address never matched it and the wells that run had
+    finished on the server were uploaded and recomputed instead of downloaded
+    (``services.remote_recover``). ``--allow_low_disk`` is the one "Load
+    previous run" does not restore, so hashing it broke the match for anyone
+    who had ticked it.
     """
-    skip_with_value = {"--input_dir", "--output_dir"}
-    skip_flags = {"--force"}
+    return _digest(pipeline_argv, extras, _DIGEST_SKIP_VALUE, _DIGEST_SKIP_FLAG)
+
+
+#: Flags followed by a value that :func:`pipeline_argv_digest` leaves out. Paths
+#: (identity, implied by the cache key), execution knobs that change only how
+#: long a run takes, and the two image-storage options, which the local reuse
+#: key leaves out for the reason ``util.settings_digest.NOT_KEYED_ON`` gives —
+#: so the same option change is treated alike on both sides.
+_DIGEST_SKIP_VALUE = frozenset({
+    "--input_dir", "--output_dir", "--incremental_prior_dir",
+    "--workers", "--tf_threads", "--focus_min",
+    "--phase_output", "--tophat_dtype",
+})
+#: Bare flags :func:`pipeline_argv_digest` leaves out: re-processing knobs and
+#: pre-flight / audit switches that compute nothing.
+_DIGEST_SKIP_FLAG = frozenset({
+    "--force", "--incremental", "--allow_low_disk", "--no_run_check",
+})
+
+
+def legacy_argv_digests(pipeline_argv: list[str], *,
+                        extras: Sequence[str] = ()) -> tuple[str, ...]:
+    """The digests an earlier build would have recorded for this configuration.
+
+    Only for *finding* work: a plate whose finished remote output was recorded
+    before :func:`pipeline_argv_digest` stopped hashing the execution knobs
+    carries a digest the current one cannot produce, and without these the
+    download-before-staging step would miss exactly the plates that are stuck
+    on the server today. Never used to address a new run. Two shapes, because
+    the recording run may or may not itself have been incremental.
+    """
+    old_values = frozenset({"--input_dir", "--output_dir"})
+    old_flags = frozenset({"--force"})
+    stripped = _strip(_without_launcher(pipeline_argv),
+                      frozenset({"--incremental_prior_dir"}),
+                      frozenset({"--incremental"}))
+    return tuple(dict.fromkeys((
+        _digest(pipeline_argv, extras, old_values, old_flags),
+        _digest(stripped, extras, old_values, old_flags),
+    )))
+
+
+def _digest(pipeline_argv, extras, skip_with_value, skip_flags) -> str:
+    """Hash *pipeline_argv*, launcher and skipped flags removed, plus *extras*."""
+    filtered = _strip(_without_launcher(pipeline_argv), skip_with_value, skip_flags)
+    filtered.extend(str(e) for e in extras)
+    return hashlib.blake2b("|".join(filtered).encode(), digest_size=8).hexdigest()
+
+
+def _strip(pipeline_argv, skip_with_value, skip_flags) -> list[str]:
+    """*pipeline_argv* without the named flags (and the values that follow them)."""
     filtered: list[str] = []
-    pipeline_argv = _without_launcher(pipeline_argv)
     i = 0
     while i < len(pipeline_argv):
         a = pipeline_argv[i]
@@ -107,8 +168,7 @@ def pipeline_argv_digest(
             continue
         filtered.append(a)
         i += 1
-    filtered.extend(str(e) for e in extras)
-    return hashlib.blake2b("|".join(filtered).encode(), digest_size=8).hexdigest()
+    return filtered
 
 def _choose_remote_output_dir(
     fresh: str,
@@ -181,7 +241,14 @@ def _compute_run_id(
     override, or with the Fetch filter changed, addresses its own directory
     instead of finding the other configuration's outputs already complete
     there."""
-    return f"{cache_key[:16]}-{pipeline_argv_digest(pipeline_argv, extras=extras)}"
+    return _run_id_body(cache_key, pipeline_argv_digest(pipeline_argv, extras=extras))
+
+
+def _run_id_body(cache_key: str, argv_digest: str) -> str:
+    """The one spelling of a run id from its two keys (``"run-"`` is prefixed by
+    the caller). ``services.remote_recover`` recomputes earlier runs' directories
+    from it, so the two cannot come to name different places."""
+    return f"{cache_key[:16]}-{argv_digest}"
 
 @dataclass(frozen=True)
 class RemoteRunPaths:

@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from analyze.form_chrome import AnalyzeFormChromeMixin
+from analyze.storage_options import build_storage_rows, storage_options
 from analyze.well_scope import build_well_scope_rows, well_scope_options
 from analyze.domain.fields import (  # noqa: F401 — re-exported for analyze.tab
     _INT_FIELDS,
@@ -35,6 +36,7 @@ from analyze.nanowell_section import AnalyzeNanowellSectionMixin
 from analyze.qc_section import AnalyzeQCSectionMixin
 from analyze.schema_section import AnalyzeSchemaSectionMixin
 from analyze.seg_params import AnalyzeSegParamsMixin
+from analyze.slurm_job_view import SlurmJobIndicator
 from services.remote_config import default_remote_index, load_remotes
 from widgets.checkable_dropdown import CheckableDropdown
 from widgets.wrap_checkbox import WrapCheckBox
@@ -274,6 +276,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
             "leaves the dataset with no completeness record; Review then says "
             "the check was turned off rather than guessing.")
         sec.layout().addWidget(self._run_check_cb)
+        build_storage_rows(self, sec)
 
     def _build_compute_options_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Compute Options", collapsible=True, collapsed=True)
@@ -433,6 +436,9 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         )
         self._manage_remotes_btn.clicked.connect(self._open_manage_remotes)
         rl.addWidget(self._manage_remotes_btn)
+        # Lit while this run holds an open Slurm job; its tooltip is the node.
+        self._slurm_indicator = SlurmJobIndicator(remote_widget)
+        rl.addWidget(self._slurm_indicator)
         rl.addStretch(1)
         parent.layout().addWidget(remote_widget)
 
@@ -678,6 +684,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
             # nothing appended it returns before touching the key.
             incremental=self._incremental_cb.isChecked(),
             **well_scope_options(self),
+            **storage_options(self),
             cpu_only=self._cpu_only_cb.isChecked(),
             allow_low_disk=self._allow_low_disk_cb.isChecked(),
             tf_threads=self._tf_threads_edit.text(),

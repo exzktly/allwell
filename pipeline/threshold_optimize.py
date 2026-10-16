@@ -782,12 +782,14 @@ def read_channel_values(csv_path, channel: str) -> np.ndarray:
     """
     import csv
 
+    from util.csv_gz import GZ_READ_ERRORS, open_csv_text
+
     # The pipeline writes the column as ``tok.lower()`` but the token arrives in
     # whatever case was typed on the command line, so match case-insensitively.
     want = f"{str(channel).strip().lower()}_mean_intensity"
     out: list[float] = []
     try:
-        with open(csv_path, newline="") as fh:
+        with open_csv_text(csv_path) as fh:
             reader = csv.DictReader(fh)
             if reader.fieldnames is None:
                 return np.array([], dtype=float)
@@ -804,7 +806,7 @@ def read_channel_values(csv_path, channel: str) -> np.ndarray:
                     continue
                 if np.isfinite(val):
                     out.append(val)
-    except OSError:
+    except (OSError, *GZ_READ_ERRORS):     # a truncated or corrupt .csv.gz
         return np.array([], dtype=float)
     return np.asarray(out, dtype=float)
 
@@ -820,14 +822,16 @@ def find_well_csv(output_dir, csv_prefix: str, well: str) -> Path | None:
     from util.well_token import canonical_well_label
 
     output_dir = Path(output_dir)
-    exact = output_dir / f"{csv_prefix}_{well}.csv"
-    if exact.is_file():
+    from util.csv_gz import csv_stem, existing_csv, glob_csvs
+
+    exact = existing_csv(output_dir / f"{csv_prefix}_{well}.csv")
+    if exact is not None:
         return exact
     want = canonical_well_label(well)
     if not want:
         return None
-    for path in sorted(output_dir.glob(f"{csv_prefix}_*.csv")):
-        stem_well = path.stem[len(csv_prefix) + 1:]
+    for path in glob_csvs(output_dir, f"{csv_prefix}_*"):
+        stem_well = csv_stem(path.name)[len(csv_prefix) + 1:]
         if canonical_well_label(stem_well) == want:
             return path
     return None

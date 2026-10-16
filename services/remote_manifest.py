@@ -58,6 +58,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # own staging, both of which run here — but the manifest must list every
     # ``util/`` file so the completeness guard (test_remote_manifest) passes.
     "util/dir_scan.py",
+    # Per-well CSVs are gzipped when a well finishes, and every CSV reader and
+    # writer in the pipeline goes through this to treat .csv / .csv.gz as one file.
+    "util/csv_gz.py",
     # The retry-with-backoff shield behind every pipeline write that lands on
     # the output volume (pipeline.io imports it at module scope).
     # Rebinds sys.stdout / sys.stderr when a frozen windowed build nulls them;
@@ -142,6 +145,8 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Worker count, threads per worker and the Cellpose GPU plan. Imported by
     # process_microscopy at module scope, so the remote needs it to start.
     "pipeline/parallelism.py",
+    # The Slurm node-specs line plan_parallelism logs inside a job.
+    "pipeline/slurm_node.py",
     # The one definition of "is this well complete", shared by the end-of-run
     # check and the Datasets Validate tool.
     "pipeline/completeness.py",
@@ -172,6 +177,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/incremental_keys.py",
     "pipeline/well_skip.py",
     "pipeline/io.py",
+    # The per-FOV image writer and the two storage options it applies
+    # (--phase_output / --tophat_dtype); process_microscopy and cli_args
+    # import them at module scope.
+    "pipeline/output_images.py",
+    "pipeline/output_policy.py",
     # Packed OME-TIFF de-interleave. Runs client-side before remote sync (the
     # remote receives ordinary loose TIFs), but listed so the manifest stays a
     # complete mirror of ``pipeline/`` per test_remote_manifest.

@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from pipeline import io as mio
+from util.csv_gz import open_csv_text
 
 _Usage = namedtuple("_Usage", "total used free")
 
@@ -170,17 +171,20 @@ def test_write_csvs_per_well_partitions_by_well(tmp_path):
         {"well": "B02", "nucleus_id": 1, "area_px": 30},
     ]
     mio.write_csvs_per_well(records, tmp_path, "exp")
-    a = tmp_path / "exp_A01.csv"
-    b = tmp_path / "exp_B02.csv"
+    a = tmp_path / "exp_A01.csv.gz"                 # a finished well's CSV is gzipped
+    b = tmp_path / "exp_B02.csv.gz"
     assert a.exists() and b.exists()
-    rows_a = list(csv.DictReader(a.open()))
+    assert sorted(p.name for p in tmp_path.iterdir()) == [a.name, b.name]   # no plain twin left
+    with open_csv_text(a) as fh:
+        rows_a = list(csv.DictReader(fh))
     assert [r["nucleus_id"] for r in rows_a] == ["1", "2"]
-    assert list(csv.DictReader(b.open()))[0]["area_px"] == "30"
+    with open_csv_text(b) as fh:
+        assert list(csv.DictReader(fh))[0]["area_px"] == "30"
 
 
 def test_write_csvs_per_well_empty_is_noop(tmp_path):
     mio.write_csvs_per_well([], tmp_path, "exp")
-    assert not list(tmp_path.glob("*.csv"))
+    assert not list(tmp_path.iterdir())
 
 
 def test_verify_files_complete_filters_missing_and_empty(tmp_path):

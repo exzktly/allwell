@@ -86,6 +86,7 @@ from review.features.image_browser.image_table.image_compose import (  # noqa: F
     resolve_chrome_plan,
     UNCORRECTED_TOOLTIP,
 )
+from review.data.frame_load import missing_frame_note
 # Faceted render placement (axis labels + group spacing) — same-feature sibling,
 # module-scope like the grid_layout import above so it isn't a deferred import.
 from review.features.image_browser.image_table import facet_view as _facet
@@ -859,7 +860,7 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
         # the crop-drag conversion and the pixel readout stay honest.
         arr = _load_mask_array(ctx, cache, well, tp, fov)
     if arr is None:
-        return None, None, False, "(no mask)" if binary_mode else "(no image)"
+        return None, None, False, "(no mask)" if binary_mode else missing_frame_note(ctx, chan)
     # A mask / threshold cell that can't resolve its mask is reported as such
     # (cell_display_rgb returns None rather than rendering the intensity image
     # the user did not ask for).

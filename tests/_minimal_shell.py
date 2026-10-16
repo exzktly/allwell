@@ -70,6 +70,7 @@ def load_dataset(ctx, path: Path) -> None:
     )
     from review.data.data_loading import extract_well_token
     from review.domain.viewer_state import read_pipeline_info
+    from util.csv_gz import csv_stem, glob_csvs
 
     ds = ctx.state.dataset
     ds.in_dir = None
@@ -79,11 +80,11 @@ def load_dataset(ctx, path: Path) -> None:
     ds.pipeline_info = info
     ctx.state.channel.smfish_channels = smfish
     ds.begin_load(path)
-    for csv in sorted(path.glob("*.csv")):
+    for csv in glob_csvs(path):
         if csv.name.startswith(".") or not _looks_like_well_measurement_csv(csv):
             continue
-        token = extract_well_token(csv.stem)
-        ctx.state.repo.load_well(token or csv.stem, csv)
+        token = extract_well_token(csv_stem(csv.name))
+        ctx.state.repo.load_well(token or csv_stem(csv.name), csv)
     ds.rebuild_timepoints()
     ds.rebuild_fovs()
     recalculate_threshold(ctx)

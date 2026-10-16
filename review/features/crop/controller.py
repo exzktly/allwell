@@ -53,6 +53,16 @@ def get_crop_scope(ctx) -> FrameScope:
     )
 
 
+def crop_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:
+    """The columns :func:`apply_crop_to_cache`'s verdict reads beyond the identity
+    columns (the scope's field and timepoint), for ``narrow_rows``."""
+    from .region import CENTROID_COL_COL, CENTROID_ROW_COL
+
+    if get_crop_region(ctx) is None:
+        return ()
+    return (CENTROID_ROW_COL, CENTROID_COL_COL)
+
+
 def apply_crop_to_cache(ctx, label: str | None = None) -> list[str]:
     """Write the ``Crop_Pass`` column onto cached well frame(s).
 

@@ -236,6 +236,13 @@ def dataset_has_focus_column(ctx) -> bool | None:
     return any(FOCUS_COLUMN in getattr(df, "columns", ()) for df in frames)
 
 
+def focus_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:
+    """The column :func:`apply_focus_gate_to_cache`'s verdict reads (``narrow_rows``)."""
+    from pipeline.field_quality_record import FOCUS_COLUMN
+
+    return (FOCUS_COLUMN,) if gate_is_on(ctx) else ()
+
+
 def apply_focus_gate_to_cache(ctx, label: str | None = None) -> list[str]:
     """Write ``Focus_Pass`` onto cached well frame(s).
 

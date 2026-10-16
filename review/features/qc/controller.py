@@ -35,6 +35,15 @@ def get_qc_params(ctx) -> QCParams:
     return qc.params
 
 
+def qc_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:
+    """The columns :func:`apply_qc_to_cache`'s verdict reads (``narrow_rows``)."""
+    from review.domain.qc_params import AREA_COLS, CIRCULARITY_COL, REGION_AREA_COL, SOLIDITY_COL
+
+    if not get_qc_params(ctx).is_active:
+        return ()
+    return (*AREA_COLS, SOLIDITY_COL, REGION_AREA_COL, CIRCULARITY_COL)
+
+
 def apply_qc_to_cache(ctx, label: str | None = None) -> list[str]:
     """Write the ``QC_Pass`` column onto cached well frame(s).
 

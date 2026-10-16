@@ -299,7 +299,7 @@ def test_the_cache_is_written_before_any_verdict_is_projected(plate, monkeypatch
     def project_qc(ctx, label):
         ctx.state.dataset.cache[label]["QC_Pass"] = 1
 
-    monkeypatch.setattr(cp, "_PROJECTORS", [project_qc])
+    monkeypatch.setattr(cp, "_PROJECTORS", [(project_qc, None)])
     ctx = _StubCtx(plate)
     frame = dl.load_and_project(ctx, "A01", path=plate)
 

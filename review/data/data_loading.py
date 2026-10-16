@@ -623,6 +623,32 @@ def get_rows(ctx, label: str) -> pd.DataFrame:
     return frame
 
 
+def run_projectors(ctx, label: str) -> None:
+    """Run every registered cache projector on well *label*, each guarded.
+
+    The loop :func:`load_and_project` runs on a frame it has just put in the row
+    cache, and ``narrow_rows`` runs on a narrow frame held in a scratch context,
+    so the two cannot drift in which layers they apply or how a failing one is
+    contained.
+    """
+    for _project in iter_cache_projectors():
+        # **Guarded per projector, matching ``qc.controller.recompute_qc_all``.**
+        # The same registry list is walked from two places, and until now the
+        # two had different failure contracts: a raise there lost one verdict
+        # column, a raise here lost the whole WELL, because this is the call
+        # that decides whether a frame enters the cache at all. One layer must
+        # never take down the others, and losing a well is the larger of the
+        # two failures, so the unguarded one was the wrong side of the
+        # asymmetry. Each projector already reports its own per-well failures
+        # through ``project_verdict_column``; this catches a projector that
+        # raises outside that walk.
+        try:
+            _project(ctx, label)
+        except Exception:
+            _logger.exception(
+                "cache projector %r failed for well %r", _project, label)
+
+
 def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     """Read well *label* from disk into the row cache, projected and recorded.
 
@@ -656,22 +682,7 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     # skip its verdict and leave the well looking fully included.
     with (pinned(label) if pinned is not None else nullcontext()):
         dataset.cache[label] = frame
-        for _project in iter_cache_projectors():
-            # **Guarded per projector, matching ``qc.controller.recompute_qc_all``.**
-            # The same registry list is walked from two places, and until now the
-            # two had different failure contracts: a raise there lost one verdict
-            # column, a raise here lost the whole WELL, because this is the call
-            # that decides whether a frame enters the cache at all. One layer must
-            # never take down the others, and losing a well is the larger of the
-            # two failures, so the unguarded one was the wrong side of the
-            # asymmetry. Each projector already reports its own per-well failures
-            # through ``project_verdict_column``; this catches a projector that
-            # raises outside that walk.
-            try:
-                _project(ctx, label)
-            except Exception:
-                _logger.exception(
-                    "cache projector %r failed for well %r", _project, label)
+        run_projectors(ctx, label)
     # The loader used to have to record this itself, having built the frame
     # outside this function; the verdict now travels with the load. Once per
     # well per dataset: it is a fact about the parse, which a re-read after

@@ -41,6 +41,12 @@ def _coerce_included(val: object) -> int:
         return 1 if str(val).strip() == "1" else 0
 
 
+def curation_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:
+    """Nothing beyond the identity columns: the overrides key on field, timepoint
+    and nucleus id and write ``Included``, all of which every narrow read carries."""
+    return ()
+
+
 def apply_curation_to_cache(ctx, label: str | None = None, *,
                             note_change: bool = True) -> None:
     """Project the override map onto cached ``row["Included"]``.

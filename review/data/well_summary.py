@@ -199,13 +199,13 @@ def write_summary(csv_path: Path, summary: WellSummary, fingerprint: str | None)
 def well_summary(csv_path: Path) -> WellSummary:
     """*csv_path*'s summary: stored, else from a column read of the Parquet cache, else from a parse."""
     from review.data.data_loading import read_well_frame
-    from review.data.parquet_cache import read_cached, source_fingerprint
+    from review.data.parquet_cache import cached_column_names, read_cached, source_fingerprint
 
     stored = read_summary(csv_path)
     if stored is not None:
         return stored
     fingerprint = source_fingerprint(csv_path)
-    names = _cached_column_names(csv_path)
+    names = cached_column_names(csv_path)
     subset = read_cached(csv_path, columns=list(SUMMARY_COLUMNS)) if names is not None else None
     if subset is not None:
         summary = summarize_frame(subset, columns=names)
@@ -213,25 +213,6 @@ def well_summary(csv_path: Path) -> WellSummary:
         summary = summarize_frame(read_well_frame(Path(csv_path)))
     write_summary(csv_path, summary, fingerprint)
     return summary
-
-
-def _cached_column_names(csv_path: Path) -> list[str] | None:
-    """The Parquet cache's column names, when a current cache exists."""
-    from review.data.parquet_cache import _FINGERPRINT_KEY, _pyarrow, cache_path, source_fingerprint
-
-    pq = _pyarrow()
-    path = cache_path(csv_path)
-    want = source_fingerprint(csv_path)
-    if pq is None or want is None or not path.exists():
-        return None
-    try:
-        schema = pq.read_schema(path)
-    except Exception as exc:  # noqa: BLE001 - an unreadable cache is a miss, as in read_cached
-        _logger.debug("parquet schema unreadable for %s (%s)", Path(csv_path).name, exc)
-        return None
-    if (schema.metadata or {}).get(_FINGERPRINT_KEY, b"").decode() != want:
-        return None
-    return [n for n in schema.names if not n.startswith("__index_level_")]
 
 
 def well_summaries(dataset) -> list[WellSummary]:

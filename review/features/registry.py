@@ -1371,6 +1371,12 @@ def _register_cache_projectors() -> None:
     ``cache_projectors.project_verdict_column`` states for QC and crop, which
     is why those two need nothing said here.
 
+    **Each registration declares the columns its verdict reads** (``columns=``),
+    so ``review/data/narrow_rows.py`` can read a well narrowly and still apply
+    every layer. ``tests/test_narrow_rows.py`` holds each declaration to its
+    verdict, and a projector registered without one sends every narrow read back
+    to the whole frame.
+
     Idempotent: it clears first, so building several registries in one test
     session cannot stack duplicates.
     """
@@ -1384,33 +1390,40 @@ def _register_cache_projectors() -> None:
     # overrides on top. The other way round, a reloaded well would lose every
     # manual inclusion to the gate.
     register_cache_projector(_lazy_projector(
-        "review.features.home.cell_gating.gating_compute", "apply_gating_to_cache"))
+        "review.features.home.cell_gating.gating_compute", "apply_gating_to_cache"),
+        columns=_lazy_projector("review.features.home.cell_gating.gating_compute", "gating_input_columns"))
     register_cache_projector(_lazy_projector(
         "review.data.curation", "apply_curation_to_cache",
-        note_change=False))
+        note_change=False),
+        columns=_lazy_projector("review.data.curation", "curation_input_columns"))
     register_cache_projector(_lazy_projector(
-        "review.features.qc.controller", "apply_qc_to_cache"))
+        "review.features.qc.controller", "apply_qc_to_cache"),
+        columns=_lazy_projector("review.features.qc.controller", "qc_input_columns"))
     register_cache_projector(_lazy_projector(
-        "review.features.crop.controller", "apply_crop_to_cache"))
+        "review.features.crop.controller", "apply_crop_to_cache"),
+        columns=_lazy_projector("review.features.crop.controller", "crop_input_columns"))
     # Field quality last, because it is the only one that can decline to write
     # its column at all — no block, a plate only partly measured, or a well
     # whose FOV labels the app already knows are untrustworthy. Ordering does
     # not matter to the result (the four write different columns), but the one
     # that sometimes writes nothing reads better at the end of the list.
     register_cache_projector(_lazy_projector(
-        "review.data.field_quality_cache", "apply_field_quality_to_cache"))
+        "review.data.field_quality_cache", "apply_field_quality_to_cache"),
+        columns=_lazy_projector("review.data.field_quality_cache", "field_quality_input_columns"))
     # The per-cell focus cut, beside the per-field verdict above because they
     # are two poolings of one measurement rather than two subsystems. Both are
     # off by default and neither subsumes the other: the field verdict removes
     # a whole field or none of it, this one removes the soft part of a field.
     register_cache_projector(_lazy_projector(
-        "review.data.focus_gate", "apply_focus_gate_to_cache"))
+        "review.data.focus_gate", "apply_focus_gate_to_cache"),
+        columns=_lazy_projector("review.data.focus_gate", "focus_input_columns"))
     # Fields excluded by hand from QC triage. Unconditional like the rest:
     # a build that strips the triage tab must still honour exclusions a
     # previous session wrote, or the same plate would count different cells
     # in two builds.
     register_cache_projector(_lazy_projector(
-        "review.data.field_exclusions", "apply_field_exclusions_to_cache"))
+        "review.data.field_exclusions", "apply_field_exclusions_to_cache"),
+        columns=_lazy_projector("review.data.field_exclusions", "field_exclusions_input_columns"))
 
 
 def attach_feature_state(state, registry: FeatureRegistry | None = None) -> None:

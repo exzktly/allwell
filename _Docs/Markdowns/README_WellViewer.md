@@ -1627,7 +1627,9 @@ What this means in use:
 - **Plate-wide views read every well the first time**, then remember the few
   numbers they need per well until something changes them (a QC threshold, a
   gate, a crop). On a plate that does not fit, the first draw after such a change
-  reads the plate from disk again.
+  reads the plate from disk again. The line and bar charts read only the columns
+  they plot and the ones the active filters use, so that read is a fraction of
+  each well and does not push other wells out of memory.
 - **Live counts say when they cover part of the plate.** QC's "flagged" count,
   the crop's status line and Cell Gating's "Included for analysis" are
   recalculated on every edit, so they count the wells in memory; when those are

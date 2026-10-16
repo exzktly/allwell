@@ -248,6 +248,36 @@ def apply_fluor_gating(
     return well_included
 
 
+def gating_input_columns(ctx, label: str | None = None) -> set[str] | None:
+    """The columns :func:`apply_gating_to_cache` reads under the recorded pass (``narrow_rows``).
+
+    The intensity floors read each gated channel's mean intensity; the scatter
+    gates and the thresholding gates read their axes, ratios included. ``None``
+    when an axis cannot be resolved to columns — an unknown ratio — so the read
+    takes the whole frame.
+    """
+    from review.data.narrow_rows import value_inputs
+
+    config = getattr(getattr(ctx.state, "cell_gating", None), "applied_gating", None)
+    if not config:
+        return set()
+    ratios = config.get("ratios")
+    wanted: set[str] = set()
+    axes: list[str] = []
+    if config.get("use_scatter"):
+        axes += [g.get(k) for g in config.get("gating_gates") or [] for k in ("x_col", "y_col")]
+    else:
+        wanted |= {f"{ch}_mean_intensity" for ch in active_fluor_gates(config.get("fluor_gates") or {})}
+    if config.get("use_thresh"):
+        axes += [g.get(k) for g in config.get("thresh_gates") or [] for k in ("x_col", "y_col")]
+    for axis in axes:
+        cols = value_inputs(axis or "", ratios)
+        if cols is None:
+            return None
+        wanted |= cols
+    return wanted
+
+
 def apply_gating_to_cache(ctx, label: str | None = None) -> None:
     """Re-apply the last gating pass to cached frame(s) — the gating projector.
 

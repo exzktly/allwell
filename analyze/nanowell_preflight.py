@@ -98,9 +98,10 @@ def nanowell_input_report(raw: str, opts: dict) -> tuple[list[str], list[str]]:
                        "position, or no pixel size), so describe the tile grid instead (Tile grid, Scan order, Tile "
                        "overlap, Pixel size)", unplaced), warnings
     if unplaced:
-        problems, warnings = _pattern_report([z for z in zips if z.stem in unplaced], opts)
-        warnings.append(f"The acquisition record cannot place {len(unplaced)} well(s); they are placed from the "
-                        "tile grid.")
+        problems, warnings = _pattern_report(
+            [z for z in zips if z.stem in unplaced], opts,
+            lead=f"The acquisition record cannot place {len(unplaced)} well(s) (no mosaic position, or no pixel "
+                 "size)")
         record = {**record, "tiles": [t for t in record["tiles"] if t["well"] not in unplaced]}
         zips = [z for z in zips if z.stem not in unplaced]
         if not record["tiles"]:
@@ -115,7 +116,7 @@ def nanowell_input_report(raw: str, opts: dict) -> tuple[list[str], list[str]]:
     return problems, warnings
 
 
-def _pattern_report(zips, opts: dict) -> tuple[list[str], list[str]]:
+def _pattern_report(zips, opts: dict, *, lead: str = "There is no acquisition record") -> tuple[list[str], list[str]]:
     """No record, a tile grid given (tracker P15): every timepoint of every well must fit the grid's cells.
 
     Read from the archives' member names, the way the run groups them; the images are not opened, so the tile
@@ -131,7 +132,7 @@ def _pattern_report(zips, opts: dict) -> tuple[list[str], list[str]]:
     schema = str(opts.get("filename_schema") or "")
     sep = str(opts.get("filename_sep") or "_")
     phase = str(opts.get("phase_token") or "").strip().lower()
-    warnings = [f"There is no acquisition record: the tiles will be placed from the {rows} x {cols} grid in "
+    warnings = [f"{lead}: the tiles will be placed from the {rows} x {cols} grid in "
                 f"{opts.get('nanowell_scan') or 'top-left-row'} order, fields in the order of their names. Use Test "
                 "detection to check the addresses land before a plate-wide run."]
     if not schema:

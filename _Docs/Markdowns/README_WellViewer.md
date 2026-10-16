@@ -5663,8 +5663,12 @@ stage position in µm where the file states one with a unit, the pixel size wher
 the file states a calibration, and the tile size. Anything the file does not
 state is left unknown rather than guessed (an ND2 that was never calibrated
 records no pixel size). The log says how many tiles got a stage position. A
-destination that already holds well archives from a different conversion gets no
-record, and the log says which archive is in the way. For a nanowell run the
+destination that already holds well archives from a different conversion (or
+from another file converted with the same settings) gets no record, and the log
+says which archive is in the way. Every Analyze run checks the record against the
+well archives, so adding or deleting an archive by hand afterwards stops the run
+with a message saying so: convert again, use Datasets → Subset to drop wells, or
+delete `in/acquisition.json` to run without it. For a nanowell run the
 stage positions are not enough to place the tiles, so describe the tile grid in
 Analyze (see *Nanowell mode*).
 

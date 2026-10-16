@@ -261,7 +261,9 @@ def test_the_analyze_pre_flight_asks_for_the_grid_a_stage_only_record_cannot_rep
                                                             "top-left-row", "nanowell_overlap_percent": "10",
                                                             "nanowell_pixel_size_um": "4.3"})
     assert problems == []
-    assert "The acquisition record cannot place 1 well(s); they are placed from the tile grid." in warnings
+    assert warnings[0].startswith("The acquisition record cannot place 1 well(s) (no mosaic position, or no pixel "
+                                  "size): the tiles will be placed from the 2 x 2 grid")
+    assert not any("There is no acquisition record" in w for w in warnings)
 
 
 def test_an_nd2_conversion_into_a_folder_it_cannot_record_drops_the_stale_record(tmp_path):
@@ -275,3 +277,30 @@ def test_an_nd2_conversion_into_a_folder_it_cannot_record_drops_the_stale_record
     explode_nd2(_nd2(tmp_path, n_pos=2, n_t=1), out, well_source="grid", grid_rows=1, grid_cols=2,
                 fovs_per_well=1, experiment="exp")
     assert not (out / "acquisition.json").exists()
+
+
+def test_a_converted_folder_changed_by_hand_is_refused_with_the_way_out(tmp_path):
+    """Every run checks a record against its archives; one written by the converter is no exception, so a well
+    deleted by hand afterwards stops the run — and the refusal names what to do."""
+    from pipeline.sidecar import check_acquisition_inputs
+    from util.acquisition_record import AcquisitionRecordError
+
+    out = tmp_path / "in"
+    _explode(_write_multi(tmp_path / "plate.ome.tif"), out)
+    check_acquisition_inputs(out, "experiment:channel:well:fov:timepoint", "_")
+    (out / "A02.zip").unlink()
+    with pytest.raises(AcquisitionRecordError, match=r"Record names absent well archive A02.*no longer matches the "
+                                                     r"well archives in in/.*Subset.*delete acquisition\.json"):
+        check_acquisition_inputs(out, "experiment:channel:well:fov:timepoint", "_")
+
+
+def test_an_archive_another_file_converted_under_the_same_settings_withholds_the_record(tmp_path):
+    """The same grid and experiment over two different files write identical member names; the second
+    conversion must not record the first file's well with its own stage positions."""
+    out = tmp_path / "in"
+    _explode(_write_multi(tmp_path / "first.ome.tif"), out, well_subset=("A01",))
+    assert read_record_file(out / "acquisition.json")["source_files"] == ["first.ome.tif"]
+    logged = []
+    _explode(_write_multi(tmp_path / "second.ome.tif"), out, well_subset=("A02",), log_fn=logged.append)
+    assert not (out / "acquisition.json").exists()
+    assert any("A01.zip is not this conversion's output" in line for line in logged)

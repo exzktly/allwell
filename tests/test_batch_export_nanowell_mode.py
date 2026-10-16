@@ -130,3 +130,39 @@ def test_a_group_s_replicate_sets_stay_sets_and_its_solo_wells_stand_alone():
     grp = BarGroup("G", members=[ReplicateSet("Drug", ["A01", "A02", "H12"])], solo_wells=["B03", "A02", "C09"])
     groups = NanowellBatchExportPanel._figure_groups(None, grp, {"A01", "A02", "B03"})
     assert groups == {"Drug": ["A01", "A02"], "B03": ["B03"]}
+
+
+def test_an_array_map_at_a_timepoint_the_well_lacks_says_so(panel, tmp_path, monkeypatch):
+    """A batch run asked for one timepoint; a well not imaged then gets a figure saying that, not the map's
+    "no addressed nanowells" placeholder (a different claim) and not another timepoint's map."""
+    from review.features.batch_export import nanowell_panel
+
+    p, _ctx = panel
+    calls = _drawn(monkeypatch)
+    messages = []
+    monkeypatch.setattr(nanowell_panel, "_render_message", lambda fig, text, gid: messages.append(text))
+    p._view_cb.setCurrentIndex(p._view_cb.findData("array_map"))
+    p._tp_cb.addItem("48h", "48h")
+    p._tp_cb.setCurrentIndex(p._tp_cb.findData("48h"))
+    p._run_batch()
+    assert calls == []
+    assert messages == ["A01 has no timepoint 48h: it was not imaged then, so there is no map to draw."] * 2
+
+
+def test_unreadable_nanowell_tables_are_refused_with_the_reason(panel, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from review.features.batch_export import nanowell_panel
+    from review.features.nanowell.collect import NanowellSchemeError
+
+    p, ctx = panel
+    ctx.state.feature_slice("nanowell").data = None
+
+    def boom(_path):
+        raise NanowellSchemeError("scheme_version 9 is not one this version reads")
+
+    shown = []
+    monkeypatch.setattr(nanowell_panel, "_load_nanowell_data", boom)
+    monkeypatch.setattr(QMessageBox, "warning", lambda _parent, title, text: shown.append((title, text)))
+    assert p._load("earliest") is None
+    assert shown and "scheme_version 9" in shown[0][1]

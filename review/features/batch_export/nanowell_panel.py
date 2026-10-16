@@ -56,6 +56,7 @@ _wells_summary = _lazy("review.features.nanowell.distribution_compute", "wells_s
 _metric_labels = _lazy("review.features.nanowell.distribution_compute", "metric_labels")
 _load_nanowell_data = _lazy("review.features.nanowell.collect", "load_nanowell_data")
 _site_metrics = _lazy("review.features.nanowell.series_compute", "site_metrics")
+_render_message = _lazy("review.features.nanowell.renderer", "render_message")
 
 _logger = logging.getLogger("review")
 
@@ -212,7 +213,12 @@ class NanowellBatchExportPanel(BatchExportPanel):
         st = self._ctx.state.feature_slice("nanowell")
         data = getattr(st, "data", None)
         if data is None or getattr(st, "loaded_for", (None,))[0] != str(data_dir or ""):
-            data = _load_nanowell_data(Path(data_dir)) if data_dir else None
+            try:
+                data = _load_nanowell_data(Path(data_dir)) if data_dir else None
+            except (ValueError, OSError) as exc:            # NanowellSchemeError is a ValueError
+                QMessageBox.warning(self, "Nanowell tables unreadable",
+                                    f"The nanowell tables could not be read, so nothing was exported:\n\n{exc}")
+                return None
         if data is None:
             QMessageBox.warning(self, "No nanowell tables",
                                 "This dataset has no nanowell tables (out/nanowells/), so there is nothing to "
@@ -281,17 +287,23 @@ class NanowellBatchExportPanel(BatchExportPanel):
             for well in targets:
                 stem = f"{safe}_{metric}" + (f"_{well}" if well else "")
                 fig = self._new_figure()
+                shown = self._timepoint_for(data, [well] if well else wells, settings)
                 try:
-                    _draw_view(fig, view, metrics, data, groups=groups, metric=drawn, channel=channel,
-                               axis=settings["axis"], timepoint=self._timepoint_for(data, wells, settings),
-                               control="", baseline=settings["baseline"], cohort=settings["cohort"],
-                               well=well or "",
-                               well_timepoint=self._timepoint_for(data, [well], settings) if well else "",
-                               note=note, tableless=tableless)
+                    if well and shown not in data.timepoints(well):
+                        # The page's map falls back to the well's first timepoint; a batch run was asked for this
+                        # one, so the figure says the well was not imaged then rather than drawing another, or
+                        # the map's "no addressed nanowells" placeholder, which would be a different claim.
+                        _render_message(fig, f"{well} has no timepoint {shown}: it was not imaged then, so there "
+                                             "is no map to draw.", gid="nw-map-missing")
+                    else:
+                        _draw_view(fig, view, metrics, data, groups=groups, metric=drawn, channel=channel,
+                                   axis=settings["axis"], timepoint=self._timepoint_for(data, wells, settings),
+                                   control="", baseline=settings["baseline"], cohort=settings["cohort"],
+                                   well=well or "", well_timepoint=shown if well else "",
+                                   note=note, tableless=tableless)
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
-                                         "well": well or "", "timepoint": self._timepoint_for(
-                                             data, [well] if well else wells, settings)}
+                                         "well": well or "", "timepoint": shown}
                     self._save_figure(fig, self._out_path(write_dir, f"{stem}.{fmt}"), fmt, group=grp,
                                       title=f"{grp.name} — {labels[drawn]}" + (f" — {well}" if well else ""))
                 except Exception as exc:

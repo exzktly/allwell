@@ -1,8 +1,10 @@
 """The acquisition record an OME-TIFF or ND2 conversion leaves beside its archives (tracker I5).
 
 A CZI conversion has always written ``in/acquisition.json`` (:mod:`pipeline.czi_acquisition`); this is the
-same record for the other two converters, so a nanowell run on an OME or ND2 plate finds where each tile sat
-without the grid being described by hand. What goes in is only what the source states:
+same record for the other two converters: the calibration and each tile's stage position, for every reader of
+the record. It does not by itself place a nanowell well — a stage position needs the stage axes' direction,
+which the run does not know (``nanowell_pattern_record.unplaced_wells``, tracker R8) — so a nanowell run on such
+a plate still takes the grid described. What goes in is only what the source states:
 
 * **Stage positions** in micrometres, per tile, when the source gives them with a unit it can be converted
   from — an OME ``<Plane>``'s ``PositionX``/``PositionY`` with their ``PositionXUnit``/``PositionYUnit``, or
@@ -20,7 +22,9 @@ without the grid being described by hand. What goes in is only what the source s
 settings call for — the wells this run wrote, the wells it resumed, and wells an earlier run with the same
 settings wrote. A record must name every archive in ``in/`` (``validate_against_archives``), so a folder
 that also holds an archive these settings did not produce gets **no** record; the conversion removed any earlier one before writing its
-first archive (:func:`discard_record`), so none is left describing a conversion the folder no longer holds. The run log
+first archive (:func:`discard_record`), so none is left describing a conversion the folder no longer holds.
+An archive this run did not write or resume counts only when the record it replaced attributed it to the same
+source file: identical settings over a different file write identical member names. The run log
 says which.
 
 Qt-free.
@@ -83,12 +87,16 @@ def build_record(source_name: str, tiles: dict) -> dict:
 
 
 def publish_record(out_in_dir: Path, source_name: str, plan: dict, *, experiment: str, channels,
-                   fovs: int, tp_plan, locate, log_fn=None) -> bool:
+                   fovs: int, tp_plan, locate, written=(), earlier=(), log_fn=None) -> bool:
     """Write ``acquisition.json`` for the archives in *out_in_dir* this conversion's settings produced.
 
     *plan* maps every well label of the conversion to its index in the conversion's own well order; *tp_plan*
     is the conversion's ``(source timepoint index, token)`` list; ``locate(well_index, fov, source_index)``
-    returns that tile's :class:`TileSource`. Returns whether a record
+    returns that tile's :class:`TileSource`. *written* is the wells this conversion wrote or resumed; *earlier*
+    the wells the record it replaced attributed to this same source file (:func:`discard_record`). An archive
+    that holds this conversion's members but is in neither came from a conversion this one cannot vouch for —
+    the same settings over a different file name the same members — so it withholds the record like any other
+    archive that is not this conversion's. Returns whether a record
     was written. Never raises for a record that cannot be built: the images are converted either way, and
     the run log says why the record is missing.
     """
@@ -102,7 +110,8 @@ def publish_record(out_in_dir: Path, source_name: str, plan: dict, *, experiment
     for archive in sorted(Path(out_in_dir).glob("*.zip")):
         well = canonical_well_label(archive.stem)
         expected = expected_members(experiment, channels, archive.stem, fovs, [tp for _i, tp in tp_plan])
-        if well is not None and archive.stem in plan and well_is_complete(archive, expected):
+        vouched = archive.stem in set(written) or archive.stem in set(earlier)
+        if well is not None and archive.stem in plan and vouched and well_is_complete(archive, expected):
             complete.append(archive.stem)
         else:
             foreign.append(archive.name)
@@ -135,6 +144,24 @@ def publish_record(out_in_dir: Path, source_name: str, plan: dict, *, experiment
     return True
 
 
-def discard_record(out_in_dir: Path) -> None:
-    """Remove the record an earlier conversion left, before this one writes a single archive."""
-    (Path(out_in_dir) / RECORD_FILENAME).unlink(missing_ok=True)
+def discard_record(out_in_dir: Path, source_name: str) -> set[str]:
+    """Remove the record an earlier conversion left, before this one writes a single archive; return the wells
+    it attributed to *source_name*, so a later subset conversion of the same file can record them again.
+
+    Read leniently: a record that cannot be read vouches for nothing, and is removed all the same.
+    """
+    import json
+
+    path = Path(out_in_dir) / RECORD_FILENAME
+    earlier: set[str] = set()
+    try:
+        old = json.loads(path.read_text(encoding="utf-8"))
+        earlier = {str(t.get("well")) for t in old.get("tiles") or []
+                   if isinstance(t, dict) and t.get("source_file") == source_name}
+    except FileNotFoundError:
+        return earlier
+    except (OSError, ValueError, AttributeError) as exc:
+        log.warning("The earlier %s in %s could not be read (%s); it vouches for no well", RECORD_FILENAME,
+                    out_in_dir, exc)
+    path.unlink(missing_ok=True)
+    return earlier

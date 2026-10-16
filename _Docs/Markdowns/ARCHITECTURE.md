@@ -3601,7 +3601,9 @@ timepoint, the fixed cohort when ticked), with the exclusions spelled out by
 reason and a row naming each of the group's wells with no nanowell table. A
 group's replicate sets stay sets and its solo wells stand alone, as the page
 groups a selection (`_figure_groups`); a group with no nanowell table at all is
-skipped and says so. The tables and the metrics at the chosen baseline are read
+skipped and says so. An Array map asked for a timepoint a well was not imaged at
+is a figure saying exactly that, where the page would fall back to the well's
+first timepoint. The tables and the metrics at the chosen baseline are read
 once per run — from the page's state when it holds this dataset — and every
 control once, before the first job. There is no AXES block (a Nanowells figure
 is several panels the page lays out itself), no per-cell CSV and no fold-change
@@ -5502,7 +5504,9 @@ well's tiles overlap in pixel space, so reading its centroids put cells from
 different tiles on top of one another. The renderer labels axes, nearest-neighbour
 distances and Ripley's radius with the payload's unit (`renderer.in_unit`). A
 nanowell cell table has a `timepoint` label and no `timepoint_hours`, so
-`collect._hours` and the tab's timepoint list go through
+`collect._hours`, the tab's timepoint list and the per-cell export
+(`spatial/cell_scope_compute.cell_scope`: the same position columns as required
+columns, `tp_fallback=True`, and its first-timepoint rule) all go through
 `data_loading.resolved_timepoints`, the loader's one label-to-hours resolver.
 
 **Multi-well faceting.** The per-frame levels (Cell / Colony /
@@ -8214,7 +8218,15 @@ folder that hold exactly the members this conversion's settings call for — the
 wells written, resumed, or written earlier under the same settings. A folder
 that also holds an archive these settings did not produce gets no record, said
 in the run log, because a record must name every archive
-(`validate_against_archives`). Each tile carries a stage position in µm and no
+(`validate_against_archives`). An archive this run did not write or resume
+counts only when the record it replaced attributed that well to the same source
+file (`discard_record` returns those wells): the same settings over a different
+file write identical member names, and its tiles would otherwise be filed under
+this file's stage positions. Like a CZI record, the result is checked against the
+archives at the start of every run (`pipeline/sidecar.check_acquisition_inputs`),
+so archives added or removed by hand afterwards stop a run; the refusal names
+the ways out (convert again, Datasets → Subset, or delete the record). Each tile
+carries a stage position in µm and no
 mosaic position: from an OME `<Plane>`'s `PositionX`/`PositionY` only when both
 carry a length unit (`pipeline/ome_acquisition.py`, keyed per `(Image, TheT)`,
 a packed single-image file's frame found by the same `_frame_index` the planes

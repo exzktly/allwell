@@ -49,3 +49,32 @@ def test_the_spatial_tab_draws_a_nanowell_run_s_cells_at_their_well_frame_positi
     fig = ctx.widgets.get("_sp_fig") if ctx.widgets.get_or_none("_sp_fig") else ctx.widgets.get("_sp_canvas").figure
     labels = {(ax.get_xlabel(), ax.get_ylabel()) for ax in fig.axes}
     assert ("x (µm)", "y (µm)") in labels
+
+
+def test_the_spatial_cell_export_holds_the_nanowell_run_s_cells_it_drew(qtbot, run_with_a_cell):  # noqa: F811
+    """The tab's "Save cells" reads the same position columns and the same hours as its figure: a nanowell cell
+    table has no field centroid and no ``timepoint_hours``, and requiring either exported nothing."""
+    from PySide6.QtWidgets import QHBoxLayout, QWidget
+
+    from review.features.export.cell_scope_compute import population_mask
+    from review.features.spatial import controller as spc
+    from review.features.spatial.cell_scope_compute import cell_scope
+    from review.features.spatial.tab_view import build_spatial_tab
+    from tests._minimal_shell import load_dataset, minimal_shell
+
+    ctx, window = minimal_shell(qtbot)
+    window._ctx, window._app_state, window._features = ctx, ctx.state, ctx.features
+    load_dataset(ctx, run_with_a_cell)
+    frame = QWidget()
+    QHBoxLayout(frame)
+    window.setCentralWidget(frame)
+    build_spatial_tab(ctx, frame)
+    ctx.state.selection.selected_wells = {"A01"}
+    spc.sp_recompute(ctx)
+    scope = cell_scope(ctx)
+    cells = pd.read_csv(run_with_a_cell / "measurements_A01.csv")
+    assert scope.required_columns == ("well_x_um", "well_y_um") and scope.timepoints == (0.0,)
+    assert int(population_mask(cells, scope).sum()) == len(st_points := ctx.state.feature_slice("spatial").frames[0]
+                                                           ["points"]) == len(cells)
+    assert ("geometry", "positions are well_x_um / well_y_um (µm); every spatial statistic on this tab is computed "
+                        "from those") in scope.notes

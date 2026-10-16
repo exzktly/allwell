@@ -229,7 +229,7 @@ def explode_nd2(
 
     out_in_dir.mkdir(parents=True, exist_ok=True)
     # The record an earlier conversion left describes that one; this one publishes its own on completion.
-    discard_record(out_in_dir)
+    earlier = discard_record(out_in_dir, nd2_path.name)
     # Counted over the wells this run writes, not over the plate. A subset
     # run denominated by the whole plate would report a complete conversion as
     # a fraction of one.
@@ -372,12 +372,13 @@ def explode_nd2(
         f"{wall:.1f}s ({rate:.0f} planes/s; read {read_total:.1f}s, write "
         f"{write_total:.1f}s summed across {n_workers} worker(s)).\n"
     )
-    _publish_record(nd2_path, out_in_dir, layout, well_map, exp_tok, tp_plan, _log)
+    _publish_record(nd2_path, out_in_dir, layout, well_map, exp_tok, tp_plan, _log, written=result.wells,
+                    earlier=earlier)
     return result
 
 
 def _publish_record(nd2_path: Path, out_in_dir: Path, layout: Nd2Layout, well_map: WellMap, exp_tok: str,
-                    tp_plan, log_fn) -> None:
+                    tp_plan, log_fn, *, written=(), earlier=()) -> None:
     """Write ``in/acquisition.json`` from the position loop's stage points and the calibration (tracker I5).
 
     A tile's position is its stage position's loop point, the same at every timepoint: an ND2 position
@@ -395,7 +396,7 @@ def _publish_record(nd2_path: Path, out_in_dir: Path, layout: Nd2Layout, well_ma
 
     publish_record(out_in_dir, nd2_path.name, {label: i for i, label in enumerate(well_map.wells)},
                    experiment=exp_tok, channels=layout.channel_names, fovs=well_map.fovs_per_well,
-                   tp_plan=tp_plan, locate=locate, log_fn=log_fn)
+                   tp_plan=tp_plan, locate=locate, written=written, earlier=earlier, log_fn=log_fn)
 
 
 def timepoint_tokens(layout: Nd2Layout) -> tuple[list[str], str]:

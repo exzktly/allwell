@@ -169,4 +169,10 @@ def check_acquisition_inputs(input_dir, schema, sep):
         return
     validation = validate_record_paths(Path(input_dir).glob("*.zip"), record, schema=schema, sep=sep)
     if not validation.ok:
-        raise AcquisitionRecordError("; ".join(validation.issues))
+        # Said with the way out: the record was written for the archives a conversion (or a Datasets tool)
+        # produced, and archives added or removed by hand since make it describe a different dataset. Running on
+        # anyway would place tiles from positions that belong to other images.
+        raise AcquisitionRecordError(
+            "; ".join(validation.issues) + f". {RECORD_FILENAME} no longer matches the well archives in "
+            f"{Path(input_dir).name}/: if they were changed by hand, convert the plate again or use Datasets → "
+            f"Subset to drop wells, or delete {RECORD_FILENAME} to run without it")

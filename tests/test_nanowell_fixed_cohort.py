@@ -62,3 +62,19 @@ def test_the_well_summary_counts_the_cohort_s_exclusions_by_their_reason(page, q
     assert (kept, sites) == (3, 4)
     late = well_summary(frame, "n", reasons=reasons).set_index("timepoint").loc["t_a"]
     assert (late["n_used"], late["excluded"], late["median"]) == (3, {COHORT_REASON: 1}, 3.0)
+
+
+def test_the_box_stays_reachable_on_trajectories_when_the_metric_has_one_value_per_nanowell(page, qtbot):  # noqa: F811
+    """Trajectories draws Cell count in place of a per-nanowell metric, with the cohort applied, so the box that
+    turns the cohort off must still be there."""
+    st = _loaded(qtbot, page)
+    page.state.selection.selected_wells = {"A01"}
+    nwc.nw_on_selection_changed(page)
+    page.widgets.get("_nw_cohort_box").setChecked(True)
+    nwc.set_metric(page, "growth_rate")
+    nwc.set_view(page, "trajectories")
+    assert any(t.startswith("Fixed cohort:") for t in _texts(page))
+    box = page.widgets.get("_nw_cohort_box")
+    assert box.isVisibleTo(box.window())                     # every ancestor up to the page, not its own flag
+    nwc.set_view(page, "distribution")
+    assert not box.isVisibleTo(box.window())                 # where the metric has one value per nanowell: no time

@@ -1447,7 +1447,7 @@ def explode_ome_tiff(
     out_in_dir.mkdir(parents=True, exist_ok=True)
     # A record left by an earlier conversion describes that conversion; this one publishes its own on
     # completion (``_publish_record``), and a cancelled one leaves none rather than a stale one.
-    discard_record(out_in_dir)
+    earlier = discard_record(out_in_dir, ome_path.name)
     # Counted over the wells this run writes, not over the plate: a subset run
     # denominated by the whole plate reports a complete conversion as a
     # fraction of one.
@@ -1606,12 +1606,12 @@ def explode_ome_tiff(
         f"summed across {n_workers} worker(s)).\n"
     )
     _publish_record(ome_path, out_in_dir, layout, well_labels, exp_tok, fovs, tp_plan,
-                    (n_positions, n_timepoints, frame_order), _log)
+                    (n_positions, n_timepoints, frame_order), _log, written=result.wells, earlier=earlier)
     return result
 
 
 def _publish_record(ome_path: Path, out_in_dir: Path, layout: OmeLayout, well_labels, exp_tok: str,
-                    fovs: int, tp_plan, frames, log_fn) -> None:
+                    fovs: int, tp_plan, frames, log_fn, *, written=(), earlier=()) -> None:
     """Write ``in/acquisition.json`` from the OME-XML's stage positions and calibration (tracker I5).
 
     A multi-image file's tile is ``(Image pos, TheT ti)``; a single-image file's is frame
@@ -1632,4 +1632,4 @@ def _publish_record(ome_path: Path, out_in_dir: Path, layout: OmeLayout, well_la
 
     publish_record(out_in_dir, ome_path.name, {label: i for i, label in enumerate(well_labels)},
                    experiment=exp_tok, channels=layout.channel_names, fovs=fovs, tp_plan=tp_plan,
-                   locate=locate, log_fn=log_fn)
+                   locate=locate, written=written, earlier=earlier, log_fn=log_fn)

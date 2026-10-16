@@ -260,7 +260,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_axis.setVisible(distribution)
             cohort_box.setChecked(st.cohort)
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
-            grp_cohort.setVisible((distribution or view == "trajectories") and not per_nanowell)
+            # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
+            # applies to what it draws, so its box stays where it can be turned off.
+            grp_cohort.setVisible((distribution and not per_nanowell) or view == "trajectories")
             grp_control.setVisible(wells_axis)
             grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position")
             grp_well.setVisible(view in ONE_WELL_VIEWS)

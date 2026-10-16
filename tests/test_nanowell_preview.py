@@ -123,3 +123,10 @@ def test_test_detection_on_an_inferred_geometry_labels_every_site_of_a_square_ar
                                phase_token="PHASE", scratch=scratch, segmenter=threshold_segmenter())
     assert result.status == nr.OK and result.origin_method == "array_centre"
     assert {s["address"] for s in result.sites} == {f"{q},{r}" for q, r in rendered.array.addresses}
+
+
+def test_test_detection_says_its_rim_is_one_timepoint_s_not_the_run_s(plate, tmp_path):
+    """Tracker X35a-R5: the preview sees one timepoint, a run decides the rim over all of them and keeps an analysed
+    dataset's roster; the preview says so rather than show a set the run may not write."""
+    result = _preview(plate, tmp_path)
+    assert any("a run decides them over all of the well's timepoints" in n for n in result.notes)

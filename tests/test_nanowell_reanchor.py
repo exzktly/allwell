@@ -88,8 +88,9 @@ def test_an_anchor_that_itself_came_from_the_plate_is_not_evidence_for_another_w
 
 
 # ── end to end ───────────────────────────────────────────────────────────────
-def _write_plate(tmp_path):
-    """Four 1-tile wells imaged twice; between the timepoints the plate turns by THETA and shifts."""
+def _write_plate(tmp_path, dark_rim=()):
+    """Four 1-tile wells imaged twice; between the timepoints the plate turns by THETA and shifts. *dark_rim* are
+    sites of B02 drawn dark at 0h (a bubble along its rim)."""
     plate = tmp_path / "plate"
     (plate / "in").mkdir(parents=True)
     rotation = _screen_rotation(THETA)
@@ -100,7 +101,8 @@ def _write_plate(tmp_path):
         s0 = np.array(q) + UNION
         s1 = rotation @ (s0 - CENTRE) + CENTRE + SHIFT
         camera1 = np.array(q) + (20.0, -10.0)             # the camera revisits each well roughly where it was
-        first, rec0 = build_well(rows=1, cols=1, tile=TILE, well=well, timepoint="0h", seed=11, radius_fraction=0.26)
+        first, rec0 = build_well(rows=1, cols=1, tile=TILE, well=well, timepoint="0h", seed=11, radius_fraction=0.26,
+                                 dark_sites=dark_rim if well == "B02" else ())
         second, rec1 = build_well(rows=1, cols=1, tile=TILE, well=well, timepoint="24h", seed=12,
                                   rotation=7.0 + THETA, array_shift_um=tuple(s1 - camera1 - UNION), radius_fraction=0.26)
         for rec, camera in ((rec0, np.array(q)), (rec1, camera1)):
@@ -139,8 +141,11 @@ _RUN_LOG = _ListHandler()
 
 @pytest.fixture(scope="module")
 def reanchored(tmp_path_factory):
-    tmp_path = tmp_path_factory.mktemp("reanchor")
-    plate, truth = _write_plate(tmp_path)
+    return _run_reanchoring(tmp_path_factory.mktemp("reanchor"))
+
+
+def _run_reanchoring(tmp_path, dark_rim=()):
+    plate, truth = _write_plate(tmp_path, dark_rim)
     real_locate, real_resolve = nr.locate_timepoint, lattice.resolve_origin
     state = {"target": False}
 
@@ -230,3 +235,22 @@ def test_a_re_anchored_well_finishes_once_in_the_progress_count(reanchored):
     tracker = ProgressTracker()
     events = [event for line in _RUN_LOG.lines for event in tracker.parse(line)]
     assert [e for e in events if e[0] == "well_repeat"] == [] and tracker.well_repeats == 0
+
+
+def test_a_re_anchored_timepoint_that_sees_a_rim_the_first_pass_did_not_widens_the_roster_for_every_timepoint(
+        tmp_path_factory):
+    """Tracker X35a-R1 on the re-anchoring path: B02's rim is dark at 0h, and its 24h, which sees it, is only addressed
+    by the end-of-run pass. That pass re-runs the well incrementally against the roster the first pass kept from 0h
+    alone; the 24h evidence changes it, so the well is analysed again over both timepoints."""
+    probe, _ = build_well(rows=1, cols=1, tile=TILE, well="B02", timepoint="0h", seed=11, radius_fraction=0.26)
+    basis = np.column_stack((probe.array.a1, probe.array.a2))
+    rim = sorted(probe.array.roster, key=lambda a: -np.linalg.norm(basis @ np.asarray(a, float)))[:4]
+    out, truth = _run_reanchoring(tmp_path_factory.mktemp("reanchor_rim"), rim)
+    grid = json.loads((out / "nanowells" / "B02_grid.json").read_text())
+    assert grid["timepoints"]["24h"]["origin_method"] == "plate_rigid"
+    assert "reanalysed_because" in grid["array_radius"]
+    roster = {tuple(a) for a in grid["array_radius"]["roster"]}
+    assert set(rim) <= roster and len(roster) == len(probe.array.roster)
+    rows = list(csv.DictReader((out / "nanowells" / "B02.csv").open()))
+    assert {tp: sum(r["timepoint"] == tp for r in rows) for tp in ("0h", "24h")} == {"0h": len(roster),
+                                                                                   "24h": len(roster)}

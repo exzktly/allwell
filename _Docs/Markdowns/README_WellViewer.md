@@ -291,9 +291,14 @@ fractions, cell count, confluence, and fluorescence over the empty nanowells' ba
 `nanowells/<well>_grid.json`, the registration, lattice and status of every timepoint. A nanowell no tile could
 see, or that was hidden, has a row with its state and **no number**, never a zero. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image
-showed in full; floor just beyond the rim that every image showed empty is not a nanowell and has no row. A
-dataset analysed with an earlier version keeps the set of nanowells it was analysed with when timepoints are added
-to it. A timepoint that could not
+showed in full; floor just beyond the rim that every image showed empty is not a nanowell and has no row. Adding a
+timepoint to an analysed well gives the same nanowells a run over every timepoint would: when the new images show a
+rim nanowell the earlier ones did not (or show one empty), the well is analysed again over all its timepoints, and
+its grid record says why. A timepoint whose nanowells sit one lattice step from the others' is flagged as a roster
+mismatch, with a note, and does not decide the rim. A dataset analysed with an earlier version keeps the set of
+nanowells it was analysed with when timepoints are added to it; Validate, Merge Plates and the Nanowells page name
+wells whose sets two versions decided, since they count the rim differently. Test detection shows the rim one
+timepoint supports and says so. A timepoint that could not
 be placed, found or addressed is named in the grid record with the reason, and the other timepoints still run.
 When a well's own evidence cannot say which nanowell is which (no visible central square, no readable array
 edge), the end of the run addresses it from the plate's other wells, which move together between timepoints,

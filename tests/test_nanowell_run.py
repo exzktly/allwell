@@ -492,7 +492,7 @@ def test_a_well_analysed_with_the_disk_rule_keeps_it_for_its_new_timepoints(tmp_
     second, later = build_well(rotation=9.0, array_shift_um=(120.0, -80.0), seed=2, timepoint="24h")
     plate = _plate_of(tmp_path, [("0h", first)], record)
     with monkeypatch.context() as old_code:                 # the disk rule, as the code before X35a ran it
-        old_code.setattr(nr, "_evidence_roster", lambda *a, **k: None)
+        old_code.setattr(nr, "_circle_roster", lambda *a, **k: (None, None, None))
         out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
     assert "roster" not in json.loads((out / "nanowells" / "A01_grid.json").read_text())["array_radius"]
     record["timepoints"].update(later["timepoints"])
@@ -529,7 +529,7 @@ def test_a_disk_rule_checkpoint_is_not_taken_back_into_an_evidence_rule_well():
     run = lambda: nr.run_well("A01", record, ["T0"], _loader(rendered), SETTINGS,     # noqa: E731
                               segmenter=threshold_segmenter(), checkpoint=checkpoints)
     with pytest.MonkeyPatch.context() as old_code:
-        old_code.setattr(nr, "_evidence_roster", lambda *a, **k: None)
+        old_code.setattr(nr, "_circle_roster", lambda *a, **k: (None, None, None))
         assert len(run().sites) == 283
     assert len(run().sites) == 265
 
@@ -558,3 +558,91 @@ def test_a_checkpoint_of_a_timepoint_measured_under_another_registration_step_is
     again = nr.run_well("A01", record, list(sources), load, INFER, segmenter=threshold_segmenter(),
                         checkpoint=checkpoints)
     assert (99, 99) not in {(r["nw_q"], r["nw_r"]) for r in again.sites if r["timepoint"] == "T1"}
+
+
+# ── review X35a-R1..R3: the rim decided over every timepoint, whichever run sees it ─
+def _rim(rendered, n=6):
+    """The *n* drawn sites farthest from the array's centre."""
+    basis = np.column_stack((rendered.array.a1, rendered.array.a2))
+    return sorted(rendered.array.roster, key=lambda a: -np.linalg.norm(basis @ np.asarray(a, float)))[:n]
+
+
+def _rim_dark_well():
+    """T0 with its six outermost nanowells dark (a bubble along the rim), T1 the plate clean: ``(record, sources)``."""
+    probe, _ = build_well(rotation=7.0, timepoint="T0")
+    first, record = build_well(rotation=7.0, timepoint="T0", cells=10, dark_sites=_rim(probe))
+    second, later = build_well(rotation=9.0, timepoint="T1", seed=2, cells=10)
+    record["timepoints"].update(later["timepoints"])
+    record["tiles"] += later["tiles"]
+    return record, {"T0": first, "T1": second}, _rim(probe)
+
+
+def test_a_rim_nanowell_hidden_at_one_timepoint_and_seen_at_another_is_in_the_roster():
+    """X35a-R3: every earlier case was one timepoint, so the union of detections over timepoints was untested."""
+    record, sources, rim = _rim_dark_well()
+    outcome = nr.run_well("A01", record, ["T0", "T1"], lambda tp, tile: sources[tp].images.get(tile), SETTINGS,
+                          segmenter=threshold_segmenter())
+    drawn = set(sources["T0"].array.addresses)
+    assert sorted(map(tuple, outcome.radius["roster"])) == sorted(drawn)
+    rows = {(r["timepoint"], r["nw_q"], r["nw_r"]): r for r in outcome.sites}
+    assert all(rows[("T0", *a)]["state"] == "occluded" and rows[("T1", *a)]["detected"] for a in rim)
+
+
+def test_an_incremental_run_gives_the_rim_a_run_over_every_timepoint_gives(tmp_path, monkeypatch):
+    """X35a-R1: T0 alone (rim dark) then T1 added incrementally kept T0's 259-site roster for T1, silently different
+    from the full run's 265. The new timepoint's evidence changes the kept roster, so the well is analysed again over
+    every timepoint, and its record says why."""
+    from tests.test_nanowell_cli import _rows, _run_main
+
+    record, sources, rim = _rim_dark_well()
+    tokens = {"T0": "0h", "T1": "24h"}
+    for block in record["tiles"]:
+        block["timepoint"] = tokens[block["timepoint"]]
+    record["timepoints"] = {tokens[k]: v for k, v in record["timepoints"].items()}
+    first_only = {"timepoints": {"0h": record["timepoints"]["0h"]}, **{k: v for k, v in record.items()
+                                                                        if k not in ("timepoints", "tiles")},
+                  "tiles": [t for t in record["tiles"] if t["timepoint"] == "0h"]}
+    plate = _plate_of(tmp_path, [("0h", sources["T0"])], first_only)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
+    assert len(json.loads((out / "nanowells" / "A01_grid.json").read_text())["array_radius"]["roster"]) == 259
+    _plate_of(tmp_path, [("0h", sources["T0"]), ("24h", sources["T1"])], record)
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    full = _run_main(monkeypatch, _plate_of(tmp_path / "full", [("0h", sources["T0"]), ("24h", sources["T1"])],
+                                            record), "--nanowell_format", "100um")
+    grid = json.loads((out / "nanowells" / "A01_grid.json").read_text())
+    full_grid = json.loads((full / "nanowells" / "A01_grid.json").read_text())
+    assert grid["array_radius"]["roster"] == full_grid["array_radius"]["roster"]
+    assert len(grid["array_radius"]["roster"]) == 265 and "adds 6" in grid["array_radius"]["reanalysed_because"]
+    pick = lambda rows: sorted((r["timepoint"], r["nw_q"], r["nw_r"], r["state"]) for r in rows)  # noqa: E731
+    assert pick(_rows(out, "A01.csv")) == pick(_rows(full, "A01.csv"))
+
+
+def test_a_timepoint_anchored_a_step_off_neither_widens_the_rim_nor_passes_as_consistent(monkeypatch):
+    """X35a-R2: T1's origin moved one step (as a wrong fiducial would). Taken at face value its detections put 17 rows
+    of floor into every timepoint and every timepoint read consistent, because each was compared on the shared roster."""
+    from pipeline.nanowell_lattice import index_points
+
+    a, record = build_well(rotation=7.0, timepoint="T0", cells=5)
+    b, later = build_well(rotation=9.0, timepoint="T1", seed=2, cells=5)
+    c, third = build_well(rotation=9.0, timepoint="T2", seed=3, array_shift_um=(500.0, 0.0), cells=5)
+    for extra in (later, third):
+        record["timepoints"].update(extra["timepoints"])
+        record["tiles"] += extra["tiles"]
+    images = {"T0": a.images, "T1": b.images, "T2": c.images}
+    real = nr.locate_timepoint
+
+    def a_step_off(tp, *args, **kwargs):
+        located = real(tp, *args, **kwargs)
+        if tp == "T1" and located.status == nr.OK:
+            located.origin_montage = tuple(np.asarray(located.origin_montage) + np.asarray(located.fit.a1))
+            located.indexed = index_points(located.detected_common - np.asarray(located.montage.origin_um),
+                                           located.fit, located.origin_montage)
+        return located
+
+    monkeypatch.setattr(nr, "locate_timepoint", a_step_off)
+    outcome = nr.run_well("A01", record, ["T0", "T1", "T2"], lambda tp, tile: images[tp].get(tile), SETTINGS,
+                          segmenter=threshold_segmenter())
+    assert sorted(map(tuple, outcome.radius["roster"])) == sorted(a.array.addresses)
+    assert [outcome.timepoints[tp]["consistency"] for tp in ("T0", "T1", "T2")] == [
+        "consistent", "roster_mismatch", "consistent"]
+    assert any("lattice steps from the other timepoints" in n for n in outcome.timepoints["T1"]["notes"])

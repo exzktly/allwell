@@ -47,8 +47,9 @@ from datasets.core.dataset_paths import (
     out_zips,
 )
 from datasets.core.dataset_paths import check_compatible, known_channel_tokens
+from domain.nanowell_roster import mixed_rules_note
 from datasets.core.nanowell_tables import (
-    carried_nanowell_block, has_nanowell_tables, nanowell_block_conflict, refuse_unusable_tables,
+    carried_nanowell_block, has_nanowell_tables, nanowell_block_conflict, refuse_unusable_tables, well_roster_rules,
 )
 
 IN_PROGRESS_MARKER = ".aw_merge_in_progress"
@@ -361,6 +362,13 @@ def _merge_nanowell_blocks(merged_info: dict, info1: dict, info2: dict, ds1, ds2
     if info1.get("acquisition") or info2.get("acquisition"):
         merged_info["acquisition"] = {**(info2.get("acquisition") or {}), **(info1.get("acquisition") or {})}
     one, two = has_nanowell_tables(ds1), has_nanowell_tables(ds2)
+    if one and two:
+        # Both plates' wells keep their own rows; wells whose rosters two versions decided differently are named,
+        # not refused: each well's numbers are right under its own rule, and only the rim's count differs
+        # (tracker X35a-R4).
+        rules = {f"{ds1.root.name}/{w}": r for w, r in well_roster_rules(ds1.out_dir).items()}
+        rules.update({f"{ds2.root.name}/{w}": r for w, r in well_roster_rules(ds2.out_dir).items()})
+        return mixed_rules_note(rules)
     if one == two:
         return None
     holder, other = (ds1, ds2) if one else (ds2, ds1)

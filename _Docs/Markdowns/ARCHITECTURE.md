@@ -473,6 +473,9 @@ allwell/
 │   │                              and the suffix/role catalog (§6.4)
 │   ├── text_columns.py         ← the one rendering of a value into a text column
 │   ├── tp_match.py             ← when two timepoints are the same measurement
+│   ├── nanowell_roster.py      ← which rule decided a nanowell well's roster (disk,
+│   │                              evidence, inferred), read by Validate, Merge Plates
+│   │                              and Review's Nanowells page
 │   ├── selections_format.py    ← the on-disk sample_definitions block: read it, write
 │   │                              it, repair it, migrate a v1 one, bake the colour.
 │   │                              Written by Review, rewritten by Datasets on a
@@ -9115,11 +9118,30 @@ rendered plates — the 100 µm fixture at three rotations, cut by the image's e
 and the 100 µm, 50 µm and two custom geometries at 1.3 and 2.0 µm per pixel — the roster is the drawn sites
 exactly (`tests/test_nanowell_run.py::test_a_circular_array_s_roster_is_every_drawn_site_and_no_other`). What it
 gives up: a rim nanowell a bubble hides at every timepoint, wholly imaged, is left out (2 sites under a rendered
-rim bubble on a one-timepoint well; detected at any other timepoint, it stays). The grid record keeps the roster
-as `array_radius.roster` with `roster_rule: "evidence"`, and an incremental or re-anchoring run keeps it. A well
-analysed before rosters were kept has a radius and no roster in its record, and keeps the disk rule it was
-analysed with, so its new timepoints get the same sites as its old ones; its checkpoints carry no roster, so none
-is taken back into a well of the other rule. The default's settings digest is unchanged. Completeness counts
+rim bubble on a one-timepoint well; detected at any other timepoint, it stays). A timepoint whose detections sit
+a lattice step from the other timepoints' (`_misanchored`: its detected sites overlap theirs better moved by one
+step than where they are) is anchored a step off: its detections do not widen the rim — taken at face value one such
+timepoint put 17 rows of floor into every timepoint — it is compared on its own evidence and so is a
+`roster_mismatch`, and its note says why; with two timepoints a step apart both are, since which is wrong cannot be
+told. Otherwise every timepoint is compared on the roster, as a rim nanowell a bubble hides at one timepoint is still
+that timepoint's. The grid record keeps the roster as `array_radius.roster` with `roster_rule: "evidence"`, and an
+incremental or re-anchoring run keeps it — unless its new timepoints change it: the kept rows' evidence (sites
+detected, sites whose whole disk was imaged; `nanowell_task._kept_evidence`) and the new timepoints' decide the
+roster a run over every timepoint would, and when that differs from the kept one (a rim nanowell hidden at the kept
+timepoints and seen at a new one, a band site a new timepoint shows empty) the task analyses the well again over
+every timepoint, logs why, and records it as `array_radius.reanalysed_because`. Without that, analysing a well day
+by day gave it 259 sites where one run over both days gave 265. A well analysed before rosters were kept has a
+radius and no roster in its record, and keeps the disk rule it was analysed with, so its new timepoints get the same
+sites as its old ones; its checkpoints carry no roster, so none is taken back into a well of the other rule. The
+default's settings digest is unchanged.
+
+A dataset can hold wells of both rules (a well forced to re-run or added after the others). `domain/nanowell_roster.py`
+reads each well's rule from its grid record (`disk`, `evidence`, `inferred`); Validate reports a dataset mixing the
+two circle rules as `nanowell_roster_rules_mixed`, Merge Plates names the wells of each in its note (not a refusal:
+each well's rows are right under its own rule, and only the count at the rim differs), and every Nanowells figure
+(the page's and Batch Export's, through `draw_view`) whose wells mix them says so in its footer. Test detection sees
+one timepoint, so its rim is that timepoint's, and its notes say a run decides the rim over every timepoint and
+keeps an analysed dataset's roster. Completeness counts
 timepoints, not (fov, timepoint) pairs (`completeness.nanowell_coverage`): a well of empty nanowells has no
 cell rows and is whole.
 

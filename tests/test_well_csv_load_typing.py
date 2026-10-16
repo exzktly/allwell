@@ -175,23 +175,31 @@ def test_no_numeric_column_is_ever_materialised_as_text(tmp_path):
 
 
 def test_the_file_is_not_read_twice_in_full(tmp_path, monkeypatch):
-    """The header read must stay a header read.
+    """The header read must stay a header read, and the body is read once.
 
-    ``_string_column_dtypes`` opens the file a second time. That is cheap only
-    while it is bounded to the header — ``nrows=0``. Reading the body twice
-    would trade one large allocation for two.
+    The header is read on its own (``nrows=0``) to learn which columns are text.
+    That is cheap only while it is bounded to the header. Reading the body twice
+    — by both readers, or the header read growing into a body read — would
+    trade one large allocation for two.
     """
+    pyarrow_csv = pytest.importorskip("pyarrow.csv")
     path = tmp_path / "measurements_A01.csv"
     path.write_text(MESSY)
 
     seen: list = []
     real = pd.read_csv
+    real_arrow = pyarrow_csv.read_csv
 
     def spy(*args, **kwargs):
-        seen.append(kwargs.get("nrows"))
+        seen.append(("pandas", kwargs.get("nrows")))
         return real(*args, **kwargs)
 
+    def arrow_spy(*args, **kwargs):
+        seen.append(("pyarrow", None))
+        return real_arrow(*args, **kwargs)
+
     monkeypatch.setattr(pd, "read_csv", spy)
+    monkeypatch.setattr(pyarrow_csv, "read_csv", arrow_spy)
     load_well_csv(path)
-    assert seen == [0, None], (
-        f"expected a header read then one body read, got nrows={seen}")
+    assert seen == [("pandas", 0), ("pyarrow", None)], (
+        f"expected one header read then one body read, got {seen}")

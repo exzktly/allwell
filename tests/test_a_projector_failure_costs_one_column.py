@@ -95,13 +95,15 @@ def test_both_walkers_of_the_registry_agree(monkeypatch, one_well):
 
     `recompute_qc_all` has guarded each projector for a while; this asserts
     the loader now does too, so the two cannot drift apart again without a
-    test noticing.
+    test noticing. The loader's loop is ``run_projectors``, which
+    ``load_and_project`` and the narrow reads (``review/data/narrow_rows.py``)
+    both call.
     """
     import ast
 
     from tests._repo_scan import parse_source, REPO_ROOT
 
-    for rel, fn_name in (("review/data/data_loading.py", "load_and_project"),
+    for rel, fn_name in (("review/data/data_loading.py", "run_projectors"),
                          ("review/features/qc/controller.py", "recompute_qc_all")):
         fn = next(n for n in ast.walk(parse_source(REPO_ROOT / rel))
                   if isinstance(n, ast.FunctionDef) and n.name == fn_name)

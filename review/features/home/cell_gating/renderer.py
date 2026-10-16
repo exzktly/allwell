@@ -14,6 +14,40 @@ from ui import theme
 from core.safe import swallowed
 
 
+#: The most vertices a CDF is drawn through. Above it the curve is drawn through
+#: evenly spaced points of the exact empirical CDF, always including the first
+#: and the last, so every vertex drawn lies on the full curve and the x range is
+#: every cell's. In nanowell mode a well's first frame is the whole mosaic, and a
+#: million-vertex line with a fill under it is seconds of drawing per redraw.
+CDF_MAX_POINTS = 2_000
+
+#: Tag on the thinned-curve note, so a test (and a redraw) can find it.
+THINNED_NOTE_TAG = "_aw_cell_gating_thinned_note"
+
+
+def cdf_points(values, max_points: int | None = None) -> tuple[np.ndarray, np.ndarray, int]:
+    """``(xs, ys, n)``: the empirical CDF of *values*, through at most *max_points* of its vertices."""
+    limit = CDF_MAX_POINTS if max_points is None else max_points
+    xs = np.sort(np.asarray(values, dtype=float))
+    n = int(xs.size)
+    ys = np.arange(1, n + 1) / n if n else np.empty(0)
+    if n > limit:
+        keep = np.unique(np.linspace(0, n - 1, limit).round().astype(np.intp))
+        xs, ys = xs[keep], ys[keep]
+    return xs, ys, n
+
+
+def _note_thinned(fig, counts: list[int]) -> None:
+    """Say on the figure that its curves are drawn through some of their points, when they are."""
+    thinned = [n for n in counts if n > CDF_MAX_POINTS]
+    if fig is None or not thinned:
+        return
+    note = fig.text(0.01, 0.005, f"CDFs over {CDF_MAX_POINTS:,} cells are drawn through {CDF_MAX_POINTS:,} "
+                    f"of their points (largest: {max(thinned):,}); every point drawn is on the full curve",
+                    ha="left", va="bottom", fontsize=7, color=theme.Colors.text_muted)
+    setattr(note, THINNED_NOTE_TAG, True)
+
+
 def _focus_cdf_xaxis(ax, vals) -> None:
     """Clamp the x-axis to the data range (+ small pad) so a gate line at 0 —
     or far outside the data — doesn't stretch the axis and cram the CDF against
@@ -102,9 +136,10 @@ def _cell_gating_plot_cdf(ctx) -> None:
         ax = fig.add_subplot(n_rows, n_cols, i + 1, facecolor=bg_panel)
         axes.append(ax)
 
+    drawn_counts: list[int] = []
     if ctx.runtime.cell_gating.cell_areas:
-        areas = np.array(sorted(ctx.runtime.cell_gating.cell_areas))
-        cdf = np.arange(1, len(areas) + 1) / len(areas)
+        areas, cdf, n_areas = cdf_points(ctx.runtime.cell_gating.cell_areas)
+        drawn_counts.append(n_areas)
         axes[0].plot(areas, cdf, linewidth=2, color=accent, alpha=0.8)
         axes[0].fill_between(areas, cdf, alpha=0.2, color=accent)
         axes[0].set_xlabel("Cell Area (pixels)", color=txt_pri, fontsize=9)
@@ -133,11 +168,11 @@ def _cell_gating_plot_cdf(ctx) -> None:
         ax = axes[next_idx]
         color = colors[next_idx % len(colors)]
         next_idx += 1
-        vals = np.array(sorted(values))
+        vals, cdf, n_vals = cdf_points(values)
+        drawn_counts.append(n_vals)
         if vals.size == 0:
             continue  # empty channel → no CDF, but the axes slot stays reserved
                        # (audit S8; avoids 0/0) so later channels don't inherit it
-        cdf = np.arange(1, len(vals) + 1) / len(vals)
         ax.plot(vals, cdf, linewidth=2, color=color, alpha=0.8)
         ax.fill_between(vals, cdf, alpha=0.2, color=color)
         ax.set_xlabel(f"{channel.upper()} Intensity", color=txt_pri, fontsize=9)
@@ -174,11 +209,11 @@ def _cell_gating_plot_cdf(ctx) -> None:
         ax = axes[next_idx]
         color = colors[next_idx % len(colors)]
         next_idx += 1
-        vals = np.array(sorted(values))
+        vals, cdf, n_vals = cdf_points(values)
+        drawn_counts.append(n_vals)
         if vals.size == 0:
             continue  # empty ratio → no CDF, but the axes slot stays reserved
                       # (audit S8; avoids 0/0) so later ratios don't inherit it
-        cdf = np.arange(1, len(vals) + 1) / len(vals)
         ax.plot(vals, cdf, linewidth=2, color=color, alpha=0.8)
         ax.fill_between(vals, cdf, alpha=0.2, color=color)
         ax.set_xlabel(f"{ratio_label} ratio", color=txt_pri, fontsize=9)
@@ -196,6 +231,7 @@ def _cell_gating_plot_cdf(ctx) -> None:
         ctx.runtime.cell_gating.axes_stack.append(limits)
 
     fig.tight_layout(pad=1.3)
+    _note_thinned(fig, drawn_counts)
     ctx.runtime.cell_gating.canvas.draw_idle()
 
     # Constrain height only; width is driven by the scroll area's

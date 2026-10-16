@@ -1671,22 +1671,41 @@ What this means in use:
 - **Every number is the same.** A well read back from disk carries everything
   you did to it — QC, gating, crop, manual exclusions, field and focus
   exclusions — because those are re-applied whenever a well is read.
-- **The first open of a dataset is the slow one.** Each CSV is parsed once and
-  kept beside it in a hidden `.aw_parquet` folder, with each well's summary;
-  later opens read those instead (a 1.1M-cell well reads back in about a fifth of
-  a second instead of fifteen).
+- **The first open of a dataset is the slow one.** Each CSV is parsed once
+  (about 4 seconds for a 1.1M-cell well) and kept beside it in a hidden
+  `.aw_parquet` folder, with each well's summary; later opens read those instead
+  (that well reads back in about a fifth of a second). A new version of All-Well
+  that parses differently re-parses each well once.
+- **Decimal values are read exactly.** Each number in a CSV is read as the
+  closest value the computer can hold to what is written. Earlier versions were
+  sometimes off by a tiny amount: up to about one part in a trillion
+  (1e-12) for values below 0.001, and in the last digit or so for larger ones. A
+  statistic or exported value may therefore differ from an earlier version's in
+  its last few significant digits.
 - **Plate-wide views read every well the first time**, then remember the few
   numbers they need per well until something changes them (a QC threshold, a
   gate, a crop). On a plate that does not fit, the first draw after such a change
-  reads the plate from disk again.
+  reads the plate from disk again. The line and bar charts read only the columns
+  they plot and the ones the active filters use, so that read is a fraction of
+  each well and does not push other wells out of memory.
 - **Live counts say when they cover part of the plate.** QC's "flagged" count,
   the crop's status line and Cell Gating's "Included for analysis" are
   recalculated on every edit, so they count the wells in memory; when those are
   not all of them the line ends with "counted over N of M wells in memory".
-- **Views that draw individual cells** (Scatter, Multivariate, Distribution, the
-  bar chart's beeswarm, the Cell Browser) still hold the cells of every well you
-  select. Selecting most of a very large plate in one of them asks for that many
-  points.
+- **Scatter, Distribution and the bar chart's beeswarm and violin** still hold
+  the cells of every well you select. Selecting most of a very large plate in one
+  of them asks for that many points.
+- **Cell Gating's distribution curves** are drawn through 2,000 of their points
+  when a curve has more cells than that; every point drawn is on the full curve,
+  and the figure says so.
+- **The Cell Browser names how many cells matched.** It shows at most 5,000 cells
+  — the first 5,000 in sort order — and its count now reads, for example,
+  "Showing 50 / 5000 cells (the first 5,000 of 81,200 matching, in sort order)".
+- **Multivariate** still holds the cells of every well you select, because its
+  correlations, clusters and summaries are each over every cell. It reads only the
+  columns it uses and leaves the other wells in memory alone, but selecting most
+  of a very large plate there still asks for that many cells (about 64 bytes a
+  cell at five features).
 - **If one well alone does not fit**, Review first gives back every well it is
   holding and tries again; if that fails too, the error names the well, its size
   on disk and what was held, instead of a bare out-of-memory message.

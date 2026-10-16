@@ -72,17 +72,140 @@ def normalize_fov_series(fov: pd.Series) -> pd.Series:
     return _normalize_fov_series(fov)
 
 
-def _string_column_dtypes(path: Path) -> dict:
-    """``{column: str}`` for the text columns, keyed on their on-disk names.
+def _string_column_dtypes(names) -> dict:
+    """``{column: str}`` for the text columns among the header *names*.
 
-    A one-row-free header read, so the main read below can be told which
-    columns are text and left to type the rest itself. The names are the
-    *unrenamed* ones because the rename happens after the read.
+    The names are the on-disk, *unrenamed* ones, because the rename happens
+    after the read; the main read is told which columns are text and left to
+    type the rest itself.
     """
-    header = pd.read_csv(path, nrows=0)
-    return {c: str for c in header.columns
-            if str(c).strip().lower() in _STRING_COLS}
+    return {c: str for c in names if str(c).strip().lower() in _STRING_COLS}
 
+
+def _read_well_table(path: Path) -> pd.DataFrame:
+    """The raw table of a well CSV: text columns as text, the rest typed by the reader.
+
+    Read by ``pyarrow.csv`` when pyarrow is installed, and by ``pd.read_csv``
+    otherwise or whenever pyarrow cannot read the file. The two give the same
+    frame once :func:`load_well_csv` has finished with it, with two measured
+    exceptions, both where pandas is the one that is wrong:
+
+    * **Decimal floats.** pandas' default C parser does not round correctly;
+      pyarrow parses every value to ``float(text)``, as pandas'
+      ``float_precision="round_trip"`` does. Measured on 200,000 full-precision
+      values per range: pandas differs on 12% of values in [0, 1e4), all within
+      5 ULP, but on 91% in [0, 1e-3) and 32% of standard-normal values, where it
+      is up to ~7,400 ULP off — a relative error of up to 1e-12. Values written
+      to six decimals parse identically. On the benchmark's 1,104,480-row well
+      the pyarrow frame equals the round-trip pandas frame exactly, and 28.8%
+      of its float values differ from the default pandas parse. An integer too big for ``int64`` is
+      the same case: pandas reads ``99999999999999999999`` as
+      ``1.0000000000000002e+20``, pyarrow as ``1e+20``.
+    * **An integer above ``int64`` but within ``uint64``** stays ``uint64``
+      under pandas and becomes the nearest ``float64`` under pyarrow. No
+      measurement column holds one.
+    * **A hexadecimal literal** (``0x10``) is the integer 16 under pyarrow and
+      text that coerces to NaN under pandas. The pipeline writes decimal only,
+      and the difference cannot be detected after the read.
+
+    Everything else was held equal on a corpus of the mess these files carry
+    (``tests/test_typed_csv_parse.py``). The settings that make it so:
+
+    * The column names are pandas' own, read from the header and handed over,
+      so an unnamed column is ``Unnamed: 4`` and a repeated one ``v.1`` exactly
+      as before.
+    * The text columns are given ``string``, so a field label ``01`` or ``-1``
+      stays text — the defect that sank ``engine="pyarrow"`` (tracker M8).
+    * ``""`` is the only null, so ``NA`` / ``null`` stay text in a text column
+      and become NaN in a numeric one through ``load_well_csv``'s coercion.
+    * A column pyarrow reads as a date or time is handed on as its text, which
+      that coercion turns to NaN — what pandas, which reads none, gives.
+
+    A row with the wrong number of fields, a file pyarrow cannot decode, an
+    empty file, and a float column holding a literal too large for a double
+    (``1e400``, which pyarrow reads as inf and pandas as text that becomes NaN)
+    all fall back to pandas, which reads or rejects them as it always has. Running out of
+    memory is raised as ``MemoryError``, not fallen back from. pyarrow is measured 13x faster on a 1,104,480-row, 513 MB well (5.0 s
+    against 64.8 s) at about the same peak (1,417 MiB against 1,334 MiB).
+    """
+    # The header alone (``nrows=0``), read once for both readers. An empty file
+    # raises pandas' ``EmptyDataError`` here, as it always has.
+    names = [str(c) for c in pd.read_csv(path, nrows=0).columns]
+    text_dtypes = _string_column_dtypes(names)
+    table = _arrow_read(path, names, text_dtypes)
+    if table is not None:
+        return table
+    return pd.read_csv(path, dtype=text_dtypes, keep_default_na=False, na_values=[""])
+
+
+def _arrow_read(path: Path, names: list[str], text_dtypes: dict) -> pd.DataFrame | None:
+    """:func:`_read_well_table`'s pyarrow read, or ``None`` to fall back to pandas."""
+    try:
+        import pyarrow as pa
+        import pyarrow.compute as pc
+        import pyarrow.csv as pcsv
+    except ImportError:
+        return None
+    try:
+        table = pcsv.read_csv(
+            path,
+            read_options=pcsv.ReadOptions(column_names=names, skip_rows=1),
+            convert_options=pcsv.ConvertOptions(
+                column_types={c: pa.string() for c in text_dtypes},
+                null_values=[""], strings_can_be_null=True, quoted_strings_can_be_null=True,
+                # pandas' own boolean spellings. pyarrow's defaults add "1" and
+                # "0", which read a column holding "True" and "1" as booleans
+                # where pandas reads text (the "True" then coerces to NaN).
+                true_values=list(_PANDAS_TRUE), false_values=list(_PANDAS_FALSE)),
+        )
+    except pa.ArrowMemoryError as exc:
+        # Out of memory is not "pyarrow cannot read this file": a pandas parse
+        # would only need more. Raised as the MemoryError it is, so the caller's
+        # release-the-row-cache-and-retry (``_read_making_room``) runs.
+        raise MemoryError(str(exc)) from exc
+    except (pa.ArrowException, ValueError, OSError) as exc:
+        _logger.info("pyarrow could not read %s (%s); parsing it with pandas",
+                     Path(path).name, str(exc).splitlines()[0][:200] if str(exc) else type(exc).__name__)
+        return None
+    for i, field in enumerate(table.schema):
+        if pa.types.is_temporal(field.type):
+            table = table.set_column(i, field.name, pc.cast(table.column(i), pa.string()))
+        elif (pa.types.is_floating(field.type) and pc.any(pc.is_inf(table.column(i))).as_py()
+              and not _infinities_are_spelled(path, names, field.name, pc.is_inf(table.column(i)))):
+            # A literal too large for a double ("1e400") reads as inf in pyarrow
+            # and as text that coerces to NaN in pandas. The text "inf" reads as
+            # inf in both, so only a file carrying the former falls back.
+            _logger.info("%s holds an out-of-range number in %s; parsing it with pandas", Path(path).name, field.name)
+            return None
+    return table.to_pandas()
+
+
+#: The spellings pandas reads as an infinity, after a sign and case are dropped.
+_INFINITY_SPELLINGS = frozenset({"inf", "infinity"})
+
+
+def _infinities_are_spelled(path: Path, names: list[str], column: str, is_inf) -> bool:
+    """Whether every infinity pyarrow read in ``column`` was written as one.
+
+    Re-reads that one column as text and checks the infinite rows' spellings.
+    Only a file whose float column holds an infinity pays for this.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.csv as pcsv
+
+    raw = pcsv.read_csv(
+        path,
+        read_options=pcsv.ReadOptions(column_names=names, skip_rows=1),
+        convert_options=pcsv.ConvertOptions(include_columns=[column], column_types={column: pa.string()}),
+    ).column(0)
+    texts = pc.utf8_lower(pc.utf8_ltrim(pc.filter(raw, is_inf), characters="+-"))
+    return set(texts.to_pylist()) <= _INFINITY_SPELLINGS
+
+
+#: pandas' boolean spellings (its C parser's defaults), given to pyarrow.
+_PANDAS_TRUE = ("True", "TRUE", "true")
+_PANDAS_FALSE = ("False", "FALSE", "false")
 
 #: A text column is worth storing as codes only while it repeats. Above this
 #: share of distinct values the codes array stops paying for itself and starts
@@ -171,8 +294,7 @@ def load_well_csv(path: Path) -> pd.DataFrame:
     ``NA`` / ``NaN`` / ``null`` stays that text in a string column and still
     coerces to NaN in a numeric one, exactly as before.
     """
-    df = pd.read_csv(path, dtype=_string_column_dtypes(path),
-                     keep_default_na=False, na_values=[""])
+    df = _read_well_table(path)
     if df.empty:
         return df
     for col in df.columns:
@@ -550,6 +672,32 @@ def get_rows(ctx, label: str) -> pd.DataFrame:
     return frame
 
 
+def run_projectors(ctx, label: str) -> None:
+    """Run every registered cache projector on well *label*, each guarded.
+
+    The loop :func:`load_and_project` runs on a frame it has just put in the row
+    cache, and ``narrow_rows`` runs on a narrow frame held in a scratch context,
+    so the two cannot drift in which layers they apply or how a failing one is
+    contained.
+    """
+    for _project in iter_cache_projectors():
+        # **Guarded per projector, matching ``qc.controller.recompute_qc_all``.**
+        # The same registry list is walked from two places, and until now the
+        # two had different failure contracts: a raise there lost one verdict
+        # column, a raise here lost the whole WELL, because this is the call
+        # that decides whether a frame enters the cache at all. One layer must
+        # never take down the others, and losing a well is the larger of the
+        # two failures, so the unguarded one was the wrong side of the
+        # asymmetry. Each projector already reports its own per-well failures
+        # through ``project_verdict_column``; this catches a projector that
+        # raises outside that walk.
+        try:
+            _project(ctx, label)
+        except Exception:
+            _logger.exception(
+                "cache projector %r failed for well %r", _project, label)
+
+
 def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     """Read well *label* from disk into the row cache, projected and recorded.
 
@@ -583,22 +731,7 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     # skip its verdict and leave the well looking fully included.
     with (pinned(label) if pinned is not None else nullcontext()):
         dataset.cache[label] = frame
-        for _project in iter_cache_projectors():
-            # **Guarded per projector, matching ``qc.controller.recompute_qc_all``.**
-            # The same registry list is walked from two places, and until now the
-            # two had different failure contracts: a raise there lost one verdict
-            # column, a raise here lost the whole WELL, because this is the call
-            # that decides whether a frame enters the cache at all. One layer must
-            # never take down the others, and losing a well is the larger of the
-            # two failures, so the unguarded one was the wrong side of the
-            # asymmetry. Each projector already reports its own per-well failures
-            # through ``project_verdict_column``; this catches a projector that
-            # raises outside that walk.
-            try:
-                _project(ctx, label)
-            except Exception:
-                _logger.exception(
-                    "cache projector %r failed for well %r", _project, label)
+        run_projectors(ctx, label)
     # The loader used to have to record this itself, having built the frame
     # outside this function; the verdict now travels with the load. Once per
     # well per dataset: it is a fact about the parse, which a re-read after

@@ -56,6 +56,11 @@ def _verdict(df, well: str, keys: set[tuple[str, str, str]]):
                       for f, t in zip(fovs, tps, strict=True)], index=df.index)
 
 
+def field_exclusions_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:
+    """Nothing beyond the identity columns: the verdict joins on field and timepoint."""
+    return ()
+
+
 def apply_field_exclusions_to_cache(ctx, label: str | None = None) -> list[str]:
     """Write ``Excluded_Field_Pass`` onto cached frame(s); return wells that failed.
 

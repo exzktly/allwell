@@ -44,7 +44,7 @@ def cluster(tmp_path):
         f'  env) echo "allwell {env}";;\n'
         f'  info) echo "{home}/miniforge3";;\n'
         # conda run --no-capture-output -n allwell python -c SCRIPT
-        f'  run) shift 4; shift; exec {shlex.quote(sys.executable)} "$@";;\n'
+        f'  run) shift 4; shift; echo "scratch=$ALLWELL_SCRATCH_DIR" >&2; exec {shlex.quote(sys.executable)} "$@";;\n'
         'esac\n'))
     _exe(bindir / "sinfo", "printf 'n1 idle\\n'\n")
     _exe(bindir / "srun", (
@@ -86,6 +86,26 @@ def test_a_launcher_with_a_loose_word_is_refused_before_anything_is_sent():
     host = RemoteHost(name="aws", ssh_alias="aws.example",
                       compute_launcher="srun --mem=60G g4dn.12xlarge")
     with pytest.raises(ValueError, match="g4dn.12xlarge"):
+        ProbeRun(host)
+
+
+def test_a_probe_is_sent_with_the_run_s_scratch_directory(cluster):
+    """A run exports the host's scratch directory before the pipeline starts;
+    the probe must too, or a value a run rejects (or expands) passes Test
+    unseen."""
+    host = RemoteHost(name="aws", ssh_alias="aws.example",
+                      compute_launcher="srun --partition=gpu --cpus-per-task=4",
+                      remote_scratch_dir="~/aw-scratch")
+    lines, rc = _run_as_login_shell(ProbeRun(host), cluster)
+    assert parse_probe(lines, rc).completed, "".join(lines)
+    assert f"scratch={cluster['HOME']}/aw-scratch\n" in lines, "".join(lines)
+
+
+def test_a_scratch_directory_a_run_would_reject_is_refused_by_the_test():
+    host = RemoteHost(name="aws", ssh_alias="aws.example",
+                      compute_launcher="srun --partition=gpu",
+                      remote_scratch_dir="/scratch/$(whoami)")
+    with pytest.raises(ValueError):
         ProbeRun(host)
 
 

@@ -923,8 +923,10 @@ def aggregate_well(
             per_fov_spread=per_fov_spread,
             tp_col=tp_col,
         )
+    on_col = _thresh_on_col(ctx)
     return aggregate_with_threshold_df(
-        get_rows(ctx, label),
+        _aggregate_rows(ctx, label, val_col=val_col, tp_col=tp_col,
+                        fluor_gates=fluor_gates, on_col=on_col),
         threshold=threshold,
         use_sem=use_sem,
         tp_col=tp_col,
@@ -932,8 +934,32 @@ def aggregate_well(
         fluor_gates=fluor_gates or {},
         per_fov_spread=per_fov_spread,
         ratios=ctx.state.channel.ratio_index,
-        on_col=_thresh_on_col(ctx),
+        on_col=on_col,
     )
+
+
+def _aggregate_rows(ctx, label: str, *, val_col: str, tp_col: str,
+                    fluor_gates: dict | None, on_col: str | None) -> pd.DataFrame:
+    """Well *label*'s rows for :func:`aggregate_with_threshold_df`, read narrowly.
+
+    The columns that function reads — the value (a ratio's two inputs), the
+    timepoint, the area its debris floor reads, each gated channel and the
+    thresholding on-column — through ``review/data/narrow_rows.py``, which adds
+    what the verdicts read and projects them. A well in the row cache is used
+    as held; anything the narrow read cannot vouch for reads the whole frame.
+    ``tests/test_narrow_rows.py`` holds the aggregate of a narrow frame to the
+    aggregate of the full one.
+    """
+    from review.data.narrow_rows import AGGREGATE_COLUMNS, narrow_rows, value_inputs
+
+    inputs = value_inputs(val_col, ctx.state.channel.ratio_index)
+    if inputs is None:
+        return get_rows(ctx, label)
+    want = inputs | {tp_col} | set(AGGREGATE_COLUMNS) | {
+        f"{channel}_mean_intensity" for channel in active_fluor_gates(fluor_gates or {})}
+    if on_col:
+        want.add(on_col)
+    return narrow_rows(ctx, label, want)
 
 
 def aggregate_group(
@@ -974,9 +1000,11 @@ def aggregate_group(
             fluor_gates=fluor_gates, per_fov_spread=per_fov_spread,
             tp_col=tp_col,
         )
+    on_col = _thresh_on_col(ctx)
     frames = []
     for w in valid:
-        sub = get_rows(ctx, w)
+        sub = _aggregate_rows(ctx, w, val_col=val_col, tp_col=tp_col,
+                              fluor_gates=fluor_gates, on_col=on_col)
         if per_fov_spread and len(sub) > 0:
             # Prefix FOV ids with the well label so identical FOV numbers
             # across replicate wells stay distinct when pooled.
@@ -993,7 +1021,7 @@ def aggregate_group(
         fluor_gates=fluor_gates or {},
         per_fov_spread=per_fov_spread,
         ratios=ctx.state.channel.ratio_index,
-        on_col=_thresh_on_col(ctx),
+        on_col=on_col,
     )
 
 

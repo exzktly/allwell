@@ -346,6 +346,11 @@ def _field_pass(df, well: str, flagged: set[tuple]):
     return pd.Series([0 if k in flagged else 1 for k in keys], index=df.index)
 
 
+def field_quality_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:
+    """Nothing beyond the identity columns: the verdict joins on field and timepoint."""
+    return ()
+
+
 def apply_field_quality_to_cache(ctx, label: str | None = None) -> list[str]:
     """Write ``Field_Pass`` onto cached well frame(s) from the run's own block.
 

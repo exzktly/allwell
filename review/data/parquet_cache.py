@@ -107,7 +107,9 @@ _FINGERPRINT_KEY = b"aw_source_fingerprint"
 #: is what makes this a rule rather than a note: it pins the number against a
 #: hash of ``load_well_csv``'s own source and the constants it reads, so editing
 #: the parser without bumping this fails.
-PARSER_VERSION = 1
+#: 2: the parse moved to ``pyarrow.csv`` (``data_loading._read_well_table``), whose
+#: floats are correctly rounded where pandas' default parser was not.
+PARSER_VERSION = 2
 
 #: Set once a missing engine has been reported, so a 96-well load says it once.
 _engine_warned = False
@@ -170,6 +172,23 @@ def source_fingerprint(csv_path: Path) -> str | None:
     except OSError:
         return None
     return f"{st.st_size}:{st.st_mtime_ns}:v{PARSER_VERSION}"
+
+
+def cached_column_names(csv_path: Path) -> list[str] | None:
+    """The Parquet cache's column names, when a current cache exists; read from the schema alone."""
+    pq = _pyarrow()
+    path = cache_path(csv_path)
+    want = source_fingerprint(csv_path)
+    if pq is None or want is None or not path.exists():
+        return None
+    try:
+        schema = pq.read_schema(path)
+    except Exception as exc:  # noqa: BLE001 - an unreadable cache is a miss, as in read_cached
+        _logger.debug("parquet schema unreadable for %s (%s)", Path(csv_path).name, exc)
+        return None
+    if (schema.metadata or {}).get(_FINGERPRINT_KEY, b"").decode() != want:
+        return None
+    return [n for n in schema.names if not n.startswith("__index_level_")]
 
 
 def read_cached(csv_path: Path, columns: list[str] | None = None) -> pd.DataFrame | None:

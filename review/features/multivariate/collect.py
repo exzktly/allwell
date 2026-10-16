@@ -20,6 +20,7 @@ from typing import Any
 import numpy as np
 
 from review.data.data_loading import df_included_mask, resolve_value_series, get_rows
+from review.data.narrow_rows import narrow_rows, value_inputs
 from review.domain.metric_registry import METRIC_BY_KEY
 from review.domain.viewer_state import parse_rc
 from review.domain.plot_members import plot_replicate_sets
@@ -87,9 +88,15 @@ def collect_feature_matrix(
         target_arr = np.asarray([float(t) for t in timepoints], dtype=float)
 
     rows_X: list[np.ndarray] = []
-    grp_labels: list[str] = []
-    well_labels: list[str] = []
-    tp_values: list[float] = []
+    grp_blocks: list[np.ndarray] = []
+    well_blocks: list[np.ndarray] = []
+    tp_blocks: list[np.ndarray] = []
+    # Narrow reads (``review/data/narrow_rows.py``): the features, the timepoint
+    # and what the verdicts read — not whole frames through the row cache.
+    want: set[str] | None = {"timepoint_hours"}
+    for col in feature_cols:
+        inputs = value_inputs(col, ratios)
+        want = None if inputs is None or want is None else want | inputs
     group_colors: dict[str, Any] = {}
     # Per-well colours keyed by well label (absolute plate-position rank), built
     # in BOTH modes so the renderer's "colour by: well" option works even when
@@ -99,7 +106,7 @@ def collect_feature_matrix(
 
     def _collect_well(well_label: str, group_name: str):
         nonlocal dropped
-        df = get_rows(ctx, well_label)
+        df = narrow_rows(ctx, well_label, want) if want is not None else get_rows(ctx, well_label)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
             return
         mask = df_included_mask(df, include_gate=include_gate).to_numpy(copy=True)
@@ -132,9 +139,11 @@ def collect_feature_matrix(
         block = np.column_stack([v[sel] for v in cols_vals]) if n_feat else \
             np.empty((sel.size, 0), dtype=float)
         rows_X.append(block)
-        grp_labels.extend([group_name] * sel.size)
-        well_labels.extend([well_label] * sel.size)
-        tp_values.extend(tp[sel].tolist())
+        # Per-well arrays, not per-cell list items: a list entry and the float it
+        # boxes cost ~40 bytes a cell before the conversion below copies them.
+        grp_blocks.append(np.full(sel.size, group_name, dtype=object))
+        well_blocks.append(np.full(sel.size, well_label, dtype=object))
+        tp_blocks.append(tp[sel].astype(float))
 
     active_rsets = plot_replicate_sets(ctx)
     if active_rsets:
@@ -166,9 +175,9 @@ def collect_feature_matrix(
         "X": X,
         "feature_cols": feature_cols,
         "feature_labels": [column_display_label(ctx, c) for c in feature_cols],
-        "group": np.asarray(grp_labels, dtype=object),
-        "well": np.asarray(well_labels, dtype=object),
-        "timepoint": np.asarray(tp_values, dtype=float),
+        "group": np.concatenate(grp_blocks) if grp_blocks else np.asarray([], dtype=object),
+        "well": np.concatenate(well_blocks) if well_blocks else np.asarray([], dtype=object),
+        "timepoint": np.concatenate(tp_blocks) if tp_blocks else np.asarray([], dtype=float),
         "group_colors": group_colors,
         "well_colors": well_colors,
         "n_cells": int(X.shape[0]),

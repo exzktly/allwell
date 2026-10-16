@@ -24,13 +24,23 @@ from collections.abc import Callable
 
 _logger = logging.getLogger("review")
 
-# Registered projectors, applied in order to each freshly-loaded frame.
-_PROJECTORS: list[Callable] = []
+# Registered projectors, applied in order to each freshly-loaded frame, each
+# with the declaration of the columns its verdict reads (``None``: undeclared).
+_PROJECTORS: list[tuple[Callable, Callable | None]] = []
 
 
-def register_cache_projector(fn: Callable) -> None:
-    """Append *fn* — an ``(ctx, label) -> None`` in-place cache projector."""
-    _PROJECTORS.append(fn)
+def register_cache_projector(fn: Callable, *, columns: Callable | None = None) -> None:
+    """Append *fn* — an ``(ctx, label) -> None`` in-place cache projector.
+
+    *columns* declares what the projector's verdict reads, for the narrow reads
+    of ``review/data/narrow_rows.py``: a ``(ctx, label) -> Iterable[str] | None``
+    naming the numeric columns the verdict needs under the current settings,
+    beyond the identity columns every narrow read carries. ``None`` from it, or
+    no declaration at all, means "I cannot say", and every narrow read then
+    reads the whole frame — the safe direction, because a verdict whose input
+    column is missing fails open and passes every cell.
+    """
+    _PROJECTORS.append((fn, columns))
 
 
 def clear_cache_projectors() -> None:
@@ -41,6 +51,11 @@ def clear_cache_projectors() -> None:
 
 def iter_cache_projectors() -> list[Callable]:
     """The registered projectors, in registration order."""
+    return [fn for fn, _columns in _PROJECTORS]
+
+
+def iter_projector_declarations() -> list[tuple[Callable, Callable | None]]:
+    """``(projector, columns declaration or None)`` pairs, in registration order."""
     return list(_PROJECTORS)
 
 

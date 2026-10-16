@@ -158,12 +158,15 @@ def test_a_changed_parser_invalidates_every_cache():
         inspect.getsource(dl.load_well_csv),
         inspect.getsource(dl._categorize_text_columns),
         inspect.getsource(dl._string_column_dtypes),
+        inspect.getsource(dl._read_well_table),
+        inspect.getsource(dl._arrow_read),
+        repr((dl._PANDAS_TRUE, dl._PANDAS_FALSE)),
         repr(sorted(dl._STRING_COLS)),
         repr(dl._CATEGORY_MAX_UNIQUE_SHARE),
     ])
     digest = hashlib.sha256(material.encode()).hexdigest()[:16]
 
-    assert (pc.PARSER_VERSION, digest) == (1, "2769ca5409532701"), (
+    assert (pc.PARSER_VERSION, digest) == (2, "069dcd63dec51357"), (
         "load_well_csv or a constant it reads has changed. Every cached frame "
         "on every user's disk was produced by the old one, and the fingerprint "
         "does not know that. Bump PARSER_VERSION so they all invalidate, then "
@@ -297,7 +300,7 @@ def test_the_cache_is_written_before_any_verdict_is_projected(plate, monkeypatch
     def project_qc(ctx, label):
         ctx.state.dataset.cache[label]["QC_Pass"] = 1
 
-    monkeypatch.setattr(cp, "_PROJECTORS", [project_qc])
+    monkeypatch.setattr(cp, "_PROJECTORS", [(project_qc, None)])
     ctx = _StubCtx(plate)
     frame = dl.load_and_project(ctx, "A01", path=plate)
 

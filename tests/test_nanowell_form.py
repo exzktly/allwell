@@ -391,6 +391,11 @@ def test_the_pre_flight_lists_the_wells_the_run_will_read(tmp_path, mess):
     opts = {"filename_schema": ":".join(SCHEMA), "filename_sep": "_", "nanowell_format": "100um",
             "nanowell_margin_um": ""}
     assert nanowell_input_report(str(root), opts) == ([], [])
+    # ... and the run's own start check agrees (roll-up review X28): passing the pre-flight and then failing at
+    # launch is the disagreement this guards.
+    from pipeline.sidecar import check_acquisition_inputs
+
+    check_acquisition_inputs(root / "in", ":".join(SCHEMA), "_")     # as process_microscopy.main calls it
 
 
 def test_test_detection_offers_the_wells_the_run_will_read(tab, tmp_path):

@@ -35,7 +35,7 @@ from pathlib import Path
 from util.aw_safe import swallow
 from util.dir_scan import files_in, subdirs_in
 from util.image_exts import is_run_input_member
-from util.well_token import canonical_well_label as _canonical_well_label
+from util.well_token import canonical_well_label as _canonical_well_label, is_well_archive
 
 log = logging.getLogger(__name__)
 
@@ -68,11 +68,10 @@ def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
         if p.name.startswith("."):
             log.debug("Skipping hidden file: %s", p.name)
             continue
-        # Canonicalises to upper-case, zero-padded column (a1 → A01) and
-        # returns None for anything that is not a 96-well position.
-        well = _canonical_well_label(p.stem)
-        if well is not None:
-            found.append((well, p))
+        # The shared rule (util.well_token.is_well_archive), so the run and every check of its input agree.
+        # Canonicalises to upper-case, zero-padded column (a1 → A01).
+        if is_well_archive(p):
+            found.append((_canonical_well_label(p.stem), p))
         else:
             skipped.append(p)
 

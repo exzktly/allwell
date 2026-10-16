@@ -19,7 +19,7 @@ from pathlib import Path
 from util.image_exts import is_run_input_member
 from util.json_write import write_json_atomic
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP, parse_schema, validate_schema
-from util.well_token import canonical_well_label
+from util.well_token import canonical_well_label, well_archives
 
 FORMAT_VERSION = 1
 RECORD_FILENAME = "acquisition.json"
@@ -289,7 +289,7 @@ def validate_against_archives(dataset_dir: str | Path, payload, *,
     the pipeline's input-member predicate. Unreadable archives are reported and
     their field coverage is not fabricated as an empty set.
     """
-    return validate_record_paths((Path(dataset_dir) / "in").glob("*.zip"), payload,
+    return validate_record_paths(well_archives(Path(dataset_dir) / "in"), payload,
                                  schema=schema, sep=sep)
 
 
@@ -334,7 +334,7 @@ def validate_record_paths(paths, payload, *, schema=DEFAULT_SCHEMA, sep=DEFAULT_
 
 def filter_record_to_archives(dataset_dir, payload, *, schema=DEFAULT_SCHEMA, sep=DEFAULT_SEP):
     """Keep exact published identities; retain the acquisition's shared clock."""
-    return filter_record_to_paths((Path(dataset_dir) / "in").glob("*.zip"), payload,
+    return filter_record_to_paths(well_archives(Path(dataset_dir) / "in"), payload,
                                   schema=schema, sep=sep)
 
 

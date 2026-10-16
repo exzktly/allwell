@@ -40,7 +40,7 @@ from pipeline.explode_common import expected_members, well_is_complete
 from util.acquisition_record import (
     AcquisitionRecordError, RECORD_FILENAME, new_record, new_timepoint, validate_record, write_record_file,
 )
-from util.well_token import canonical_well_label
+from util.well_token import canonical_well_label, well_archives
 
 log = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ def publish_record(out_in_dir: Path, source_name: str, plan: dict, *, experiment
 
     path = Path(out_in_dir) / RECORD_FILENAME
     complete, foreign = [], []
-    for archive in sorted(Path(out_in_dir).glob("*.zip")):
+    for archive in well_archives(out_in_dir):
         well = canonical_well_label(archive.stem)
         expected = expected_members(experiment, channels, archive.stem, fovs, [tp for _i, tp in tp_plan])
         vouched = archive.stem in set(written) or archive.stem in set(earlier)

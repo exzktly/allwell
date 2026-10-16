@@ -395,6 +395,9 @@ allwell/
 │   ├── well_token.py           ← canonical 96-well token parser (single source of truth:
 │   │                              process_microscopy, well_plate_zipper, analyze.tab and
 │   │                              input_resolution_service all parse well names through it)
+│   │                              — and `is_well_archive` / `well_archives`, the one rule for which
+│   │                              files in in/ are well archives: the run, its start check, the
+│   │                              acquisition record's checks, the converters and the pre-flight
 │   ├── filename_token.py       ← reduce a metadata label (a channel name, an
 │   │                              experiment) to a token that survives a filename;
 │   │                              both packed-file converters name images through it

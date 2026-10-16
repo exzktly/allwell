@@ -24,6 +24,7 @@ from util.acquisition_record import (
 from util.image_exts import is_run_input_member
 from util.json_write import write_json_atomic
 from util.zip_write import atomic_zip
+from util.well_token import well_archives
 
 FRAME_COMMENT_PREFIX = b"allwell:czi-source-timepoint="
 
@@ -137,7 +138,7 @@ class RecordBuilder:
 
     def _published_tiles(self, *, ignore_wells=()):
         tiles = {}
-        for path in sorted(self.directory.glob("*.zip")):
+        for path in well_archives(self.directory):
             if path.stem in ignore_wells:
                 continue
             with zipfile.ZipFile(path) as archive:
@@ -171,7 +172,7 @@ class RecordBuilder:
         return len(actual) == len(expected) and set(actual) == expected
 
     def _relabel(self, tokens):
-        for path in sorted(self.directory.glob("*.zip")):
+        for path in well_archives(self.directory):
             with zipfile.ZipFile(path) as source:
                 renamed = []
                 for info in source.infolist():
@@ -213,7 +214,7 @@ class RecordBuilder:
                     f"CZI files disagree about pixel_size_um.{axis}: {sorted(known)}")
 
     def _check_retained_names(self, selected_wells):
-        for path in sorted(self.directory.glob("*.zip")):
+        for path in well_archives(self.directory):
             if path.stem in selected_wells:
                 continue
             with zipfile.ZipFile(path) as archive:

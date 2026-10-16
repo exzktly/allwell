@@ -167,7 +167,11 @@ def check_acquisition_inputs(input_dir, schema, sep):
     record = read_record_file(Path(input_dir) / RECORD_FILENAME)
     if record is None:
         return
-    validation = validate_record_paths(Path(input_dir).glob("*.zip"), record, schema=schema, sep=sep)
+    from util.well_token import well_archives
+
+    # The archives the run reads (X28): an AppleDouble sidecar or an upper-case suffix must not fail a run the
+    # pre-flight passed.
+    validation = validate_record_paths(well_archives(input_dir), record, schema=schema, sep=sep)
     if not validation.ok:
         # Said with the way out: the record was written for the archives a conversion (or a Datasets tool)
         # produced, and archives added or removed by hand since make it describe a different dataset. Running on

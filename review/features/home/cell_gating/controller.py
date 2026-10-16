@@ -27,6 +27,7 @@ controllers, the feature registry, and the persistence layer call):
 
 from __future__ import annotations
 
+import copy
 import logging
 import time
 
@@ -48,6 +49,7 @@ from core.safe import swallowed
 from review.core.selection_controller import invalidate_stats_cache
 from review.data.curation import apply_curation_to_cache
 from review.data.data_loading import get_rows, held_wells_note
+from review.data.plate_scan import per_well
 from review.domain.gating_state import (
     default_thresh_count_on, default_thresh_frac_on, fluor_gate_for,
     resolve_gate_key,
@@ -103,12 +105,15 @@ def gating_pass_config(ctx) -> dict:
         # or the union of all gates — defines the Included population instead of
         # the intensity floors.
         "use_scatter": bool(ctx.state.cell_gating.use_scatter_gates),
-        "gating_gates": cell_gating_selected_scatter_gates(ctx, "gating"),
+        # Copies of the gate dicts, not the dicts: the Scatter tab edits a gate's
+        # corners in place on every drag event, and a configuration that shared
+        # them would re-gate a reloaded well with a box the pass never applied.
+        "gating_gates": copy.deepcopy(cell_gating_selected_scatter_gates(ctx, "gating")),
         # Thresholding has its OWN gate selection (independent of the gating
         # layer): cells inside its gate(s) define the "on" population for
         # fraction-on (Gate_On column).
         "use_thresh": bool(ctx.state.cell_gating.use_scatter_thresh),
-        "thresh_gates": cell_gating_selected_scatter_gates(ctx, "thresh"),
+        "thresh_gates": copy.deepcopy(cell_gating_selected_scatter_gates(ctx, "thresh")),
         "ratios": ctx.state.channel.ratio_index or {},
     }
 
@@ -153,7 +158,13 @@ class GatingWorker(QThread):
         fluor_gates = config["fluor_gates"]
         # Recorded before the first well is written, so a well evicted and
         # re-read at any point during or after this pass is gated the same way
-        # by the projector (``gating_compute.apply_gating_to_cache``).
+        # by the projector (``gating_compute.apply_gating_to_cache``). Not by a
+        # pass already cancelled — its replacement has recorded, or is about to
+        # record, the configuration in force — and asserted again when the pass
+        # completes, which settles the one interleaving the check cannot: a
+        # cancel landing between it and the assignment.
+        if self._cancelled:
+            return
         self._ctx.state.cell_gating.applied_gating = config
         labels = list(self._ctx.state.dataset.well_paths)
         total = len(labels)
@@ -213,6 +224,9 @@ class GatingWorker(QThread):
             time.sleep(0.01)
 
         if not self._cancelled:
+            # See the recording above: a cancelled predecessor can have written
+            # its configuration after this pass recorded its own.
+            self._ctx.state.cell_gating.applied_gating = config
             # Re-apply user overrides on top of the gating-computed Included
             # so per-cell curation in the Segmentation tab is not clobbered by
             # threshold-based recomputes.
@@ -234,6 +248,50 @@ class GatingWorker(QThread):
 
 # ── public API ────────────────────────────────────────────────────────────
 
+def _first_frame_values(df, channels, ratios):
+    """One well's first-frame cell areas, positive channel values and ratios, or ``None``.
+
+    Respects the crop region and the QC debris gate, not the fluorescence gate —
+    these CDFs are what that gate is set from.
+    """
+    if df is None or df.empty:
+        return None
+    frame_df, _ = _cell_gating_first_frame_rows(df)
+    if frame_df is None or frame_df.empty:
+        return None
+    frame_df = _cell_gating_valid_rows(frame_df)
+    if frame_df.empty:
+        return None
+    areas = np.empty(0)
+    if "area_px" in frame_df.columns:
+        area = pd.to_numeric(frame_df["area_px"], errors="coerce").to_numpy()
+        areas = area[np.isfinite(area) & (area > 0)]
+    fluor: dict = {}
+    for channel in channels:
+        val_col = f"{channel}_mean_intensity"
+        if val_col not in frame_df.columns:
+            continue
+        v = pd.to_numeric(frame_df[val_col], errors="coerce").to_numpy()
+        positive = v[np.isfinite(v) & (v > 0)]
+        if positive.size:
+            fluor[channel] = positive
+    ratio_vals: dict = {}
+    for rm in ratios:
+        num_col = rm.numerator_col()
+        den_col = rm.denominator_col()
+        if num_col not in frame_df.columns or den_col not in frame_df.columns:
+            continue
+        num = pd.to_numeric(frame_df[num_col], errors="coerce").to_numpy()
+        den = pd.to_numeric(frame_df[den_col], errors="coerce").to_numpy()
+        eps = float(rm.epsilon or 0.0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = num / (den + eps) if eps else np.where(den != 0, num / den, np.nan)
+        keep = np.isfinite(ratio) & (ratio > 0)
+        if keep.any():
+            ratio_vals[rm.display_label()] = ratio[keep]
+    return areas, fluor, ratio_vals
+
+
 def cell_gating_load_cell_areas(ctx) -> None:
     """Repopulate cell-area + per-channel fluorescence CDFs from selected wells."""
     if not ctx.runtime.cell_gating.fluor_gate_edits is not None:
@@ -244,48 +302,25 @@ def cell_gating_load_cell_areas(ctx) -> None:
     labels = _cell_gating_source_wells(ctx)
     ratios = list(ctx.state.channel.ratio_metrics or [])
 
+    channels = tuple(ctx.state.channel.fluor_channels)
+    params = (channels, tuple((rm.display_label(), rm.numerator_col(), rm.denominator_col(),
+                               float(rm.epsilon or 0.0)) for rm in ratios))
     for label in labels:
-        df = get_rows(ctx, label)
-        if df is None or df.empty:
+        # Remembered per well (``plate_scan``) until its rows or verdicts change:
+        # this runs several times while a dataset opens and on every visit to the
+        # tab, and with the row cache bounded each run would read every evicted
+        # source well from disk again. What is kept is one frame's values per
+        # well — the first frame's cells — never the rows.
+        found = per_well(ctx, "cell_gating_first_frame", label, params,
+                         lambda df: _first_frame_values(df, channels, ratios))
+        if found is None:
             continue
-        frame_df, _ = _cell_gating_first_frame_rows(df)
-        if frame_df is None or frame_df.empty:
-            continue
-        # Respect the crop region + QC debris gate (not the fluorescence gate —
-        # these CDFs are used to set it).
-        frame_df = _cell_gating_valid_rows(frame_df)
-        if frame_df.empty:
-            continue
-        if "area_px" in frame_df.columns:
-            area = pd.to_numeric(frame_df["area_px"], errors="coerce").to_numpy()
-            ctx.runtime.cell_gating.cell_areas.extend(
-                float(a) for a in area[np.isfinite(area) & (area > 0)]
-            )
-        for channel in ctx.state.channel.fluor_channels:
-            val_col = f"{channel}_mean_intensity"
-            if val_col not in frame_df.columns:
-                continue
-            v = pd.to_numeric(frame_df[val_col], errors="coerce").to_numpy()
-            positive = v[np.isfinite(v) & (v > 0)]
-            if positive.size:
-                ctx.runtime.cell_gating.fluor_data.setdefault(channel, []).extend(
-                    float(x) for x in positive
-                )
-        for rm in ratios:
-            num_col = rm.numerator_col()
-            den_col = rm.denominator_col()
-            if num_col not in frame_df.columns or den_col not in frame_df.columns:
-                continue
-            num = pd.to_numeric(frame_df[num_col], errors="coerce").to_numpy()
-            den = pd.to_numeric(frame_df[den_col], errors="coerce").to_numpy()
-            eps = float(rm.epsilon or 0.0)
-            with np.errstate(divide="ignore", invalid="ignore"):
-                ratio = num / (den + eps) if eps else np.where(den != 0, num / den, np.nan)
-            keep = np.isfinite(ratio) & (ratio > 0)
-            if keep.any():
-                ctx.runtime.cell_gating.ratio_data.setdefault(rm.display_label(), []).extend(
-                    float(x) for x in ratio[keep]
-                )
+        areas, fluor, ratio_vals = found
+        ctx.runtime.cell_gating.cell_areas.extend(float(a) for a in areas)
+        for channel, values in fluor.items():
+            ctx.runtime.cell_gating.fluor_data.setdefault(channel, []).extend(float(x) for x in values)
+        for name, values in ratio_vals.items():
+            ctx.runtime.cell_gating.ratio_data.setdefault(name, []).extend(float(x) for x in values)
 
     _cell_gating_build_channel_controls(ctx)
     _cell_gating_refresh_optimizer_controls(ctx)

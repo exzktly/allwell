@@ -39,10 +39,19 @@ from review.domain.fov_integrity import FovIntegrity, check_fov_labels
 _logger = logging.getLogger("review")
 
 #: Bumped whenever :func:`summarize_frame` would describe the same frame differently.
-SUMMARY_VERSION = 1
+#: 2: ``nucleus_id`` joined :data:`SUMMARY_COLUMNS`; a version-1 summary taken from
+#: the column subset judged the FOV labels without it (see below).
+SUMMARY_VERSION = 2
 
-#: The columns a summary reads, for a subset read of the Parquet cache.
-SUMMARY_COLUMNS = ("timepoint_hours", "timepoint", "fov", "filename")
+#: The columns a summary reads, for a subset read of the Parquet cache: what the
+#: timepoint and FOV lists read, and **everything** ``fov_integrity.
+#: check_fov_labels`` reads — ``filename`` for its first signal, ``nucleus_id``
+#: for its second (one nucleus id appearing twice in a field and timepoint). A
+#: verdict judged on fewer columns answers "trusted" for a well that is not, and
+#: the summary stores that under the CSV's fingerprint; ``tests/
+#: test_opening_reads_what_fits.py`` holds the subset read to the full frame's
+#: answer on a well only the second signal catches.
+SUMMARY_COLUMNS = ("timepoint_hours", "timepoint", "fov", "filename", "nucleus_id")
 
 #: Columns the projectors add to a loaded frame. A summary describes the parse,
 #: so a summary taken from a projected frame leaves them out.
@@ -149,10 +158,11 @@ def read_summary(csv_path: Path) -> WellSummary | None:
         return None
     try:
         data = json.loads(summary_path(csv_path).read_text())
-        if data.get("fingerprint") != _stamp(fingerprint):
+        if not isinstance(data, dict) or data.get("fingerprint") != _stamp(fingerprint):
             return None
         return WellSummary.from_json(data["summary"])
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        # Any unreadable summary is a miss, recomputed — never a failed open.
         return None
 
 

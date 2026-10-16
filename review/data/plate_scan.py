@@ -36,13 +36,22 @@ def per_well(ctx, kind: str, label: str, params: Hashable, compute: Callable):
         store = None
     key = ("plate_scan", kind, label, params, version)
     if store is not None:
-        hit = store.cache.get(key)
-        if hit is not None:
-            return hit
+        hit = store.cache.get(key, _MISSING)
+        if hit is not _MISSING:
+            return None if hit is _NONE else hit
     result = compute(get_rows(ctx, label))
-    if store is not None and result is not None:
-        store.cache[key] = result
+    if store is not None:
+        # ``None`` is remembered too: it is the answer for a well with nothing
+        # to contribute (no values of the column, no rows), and not remembering
+        # it re-read exactly those wells — every well, for a ratio column — on
+        # every ask.
+        store.cache[key] = _NONE if result is None else result
     return result
+
+
+#: A key with no entry, and a remembered ``None`` (which ``dict.get`` cannot tell apart).
+_MISSING = object()
+_NONE = object()
 
 
 def every_well(ctx, kind: str, params: Hashable, compute: Callable) -> dict:

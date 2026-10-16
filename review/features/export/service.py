@@ -1082,6 +1082,8 @@ def export_distribution_data(ctx) -> None:
     from review.data.data_loading import _all_fluor_values_filtered, iter_plot_groups
     import math as _math
 
+    import numpy as np
+
     val_col = ctx.state.channel.active_val_col
     fluor_gates = get_all_fluor_gates(ctx)
     ratios = ctx.state.channel.ratio_index
@@ -1115,7 +1117,10 @@ def export_distribution_data(ctx) -> None:
         # they were a Python string per cell for every group at once — about
         # eight times the memory of the floats, held until the whole file was
         # assembled. ``float_format`` writes the same "%.6f" text they held.
-        chunks.append((name, well_name, vals))
+        # As floats whatever the column's type: an integer column (a spot
+        # count) would otherwise skip ``float_format`` and write ``12`` where the
+        # per-cell strings wrote ``12.000000``.
+        chunks.append((name, well_name, np.asarray(vals, dtype=float)))
 
     if not chunks:
         _warn(ctx.window, "Export", "No distribution data — select wells and a timepoint first.")

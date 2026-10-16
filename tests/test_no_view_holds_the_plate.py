@@ -237,3 +237,59 @@ def test_the_distribution_export_writes_what_the_string_version_wrote(tmp_path, 
                                         "gfp_mean_intensity": [f"{v:.6f}" for v in vals]})
                           for name, vals in values.items()], ignore_index=True).to_csv(index=False)
     assert out.read_text() == expected
+
+
+# ── review R1: a writer on a thread must not hang or swallow its failure ────
+
+
+def _batch_harness(monkeypatch, wells, *, chunk_fails_at=None):
+    import review.features.batch_export._cell_rows as cr
+    from review.features.export import cell_scope_compute as csc
+    from review.features.export.cell_scope_compute import CellScope
+
+    reads = _Reads()
+    monkeypatch.setattr(cr, "get_rows", reads.get_rows, raising=False)
+    monkeypatch.setattr("review.data.data_loading.get_rows", reads.get_rows)
+    monkeypatch.setattr(cr, "figure_names_map", lambda ctx: {})
+    monkeypatch.setattr(cr, "_scope_block", lambda ctx, scope, **kw: ["# test"])
+    if chunk_fails_at is not None:
+        real_chunk, seen = csc.build_chunk, []
+
+        def failing_chunk(frame, *a, **k):
+            seen.append(1)
+            if len(seen) == chunk_fails_at:
+                raise ValueError("this chunk cannot be cut")
+            return real_chunk(frame, *a, **k)
+
+        monkeypatch.setattr(csc, "build_chunk", failing_chunk)
+    ctx = SimpleNamespace(
+        runtime=SimpleNamespace(cell_gating=SimpleNamespace(worker=None)),
+        state=SimpleNamespace(
+            dataset=SimpleNamespace(well_paths={w: f"/tmp/{w}" for w in wells}, rows_version=1,
+                                    data_dir="/tmp/ds", crop_region=None),
+            selection=SimpleNamespace(selections=[]),
+            cell_gating=SimpleNamespace(thresh_frac_on={}, thresh_count_on={}, scatter_gates=None,
+                                        use_scatter_gates=False, gating_choices=None,
+                                        thresh_choices=None, use_scatter_thresh=False)))
+    scope = CellScope(plot="line", val_col="gfp_mean_intensity", ratios={}, threshold=0.0,
+                      fluor_gates={}, wells=tuple(("G", w) for w in wells))
+    return cr, ctx, scope
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize("n_wells", [1, 5])
+def test_a_write_that_fails_is_raised_not_hung_or_counted_as_nothing(tmp_path, monkeypatch, n_wells):
+    cr, ctx, scope = _batch_harness(monkeypatch, _WELLS[:n_wells])
+    out = tmp_path / "no such directory" / "cells.csv"           # the temp file cannot be opened
+    with pytest.raises(OSError):
+        cr.write_cell_rows(ctx, scope, out)
+
+
+@pytest.mark.timeout(60)
+def test_a_chunk_that_fails_leaves_no_partial_file(tmp_path, monkeypatch):
+    cr, ctx, scope = _batch_harness(monkeypatch, _WELLS, chunk_fails_at=3)
+    out = tmp_path / "cells.csv"
+    with pytest.raises(ValueError, match="cannot be cut"):
+        cr.write_cell_rows(ctx, scope, out)
+    assert not out.exists(), "two wells' rows were committed as the file"
+    assert not [p for p in tmp_path.iterdir()], [p.name for p in tmp_path.iterdir()]

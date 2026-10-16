@@ -189,3 +189,32 @@ def test_an_orphaned_summary_is_pruned(ctx):
     ctx.paths["C03"].unlink()
     prune(ctx.paths["C03"].parent)
     assert not stored.exists()
+
+
+# ── review R2 / R8 ─────────────────────────────────────────────────────────
+
+
+def test_a_summary_from_the_column_read_judges_the_fov_labels_as_the_frame_does(tmp_path):
+    """A well whose field labels pool several images shows it only through a
+    nucleus id repeated within one field and timepoint (the check's second
+    signal). The summary taken from the Parquet column read must see that too,
+    or it stores "trusted" for a well that is not."""
+    from review.data.parquet_cache import read_cached
+
+    path = tmp_path / "E05.csv"
+    pd.DataFrame({"well": ["E05"] * 6, "fov": ["1"] * 6, "timepoint": ["0h"] * 6,
+                  "nucleus_id": ["1", "2", "3", "1", "2", "3"], "gfp_mean_intensity": np.arange(6.0)}
+                 ).to_csv(path, index=False)
+    full = summarize_frame(data_loading.read_well_frame(path))     # also fills the Parquet cache
+    assert full.fov_verdict.trusted is False, "the fixture does not trip the second signal"
+    assert read_cached(path) is not None, "no Parquet cache; the column-read path would not be taken"
+    assert well_summary(path).fov_verdict == full.fov_verdict
+
+
+@pytest.mark.parametrize("text", ["[]", '"x"', "7", "{", ""])
+def test_an_unreadable_summary_is_a_miss_not_a_failed_open(ctx, text):
+    path = ctx.paths["A01"]
+    well_summary(path)
+    summary_path(path).write_text(text)
+    assert read_summary(path) is None
+    assert well_summary(path).fovs == ("1", "2")

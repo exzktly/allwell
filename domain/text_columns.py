@@ -35,6 +35,7 @@ applied directly to one of these six columns, anywhere in the app.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 #: The columns ``load_well_csv`` reads as text and may store as categories.
@@ -61,13 +62,31 @@ def as_text(values, *, default: str = "") -> pd.Series:
     """
     s = values if isinstance(values, pd.Series) else pd.Series(values)
     if isinstance(s.dtype, pd.CategoricalDtype):
-        s = s.astype(object)
+        return _categorical_as_text(s, default)
     # `.where(notna, default)` rather than `.fillna(default)`: identical on an
     # object column, and it is the fillna that raises on a categorical one.
     s = s.where(s.notna(), default).astype(str).str.strip()
     if default:
         s = s.mask(s == "", default)
     return s
+
+
+def _categorical_as_text(s: pd.Series, default: str) -> pd.Series:
+    """:func:`as_text` of a categorical, computed once per category, not once per row.
+
+    The text columns are stored as categories because they repeat — a well of a
+    million cells carries a few dozen FOV labels and a dozen timepoints — so the
+    strip and the blank-to-*default* rule are applied to the categories and the
+    rows take their category's answer by code. Widening to ``object`` and
+    stripping every row cost 0.33 s a call on a 1.1M-row well, and the FOV check
+    alone made three such calls on every read of a well. A missing value (code
+    ``-1``) reads as *default*, as it does on the object path.
+    """
+    cats = pd.Series(s.cat.categories, dtype=object).astype(str).str.strip()
+    if default:
+        cats = cats.mask(cats == "", default)
+    lookup = np.append(cats.to_numpy(dtype=object), np.array([default], dtype=object))
+    return pd.Series(lookup[s.cat.codes.to_numpy()], index=s.index, name=s.name, dtype=object)
 
 
 def text_column(df, column: str, *, default: str = "") -> pd.Series:

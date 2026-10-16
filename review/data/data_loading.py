@@ -600,8 +600,13 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
                 _logger.exception(
                     "cache projector %r failed for well %r", _project, label)
     # The loader used to have to record this itself, having built the frame
-    # outside this function; the verdict now travels with the load.
-    record_fov_verdict(ctx, label, frame)
+    # outside this function; the verdict now travels with the load. Once per
+    # well per dataset: it is a fact about the parse, which a re-read after
+    # eviction does not change, and judging a 1.1M-row well's labels took a
+    # second — on every re-read, when the cache is bounded. A well opened from
+    # its summary already has the summary's verdict; ``begin_load`` clears them.
+    if label not in getattr(dataset, "fov_integrity", {}):
+        record_fov_verdict(ctx, label, frame)
     # The projectors added columns in place; the budget should count them. The
     # local *frame* is what is returned: a frame larger than the budget is held
     # alone, and another thread's read may have evicted it since the unpin.

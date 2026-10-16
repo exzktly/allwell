@@ -59,8 +59,9 @@ _HELD_ONLY_READERS: dict[str, str] = {
     "review/features/home/cell_gating/controller.py::cell_gating_refresh_included_count": (
         "'Included for analysis', counted over the held frames; the line appends held_wells_note."),
     "review/features/smfish/tab_view.py::_smfish_refresh_app_cache": (
-        "Replaces a HELD well's frame after the smFISH write-back rewrote its CSV. An evicted well needs "
-        "nothing: its next read sees the new file, whose fingerprint invalidates the Parquet cache."),
+        "Re-reads each HELD well through load_and_project after the smFISH write-back rewrote its CSV, so it "
+        "carries every verdict layer again. An evicted well needs nothing: its next read sees the new file, whose "
+        "fingerprint invalidates the Parquet cache, and is projected like any other read."),
     "review/core/dataset_state.py::begin_load": "Clears the cache on a dataset swap.",
     "review/core/channel_state_controller.py::_sample_frame": (
         "Channel detection reads column names and the first row's channel token, shared by every well of a run: "
@@ -71,7 +72,9 @@ _HELD_ONLY_READERS: dict[str, str] = {
         "Checks the first held frame for the new metric's column and clears the cache when it is missing (a "
         "stale cache). Any held well answers that; with none held there is nothing stale to clear."),
     "review/persistence/reset_scopes.py::clear_curation": "Clears the cache so frames reload without overrides.",
-    "review/persistence/reset_scopes.py::_clear_gating": "Clears the cache so frames reload ungated.",
+    "review/persistence/reset_scopes.py::_clear_gating": (
+        "Clears the cache so frames reload ungated; restore_gating_block forgets the applied gating first, so a "
+        "well read before the restarted pass runs is not re-gated with the cleared configuration."),
     "review/core/dataset_state.py::well_summaries": (
         "Summarises a held frame for a well that has no stored summary — a supplement to the summaries, which "
         "cover every opened well, never a substitute for them."),

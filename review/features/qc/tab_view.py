@@ -384,8 +384,9 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
             status.setText("")
             return
         n_excl, n_tot = qc_excluded_count(ctx)
-        if n_tot:
-            status.setText(f"flagged {n_excl:,} / {n_tot:,}{held_wells_note(ctx)}")
+        # Blank when nothing is held to count (a reset just emptied the cache):
+        # the previous count would otherwise stay on screen as if current.
+        status.setText(f"flagged {n_excl:,} / {n_tot:,}{held_wells_note(ctx)}" if n_tot else "")
 
     def _update_field_quality_status() -> None:
         _refresh_field_quality_status(

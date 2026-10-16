@@ -26,6 +26,13 @@ sliced copy of every well in the scope. The rows are read twice — once for the
 column lists the header needs, once for the chunk — which costs a re-read from
 the Parquet cache for a well the row cache has since evicted. A well that reads
 the first time and fails the second is logged and contributes no rows.
+
+A writer on a thread is a writer whose failure can vanish, so two things are
+carried across: a write that fails (the temp file unwritable, the disk full,
+the replace refused) is re-raised here exactly as it was raised inline — never
+a hang on a queue nobody drains, never "0 rows" — and a chunk that fails to cut
+cancels the writer, which then discards its temp file instead of committing a
+partial one, before that failure is re-raised.
 """
 
 from __future__ import annotations
@@ -44,6 +51,9 @@ from review.features.export.service import (
     _gating_busy, _scope_block, figure_names_map,
 )
 from review.features.export.worker import DONE, CellExportWriter
+
+#: How often a blocked ``put`` re-checks that the writer thread is still draining.
+_PUT_POLL_S = 0.1
 
 _logger = logging.getLogger("review")
 
@@ -112,18 +122,37 @@ def write_cell_rows(ctx, scope, out_path) -> int:
     # sliced copy of every well of the scope at once.
     chunks: queue.Queue = queue.Queue(maxsize=2)
 
+    cancel = threading.Event()
     writer = CellExportWriter(
         out_path=out_path, header=header, scope_lines=scope_lines,
         chunks=chunks,
-        # Never set: there is no user to cancel a job that is already inside a
-        # blocking run, and a cancel event that could fire would let the writer
-        # return its "cancelled" result into a batch that would then commit the
-        # partial file it had left behind.
-        cancel=threading.Event(),
+        # Set only when cutting a chunk fails, so the writer discards its temp
+        # file rather than committing a partial one; that failure is then
+        # re-raised here, so the batch records the shortfall and never sees a
+        # file. There is no user to cancel a job already inside a blocking run.
+        cancel=cancel,
         total_wells=len(wells))
-    result: dict = {}
-    thread = threading.Thread(target=lambda: result.update(writer() or {}),
-                              name="batch-cell-export-writer", daemon=True)
+    outcome: dict = {}
+
+    def _drain() -> None:
+        # The writer re-raises a write failure; on a thread that would vanish,
+        # so it is carried back and raised in the caller, as it was inline.
+        try:
+            outcome["result"] = writer() or {}
+        except BaseException as exc:  # noqa: BLE001 - re-raised below
+            outcome["error"] = exc
+
+    def _put(item) -> bool:
+        """Queue *item* unless the writer has stopped; never block on a dead one."""
+        while thread.is_alive():
+            try:
+                chunks.put(item, timeout=_PUT_POLL_S)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    thread = threading.Thread(target=_drain, name="batch-cell-export-writer", daemon=True)
     thread.start()
     try:
         for group, well in wells:
@@ -134,10 +163,16 @@ def write_cell_rows(ctx, scope, out_path) -> int:
             except Exception:
                 _logger.exception("Batch cell export: rows for %r", well)
                 continue
-            chunks.put(csc.build_chunk(
-                frame, scope, group=group, well_label=well,
-                well_name=labels.get(well, well)))
-    finally:
-        chunks.put(DONE)
+            chunk = csc.build_chunk(frame, scope, group=group, well_label=well,
+                                    well_name=labels.get(well, well))
+            if not _put(chunk):
+                break
+    except BaseException:
+        cancel.set()
         thread.join()
-    return int(result.get("rows", 0))
+        raise
+    _put(DONE)
+    thread.join()
+    if "error" in outcome:
+        raise outcome["error"]
+    return int(outcome.get("result", {}).get("rows", 0))

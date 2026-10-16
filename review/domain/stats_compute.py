@@ -611,19 +611,23 @@ def _make_room_for_cdf(ctx, cache: dict, incoming: int) -> None:
     """
     version = ctx.state.dataset.rows_version
     budget = getattr(ctx.state.dataset.cache, "budget_bytes", None)
-    entries = [k for k in cache if isinstance(k, tuple) and k and k[0] == "well_cdf"]
+    # A snapshot of the keys, and ``pop`` with a default: the gating worker's
+    # cancel path clears this dict from its own thread.
+    entries = [k for k in list(cache) if isinstance(k, tuple) and k and k[0] == "well_cdf"]
     for key in entries:
         if key[5] != version:
-            del cache[key]
+            cache.pop(key, None)
     if budget is None:
         return
     cap = int(budget * CDF_MEMO_SHARE)
-    live = [k for k in entries if k in cache]
-    held = sum(int(getattr(cache[k], "nbytes", 0)) for k in live)
-    for key in live:
+    live = [(k, cache.get(k)) for k in entries]
+    live = [(k, v) for k, v in live if v is not None]
+    held = sum(int(getattr(v, "nbytes", 0)) for _k, v in live)
+    for key, value in live:
         if held + incoming <= cap:
             break
-        held -= int(getattr(cache.pop(key), "nbytes", 0))
+        cache.pop(key, None)
+        held -= int(getattr(value, "nbytes", 0))
 
 
 def _gate_cache_sig(ctx) -> tuple | None:

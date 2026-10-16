@@ -169,6 +169,14 @@ def _recover_in_place_append(path: Path) -> None:
     append alone, is logged at WARNING so it reaches the log drawer. A failure
     is logged rather than raised: the load goes on and reports whatever it
     cannot read in its own words.
+
+    It runs on the GUI thread, deliberately (tracker M14-R18). The load around
+    it is synchronous on this thread and reads every well's measurements, far
+    more than an undo, which reads each journalled archive's member headers and
+    a few kilobytes of tail; with no journal present it is one directory
+    listing. Moving it to a worker would let the load read archives the undo is
+    still rewriting. The Concatenate page's own undo, which a user starts by
+    hand and may repeat, does run on a worker.
     """
     from util.zip_append import recover
 

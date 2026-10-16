@@ -197,7 +197,8 @@ def _file_content(path: Path) -> tuple[int, int]:
     return crc & 0xFFFFFFFF, size
 
 
-def _source_members(source: Path) -> list[tuple[str, tuple[int, int] | None]]:
+def _source_members(source: Path, *, halt: Callable[[], bool] = _never,
+                    log: Callable[[str], None] = _null) -> list[tuple[str, tuple[int, int] | None]]:
     """``(name, (crc, size))`` of every file in *source*.
 
     A zip's come from its central directory. A folder's are read: a folder has
@@ -206,18 +207,25 @@ def _source_members(source: Path) -> list[tuple[str, tuple[int, int] | None]]:
     debris is not read (``None``); it is never appended.
     """
     if source.is_dir():
+        files = [path for path in sorted(source.rglob("*")) if path.is_file()]
+        # Reading is the cost of a folder well (every byte, before anything is
+        # written), so it is announced and can be stopped between files.
+        log(f"  Reading dataset 2's folder well {source.name} ({len(files)} file(s)) to checksum "
+            "it before anything is written…")
         out = []
-        for path in sorted(source.rglob("*")):
-            if path.is_file():
-                name = path.relative_to(source).as_posix()
-                out.append((name, None if is_os_junk_member(name) else _file_content(path)))
+        for path in files:
+            if halt():
+                raise ConcatError("Cancelled — nothing was appended.")
+            name = path.relative_to(source).as_posix()
+            out.append((name, None if is_os_junk_member(name) else _file_content(path)))
         return out
     with zipfile.ZipFile(source) as archive:
         return [(i.filename, (i.CRC, i.file_size)) for i in archive.infolist() if not i.is_dir()]
 
 
 def _plan_one(plan: MergePlan, well: str, source: Path, target: Path,
-              problems: list[str]) -> WellAppend:
+              problems: list[str], *, halt: Callable[[], bool] = _never,
+              log: Callable[[str], None] = _null) -> WellAppend:
     item = WellAppend(well=well, target=target, source=source)
     names: set[str] = set()
     contents: dict[tuple[int, int], str] = {}
@@ -227,7 +235,7 @@ def _plan_one(plan: MergePlan, well: str, source: Path, target: Path,
                 names.add(info.filename)
                 if not info.is_dir() and info.file_size:
                     contents.setdefault((info.CRC, info.file_size), info.filename)
-    for name, content in _source_members(source):
+    for name, content in _source_members(source, halt=halt, log=log):
         if is_os_junk_member(name):
             item.junk_skipped += 1
             continue
@@ -249,7 +257,8 @@ def _plan_one(plan: MergePlan, well: str, source: Path, target: Path,
     return item
 
 
-def plan_wells(plan: MergePlan) -> list[WellAppend]:
+def plan_wells(plan: MergePlan, *, log: Callable[[str], None] = _null,
+               is_cancelled: Callable[[], bool] = _never) -> list[WellAppend]:
     """Every well dataset 2 adds to, or :class:`ConcatError` naming what would collide.
 
     Nothing is written. A refusal names up to :data:`_SHOWN` collisions and
@@ -258,9 +267,13 @@ def plan_wells(plan: MergePlan) -> list[WellAppend]:
     """
     first, second = in_containers(plan.ds1), in_containers(plan.ds2)
     problems: list[str] = []
-    items = [_plan_one(plan, well, source, first.get(well) or plan.ds1.in_dir / f"{well}.zip",
-                       problems)
-             for well, source in sorted(second.items())]
+    items = []
+    for well, source in sorted(second.items()):
+        if is_cancelled():
+            raise ConcatError("Cancelled — nothing was appended.")
+        items.append(_plan_one(plan, well, source,
+                               first.get(well) or plan.ds1.in_dir / f"{well}.zip", problems,
+                               halt=is_cancelled, log=log))
     if problems:
         more = f" (and {len(problems) - _SHOWN} more)" if len(problems) > _SHOWN else ""
         raise ConcatError(
@@ -403,7 +416,7 @@ def append_in_place(
     emit = log or _null
     cancelled = is_cancelled or _never
     report = progress or _null
-    items = plan_wells(plan)
+    items = plan_wells(plan, log=emit, is_cancelled=cancelled)
     _preamble(plan, items, emit)
     lock, stop = threading.Lock(), threading.Event()
 

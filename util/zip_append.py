@@ -91,6 +91,8 @@ __all__ = [
     "journal_path",
     "locate_tail",
     "pending_journals",
+    "pending_refusal",
+    "refuse_if_pending",
     "recover",
     "recover_paths",
 ]
@@ -136,6 +138,33 @@ def journal_path(archive: Path) -> Path:
     """The journal file that belongs to *archive*."""
     archive = Path(archive)
     return archive.with_name(f".{archive.name}{JOURNAL_SUFFIX}")
+
+
+def pending_refusal(in_dir: Path) -> str:
+    """Why *in_dir* must not be read as it stands, or ``""``.
+
+    For a reader that does not undo anything itself — the pipeline's own
+    command line, which a user can run on a dataset whose in-place addition a
+    crash left unfinished, and would otherwise analyse an uncommitted timepoint.
+    """
+    pending = pending_journals(in_dir)
+    if not pending:
+        return ""
+    return (f"{in_dir} holds an unfinished in-place addition "
+            f"({', '.join(p.name for p in pending[:3])}): some well archives may hold part of "
+            "a timepoint. Open the dataset in All-Well (Review, Analyze or Concatenate) to undo "
+            "it, then run this again.")
+
+
+def refuse_if_pending(in_dir: Path, refuse: Callable[[str], object]) -> None:
+    """Call *refuse* with :func:`pending_refusal`'s reason when there is one.
+
+    The shape a command line's argument check wants (``parser.error``), so its
+    caller gains no branch of its own.
+    """
+    reason = pending_refusal(in_dir)
+    if reason:
+        refuse(reason)
 
 
 def _archive_for(journal: Path) -> Path:
@@ -231,7 +260,8 @@ def _machine_id() -> str | None:
     if sys.platform == "darwin":  # pragma: no cover - exercised on macOS only
         try:
             out = subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
-                                 capture_output=True, text=True, timeout=5).stdout
+                                 capture_output=True, text=True, encoding="utf-8",
+                                 errors="replace", timeout=5).stdout
         except (OSError, subprocess.SubprocessError):
             return None
         for line in out.splitlines():
@@ -265,12 +295,17 @@ def _process_started(pid: int) -> str | None:
         return f"linux:{fields[19]}" if len(fields) > 19 else None
     if os.name == "nt":  # pragma: no cover - Windows: no start time, liveness only
         return None
-    try:  # pragma: no cover - macOS and other POSIX systems
-        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
-                             capture_output=True, text=True, timeout=5).stdout.strip()
+    # ``ps`` prints the start time in the caller's timezone and locale, so two
+    # windows (or one window either side of a timezone change) read different
+    # text for the same process. Fixed here, the token is the same everywhere.
+    env = {"PATH": os.environ.get("PATH", "/bin:/usr/bin"), "LC_ALL": "C", "TZ": "UTC0"}
+    try:
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], env=env,
+                             capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=5).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
-    return f"ps:{out}" if out else None
+    return f"ps-utc:{out}" if out else None
 
 
 def _identity() -> dict:
@@ -422,6 +457,21 @@ def _restore(journal: Path) -> str:
     return f"{archive.name}: restored to its {header['members']} member(s) from before the append."
 
 
+_KEEP_HINT = (" To keep the archives as they are now, use \"Undo the unfinished addition…\" in "
+              "Concatenate and choose to keep them; the log then says what each one holds.")
+
+
+def _end_digest(archive: Path) -> str:
+    """SHA-256 of *archive*'s central directory to its end, or ``"unreadable"``."""
+    try:
+        tail = locate_tail(archive)
+    except (AppendJournalError, OSError):
+        return "unreadable"
+    with open(archive, "rb") as handle:
+        handle.seek(tail.offset)
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
 def _refuse_unless_untouched(archive: Path, header: dict) -> None:
     """Raise unless every byte below the saved tail is still what the journal saw.
 
@@ -430,9 +480,14 @@ def _refuse_unless_untouched(archive: Path, header: dict) -> None:
     whole since — Analyze folding a loose image into it is one — and writing a
     stale directory into that file reports "restored" over an archive that no
     longer reads. Two checks, both cheap on a multi-gigabyte file: the size and
-    modification time recorded once the append had finished (absent when the
-    process died part-way, when nothing but that process wrote the file), and
-    a hash of every old member's local header at its old offset.
+    a SHA-256 of the archive's own end (its new central directory to the end
+    of the file, kilobytes) recorded once the append had finished — absent when
+    the process died part-way, when nothing but that process wrote the file —
+    and a hash of every old member's local header at its old offset.
+
+    Content, not modification time: a copy that does not keep times, a sync
+    client, or a volume with coarser timestamps changes the time and nothing
+    else, and a time check then refused that archive for ever.
     """
     offset = int(header["tail_offset"])
     stat = archive.stat()
@@ -441,17 +496,18 @@ def _refuse_unless_untouched(archive: Path, header: dict) -> None:
         raise AppendJournalError(f"{archive.name} is shorter than it was before the append "
                                  f"began, so its earlier members are damaged{keep}")
     stamp = header.get("appended")
-    if stamp and (stat.st_size, stat.st_mtime_ns) != (stamp["size"], stamp["mtime_ns"]):
+    if stamp and (stat.st_size != stamp["size"] or _end_digest(archive) != stamp["end_sha256"]):
+        what = (f"it is {stat.st_size} bytes, {stamp['size']} when the append finished"
+                if stat.st_size != stamp["size"] else
+                "its central directory is not the one the append wrote")
         raise AppendJournalError(
             f"{archive.name} was changed by something else after the unfinished append "
-            f"(size {stat.st_size}, was {stamp['size']}), so undoing it would damage it{keep} "
-            "Check the archive, then delete the journal files by hand.")
+            f"({what}), so undoing it would damage it{keep}{_KEEP_HINT}")
     if "headers_sha256" in header and _local_headers(
             archive, list(header.get("offsets") or [])) != header["headers_sha256"]:
         raise AppendJournalError(
             f"{archive.name}'s earlier members are no longer where or what they were when the "
-            f"append began, so undoing it would damage the archive{keep} Check the archive, "
-            "then delete the journal files by hand.")
+            f"append began, so undoing it would damage the archive{keep}{_KEEP_HINT}")
 
 
 # ── the write guard ──────────────────────────────────────────────────────────
@@ -610,8 +666,7 @@ class AppendRun:
             raw.flush()
             os.fsync(raw.fileno())
         # The archive as this run left it; an undo refuses a file that differs.
-        stat = archive.stat()
-        header["appended"] = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+        header["appended"] = {"size": archive.stat().st_size, "end_sha256": _end_digest(archive)}
         _publish(journal_path(archive), json.dumps(header).encode("utf-8") + b"\n" + saved)
         with zipfile.ZipFile(archive) as after_zf:
             after = _member_identity(after_zf.infolist())
@@ -657,7 +712,13 @@ def _rollback(in_dir: Path) -> list[str]:
         except (AppendJournalError, OSError, zipfile.BadZipFile) as exc:
             failures.append(f"{_archive_for(journal).name}: {exc}")
     run = Path(in_dir) / RUN_JOURNAL_NAME
-    if run.exists():
+    if failures and run.exists():
+        # The record must keep describing the archives: with any archive still
+        # holding the addition, putting the old record back would leave it
+        # claiming less than is there. Both stay as they are, together.
+        lines.append("The preserved files (such as acquisition.json) were left as they are, "
+                     "because not every archive could be restored.")
+    elif run.exists():
         try:
             payload = json.loads(run.read_text(encoding="utf-8"))
             for rel, content in (payload.get("preserved") or {}).items():
@@ -672,7 +733,7 @@ def _rollback(in_dir: Path) -> list[str]:
             failures.append(f"{RUN_JOURNAL_NAME}: {exc}")
     if failures:
         raise AppendJournalError("Could not undo the in-place append completely: "
-                                 + "; ".join(failures))
+                                 + "; ".join(failures) + " " + " ".join(lines))
     run.unlink(missing_ok=True)
     fsync_path(in_dir)
     return lines
@@ -718,9 +779,26 @@ def _same_computer(header: dict) -> bool:
     """Whether *header* was written on this computer: by machine id when both
     sides have one (the hostname drifts with the network on macOS), else by name."""
     recorded, here = header.get("machine"), _machine_id()
+    same_name = header.get("host") == _host()
     if recorded and here:
-        return recorded == here
-    return header.get("host") == _host()
+        if recorded != here:
+            return False
+        # A Mac's platform UUID is its own; its hostname follows the network,
+        # which is the drift this exists for. Elsewhere a machine id is cloned
+        # with the image (Linux VM templates, un-sysprepped Windows), so two
+        # computers can share one: the name must agree too.
+        return same_name or recorded.startswith("mac:")
+    return same_name
+
+
+#: Start-time sources whose tokens are comparable between processes: the
+#: kernel's tick count, and ``ps`` read under a fixed timezone and locale.
+#: A mismatch between anything else is not evidence of a dead run.
+_STABLE_SOURCES = ("linux", "ps-utc")
+
+
+def _token_source(token: str) -> str:
+    return token.split(":", 1)[0]
 
 
 def _owner_blocks(header: dict, where: Path) -> str:
@@ -739,14 +817,15 @@ def _owner_blocks(header: dict, where: Path) -> str:
     if pid == os.getpid() or not _pid_alive(pid):
         return ""
     recorded, current = header.get("pstart"), _process_started(pid)
-    if recorded and current and recorded != current:
+    if (recorded and current and recorded != current
+            and _token_source(recorded) == _token_source(current) in _STABLE_SOURCES):
         return ""                                   # the pid now belongs to another process
     return (f"An in-place append into {where} is still running in process {pid}; it was "
             "left alone. If that process is not All-Well, undo it anyway from the "
             "Concatenate page.")
 
 
-def recover(in_dir: Path, *, force: bool = False) -> Recovery:
+def recover(in_dir: Path, *, force: bool = False, keep: bool = False) -> Recovery:
     """Undo an unfinished in-place append in *in_dir*, or clear a finished one's leftovers.
 
     Safe to call on every open: with nothing to do it reads one directory
@@ -758,6 +837,12 @@ def recover(in_dir: Path, *, force: bool = False) -> Recovery:
     running (another computer, a live pid): the page's "undo anyway", asked
     only after the user has confirmed. It never overrides a run this process
     holds, and never the checks that the archive is still the one journalled.
+
+    *keep* is the exit when an undo is refused as unsafe: nothing is restored,
+    every archive and preserved file is left exactly as it is, the journals are
+    removed, and the lines say what each archive now holds — which wells carry
+    members added since the addition began — so the user decides with the facts.
+    Like *force*, it is asked for only after the user has confirmed.
 
     The folder is claimed in the in-process registry for the whole recovery, so
     an append cannot start in it — and a second recovery cannot run — meanwhile.
@@ -773,14 +858,70 @@ def recover(in_dir: Path, *, force: bool = False) -> Recovery:
             return result
         _ACTIVE.add(key)
     try:
+        if keep:
+            return Recovery(lines=_keep_as_is(in_dir))
         return _recover_claimed(in_dir, force=force)
     finally:
         with _ACTIVE_LOCK:
             _ACTIVE.discard(key)
 
 
+def _archive_state(archive: Path, header: dict, tail: bytes) -> str:
+    """One sentence on what *archive* holds now, relative to its journal."""
+    if not archive.exists():
+        return f"{archive.name}: missing."
+    try:
+        with zipfile.ZipFile(archive) as reader:
+            names = reader.namelist()
+    except (zipfile.BadZipFile, OSError) as exc:
+        return f"{archive.name}: does not open as a zip archive ({exc}); check it before use."
+    if header.get("kind") == _KIND_CREATED:
+        return f"{archive.name}: kept as created by the unfinished addition ({len(names)} member(s))."
+    old = int(header.get("members", len(names)))
+    if (archive.stat().st_size == int(header.get("length", -1))
+            and _end_digest(archive) == hashlib.sha256(tail).hexdigest()):
+        return f"{archive.name}: exactly as it was before the addition ({old} member(s))."
+    added = names[old:]
+    shown = ", ".join(added[:5]) + (", …" if len(added) > 5 else "")
+    # "Added since", not "added by": another writer may have added some of them.
+    return (f"{archive.name}: kept with {len(added)} member(s) added since the addition began"
+            + (f" ({shown})" if added else "") + f", after its {old} earlier one(s).")
+
+
+def _keep_as_is(in_dir: Path) -> list[str]:
+    """Stop tracking an unfinished addition, leaving every file as it is, and say what is there."""
+    lines = ["The unfinished addition's notes were discarded and nothing was restored. "
+             "Each archive now:"]
+    for journal in sorted(Path(in_dir).glob(f".*{JOURNAL_SUFFIX}")):
+        try:
+            header, tail = _read_journal(journal)
+        except AppendJournalError:
+            header, tail = {}, b""
+        lines.append("  " + _archive_state(_archive_for(journal), header, tail))
+        journal.unlink()
+    run = Path(in_dir) / RUN_JOURNAL_NAME
+    if run.exists():
+        with swallow(f"reading the preserved files in {run}", level=logging.WARNING, logger=_LOG):
+            payload = json.loads(run.read_text(encoding="utf-8"))
+            for rel, content in (payload.get("preserved") or {}).items():
+                target = Path(in_dir) / rel
+                now = target.read_bytes() if target.exists() else None
+                before = None if content is None else base64.b64decode(content)
+                lines.append(f"  {target.name}: left as it is now "
+                             f"({'unchanged by' if now == before else 'changed by'} the addition).")
+        run.unlink()
+    for tmp in Path(in_dir).glob(f".*{JOURNAL_SUFFIX}{_TMP_SUFFIX}"):
+        tmp.unlink(missing_ok=True)
+    fsync_path(in_dir)
+    return lines
+
+
 def _has_journal_files(in_dir: Path) -> bool:
     return any(in_dir.glob(f".*{JOURNAL_SUFFIX}*")) or any(in_dir.glob(f"{RUN_JOURNAL_NAME}*"))
+
+
+#: How long an unreadable run journal is taken to be one still being written.
+_TORN_RUN_JOURNAL_AGE_S = 120.0
 
 
 def _recover_claimed(in_dir: Path, *, force: bool) -> Recovery:
@@ -795,7 +936,15 @@ def _recover_claimed(in_dir: Path, *, force: bool) -> Recovery:
         except (ValueError, OSError) as exc:
             if journals:
                 raise AppendJournalError(f"{run} is damaged ({exc}); nothing was changed.") from exc
-            # Torn while being created, before any archive was touched.
+            # Unreadable and no archive journalled yet: either torn by a crash
+            # while being created, or being written right now by an append in
+            # another process (the exclusive-create fallback opens the file
+            # before writing it). Only an old one is a crash.
+            age = time.time() - run.stat().st_mtime
+            if age < _TORN_RUN_JOURNAL_AGE_S and not force:
+                result.blocked = (f"An in-place append into {in_dir} appears to be starting "
+                                  "(its run journal is still being written); it was left alone.")
+                return result
             run.unlink()
             result.lines.append(f"{RUN_JOURNAL_NAME}: removed an unfinished run journal; no "
                                 "archive had been touched.")

@@ -87,6 +87,7 @@ from util.schema import (
     validate_schema,
 )
 from util.zip_write import replace_folder_with_archive
+from util.zip_append import refuse_if_pending as _refuse_if_appending
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
 # here at module level.  They are imported inside _worker_init, after the
@@ -3145,6 +3146,8 @@ def main() -> None:
 
     if not input_dir.is_dir():
         parser.error(f"--input_dir does not exist or is not a directory: {input_dir}")
+    # An in-place addition a crash left unfinished (Concatenate) is not analysed.
+    _refuse_if_appending(input_dir, parser.error)
 
     # ── Schema validation ─────────────────────────────────────────────────────
     schema = parse_schema(args.filename_schema)

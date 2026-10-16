@@ -431,6 +431,11 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._refresh_undo_row()
         self._revalidate_cross()
 
+    def set_undo_busy(self, busy: bool) -> None:
+        """While an undo runs, its button is a status rather than a control."""
+        self._undo_btn.setEnabled(not busy)
+        self._undo_btn.setText("Undoing…" if busy else "Undo the unfinished addition…")
+
     def datasets_changed_on_disk(self) -> None:
         """Re-read both datasets after something outside the fields changed them."""
         self._on_field_changed()

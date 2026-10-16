@@ -588,11 +588,8 @@ def test_a_stop_whose_undo_fails_does_not_claim_dataset_1_was_restored(pair, mon
 
     monkeypatch.setattr(zip_append, "_rollback", undo_fails)
     plan = in_place.build_append_plan(pair / "d1", pair / "d2", gap_hours=24.0)
-    asked = {"n": 0}
-
     def stop_after_copying_began():
-        asked["n"] += 1
-        return asked["n"] > 2
+        return any((pair / "d1" / "in").glob(".*.aw-append-journal"))
 
     with pytest.raises(cc.ConcatError) as caught:
         in_place.append_in_place(plan, is_cancelled=stop_after_copying_began, workers=1)
@@ -651,6 +648,24 @@ def test_a_provenance_failure_after_the_commit_is_a_note_not_a_failure(tmp_path,
     assert "E_GFP_A01_F001_48h.tif" in _names(tmp_path / "d1" / "in" / "A01.zip")
 
 
+def _settle_undo(ctrl, timeout_s: float = 30.0) -> None:
+    """Pump until the page's undo, and any undo it chains into, has finished."""
+    import time
+    from PySide6.QtWidgets import QApplication
+    deadline, quiet = time.monotonic() + timeout_s, 0
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        worker = ctrl._undo_worker
+        if worker is not None and worker.isRunning():
+            worker.wait(50)
+            quiet = 0
+            continue
+        quiet = quiet + 1 if ctrl.page._undo_btn.text() != "Undoing…" else 0
+        if quiet >= 5:
+            return
+    raise AssertionError("the page's undo did not finish")
+
+
 def test_the_page_undoes_an_unfinished_addition_from_another_computer_after_two_yeses(
         qapp, pair, monkeypatch):
     """M14-R10: a run recorded by a computer that will not come back (or a recycled pid)
@@ -677,6 +692,7 @@ def test_the_page_undoes_an_unfinished_addition_from_another_computer_after_two_
 
     monkeypatch.setattr(QMessageBox, "question", answer)
     page._undo_btn.click()
+    _settle_undo(ctrl)
     assert questions == ["Undo the unfinished addition?", "Undo it anyway?"]
     assert _sha(archive) == original and pending_journals(pair / "d1" / "in") == []
     assert page._undo_row.isVisibleTo(page) is False
@@ -693,5 +709,101 @@ def test_the_page_s_undo_does_nothing_when_the_user_says_no(qapp, pair, monkeypa
     page = _page_with(ctrl, pair / "d1", pair / "d2")
     monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.No)
     page._undo_btn.click()
+    _settle_undo(ctrl)
     assert _sha(archive) == appended
+    ctrl.shutdown()
+
+
+
+def test_stop_is_honoured_while_a_folder_well_is_read_for_checksums(tmp_path):
+    """M14-R17: the folder pass reads every byte of dataset 2 before writing anything;
+    it says so and a Stop ends it there, with nothing touched."""
+    _folder_pair(tmp_path)
+    before = _hashes(tmp_path / "d1")
+    plan = in_place.build_append_plan(tmp_path / "d1", tmp_path / "d2", gap_hours=24.0)
+    lines: list[str] = []
+    reads = {"n": 0}
+    real = in_place._file_content
+
+    def counted(path):
+        reads["n"] += 1
+        return real(path)
+
+    import unittest.mock as mock
+    with mock.patch.object(in_place, "_file_content", counted), \
+            pytest.raises(cc.ConcatError, match="Cancelled — nothing was appended"):
+        in_place.append_in_place(plan, lines.append, is_cancelled=lambda: reads["n"] >= 1)
+    assert any("Reading dataset 2's folder well A01 (3 file(s))" in line for line in lines)
+    assert reads["n"] == 1                                  # stopped after the first file
+    assert _hashes(tmp_path / "d1") == before
+
+
+def test_the_page_keeps_the_archives_when_the_undo_is_refused(qapp, pair, monkeypatch):
+    """M14-R12: a refused undo has an in-app exit — keep the archives as they are and
+    discard the notes — and the log says which wells hold the addition's images."""
+    from PySide6.QtWidgets import QMessageBox
+    from datasets.concatenate.controller import ConcatenateController
+    from util.zip_append import pending_journals
+    archive = pair / "d1" / "in" / "A01.zip"
+    crash_append(archive, "after")
+    with zipfile.ZipFile(archive, "a") as writer:          # something else changed it since
+        writer.writestr("E_GFP_A01_f9_0h.tif", b"someone else's")
+    changed = _sha(archive)
+    ctrl = ConcatenateController()
+    page = _page_with(ctrl, pair / "d1", pair / "d2")
+    questions: list[str] = []
+
+    def answer(_parent, title, _text, *_a):
+        questions.append(title)
+        return QMessageBox.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", answer)
+    logged: list[str] = []
+    monkeypatch.setattr(page, "append_log", logged.append)
+    page._undo_btn.click()
+    _settle_undo(ctrl)
+    assert questions == ["Undo the unfinished addition?", "Keep the archives as they are?"]
+    assert _sha(archive) == changed and pending_journals(pair / "d1" / "in") == []
+    assert any("A01.zip: kept with 2 member(s) added since the addition began "
+               "(E_GFP_A01_f0_48h.tif, E_GFP_A01_f9_0h.tif)" in line for line in logged), logged
+    ctrl.shutdown()
+
+
+def test_the_pipeline_command_line_refuses_an_unfinished_addition(tmp_path):
+    """M14-R16: the CLI runs no recovery, so it must not analyse an uncommitted timepoint."""
+    import subprocess
+    import sys
+    _raw(tmp_path / "d1", wells=("A01",))
+    crash_append(tmp_path / "d1" / "in" / "A01.zip", "after")
+    repo = Path(__file__).resolve().parent.parent
+    result = subprocess.run(
+        [sys.executable, str(repo / "process_microscopy.py"), "--input_dir",
+         str(tmp_path / "d1" / "in"), "--output_dir", str(tmp_path / "d1" / "out")],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+    assert result.returncode != 0
+    assert "holds an unfinished in-place addition" in result.stderr, result.stderr[-2000:]
+
+
+def test_the_page_s_undo_runs_off_the_ui_thread(qapp, pair, monkeypatch):
+    """M14-R18: an undo reads every member header of every journalled archive; the page
+    must not freeze while it does."""
+    import threading
+    from PySide6.QtWidgets import QMessageBox
+    from datasets.concatenate.controller import ConcatenateController
+    from util import zip_append
+    crash_append(pair / "d1" / "in" / "A01.zip", "after")
+    threads: list[bool] = []
+    real = zip_append.recover
+
+    def spy(*args, **kwargs):
+        threads.append(threading.current_thread() is threading.main_thread())
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(zip_append, "recover", spy)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.Yes)
+    ctrl = ConcatenateController()
+    page = _page_with(ctrl, pair / "d1", pair / "d2")
+    page._undo_btn.click()
+    _settle_undo(ctrl)
+    assert threads == [False]
     ctrl.shutdown()

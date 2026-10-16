@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 import zipfile
 from pathlib import Path
 
@@ -257,11 +258,13 @@ def test_a_recycled_pid_is_a_dead_run_and_is_undone(tmp_path):
     assert _sha(archive) == original
 
 
-def test_a_hostname_that_drifted_on_the_same_computer_is_not_another_computer(tmp_path):
+def test_a_mac_whose_hostname_drifted_is_still_the_same_computer(tmp_path, monkeypatch):
+    """A Mac's platform UUID is its own; its hostname follows the network."""
     archive = _messy(tmp_path / "in" / "A01.zip")
     original = _sha(archive)
     crash_append(archive, "after")
-    _edit_run_journal(archive, host="Zaks-MacBook-Pro.local")      # same machine id
+    monkeypatch.setattr(zip_append, "_machine_id", lambda: "mac:PLATFORM-UUID")
+    _edit_run_journal(archive, host="Zaks-MacBook-Pro.local", machine="mac:PLATFORM-UUID")
     result = recover(archive.parent)
     assert result.blocked == ""
     assert _sha(archive) == original
@@ -451,9 +454,104 @@ def test_a_create_that_died_mid_write_leaves_no_staging_file(tmp_path):
 def test_a_torn_run_journal_with_no_archive_touched_is_cleared(tmp_path):
     in_dir = tmp_path / "in"
     archive = _messy(in_dir / "A01.zip")
-    (in_dir / RUN_JOURNAL_NAME).write_text('{"format": "allwell-zip-ap')
+    torn = in_dir / RUN_JOURNAL_NAME
+    torn.write_text('{"format": "allwell-zip-ap')
+    an_hour_ago = time.time() - 3600
+    os.utime(torn, (an_hour_ago, an_hour_ago))
     result = recover(in_dir)
     assert "no archive had been touched" in result.lines[0]
     with AppendRun(in_dir) as run:                       # usable again
         run.append(archive, _add)
         run.commit()
+
+
+
+def test_a_run_journal_still_being_written_is_left_alone(tmp_path):
+    """M14-R15: the exclusive-create fallback opens the file before writing it, so a
+    fresh unreadable run journal may belong to an append that is starting now."""
+    in_dir = tmp_path / "in"
+    _messy(in_dir / "A01.zip")
+    (in_dir / RUN_JOURNAL_NAME).write_bytes(b"")
+    result = recover(in_dir)
+    assert "still being written" in result.blocked
+    assert (in_dir / RUN_JOURNAL_NAME).exists()
+
+
+def test_an_archive_whose_time_alone_changed_is_still_undone(tmp_path):
+    """M14-R12: a copy that does not keep modification times (or a sync client, or a
+    coarser-time volume) changes nothing an undo depends on."""
+    archive = _messy(tmp_path / "in" / "A01.zip")
+    original = _sha(archive)
+    crash_append(archive, "after")
+    later = time.time() + 7200
+    os.utime(archive, (later, later))
+    try:
+        result = recover(archive.parent)
+    except AppendJournalError as exc:
+        raise AssertionError(f"a time-only change refused the undo: {exc}") from exc
+    assert result.blocked == ""
+    assert _sha(archive) == original
+
+
+def test_a_refused_undo_leaves_the_record_with_the_archives(tmp_path):
+    """M14-R13: one archive could not be restored, so the record must not go back to
+    describing less than the archives still hold."""
+    in_dir = tmp_path / "in"
+    a01, a02 = _messy(in_dir / "A01.zip"), _messy(in_dir / "A02.zip")
+    record = in_dir / "acquisition.json"
+    record.write_text('{"old": true}')
+    run = AppendRun(in_dir, preserve=[record])
+    run.__enter__()
+    run.append(a01, _add)
+    run.append(a02, _add)
+    record.write_text('{"new": true}')
+    run._release()
+    with zipfile.ZipFile(a02, "a") as writer:            # something else changed A02 since
+        writer.writestr("other.tif", b"other")
+    with pytest.raises(AppendJournalError, match="left as they are"):
+        recover(in_dir)
+    assert record.read_text() == '{"new": true}'
+    assert (in_dir / RUN_JOURNAL_NAME).exists()
+
+
+def test_ps_start_times_read_the_same_in_any_timezone(monkeypatch):
+    """M14-R14: the macOS/BSD token came from ``ps`` in the caller's timezone, so a live
+    run read from another timezone looked recycled and was undone."""
+    import subprocess
+    import sys as _sys
+    live = subprocess.Popen(["sleep", "30"])
+    try:
+        monkeypatch.setattr(_sys, "platform", "darwin")
+        monkeypatch.setenv("TZ", "Europe/London")
+        time.tzset()
+        recorded = zip_append._process_started(live.pid)
+        monkeypatch.setenv("TZ", "America/New_York")
+        time.tzset()
+        header = {"host": zip_append._host(), "machine": zip_append._machine_id(),
+                  "pid": live.pid, "pstart": recorded}
+        assert zip_append._process_started(live.pid) == recorded
+        assert f"process {live.pid}" in zip_append._owner_blocks(header, Path("X"))
+    finally:
+        live.kill()
+        monkeypatch.delenv("TZ")
+        time.tzset()
+
+
+def test_start_times_from_different_sources_are_not_evidence_of_a_dead_run(monkeypatch):
+    """M14-R14: a mismatch only counts between tokens of the same stable source."""
+    header = {"host": zip_append._host(), "machine": zip_append._machine_id(),
+              "pid": os.getppid(), "pstart": "ps:Fri Oct 16 18:25:42 2026"}
+    assert f"process {os.getppid()}" in zip_append._owner_blocks(header, Path("X"))
+
+
+def test_a_cloned_machine_id_with_another_name_is_another_computer(tmp_path, monkeypatch):
+    """M14-R14 (M-D): Linux VM templates and un-sysprepped Windows images share a
+    machine id; only a Mac's id is taken alone."""
+    archive = _messy(tmp_path / "in" / "A01.zip")
+    crash_append(archive, "after")
+    monkeypatch.setattr(zip_append, "_machine_id", lambda: "linux:CLONED")
+    _edit_run_journal(archive, host="the-other-vm", machine="linux:CLONED")
+    appended = _sha(archive)
+    result = recover(archive.parent)
+    assert "'the-other-vm'" in result.blocked
+    assert _sha(archive) == appended

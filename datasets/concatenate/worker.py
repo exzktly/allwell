@@ -86,3 +86,34 @@ class ConcatenateWorker(QThread):
             self.failed.emit(f"Concatenation failed: {exc}")
         else:
             self.succeeded.emit(str(plan.dest.root), summary)
+
+
+class UndoAppendWorker(QThread):
+    """Undoes an unfinished in-place addition off the UI thread.
+
+    *mode* is ``"undo"`` (an ordinary recovery), ``"force"`` (the user
+    confirmed that the recorded run is not still going) or ``"keep"`` (the user
+    chose to keep the archives as they are). ``done`` carries ``("ok",
+    Recovery)``, or ``("refused", message)`` when the undo was refused as
+    unsafe or could not complete.
+    """
+
+    done = Signal(str, object)
+
+    def __init__(self, root: str, mode: str, parent=None) -> None:
+        super().__init__(parent)
+        self._root = root
+        self._mode = mode
+
+    def run(self) -> None:  # noqa: D401 — QThread entry point
+        from pathlib import Path
+
+        from util.zip_append import AppendJournalError, recover
+
+        try:
+            result = recover(Path(self._root) / "in", force=self._mode == "force",
+                             keep=self._mode == "keep")
+        except (AppendJournalError, OSError) as exc:
+            self.done.emit("refused", str(exc))
+        else:
+            self.done.emit("ok", result)

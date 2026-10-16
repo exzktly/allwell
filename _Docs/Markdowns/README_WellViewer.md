@@ -1596,6 +1596,49 @@ an image-using tab is opened. `pipeline_info.json` is re-read on every open, so
 the viewer always tracks the schema + channel tokens the dataset was built with
 — if you re-run the pipeline with different tokens, just re-open the folder.
 
+### Opening a plate larger than memory
+
+Review keeps the measurement rows of the wells it is using in memory, up to a
+budget — a quarter of the computer's memory by default. A plate that fits opens
+exactly as it always has, every well held. A plate that does not — a full plate
+of 300 MB well CSVs, about a million cells a well, needs around 19 GB — still
+opens: Review reads wells until the budget is full, takes a short summary of
+every other well (its timepoints, fields of view, columns and cell count), and
+reads the rest from disk when a view asks for them, dropping the wells used least
+recently to make room. The log says so the first time it happens, naming how many
+wells are held and the budget.
+
+What this means in use:
+
+- **Every number is the same.** A well read back from disk carries everything
+  you did to it — QC, gating, crop, manual exclusions, field and focus
+  exclusions — because those are re-applied whenever a well is read.
+- **The first open of a dataset is the slow one.** Each CSV is parsed once and
+  kept beside it in a hidden `.aw_parquet` folder, with each well's summary;
+  later opens read those instead (a 1.1M-cell well reads back in about a fifth of
+  a second instead of fifteen).
+- **Plate-wide views read every well the first time**, then remember the few
+  numbers they need per well until something changes them (a QC threshold, a
+  gate, a crop). On a plate that does not fit, the first draw after such a change
+  reads the plate from disk again.
+- **Live counts say when they cover part of the plate.** QC's "flagged" count,
+  the crop's status line and Cell Gating's "Included for analysis" are
+  recalculated on every edit, so they count the wells in memory; when those are
+  not all of them the line ends with "counted over N of M wells in memory".
+- **Views that draw individual cells** (Scatter, Multivariate, Distribution, the
+  bar chart's beeswarm, the Cell Browser) still hold the cells of every well you
+  select. Selecting most of a very large plate in one of them asks for that many
+  points.
+- **If one well alone does not fit**, Review first gives back every well it is
+  holding and tries again; if that fails too, the error names the well, its size
+  on disk and what was held, instead of a bare out-of-memory message.
+
+To change the budget, set the environment variable `ALLWELL_ROW_CACHE_MB` before
+starting the app, for example `ALLWELL_ROW_CACHE_MB=8192 python allwell.py` for
+8 GB. `python scripts/bench_large_plate.py --dir <folder> --wells 24` writes a
+synthetic plate of large wells and reports the time and peak memory of opening
+it and of one plate-wide plot.
+
 ### Home
 
 The page Review opens on. It answers the four things you want to know before

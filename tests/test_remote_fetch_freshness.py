@@ -229,6 +229,9 @@ def _retry_pulls(monkeypatch, tmp_path, run, well="C08") -> list[str]:
         pulled.append(argv[-2])          # the remote source
     # Patched where the retry reads it: the verifier lives in remote_fetch.
     monkeypatch.setattr(remote_fetch, "_rsync_with_retry", _fake_rsync)
+    # The retry also brings each well's settings marker home, through the
+    # small-file seam rather than this one.
+    monkeypatch.setattr(remote_fetch, "pull_small_file", lambda *a, **k: False)
 
     host = remote_config.RemoteHost(
         name="t", ssh_alias="test-host", remote_project_dir="~/allwell",

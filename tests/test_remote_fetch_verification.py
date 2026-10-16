@@ -19,11 +19,13 @@ ones that now catch them:
 
 from __future__ import annotations
 
+import gzip
 import zipfile
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from services import remote_fetch
 from services.remote_config import RemoteHost
 from services.remote_runner import (
     LocalInputMode,
@@ -159,11 +161,88 @@ def test_an_incremental_well_csv_is_merged_into_the_local_one(host, tmp_path, mo
     monkeypatch.setattr(Fetcher, "_pull_listed", fake_pull_listed)
     monkeypatch.setattr(Fetcher, "_delete_well_files_on_remote", lambda self, w: None)
     monkeypatch.setattr(Fetcher, "_pull_settings_marker", lambda self, w: None)
+    monkeypatch.setattr(remote_fetch, "compress_remote_csvs", lambda *a: None)
     try:
         fetcher._fetch_one("A01")
     finally:
         fetcher.cancel()
 
-    rows = (out / "plate_A01.csv").read_text().splitlines()
+    # The merged well CSV is recompressed, like every finished well's.
+    from util.csv_gz import open_csv_text
+    assert not (out / "plate_A01.csv").exists()
+    with open_csv_text(out / "plate_A01.csv.gz") as fh:
+        rows = fh.read().splitlines()
     assert rows[0] == header
     assert sorted(rows[1:]) == ["A01,1,0,1,10", "A01,2,0,1,20"]
+
+
+def _drive_fetch_one(host, out, run, monkeypatch, *, pulled_name, events):
+    """Run ``_fetch_one`` with the transport stubbed; ``events`` records the
+    order of remote compression, listing and pull."""
+    fetcher = _fetcher(host, run)
+
+    def fake_list(self, src):
+        events.append(("list", src))
+        return "test-host", [f"/r/out/{pulled_name}"], 20
+
+    def fake_pull_listed(self, host, files, dest_dir):
+        events.append(("pull", list(files)))
+        (dest_dir / pulled_name).write_bytes(
+            gzip.compress(b"well,fov\nA01,NEW\n") if pulled_name.endswith(".gz")
+            else b"well,fov\nA01,NEW\n")
+        return 1
+
+    monkeypatch.setattr(Fetcher, "_rsync",
+                        lambda self, argv: _zip(argv[-1], {"A01_f1_t0_gfp.tif": b"x"}) or True)
+    monkeypatch.setattr(Fetcher, "_remote_file_size", lambda self, p: None)
+    monkeypatch.setattr(Fetcher, "_already_local", lambda self, w: None)
+    monkeypatch.setattr(Fetcher, "_list_remote_glob", fake_list)
+    monkeypatch.setattr(Fetcher, "_pull_listed", fake_pull_listed)
+    monkeypatch.setattr(Fetcher, "_delete_well_files_on_remote", lambda self, w: None)
+    monkeypatch.setattr(Fetcher, "_pull_settings_marker", lambda self, w: None)
+    monkeypatch.setattr(remote_fetch, "compress_remote_csvs",
+                        lambda host, rout, well, log: events.append(("compress", well)))
+    try:
+        fetcher._fetch_one("A01")
+    finally:
+        fetcher.cancel()
+    return fetcher
+
+
+def test_a_well_not_yet_transferred_is_compressed_on_the_remote_first(host, tmp_path, monkeypatch):
+    """The in-flight case: a run started before CSVs were compressed leaves a
+    plain CSV on the remote, and it must be gzipped before it is listed and
+    pulled — and the listing must name both spellings."""
+    out = tmp_path / "out"
+    out.mkdir()
+    events: list = []
+    _drive_fetch_one(host, out, _run(out), monkeypatch,
+                     pulled_name="plate_A01.csv.gz", events=events)
+    kinds = [e[0] for e in events]
+    assert kinds == ["compress", "list", "pull"]
+    listing = events[1][1]
+    assert listing.endswith(":/r/out/*_A01.csv /r/out/*_A01.csv.gz")
+
+
+def test_a_well_already_transferred_is_not_compressed_again(host, tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    run = _run(out)
+    run.fetched_wells.add("A01")
+    events: list = []
+    _drive_fetch_one(host, out, run, monkeypatch,
+                     pulled_name="plate_A01.csv.gz", events=events)
+    assert "compress" not in [e[0] for e in events]
+
+
+def test_a_fetched_gz_is_not_shadowed_by_the_previous_runs_plain_csv(host, tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "plate_A01.csv").write_text("well,fov\nA01,STALE\n")
+    _drive_fetch_one(host, out, _run(out), monkeypatch,
+                     pulled_name="plate_A01.csv.gz", events=[])
+    from util.csv_gz import existing_csv, open_csv_text
+    found = existing_csv(out / "plate_A01.csv")
+    assert found == out / "plate_A01.csv.gz"
+    with open_csv_text(found) as fh:
+        assert fh.read().splitlines()[1] == "A01,NEW"

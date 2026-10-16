@@ -226,7 +226,7 @@ allwell/
 │
 │  ── packages ──
 ├── analyze/                     ← Analyze pane: the form, the run controls, the live log.
-│   │                              Every module but `remote_dialog` and `well_scope` is a mixin of the one
+│   │                              Every module but `remote_dialog`, `well_scope` and `slurm_job_view` is a mixin of the one
 │   │                              `AnalyzeTab`; the split answers the line budgets in
 │   │                              `tests/test_monolith_budgets.py`, not a division of
 │   │                              responsibility callers can see (§6.1)
@@ -239,8 +239,10 @@ allwell/
 │   │   ├── input.py            ← run-dir resolver, OME-TIFF redirect, channel rows,
 │   │   │                          browse-time folder scan
 │   │   ├── job_edit.py         ← the inverse of collect_spec, for the queue's edit flow
-│   │   └── well_list.py        ← the one parse of a typed well list, and the sentence a
-│   │                              --only_wells run announces itself with
+│   │   ├── well_list.py        ← the one parse of a typed well list, and the sentence a
+│   │   │                          --only_wells run announces itself with
+│   │   └── slurm_job.py        ← the run's Slurm job as none / queued / open, folded
+│   │                              from the run's events, and the indicator's tooltip
 │   ├── qc_section.py           ← the Quality Control section: the pixel
 │   │                              corrections, the debris gate, and the
 │   │                              per-cell focus measurement and its cut
@@ -249,6 +251,8 @@ allwell/
 │   ├── seg_params.py           ← per-method segmentation params + StarDist thresholds
 │   ├── well_scope.py           ← the Only these wells / Force these wells rows and the
 │   │                              run options they contribute
+│   ├── slurm_job_view.py       ← the Slurm-job icon in the Run on: row — lit while a job
+│   │                              is open, dimmed while queued, its tooltip the node
 │   ├── log_pane.py             ← the output pane — log view, raw-log toggle,
 │   │                              run-outcome surfacing, "Last run ·" card
 │   ├── pinfo.py                ← restore a prior run's pipeline_info into the form
@@ -356,10 +360,22 @@ allwell/
 │   ├── sidecar.py              ← the pipeline_info.json blocks the user owns
 │   │                              (cell_gating / sample_definitions / ratios /
 │   │                              notes), preserved across any wholesale rewrite
+│   ├── output_images.py        ← the per-FOV image writer (_tophat / _smfish /
+│   │                              _labels / overlay) and the two storage policies
+│   │                              it applies: phase reference, source bit depth
+│   ├── output_policy.py        ← those two options' names and defaults, with no
+│   │                              imports, so the CLI and the form can name them
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
 │                                  + a well's own archive, read and written
 │                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
+│   ├── csv_gz.py               ← a per-well CSV in either spelling, `name.csv` or `name.csv.gz`:
+│   │                              existing_csv / glob_csvs (one entry per logical file, plain
+│   │                              wins over gzip), open_csv_text (gz-aware by name, for read
+│   │                              and write), csv_stem (Path.stem leaves ".csv" on a gz name),
+│   │                              gzip_csv (crash-safe: hidden .part, fsync, rename, then
+│   │                              remove the original). Every CSV reader in the pipeline,
+│   │                              Review and the Datasets tools goes through it
 │   ├── dir_scan.py             ← "what is directly inside this directory?", answered out
 │   │                              of one os.scandir rather than a stat per entry — the
 │   │                              difference between instant and twenty minutes when the
@@ -426,6 +442,8 @@ allwell/
 │   ├── worker_bridge.py        ← run_off_thread, the one-shot queued-signal bridge
 │   │                              (+ progress / stage reporting), and GuiLogRelay,
 │   │                              which puts a worker's log lines on the GUI thread
+│   ├── log_mirror.py           ← mirror_line(): copies the warnings and errors the Analyze
+│   │                              and Datasets panes show in their own logs into the app log
 │   └── panes.py                ← PANE_MODES and the index/name lookups either way —
 │                                  the roster of the application's three panes
 ├── domain/                      ← Qt-free models and pure logic that more than ONE pane
@@ -5752,8 +5770,9 @@ an exit of 0 with `_stop_requested` set as a stop (`_enqueue_stopped`), never as
 Stop, and a remote one keeps its remote output. A Suspend that winds down
 cleanly exits 0 and is reported as its own `suspended` event (below); a remote
 one keeps the configured cleanup, which fires only after the fetch is verified,
-because the resume uploads only the missing groups and never re-attaches, so
-nothing on the host is read again. While one
+because the resume uploads only the missing groups and never re-attaches —
+it reads the previous directory only for wells that were never downloaded,
+and a verified fetch leaves none. While one
 that dies by signal arrives as an `error` like a Stop. A Stop, Suspend or queue
 Pause that lands while the input is still being grouped ends the grouping
 subprocess, and the resolver (`AnalyzeInputMixin._input_failure_text`) words
@@ -8183,9 +8202,18 @@ warning when a Slurm job was given one or two of a larger node's CPUs — what a
 scheduler command with no `--cpus-per-task` gets — naming the cause and the
 flag to add, because the worker pool and any `--workers` are clamped to the
 CPUs the job has and the clamp alone does not say why;
-`tests/test_a_starved_slurm_job_says_so.py`), `pipeline.stardist` (StarDist segmenters +
+`tests/test_a_starved_slurm_job_says_so.py`; it also logs `pipeline.slurm_node.node_specs_line()`
+inside a Slurm job), `pipeline.slurm_node` (the `Slurm node specs — key=value | …` line, keys in
+`SPEC_KEYS`: what the job was given — `SLURM_CPUS_ON_NODE`, `SLURM_MEM_PER_NODE` /
+`SLURM_MEM_PER_CPU`, the partition — beside what the node has — `os.cpu_count()`, `MemTotal`, the
+CPU model, `nvidia-smi` GPUs — and the `squeue` time limit, every probe optional and time-boxed,
+`?` when unread; `parse_node_specs` is the app's reader of it. It is the pipeline's job rather than
+an `echo` in the launch command because that command is packed into one line under the length
+budget `tests/test_the_launch_command_survives_the_command_line.py` holds), `pipeline.stardist` (StarDist segmenters +
 per-worker model state behind `set_model`/`set_fov_label`; TensorFlow lazy), and
-`pipeline.io` (atomic image/CSV/overlay writers). The two ML runtimes stay
+`pipeline.io` (atomic image/CSV/overlay writers), `pipeline.output_images` (which
+images a FOV-group archives and in what storage type — §6.2 *How the archived
+images are stored*). The two ML runtimes stay
 behind lazy imports, so importing `process_microscopy` pulls in **neither TF nor
 Torch** — they load only when a worker actually segments. Each `pipeline`
 module is in the remote manifest (`test_remote_manifest.py`) and the file sizes
@@ -8356,6 +8384,26 @@ keyed on `(fov, timepoint)`, computed for both member roles by the single
 `_SchemaReader.group_key` so a label and its tophat cannot disagree about either
 coordinate; `_index_members`, `_sample_one_well` and `_otsu_per_channel` are the
 three steps around it.
+
+A channel the run referenced rather than archived — the phase channel under
+`--phase_output reference` — has no `_tophat` member to pair, so
+`run_auto_threshold_pass` names it (`_referenced_channels` — the phase token,
+whatever this run's `--phase_output`, since a copy-mode run over up-to-date wells
+leaves archives with no phase `_tophat`) and `estimate_thresholds_from_outputs` opens `<input_dir>/<WELL>.zip`
+beside each output archive (`_open_input_archive`) and indexes its raw frames
+for those channels only (`_index_input_frames`, which judges members by
+basename because an input archive may nest them, skips `__MACOSX/`, dotfiles
+and role-suffixed members, and leaves a multi-page frame to be sampled at its
+first plane, as the pipeline measures it). The input archive is found by
+canonical well label (`_input_archive_for`), because the pipeline accepts
+`A1.zip` and writes `A01_out.zip`. An archived `_tophat` still wins, so a well a copy-mode run wrote is
+read from its own archive; a well with no input archive says so and contributes
+no samples for that channel. The batched-remote re-run carries `--input_dir`
+(the local folder) and `--phase_output` into its rebuilt args for the same
+reason. Review's Cell Gating button applies the same rule in
+`review/data/auto_threshold` (`_with_raw_frames`, over both of its walks, with
+the input archive found through `image_discovery.find_plain_well_zips_in_dir`),
+so the two estimates agree.
 
 A schema need not name every slot, and an unnamed slot is not a parse failure.
 `well:channel:timepoint` (files like `A01_w2Turq_T04.tif`) has no fov token to
@@ -8646,6 +8694,83 @@ channel. The Phase channel is still *quantified* like any other: it is a member
 of `fluor_tokens`, and that membership is what gives Analyze a channel row on
 which to carry the Phase checkbox.
 
+**How the archived images are stored.** Two run options decide how much of
+`<well>_out.zip` there is, and neither changes a CSV value: quantification
+reads the in-memory float arrays, never the files, so the per-well CSV is
+byte-identical under every combination
+(`tests/test_output_storage.py::test_the_csv_is_identical_either_way`). The
+end-of-run auto-threshold defaults are the one number sampled *from* the files,
+so under source bit depth they can move by a fraction of a count. Both are
+applied by `pipeline/output_images.write_processed_images`, the per-FOV writer
+`process_image_group` calls; their names and defaults live in the import-free
+`pipeline/output_policy.py` so `pipeline.cli_args` and the Analyze form can name
+them without importing the imaging stack.
+
+* `--phase_output reference` (default) / `copy`. Because the passthrough above
+  leaves the phase channel's frame untouched, its `_tophat` is the input image
+  pixel for pixel. Under `reference` the writer does not archive it — in the
+  nuclear slot for label-free (where `main()` has remapped the nuclear token
+  onto the phase token) and in the fluor slot otherwise, matched with the same
+  case-insensitive comparison the passthrough uses (`is_phase_token`). Every
+  reader then finds the frame in `in/<well>.zip`, and every one of them keys on
+  the dataset's `phase_token` (`frame_load.phase_channel`), **never** on the
+  recorded `phase_output`: that records what the *last* run asked for, and a
+  re-run that found its wells up to date, a run over `--only_wells`, and a
+  Merge Plates or Concatenate result (which carry dataset 1's sidecar) all
+  leave archives it does not describe. Because the phase frame is never
+  corrected, reading it from the input wherever no `_tophat` was archived is
+  right for every dataset, and an archived one still wins. The readers are
+  Review's frame loader, through
+  its existing per-cell `tophat` → `fluor_raw` fallback
+  (`review/data/frame_load.load_frame_array`), which does **not** record a
+  phase cell in `raw_fallbacks` — the raw frame *is* the corrected one, so
+  badging it uncorrected would be false on every cell — and the two Otsu
+  estimators as described in §6.2 *The Otsu mode reads its samples out of the
+  output archives*. The Image Table names the one case this cannot serve: a
+  phase cell with no frame reads `(phase input not found — needs in/)`
+  (`frame_load.missing_frame_note`), on the live grid and in an exported
+  figure, because the frame was never meant to be in `out/` and "(no image)"
+  would send the user looking there. A *composite* cell (an overlay blend, a
+  Cell Browser multi-channel crop) still drops a member it cannot load without
+  marking it, as it always has for any channel. The Datasets tools (Subset, Concatenate, Merge
+  Plates) already carry `in/` with `out/`, so a referenced dataset survives
+  them.
+* `--tophat_dtype source` (default) / `float32`. A corrected frame is computed in
+  float32, and a float32 file of camera counts is twice the bytes before
+  compression; after it the saving depends on whether the correction left
+  fractional values — a flat-field division does on nearly every pixel, a
+  background subtraction alone on integer input often does not (measured on a
+  synthetic 12-bit frame: about 60% of the zipped `_tophat` saved with a
+  Gaussian flat-field, about 18% with `sliding_disk` alone). `storage_array` rounds a `_tophat` back to its input's integer
+  type when, and only when, the input was `uint8` or `uint16` (the ceiling
+  `load_2d_gray_with_ceiling` reports, now read for every channel by
+  `_load_image_group`, not only the nuclear one) and every value is finite,
+  non-negative and fits once rounded. Anything else stays float32 for that
+  frame, and the run log says why at INFO for a frame that overflowed (DEBUG for
+  a float or signed input, which is so on every frame): a float input may be a 0–1 normalised channel
+  that rounding would erase, and a flat-field division can lift a corrected
+  pixel above the camera's ceiling, where clipping would invent a saturation
+  the data does not contain. `_smfish` and `_cytoplasm_tophat` are always
+  float32 — a LoG response is small and fractional by construction. A reader of
+  a converted file sees at most half a count of rounding; Review's loaders cast
+  every frame to float32 on read, so a dataset mixing both storage types (an
+  incremental run straddling the change) displays identically.
+
+Both values are recorded in `pipeline_info.json` as `phase_output` /
+`tophat_dtype`; a sidecar written before they existed is read as `copy` /
+`float32`, which is what that run did (`LEGACY_*` in `output_policy`). Neither is
+in the reuse key (`util/settings_digest.NOT_KEYED_ON` says why: the CSVs do not
+change, and keying on options the parser always sets would invalidate every
+recorded digest at once), and the remote run id leaves both flags out
+(`services/remote_run_id._DIGEST_SKIP_VALUE`) so the same change is treated
+alike on both sides. `build_pipeline_args` emits each flag only when the form
+turns its default off, so a run at the defaults sends the argv it always did.
+The consequence of not keying them is that a changed storage option applies
+only to wells a run actually processes: an up-to-date well keeps the archive an
+earlier run wrote, and an incremental run keeps that run's members, so a plate's
+existing wells change storage only on a forced re-run — which is why the
+readers above never trust the sidecar's record of it.
+
 **Phase and segmentation are mutually exclusive outside label-free.** Because
 the Phase channel skips correction entirely, naming it as the segmentation (or
 cytoplasm) input under a fluorescence routine runs that routine over an
@@ -8891,6 +9016,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_run_id.py` | Where a remote run lives, and whether an earlier one's work may be reused — two questions sharing a module because they are keyed on the same facts, and every reuse defect here came from one being keyed on less than the other. `_compute_run_id` and `pipeline_argv_digest` decide the address; `_choose_remote_output_dir` decides whether a recorded one may be used instead; `remote_run_dir` / `remote_run_paths` are its single spelling. Pure — no ssh, no filesystem — which is what lets the highest-stakes predicate in the remote path be tested directly rather than through a harness. |
 | `remote_commands.py` | The shell a remote run sends, as strings: `_compose_remote_cmd` (the single-launch line — record the pidfile, optionally exec the scheduler launcher, activate conda, wait for the upload, exec the pipeline), `_compose_driver_cmd` and `_batch_driver_snippet` (the batched driver that holds one allocation and runs a pipeline per batch, stopping early when the run's suspend request appears), `_remote_scratch_export`, the batch handshake names (`BATCH_READY`, `BATCH_DONE`, `BATCH_DONE_MARKER`), and `pack_for_login_shell` / `unpack_login_shell_command`. Both launch paths send their command through `pack_for_login_shell` — gzip + base64 into one short line of plain characters that the login shell unpacks and `eval`s, so `$$` and `exec` still act on the login shell and the pidfile and cancel channel are unchanged. The scripts are thousands of characters across seventeen lines with hundreds of quotes, and on a Windows client the one `ssh` argument they travel in is rebuilt by `list2cmdline` and parsed again by Git for Windows' `ssh.exe`; a batched launch past 8,191 characters failed there with `bash: -c: line 17: syntax error: unexpected end of file`. A remote without `base64` or `gzip` fails with exit `UNPACK_FAILED_EXIT` and a line saying so, never with an empty `eval` that would exit 0. Tests read a spawned command through `unpack_login_shell_command`. No ssh and no I/O, so a quoting decision is tested by reading the string and the driver by running it in `bash`. Re-exported by `remote_runner`; imports the transport's quoting and the conda / wait snippets, never the runner. |
 | `remote_suspend.py` | Asking a running remote pipeline to suspend: `request_suspend` (touch the run's request file over ssh, bounded by `SUSPEND_REQUEST_TIMEOUT_S`, telling a batched run's local loop first), and `_AnySet`, the Event-shaped view a batch upload watches so either a Stop or a suspend ends it. `RemoteRunner.request_suspend` is a one-line delegate; `remote_runner` binds `request_suspend` for that and nothing else from here. |
+| `remote_recover.py` | Before any unforced remote run stages its upload, `recover_finished_outputs` downloads what the previous run of the plate finished on the host and never brought home: it finds that run's directory through the journal's recorded address (`stored_remote_address`, the three re-attach keys) and runs `FetchedOutputVerifier.verify` against it. Matches on the current argv digest, then on `legacy_argv_digests` so plates recorded by an earlier build are found. Returns a `Recovery`; `pulled` makes `PipelineRunner` stage incrementally, `ok=False` means listed wells could not be pulled and the run is ended rather than re-uploading them. Declines for a forced run. |
 | `remote_scratch.py` | The leaves of the remote staging work, stdlib + `util` only: where transient bytes go while a transfer is in flight (`_scratch_dir`, `_transit_dir`, `TRANSIT_SUBDIR`), how a stale one is swept (`sweep_stale_scratch`), whether an archive arrived whole (`_zip_is_complete`), and what the user's own input archives hash to (`fingerprint_archives`, `source_fingerprint` — the discriminator the remote re-attach is keyed on). Nine functions whose only tie to `remote_runner` was one constant; every caller, the runner's own `source_fingerprint` read included, imports them from here. |
 | `remote_upload.py` | Getting a run's input onto the remote host, once. `DatasetCache` keys each upload by a stat-based fingerprint of the staged archives, so re-running the same input is a metadata round trip rather than a re-upload; streams rsync's output well by well (`_run_rsync_streaming`, `_UploadWellProgress`) so the Upload rail and each well's dial fill as its archive lands; and keeps the remote cache inside the host's budget. Its short ssh control commands are bounded by `SSH_CONTROL_TIMEOUT_S`. Line-budgeted (`REMOTE_UPLOAD_BUDGET`). |
 | `remote_jobs.py` | The scheduler jobs a remote run holds, and making sure none outlives it. `close_remote_job` is the teardown backstop every exit the app survives goes through (it reads the job id from `<pidfile>.slurm` and `scancel`s it); `sweep_orphaned_allocation` is what the next run of the same plate does about an exit the app did not survive, and returns its verdict (`swept`, `owned`, `notmine`, `unknown`, `none`) because the batched path acts on it. Both refuse to cancel a job that is not the caller's (`_only_my_job`), and both are no-ops on a host with no `compute_launcher`. `RemoteRunner.close_remote_job` and `_sweep_orphaned_allocation` delegate here. Line-budgeted (`REMOTE_JOBS_BUDGET`). |
@@ -8901,6 +9027,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_batch_staging.py` | What a batched run's retry may reuse of an earlier attempt's staged uploads. `prune_staged` empties a kept `b<i>` / `bg/` of every entry not in the batch about to be uploaded and logs how many of the batch's wells were already there, falling back to `rm -rf` of the directory on any answer but a clean listing. The reuse is safe because the run directory is keyed on the staged archives' fingerprint; the *Batched mode* paragraph in the `remote_runner.py` row says why. |
 | `slurm_batch_script.py` | Turning a JupyterHub profile into an `srun` launcher the way the cluster does: `launcher_from_batch_script` renders the spawner's job template (Jinja-style `{{ var }}` / `{% if var %}` or `{var}`, each `req_<name>` as `<name>`) and keeps the `#SBATCH` resource options only — partition, CPUs, memory, time, GPUs, constraint and their kin — because `--output`, `--export`, `--chdir` and `--ntasks` describe JupyterHub's batch job and would break a step the app runs. `directive_flags` sorts one directive's words into flags and stray words. `single_task` folds a task count into the CPU count: a template that asks for cores the batch way (`#SBATCH -n {nprocs}`) gives a batch job that many CPUs, while `-n` on the app's `srun` would start the pipeline that many times, so the step asks for one task with *tasks × cpus-per-task* CPUs — dropping it left the step one CPU and the pipeline one worker. A resource option whose whole value is a variable the profile leaves unset is skipped quietly (the profile asks for no such resource); one with more around the variable is reported. A stray word, or a resource line that needs a value the profile does not set, is reported in `ScriptLauncher.dropped`; nothing is appended to a launcher where `srun` would take it for the program. |
 | `scheduler_probe.py` | The Remotes dialog's scheduler **Test**: `ProbeRun` sends a job through the real launch path — `_compose_remote_cmd` (conda activation, the environment guard, the `srun` wrapper and its stray-word refusal), `pack_for_login_shell` and the host's `ssh -tt` argv — with a short Python probe in the host's conda environment in place of the pipeline. The probe prints `[probe] key=value` lines (node, the job's CPUs and the node's, `SLURM_JOB_ID` / `SLURM_CPUS_PER_TASK` / `CUDA_VISIBLE_DEVICES`, `nvidia-smi -L`, Torch and CUDA, Cellpose); `parse_probe` and `summarize` turn them into the verdict the dialog shows, using `pipeline.parallelism.slurm_cpu_shortfall` for the CPU rule. It exists because every scheduler defect so far was invisible to tests that drive stand-in schedulers and obvious on the real cluster within a minute. `analyze/scheduler_test_dialog.py` runs it on a worker thread, streams the launch's output, and closing it ends the ssh session, which hands back the allocation. `tests/test_scheduler_probe.py` runs the real command under `sh` against stand-in `srun`, `sinfo` and `conda`. |
+| `JOB_CLOSED_LINE` (in `pipeline_runner.py`) | What `PipelineRunner._note_scheduler_job_closed` prints, on a host with a `compute_launcher` only, once the remote process that held the run's Slurm job has exited — printed locally because the single-run launch `exec`s the pipeline, so nothing inside the job runs after it. `ProgressTracker` turns it, or the batched driver's `releasing the allocation`, into `("slurm_job", ("closed", {}))`, and the node-specs line `pipeline/slurm_node.py` logs into `("slurm_job", ("specs", {…}))`; the Analyze pane's job indicator (`analyze/slurm_job_view.py`) folds those with the existing `sched` events. `tests/test_the_slurm_job_indicator.py`. |
 | `remote_srun_retry.py` | The `srun` launch wrapper: prefer powered-on nodes via `sinfo`, retry a node that fails to boot up to three times with it excluded, merge the user's own `--exclude`; and `stray_launcher_words`, which finds a word `srun` would run as the program. The *Scheduled compute* paragraph in the `remote_runner.py` row says why. |
 | `remote_wire.py` | The remote client's line vocabulary: `TRANSIENT_PREFIX` / `WELL_XFER_PREFIX` (live-state lines `ProgressTracker` routes to the status line and never logs), the transfer cadences, the exhausted-retry advice, and the `Well X — done.` / mode-banner patterns the `Fetcher` triggers on. Stdlib-only and importing nothing else of the remote client's, so every stage reads it without a cycle. |
 | `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` (in `remote_fetch.py`) pulls each well's `<well>_out.zip` + CSVs back. The runner orchestrates; turning the user's input into the archives it uploads is `remote_staging.py`, getting them onto the host once is `remote_upload.py`, the run as a process the GUI reads and stops is `remote_process.py`, bringing output home and proving it arrived is `remote_fetch.py`, the scheduler jobs a run holds — closing one, and sweeping one a crashed run left — are `remote_jobs.py`, the record a run carries is `remote_run_state.py`, and the lines its stages print and parse are `remote_wire.py`. **It pulls `pipeline_info.json` too, as early as the remote has one**, so the plate can be opened in Review while the run is still going: per-well CSVs arrive as each well finishes, and without the sidecar there is nothing to interpret them with — no filename schema, no channel tokens, no `available_timepoints` / `available_fovs`, so the viewer falls back to guessing channels from CSV column names. Nothing on stdout announces that file, so `Fetcher._sidecar_loop` polls for it on its own thread every `SIDECAR_POLL_S` rather than waiting on a marker; the first attempt waits out an interval, because the thread starts in the same breath as the ssh that launches the pipeline and at that instant the remote cannot have written it. The window is hours (`SIDECAR_POLL_MAX_S`) since what it waits out is the scheduler queue, not the pipeline's start-up. Two rules keep it from fighting the other writers of that path. It **never overwrites**: a sidecar already present locally belongs to a previous run of this dataset and carries cell-gating thresholds, sample definitions, ratios, notes and the `run_report`, none of which the remote's copy has. And what it installs is **stamped `provisional`**, because a sidecar written by a job still running describes only the input that job was handed — one batch's split, in batched mode — so its `available_*` are short of the plate and there is no `run_report` at all; `verify_and_cleanup` replaces the file wholesale at the end and the mark goes with it, while a run that never got there leaves the mark in place, which is the honest outcome. The poll is off by default (`poll_sidecar`) so a `Fetcher` built to exercise one method in a test never reaches the network on a timer; both production call sites enable it and `tests/test_remote_midrun_sidecar.py` fails if a third one forgets. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/11/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive; 11 is *error in file I/O*, what a fault on the local end of a transfer looks like). Every write the client itself makes on a user volume — staging copies off the input dir, `Fetcher._materialize`, the `pipeline_info.json` rewrite — goes through `util.retry_io.retry_io` for the same reason (§6.5). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Which conda env the pipeline runs in** is `_conda_env_selector`'s answer, resolved once per runner from the host's `remote_python` and used by both the argv builder and the shell composer so they cannot disagree: left at its default the field is a *placeholder* and the env is resolved by name (`conda run -n allwell`), which is what makes a host with a pre-existing system conda work at all; set by the user to an `<env>/bin/python` it selects that prefix (`conda run -p <env>`). `_conda_env_guard` then verifies the env exists on the remote — inside the scheduler allocation when there is one, since the compute node is where it has to exist — and aborts with a `[remote]`-prefixed message naming the host, conda's base, the envs it can see, and the fix. Without it the run reached `conda run` and died on conda's bare `EnvironmentLocationNotFound`, which in a scrolling log is indistinguishable from an error the pipeline raised. A cache hit execs `true` and skips the check. **"Does the env exist" is conda's own question** — a prefix is an environment iff it holds `conda-meta/history` — and the shell that answers it, `CONDA_ENV_SHELL_HELPERS`, is shared with `services/remote_bootstrap.py` so the runner's check and the bootstrap's create-or-skip decision cannot disagree. See §6.6 for why that mattered. **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. **An `srun` launcher is wrapped** by `services/remote_srun_retry.wrap_srun_launch`, from `remote_commands._launch`, which both composers end in. On a cluster that powers idle nodes down, Slurm can grant a sleeping node and boot it; `srun` waits only as long as the cluster's `ResumeTimeout`, then prints `Something is wrong with the boot of the nodes`, gives the allocation back and exits (`NODE_FAIL`), and nothing in Slurm retries an `srun` step. The wrapper, a POSIX `sh` loop on the login node, asks `sinfo` before each attempt and passes `--exclude` for every node of the launcher's partition that is not powered on (`AWAKE_STATES`: `idle`, `mix`, `alloc`, `comp`), when at least one is. Before launching with that exclusion it asks Slurm, with `srun --test-only` (which queues nothing), whether the request could run on those nodes at all; when it could not — the awake nodes are the wrong instance type for a `--constraint`, say — it drops the exclusion and prints `no powered-on node matches this request — Slurm will start one`, rather than letting the first real `srun` fail with `Requested node configuration is not available`. A request the test passes but the real launch still finds unsatisfiable (a node's state changed in between) is retried once without the exclusion. On a boot failure the wrapper adds the node `srun` named to the exclusion and launches again, up to `SRUN_BOOT_RETRIES` (3) times, then names every failed node. Each retry prints a `[remote] scheduler: requesting allocation via:` line, which `ProgressTracker` already reads as "waiting", so the progress view returns to its queue clock. The user's own `--exclude` / `-x` is merged in rather than passed twice, because Slurm keeps only the last. The loop cannot `exec` srun, so each attempt records srun's own PID through `sh -c 'echo $$ > pidfile; exec …'`, keeping the `kill -TERM $(cat pidfile)` cancel channel pointed at srun. The launch's output is copied to `<pidfile>.srun-err` with `tee` and only lines beginning `srun:` are searched. It is `tee` and not an `awk` filter because `mawk`, the default `awk` on Debian and Ubuntu login nodes, fills its whole input buffer before handling a line: a filter held the job's first lines back until more output arrived, and a run that had just been allocated a node sat silent (`test_the_job_s_first_line_arrives_before_the_job_ends` measures the delay). **A launcher with a loose word is refused**: `srun` stops reading options at the first word that is not one, so a word such as an instance type left after `--mem=60G` becomes the program, and the job fails with `execve(): <word>: No such file or directory` only once a node starts. `stray_launcher_words` finds a non-option word that follows an option written with `=` or another such word (a word after a bare option may be its value and is left alone); the Remotes dialog refuses to save such a launcher, and `remote_commands._launch` refuses to launch one, since a saved host is never re-checked by the dialog. Any other launcher is exec'd unwrapped as before. `tests/test_srun_boot_retry.py` runs the wrapper under the system `sh` with stand-in `srun` and `sinfo`, and checks that the composed job script reaches `srun` byte for byte as it reaches an unwrapped launcher. Empty `compute_launcher` = direct-on-host execution (the default). **A queue wait is announced, timed, and named**, because it is otherwise indistinguishable from a hang: the upload finishes and the log stops. `_scheduler_handoff_lines` writes the hand-off and is called from **every** launch path — the batched one composed the same launcher but announced nothing, so a batched run fell silent at the exact moment it began waiting. `ProgressTracker` turns those lines, plus the scheduler's own `srun: job N queued and waiting for resources` / `has been allocated resources`, into a `sched` event, and `AnalyzeProgressMixin._on_scheduler` runs a 1-Hz clock reading *Waiting for the scheduler — 4m12s (job 4812345)* with a log breadcrumb every two minutes repeating the elapsed time, the job id and the **request** (an unsatisfiable one — a partition that does not exist, a `--gres` the cluster cannot honour — is the usual cause of an indefinite queue). The job id comes from the scheduler's stderr rather than the `.slurm` sidecar because the sidecar is written from *inside* the allocation and so does not exist while the job is pending; a site whose scheduler words those lines differently still gets the wait announced and timed off the app's own lines, and loses only the id. The wait is what finally retracts the plate-wide `Transferring… N%` label: `set_transfer(None)` otherwise fires only on a *compute* event, which by definition has not happened while the job is queued, which is why the status sat on `Transferring… 100%` for the whole wait. **A remote run does not write to the client's home volume.** Every downloaded `<well>_out.zip` used to be staged through `~/.allwell/scratch` and then materialised into the output directory, so each byte of a plate's results crossed two filesystems and the first of them was one the run had no reason to touch — a full home volume stopped runs whose own input and output volumes had room, which is the `ENOSPC` users hit. `_transit_dir` puts a file in transit beside the volume it is going to (or, for the upload-side archive rewrites, the one it came from): a dot-prefixed `.allwell-transit`, so every dataset scan in the app skips it, removed as soon as the file it held is in place, and swept by `sweep_stale_scratch(also=…)` when a hard quit leaks one. This does not re-create what `pipeline.io.scratch_base_for` warns about — that warning is about the *pipeline's* per-FOV working set, tens of thousands of create/fsync/rename operations from every worker, where this is one file per well written once and moved once, onto a volume that already receives exactly those bytes by copy. What changes is that the move becomes a same-volume rename and the home volume is off the path. A volume that refuses the directory falls back to the scratch base and **says so**, once per volume; falling back silently would be the original failure with the explanation removed. **The pipeline's scratch on the remote is a per-host setting**, `remote_scratch_dir`, exported as `ALLWELL_SCRATCH_DIR` inside both composed commands (single-shot and batch driver) because that is what `pipeline.io.scratch_base_for` reads; `services/pipeline_runner` sets the same variable in the GUI's own environment, which reaches a local subprocess and nothing else. Empty leaves the remote on its `~/.allwell/scratch`, which on a cluster is the home quota — the worst available volume for a working set of several uncompressed images per field. It is the one path in the file deliberately **not** run through `_remote_quote`: the values that matter (`$TMPDIR`, `$SLURM_TMPDIR`, `/scratch/$USER`) need remote-side expansion, so it is emitted in double quotes with a leading `~` rewritten to `$HOME` first, and a value carrying shell syntax is refused rather than composed into a command that would fail on the remote naming nothing. The `remotes.toml` schema is the live contract in `services/remote_config.py`. **The end-of-run completeness check runs client-side, once, after the fetch.** `_build_remote_argv` appends `--no_run_check` to every remote launch and `verify_and_cleanup` calls `run_client_side_completeness_check` instead, immediately after `refresh_pipeline_info_available_from_outputs` (which rewrites the very `available_*` fields a check would otherwise read stale) and before the `ok` gate, since a run that came back short is exactly the one whose record is worth having. Three reasons it cannot run remotely, and they compound: an incremental run's remote output dir holds only the uploaded split, so a record written there inventories the wrong tree; the fetched sidecar overwrites the local one, so the record would be destroyed on arrival; and a batched run is N separate pipeline launches, each of which would describe its own slice as if it were the plate. Running on the client also answers a strictly better question — *did it get here*, rather than *did the remote produce it*. Whatever `run_check` the fetch brought back is **dropped before the local check runs**: the remote's suppression writes the same "turned off" stub a user's own `--no_run_check` would, and that stub surviving would tell a user they had turned the check off when they had not. The two outcomes are therefore an honest record or none at all, and none reads as "not checked", which is what happened. **Empty-well correction reaches every batch from one upload.** The pipeline builds its `empty_well` background and flat-field fields from whatever blank wells are in the directory it is pointed at, at the moment it starts — and batched mode stages one batch at a time, so a blank left in the ordinary slicing corrected the batch it landed in and nothing else. Wells sort alphabetically and blanks are conventionally H12/G12, so in practice it was the last batch, and every earlier one produced numbers with the background left in whole. Nothing marked them: `_empty_well_field` returns `None` for a channel with no model and the frame passes through untouched, so the output is bit-for-bit the raw input and indistinguishable from a corrected well. A blank is a full well of uncompressed frames — the same size as any other — so it cannot be copied into each batch. `_empty_well_blanks` reads the run's own argv for `--background_well` plus an `empty_well` mode, holds those archives out of the batch slicing, and uploads them **once** to `runs/<run_id>/bg/`, outside the staging the driver's `rm -rf in && mv b<i> in` replaces. The pipeline's `--background_dir` names that directory, so every batch builds the same reference; the driver hard-links each blank that still needs processing into the final batch (`ln`, one filesystem, no bytes) so it is run once for its own output — named one by one rather than globbing `bg/`, since on a re-run some blanks are references only and linking those back in would reprocess a well the user's own re-run declined. **The staging filters do not touch a blank at all**: `stage_local_zips` takes the background wells and `_plan_staging` stages them whole, the way a `--force_wells` well bypasses the incremental diff. Without that, an incremental re-run finds every one of the blank's FOVs already processed, drops it, and starves the whole plate of the correction — and a blank with *some* new fields would be thinned to those, so the field would be estimated from a fraction of the reference while the log reported it built. When the only wells left to run are blanks, they are treated as ordinary wells instead: an empty batch would be uploaded to a directory the driver cannot then `mv`. **And a correction that cannot be built stops the run.** `_require_empty_well_models` raises when `empty_well` was requested with named wells and no model came back, naming the wells and the directory searched — an `INFO` line reading `(none found)` was the only previous signal, for a run that had explicitly asked for the correction. **Rewriting a well archive is a cost decision, and it says why.** The upload planner (`_plan_staging`) reads each archive's central directory — member names *and* compressed sizes, one read — and rewrites an archive only when the channel filter (or an incremental run's already-done FOV-groups) drops members worth at least `remote_config.REWRITE_MIN_SAVING` of its bytes. Rewriting costs a full local read and write before a byte is uploaded and buys only a smaller transfer, so shedding two small frames from a multi-gigabyte well is a bad trade — the remote ignores channels it was not asked for anyway, so sending them costs bandwidth and nothing else. Either way the plan line names the count, the fraction and **the reason**: the channel token parsed out of the dropped members' own names (or the bare filename, when the name does not decompose under the run's schema, since a guessed token is worse than none), or the FOV-group count for an incremental drop. Previously the log said only *that* it was rewriting, which left "every channel is selected, so why is it copying my plate?" answerable from no line the run emits. An archive from which nothing is dropped is passed through untouched and logs nothing — `keep is None` holds exactly when nothing was dropped, which is the invariant every diagnosis of this path rests on. **What counts as an image is one question with one answer**, `util/image_exts.GROUP_IMAGE_EXTS`, read by both `process_microscopy`'s scanners and this planner: they had drifted to `.tif`/`.tiff` here against `.tif`/`.tiff`/`.png`/`.jpg`/`.jpeg` there, so a `.png` member was invisible to the planner and was silently dropped from any archive rewritten for another reason — input the remote would have processed. **Batched mode** (`remote_batch_size > 0` → `_BatchedRemoteProcess`) uploads and runs the plate in slices so peak remote disk is one batch of input plus about one well of output. **One allocation serves every batch.** Each batch used to compose its own `srun`, so a scheduler-backed host queued once per batch and handed the node back in between — an allocation is the expensive thing to obtain and the cheap thing to keep. `_batch_driver_snippet` builds a loop that stays inside one job: it waits for each batch's `BATCH_READY` file, swaps that batch's staged directory into place, runs the pipeline, writes the exit code into `BATCH_DONE` and prints `BATCH_DONE_MARKER`, which the local reader thread consumes (it never reaches the log — `ProgressTracker` has no reason to see the handshake). **The swap is the barrier.** Batched input now lives in the run directory rather than the shared dataset cache, batch *i* is uploaded to `b<i>` beside it, and the driver does `rm -rf in && mv b<i> in` — atomic within one filesystem, so a batch's pipeline sees exactly its own zips. The old shared directory relied on the Fetcher having deleted the previous batch's input in time and nothing waited for it, which is what `ProgressTracker.well_repeats` counts. **A retry keeps what an earlier attempt staged.** The driver is launched before batch 1 is uploaded, so a node that then fails to boot (`srun: error: Nodes … are still not ready` / `Something is wrong with the boot of the nodes`) leaves batch 1's wells sitting in `b1` untouched. `_start_driver` clears only `in/` — a batch the driver had already swapped in and may have half-processed — and keeps every `b<i>` and `bg/`. That is safe because `run_id` is keyed on the name, size and mtime of every staged archive (`fingerprint_archives`), so a file of a given name in the run directory is a whole or partial copy of the archive this run would send under that name: rsync's quick check skips the whole ones and `--partial` resumes the rest. What a kept directory can still hold is a well that belongs to a different batch now, because the local-completion filter can shift the slicing between attempts; `services/remote_batch_staging.prune_staged` runs `find … ! -name <each kept zip> -exec rm -rf {} + -o -print` immediately before each upload, so the driver's `mv` still hands the pipeline exactly one batch, logs how many of the batch's wells were already there, and falls back to `rm -rf` of the whole directory on any answer other than a clean listing — a re-send costs time, a stray well in a batch costs a duplicate result. `tests/test_a_retry_keeps_the_staged_batches.py` drives attempt, dead driver, attempt against a local directory standing in for the remote, running the remote commands under `bash`. **A failed batch keeps the node**: the loop carries on, the run's own code carries the first failure, and an end-of-run tally names which batches failed. **The stream ending is the only signal that the run is over.** Stop reaches the batched wrapper through `signal_subprocess`, which reads `proc.pid`; with one driver held for the whole run that is always a real pid, so the process group is killed and `terminate()` — the method that sets the stop flag and cancels the Fetcher — never runs. The reader thread therefore treats EOF with batches still unreported as the run being over: it sets the flag and cancels the Fetcher itself, which is what gets the worker out of the rsync it is sitting in (`upload_subset` watches that flag). A walltime expiry or a node failure arrives the same way and is reported differently, since one is the user's doing and the other is not. Two things do end it, both meaning the app is gone rather than slow — a heartbeat that stopped advancing and a batch that never arrived — and each batch is additionally wrapped in `timeout` at the budget the operator's original `--time` set for one batch, so one wedged well cannot burn the whole run's walltime. That `--time` is scaled by the batch count *plus one* (`remote_config.scale_launcher_time`, clamped at `MAX_HELD_ALLOCATION_S`) because it sized a single launch and now has to cover the plate: the node is also held through every upload after the first, since the driver waits for each batch inside the allocation, so budgeting only the compute puts the expiry somewhere in the last batch of any run whose transfers are not free. The extra batch's budget is a guess and the log line says so. A launcher that sets no `--time` is left alone, since inventing a number is worse than inheriting the cluster's. Each batch is still its own pipeline invocation and so emits its own "N well(s) to process" banner for its own slice; `_run_batches` therefore injects one synthetic `Zip mode: <N> wells — batched` line ahead of batch 1, and `ProgressTracker` locks the run's denominator onto the first banner it sees. That `<N>` is the whole **staged** plate, including the wells the batched path skips because their per-well CSV is already complete locally — each skipped well gets its own `SKIP well …` marker on the same stream, so it is counted and painted on the plate map instead of leaving the run reporting 100% against a denominator smaller than the plate the user staged. **The allocation is asked for before the plate is uploaded.** A queue wait and a transfer are independent waits, and spending them end to end adds the whole queue to every run; requested first, they overlap. The job `srun` places starts the moment a node is granted, which may be long before the last byte lands, so the composed command blocks on an `UPLOAD_SENTINEL` file written into the run directory once rsync returns — announcing both edges of that wait, because a granted node waiting on bytes looks exactly like a hung one. `UPLOAD_WAIT_TIMEOUT_S` bounds it, since the node is idle and billed throughout; a failed upload cancels the allocation immediately rather than leaving it to time out. That deadline is for an uploader that is alive but wedged — the case that actually happens is the app being *killed*, and for that the uploader beats `UPLOAD_HEARTBEAT` every `UPLOAD_HEARTBEAT_S` (a daemon thread, not a per-file hook: rsync can spend minutes inside one large archive). A beat that stops advancing frees the node within `UPLOAD_HEARTBEAT_STALE_S` however long the upload legitimately needed. The file is touched over ssh, so the mtime the job compares against its own `date` is the remote clock and no skew between two machines is being measured. **Crash recovery closes the other half.** `close_remote_job` covers every exit the app survives — clean quit, finished run, Stop — because it reads the job id from memory; a SIGKILL, segfault or power cut runs none of it. The id is on the shared filesystem the whole time and `run_id` is deterministic in (input, arguments), so `remote_jobs.sweep_orphaned_allocation` lets the *next* run of the same plate find and cancel exactly the job the crashed one left. That determinism cuts both ways — two sessions on the same plate compute the same `run_id` — so the sweep refuses to touch a job whose heartbeat is fresh or whose sidecar was written moments ago, and returns which of the four verdicts it reached (`swept`, `owned`, `notmine`, `unknown`) rather than only logging it: the batched path is about to clear that same run directory's `in/` and prune its staged batches, and on `owned` it stops the run instead, since both sessions would otherwise stage batches into one directory. **Nothing it cannot measure is treated as dead.** The ages come from `stat -c %Y` *or* BSD's `stat -f %m`, and a host that answers neither gets `unknown` and keeps its job — the earlier code gave the two files opposite defaults for the same failure (epoch 0 for the heartbeat, *now* for the sidecar), so such a host silently never swept anything. The beat itself runs for the **whole** run rather than just the upload, on both paths, because it is what the sweep reads: stopping it when the transfer ended made an hour-long compute look abandoned to the next session on the same plate. **Neither cancel path will touch a job that is not the caller's**: both ask `squeue` who owns the id and stop if the answer is not `id -un`, and both pass `-u` to `scancel` as well, so a job that changed hands between the question and the answer still cannot be cancelled. Slurm would refuse a non-owner anyway — but that is the scheduler's policy rather than this app's promise, and it does not hold for an operator account. The overlap is taken **only** where there is something to queue for: a host with no launcher runs on the login node as soon as ssh connects, and a cache hit runs `true`, so both keep the old upload-first order — starting either early would run the pipeline against an input directory that is still filling. The run directory can be known in advance because `cache_key` is a local computation over the input archives; `spawn` checks the upload landed under that same key, since a divergence means the bytes went somewhere the waiting job will never look.  **`spawn` reads as its phases**: `_prepare_run` addresses the run (cache key, run id, the re-attach decision) and records it in the journal, `_preflight_cache_hit` decides whether the pipeline needs to run at all, `_compose_launch` builds the argv and the remote command and returns whether the allocation overlaps the upload, and `_start_ssh` / `_upload_input` do the two outbound steps. The overlapped launch's ordering and its failure handling — sweep, heartbeat, allocate, upload, sentinel, and handing the node back if either of the last two fails — stay in `spawn` itself, because that ordering is the behaviour `tests/test_remote_allocation_overlap.py` pins and a helper would hide it. What `spawn` leaves behind for the rest of the run (the suspend request armed only when a pipeline was launched, and the `Fetcher` that `cancel` stops) is pinned by `tests/test_remote_spawn_phases.py`. The module carries a line budget (`test_monolith_budgets.py::test_remote_runner_line_budget`), and each owner module beside it has its own, because the complexity ratchet cannot supply one — the functions here are long rather than branchy, so length is the dimension that needs the limit. Every recurring fault in this file has been a half-finished sweep of a fact derived in N places, and a module keeps acquiring those for as long as adding one more costs nothing. **Its supported import surface is its `__all__`** — `RemoteRunner`, `OutputFilter`, `LocalInputMode`, `ZippedInput`, `stage_local_zips`, `input_well_containers`, `repo_root`, `TRANSIENT_PREFIX`, `WELL_XFER_PREFIX` and the packaging contract `_REQUIRED_REMOTE_FILES`. No file reaches any other name through `services.remote_runner` — not by `from … import`, by `rr.X`, by a named `setattr`/`patch.object`, or by a `"services.remote_runner.X"` patch string, including a deeper one such as `"services.remote_runner.subprocess.run"`, which patches the shared `subprocess` module and is written `"subprocess.run"` — and the runner re-exports nothing outside `__all__`. Every caller imports from, and every test patches, the module that owns the name; a test that steers code the runner calls patches the module where that code lives. `tests/test_remote_runner_facade.py` enforces both directions; the scan behind it is `tests/_facade_scan.py`, and `tests/test_guards_bite.py` shows it seeing each access form. |
@@ -8912,7 +9039,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `subprocess_text.py` | `TEXT_UTF8` — the one spelling of "decode this subprocess's output as UTF-8", splatted into every `subprocess.run` / `Popen` whose text-mode output the app reads. `text=True` on its own decodes with `locale.getpreferredencoding(False)`, which is UTF-8 on macOS and Linux but the ANSI codepage on Windows — so the `✓` / `→` markers, the em-dash in `Well X — done.` and any non-ASCII byte in a path either mojibake or raise `UnicodeDecodeError` out of a reader thread, skipping the `proc.wait()` behind it. `errors="replace"` is the second half: a `?` in a log line beats an exception that makes the GUI report a run as never started while it keeps going. `tests/test_subprocess_text_decoding.py` fails on any text-mode call in the tree that names no codec, including one whose flag sits in a kwargs dict; `services/remote_bootstrap.py` spells the same three arguments out because it stays stdlib-only. |
 | *(pipeline)* `settings_record.py` + `util/settings_digest.py` | Which configuration produced each well's output, recorded beside it as `<out>/.aw_settings/<WELL>.json`. `KEYED_ON` is the roster of what invalidates a prior result — the segmenter and every one of its thresholds, the channels quantified, the QC gate, both top-hat radii and FFT bands, the mesh background parameters, the flat-field and blank, the auto-threshold controls and their control wells, and the filename schema — with the reason each entry is in it; `settings_digest` hashes whatever of them a run states. **The keys are `process_microscopy.build_parser()` destinations**, because the one caller digests that parser's namespace: a key spelled any other way contributes nothing, silently, which is how the first version of the roster came to name six options that do not exist and leave fifteen real ones unkeyed. `NOT_KEYED_ON` is its complement, carrying the reason each remaining option is outside the key, so the two partition the parser exactly and a newly added option fails the suite until someone classifies it. Both of the pipeline's reuse predicates consult the record: the plain re-run skip (`well_skip.output_exists_for_well`) and the incremental done-set. Without it, re-running a plate with a different segmenter was answered "up to date" while `write_pipeline_info` rewrote the sidecar to advertise the new configuration, so the plate described a setup that had produced none of the numbers in it. The marker is written by the worker, after both the CSV and the archive are on disk and past every short circuit — a well that logged "up to date (no new FOVs)" computed nothing and must not be credited with this run's settings. A remote run's marker is written on the worker host, so `Fetcher._pull_settings_marker` brings each well's back with its output rather than the client recomputing a second copy of the digest. **A well with no recorded digest is accepted**, so introducing the check forces nobody to reprocess anything; the cost is that a plate written before the record existed keeps the old behaviour until its next forced run. The digest is deliberately blind to the paths, to `--force`/`--incremental` and to anything about the machine, so a plate computed locally and on a worker host produces the same key. Registered in `tests/test_reuse_is_keyed_completely.py`, which drives every key through `well_settings_allow_reuse` itself rather than only through the digest. |
 | `run_detect.py` | Run-time detection of an Analyze run's filename schema, separator and channel roles from its input (`resolve_detection`, for a `RunSpec` with `auto_detect`), preferring a chained converter's recorded `upstream_layout`, and the checks that the detected channels fit every option naming a channel (`channel_option_errors`). Detection that cannot decide raises `DetectionError`; it never falls back to the job's frozen values. `scan_pipeline_info` is the confidence rule the form's **Detect from filenames** shares. |
-| `run_journal.py` | The record of what a run intended, where it sent the work, and what became of each well — opened before the first well is processed, amended as the run goes, closed with an outcome, so a record still open at the next start-up is a run the app was killed during (§6.5). Stdlib-only. Writes `<output_dir>/.aw_journal/`: `run.json` for the run and one `wells/<WELL>.json` per well, `pipeline/run_report.py`'s one-atomic-file-per-unit shape so the orchestrator, the worker pool and the Fetcher thread all record without a lock. **Evidence, never authority** — `pipeline.completeness` stays the answer to "is this well complete" and the artefacts stay the done-set, so a journal that goes missing costs answers rather than making a good dataset look empty. It drives exactly one decision, the remote re-attach above. A well record can name the run it belongs to: `open_run` returns a token, and a writer that hands it back cannot file its progress under a previous run's surviving record — which is what a run whose own `open_run` failed would otherwise do. The local path passes it (`analyze.progress._journal_well`); the remote writers — `_record_remote_in_journal` and the Fetcher's three `record_well` calls — do not, so they are trusted writes and that protection does not extend to them. The consequence is worth stating rather than leaving implied: on a *remote* run whose own `open_run` failed, those four still write into whatever record survives in that directory, which in that exact scenario is the previous run's, still open because the index is holding it for resume. Measured: run 2's remote address and its uploaded wells land inside run 1's record. Re-attach is keyed on the cache key and would therefore decline, so no wrong numbers follow — but run 1's tally and per-well detail are corrupted, and its resume offer describes a run that did not produce them — while a run's *own* completion lines, which are parsed on the GUI thread and therefore arrive after the worker thread closed the record, are still accepted. Asking the cheaper question instead, "is a run open here", refused the tail of every plate: a 24-well run recorded four wells and the pre-run readout said so. `tests/test_a_run_end_to_end_records_every_well.py` drives a real run through a real drain and is the only test on either side of this record that does. `WELL_STATES` is the single roster of what a run can have done to a well, guarded by `tests/test_no_second_journal_vocabulary.py` — which walks dict keys as well as tuples, lists and sets, because a states-to-words table is presentation only for as long as the module holding it also consults the canonical roster; one that does not is holding its only copy, and anything iterating it drops every state it fails to spell. |
+| `run_journal.py` | The record of what a run intended, where it sent the work, and what became of each well — opened before the first well is processed, amended as the run goes, closed with an outcome, so a record still open at the next start-up is a run the app was killed during (§6.5). Stdlib-only. Writes `<output_dir>/.aw_journal/`: `run.json` for the run (its `remote` address, plus the `remote_history` of up to `REMOTE_HISTORY_MAX` addresses earlier runs of the plate used, which `stored_remote_addresses` reads so a later run cannot erase where finished output was) and one `wells/<WELL>.json` per well, `pipeline/run_report.py`'s one-atomic-file-per-unit shape so the orchestrator, the worker pool and the Fetcher thread all record without a lock. **Evidence, never authority** — `pipeline.completeness` stays the answer to "is this well complete" and the artefacts stay the done-set, so a journal that goes missing costs answers rather than making a good dataset look empty. It drives exactly one decision, the remote re-attach above. A well record can name the run it belongs to: `open_run` returns a token, and a writer that hands it back cannot file its progress under a previous run's surviving record — which is what a run whose own `open_run` failed would otherwise do. The local path passes it (`analyze.progress._journal_well`); the remote writers — `_record_remote_in_journal` and the Fetcher's three `record_well` calls — do not, so they are trusted writes and that protection does not extend to them. The consequence is worth stating rather than leaving implied: on a *remote* run whose own `open_run` failed, those four still write into whatever record survives in that directory, which in that exact scenario is the previous run's, still open because the index is holding it for resume. Measured: run 2's remote address and its uploaded wells land inside run 1's record. Re-attach is keyed on the cache key and would therefore decline, so no wrong numbers follow — but run 1's tally and per-well detail are corrupted, and its resume offer describes a run that did not produce them — while a run's *own* completion lines, which are parsed on the GUI thread and therefore arrive after the worker thread closed the record, are still accepted. Asking the cheaper question instead, "is a run open here", refused the tail of every plate: a 24-well run recorded four wells and the pre-run readout said so. `tests/test_a_run_end_to_end_records_every_well.py` drives a real run through a real drain and is the only test on either side of this record that does. `WELL_STATES` is the single roster of what a run can have done to a well, guarded by `tests/test_no_second_journal_vocabulary.py` — which walks dict keys as well as tuples, lists and sets, because a states-to-words table is presentation only for as long as the module holding it also consults the canonical roster; one that does not is holding its only copy, and anything iterating it drops every state it fails to spell. |
 | `run_provenance.py` | An Analyze run's two lines in the dataset's provenance log (§5.7). `PipelineRunner._open_journal` calls `begin_run`, which appends `run_started` (mode, input folder, the exact pipeline argv, and the run-scope options `force` / `force_wells` / `incremental` / `only_wells`) and fingerprints the sidecar's current `run_check` block; `_close_journal` calls `finish_run`, which appends `run_finished` with the journal's outcome and this run's `run_check` totals. Emitted by the runner rather than the pipeline because the runner is the one process that sees the start and end of every run — a remote pipeline's own writes would stay on the worker host, since the fetch pulls named files only — and because `process_microscopy.py` is at its line budget. The cost is stated: a pipeline launched from a terminal writes no run events. **The `run_check` is quoted only if it changed during the run.** A run that died before its end-of-run check leaves the previous run's block in the sidecar; its timestamps are second-resolution, so two runs of a small plate can share one, and comparing them let a failed run quote the previous run's healthy totals. Comparing a digest taken at `begin_run` instead has no resolution limit; a run that rewrote a byte-identical block is reported as having none, which errs toward unknown. `argv` is recorded rather than a settings digest because the client's opts are not the pipeline's parsed namespace, so a client-side digest would not match `.aw_settings/`. Pinned by `tests/test_provenance_log.py`, which drives the real runner twice (the history grows while the journal is replaced) and the remote open/fetch/close order. |
 
 These modules deliberately have no Qt imports beyond what the Analyze tab
@@ -9004,6 +9131,67 @@ was declared complete over a partial well. For the same reason the pre-flight's
 full-cache-hit check (`remote_run_id._pipeline_launch_is_pointless`) never fires
 for an incremental run, and otherwise asks whether every *uploaded* well is
 present, not whether the directory holds as many out.zips as were uploaded.
+
+**What the previous run finished is downloaded before any run stages.**
+Staging decides what to upload from the *local* folder alone — the incremental
+split by its done-set, batched mode by its per-well CSV check, a plain
+single-shot run not at all — so a well the previous run finished on the host
+and never downloaded (the state a Suspend, Stop, dropped connection or closed
+laptop leaves once the remote compute is done) looks unprocessed and would be
+uploaded whole and recomputed, while its output sits in a directory that an
+incremental run never re-attaches to and a batched run never lists. So
+`PipelineRunner._recover_remote_outputs` runs before `stage_local_zips` on
+**every unforced remote run**, incremental or not, single-shot or batched:
+`services/remote_recover.recover_finished_outputs` gathers every directory an
+earlier run of this plate and configuration may have left wells in
+(`_candidate_dirs`), lists each, and — for each that holds wells this folder
+lacks — runs the ordinary `FetchedOutputVerifier.verify` against it. The
+candidates come from two places that complement each other. **The journal's
+addresses**, the current one and every earlier one `run_journal.record_remote`
+kept in `remote_history` (`stored_remote_addresses`), each held to the same three
+keys as the re-attach — with, for finding work only, the digests an earlier
+build recorded (`remote_run_id.legacy_argv_digests`), so a plate already stuck
+on a host is found. The history exists because every run records its own
+address before it uploads a byte: a run stopped during its upload used to
+overwrite the only record of where the previous run's finished output was, and
+the next run looked in the stopped run's empty directory and uploaded the
+plate again. **The address the name implies**: a run's directory is
+`runs/run-<upload key>-<argv digest>` (`_run_id_body`, the one spelling), and
+for a plate that is one zip per well uploaded as it is, the upload key *is*
+`source_fingerprint` of the user's own archives — so an earlier whole-plate
+run's directory, single-shot or batched, is recomputed with no record at all,
+from the same images and settings the journal would have been matched on. That
+is what finds a plate whose address was lost before the history existed. A run
+whose upload was rewritten (a channel filter dropping at least
+`REWRITE_MIN_SAVING` of the bytes) keyed on a fresh copy, and only the journal
+can find it. A search that finds nothing says so in one log line naming every
+place it looked. Each pull is the verifier's: sidecar merge, `errors/`, the per-well pull (which brings each
+well's `.aw_settings` marker too, as the in-stream fetch does), the fetch
+report — so there is one fetch implementation, not a second one for this
+case. When it pulled anything the run is **staged incrementally** whatever was ticked,
+because only the split leaves a locally complete well out of the upload on
+every path; when nothing is left, `_nothing_left_to_upload` ends the run with
+"Nothing to upload" rather than launching the host on an empty input. An
+empty-well blank on its own counts as nothing left once its own output is here
+(`_only_measured_blanks`): staging uploads a blank whole on every run, because it
+is the input the correction is built from, so with every sample well complete
+it was the only thing in the upload and a node was asked for to recompute it. A pull
+that cannot bring every listed well home **ends the run with an error** instead
+of falling through to the upload: the wells that failed would be re-uploaded
+and recomputed, and the incremental run then empties its own output directory,
+which can be the very one still holding them. A forced run skips all of it.
+`tests/test_a_resumed_remote_run_downloads_before_uploading.py` drives the
+app's sequence — run one (single-shot or batched) suspended before its
+download, run two through the real `_run_pipeline_remote`, with incremental on
+and off — against the fake host, and holds the other direction too: a changed
+setting that alters the numbers never matches.
+
+A **full cache hit uploads nothing.** When the pre-flight finds every staged
+well's output already in the (re-attached) directory, the pipeline is replaced
+by `true` and the upload is skipped with it: nothing will read that input, and
+a plate whose staged archives keyed differently from the last run's was
+otherwise sent in full for a run that computes nothing.
+
 Only the *output*
 directory moves: the input keys on this run's own staged archives, and the
 pidfile, sentinel and heartbeat stay under this run's own `run_id`, because
@@ -9052,6 +9240,21 @@ the checkout lived, and which Python was on PATH — each miss re-uploading the
 plate and recomputing it with nothing logged. `test_the_launcher_does_not_reach_the_digest`
 compares the three shapes directly, which a pinned digest literal cannot do:
 one computed from `sys.executable` is itself machine-specific.
+
+The flags `util.settings_digest.NOT_KEYED_ON` lists as execution or
+re-processing knobs are sliced off for the same reason
+(`_DIGEST_SKIP_VALUE` / `_DIGEST_SKIP_FLAG`: `--incremental`,
+`--incremental_prior_dir`, `--workers`, `--tf_threads`, `--focus_min`,
+`--allow_low_disk`, `--no_run_check`, beside `--force`). None changes what the
+remote writes, and two of them cost the most: `_build_remote_argv` drops the
+incremental pair before the host sees the command, yet hashed they made a
+resume — which is always incremental — a differently configured run from the
+one it resumed, so the download-before-staging step above could never fire;
+and "Load previous run" does not restore `--allow_low_disk`, so ticking it once
+hid a plate's finished output from every later run. A settings round trip
+through a remote run's `pipeline_info.json` and "Load previous run" otherwise
+reproduces the argv exactly — measured, not assumed — so the reloaded form
+finds the plate.
 
 Every call that turns a configuration into an address or a reuse key folds
 those extras in — `spawn`'s two, and `_BatchedRemoteProcess`'s run id *and* its
@@ -9767,6 +9970,52 @@ configured staging area.
 The run logs its resolved scratch base on the `Scratch  :` line; if that ever
 reads back as the output dir on a network mount, that is the failure
 configuration.
+
+### 6.5b Per-well CSVs are gzipped, and every reader takes either spelling
+
+A plate's per-well CSVs get very large, so a finished well's
+`<prefix>_<well>.csv` is stored as `<prefix>_<well>.csv.gz`. A dataset folder can
+hold either spelling, or a mix: wells analysed before compression existed, a run
+resumed across the change, an incremental run on top of an old dataset. The one
+module that says how the two relate is `util/csv_gz.py`, and the rules are:
+
+- **One logical file, two possible spellings.** `existing_csv` and `glob_csvs`
+  return one entry per logical CSV. When both spellings exist the plain file wins:
+  the archive is only ever produced from a plain file, so the two coexist only
+  when a merge wrote a newer plain file beside an older archive, or when removing
+  the plain file after compressing failed (the two are then identical).
+- **Names are stripped with `csv_stem`, never `Path.stem`**, which leaves `.csv`
+  on a gzipped name. The Review well key, the Parquet cache name and the Datasets
+  well maps all use it.
+- **Writers are gzip-aware by name.** `open_csv_text(path, "w")` and
+  `review.persistence._io.atomic_write_text` write gzip bytes for a `.csv.gz` path;
+  writing plain text under that name would leave a file no reader accepts.
+  The Datasets tools (Subset, Merge Plates, Concatenate) keep the spelling of their
+  source CSV.
+
+**When the pipeline compresses.** Not while a well is being built: the incremental
+and resume logic reads a well's rows back (`read_done_fov_keys`,
+`merge_records_into_csv`), so the CSV is a plain file until its well is written
+for the last time. `pipeline.io.write_well_csv` (a fresh well) and
+`merge_well_records` (an incremental merge, which reads the existing file in
+either spelling and writes plain) both end by calling `compress_well_csv`, and
+`process_microscopy` reaches the per-well CSV only through them
+(`tests/test_csv_gz.py` pins that). A compression failure is logged and leaves the
+plain CSV: a larger file, not a wrong one.
+
+**Remote runs compress before the transfer.** The remote runs the same
+`process_microscopy`, so a well's CSV is already `.csv.gz` on the remote when it
+finishes. For a run that was started before compression existed, the remote still
+holds plain CSVs; `Fetcher._fetch_one` therefore runs `compress_remote_csvs` (a
+small `gzip`-to-`.part`-then-rename script over ssh, in `services/remote_csv.py`) for a well that is not yet in
+`run.fetched_wells`, before listing and pulling it. A well already transferred is
+never touched again. The listing names both spellings (`*_<well>.csv` and
+`*_<well>.csv.gz`), so a host where `gzip` failed still delivers its plain CSV.
+After a non-incremental pull `retire_superseded_csvs` removes the other spelling of
+every CSV that arrived, because a stale plain `x.csv` from an earlier run would
+otherwise shadow the freshly fetched `x.csv.gz`. An incremental fetch merges the
+partial into the local CSV (`pipeline.io.merge_fetched_csvs`) and recompresses the
+result. The end-of-run retry and the verification step use the same helpers.
 
 ### 6.6 The remote conda environment, and one definition of "it exists"
 
@@ -13904,8 +14153,35 @@ remote UTF-8 stream is decoded on a cp1252 Windows client).
   `logging.getLogger("review")` (the viewer) or
   `logging.getLogger("review.auto_threshold")` (per-domain children).
 - `allwell._attach_log_ring_buffer` captures every record into a ring
-  buffer that the Help drawer's log tab and the Analyze tab's live log
-  view both read from.
+  buffer that the application log drawer (`⌘L`) reads from. It is attached to
+  `"review"` (which does not propagate) and to the root logger, so every
+  `allwell.*` and `__name__` logger reaches it too. It also turns on
+  `logging.captureWarnings`, so Python `warnings.warn` calls arrive on
+  `py.warnings` instead of only on stderr.
+- **The application log holds every pane's warnings and errors.** Two of the
+  app's logs are not fed by `logging` at all: the Analyze run log is the
+  pipeline subprocess's stdout written straight into a widget
+  (`analyze/log_pane.py::_log_lines`), and each Datasets tool page's raw log is
+  its worker's `logLine` signal (`datasets/core/log_panel.py::append_log`).
+  Both of those single entry points call `core.log_mirror.mirror_line`, which
+  forwards a line to `allwell.analyze` / `allwell.datasets.<tool>` only when it
+  is a WARNING or an ERROR — Analyze passes the tag it already coloured the line
+  by, so the two surfaces cannot disagree; a Datasets line is an ERROR when it
+  opens with the tools' `✗` failure mark and is otherwise judged by
+  `services.pipeline_runner.classify_log_line`. The pipeline's own
+  `asctime  LEVEL` prefix is stripped, since the app log stamps its own.
+  The mirror loggers sit outside `"review"` on purpose: that logger also feeds
+  Review's bottom status log, which is Review's own diary. Nothing in the app
+  log is fed back into either pane, so the mirror cannot loop. Ordinary INFO
+  lines stay in their pane only — a run says tens of thousands of them.
+- **What no pane reports reaches it too.** `startup.boot_diag.install_excepthook`
+  writes an uncaught exception to `allwell.uncaught` as well as the boot log,
+  and installs a `threading.excepthook` that does the same for an exception
+  that kills a background thread (which `sys.excepthook` never sees).
+  `install_qt_cross_thread_trace`'s Qt message handler forwards Qt warnings,
+  criticals and fatals to `allwell.qt`, behind a thread-local re-entrancy guard
+  because the log handler's own queued signal can raise a Qt warning at
+  teardown. `tests/test_errors_reach_the_app_log.py` drives each route.
 - **A `logging.Handler` runs on whichever thread logged the record**, and in
   this app that includes every background thread there is: the remote runner's
   batch loop and its fetcher, the smFISH and cell-browser loaders, the gating

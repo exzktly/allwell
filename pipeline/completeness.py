@@ -377,16 +377,19 @@ def csv_keys_and_state(path: Path) -> tuple[set[tuple[str, str]], str]:
     """
     import csv
 
-    if not path.exists():
+    from util.csv_gz import GZ_READ_ERRORS, existing_csv, open_csv_text
+
+    found = existing_csv(path)
+    if found is None:
         return set(), "missing"
     try:
-        with path.open(newline="") as handle:
+        with open_csv_text(found) as handle:
             reader = csv.DictReader(handle)
             fieldnames = list(reader.fieldnames or [])
             if not fieldnames:
                 return set(), "unreadable"
             keys = csv_keys_from_rows(reader, fieldnames)
-    except (OSError, UnicodeDecodeError, csv.Error):
+    except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError, csv.Error):   # + a damaged .gz
         return set(), "unreadable"
     if not keys:
         # No keys can mean no rows, or rows without the two columns. Both are
@@ -480,6 +483,7 @@ def wells_with_output(output_dir: Path, csv_prefix: str) -> set[str]:
     goes through the shared ``canonical_well_label`` parser, so ``a1``, ``A1``
     and ``A01`` land on one key rather than three.
     """
+    from util.csv_gz import csv_stem, is_csv_name
     from util.well_token import canonical_well_label
 
     found: set[str] = set()
@@ -496,8 +500,8 @@ def wells_with_output(output_dir: Path, csv_prefix: str) -> set[str]:
             label = canonical_well_label(stem[: -len("_out.zip")])
         elif path.is_dir() and stem != _ERRORS_DIRNAME:
             label = canonical_well_label(stem)
-        elif stem.startswith(prefix) and stem.endswith(".csv"):
-            label = canonical_well_label(stem[len(prefix): -len(".csv")])
+        elif stem.startswith(prefix) and is_csv_name(stem):
+            label = canonical_well_label(csv_stem(stem)[len(prefix):])
         if label:
             found.add(label)
     return found
@@ -512,13 +516,11 @@ def _csv_prefixes_present(output_dir: Path) -> list[str]:
     """
     from util.well_token import canonical_well_label
 
+    from util.csv_gz import csv_stem, glob_csvs
+
     prefixes: set[str] = set()
-    try:
-        entries = sorted(Path(output_dir).glob("*.csv"))
-    except OSError:
-        return []
-    for path in entries:
-        head, sep_, tail = path.stem.rpartition("_")
+    for path in glob_csvs(output_dir):
+        head, sep_, tail = csv_stem(path.name).rpartition("_")
         if sep_ and head and canonical_well_label(tail):
             prefixes.add(head)
     return sorted(prefixes)
@@ -552,7 +554,7 @@ def scan_run(
     ``partial_scan``, so a truncated record can never be mistaken for a clean
     plate.
     """
-    from pipeline.well_skip import csv_path_for_well, out_folder_path, out_zip_path
+    from pipeline.well_skip import existing_csv_for_well, out_folder_path, out_zip_path
 
     out_dir = Path(output_dir)
     in_map = {str(k): Path(v) for k, v in dict(in_containers or {}).items()}
@@ -578,7 +580,7 @@ def scan_run(
             out_zip = out_zip_path(out_dir, well)
             out_folder = out_folder_path(out_dir, well)
             csv_keys, csv_state = csv_keys_and_state(
-                csv_path_for_well(out_dir, well, csv_prefix))
+                existing_csv_for_well(out_dir, well, csv_prefix))
             cov = coverage_for_well(
                 well,
                 in_members=_member_names(container),

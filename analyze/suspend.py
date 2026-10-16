@@ -740,7 +740,13 @@ class AnalyzeSuspendMixin:
         stop case matters as much as the suspend case, because a hard Stop still
         leaves every finished well's CSV on disk and the user may well want to
         carry on from it.
+
+        It also puts out the Slurm-job indicator. The runner reports the job
+        closed when its remote process exits; a run that ended before it got
+        that far must not leave the icon lit either.
         """
+        with swallow("resetting the Slurm-job indicator"):
+            self._slurm_indicator.reset()
         try:
             out_dir = self._runner.last_output_dir
             completed = bool(getattr(self, "_run_ok", False)) and not (

@@ -23,6 +23,7 @@ from typing import Any
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from review.core.lazy import lazy
+from review.data.frame_load import missing_frame_note
 from core.safe import swallowed
 
 from review.features.image_browser.image_table import facet_view as _facet
@@ -547,7 +548,7 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None,
                 ax.imshow(rgb, aspect="equal")
             else:
                 ax.text(
-                    0.5, 0.5, "(no image)",
+                    0.5, 0.5, missing_frame_note(ctx, cell.get("chan", "")),
                     ha="center", va="center", transform=ax.transAxes, fontsize=7,
                 )
 

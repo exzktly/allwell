@@ -141,7 +141,7 @@ def test_one_undecodable_partial_does_not_stop_the_wells_after_it(tmp_path):
     added = merge_fetched_csvs(src, target, log_fn=log.append)
 
     assert added == 1
-    assert (target / "measurements_B02.csv").is_file(), (
+    assert (target / "measurements_B02.csv.gz").is_file(), (
         "B02 never merged because A01's bytes were not decodable")
     assert "measurements_A01.csv" in "".join(log), (
         "the damaged partial was skipped without saying so")

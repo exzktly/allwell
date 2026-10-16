@@ -488,7 +488,10 @@ else, or once a run has written there again.
 - **Phase channel** (optional). Tick **Phase** on the fluorescent-channel row
   holding your brightfield / DIC image. That channel skips flat-field and
   background correction entirely — those corrections have nothing to remove from
-  a brightfield frame and only add artefacts — and is saved from the original.
+  a brightfield frame and only add artefacts. Its corrected image is therefore
+  the input image unchanged, so by default the run does not save it a second
+  time: Review shows the phase frame from the input archive `in/<WELL>.zip` (see
+  **Reference the phase input image** under [Output options](#8-output-options)).
   It is still quantified like any other channel. At most one channel can be
   Phase, and it cannot also be smFISH.
 
@@ -907,6 +910,9 @@ Collapsed by default.
 - **CSV prefix.** The stem of the per-well measurements files the run writes;
   `measurements` by default, giving `measurements_<WELL>.csv`. Change it to keep
   two differently-configured runs distinguishable inside one output folder.
+  A finished well's CSV is stored gzipped (`measurements_<WELL>.csv.gz`) to keep
+  large plates small; for a remote run the CSV is compressed on the remote before
+  it is downloaded, including for a run that was already under way.
 
 - **Check completeness when the run finishes.** On by default. After the last
   well, the run compares what each well's input archive held against what its
@@ -918,6 +924,44 @@ Collapsed by default.
   exactly like a complete well's on disk; without the record there is nothing to
   compare them against. Turning it off leaves the dataset with no completeness
   record, and Review then says the check was turned off rather than guessing.
+
+- **Reference the phase input image instead of resaving it.** On by default.
+  The Phase channel is never background-corrected, so its "corrected" image is
+  the input image itself. With this ticked the run does not copy it into
+  `<WELL>_out.zip`; Review, the Cell Gating auto-threshold and the end-of-run
+  threshold estimate all read the phase frame from `in/<WELL>.zip` instead. That
+  removes one full-size image per field from every output archive. **Keep the
+  `in/` folder with the dataset**: opened without it, Review's Image Table marks
+  each phase cell `(phase input not found — needs in/)` rather than showing it.
+  Untick it to resave the phase image into the output archive, as earlier
+  versions did — for instance before handing someone only the `out/` folder;
+  wells that are already finished keep their archive unless you also tick
+  **Force reprocess**. Measurements are identical either way.
+
+- **Store corrected images at the input's bit depth.** On by default. The
+  background-corrected images (`_tophat`) are computed as 32-bit decimals; with
+  this ticked each is saved back in the bit depth its input was recorded at
+  (8- or 16-bit), rounded to the nearest count. That halves each file before
+  compression. How much it saves inside the zip depends on the correction:
+  a flat-field correction leaves fractional values on nearly every pixel, which
+  compress badly, so the saving is large (around 60% on a synthetic test
+  plate); background subtraction alone often leaves whole numbers already,
+  and the saving is smaller (around 18%). A frame whose corrected values do not fit —
+  a flat-field correction can lift a pixel above the camera's maximum — or whose
+  input was already floating point is kept 32-bit, and the run log says which.
+  smFISH and cytoplasm intermediates always stay 32-bit. **Measurements do not
+  change**: every number in the CSV is computed before the images are saved.
+  What changes is what you see in Review's corrected views and what the Cell
+  Gating auto-threshold samples, by at most half a count per pixel — so the
+  suggested gating threshold written at the end of a run can differ from a
+  32-bit run's by a fraction of a count. Untick it to keep the 32-bit decimals.
+
+  Both choices are recorded in `pipeline_info.json` (`phase_output`,
+  `tophat_dtype`) and restored when you load a dataset's settings. Neither marks
+  an existing well out of date, and an incremental run keeps the images earlier
+  runs archived, so a plate's existing wells shrink only when you re-run them
+  with **Force reprocess**. From the command line they are
+  `--phase_output reference|copy` and `--tophat_dtype source|float32`.
 
 Packaging is not configurable: inputs are always read from per-well `.zip`
 archives and outputs are always written as per-well `.zip` archives. See
@@ -1048,6 +1092,15 @@ Picking a remote changes nothing
 about the form above it — the same schema, channels, folders and options are
 sent — only where the segmentation runs. Results come back into the same output
 folder, so Review cannot tell the difference afterwards.
+
+**A small server icon beside Manage… shows the run's Slurm job** on a host that
+runs through a scheduler. It is green while the job is open — granted a node
+and holding it — and grey while the job is still queued for a node; once the
+job closes, or on a host with no scheduler, there is no icon. Hover over it
+for the job number and what the node is: its name and partition, the CPUs the
+job was given out of the node's total, the CPU model, the memory given and the
+node's total, its GPUs, and the job's time limit. A detail the node could not
+report is left out.
 
 **Whatever you pick stays picked.** Adding, editing or deleting a host — or
 running a bootstrap, successful or not — rebuilds the dropdown from the file,
@@ -1299,6 +1352,24 @@ and by `remote_fetch_report.txt` in the output folder.
   the lines under it name the plate, say when the run started and how it ended,
   and report how many wells it recorded as finished, failed, or produced on a
   remote machine but never downloaded. **Resume** picks it up from there.
+- **A remote run never re-uploads what the host already finished.** Every
+  remote run that is not forced — Resume, or Run with **incremental** ticked or
+  not, single-shot or batched, including after **Load previous run** — first
+  asks the host for the wells any earlier run of this plate finished there and
+  never downloaded, and downloads them — including a run whose record was
+  overwritten by a later run you stopped during its upload. The log names every
+  place it looked when it finds nothing. They are not uploaded or computed
+  again; only what is still missing is sent, and if nothing is, the run ends
+  with "Nothing to upload" — an empty-well blank whose own results are already
+  here is not uploaded on its own just to be recomputed. This needs the same images, the same host, and the
+  same settings that change the numbers (segmentation, channels, corrections,
+  QC gates and so on); worker counts, the low-disk override and the run check
+  do not matter. Change one that alters the numbers and the old output is
+  correctly not reused. One case it cannot find without a record: a run whose
+  upload was rewritten to drop unused channels, if a later run made before this
+  version overwrote where it went. If the download fails, the run stops with an error
+  rather than re-uploading the wells: run it again to retry, or tick **Force
+  reprocess all wells** to recompute the plate from scratch.
 - The offer is about **the folder in the input field**. If you have not chosen
   one yet — the state the pane opens in — it offers the most recent unfinished
   run on any plate, which is how you carry on with something from yesterday.
@@ -1322,6 +1393,8 @@ and by `remote_fetch_report.txt` in the output folder.
 ```
 <output_dir>/
 ├── <well>_out.zip          ← masks + tophat-corrected fluorescence + overlays
+│                              (the phase channel's frame stays in in/<well>.zip
+│                              unless "Reference the phase input" is unticked)
 ├── <prefix>_<well>.csv     ← per-well measurement CSV (one row per nucleus)
 ├── pipeline_info.json      ← schema + channel tokens + FOVs + timepoints +
 │                              gating thresholds + saved selections +
@@ -1426,7 +1499,10 @@ with the **Open** button (or `Ctrl+O`, or launch with
 `python allwell.py --data_dir <path>`); a finished Analyze run hands off here
 automatically. The viewer accepts:
 
-- A folder of per-well CSVs (flat).
+- A folder of per-well CSVs (flat). Each CSV may be plain (`.csv`) or gzipped
+  (`.csv.gz`), and one folder can hold both: the pipeline gzips a well's CSV when
+  the well finishes, and datasets analysed with older versions keep their plain
+  CSVs. Nothing needs converting.
 - A folder containing an `out/` subfolder of CSVs.
 - A folder with both `in/` (source ZIPs) and `out/` (results).
 
@@ -6617,7 +6693,7 @@ architecture-specific and can't produce a universal binary.
 | `⌘←` / `Ctrl+←` | Back through tab history |
 | `⌘→` / `Ctrl+→` | Forward through tab history |
 | `⌘/` / `Ctrl+/` | Open the help drawer |
-| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going |
+| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception |
 | `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |
 | `⌘W` / `Ctrl+W` | Close window |
 

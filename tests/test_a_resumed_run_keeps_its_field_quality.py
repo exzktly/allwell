@@ -320,7 +320,7 @@ def test_the_cli_resumes_a_folder_mode_plate_it_left_mixed(
 
     block = _run_main(monkeypatch, plate, incremental=True)
     assert set(block["wells"]) == {"C01", "D01"}, "a well left as a folder was not run"
-    assert (plate / "out" / "measurements_D01.csv").exists()
+    assert (plate / "out" / "measurements_D01.csv.gz").exists()
 
 
 # ── a folder-mode well leaves no folder of spent checkpoints ────────────────

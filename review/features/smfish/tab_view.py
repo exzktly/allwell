@@ -47,7 +47,7 @@ from review.features.smfish.controller import (
 from review.features.smfish.worker import apply_global_threshold_async
 from review.domain.viewer_state import make_schema_extractor, extract_well_token, parse_rc
 from review.core.channel_state_controller import recalculate_threshold
-from review.data.data_loading import read_well_frame
+from review.data.data_loading import load_and_project
 from core.safe import swallowed
 
 logger = logging.getLogger("smfish_tab")
@@ -1029,9 +1029,14 @@ def _smfish_apply_to_all(ctx) -> None:
 
 def _smfish_refresh_app_cache(ctx) -> None:
     replaced = False
-    for label, path in ctx.state.dataset.well_paths.items():
+    for label in list(ctx.state.dataset.well_paths):
         if label in ctx.state.dataset.cache:
-            ctx.state.dataset.cache[label] = read_well_frame(path)
+            # Re-read through ``load_and_project``, the one way a frame enters
+            # the row cache, so the held well carries every verdict layer again
+            # — gating, curation, QC, crop, field and focus — exactly as a well
+            # the cache had evicted does when it is next read. Storing the bare
+            # parse here left held wells unprojected while evicted ones were not.
+            load_and_project(ctx, label)
             replaced = True
     if replaced:
         # A replaced frame invalidates a memoized aggregation of that well

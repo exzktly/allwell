@@ -92,14 +92,18 @@ def _norm_fov(df: pd.DataFrame) -> np.ndarray:
 
 
 def _safe_rows(ctx, lbl):
-    """The well's raw DataFrame from the loaded-row cache, or None when the
-    backend exposes only pre-aggregated points (the pure-logic MockApp seeds no
-    cache). Reads via the row repository (``rows_or_none`` = cache-only, no lazy
-    load) — the same cache the row service fills, so a real app has the frame
-    here. The MockApp builds ``AppState`` directly (no ``ViewerContext``), so its
-    ``repo`` is ``None`` → ``None``, matching the old empty-cache behaviour (B3)."""
+    """The well's raw DataFrame, or None when the backend exposes only
+    pre-aggregated points (the pure-logic MockApp builds ``AppState`` directly,
+    with no ``ViewerContext``, so its ``repo`` is ``None``).
+
+    Through ``repo.rows`` — the lazy read — and not the cache-only
+    ``rows_or_none`` it used to take. The row cache is bounded
+    (``review/data/row_cache.py``), so a well can be evicted between the
+    aggregation that drew its mean and this read; a cache-only lookup then
+    answered ``None`` and the median and mean-of-all beside that mean became
+    NaN, reported as "not computed" for a well that had rows all along."""
     repo = ctx.state.repo
-    return repo.rows_or_none(lbl) if repo is not None else None
+    return repo.rows(lbl) if repo is not None else None
 
 
 def _point_at(pts, target_t) -> tuple | None:
@@ -561,9 +565,8 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
     rather than making this one copy for everybody.
     """
     store = getattr(ctx.state, "stats_cache", None)
-    rows = get_rows(ctx, label)
     if store is None:
-        return compute(rows, val_col=val_col, fluor_gates=fluor_gates,
+        return compute(get_rows(ctx, label), val_col=val_col, fluor_gates=fluor_gates,
                        ratios=ctx.state.channel.ratio_index)
     key = (
         "well_cdf", label, val_col,
@@ -582,10 +585,49 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
     hit = store.cache.get(key)
     if hit is not None:
         return hit
-    result = compute(rows, val_col=val_col, fluor_gates=fluor_gates,
+    # Read only on a miss: the row cache is bounded, and reading a well first
+    # loaded an evicted one from disk only to return the remembered array.
+    result = compute(get_rows(ctx, label), val_col=val_col, fluor_gates=fluor_gates,
                      ratios=ctx.state.channel.ratio_index)
+    _make_room_for_cdf(ctx, store.cache, int(getattr(result, "nbytes", 0)))
     store.cache[key] = result
     return result
+
+
+#: Share of the row-cache budget the remembered CDF arrays may hold together.
+CDF_MEMO_SHARE = 0.25
+
+
+def _make_room_for_cdf(ctx, cache: dict, incoming: int) -> None:
+    """Drop remembered CDF arrays — stale ones, then the oldest — to fit *incoming*.
+
+    These are the one per-cell thing the statistics cache keeps: a well's whole
+    filtered population, tens of megabytes on a large well. Without a bound the
+    dict kept one for every well ever drawn with the CDF on, and one more per
+    ``rows_version`` tick (each gating pass), none of which was ever read again —
+    a second unbounded row cache. Entries from an older ``rows_version`` can never
+    be hit and go first; then the oldest, until the arrays fit within
+    :data:`CDF_MEMO_SHARE` of the row-cache budget.
+    """
+    version = ctx.state.dataset.rows_version
+    budget = getattr(ctx.state.dataset.cache, "budget_bytes", None)
+    # A snapshot of the keys, and ``pop`` with a default: the gating worker's
+    # cancel path clears this dict from its own thread.
+    entries = [k for k in list(cache) if isinstance(k, tuple) and k and k[0] == "well_cdf"]
+    for key in entries:
+        if key[5] != version:
+            cache.pop(key, None)
+    if budget is None:
+        return
+    cap = int(budget * CDF_MEMO_SHARE)
+    live = [(k, cache.get(k)) for k in entries]
+    live = [(k, v) for k, v in live if v is not None]
+    held = sum(int(getattr(v, "nbytes", 0)) for _k, v in live)
+    for key, value in live:
+        if held + incoming <= cap:
+            break
+        cache.pop(key, None)
+        held -= int(getattr(value, "nbytes", 0))
 
 
 def _gate_cache_sig(ctx) -> tuple | None:

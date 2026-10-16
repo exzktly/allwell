@@ -16,12 +16,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
 
-import pandas as pd
 
 from util.fov import sort_key as _fov_sort_key
 from review.data.data_loading import parse_timepoint_hours
+from review.data.row_cache import RowCache
+from review.data.well_summary import WellSummary, well_summaries
 from review.data.image_resolver import normalize_numeric_token
-from domain.text_columns import text_column, timepoint_text
 
 # Local alias for the shared numeric-token normaliser: a raw FOV token collapses
 # to ``%g`` form so ``1``, ``01`` and ``1.0`` index the same field of view.
@@ -43,7 +43,14 @@ class DatasetState:
     tmp_dir: Path | None = None
 
     well_paths: dict[str, Path] = field(default_factory=dict)
-    cache: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # Bounded by a memory budget (``review/data/row_cache.py``): iterating it
+    # yields the wells held, not the plate — ask ``get_rows`` for each well.
+    cache: RowCache = field(default_factory=RowCache)
+
+    # well token -> WellSummary: what opening the dataset needs from each well
+    # (timepoints, FOVs, tokens, columns, the FOV verdict), kept for every well
+    # whether or not its rows are held. Filled by ``WellRepository.open_well``.
+    summaries: dict[str, WellSummary] = field(default_factory=dict)
 
     all_timepoints_cache: list[float] = field(default_factory=list)
     all_fovs_cache: list[str] = field(default_factory=list)
@@ -153,6 +160,7 @@ class DatasetState:
         self.load_generation += 1
         self.persistence_doc = None
         self.well_paths.clear()
+        self.summaries.clear()
         self.cache.clear()
         self.fov_integrity.clear()
         self.persistence_doc_degraded = False
@@ -189,28 +197,21 @@ class DatasetState:
         self.crop_scope_fovs = None
         self.crop_scope_tps = None
 
+    def well_summaries(self) -> list[WellSummary]:
+        """A summary for every well, held or not (``well_summary.well_summaries``)."""
+        return well_summaries(self)
+
     def rebuild_timepoints(self) -> None:
         """Recompute the canonical numeric timepoint list.
 
         Merged from two sources so every tab that reads ``all_timepoints_cache``
-        agrees: the loaded CSV rows (``timepoint_hours`` or parsed ``timepoint``
-        strings) and ``pipeline_info``'s ``available_timepoints``.
+        agrees: every well's timepoints (``timepoint_hours`` or parsed
+        ``timepoint`` strings, as summarised) and ``pipeline_info``'s
+        ``available_timepoints``.
         """
         all_tps: set[float] = set()
-        for df in self.cache.values():
-            if df is None or df.empty:
-                continue
-            if "timepoint_hours" in df.columns:
-                tp_num = pd.to_numeric(df["timepoint_hours"], errors="coerce")
-                all_tps.update(float(t) for t in tp_num.dropna().unique())
-                missing = tp_num.isna()
-            else:
-                missing = pd.Series(True, index=df.index)
-            if "timepoint" in df.columns and missing.any():
-                for s in timepoint_text(df.loc[missing]).unique():
-                    parsed = parse_timepoint_hours(s)
-                    if parsed is not None:
-                        all_tps.add(parsed)
+        for summary in self.well_summaries():
+            all_tps.update(summary.timepoints)
         for tp in (self.pipeline_info or {}).get("available_timepoints", []) or []:
             parsed = parse_timepoint_hours(str(tp))
             if parsed is not None:
@@ -218,19 +219,14 @@ class DatasetState:
         self.all_timepoints_cache = sorted(all_tps)
 
     def rebuild_fovs(self) -> None:
-        """Recompute the canonical FOV list from the row cache + pipeline_info.
+        """Recompute the canonical FOV list from every well + pipeline_info.
 
         A dataset with rows but no ``fov`` column collapses to a single FOV
         ``"1"`` so the FOV menus are never empty.
         """
         all_fovs: set[str] = set()
-        for df in self.cache.values():
-            if df is None or df.empty or "fov" not in df.columns:
-                continue
-            for raw in text_column(df, "fov").unique():
-                fov = _norm_fov(raw)
-                if fov:
-                    all_fovs.add(fov)
+        for summary in self.well_summaries():
+            all_fovs.update(summary.fovs)
         for fov in (self.pipeline_info or {}).get("available_fovs", []) or []:
             fov_norm = _norm_fov(fov)
             if fov_norm:

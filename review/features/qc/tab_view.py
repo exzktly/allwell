@@ -29,6 +29,8 @@ from review.data.field_quality_cache import (
 from review.data.focus_gate import (
     focus_effect_text, focus_gate_can_apply, focus_status, recorded_cut_note,
 )
+from review.data.data_loading import held_wells_note
+
 from .controller import get_qc_params, qc_excluded_count, set_qc_params
 from .params import QCParams
 from review.domain.qc_params import _pos
@@ -378,12 +380,13 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
             w.setEnabled(on)
 
     def _update_status() -> None:
-        if not ctx.state.dataset.cache:
+        if not ctx.state.dataset.well_paths:
             status.setText("")
             return
         n_excl, n_tot = qc_excluded_count(ctx)
-        if n_tot:
-            status.setText(f"flagged {n_excl:,} / {n_tot:,}")
+        # Blank when nothing is held to count (a reset just emptied the cache):
+        # the previous count would otherwise stay on screen as if current.
+        status.setText(f"flagged {n_excl:,} / {n_tot:,}{held_wells_note(ctx)}" if n_tot else "")
 
     def _update_field_quality_status() -> None:
         _refresh_field_quality_status(
@@ -567,8 +570,7 @@ def _selected_well(ctx) -> str:
         return str(last)
     if wells:
         return wells[0]
-    cache = getattr(ctx.state.dataset, "cache", None) or {}
-    return next(iter(sorted(cache)), "")
+    return next(iter(sorted(ctx.state.dataset.well_paths)), "")
 
 
 def _show_well_focus_curve(ctx) -> None:

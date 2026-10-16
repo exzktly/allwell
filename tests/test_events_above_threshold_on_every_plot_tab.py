@@ -100,7 +100,7 @@ def _scatter_ctx(label_to_df, *, cutoff=50.0):
             use_scatter_thresh=False, scatter_gates=[], thresh_choices=None),
         selection=SimpleNamespace(selected_wells=list(label_to_df), selections=[]),
         plot=SimpleNamespace(use_sem=False, use_fov_replicates=False),
-        repo=SimpleNamespace(rows_or_none=cache.get),
+        repo=SimpleNamespace(rows_or_none=cache.get, rows=cache.get),
     )
     runtime = SimpleNamespace(aggregate=SimpleNamespace(well=None))
     return SimpleNamespace(state=state, runtime=runtime)

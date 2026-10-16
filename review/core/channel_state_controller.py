@@ -19,10 +19,10 @@ import logging
 from collections.abc import Iterable
 import math  # noqa: F401 — keeps parity with the original method bodies
 
-import numpy as np
 import pandas as pd
 
 from core import debug_flags as _debug_flags
+from review.data.plate_scan import every_well
 from review.data.data_loading import (
     _all_fluor_values,
     detect_fluor_channels,
@@ -98,6 +98,31 @@ def recalculate_threshold(ctx) -> None:
         _RECALC_IN_PROGRESS.discard(id(ctx))
 
 
+def _value_extent(df, val_col: str) -> tuple[float, float] | None:
+    """``(min, max)`` of one well's included finite values of *val_col*, or ``None``."""
+    values = _all_fluor_values(df, val_col=val_col)
+    if values.size == 0:
+        return None
+    return float(values.min()), float(values.max())
+
+
+def _sample_frame(ctx) -> pd.DataFrame:
+    """One well's frame, for channel detection: a held one when any is held.
+
+    Detection reads column names and the first row's ``channel`` value, which
+    every well of a run shares, so any well answers. With the row cache bounded
+    the first well need not be held, and reading it from disk on every
+    recalculation — every channel switch — would cost a well read each time for
+    an answer a held frame already has.
+    """
+    from review.data.data_loading import get_rows
+
+    dataset = ctx.state.dataset
+    held = [label for label in dataset.well_paths if label in dataset.cache]
+    label = held[0] if held else next(iter(dataset.well_paths), None)
+    return get_rows(ctx, label) if label is not None else pd.DataFrame()
+
+
 def reset_threshold_range(channel_state) -> None:
     """Return the threshold slider range to ``ChannelState``'s own defaults.
 
@@ -114,11 +139,7 @@ def reset_threshold_range(channel_state) -> None:
 
 def _recalculate_threshold(ctx) -> None:
     """The body of :func:`recalculate_threshold`, one re-entrancy check in."""
-    from review.data.data_loading import get_rows
-    sample_df = next(
-        (get_rows(ctx, lbl) for lbl in ctx.state.dataset.well_paths),
-        pd.DataFrame(),
-    )
+    sample_df = _sample_frame(ctx)
     detected = detect_fluor_channels(sample_df)
     detected_smfish = detect_smfish_channels(sample_df)
     pipeline_fluor_raw = [
@@ -197,12 +218,15 @@ def _recalculate_threshold(ctx) -> None:
     val_col = channel_state.active_val_col
     cached = channel_state.cached_range(val_col)
     if cached is None:
-        chunks = [
-            _all_fluor_values(get_rows(ctx, lbl), val_col=val_col)
-            for lbl in ctx.state.dataset.well_paths
-        ]
-        all_vals = np.concatenate(chunks) if chunks else np.empty(0)
-        if all_vals.size == 0:
+        # Each well's own (min, max), one well at a time, rather than every
+        # included value of the plate concatenated before taking two numbers
+        # from it: 106M floats — 850 MB — for a 96-well plate of 1.1M-cell
+        # wells, on top of rows the bounded row cache could no longer hold.
+        # Remembered per well (``plate_scan``) until the rows or verdicts change.
+        extents = [e for e in every_well(ctx, "fluor_range", val_col,
+                                         lambda df: _value_extent(df, val_col)).values()
+                   if e is not None]
+        if not extents:
             # No values for this column anywhere in the loaded dataset. The
             # range is *undefined*, which is not the same as "unchanged":
             # returning here left ``threshold_min`` / ``threshold_max`` holding
@@ -217,7 +241,7 @@ def _recalculate_threshold(ctx) -> None:
                 val_col, channel_state.threshold_min, channel_state.threshold_max,
             )
             return
-        lo, hi = float(all_vals.min()), float(all_vals.max())
+        lo, hi = min(e[0] for e in extents), max(e[1] for e in extents)
         if hi <= lo:
             hi = lo + 1.0
         channel_state.cache_range(val_col, lo, hi)

@@ -1082,6 +1082,8 @@ def export_distribution_data(ctx) -> None:
     from review.data.data_loading import _all_fluor_values_filtered, iter_plot_groups
     import math as _math
 
+    import numpy as np
+
     val_col = ctx.state.channel.active_val_col
     fluor_gates = get_all_fluor_gates(ctx)
     ratios = ctx.state.channel.ratio_index
@@ -1111,18 +1113,19 @@ def export_distribution_data(ctx) -> None:
             continue
         well_name = well_name_for(name, well_labels,
                                   well_paths=well_paths, strict=True)
-        chunks.append(pd.DataFrame({
-            "group": name,
-            "well_name": well_name,
-            "timepoint_h": tp_tag_str,
-            val_col: [f"{v:.6f}" for v in vals],
-        }))
+        # The values stay floats until each group is written: formatted up front
+        # they were a Python string per cell for every group at once — about
+        # eight times the memory of the floats, held until the whole file was
+        # assembled. ``float_format`` writes the same "%.6f" text they held.
+        # As floats whatever the column's type: an integer column (a spot
+        # count) would otherwise skip ``float_format`` and write ``12`` where the
+        # per-cell strings wrote ``12.000000``.
+        chunks.append((name, well_name, np.asarray(vals, dtype=float)))
 
     if not chunks:
         _warn(ctx.window, "Export", "No distribution data — select wells and a timepoint first.")
         return
 
-    combined = pd.concat(chunks, ignore_index=True)
     tp_tag = f"_t{tp_h:g}h" if _math.isfinite(tp_h) else ""
     out_path = ask_save_csv(
         ctx, "Export distribution data",
@@ -1131,8 +1134,17 @@ def export_distribution_data(ctx) -> None:
     if not out_path:
         return
     try:
-        combined.to_csv(out_path, index=False)
-        ctx.notify.set_status(f"Exported {len(combined)} cell(s) → {Path(out_path).name}")
+        total = 0
+        with open(out_path, "w", newline="", encoding="utf-8") as fh:
+            for i, (name, well_name, vals) in enumerate(chunks):
+                pd.DataFrame({
+                    "group": name,
+                    "well_name": well_name,
+                    "timepoint_h": tp_tag_str,
+                    val_col: vals,
+                }).to_csv(fh, index=False, header=(i == 0), float_format="%.6f")
+                total += len(vals)
+        ctx.notify.set_status(f"Exported {total} cell(s) → {Path(out_path).name}")
     except OSError as exc:
         _error(ctx.window, "Export failed", str(exc))
 
@@ -1274,15 +1286,21 @@ def export_cell_data(ctx, scope) -> None:
               "This plot is not drawing any wells — select wells first.")
         return
 
-    frames = {}
+    # Each well's columns, not its frame: the header and the missing-verdict
+    # note need every well's column list, and holding every well's frame to get
+    # them would put the plate back in memory for the length of the export. The
+    # rows are read again, one well per tick, when its chunk is cut — from the
+    # row cache, or from disk for a well it has evicted, identical either way
+    # (and ``_dataset_signature`` refuses the export if the data changes).
+    columns_by_well: dict[str, list] = {}
     unreadable: list[str] = []
     for _group, well in wells:
         try:
-            frames[well] = get_rows(ctx, well)
+            columns_by_well[well] = list(get_rows(ctx, well).columns)
         except Exception:
             swallowed(f"cell export: rows for {well!r}")
             unreadable.append(well)
-    frames_columns = [list(f.columns) for f in frames.values() if f is not None]
+    frames_columns = list(columns_by_well.values())
     if not frames_columns:
         _warn(ctx.window, "Export", "No rows to export for the current plot.")
         return
@@ -1350,7 +1368,11 @@ def export_cell_data(ctx, scope) -> None:
             return
         group, well = wells[state["i"]]
         state["i"] += 1
-        df = frames.get(well)
+        try:
+            df = get_rows(ctx, well) if well in columns_by_well else None
+        except Exception as exc:
+            _abort(f"could not read {well}: {exc}")
+            return
         if df is None or df.empty:
             QTimer.singleShot(0, _tick)
             return

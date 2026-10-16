@@ -1379,6 +1379,12 @@ def _register_cache_projectors() -> None:
     )
 
     clear_cache_projectors()
+    # Gating before curation, the order the gating pass itself uses: it writes
+    # ``Included`` from the gates and then re-asserts the user's per-cell
+    # overrides on top. The other way round, a reloaded well would lose every
+    # manual inclusion to the gate.
+    register_cache_projector(_lazy_projector(
+        "review.features.home.cell_gating.gating_compute", "apply_gating_to_cache"))
     register_cache_projector(_lazy_projector(
         "review.data.curation", "apply_curation_to_cache",
         note_change=False))

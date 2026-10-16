@@ -2,9 +2,8 @@
 
 Every setter and lifecycle hook takes a ``ViewerContext``. Widget handles
 resolve via ``ctx.widgets.get_or_none``, state via ``ctx.state.feature_slice``,
-and per-well DataFrames read from ``ctx.state.dataset.cache`` — the Spatial
-tab operates on wells that a plotting / image tab has already loaded, so
-no god-object reach-through is needed.
+and per-well DataFrames through ``data_loading.get_rows`` (in ``collect``), one
+well at a time — so no god-object reach-through is needed.
 """
 
 from __future__ import annotations

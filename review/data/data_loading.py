@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+from contextlib import nullcontext
 import re
 from pathlib import Path
 from collections.abc import Iterator
@@ -465,6 +467,58 @@ def read_well_frame(path: Path) -> pd.DataFrame:
     return frame
 
 
+class WellDoesNotFitInMemory(MemoryError):
+    """A well's rows could not be read for lack of memory, even with the row cache emptied.
+
+    A ``MemoryError`` subclass, so every handler that already catches one still
+    does; what changes is the sentence. The bare error names a numpy allocation —
+    "Unable to allocate 8.43 MiB for an array with shape (1104480,)" — which says
+    nothing about which well, how large it is, or what was already held, and an
+    8 MiB allocation failing reads as a bug rather than as a machine out of
+    memory. This one names all three.
+    """
+
+
+def _mib(n: float) -> str:
+    return f"{n / 2**20:,.0f} MiB"
+
+
+def _read_making_room(dataset, label: str, path: Path) -> pd.DataFrame:
+    """:func:`read_well_frame`, retried once with the row cache emptied on a ``MemoryError``.
+
+    The held frames are the one large thing this layer can give back. Dropping
+    them costs re-reading those wells later (0.22 s each from the Parquet cache);
+    not dropping them costs the well being asked for. A second failure is raised
+    as :class:`WellDoesNotFitInMemory`, naming the well, its size on disk, what
+    the cache held when the first attempt failed, and its budget.
+    """
+    try:
+        return read_well_frame(path)
+    except MemoryError as first:
+        cache = dataset.cache
+        held = cache.describe() if hasattr(cache, "describe") else f"{len(cache)} well(s) held"
+        _logger.warning("Out of memory reading well %s (%s); emptying the row cache and trying once more",
+                        label, held)
+        release = getattr(cache, "release", None)
+        if release is not None:
+            release()
+        else:
+            cache.clear()
+        try:
+            return read_well_frame(path)
+        except MemoryError as second:
+            try:
+                on_disk = _mib(os.path.getsize(path))
+            except OSError:
+                on_disk = "an unknown size"
+            raise WellDoesNotFitInMemory(
+                f"Well {label} could not be read: the computer ran out of memory. Its CSV is {on_disk} on disk; "
+                f"when the read began the {held}. Emptying that cache and retrying did not help, so this well "
+                f"alone needs more memory than is free. Close other programs, or open the plate on a machine "
+                f"with more memory. (The failing allocation: {first})"
+            ) from second
+
+
 def get_rows(ctx, label: str) -> pd.DataFrame:
     """Return the measurement frame for well *label*, loading + projecting lazily.
 
@@ -483,10 +537,17 @@ def get_rows(ctx, label: str) -> pd.DataFrame:
     pass also calls: one path in, so a lazily reloaded well carries exactly the
     layers a freshly opened dataset's well does.
     """
-    cache = ctx.state.dataset.cache
-    if label not in cache:
-        load_and_project(ctx, label)
-    return cache[label]
+    # One lookup, not ``in`` then ``[]``: the cache is bounded, and a well held at
+    # the first may be evicted by another thread's read before the second.
+    try:
+        frame = ctx.state.dataset.cache[label]
+    except KeyError:
+        frame = None
+    # Loaded outside the ``except``: a failure there would otherwise be reported
+    # as raised "during handling of" a KeyError, which reads as a second fault.
+    if frame is None:
+        frame = load_and_project(ctx, label)
+    return frame
 
 
 def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
@@ -515,27 +576,64 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     dataset = ctx.state.dataset
     if path is not None:
         dataset.well_paths[label] = path
-    dataset.cache[label] = read_well_frame(dataset.well_paths[label])
-    for _project in iter_cache_projectors():
-        # **Guarded per projector, matching ``qc.controller.recompute_qc_all``.**
-        # The same registry list is walked from two places, and until now the
-        # two had different failure contracts: a raise there lost one verdict
-        # column, a raise here lost the whole WELL, because this is the call
-        # that decides whether a frame enters the cache at all. One layer must
-        # never take down the others, and losing a well is the larger of the
-        # two failures, so the unguarded one was the wrong side of the
-        # asymmetry. Each projector already reports its own per-well failures
-        # through ``project_verdict_column``; this catches a projector that
-        # raises outside that walk.
-        try:
-            _project(ctx, label)
-        except Exception:
-            _logger.exception(
-                "cache projector %r failed for well %r", _project, label)
+    frame = _read_making_room(dataset, label, dataset.well_paths[label])
+    pinned = getattr(dataset.cache, "pinned", None)
+    # Pinned while the projectors run: they find the frame by label, and one that
+    # found it evicted meanwhile (a read on the gating worker's thread) would
+    # skip its verdict and leave the well looking fully included.
+    with (pinned(label) if pinned is not None else nullcontext()):
+        dataset.cache[label] = frame
+        for _project in iter_cache_projectors():
+            # **Guarded per projector, matching ``qc.controller.recompute_qc_all``.**
+            # The same registry list is walked from two places, and until now the
+            # two had different failure contracts: a raise there lost one verdict
+            # column, a raise here lost the whole WELL, because this is the call
+            # that decides whether a frame enters the cache at all. One layer must
+            # never take down the others, and losing a well is the larger of the
+            # two failures, so the unguarded one was the wrong side of the
+            # asymmetry. Each projector already reports its own per-well failures
+            # through ``project_verdict_column``; this catches a projector that
+            # raises outside that walk.
+            try:
+                _project(ctx, label)
+            except Exception:
+                _logger.exception(
+                    "cache projector %r failed for well %r", _project, label)
     # The loader used to have to record this itself, having built the frame
-    # outside this function; the verdict now travels with the load.
-    record_fov_verdict(ctx, label, dataset.cache[label])
-    return dataset.cache[label]
+    # outside this function; the verdict now travels with the load. Once per
+    # well per dataset: it is a fact about the parse, which a re-read after
+    # eviction does not change, and judging a 1.1M-row well's labels took a
+    # second — on every re-read, when the cache is bounded. A well opened from
+    # its summary already has the summary's verdict; ``begin_load`` clears them.
+    if label not in getattr(dataset, "fov_integrity", {}):
+        record_fov_verdict(ctx, label, frame)
+    # The projectors added columns in place; the budget should count them. The
+    # local *frame* is what is returned: a frame larger than the budget is held
+    # alone, and another thread's read may have evicted it since the unpin.
+    remeasure = getattr(dataset.cache, "remeasure", None)
+    if remeasure is not None:
+        remeasure(label)
+    return frame
+
+
+def held_wells_note(ctx) -> str:
+    """``""`` when every well of the dataset is in the row cache, else a clause
+    saying how many are — for a count taken over the held frames.
+
+    The live readouts (the QC row's "flagged", the crop's status line, Cell
+    Gating's "Included for analysis") are recomputed on every edit, so they count
+    the frames in memory rather than reading every well from disk each time. On a
+    plate that fits the row-cache budget that is the plate; on one that does not
+    it is part of it, and a count over part of a plate printed like a count over
+    all of it is the silent shortfall CLAUDE.md §7 forbids.
+    """
+    dataset = ctx.state.dataset
+    wells = getattr(dataset, "well_paths", None) or {}
+    total = len(wells)
+    held = sum(1 for label in dataset.cache.keys() if label in wells)
+    if total == 0 or held >= total:
+        return ""
+    return f" — counted over {held} of {total} wells in memory"
 
 
 def record_fov_verdict(ctx, label: str, df) -> None:
@@ -554,7 +652,16 @@ def record_fov_verdict(ctx, label: str, df) -> None:
     warning existed, was tested, and could not fire. Any future path that
     builds a frame calls this too, or it inherits the same silence.
     """
-    verdict = check_fov_labels(df)
+    record_fov_integrity(ctx, label, check_fov_labels(df))
+
+
+def record_fov_integrity(ctx, label: str, verdict) -> None:
+    """Store a well's FOV-label verdict, and warn when the labels cannot be trusted.
+
+    The half of :func:`record_fov_verdict` that does not need the rows: a well
+    opened from its summary (``review/data/well_summary.py``) carries the
+    verdict computed when the summary was.
+    """
     ctx.state.dataset.fov_integrity[label] = verdict
     if not verdict.trusted:
         _logger.warning(
@@ -572,18 +679,26 @@ def get_all_timepoints(ctx) -> list[float]:
     ``include_gate=False`` — the per-cell scatter draws gates, so timepoint
     enumeration must see the full cloud, not a gate-filtered subset.
 
-    A8 residuals-ledger R1: fully ctx — the well list reads typed state and rows
-    come from the ctx-native :func:`get_rows` service, so no god-object residual.
+    Every well is read once through :func:`get_rows` and its timepoints remembered
+    (``plate_scan``) until its rows or verdicts change: the tabs ask on every
+    activation and channel switch, and with the row cache bounded each ask would
+    otherwise read the plate from disk.
     """
+    from review.data.plate_scan import every_well
+
     timepoints: set = set()
-    for label in ctx.state.dataset.well_paths:
-        df = get_rows(ctx, label)
-        if df is None or df.empty or "timepoint_hours" not in df.columns:
-            continue
-        mask = df_included_mask(df, include_gate=False)
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
-        timepoints.update(float(t) for t in tp.dropna().unique())
+    for found in every_well(ctx, "included_timepoints", None, _included_timepoints).values():
+        timepoints.update(found)
     return sorted(timepoints)
+
+
+def _included_timepoints(df) -> frozenset:
+    """One well's included ``timepoint_hours`` (gates aside), for :func:`get_all_timepoints`."""
+    if df is None or df.empty or "timepoint_hours" not in df.columns:
+        return frozenset()
+    mask = df_included_mask(df, include_gate=False)
+    tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
+    return frozenset(float(t) for t in tp.dropna().unique())
 
 
 def resolve_value_series(
@@ -1234,6 +1349,9 @@ def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, s
     for name, wells, rset in plot_group_well_lists(ctx, fallback_to_all):
         frames = [get_rows(ctx, w) for w in wells]
         pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+        # Released before the yield: the consumer holds the pooled copy while it
+        # draws, and the list beside it doubled the group's rows for that time.
+        del frames
         color = _color_rset(rset) if rset is not None else color_for_wells([name])
         yield name, color, pooled
 

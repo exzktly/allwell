@@ -95,13 +95,6 @@ _KNOWN_WRITERS: dict[str, str] = {
         "active; the aggregation reads it as the on-population, so it changes "
         "plotted fractions and must bump."
     ),
-    "review/features/smfish/tab_view.py::__replaces_frame__": (
-        "The smFISH worker writes its per-cell tallies back into the well CSV "
-        "and then REPLACES the cached frame by re-reading it. A replacement "
-        "invalidates a memo exactly as hard as a column write, and is a "
-        "different syntactic shape, so a scan looking only for column writes "
-        "walks past it."
-    ),
     "review/data/data_loading.py::__replaces_frame__": (
         "load_and_project seeds the cache well by well — the single path a "
         "frame enters the row cache by, for the lazy read and the dataset "

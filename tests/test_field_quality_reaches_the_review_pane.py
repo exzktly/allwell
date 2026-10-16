@@ -80,7 +80,7 @@ def _ctx(block, *, exclude=True, integrity=None, cache=None):
         dataset=SimpleNamespace(
             pipeline_info=({FIELD_QUALITY_BLOCK: block} if block else {}),
             fov_integrity=dict(integrity or {}),
-            cache=cache),
+            cache=cache, well_paths=dict.fromkeys(cache)),
         qc=SimpleNamespace(
             params=QCParams(exclude_flagged_fields=exclude))))
 
@@ -380,6 +380,7 @@ def _panel_ctx(block, *, exclude=False, integrity=None):
         dataset=SimpleNamespace(
             data_dir=None,
             cache={w: _frame(w) for w in WELLS},
+            well_paths=dict.fromkeys(WELLS),
             fov_integrity=dict(integrity or {}),
             pipeline_info=({FIELD_QUALITY_BLOCK: block} if block else {})),
         qc=QcState(params=QCParams(exclude_flagged_fields=exclude)))

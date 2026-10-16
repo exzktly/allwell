@@ -242,6 +242,9 @@ def _reset_gating_state(ctx) -> None:
     cg.use_scatter_thresh = False
     cg.gating_choices = None
     cg.thresh_choices = None
+    # The previous dataset's pass; the new one's projector must apply nothing
+    # until a pass runs on it.
+    cg.applied_gating = None
     # The gate *values* leak the same way as the scatter-gate config: the
     # cell_gating loader merges them in additively and early-returns for a
     # dataset with no gating block, so a stale fluor gate / ThreshFracOn would
@@ -544,18 +547,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # network share takes long enough that a frozen window reads as a hang.
     _show_progress(ctx, n, f"Loading {n} CSV file(s)…", allow_user_input=False)
     _opening_set_phase(ctx, f"Loading {n} well CSV(s)…", value=0, maximum=n)
-    for i, p in enumerate(csvs, 1):
-        tok = app._extract_well_token(csv_stem(p.name))
-        key = tok if tok else csv_stem(p.name)
-        # The repository's load is the same one a lazy read reaches on a cache
-        # miss: it registers the path, reads the CSV, runs every registered
-        # projector and records the FOV verdict. This pass used to do those four
-        # things itself, which is how the eager and lazy paths came to disagree
-        # about which layers a cached frame carries.
-        ctx.state.repo.load_well(key, p)
-        _step_progress(ctx, i, f"Loading {i}/{n}: {p.name}",
-                       allow_user_input=False)
-        _opening_set_phase(ctx, f"Loading {i}/{n}: {p.name}", value=i)
+    _open_wells(ctx, app, csvs)
     app._hide_progress()
     app._rebuild_all_timepoints_cache()
     app._rebuild_all_fovs_cache()
@@ -762,6 +754,37 @@ def load_directory(ctx, d: Path, label=None) -> None:
     except Exception:
         logging.getLogger("review").exception(
             "post-load active-tab refresh failed")
+
+
+def _open_wells(ctx, app, csvs) -> None:
+    """Register every well of an opening dataset, reading rows while they fit.
+
+    Rows are read while the plate fits the row-cache budget and not after: once
+    a load has had to evict a well, reading more would only evict more. A plate
+    that fits therefore opens exactly as it always did, every well held; one that
+    does not opens with the wells that fit and a summary of every well
+    (``review/data/well_summary.py``), which is all the open itself needs. The
+    rest are read when a view asks for them.
+    """
+    n = len(csvs)
+    loading_rows = True
+    for i, p in enumerate(csvs, 1):
+        tok = app._extract_well_token(csv_stem(p.name))
+        key = tok if tok else csv_stem(p.name)
+        # The repository's open is the same load a lazy read reaches on a cache
+        # miss: it registers the path, reads the CSV, runs every registered
+        # projector and records the FOV verdict. This pass used to do those four
+        # things itself, which is how the eager and lazy paths came to disagree
+        # about which layers a cached frame carries.
+        ctx.state.repo.open_well(key, p, load_rows=loading_rows)
+        if loading_rows and getattr(ctx.state.dataset.cache, "evictions", 0):
+            loading_rows = False
+            logging.getLogger("review").info(
+                "Opened the first %d of %d wells into memory; the rest are summarised and read when a view "
+                "needs them (%s).", i, n, ctx.state.dataset.cache.describe())
+        _step_progress(ctx, i, f"Loading {i}/{n}: {p.name}",
+                       allow_user_input=False)
+        _opening_set_phase(ctx, f"Loading {i}/{n}: {p.name}", value=i)
 
 
 def _kick_off_gating_after_load(ctx) -> None:

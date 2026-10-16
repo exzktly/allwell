@@ -145,6 +145,9 @@ def restore_gating_block(ctx, block) -> None:
     cg.use_scatter_thresh = False
     cg.gating_choices = None
     cg.thresh_choices = None
+    # The pass this kicks records its own configuration when it starts; until
+    # then a well read from disk must not be re-gated with the one just cleared.
+    cg.applied_gating = None
     if isinstance(block, dict) and block:
         _write_gating_block_to_slice(cg, block)
     _mirror_gating_to_widgets(ctx, run_worker=True)

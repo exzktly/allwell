@@ -31,7 +31,7 @@ THRESHOLD = 40
 # 985 -> 813: collect_bar_items (95) and its _items_for_tp (77) left it (C3).
 # 813 -> 805: process_microscopy.main's worker / thread / device planning moved
 # to pipeline.parallelism.plan_parallelism.
-TOTAL_ALLOWLISTED_CC_BUDGET = 805
+TOTAL_ALLOWLISTED_CC_BUDGET = 803
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,

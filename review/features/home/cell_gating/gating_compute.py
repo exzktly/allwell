@@ -248,6 +248,44 @@ def apply_fluor_gating(
     return well_included
 
 
+def apply_gating_to_cache(ctx, label: str | None = None) -> None:
+    """Re-apply the last gating pass to cached frame(s) — the gating projector.
+
+    Gating used to be written onto the cached frames once, by ``GatingWorker``,
+    and never again. That was sound while the row cache held every well for the
+    whole session. It is bounded now (``review/data/row_cache.py``), so a well
+    gated by the pass can be evicted and read back from disk — and without this
+    it came back with the CSV's ``Included`` and no ``Gate_Pass`` / ``Gate_On``,
+    so every plot counted its ungated cells with nothing to say so.
+
+    Registered as a cache projector *before* curation, matching the pass: the
+    worker writes these columns and then re-applies the user's per-cell
+    overrides on top, and the projector registry runs curation next.
+
+    Applies ``ctx.state.cell_gating.applied_gating`` — the configuration the
+    last pass applied — rather than the live settings, so a reloaded well agrees
+    with the wells the pass wrote. ``None`` (no pass on this dataset) writes
+    nothing, as no pass did. No ``rows_version`` bump: on the load path the
+    frame is new and has no memoized aggregate (``cache_projectors`` says why).
+    """
+    if label is None:
+        # The walk over every held frame is the gating pass's own job, and it
+        # has already written them: ``recompute_qc_all`` re-runs every registered
+        # projector with no label on each QC edit, and re-gating every held well
+        # there would cost a full gating pass per keystroke to rewrite the same
+        # values. Only a frame read from disk lacks the columns.
+        return
+    config = getattr(getattr(ctx.state, "cell_gating", None), "applied_gating", None)
+    if not config:
+        return
+    # Cache-only: a projector writes onto the frame being loaded, which
+    # ``load_and_project`` has stored (and pinned) before calling it.
+    frame = ctx.state.repo.rows_or_none(label)
+    if frame is None or frame.empty:
+        return
+    apply_fluor_gating(frame, **config)
+
+
 # ── ThreshFracOn optimizer numeric core ──────────────────────────────────────
 #
 # The sweep primitives and the relative-gap objective live in

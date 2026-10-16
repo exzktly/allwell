@@ -1,12 +1,10 @@
 """Spatial-analysis data collector — pure walker over centroid columns.
 
-Reads ``shape_centroid_col`` / ``shape_centroid_row`` from each loaded well's
-cached DataFrame (``ctx.state.dataset.cache``), honours the standard
-inclusion + gating masks, and returns a plain dict of parallel arrays. No
-matplotlib, no Qt, and — deliberately — no reach-through to the
-``ReviewApp`` methods: the Spatial tab operates on wells that a
-plotting / image tab has already loaded, so the cache is the authoritative
-per-well DataFrame source.
+Reads ``shape_centroid_col`` / ``shape_centroid_row`` from each well's rows,
+through ``data_loading.get_rows`` — one well at a time, since the row cache is
+bounded and a plate need not fit in it — honours the standard inclusion +
+gating masks, and returns a plain dict of parallel arrays. No matplotlib, no
+Qt, and no reach-through to the ``ReviewApp`` methods.
 """
 
 from __future__ import annotations
@@ -25,7 +23,8 @@ from typing import Any
 import numpy as np
 
 from pipeline.shape_features import is_shape_column
-from review.data.data_loading import df_included_mask, resolve_value_series, resolved_timepoints
+from review.data.data_loading import df_included_mask, get_rows, resolve_value_series, resolved_timepoints
+from review.data.plate_scan import every_well
 from review.domain import spatial_compute as spc
 from review.domain.metric_registry import METRICS
 from domain.tp_match import tp_close_mask
@@ -60,13 +59,15 @@ def _hours(df) -> np.ndarray:
 
 
 def _cached_df(ctx, well_label: str) -> pd.DataFrame | None:
-    """Return the cached per-well DataFrame or ``None`` if the well was never
-    loaded. Cache-only lookup — no lazy load — so this stays a pure ``ctx.state``
-    reader."""
-    cache = getattr(ctx.state.dataset, "cache", None)
-    if cache is None:
+    """The well's rows, read through ``get_rows``; ``None`` for a well the
+    dataset does not have.
+
+    Not a cache-only lookup any more. The row cache is bounded
+    (``review/data/row_cache.py``), so "not in the cache" now also means
+    "evicted", and a cache-only read drew an evicted well as an empty frame."""
+    if well_label not in ctx.state.dataset.well_paths:
         return None
-    return cache.get(well_label)
+    return get_rows(ctx, well_label)
 
 
 def collect_spatial_frame(
@@ -147,10 +148,16 @@ def collect_spatial_frame(
 
 
 def _sample_loaded_df(ctx) -> pd.DataFrame | None:
-    """Return the first non-empty cached DataFrame across all loaded wells
-    (used for picker discovery), or ``None`` if nothing is loaded."""
-    cache = getattr(ctx.state.dataset, "cache", None) or {}
-    for label, df in cache.items():
+    """A non-empty well's frame for picker discovery, or ``None`` with no data.
+
+    A held frame when there is one — any well answers which columns exist —
+    else the first well read from disk: with the row cache bounded, an empty
+    cache no longer means an empty dataset."""
+    for _label, df in ctx.state.dataset.cache.items():
+        if df is not None and not df.empty:
+            return df
+    for label in list(ctx.state.dataset.well_paths):
+        df = get_rows(ctx, label)
         if df is not None and not df.empty:
             return df
     return None
@@ -204,19 +211,24 @@ def available_metric_columns(ctx) -> list[str]:
 
 
 def available_timepoints(ctx) -> list[float]:
-    """Unique finite ``timepoint_hours`` across every well in the cache.
+    """Unique finite included timepoints, in hours, across every well.
 
-    Pure ``ctx.state`` reader; empty when nothing has been loaded.
+    Every well, not every *held* well: the row cache is bounded, so each well is
+    read through ``get_rows`` and its timepoints remembered (``plate_scan``) until
+    its rows or verdicts change. Empty when nothing has been loaded.
     """
     seen: set = set()
-    cache = getattr(ctx.state.dataset, "cache", None) or {}
-    for _label, df in cache.items():
-        if df is None or df.empty:
-            continue
-        mask = df_included_mask(df, include_gate=False).to_numpy()
-        tp = _hours(df)
-        seen.update(float(t) for t in np.unique(tp[mask & np.isfinite(tp)]))
+    for tps in every_well(ctx, "spatial_timepoints", None, _included_hours).values():
+        seen.update(tps)
     return sorted(seen)
+
+
+def _included_hours(df) -> frozenset:
+    if df is None or df.empty:
+        return frozenset()
+    mask = df_included_mask(df, include_gate=False).to_numpy()
+    tp = _hours(df)
+    return frozenset(float(t) for t in np.unique(tp[mask & np.isfinite(tp)]))
 
 
 def collect_summary_matrix(
@@ -250,62 +262,35 @@ def collect_summary_matrix(
           didn't have any cells at that timepoint.
         - ``metric_col``: echo of the ICC metric column (for CSV headers).
     """
-    import pandas as pd
+    # Each well is read once, through ``get_rows``, and its row of the matrix
+    # filled before the next is read — so a plate larger than the row-cache
+    # budget is walked without holding it whole. A missing or empty well is
+    # dropped, as before.
+    tps = sorted({float(t) for t in timepoints if np.isfinite(t)})
+    ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
+    units: set = set()
     valid_wells: list[str] = []
-    cache = getattr(ctx.state.dataset, "cache", None) or {}
+    rows: list[list] = []
     for w in wells:
-        df = cache.get(w)
+        if w not in ctx.state.dataset.well_paths:
+            continue
+        df = get_rows(ctx, w)
         if df is None or df.empty:
             continue
         valid_wells.append(w)
-    tps = sorted({float(t) for t in timepoints if np.isfinite(t)})
-    n_w, n_t = len(valid_wells), len(tps)
-    summaries = np.empty((n_w, n_t), dtype=object)
+        rows.append(_summary_row(df, tps, metric_col, ratios, units, include_gate=include_gate,
+                                 colony_method=colony_method, eps_mult=eps_mult,
+                                 min_samples=min_samples))
+    summaries = np.empty((len(valid_wells), len(tps)), dtype=object)
     summaries[:] = None
-    if n_w == 0 or n_t == 0:
+    for i, row in enumerate(rows):
+        for j, summary in enumerate(row):
+            summaries[i, j] = summary
+    if not valid_wells or not tps:
         return {
             "wells": valid_wells, "timepoints": tps,
             "summaries": summaries, "metric_col": metric_col,
         }
-
-    ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
-    units: set = set()
-    for i, w in enumerate(valid_wells):
-        df = cache.get(w)
-        columns = None if df is None or df.empty else position_columns(df)
-        if columns is None:
-            continue
-        units.add(columns[2])
-        tp_col = _hours(df)
-        finite_tp = np.isfinite(tp_col)
-        base_mask = df_included_mask(df, include_gate=include_gate).to_numpy(copy=True)
-        base_mask &= finite_tp
-        col = pd.to_numeric(df[columns[0]], errors="coerce").to_numpy()
-        row = pd.to_numeric(df[columns[1]], errors="coerce").to_numpy()
-        base_mask &= np.isfinite(row) & np.isfinite(col)
-        metric_vals: np.ndarray | None = None
-        if metric_col:
-            try:
-                metric_vals = np.asarray(
-                    resolve_value_series(df, metric_col, ratios).to_numpy(),
-                    dtype=float,
-                )
-            except Exception:
-                metric_vals = None
-
-        for j, target in enumerate(tps):
-            frame_mask = base_mask & tp_close_mask(tp_col, target)
-            idx = np.flatnonzero(frame_mask)
-            if idx.size == 0:
-                continue
-            pts = np.column_stack([col[idx], row[idx]])
-            m = metric_vals[idx] if metric_vals is not None else None
-            summary = spc.summarise_frame(
-                pts, metric=m,
-                colony_method=colony_method,
-                eps_mult=eps_mult, min_samples=min_samples,
-            )
-            summaries[i, j] = summary
 
     return {
         "wells": valid_wells,
@@ -315,6 +300,47 @@ def collect_summary_matrix(
         # One unit for the table; wells in two frames (a merged plate) cannot share distances, and say so.
         "unit": next(iter(units)) if len(units) == 1 else ("mixed: µm and px" if units else "px"),
     }
+
+
+def _summary_row(df, tps, metric_col, ratios, units: set, *, include_gate: bool,
+                 colony_method: str, eps_mult: float, min_samples: int) -> list:
+    """One well's :class:`FrameSummary` per timepoint (``None`` where it has no cells)."""
+    import pandas as pd
+    out: list = [None] * len(tps)
+    columns = position_columns(df)
+    if columns is None:
+        return out
+    units.add(columns[2])
+    tp_col = _hours(df)
+    finite_tp = np.isfinite(tp_col)
+    base_mask = df_included_mask(df, include_gate=include_gate).to_numpy(copy=True)
+    base_mask &= finite_tp
+    col = pd.to_numeric(df[columns[0]], errors="coerce").to_numpy()
+    row = pd.to_numeric(df[columns[1]], errors="coerce").to_numpy()
+    base_mask &= np.isfinite(row) & np.isfinite(col)
+    metric_vals: np.ndarray | None = None
+    if metric_col:
+        try:
+            metric_vals = np.asarray(
+                resolve_value_series(df, metric_col, ratios).to_numpy(),
+                dtype=float,
+            )
+        except Exception:
+            metric_vals = None
+
+    for j, target in enumerate(tps):
+        frame_mask = base_mask & tp_close_mask(tp_col, target)
+        idx = np.flatnonzero(frame_mask)
+        if idx.size == 0:
+            continue
+        pts = np.column_stack([col[idx], row[idx]])
+        m = metric_vals[idx] if metric_vals is not None else None
+        out[j] = spc.summarise_frame(
+            pts, metric=m,
+            colony_method=colony_method,
+            eps_mult=eps_mult, min_samples=min_samples,
+        )
+    return out
 
 
 def summary_matrix_to_csv_rows(payload: dict[str, Any]):

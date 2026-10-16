@@ -1,6 +1,7 @@
 """Open a synthetic plate of large wells and record the time and peak memory it costs.
 
-The report behind ``_Docs/Markdowns/LARGE_DATASET_TRACKER.md``: a plate of 300 MB
+The report behind the large-dataset tracker (in the git history of
+``_Docs/Markdowns/LARGE_DATASET_TRACKER.md``): a plate of 300 MB
 well CSVs (about 1.1M cells each) died on open with a ``MemoryError``. This
 measures that case directly rather than asserting it fixed — the open, through
 the real ``ReviewApp._load_path``, and then the per-well aggregation a line plot

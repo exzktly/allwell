@@ -14544,6 +14544,35 @@ help while `qtbot` still holds the app).
    listing, which is fine at the scale a test's own request happens.
    `test_the_fast_lane_stays_fast.py` holds the rule.
 
+11. **The lane runs in parallel, a file per worker.** `scripts/test.sh` adds
+   `-n auto --dist loadfile` when pytest-xdist is installed (it is pinned in
+   `tests/requirements-dev.txt`): one worker process per CPU, and every test of
+   a file on the same worker, so a module-scoped fixture is still built once and
+   tests that rely on running in order within their file still do.
+   `ALLWELL_TEST_WORKERS=0` runs serially — the setting for a `--durations`
+   profile, which a parallel run splits across workers — and any other number
+   sets the worker count. Parallel workers share the machine, so a test may not
+   share a path with another test: the pipeline's scratch directory defaults to
+   `~/.allwell/scratch` and names a well's extraction directory for the well
+   alone, so two tests processing `A01` at once deleted each other's images.
+   `conftest._pipeline_scratch_goes_to_a_scratch_directory` gives every test its
+   own `ALLWELL_SCRATCH_DIR` (a test measuring the default resolution unsets
+   it). The same collision is what two lanes run side by side used to hit. CI
+   gates on the JUnit report, which the controller writes from every worker's
+   results.
+
+   A worker that crashes takes its file down with it ("node down: Not properly
+   terminated"), and the controller can then hang at 99 % waiting on it, so a
+   crash a serial run survives by luck is a stopped lane here. The one seen was
+   the widget reaper (rule 7) deleting the Analyze pane while the pre-run
+   coverage scan's daemon thread (`aw-preflight-scan`) was emitting its answer
+   to it; the faulthandler stack in the boot log showed both threads. So the
+   reaper first joins every thread the test started, for up to
+   `_THREAD_JOIN_SECONDS` (2 s) each, skipping Qt's own threads, which
+   `threading` sees as unjoinable dummies. A long-lived worker such as the
+   persistence writer never ends, and the sixteen tests that leave one pay the
+   full wait — about 8 s of the lane's wall time.
+
 **The slow lane runs on demand, not on PRs and not on a schedule** —
 `.github/workflows/slow-lane.yml`, six sharded runners, dispatched by hand from
 the Actions tab; `scripts/test_slow.sh` runs the same lane locally. It is not a

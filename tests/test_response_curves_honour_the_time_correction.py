@@ -31,6 +31,7 @@ from types import SimpleNamespace
 from review.domain.time_rescale import TimeRescale, figure_timepoints_label
 from tests.test_response_figure_title import _one_dose_plate
 from tests.test_response_tab import tab  # noqa: F401 — the fixture is the point
+from tests._repo_scan import parse_source
 
 RESPONSE = Path(__file__).resolve().parent.parent / "review" / "features" / "response"
 
@@ -500,7 +501,7 @@ def test_no_response_site_formats_an_hour_outside_the_helpers():
     offenders = []
     for path in _SCANNED:
         text = path.read_text()
-        tree = ast.parse(text, filename=str(path))
+        tree = parse_source(path)
         owner = _enclosing_function(tree)
         lines = text.splitlines()
         hits: list[tuple[int, str]] = []
@@ -544,7 +545,7 @@ def test_the_exemption_roster_still_describes_real_functions():
             stale.append(f"{filename}: not in the scanned set")
             continue
         text = path.read_text()
-        tree = ast.parse(text, filename=str(path))
+        tree = parse_source(path)
         owner = _enclosing_function(tree)
         if func not in owner.values():
             stale.append(f"{filename}::{func} ({reason[:40]}…): no such function")

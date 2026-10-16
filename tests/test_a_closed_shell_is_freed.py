@@ -44,6 +44,11 @@ def test_a_closed_shell_with_the_playground_is_collected(qapp, mini_dataset):
 
     from review.features.image_browser.playground.tab_view import build_playground_tab
 
+    # Settle what earlier tests in this process left queued before taking the
+    # baseline. Under xdist a worker runs many files back to back, and a
+    # deferred delete or timer of theirs landing inside this test's own flush
+    # read once as a `QFrame` this shell had left behind.
+    _flush(qapp)
     before = {id(w) for w in QApplication.topLevelWidgets()}
     ctx, window = minimal_shell(_NoBot())
     load_dataset(ctx, mini_dataset)

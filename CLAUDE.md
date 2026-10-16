@@ -81,10 +81,10 @@ the container**:
   tests have passed, which is why the fast lane's widget reaper exempts
   anything marked `slow`.
 
-Four things keep the fast lane fast, all of them in the harness rather than in
+Five things keep the fast lane fast, all of them in the harness rather than in
 any test, and all of them easy to undo without a single test going red.
 `tests/test_the_fast_lane_stays_fast.py` is what notices; ARCHITECTURE.md §10.4
-rules 7–10 explain each.
+rules 7–11 explain each.
 
 1. **A test does not keep the widgets it builds.** An autouse fixture deletes
    the top-level widgets it leaves behind. Without it the process carried
@@ -102,13 +102,22 @@ rules 7–10 explain each.
    so one per test makes setup quadratic in the test count — it reached 316 s
    of a 10.5-minute lane and pushed CI past its 15-minute cap on every branch.
    Take a per-test dir from `conftest._scratch_dir(_autouse_scratch_root, …)`.
+5. **The lane runs in parallel, one file per worker.** `scripts/test.sh` passes
+   `-n auto --dist loadfile` (pytest-xdist, pinned in `requirements-dev.txt`).
+   So a test may share no path with another test running at the same moment —
+   each gets its own `ALLWELL_SCRATCH_DIR` — and a test that leaves a thread
+   running is joined before its widgets are deleted, because a crash a serial
+   run survives by luck stops a worker here. `ALLWELL_TEST_WORKERS=0` runs
+   serially, which is what a `--durations` profile needs: a parallel run splits
+   the timings across workers.
 
 **How long it actually takes**, so a run that is merely slow is not mistaken for
 one that is wedged:
 
 | | Measured |
 |---|---|
-| Fast lane, local, quiet container | ~5 min (10,277 tests) |
+| Fast lane, local, quiet container, 4 CPUs | ~2.3 min in parallel (11,031 tests); ~7 min serial (`ALLWELL_TEST_WORKERS=0`) |
+| Fast lane, 2 workers (what CI's runner gets) | ~4.1 min |
 | Fast lane, local, under contention from other work in the same container | roughly 2–3× that |
 | Fast lane, CI job end to end | add ~2 min for checkout and installing the test stack. The job cap is 15 min (`ci.yml`) |
 | One slow-lane file of ~15 full-app tests | ~3.5 min, i.e. ~14 s per app construction |

@@ -585,6 +585,7 @@ def cell_table(labels, pixel_size_um: float, geometries, counts: dict, addresses
     the cells are measured on (the channels the pipeline quantifies today); its columns are
     ``mean_<name>``. Columns are lists, ready for a DataFrame.
     """
+    from scipy import ndimage
     from skimage.measure import regionprops
 
     labels = np.asarray(labels)
@@ -593,10 +594,13 @@ def cell_table(labels, pixel_size_um: float, geometries, counts: dict, addresses
                "label": []}
     for name in (intensity or {}):
         columns[f"mean_{name}"] = []
-    reference = next(iter(intensity.values())) if intensity else None
-    for region in regionprops(labels, intensity_image=reference):
-        if region.label not in site_of:
-            continue
+    regions = [region for region in regionprops(labels) if region.label in site_of]
+    # Every cell's mean on every channel in one labelled pass per channel, rather than a full-tile mask per cell
+    # per channel — that was ~18 ms a cell, a quarter of an hour a timepoint on a dense well (roll-up review X22).
+    kept = [region.label for region in regions]
+    means = {name: ndimage.mean(np.asarray(image, dtype=np.float64), labels=labels, index=kept) if kept else []
+             for name, image in (intensity or {}).items()}
+    for position, region in enumerate(regions):
         index = site_of[region.label]
         address = addresses.get(index)
         cy, cx = region.centroid
@@ -607,8 +611,8 @@ def cell_table(labels, pixel_size_um: float, geometries, counts: dict, addresses
         columns["y_um"].append(float(tile_origin_um[1] + (cy + 0.5) * pixel_size_um))
         columns["area_um2"].append(float(region.area) * pixel_size_um ** 2)
         columns["label"].append(int(region.label))
-        for name, image in (intensity or {}).items():
-            columns[f"mean_{name}"].append(float(np.asarray(image, dtype=np.float64)[labels == region.label].mean()))
+        for name in (intensity or {}):
+            columns[f"mean_{name}"].append(float(means[name][position]))
     return columns
 
 

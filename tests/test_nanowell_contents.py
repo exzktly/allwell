@@ -260,6 +260,27 @@ def test_cell_table_carries_address_and_well_frame_position():
     assert unaddressed["address_q"] == [None] and unaddressed["site_index"] == [5]
 
 
+def test_every_cell_s_mean_is_its_own_pixels_on_every_channel():
+    """Roll-up review X22 measured each mean through a full-tile mask per cell per channel; the means are now one
+    labelled pass per channel. Each cell has its own value on each channel, a label outside any site comes first
+    (so a mean read from the wrong position is wrong), and a NaN pixel makes that cell's mean NaN, as before."""
+    labels = np.zeros((190, 190), dtype=np.int32)
+    labels[5:8, 5:8] = 1                                    # between sites: not a counted cell
+    for label, site in ((2, 0), (3, 5), (4, 10)):
+        x, y = CENTRES[site]
+        labels[int(y) - 2:int(y) + 2, int(x) - 2:int(x) + 2] = label
+    rng = np.random.default_rng(3)
+    gfp, rfp = rng.uniform(0, 100, labels.shape), rng.uniform(0, 100, labels.shape)
+    x, y = CENTRES[10]
+    rfp[int(y), int(x)] = np.nan
+    counts = nm.count_cells(labels, PX, GEOMS)
+    table = nm.cell_table(labels, PX, GEOMS, counts, {}, intensity={"gfp": gfp, "rfp": rfp})
+    assert table["label"] == [2, 3, 4]
+    np.testing.assert_allclose(table["mean_gfp"], [gfp[labels == k].mean() for k in (2, 3, 4)], rtol=1e-12)
+    np.testing.assert_allclose(table["mean_rfp"][:2], [rfp[labels == k].mean() for k in (2, 3)], rtol=1e-12)
+    assert np.isnan(table["mean_rfp"][2])
+
+
 # ── C7 ──────────────────────────────────────────────────────────────────────
 def test_fluorescence_is_over_the_empty_background_and_none_is_not_zero():
     image = np.full((190, 190), 10.0)

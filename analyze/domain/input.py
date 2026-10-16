@@ -209,7 +209,7 @@ class AnalyzeInputMixin:
             # a scan that silently rewrote nothing.
             self._set_schema_detection(
                 "Couldn't read a layout from these filenames — your settings "
-                "above are unchanged.", problem=True)
+                "below are unchanged.", problem=True)
             # The dashboard has to be told too. Both refusals used to return
             # before this, so a scan that found nothing left the previous
             # scan's line standing — and once the picker gained a readout of
@@ -254,7 +254,7 @@ class AnalyzeInputMixin:
         else:
             self._set_schema_detection(
                 f"{guess.summary()} No well and channel pair was identified, "
-                f"so your settings above are unchanged.", problem=True)
+                f"so your settings below are unchanged.", problem=True)
         self._report_scan_guess(
             tokens, schema=guess.schema_str if guess.confident else "",
             shortfall=guess.sampled - guess.matched)

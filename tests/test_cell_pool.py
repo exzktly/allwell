@@ -212,3 +212,12 @@ def test_box_counts_are_the_scatter_gates_own_comparisons(backend):
                 assert pool.count_at(group, [t]) == int((tp == t).sum())
             assert pool.distinct("tp", group).tolist() == sorted(set(truth[group]["tp"]))
             assert pool.count_box("v", "w", box, group, tps=[]) == 0
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_a_per_group_cap_samples_each_group_to_it(backend):
+    pool, truth = _fill(backend)
+    with pool:
+        got = pool.sample(100, per_group=True)
+        assert {g: len(s) for g, s in got.items()} == {"ctrl": 100, "drug": 100, "tiny": 3}
+        assert got["tiny"].row.tolist() == truth["tiny"]["row"]

@@ -1645,9 +1645,13 @@ What this means in use:
   violin's median line still use every value; only the KDE and CDF curves and
   the violin's outline are drawn from the sample, and the figure says so. The
   exported CSV holds every value.
-- **The other views that draw individual cells** (Multivariate, the bar chart's
-  beeswarm, the Cell Browser) still hold the cells of every well you select.
-  Selecting most of a very large plate in one of them asks for that many points.
+- **The bar chart's beeswarm and violin draw at most 5,000 cells per column.** A
+  column with more cells draws a sample of 5,000, and the figure says which
+  columns did; the fraction, the mean line and the median line still use every
+  cell.
+- **The other views that draw individual cells** (Multivariate, the Cell
+  Browser) still hold the cells of every well you select. Selecting most of a
+  very large plate in one of them asks for that many points.
 - **If one well alone does not fit**, Review first gives back every well it is
   holding and tries again; if that fails too, the error names the well, its size
   on disk and what was held, instead of a bare out-of-memory message.

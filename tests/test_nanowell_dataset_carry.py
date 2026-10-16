@@ -152,6 +152,9 @@ def test_a_merged_sidecar_drops_the_re_anchoring_record_and_refuses_two_calibrat
 
 @pytest.mark.parametrize("damage, message", [
     (lambda f: (f / "A01.csv").unlink(), "A01 has a nanowell grid record and no sites table"),
+    # Roll-up review X15: a gzipped sites table is not one Review can read, so it is not carried as one.
+    (lambda f: ((f / "A01.csv.gz").write_bytes(__import__("gzip").compress((f / "A01.csv").read_bytes())),
+                (f / "A01.csv").unlink()), "A01 has a nanowell grid record and no sites table"),
     (lambda f: (f / "A01_grid.json").write_text("{not json"), "A01_grid.json is unreadable"),
     (lambda f: ((f / "A1_grid.json").write_text((f / "A01_grid.json").read_text()),
                 (f / "A1.csv").write_text((f / "A01.csv").read_text())), "A01, A1 are one well spelled 2 ways"),

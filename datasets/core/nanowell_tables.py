@@ -51,11 +51,10 @@ def refuse_nanowell_tables(paths, label: str, error_cls, action: str) -> None:
 
 
 def sites_table(folder: Path, well: str) -> Path | None:
-    """The well's sites table, ``<well>.csv`` or ``<well>.csv.gz`` (the plain file wins, as Review reads it)."""
-    for name in (f"{well}.csv", f"{well}.csv.gz"):
-        if (Path(folder) / name).is_file():
-            return Path(folder) / name
-    return None
+    """The well's sites table, ``<well>.csv`` — the one spelling the run writes and Review reads. A gzipped copy
+    is not one: carried, it would arrive as a table Review cannot open (roll-up review X15)."""
+    path = Path(folder) / f"{well}.csv"
+    return path if path.is_file() else None
 
 
 def _open_text(path: Path, mode: str):
@@ -79,7 +78,7 @@ def nanowell_table_problems(paths) -> list[str]:
         return []
     problems = []
     grids = {p.name[: -len("_grid.json")]: p for p in folder.glob("*_grid.json")}
-    tables = {p.name.split(".csv")[0] for p in folder.glob("*.csv*") if p.name.endswith((".csv", ".csv.gz"))}
+    tables = {p.name[: -len(".csv")] for p in folder.glob("*.csv")}
     for well in sorted(set(grids) ^ tables):
         have, lack = ("grid record", "sites table") if well in grids else ("sites table", "grid record")
         problems.append(f"{well} has a nanowell {have} and no {lack}")

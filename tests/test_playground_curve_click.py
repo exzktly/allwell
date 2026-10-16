@@ -284,4 +284,99 @@ def test_a_press_before_any_sweep_picks_nothing(playground):
     ctx = playground
     pc.playground_sweep_pick(ctx, 0.3)
     assert ctx.window._playground_seg_prob_edit.text() == ""
+    assert ctx.state.playground.sweep_picked is None
     assert ctx.state.playground.seg_running is False
+
+
+def test_a_click_while_a_worker_runs_changes_nothing_and_says_why(swept,
+                                                                  monkeypatch):
+    """Excludes the pick that lands while the session's one model is busy.
+
+    Both workers are held in flight — the fakes below never call back — so the
+    refusal is reached through the real running flags, not through a flag the
+    test set. The box keeps the threshold of the segmentation in flight, no
+    further segmentation is asked for, the outlines on the canvas stay as they
+    were, and the read-out says why.
+    """
+    ctx, requests = swept
+    popup = ctx.runtime.playground.sweep_curve_popup
+    box = ctx.window._playground_seg_prob_edit
+
+    _press_point(popup, 0.5)                      # completes: two outlines
+    assert _outlined(ctx) == [True, True, False]
+
+    held: list = []
+
+    def _held_segment(arr, *, prob_thresh, nms_thresh, on_done,
+                      on_failed=None, on_stage=None):
+        held.append(prob_thresh)
+        return object()
+
+    monkeypatch.setattr(pc, "request_stardist_labels", _held_segment)
+    _press_point(popup, 0.2)                      # starts, never finishes
+    assert held == [pytest.approx(0.2)]
+    assert ctx.state.playground.seg_running is True
+    before = (box.text(), _outlined(ctx))
+
+    _press_point(popup, 0.8)
+    assert held == [pytest.approx(0.2)], "a second segmentation was started"
+    assert (box.text(), _outlined(ctx)) == before
+    assert "Still running" in _status(ctx)
+
+
+def test_a_click_while_a_sweep_runs_changes_nothing_and_says_why(swept,
+                                                                 monkeypatch):
+    ctx, requests = swept
+    popup = ctx.runtime.playground.sweep_curve_popup
+    box = ctx.window._playground_seg_prob_edit
+
+    _press_point(popup, 0.2)                      # completes: three outlines
+    assert _outlined(ctx) == [True, True, True]
+
+    monkeypatch.setattr(pw, "request_threshold_sweep",
+                        lambda *a, **k: object())  # in flight, never returns
+    ctx.window._playground_sweep_btn.click()
+    assert ctx.state.playground.sweep_running is True
+    n_before = len(requests)
+
+    _press_point(popup, 0.8)
+    assert len(requests) == n_before, "segmented while the sweep was running"
+    assert box.text() == "0.2"
+    assert _outlined(ctx) == [True, True, True]
+    assert "Still running" in _status(ctx)
+
+
+def test_a_press_with_the_toolbars_zoom_armed_picks_nothing(swept):
+    """Excludes the pick that re-segments the frame every time the user drags
+    out a zoom box. Disarming it again and pressing the same point does pick,
+    so the press itself is known to land on the line."""
+    ctx, requests = swept
+    popup = ctx.runtime.playground.sweep_curve_popup
+    nav = popup._canvas.toolbar
+    assert nav is not None, "the window has no navigation toolbar"
+    nav.zoom()                                   # arm
+    assert str(nav.mode)
+    _press_point(popup, 0.2)
+    assert requests == []
+    assert ctx.window._playground_seg_prob_edit.text() == ""
+    assert _outlined(ctx) == [False, False, False]
+
+    nav.zoom()                                   # disarm
+    assert not str(nav.mode)
+    _press_point(popup, 0.2)
+    assert requests == [pytest.approx(0.2)]
+
+
+def test_a_refused_sweep_offers_no_threshold_to_pick(playground):
+    """A curve that is a refusal (no nuclei at any threshold) has no measured
+    point to pick. The window draws no line, so a press cannot reach the pick;
+    this is the controller's own half, for any other caller."""
+    from review.domain.threshold_sweep import curve_from_counts, sweep_grid
+    ctx = playground
+    grid = sweep_grid()
+    st = ctx.state.playground
+    st.sweep_curve = curve_from_counts(grid, [0] * len(grid))
+    assert st.sweep_curve.declined
+    pc.playground_sweep_pick(ctx, 0.3)
+    assert ctx.window._playground_seg_prob_edit.text() == ""
+    assert st.sweep_picked is None

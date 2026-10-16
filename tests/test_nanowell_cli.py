@@ -427,3 +427,74 @@ def test_a_well_s_montages_are_spilled_into_its_scratch_and_go_with_it(tmp_path,
     assert not spill.exists()
     with zipfile.ZipFile(out / f"{WELL}_out.zip") as zf:
         assert f"{WELL}_0h_montage.png" in zf.namelist()
+
+
+# ── an inferred geometry (tracker X35) ───────────────────────────────────────
+def _square_plate(tmp_path, timepoints=("0h",)):
+    """A square lattice in a square array, turned 12 degrees, with no central square, one 900 px tile a timepoint;
+    the second timepoint is the plate put back shifted and turned a little."""
+    record, items = None, []
+    for k, token in enumerate(timepoints):
+        rendered, rec = build_well(rows=1, cols=1, tile=(900, 900), timepoint=token, seed=1 + k, lattice="square",
+                                   array_shape="square", rotation=12.0 + 2 * k, radius_fraction=0.3,
+                                   square_centre=False, array_shift_um=(60.0 * k, -40.0 * k))
+        if record is None:
+            record = rec
+        else:
+            record["timepoints"].update(rec["timepoints"])
+            record["tiles"] += rec["tiles"]
+        items.append((token, rendered))
+    plate = tmp_path / "plate"
+    (plate / "in").mkdir(parents=True)
+    tif = tmp_path / "frame.tif"
+    with zipfile.ZipFile(plate / "in" / f"{WELL}.zip", "w") as zf:
+        for token, rendered in items:
+            for fov, image in rendered.images.items():
+                for channel, frame in (("PHASE", image), ("GFP", image * 0 + 10.0)):
+                    imwrite(str(tif), frame.astype("float32"))
+                    zf.write(tif, f"exp_{channel}_{WELL}_{fov}_{token}.tif")
+    write_record_file(plate / "in" / "acquisition.json", record)
+    return plate, dict(items)
+
+
+def test_an_inferred_geometry_reaches_the_run_from_the_command_line(tmp_path, monkeypatch):
+    plate, rendered = _square_plate(tmp_path)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--nanowell_geometry", "infer")
+    rows = _rows(out, f"{WELL}.csv")
+    assert {(int(r["nw_q"]), int(r["nw_r"])) for r in rows} == set(rendered["0h"].array.addresses)
+    assert {r["nw_ring"] for r in rows if (r["nw_q"], r["nw_r"]) == ("3", "-2")} == {"3"}     # square rings
+    grid = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())
+    block = grid["timepoints"]["0h"]
+    assert (block["status"], block["lattice_kind"], block["geometry"]["shape"]) == ("ok", "square", "polygon")
+    assert grid["array_radius"]["radius_um"] is None and len(grid["array_radius"]["roster"]) == len(rows)
+    assert json.loads((out / "pipeline_info.json").read_text())["nanowell"]["settings"]["geometry"] == "infer"
+
+
+def test_without_the_flag_the_same_square_plate_is_read_as_hexagonal_and_gets_no_addresses(tmp_path, monkeypatch):
+    plate, _ = _square_plate(tmp_path)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
+    grid = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())
+    assert grid["timepoints"]["0h"]["status"] != "ok"
+    assert all(not r["nw_q"] for r in _rows(out, f"{WELL}.csv"))
+
+
+def test_an_incremental_inferred_run_adds_the_new_timepoint_to_the_kept_roster(tmp_path, monkeypatch, located_calls):
+    from pipeline import nanowell_run as nr
+
+    plate, _ = _square_plate(tmp_path)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--nanowell_geometry", "infer")
+    first = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())["array_radius"]["roster"]
+    plate2, _ = _square_plate(tmp_path / "second", timepoints=("0h", "24h"))
+    (plate / "in" / f"{WELL}.zip").write_bytes((plate2 / "in" / f"{WELL}.zip").read_bytes())
+    (plate / "in" / "acquisition.json").write_bytes((plate2 / "in" / "acquisition.json").read_bytes())
+    given = []
+    real = nr.run_well
+    monkeypatch.setattr(nr, "run_well", lambda *a, **k: (given.append(k.get("fixed_roster")), real(*a, **k))[1])
+    located_calls["measure"].clear()
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--nanowell_geometry", "infer", "--incremental")
+    assert located_calls["measure"] == ["24h"] and given == [first]
+    rows = _rows(out, f"{WELL}.csv")
+    by_tp = {tp: {(r["nw_q"], r["nw_r"]) for r in rows if r["timepoint"] == tp} for tp in ("0h", "24h")}
+    assert by_tp["0h"] == by_tp["24h"] and len(by_tp["0h"]) == len(first)
+    grid = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())
+    assert grid["array_radius"]["roster"] == first and grid["timepoints"]["24h"]["status"] == "ok"

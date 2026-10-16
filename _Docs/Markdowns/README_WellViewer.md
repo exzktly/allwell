@@ -205,9 +205,22 @@ build.
 In the Analyze pane, open the **Nanowells** section (folded by default), tick **Nanowell arrays**, and mark the
 channel the tiles are imaged in as **Phase** (Channel Tokens). The section asks for the plate format (100 µm or
 50 µm nanowells, or **Custom size**, which shows two more fields: the nanowell diameter and the lattice pitch,
-centre to centre — the run measures the pitch on the tiles, so it is a starting value) and, optionally, the cell diameter, the margin around a nanowell that must lie inside one tile
+centre to centre — the run measures the pitch on the tiles, so it is a starting value), the **Array geometry**
+and, optionally, the cell diameter, the margin around a nanowell that must lie inside one tile
 for that tile to own it, the angle of the central square's edges to a lattice row, and the occlusion and
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
+
+**Array geometry** says how the array is found. *Hexagonal lattice in a circle* (the default) looks for nanowells
+of the plate format's diameter on a hexagonal lattice inside a circular array. *Infer from the image* assumes only
+that nanowells are light and the lattice between them dark: it separates light from dark to find where the
+nanowells are, and reads from their positions whether the lattice is hexagonal or square, its pitch and
+orientation, and the array's outline (a circle, or whatever shape the nanowells fill), then gives every nanowell
+its address on that lattice. A nanowell a bubble hides keeps its address and is reported as occluded, and the
+grid record counts how many sites showed no nanowell. The plate format's pitch and diameter are then compared
+with what was measured: a pitch more than 5 % off, or a diameter more than 25 % off, is written as a note on the
+timepoint with both numbers (the addresses use the measured pitch). On a square lattice a nanowell's ring is the
+number of lattice steps along the larger of its two coordinates, and the Nanowells page lays the array map out
+square.
 While the mode is on, the segmentation method is set to label-free and locked (your choice returns when the mode
 is switched off). Run refuses to start, naming the fix, when a number is out of range or the Phase channel is
 unmarked (unless channel auto-detection will name it), and, for a single run with auto-detection off, when
@@ -256,7 +269,10 @@ tiles instead;
 `--phase_token` names the channel the tiles are imaged in. `--nanowell_cell_diameter_um` (default 15) is the
 cell size the label-free segmenter is given, `--nanowell_margin_um` the margin around a nanowell that must lie
 inside one tile for that tile to own it (default a tenth of the diameter), and `--nanowell_square_edge_deg` the
-angle of the central square's edges to a lattice row (default 0). Wells must be zips.
+angle of the central square's edges to a lattice row (default 0). `--nanowell_geometry infer` finds the array by
+its contrast and infers the lattice kind (hexagonal or square), pitch, orientation and outline, as *Infer from
+the image* does on the form; without it (`hex_circle`) the array is a hexagonal lattice in a circle. Wells must
+be zips.
 
 Besides the usual per-cell CSV (one row per cell, with the owner tile as `fov` and the nanowell's address
 `nw_q`, `nw_r`, `nw_ring`, `nw_label` and its position `well_x_um`, `well_y_um`), the run writes

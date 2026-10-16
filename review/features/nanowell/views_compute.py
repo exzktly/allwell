@@ -1,14 +1,16 @@
 """What the Array map, Trajectories and Position views draw, as data (tracker V2, V2a, V4, V6; decision U4).
 
 **Array map positions are lattice positions** (U4). A nanowell is drawn where its address puts it on an ideal
-lattice of the well's pitch, east along ``q``, ``r`` 60° counter-clockwise from it on screen (y down), so a
+lattice of the well's pitch and kind (the grid record's ``lattice_kind``: hexagonal unless it says square), east
+along ``q``, ``r`` 60° (90° on a square lattice) counter-clockwise from it on screen (y down), so a
 nanowell stays in one place while the time slider moves — the plate may have been put back rotated between
 acquisitions, and the measured positions belong to Array QC, the misregistration view. A site has a place
 whether or not it was seen.
 
 **Trajectories** are each nanowell's metric over time, coloured by occupancy class, with one median per
 occupancy class over the nanowells with a value at each timepoint — "which nanowells went where". **Position
-effects** are the metric against ring (distance from the central square in lattice steps), per well, with the
+effects** are the metric against ring (distance from the central square in lattice steps: the hex distance, or
+``max(|q|, |r|)`` on a square lattice), per well, with the
 share of each ring's nanowells excluded — an edge-effect check, descriptive only.
 
 Qt-free.
@@ -27,15 +29,17 @@ from review.features.nanowell.collect import MEASURABLE
 _SQRT3_2 = math.sqrt(3.0) / 2.0
 
 
-def lattice_xy(q, r, pitch_um: float) -> tuple[np.ndarray, np.ndarray]:
-    """Display positions (µm, y down) of axial addresses on an ideal hex lattice of *pitch_um*.
+def lattice_xy(q, r, pitch_um: float, kind: str = "hex") -> tuple[np.ndarray, np.ndarray]:
+    """Display positions (µm, y down) of addresses on an ideal lattice of *pitch_um* and *kind*.
 
-    ``q`` steps east; ``r`` steps along the direction 60° counter-clockwise from east on screen, which with y
-    down is up and to the right — the pipeline's convention (``pipeline_info.json``'s ``nanowell.conventions``).
-    The central square ``(0, 0)`` is at the origin.
+    ``q`` steps east; ``r`` steps along the direction 60° (hexagonal) or 90° (square) counter-clockwise from east
+    on screen, which with y down is up and to the right (straight up) — the pipeline's convention
+    (``pipeline_info.json``'s ``nanowell.conventions``). The central site ``(0, 0)`` is at the origin.
     """
     q = np.asarray(q, dtype=float)
     r = np.asarray(r, dtype=float)
+    if kind == "square":
+        return pitch_um * q, -pitch_um * r
     return pitch_um * (q + 0.5 * r), -pitch_um * _SQRT3_2 * r
 
 
@@ -44,6 +48,13 @@ def well_pitch(data, well: str) -> float | None:
     pitches = [b.get("pitch_um") for b in (data.grids.get(well) or {}).values() if isinstance(b, dict)]
     pitches = [float(p) for p in pitches if isinstance(p, (int, float)) and math.isfinite(p) and p > 0]
     return float(np.median(pitches)) if pitches else None
+
+
+def well_lattice_kind(data, well: str) -> str:
+    """``"square"`` when the well's grid records say its lattice is square, else ``"hex"`` (the plates before the
+    pipeline could infer a lattice record ``hex`` or nothing). One kind per well: a plate does not change it."""
+    kinds = {b.get("lattice_kind") for b in (data.grids.get(well) or {}).values() if isinstance(b, dict)}
+    return "square" if "square" in kinds and "hex" not in kinds else "hex"
 
 
 @dataclass
@@ -79,7 +90,7 @@ def map_model(metrics: pd.DataFrame, data, well: str, timepoint: str, column: st
     pitch = well_pitch(data, well)
     if not len(rows) or pitch is None:
         return None
-    x, y = lattice_xy(rows["nw_q"].to_numpy(), rows["nw_r"].to_numpy(), pitch)
+    x, y = lattice_xy(rows["nw_q"].to_numpy(), rows["nw_r"].to_numpy(), pitch, well_lattice_kind(data, well))
     radius = rows["radius_um"].dropna()
     values = numeric_values(rows, column).to_numpy(dtype=float)
     states = list(rows["state"].astype(str))
@@ -151,6 +162,13 @@ def hex_ring(q, r) -> np.ndarray:
     return (np.abs(q) + np.abs(r) + np.abs(q + r)) / 2.0
 
 
+def lattice_ring(q, r, kind: str = "hex") -> np.ndarray:
+    """:func:`hex_ring` on a hexagonal lattice, ``max(|q|, |r|)`` on a square one — the pipeline's ``lattice_ring``."""
+    if kind == "square":
+        return np.maximum(np.abs(np.asarray(q, dtype=float)), np.abs(np.asarray(r, dtype=float)))
+    return hex_ring(q, r)
+
+
 @dataclass
 class PositionSeries:
     well: str
@@ -162,15 +180,15 @@ class PositionSeries:
     excluded_share: np.ndarray            # fraction of the ring's nanowells with no value
 
 
-def position_series(metrics: pd.DataFrame, wells, timepoint: str,
-                    column: str) -> tuple[list[PositionSeries], list[str]]:
+def position_series(metrics: pd.DataFrame, wells, timepoint: str, column: str,
+                    kinds: dict | None = None) -> tuple[list[PositionSeries], list[str]]:
     """Per well, the metric's median and quartiles by ring at *timepoint*, and each ring's excluded share —
     every addressed roster nanowell counts towards its ring, seen or not. Also the wells with no addressed
     nanowell at *timepoint*, which have no series and are named rather than dropped."""
     out, missing = [], []
     for well in wells:
         rows = metrics[(metrics["well"] == well) & (metrics["timepoint"] == timepoint)]
-        frame = pd.DataFrame({"ring": hex_ring(rows["nw_q"], rows["nw_r"]),
+        frame = pd.DataFrame({"ring": lattice_ring(rows["nw_q"], rows["nw_r"], (kinds or {}).get(well, "hex")),
                               "v": numeric_values(rows, column).to_numpy(dtype=float)}).dropna(subset=["ring"])
         if not len(frame):
             missing.append(well)

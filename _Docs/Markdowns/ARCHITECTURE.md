@@ -8801,12 +8801,64 @@ measures it: `working_pitch` runs the lattice search (half to twice the nominal)
 `PITCH_PROBE_TILES` tiles nearest the grid's centre and takes their median, and that pitch, then
 the lattice fit's own, seeds the per-tile fits, registration, the stage tolerance, the fiducial
 search, site de-duplication and the roster radius. The grid record states it
-(`pitch_seed_um`, `pitch_seed_source` — `tiles` or `nominal`) with `tile_lattice_fits` (fitted,
+(`pitch_seed_um`, `pitch_seed_source` — `tiles` or `nominal`, or `contrast` for an inferred geometry) with `tile_lattice_fits` (fitted,
 of tiles), and a timepoint where no tile's lattice fits says so in `registration_warnings`. A
 rendered 50 um array registers every tile on its lattice at a true pitch of 143 um or 86 um. The renderer's bubble is a flat grey disk; what a real bubble does to a phase image is
 not established. The user reports the square's edges parallel to the plate's, which matches
 a lattice row (modulo the square's 90°) for either regular placement of a hex lattice on the
 plate. Nothing has run on real phase-contrast images (tracker N10, blocked on Q7).
+
+**The array's geometry from its contrast (`pipeline/nanowell_infer.py`).** The matched filter above assumes the
+plate format's diameter, a hexagonal lattice and a circular array. `--nanowell_geometry infer` assumes only the
+plate's polarity: nanowells are light and the lattice between them dark, and a bubble over a nanowell makes it
+dark too, so it is not found rather than mistaken for one. `find_wells_by_contrast` splits light from dark twice.
+The first split is one Otsu threshold over the image with its slowest variation removed (two box filters a third
+of the image wide), enough to measure the wells' spacing and size. The second smooths the image over 0.12 of a
+well's diameter (camera noise in a flat region otherwise splits into well-sized speckle) and splits each pixel at
+the midpoint of the brightest and darkest within 2.5 spacings, so a tile a third as bright as its neighbour is
+read like it. A light blob is a nanowell when its area is 0.45 to 1.7 times the typical blob's (area-weighted
+median), its second moments are within 1.6 of round, and it is lighter than the dark around it by at least 0.2 of
+the typical blob's lift and eight times the noise left after smoothing — speckle of the flat floor outside a small
+array is no lighter than its surround, and without that test a 61-site array in a mostly empty image was read
+as a polygon of 106 to 108 sites (noise 0.05 and 0.15 of the well-to-lattice range 0.7). Rejected blobs are counted by reason. A blob touching the image's edge or the montage's
+uncovered pixels is cut: its centroid is biased, so it takes no part in the fit and only says that the array runs
+off the image. `infer_array` fits the lattice with `fit_lattice(kind="auto")` and no expected pitch, refuses a
+stretched basis as `detect_sites` does, indexes every well, and reads the extent from the occupied lattice sites:
+every site inside their convex hull (plus a quarter pitch) belongs to the array, found or not, so a nanowell under
+a bubble keeps its place and is counted `missing`. The outline is a `circle` when `fit_array_boundary` fits one
+and no lattice site a quarter pitch inside it, wholly on the image, lies outside the hull (at most two, or 3 % of
+the wells found); otherwise it is the hull itself, a `polygon` — a hexagonal or square outline has the whole cap
+between it and its circumcircle outside its hull. A circle's sites are the hull's, those a quarter pitch inside
+the circle (under a bubble), and those the image does not show wholly within the circle plus 0.02 of a pitch; a
+site just past the rim and on the image would have been seen if it were there, so it is not added. The array's
+centre is the circle's centre, or the polygon's middle site: the mean of its integer addresses rounded half down
+on each axis, which noise cannot move. A polygon the image cuts (`clipped`: a cut well on the lattice, or a found
+one within 0.6 of a pitch of the edge) has no centre, because its seen part's middle is not the array's; it is
+anchored by the central square or the rest of the plate, or stays unaddressed. In the run
+(`nanowell_run._detect_by_contrast`) the result is a `SiteDetection` whose boundary centre is that centre, so
+the central square, the orientation check and `resolve_origin` run unchanged; the measured pitch and the wells'
+diameter are compared with the settings' (`compare_given`: 5 % for the pitch, 25 % for the diameter, which a
+threshold reads less precisely), the format's diameter is still what sites are fitted and owned with, and a
+disagreement is a note on the timepoint naming both numbers, never a silent choice. The roster of an inferred
+array is a set of addresses: each anchored timepoint's own sites relative to its origin, kept where at least
+half of the timepoints hold them (`_shared_roster`), so a bubble over the edge at one timepoint does not take its
+sites out of the well; a timepoint whose own set differs by more than two sites or 2 % is `roster_disagrees`. The
+grid record keeps the set as `array_radius.roster` (with `radius_um: null`), which an incremental or re-anchoring
+run keeps as `run_well(fixed_roster=…)`; an empty one (an earlier run that anchored nothing) is not kept. On a
+square lattice `nw_ring` is `max(|q|, |r|)` (`lattice_ring`), the rings `util/nanowell_address.py` labels, and
+`lattice_kind` in the grid record says which lattice the addresses are on.
+
+What this establishes, and what it does not: on rendered tiles (`tests/test_nanowell_infer.py`) square and
+hexagonal lattices at several rotations, circular and square outlines, wells drawn dark, an array the image
+cuts, a gain step, falling illumination, a small array on a noisy floor and two timepoints with a corner hidden
+at one are each addressed as drawn, and through `process_microscopy.main` a square array is addressed end to end
+and kept by an incremental run (`tests/test_nanowell_cli.py`). Within 2.5 spacings of a gain step the bright side
+sets the split and dim wells there are reported missing; a well on a circle's rim that is never seen at any
+timepoint leaves the roster; and a polygon whose edge a bubble cuts deeply enough to move its middle site would
+shift that timepoint's addresses by one, which shows only as `roster_disagrees`. The thresholds are synthetic
+choices: real phase images (tracker Q7) decide whether they hold. The hexagonal lattice in a circle stays the
+default, and its own roster (`roster`, the shared radius plus a quarter pitch) holds a ring of sites beyond a
+circular array's rim — 18 on a rendered 265-site array, each written as `occluded` (tracker X36).
 
 ### 6.2h What is inside each nanowell
 
@@ -8940,8 +8992,12 @@ settings; the CLI refuses a non-finite number for any of them.
 registers them (`tile_register`, with each tile's own lattice fit as the lattice-phase constraint), builds the
 montage, estimates the lattice from its spectrum, detects the sites, scores the central square, checks the
 square's orientation and the plate format, resolves the origin (fiducial, array centre, or a plate-rigid
-prediction handed in) and indexes the sites. `run_well` locates every timepoint first, takes **one shared array
-radius per well** (`shared_array_radius`) so every timepoint has the same roster, and only then
+prediction handed in) and indexes the sites. With `--nanowell_geometry infer` (`NanowellSettings.geometry`,
+section 6.2g's last part) the per-tile fits, the working pitch and the montage's sites come from
+`pipeline/nanowell_infer.py` instead of the matched filter and the spectrum, and the grid record gains a
+`geometry` block; everything from the central square on is the same. `run_well` locates every timepoint first,
+takes **one shared array radius per well** (`shared_array_radius`) so every timepoint has the same roster — for an
+inferred geometry **one shared set of addresses** instead (`_shared_roster`) — and only then
 — with each located montage spilled meanwhile to a memory-mapped `.npy` under the well's scratch
 (`spill_dir`, `<scratch>/.montages`), so a long time-course does not hold every montage in memory at once —
 `measure_timepoint`s each: owner-tile geometry at full resolution (fused sites on the montage),
@@ -8992,7 +9048,9 @@ already means the mode off to every reader, so the stripped form's argv is the o
 existed (`tests/test_nanowell_removable.py`). The pipeline's nanowell mode and the Datasets tools' table carrying
 stay in every build: Qt-free, sent to remote hosts, and what keeps a dataset with nanowell tables whole. The
 Nanowells section (`analyze/nanowell_section.py`, folded by default) holds the mode
-checkbox, the plate format, the cell diameter, the margin, the square's edge angle and the occlusion and
+checkbox, the plate format, the array geometry (*Hexagonal lattice in a circle*, which sends no flag, or *Infer
+from the image*, which sends `--nanowell_geometry infer`; `GEOMETRY_CHOICES` in `domain/nanowell_fields.py`), the
+cell diameter, the margin, the square's edge angle and the occlusion and
 clipping thresholds; a blank number sends no flag and the pipeline's default applies. Its option keys are
 the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's
 `execution_options` all name the same things and the edit-a-queued-job round trip and the sidecar restore
@@ -9180,10 +9238,11 @@ palette — so a capture, which flips the theme without a redraw, puts the publi
 against recorded time, a timepoint without a number as a gap and a hatched band, with each timepoint's state
 written above, and a strip of crops of the first selected nanowell, one per timepoint.
 
-**The other views.** `views_compute` holds what they draw as data. `lattice_xy` places an axial address on
-an ideal lattice of the well's measured pitch (`well_pitch`, the median of its timepoints' grid records): `q`
-east, `r` 60° counter-clockwise from east on screen with y down, the central square at the origin — the
-pipeline's convention, which `tests/test_nanowell_page_views.py` checks against a real run by fitting a
+**The other views.** `views_compute` holds what they draw as data. `lattice_xy` places an address on an ideal
+lattice of the well's measured pitch (`well_pitch`, the median of its timepoints' grid records) and kind
+(`well_lattice_kind`: square only when the grid records say `lattice_kind: square`, hexagonal otherwise): `q`
+east, `r` 60° (90° on a square lattice) counter-clockwise from east on screen with y down, the central site at
+the origin — the pipeline's convention, which `tests/test_nanowell_page_views.py` checks against a real run by fitting a
 rotation from the lattice positions to the measured ones (no reflection, the grid record's angle, residuals of
 localisation size). The **Array map** (`map_model`, `render_array_map`) draws lattice positions rather than
 measured ones (U4), so a nanowell keeps its place as the timepoint moves even when the plate was put back
@@ -9194,7 +9253,8 @@ and a well whose grid record has no pitch is a `render_message` figure saying so
 with one value per nanowell is greyed in the Metric list there, and a saved one is drawn as cell count with a
 footer line saying so. **Position** (`position_series`) is the metric's median and interquartile range by ring,
 with the share of each ring's nanowells without a value; it makes no test. The ring comes from the address
-(`hex_ring`, the pipeline's `(|q| + |r| + |q + r|) / 2`), not from a row's `nw_ring`, because the rows Review adds
+(`lattice_ring`, the pipeline's: `(|q| + |r| + |q + r|) / 2` on a hexagonal lattice, `max(|q|, |r|)` on a square
+one, the kind passed per well by `controller.draw_view`), not from a row's `nw_ring`, because the rows Review adds
 for a roster nanowell not seen at a timepoint carry the address and no ring — reading the column dropped them,
 so a ring nobody saw vanished instead of reading as wholly excluded. A drawn well with no addressed nanowell at
 the timepoint is named in the footer. `numeric_values` reads the

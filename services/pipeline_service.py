@@ -51,7 +51,8 @@ def _emit_num_flag(args: list[str], opts: dict, key: str, flag: str, cast) -> No
 
 def _emit_nanowell_flags(args: list[str], opts: dict) -> None:
     """Nanowell mode: ``--nanowell_format`` when the section is on, and each of its numeric fields that is filled;
-    a custom format's diameter and pitch, and the tile grid when one is given (for data with no record).
+    a custom format's diameter and pitch, the array geometry when it is inferred, and the tile grid when one is
+    given (for data with no record).
 
     Absent or blank ``nanowell_format`` is the mode off and sends nothing, so an opts dict from before the
     section existed builds the argv it always did. A blank numeric field sends no flag and the pipeline's
@@ -64,6 +65,8 @@ def _emit_nanowell_flags(args: list[str], opts: dict) -> None:
     for key in ("nanowell_cell_diameter_um", "nanowell_margin_um", "nanowell_square_edge_deg",
                 "nanowell_occluded_below", "nanowell_clipped_below"):
         _emit_num_flag(args, opts, key, f"--{key}", float)
+    if str(opts.get("nanowell_geometry") or "").strip() == "infer":   # the default sends nothing (tracker X35)
+        args += ["--nanowell_geometry", "infer"]
     if plate_format == "custom":                     # a known format's geometry is its own, never sent
         for key in ("nanowell_diameter_um", "nanowell_pitch_um"):
             _emit_num_flag(args, opts, key, f"--{key}", float)

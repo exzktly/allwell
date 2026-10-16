@@ -2061,6 +2061,7 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/tile_grid.py",
         "pipeline/tile_register.py",
         "pipeline/nanowell_detect.py",
+        "pipeline/nanowell_infer.py",
         "pipeline/nanowell_sites.py",
         "pipeline/nanowell_measure.py",
         "pipeline/nanowell_run.py",

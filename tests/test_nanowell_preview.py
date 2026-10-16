@@ -108,3 +108,18 @@ def _scratch(tmp_path):
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     return scratch
+
+
+def test_test_detection_on_an_inferred_geometry_labels_every_site_of_a_square_array(tmp_path):
+    """Tracker X35: Test detection locates the way the run will, so an inferred square array that is not a circle
+    is measured against its own sites (it has no boundary radius) and every drawn address is shown."""
+    rendered, record = build_well(timepoint="0h", lattice="square", array_shape="square", rotation=-15.0,
+                                  radius_fraction=0.22, square_centre=False)
+    zip_path = _write_plate(tmp_path, rendered, record) / "in" / f"{WELL}.zip"
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    result = preview_timepoint(zip_path, WELL, "0h", nr.NanowellSettings("100um", geometry=nr.GEOMETRY_INFER),
+                               grouper=pm.find_image_groups_in_zip, parse=pm.parse_filename, schema=SCHEMA, sep="_",
+                               phase_token="PHASE", scratch=scratch, segmenter=threshold_segmenter())
+    assert result.status == nr.OK and result.origin_method == "array_centre"
+    assert {s["address"] for s in result.sites} == {f"{q},{r}" for q, r in rendered.array.addresses}

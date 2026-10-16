@@ -18,7 +18,8 @@ from __future__ import annotations
 from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QWidget
 
 from analyze.domain.nanowell_fields import (
-    CUSTOM_FORMAT, DEFAULTS, PLATE_FORMAT_CHOICES, SCAN_CHOICES, nanowell_enabled, nanowell_option_errors,
+    CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, PLATE_FORMAT_CHOICES, SCAN_CHOICES, nanowell_enabled,
+    nanowell_option_errors,
 )
 
 #: field key -> (row label, edit attribute, tooltip). The edits' placeholders are the pipeline's defaults.
@@ -74,7 +75,8 @@ def settings_from_opts(opts: dict):
     return NanowellSettings(
         plate_format, number("nanowell_margin_um", None), number("nanowell_cell_diameter_um", 15.0),
         number("nanowell_square_edge_deg", 0.0), number("nanowell_occluded_below", 0.5),
-        number("nanowell_clipped_below", 0.5), custom)
+        number("nanowell_clipped_below", 0.5), custom,
+        str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]))
 
 
 class AnalyzeNanowellSectionMixin:
@@ -97,11 +99,24 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_format_cb = QComboBox(row)
         for value, label in PLATE_FORMAT_CHOICES:
             self._nanowell_format_cb.addItem(label, userData=value)
-        self._nanowell_format_cb.setToolTip("Fixes the lattice pitch and the nanowell diameter the array is found with.")
+        self._nanowell_format_cb.setToolTip("Fixes the lattice pitch and the nanowell diameter the array is found with "
+                                            "(with an inferred array geometry, what is measured is compared with).")
         row.layout().addWidget(self._nanowell_format_cb)
         row.layout().addStretch(1)
 
         self._nanowell_field_rows = [row.parentWidget()]
+        row = self._row(sec, "Array geometry", tooltip=(
+            "Hexagonal lattice in a circle: the array is found at the plate format's diameter, as a hexagonal "
+            "lattice inside a circular outline. Infer from the image: the nanowells are found by their contrast "
+            "(light wells on a dark lattice) and the lattice kind (hexagonal or square), pitch, orientation and the "
+            "array's outline are read from where they are; the format's pitch and diameter are only compared with "
+            "what is measured, and a disagreement is reported."))
+        self._nanowell_geometry_cb = QComboBox(row)
+        for value, label in GEOMETRY_CHOICES:
+            self._nanowell_geometry_cb.addItem(label, userData=value)
+        row.layout().addWidget(self._nanowell_geometry_cb)
+        row.layout().addStretch(1)
+        self._nanowell_field_rows.append(row.parentWidget())
         self._nanowell_custom_rows = []
         for key, label, attr, tip in _CUSTOM_FIELDS:
             self._nanowell_custom_rows.append(self._nanowell_edit_row(sec, key, label, attr, tip))
@@ -167,6 +182,7 @@ class AnalyzeNanowellSectionMixin:
         """The controls below the mode checkbox mean nothing while it is off, so they are disabled, not hidden."""
         on = self._nanowell_cb.isChecked()
         self._nanowell_format_cb.setEnabled(on)
+        self._nanowell_geometry_cb.setEnabled(on)
         for _key, _label, attr, _tip in _FIELDS + _CUSTOM_FIELDS + _GRID_FIELDS:
             getattr(self, attr).setEnabled(on)
         self._nanowell_scan_cb.setEnabled(on)
@@ -202,6 +218,7 @@ class AnalyzeNanowellSectionMixin:
         for key, _label, attr, _tip in _FIELDS + _CUSTOM_FIELDS + _GRID_FIELDS:
             out[key] = getattr(self, attr).text().strip()
         out["nanowell_scan"] = self._nanowell_scan_cb.currentData() or SCAN_CHOICES[0]
+        out["nanowell_geometry"] = self._nanowell_geometry_cb.currentData() or GEOMETRY_CHOICES[0][0]
         return out
 
     def _apply_nanowell_settings(self, d: dict) -> None:
@@ -237,6 +254,9 @@ class AnalyzeNanowellSectionMixin:
             getattr(self, attr).setText("" if value is None else f"{value:.12g}" if isinstance(value, float) else str(value))
         scan = self._nanowell_scan_cb.findData(str(d.get("nanowell_scan") or SCAN_CHOICES[0]))
         self._nanowell_scan_cb.setCurrentIndex(max(scan, 0))
+        # Absent or None is a run that did not choose: the format's hexagonal lattice in a circle.
+        geometry = self._nanowell_geometry_cb.findData(str(d.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]))
+        self._nanowell_geometry_cb.setCurrentIndex(max(geometry, 0))
         self._refresh_nanowell_custom()
 
     def _nanowell_validation_error(self, *, check_input: bool, for_run: bool = True) -> str | None:

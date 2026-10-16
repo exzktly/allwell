@@ -31,7 +31,7 @@ THRESHOLD = 40
 # 985 -> 813: collect_bar_items (95) and its _items_for_tp (77) left it (C3).
 # 813 -> 805: process_microscopy.main's worker / thread / device planning moved
 # to pipeline.parallelism.plan_parallelism.
-TOTAL_ALLOWLISTED_CC_BUDGET = 803
+TOTAL_ALLOWLISTED_CC_BUDGET = 759
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
@@ -145,7 +145,8 @@ ALLOWLIST = {
     # testable. Removed from the allowlist.
     "review/features/image_browser/image_table/export.py::_build_export_figure",
     "review/core/channel_state_controller.py::update_channel_selector",
-    "review/core/selection_controller.py::refresh_sidebar_map_now",
+    # DONE: refresh_sidebar_map_now dropped under the threshold when its
+    # per-mode plate colouring moved into _plate_colors. Removed.
     # A5 DONE: run_stats (was CC 52) decomposed — the pure report formatters
     # (_build_header_lines / _format_group_summary_lines / _format_pairwise_lines
     # / _resolve_sample_units / _sig_marker) were extracted and unit-tested; the

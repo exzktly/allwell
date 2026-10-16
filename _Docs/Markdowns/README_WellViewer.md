@@ -2319,6 +2319,26 @@ spinbox (default 2), walking the wells along the Rows / Columns direction. On
 the Replicates plate every well is tinted by its **group's** colour, so all wells in
 a group read as one condition and match the group's row swatch.
 
+**On a plotting tab, the plate shows your groups once you have any.** A click
+on a well in a group shows or hides that whole group on every plot. A click on
+a well in no group puts that one well on the plots by itself, beside the
+groups and labelled with its own name; click it again to take it off. Both
+reach Bar Plots, Line Graphs, Scatter and Distribution alike.
+
+**Make groups from a variable.** If you have already recorded what you did to
+each well on the **Variables** tab, the row under Quick Replicates turns that
+into groups: pick a variable under **Make groups from** and press **Make groups
+from variable**, and every well holding the same value becomes one group, named
+by the value (`10 µM`). With two or more variables you can also pick **Every
+variable combined**, which makes one group per combination the plate actually
+holds (`HeLa · 10 µM`) rather than pooling every dose of a cell line together.
+The result replaces your current groups — you are asked first — and the groups
+it makes are ordinary groups: rename, recolour, or click wells in and out of
+them like any other. A well with no value for the variable joins no group, and
+the status line names it. If the plotting band's **Group by** is still set to a
+variable, the plots go on pooling by that variable and the status line says so;
+set Group by back to *Wells / groups* to plot the new groups.
+
 **Once you have filled in Variables, new groups are named after them.** A group
 whose wells all hold `HeLa` and `10 µM` is created as `HeLa · 10 µM`, whether it
 came from **Quick Replicates** or from **+ Add**, instead of the placeholder
@@ -2487,10 +2507,21 @@ going blank; the Variables tab is where you fix that, and the note on the figure
 says that is what happened rather than claiming wells are missing.
 
 If you have not defined any replicate groups, grouping by a variable also
-ignores your plate selection: every loaded well holding a value is pooled, so
-one well selected can be four drawn. That is what "group the plate by this
+sets aside the wells you had selected: every loaded well holding a value is
+pooled, so one well selected can be four drawn. That is what "group the plate by this
 variable" has to mean, and the note on the figure counts the wells it brought in
 so it is not a silent change to every number on screen.
+
+**Clicking a well on the plate shows or hides its value.** While the plots are
+grouped by a variable, the plate on a plotting tab is coloured by value, and a
+click on a well hides that well's whole value from every plot — click any well
+holding it to bring it back. Clicking a row or column header hides or shows
+every value on that line, and the plate's corner shows or hides them all. Your
+own replicate groups are not touched: they are not what the plots are drawing.
+Hiding every value leaves the plots empty rather than going back to your
+groups. A well with no value is not plotted at all under the grouping, so a
+click on it changes nothing and the status line says why. Changing Group by
+shows every value again.
 
 Group by, Colour by, Split by and Then by are cleared when you open a different
 dataset.

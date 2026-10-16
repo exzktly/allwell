@@ -56,7 +56,8 @@ def test_groups_plate_uses_group_colors():
     g2 = {"id": "g2", "wells": ["A02", "B01"], "color": "#123456"}
     plate = _FakePlate()
     ctx = SimpleNamespace(
-        widgets=SimpleNamespace(get_or_none=lambda key: plate),
+        widgets=SimpleNamespace(
+            get_or_none=lambda key: plate if key == "_rep_map_plate" else None),
         state=SimpleNamespace(
             selection=SimpleNamespace(
                 selections=[g1, g2],

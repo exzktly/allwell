@@ -98,6 +98,12 @@ class PlotState:
     # per-tab copy would let the Bar tab and the Statistics tab describe the
     # same plate two ways.
     group_by_variable: str = ""
+    # The values of ``group_by_variable`` the user has hidden by clicking one
+    # of their wells on the plate — the variable grouping's counterpart of a
+    # replicate group's ``hidden`` flag. Value ids, so a rename keeps them.
+    # Meaningless once the variable changes, so every write of
+    # ``group_by_variable`` clears it.
+    group_by_hidden_values: set[str] = field(default_factory=set)
 
     # Ink and layout, from a second and third variable. These do **not** change
     # what a member is — ``group_by_variable`` alone decides that — so they can
@@ -510,6 +516,7 @@ class PlotState:
         # cleared here by name are `group_by_variable`, which is not on that
         # roster, and nothing else.
         self.group_by_variable = ""
+        self.group_by_hidden_values = set()
         from review.core.group_by_controller import DECORATION_CONTROLS
         for _field, _widget, _label in DECORATION_CONTROLS:
             setattr(self, _field, "")

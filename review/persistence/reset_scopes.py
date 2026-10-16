@@ -281,6 +281,7 @@ def _clear_sample_variables(ctx) -> None:
     with _swallow("clear the Group by variable"):
         from review.core.group_by_controller import DECORATION_CONTROLS
         ctx.state.plot.group_by_variable = ""
+        ctx.state.plot.group_by_hidden_values = set()
         for field, _widget, _label in DECORATION_CONTROLS:
             setattr(ctx.state.plot, field, "")
     _save(ctx, "sample_variables")

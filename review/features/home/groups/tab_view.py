@@ -23,7 +23,8 @@ from review.domain.plate_layout import PLATE_COLS
 from review.core.ui_helpers import btn_primary, btn_secondary
 from widgets.separator import build_hline_separator
 from review.features.home.groups.controller import (
-    rep_add, rep_quick_pairs_from_dropdowns,
+    refresh_from_variable_row, rep_add, rep_groups_from_variable,
+    rep_quick_pairs_from_dropdowns,
 )
 from review.features.home.groups.panel_view import build_replicate_panel
 
@@ -114,6 +115,8 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     hdr2r_l.addWidget(btn_primary(hdr2r, "Apply Quick Replicates",
                                   lambda: rep_quick_pairs_from_dropdowns(ctx)))
 
+    _build_from_variable_row(ctx, parent, layout)
+
     layout.addWidget(build_hline_separator(parent))
 
     # Active-group banner — until the user clicks a group below, plate
@@ -176,3 +179,37 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     hint.setWordWrap(True)
     hint.setContentsMargins(0, 6, 0, 8)
     layout.addWidget(hint)
+
+
+#: The button's tooltip while it is enabled — kept on the widget as a property
+#: so ``refresh_from_variable_row`` can swap in the disabled reason and back.
+_FROM_VARIABLE_TIP = (
+    "Replace the groups with one group per value of the chosen variable — "
+    "every well holding that value becomes a replicate of it. The groups are "
+    "ordinary groups afterwards: rename them, recolour them, add or remove "
+    "wells. Wells with no value join no group.")
+
+
+def _build_from_variable_row(ctx, parent: QWidget, layout) -> None:
+    """*Make groups from:* ``[variable]`` ``[Make groups]`` — values into groups.
+
+    Beside Quick Replicates because it answers the same request from the other
+    end: Quick Replicates groups wells by where they sit on the plate, this by
+    what was done to them, which the Variables tab already records.
+    """
+    row = QWidget(parent)
+    row_l = QHBoxLayout(row)
+    row_l.setContentsMargins(0, 4, 0, 4)
+    layout.addWidget(row)
+    row_l.addWidget(QLabel("Make groups from:", row))
+    combo = ctx.widgets.register("_rep_from_var_combo", QComboBox(row))
+    combo.setProperty("enabledTip", _FROM_VARIABLE_TIP)
+    row_l.addWidget(combo)
+    row_l.addStretch(1)
+    button = ctx.widgets.register(
+        "_rep_from_var_btn",
+        btn_primary(row, "Make groups from variable",
+                    lambda: rep_groups_from_variable(ctx)))
+    button.setProperty("enabledTip", _FROM_VARIABLE_TIP)
+    row_l.addWidget(button)
+    refresh_from_variable_row(ctx)

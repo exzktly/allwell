@@ -210,6 +210,10 @@ def snapshot(ctx) -> dict:
         # exactly as ``refresh_group_by_combo`` and ``plot_replicate_sets``
         # already agree to do for a live selection that goes stale.
         "group_by_variable": str(ctx.state.plot.group_by_variable or ""),
+        # Which of its values a plate click has hidden. Without it a restored
+        # view draws every dose under a plate the user had trimmed.
+        "group_by_hidden_values": sorted(
+            getattr(ctx.state.plot, "group_by_hidden_values", None) or ()),
         "colour_by_variable": str(ctx.state.plot.colour_by_variable or ""),
         "split_by_variable": str(ctx.state.plot.split_by_variable or ""),
         "sub_split_by_variable": str(ctx.state.plot.sub_split_by_variable or ""),
@@ -706,6 +710,16 @@ def restore(ctx, state: dict, *, prefer_home: bool = False) -> list[str]:
     # the older file could not have written.
     if "split_by_variable" in state and "sub_split_by_variable" not in state:
         ctx.state.plot.sub_split_by_variable = ""
+    # Hidden values go with the grouping they were hidden under: a file that
+    # states a grouping restores exactly its own hidden set, empty when it
+    # predates the field, rather than keeping whatever is hidden now.
+    if "group_by_variable" in state:
+        try:
+            ctx.state.plot.group_by_hidden_values = {
+                str(v) for v in (state.get("group_by_hidden_values") or ())}
+        except Exception:
+            failed.append("group by hidden values")
+            swallowed()
 
     if "use_fov_replicates" in state:
         # The FOV-spread toggle on Line Graphs / Bar Plots. Set the field, then

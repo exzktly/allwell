@@ -13,7 +13,7 @@ from __future__ import annotations
 from review.data.data_loading import get_rows
 
 from review.domain.viewer_state import parse_rc
-from review.domain.plot_members import plot_replicate_sets
+from review.domain.plot_members import plot_replicate_sets, variable_grouping_in_force
 
 from dataclasses import dataclass
 
@@ -257,7 +257,9 @@ def cell_browser_source_wells(ctx) -> list[str]:
     # only populate ``selected_wells`` — the real ctx always provides all three.
     selections = getattr(sel, "selections", None)
     selected_wells = getattr(sel, "selected_wells", None) or ()
-    if selections:
+    if selections or variable_grouping_in_force(ctx):
+        # ``plot_replicate_sets`` carries the solo wells too, and under a
+        # variable grouping the visible values — the plate's own active set.
         wells: list[str] = []
         seen: set = set()
         for rset in plot_replicate_sets(ctx):
@@ -265,10 +267,6 @@ def cell_browser_source_wells(ctx) -> list[str]:
                 if w in paths and w not in seen:
                     seen.add(w)
                     wells.append(w)
-        for w in (getattr(sel, "active_solo_wells", None) or ()):
-            if w in paths and w not in seen:
-                seen.add(w)
-                wells.append(w)
     elif selected_wells:
         wells = [lbl for lbl in selected_wells if lbl in paths]
     else:

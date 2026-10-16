@@ -777,7 +777,9 @@ class _BarCollector:
                         continue
                     seen.add(w)
                     well_disp = ctx.runtime.barplot.well_display_label(w)
-                    gk_well = f"{well_disp} [{rset.name}]"
+                    # A solo well is its own set; "B01 [B01]" says nothing.
+                    gk_well = (well_disp if getattr(rset, "solo", False)
+                               else f"{well_disp} [{rset.name}]")
                     # Group-by-well with several timepoints: the cluster header
                     # shows well + set and the bar just its timepoint;
                     # otherwise the bar carries well + set on one line.

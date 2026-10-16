@@ -173,15 +173,32 @@ def rep_quick_pairs(ctx) -> None:
     if not new_sets:
         return
     name_sets_from_variables(ctx, new_sets)
-    if sel_state.selections:
-        resp = QMessageBox.question(
-            ctx.window, "Replace groups?",
-            f"This will replace the current {len(sel_state.selections)} group(s). Continue?",
-            QMessageBox.Yes | QMessageBox.No,
-        )
-        if resp != QMessageBox.Yes:
-            return
+    if sel_state.selections and not _confirm_replace(ctx, len(sel_state.selections)):
+        return
+    replace_groups(ctx, new_sets)
+
+
+def _confirm_replace(ctx, n_groups: int) -> bool:
+    """Ask before a generated set of groups replaces the user's *n_groups*."""
+    resp = QMessageBox.question(
+        ctx.window, "Replace groups?",
+        f"This will replace the current {n_groups} group(s). Continue?",
+        QMessageBox.Yes | QMessageBox.No,
+    )
+    return resp == QMessageBox.Yes
+
+
+def replace_groups(ctx, sets) -> None:
+    """Make *sets* the plate's replicate groups, replacing whatever was there.
+
+    The one writer for both generators on this page — Quick Replicates and
+    *Make groups from variable* — so a generated group is the same kind of
+    thing whichever button made it: same source tag, same colour sequence,
+    same ``name_is_verbatim`` carried through, and editable afterwards exactly
+    like a group drawn by hand.
+    """
     from domain.selections_format import make_selection
+    sel_state = ctx.state.selection
     used_names: set = set()
     used_ids: set = set()
     # A group is one condition; its wells are implicitly its replicate set, so
@@ -192,10 +209,136 @@ def rep_quick_pairs(ctx) -> None:
                            name_is_verbatim=s.name_is_verbatim,
                            source="rep_set", used_names=used_names, used_ids=used_ids,
                            fallback_color_idx=i)
-            for i, s in enumerate(new_sets)]
+            for i, s in enumerate(sets)]
     sel_state.selections = sels
     sel_state.current_selection_id = sels[0]["id"] if sels else None
     ctx.coordinator.rebuild_all()
+
+
+# ── groups from a sample variable ───────────────────────────────────────────
+
+#: The *Make groups from* choice that crosses every variable, so a plate of two
+#: cell lines across a dose series gives ``HeLa · 10 µM`` rather than six doses
+#: of HeLa pooled into one group.
+ALL_VARIABLES = "__all_variables__"
+
+
+def variable_group_choices(ctx) -> list[tuple[str, str]]:
+    """``(label, data)`` for the *Make groups from* combo, in variable order."""
+    vset = getattr(ctx.state.selection, "variables", None)
+    variables = list(getattr(vset, "variables", ()) or ())
+    choices = [(v.name, v.id) for v in variables]
+    if len(variables) >= 2:
+        choices.append(("Every variable combined", ALL_VARIABLES))
+    return choices
+
+
+def groups_from_variable(ctx, choice: str):
+    """``(sets, wells left out)`` for turning *choice*'s values into groups.
+
+    One group per value — or, for :data:`ALL_VARIABLES`, per combination of
+    values a well actually holds — named by the values, through the same
+    ``crossed_replicate_sets`` the Response tab pools with, so the name a group
+    gets here is the name that member already carries on a grouped plot. A
+    loaded well with no value (for any of the variables, when combined) joins
+    no group and is returned in the second list, so the caller can say so:
+    a well silently missing from every group is a well missing from every plot.
+    """
+    from review.domain.plot_members import crossed_replicate_sets
+    from review.domain.viewer_state import parse_rc
+
+    vset = getattr(ctx.state.selection, "variables", None)
+    if vset is None:
+        return [], []
+    if choice == ALL_VARIABLES:
+        ids = [v.id for v in vset.variables]
+    else:
+        ids = [choice] if vset.by_id(choice) is not None else []
+    if not ids:
+        return [], []
+    sets = crossed_replicate_sets(ctx, ids)
+    placed = {w for r in sets for w in r.wells}
+    left_out = sorted((w for w in (ctx.state.dataset.well_paths or {})
+                       if w not in placed), key=parse_rc)
+    return sets, left_out
+
+
+def _choice_label(ctx, choice: str) -> str:
+    for label, data in variable_group_choices(ctx):
+        if data == choice:
+            return "every variable" if data == ALL_VARIABLES else label
+    return "that variable"
+
+
+def rep_groups_from_variable(ctx, choice: str | None = None) -> None:
+    """*Make groups from variable*: replace the groups with one per value.
+
+    Says what it did, in the sentence the user reads next: how many groups,
+    which wells have no value and so are in none, and — when the plots are
+    grouped by a variable on the plotting band — that they still are, because
+    a variable grouping replaces the groups in every plot and the new groups
+    would otherwise appear to have changed nothing.
+    """
+    if choice is None:
+        combo = ctx.widgets.get_or_none("_rep_from_var_combo")
+        choice = combo.currentData() if combo is not None else None
+    if not choice:
+        return
+    label = _choice_label(ctx, choice)
+    sets, left_out = groups_from_variable(ctx, choice)
+    if not sets:
+        ctx.notify.set_status(
+            f"No well has a value for {label} yet. Fill its values on the "
+            f"Variables tab first.")
+        return
+    sel_state = ctx.state.selection
+    if sel_state.selections and not _confirm_replace(ctx, len(sel_state.selections)):
+        return
+    replace_groups(ctx, sets)
+    ctx.notify.set_status(_made_groups_sentence(ctx, label, sets, left_out))
+
+
+def _made_groups_sentence(ctx, label: str, sets, left_out) -> str:
+    from review.domain.plot_members import variable_grouping_in_force
+
+    parts = [f"Made {len(sets)} group{'s' if len(sets) != 1 else ''} from {label}."]
+    if left_out:
+        shown = ", ".join(left_out[:4]) + ("…" if len(left_out) > 4 else "")
+        parts.append(f"{len(left_out)} well{'s' if len(left_out) != 1 else ''} "
+                     f"with no value {'are' if len(left_out) != 1 else 'is'} in "
+                     f"no group ({shown}).")
+    if variable_grouping_in_force(ctx):
+        parts.append("The plots are still grouped by a variable — set Group by "
+                     "to Wells / groups on the plotting band to plot these groups.")
+    return " ".join(parts)
+
+
+def refresh_from_variable_row(ctx) -> None:
+    """Fill the *Make groups from* combo, keeping the choice where it survives.
+
+    Disabled with its reason rather than hidden when there is no variable: the
+    row says what it would do, and the tooltip says what it is waiting for.
+    """
+    combo = ctx.widgets.get_or_none("_rep_from_var_combo")
+    button = ctx.widgets.get_or_none("_rep_from_var_btn")
+    if combo is None:
+        return
+    keep = combo.currentData()
+    choices = variable_group_choices(ctx)
+    combo.blockSignals(True)
+    combo.clear()
+    for label, data in choices:
+        combo.addItem(label, data)
+    index = combo.findData(keep) if keep else -1
+    combo.setCurrentIndex(index if index >= 0 else 0)
+    combo.blockSignals(False)
+    on = bool(choices)
+    reason = ("" if on else
+              "Define a variable on Home → Sample Map → Variables first.")
+    for widget in (combo, button):
+        if widget is not None:
+            widget.setEnabled(on)
+            widget.setToolTip(reason or widget.property("enabledTip") or "")
 
 
 def build_rep_add_dialog(ctx) -> RepAddDialog:
@@ -371,6 +514,10 @@ def rep_refresh_map(ctx) -> None:
     cur = next((s for s in sel_state.selections if s.get("id") == cur_id), None)
     cur_wells = [w for w in (cur.get("wells") or []) if w in well_paths] if cur else []
     plate.setSelectedWellIds(cur_wells)
+    # Variables are defined on a sibling tab and this is the refresh every
+    # definition edit already reaches, so the combo cannot list a variable that
+    # was deleted or miss one just created.
+    refresh_from_variable_row(ctx)
 
 
 def rep_quick_pairs_from_dropdowns(ctx) -> None:

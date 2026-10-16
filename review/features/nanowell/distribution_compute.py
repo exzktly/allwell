@@ -19,6 +19,7 @@ the swarm's roster. ``hidden`` are dots with a value that did not fit the slot, 
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -157,6 +158,10 @@ class DistributionModel:
     control: str = ""
     baseline: str = "earliest"
     notes: list = field(default_factory=list)          # sentences printed in the footer
+    #: The cut the user set for this metric (tracker I9), or ``None``: then no fraction responding is computed.
+    responding_above: float | None = None
+    #: ``(group, fraction, timepoint)`` per group: the mean of its wells' fractions responding at *timepoint*.
+    responding: list = field(default_factory=list)
 
     def swarms(self):
         return [s for p in self.panels for s in p.swarms]
@@ -216,11 +221,12 @@ def fixed_cohort(frame: pd.DataFrame, column: str, reasons: pd.Series) -> tuple[
 
 
 def wells_summary(metrics: pd.DataFrame, wells, metric: str, *, channels=(), channel: str | None = None,
-                  cohort: bool = False) -> pd.DataFrame:
+                  cohort: bool = False, responding_above: float | None = None) -> pd.DataFrame:
     """``summary_compute.well_summary`` for *wells*, prepared exactly as the Distribution view prepares it: a
     per-nanowell metric at each well's own first timepoint, labelled :data:`PER_NANOWELL_LABEL`, and the fixed
     cohort applied when *cohort* (its exclusions then counted under :data:`COHORT_REASON`). Batch Export's
-    Nanowells mode writes this beside each figure (tracker I4), so the CSV's numbers are the figure's."""
+    Nanowells mode writes this beside each figure (tracker I4), so the CSV's numbers are the figure's.
+    *responding_above* is the user's cut for the metric; without one the fraction responding is undefined."""
     column = metric_column(metric, channel)
     frame = metrics[metrics["well"].isin(list(wells))]
     reasons = exclusion_reason(frame, column, channels)
@@ -229,17 +235,18 @@ def wells_summary(metrics: pd.DataFrame, wells, metric: str, *, channels=(), cha
         frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
     elif cohort:
         frame, reasons, _kept, _sites = fixed_cohort(frame, column, reasons)
-    return well_summary(frame, column, channels, reasons=reasons)
+    return well_summary(frame, column, channels, reasons=reasons, responding_above=responding_above)
 
 
 def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), channel: str | None = None,
                        axis: str = TIME, groups: dict, timepoint: str = "", control: str = "",
                        time_source: str | None = None, baseline: str = "earliest",
-                       cohort: bool = False) -> DistributionModel:
+                       cohort: bool = False, responding_above: float | None = None) -> DistributionModel:
     """The Distribution view for *groups* (``name -> wells``, as ``controller.replicate_groups`` gives).
 
     A group of one well is that well; a group of several is a replicate set. Only the wells named in
-    *groups* are drawn.
+    *groups* are drawn. *responding_above* is the cut the user set for this metric (tracker I9): the footer
+    states each group's fraction responding at it, or says that no cut is set.
     """
     column = metric_column(metric, channel)
     label = METRICS[metric][0] + (f" · {channel}" if METRICS[metric][1] else "")
@@ -253,7 +260,7 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         first = frame["tp_order"] == 0
         frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
     model = DistributionModel(metric, column, label, axis, metric in INTEGER_METRICS, [], control=control,
-                              baseline=baseline)
+                              baseline=baseline, responding_above=responding_above)
     if cohort and metric not in PER_NANOWELL:
         frame, reasons, kept, sites = fixed_cohort(frame, column, reasons)
         model.notes.append(f"Fixed cohort: only the {kept:,} of {sites:,} nanowells with a value at every timepoint "
@@ -278,7 +285,8 @@ def _time_label(frame: pd.DataFrame, tp: str) -> str:
 
 
 def _time_panels(model, frame, column, reasons, groups, channels) -> None:
-    summary = well_summary(frame, column, channels, reasons=reasons) if len(frame) else None
+    summary = (well_summary(frame, column, channels, reasons=reasons, responding_above=model.responding_above)
+               if len(frame) else None)
     for name, members in groups.items():
         rows = frame[frame["well"].isin(members)]
         tps = _order(rows)
@@ -298,6 +306,11 @@ def _time_panels(model, frame, column, reasons, groups, channels) -> None:
                 mine = summary[summary["well"] == well].set_index("timepoint")
                 panel.medians[well] = [(i + (j - (k - 1) / 2) * width, float(mine.loc[tp, "median"]))
                                        for i, tp in enumerate(tps) if tp in mine.index]
+            if tps:
+                # Over time, each group's fraction is stated at its latest timepoint: one number per group.
+                last = summary[summary["well"].isin(members) & (summary["timepoint"] == tps[-1])]
+                fractions = last["fraction_responding"].dropna()
+                model.responding.append((name, float(fractions.mean()) if len(fractions) else math.nan, tps[-1]))
         model.panels.append(panel)
 
 
@@ -309,8 +322,9 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
         reasons = reasons[frame.index]
     model.timepoint = timepoint if model.metric not in PER_NANOWELL else ""
     panel = Panel(title=(f"{timepoint}" if model.timepoint else "One value per nanowell"), swarms=[], ticks=[])
-    summary = well_summary(frame, column, channels, reasons=reasons) if len(frame) else pd.DataFrame(
-        columns=["well", "timepoint", "median", "n_used", "excluded", "time_h", "tp_order"])
+    summary = (well_summary(frame, column, channels, reasons=reasons, responding_above=model.responding_above)
+               if len(frame) else pd.DataFrame(columns=["well", "timepoint", "median", "n_used", "excluded", "time_h",
+                                                        "tp_order", "fraction_responding"]))
     stats = group_summary(summary, groups, metric=column if column in LOG_METRICS else "",
                           control=control if control in groups else None)
     for i, (name, members) in enumerate(groups.items()):
@@ -329,6 +343,7 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
             panel.stats.append(GroupStat(name, float(i), float(r["centre"]), float(r["ci_low"]), float(r["ci_high"]),
                                          int(r["n_wells"]), int(r["n_wells"]) - 1 if r["n_wells"] >= 2 else None,
                                          float(r["vs_control"]), list(r["wells_without_value"])))
+            model.responding.append((name, float(r["fraction_responding"]), model.timepoint or PER_NANOWELL_LABEL))
     model.panels.append(panel)
 
 
@@ -344,7 +359,32 @@ def _notes(model: DistributionModel, metric: str, time_source: str | None) -> No
                            "timepoint.")
     else:
         model.notes.append("The line joins each well's median over the nanowells with a value at that timepoint.")
+    model.notes.append(responding_note(model))
     if time_source == "label":
         model.notes.append("Times are read from the timepoint labels, not the acquisition record.")
     elif time_source is None:
         model.notes.append("Times are unknown; timepoints are in label order.")
+
+
+def format_cut(value: float) -> str:
+    """A cut as text that reads back as exactly the same number.
+
+    ``:g`` keeps six significant figures, so ``12345.67`` showed as ``12345.7`` — and the field, re-read on its
+    next focus change, then stored the rounded number in place of the typed one. Fifteen significant figures
+    hold any decimal a person types; ``repr`` is the fallback for a value that still would not round-trip.
+    """
+    text = f"{value:.15g}"
+    return text if float(text) == value else repr(value)
+
+
+def responding_note(model: DistributionModel) -> str:
+    """The footer's fraction-responding sentence: each group's fraction at the user's cut, or that none is set."""
+    if model.responding_above is None:
+        return (f"Fraction responding is not computed: no threshold is set for {model.label} "
+                "(Responding above).")
+    parts = [f"{name} {fraction:.0%}" if math.isfinite(fraction) else f"{name} —"
+             for name, fraction, _tp in model.responding]
+    at = {tp for _n, _f, tp in model.responding}
+    where = f" at {next(iter(at))}" if len(at) == 1 else " at each group's latest timepoint"
+    return (f"Responding: above {format_cut(model.responding_above)}. Fraction responding (mean over wells){where}: "
+            + (", ".join(parts) if parts else "no group has a value") + ".")

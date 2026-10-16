@@ -7,6 +7,7 @@ a state its controls cannot show.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 BASELINES = ("earliest", "first_measurable")
@@ -29,6 +30,9 @@ class NanowellState:
     selected_sites: list = field(default_factory=list)  # [[well, q, r], ...] — not a plate selection
     control: str = ""                       # the group compared against on *Along x: Wells* ("" = none)
     cohort: bool = False                    # only nanowells with a value at every timepoint (tracker I8)
+    #: The user's "responding above" cut per metric column (``brightness_fc_GFP``, ``n``; tracker I9). A metric
+    #: with none has no fraction responding: there is no default cut.
+    thresholds: dict = field(default_factory=dict)
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
@@ -54,7 +58,7 @@ class NanowellState:
     def to_config(self) -> dict:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
-                "selected_sites": [list(s) for s in self.selected_sites]}
+                "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
         """Take each recognised value from *config*; anything else keeps its default."""
@@ -73,3 +77,7 @@ class NanowellState:
                     and all(isinstance(v, int) and not isinstance(v, bool) for v in item[1:])):
                 sites.append([item[0], int(item[1]), int(item[2])])
         self.selected_sites = sites
+        thresholds = config.get("thresholds")
+        self.thresholds = {k: float(v) for k, v in (thresholds.items() if isinstance(thresholds, dict) else ())
+                           if isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool)
+                           and math.isfinite(v)}

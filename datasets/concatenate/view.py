@@ -21,11 +21,13 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -43,12 +45,21 @@ from datasets.concatenate.concatenate_compute import (
     gap_preview,
 )
 from datasets.concatenate.dashboard import ConcatDashboard
+from datasets.concatenate.in_place import in_place_refusal
+from util.zip_append import pending_journals
 from datasets.concatenate.raw_compute import is_raw_dataset
 from datasets.core.dataset_fields import is_dataset, is_free_destination
 from datasets.core.dataset_fields import promote_open_button
 
 # Wide enough for "1d 6h 30m"; the gap is a short duration, not a path.
 _GAP_FIELD_W = 140
+
+_PICK_BOTH = "Pick dataset 1 and dataset 2 first."
+_IN_PLACE_NOTE = (
+    "Dataset 2's images are added to dataset 1's own archives under their shifted names, so "
+    "nothing is copied and no destination is needed. Dataset 1 is changed; dataset 2 is left "
+    "as it is, and the log ends with its files so you can delete them by hand. If anything "
+    "fails, dataset 1 is restored exactly as it was.")
 
 
 
@@ -74,6 +85,8 @@ class ConcatenatePage(LogPanelMixin, QWidget):
 
     runRequested = Signal()
     queueRequested = Signal()
+    #: The dataset root whose unfinished in-place addition the user asked to undo.
+    undoAppendRequested = Signal(str)
     openInReviewRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -85,6 +98,9 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         # the default is when it runs; anything else is the user's own gap.
         self._gap_default_text = ""
         self._gap_preview = GapPreview()
+        # Why "Add to dataset 1 in place" can't be chosen for the current pair
+        # ("" when it can); see datasets.concatenate.in_place.in_place_refusal.
+        self._in_place_reason = _PICK_BOTH
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -119,9 +135,10 @@ class ConcatenatePage(LogPanelMixin, QWidget):
             "same plate imaged in separate sessions; dataset 2's timepoints are "
             "relabelled to continue after dataset 1's last timepoint. Both can be "
             "analysed datasets, or both raw (converted images with no analysis "
-            "yet — merge those first, then analyse the plate once). The merged "
-            "result is written to the destination folder — both originals are "
-            "left untouched.",
+            "yet — merge those first, then analyse the plate once). Create a new "
+            "dataset to write the merged result to a destination folder, leaving "
+            "both originals untouched; or, when dataset 2 is raw, add it to "
+            "dataset 1 in place, which copies nothing.",
             self,
         )
         blurb.setObjectName("Muted")
@@ -129,6 +146,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         outer.addWidget(blurb)
 
         self._build_equation_row(outer)
+        self._build_mode_row(outer)
         self._build_gap_row(outer)
 
         run_row = QWidget(self)
@@ -174,6 +192,48 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         )
         self._ds1_field, self._ds2_field = eq.ds1, eq.ds2
         self._dest_field, self._cross_hint = eq.dest, eq.cross_hint
+
+    def _build_mode_row(self, outer: QVBoxLayout) -> None:
+        """Where the result goes: a new dataset (the default) or dataset 1 itself."""
+        box_widget = QWidget(self)
+        box = QVBoxLayout(box_widget)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(theme.Spacing.xs)
+        self._mode_new = QRadioButton("Create a new dataset in the destination folder", box_widget)
+        self._mode_new.setObjectName("ConcatModeNew")
+        self._mode_in_place = QRadioButton("Add dataset 2 to dataset 1 in place", box_widget)
+        self._mode_in_place.setObjectName("ConcatModeInPlace")
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.addButton(self._mode_new)
+        self._mode_group.addButton(self._mode_in_place)
+        self._mode_new.setChecked(True)
+        self._mode_in_place.setEnabled(False)
+        self._mode_in_place.toggled.connect(lambda _checked: self._on_mode_changed())
+        self._mode_hint = QLabel("", box_widget)
+        self._mode_hint.setObjectName("Muted")
+        self._mode_hint.setWordWrap(True)
+        for widget in (self._mode_new, self._mode_in_place, self._mode_hint):
+            box.addWidget(widget)
+        # Shown only while a picked dataset holds an in-place addition a crash
+        # left unfinished; the controller confirms before undoing anything.
+        self._undo_row = QWidget(box_widget)
+        undo = QHBoxLayout(self._undo_row)
+        undo.setContentsMargins(0, 0, 0, 0)
+        undo.setSpacing(theme.Spacing.sm)
+        self._undo_note = QLabel("", self._undo_row)
+        self._undo_note.setObjectName("Warn")
+        self._undo_note.setWordWrap(True)
+        self._undo_btn = QPushButton("Undo the unfinished addition…", self._undo_row)
+        self._undo_btn.setObjectName("ConcatUndoAppend")
+        self._undo_btn.setProperty("variant", "secondary")
+        self._undo_btn.clicked.connect(lambda: self.undoAppendRequested.emit(self._undo_root))
+        undo.addWidget(self._undo_note, 1)
+        undo.addWidget(self._undo_btn)
+        self._undo_root = ""
+        self._undo_row.setVisible(False)
+        box.addWidget(self._undo_row)
+        outer.addWidget(box_widget)
+        self._refresh_mode_hint()
 
     def _build_gap_row(self, outer: QVBoxLayout) -> None:
         """The time between the two datasets: a field, what it will do, and why."""
@@ -259,6 +319,19 @@ class ConcatenatePage(LogPanelMixin, QWidget):
     def gap_preview(self) -> GapPreview:
         return self._gap_preview
 
+    def in_place(self) -> bool:
+        """Whether the run adds dataset 2 to dataset 1 in place rather than writing a new dataset."""
+        return self._mode_in_place.isChecked()
+
+    def set_in_place(self, on: bool) -> None:
+        """Choose the mode, as a queued job asks for it.
+
+        Checked even when the page's own gate would not offer it: a queued
+        in-place job must never quietly become a new-dataset run, and the run
+        itself refuses a pair that can't be appended, with the reason.
+        """
+        (self._mode_in_place if on else self._mode_new).setChecked(True)
+
     def revalidate_fields(self, *, ok: bool = False) -> None:
         """Re-run every field's validator against current disk state.
 
@@ -276,11 +349,15 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         """
         for field in (self._ds1_field, self._ds2_field, self._dest_field):
             field.revalidate()
-        if ok and self._dest_field.message():
+        if ok and not self.in_place() and self._dest_field.message():
             self._dest_field.show_note(
                 "This destination now holds the merged dataset from that "
                 "run — pick a new folder to merge again."
             )
+        # An in-place run changed dataset 1, so whether the pair can (still)
+        # be appended is a new question.
+        self._refresh_in_place_gate()
+        self._refresh_undo_row()
         self._revalidate_cross()
 
     def set_running(self, running: bool) -> None:
@@ -301,6 +378,10 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._ds2_field.setLocked(running)
         self._dest_field.setLocked(running)
         self._gap_edit.setEnabled(not running)
+        self._mode_new.setEnabled(not running)
+        self._mode_in_place.setEnabled(not running and not self._in_place_reason)
+        if running:
+            self._undo_row.setVisible(False)
 
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root
@@ -308,6 +389,13 @@ class ConcatenatePage(LogPanelMixin, QWidget):
 
     # ── internals ────────────────────────────────────────────────────────────
     def _inputs_ready(self) -> bool:
+        if self.in_place():
+            return (
+                self._ds1_field.is_valid()
+                and self._ds2_field.is_valid()
+                and not self._in_place_reason
+                and not self._gap_preview.error
+            )
         return (
             self._ds1_field.is_valid()
             and self._ds2_field.is_valid()
@@ -317,6 +405,8 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         )
 
     def _cross_message(self) -> str:
+        if self.in_place():
+            return ""
         d1, d2, dest = self._ds1_field.path(), self._ds2_field.path(), self._dest_field.path()
         if dest and (dest == d1 or dest == d2):
             return "Destination must be a different folder from both datasets."
@@ -337,7 +427,59 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         set_variant(self._run_btn, "primary")
         self._update_status_preview()
         self._refresh_gap(datasets_changed=True)
+        self._refresh_in_place_gate()
+        self._refresh_undo_row()
         self._revalidate_cross()
+
+    def set_undo_busy(self, busy: bool) -> None:
+        """While an undo runs, its button is a status rather than a control."""
+        self._undo_btn.setEnabled(not busy)
+        self._undo_btn.setText("Undoing…" if busy else "Undo the unfinished addition…")
+
+    def datasets_changed_on_disk(self) -> None:
+        """Re-read both datasets after something outside the fields changed them."""
+        self._on_field_changed()
+
+    def _refresh_undo_row(self) -> None:
+        """Offer the undo for the first picked dataset holding an unfinished addition."""
+        root = next((path for path in (self.dataset1_path(), self.dataset2_path())
+                     if path and pending_journals(Path(path) / "in")), "")
+        self._undo_root = root
+        if root:
+            self._undo_note.setText(
+                f"{Path(root).name} holds an in-place addition that did not finish. It is "
+                "undone the next time the dataset is opened or analysed, or now:")
+        self._undo_row.setVisible(bool(root) and not self._running)
+
+    def _refresh_in_place_gate(self) -> None:
+        """Offer "in place" only for a pair that can be appended, and say why not otherwise."""
+        if self._running:
+            return
+        if self._ds1_field.is_valid() and self._ds2_field.is_valid():
+            self._in_place_reason = in_place_refusal(self.dataset1_path(), self.dataset2_path())
+        else:
+            self._in_place_reason = _PICK_BOTH
+        self._mode_in_place.setEnabled(not self._in_place_reason)
+        if self._in_place_reason and self.in_place():
+            self._mode_new.setChecked(True)
+        self._refresh_mode_hint()
+
+    def _on_mode_changed(self) -> None:
+        set_variant(self._run_btn, "primary")
+        # In place, dataset 1 is the target: the destination field means nothing.
+        self._dest_field.setEnabled(not self.in_place())
+        self._refresh_mode_hint()
+        self._revalidate_cross()
+
+    def _refresh_mode_hint(self) -> None:
+        if self.in_place():
+            text = self._in_place_reason or _IN_PLACE_NOTE
+        elif self._in_place_reason and self._in_place_reason != _PICK_BOTH:
+            text = f"Adding in place is unavailable: {self._in_place_reason}"
+        else:
+            text = ""
+        self._mode_hint.setText(text)
+        self._mode_hint.setVisible(bool(text))
 
     def _on_gap_changed(self) -> None:
         set_variant(self._run_btn, "primary")

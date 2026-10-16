@@ -619,6 +619,8 @@ def _capture_threshold_curve(app, w) -> None:
          "stopped early — the unmeasured range stays visibly empty"),
         ("declined", curve_from_counts(grid, [0] * len(grid), **common),
          "no nuclei at any threshold: the refusal is the figure"),
+        ("picked", curve_from_counts(grid, measured, current=0.2, **common),
+         "a point clicked: its threshold ringed, the frame re-segmented at it"),
     )
     for slug, curve, desc in cases:
         dlg = QDialog(w)
@@ -629,7 +631,8 @@ def _capture_threshold_curve(app, w) -> None:
         fig = Figure(figsize=(7.8, 4.4), dpi=100)
         canvas = FigureCanvas(fig)
         lay.addWidget(canvas)
-        draw_threshold_curve(fig, curve)
+        draw_threshold_curve(fig, curve,
+                             picked=grid[11] if slug == "picked" else None)
         dlg.show()
         settle(app, 250)
         canvas.draw()

@@ -7,6 +7,7 @@ is where the dataset on disk and the app's Sample Definitions come in.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -265,7 +266,8 @@ def redraw(ctx) -> None:
             axis=st.axis, timepoint=shown_timepoint(ctx)[1] if st.view == "position" else st.timepoint,
             control=st.control, baseline=st.baseline, cohort=st.cohort, well=well,
             well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
-            selected=[tuple(s) for s in st.selected_sites])
+            selected=[tuple(s) for s in st.selected_sites],
+            responding_above=st.thresholds.get(metric_column(metric, channel)))
         if model is not None:
             st.model = model
     from review.core.plot_style import apply_export_style_to_current
@@ -294,14 +296,16 @@ def resolve_metric(view: str, metric: str, active_channel, channels) -> tuple[st
 
 def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
-              note: str = "", tableless=(), selected=()) -> tuple[object, object]:
+              note: str = "", tableless=(), selected=(),
+              responding_above: float | None = None) -> tuple[object, object]:
     """Draw *view* (Distribution, Array map, Trajectories or Position) into *fig*: ``(hit map, model)``.
 
     **The one composition of each view**, called by the page and by Batch Export's Nanowells mode (tracker I4),
     so a saved batch figure is the page's figure for the same choices — the notes, the exclusions and the
     empty states included — and fixing one fixes both. *groups* is ``group -> wells``; *timepoint* is the
     timepoint Position and *Along x: Wells* compare at; *well* and *well_timepoint* are what the Array map shows.
-    The hit map is ``None`` for views with nothing to click.
+    The hit map is ``None`` for views with nothing to click. *responding_above* is the user's cut for *metric*
+    (tracker I9), which the Distribution view states the fraction responding at.
     """
     wells = [w for members in groups.values() for w in members]
     if view == "array_map":
@@ -325,7 +329,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         return None, None
     model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
-                               baseline=baseline, cohort=cohort)
+                               baseline=baseline, cohort=cohort, responding_above=responding_above)
     if tableless:
         model.notes.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
                               f"{', '.join(tableless)}.")
@@ -586,6 +590,45 @@ def set_timepoint(ctx, timepoint: str) -> None:
 
 def set_control(ctx, control: str) -> None:
     _set(ctx, "control", control or "")
+
+
+def drawn_metric_column(ctx) -> str | None:
+    """The metrics column the page's metric resolves to now (the shared channel applied), or ``None`` before a
+    dataset with nanowells is loaded. The "responding above" cut is kept per column (tracker I9)."""
+    st = _state(ctx)
+    if st is None or st.data is None:
+        return None
+    metric, channel, _note = resolve_metric(st.view, st.metric, ctx.state.channel.active_channel, st.data.channels)
+    return metric_column(metric, channel)
+
+
+def parse_threshold(text: str) -> float | None:
+    """A typed cut as a finite number, or ``None`` for an empty field or anything that is not one."""
+    try:
+        value = float(str(text).strip())
+    except ValueError:
+        return None
+    return value if math.isfinite(value) else None
+
+
+def set_responding_above(ctx, text: str) -> None:
+    """Set the cut for the metric the page draws, or clear it with an empty field (tracker I9). Text that is not
+    a number changes nothing: the field is put back to the cut that is set."""
+    st = _state(ctx)
+    column = drawn_metric_column(ctx)
+    if st is None or column is None:
+        return
+    value = parse_threshold(text)
+    if (value is None and str(text).strip()) or st.thresholds.get(column) == value:
+        _call(ctx, "_nw_refresh_controls")
+        return
+    if value is None:
+        st.thresholds.pop(column, None)
+    else:
+        st.thresholds[column] = value
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
 
 
 def set_page_baseline(ctx, baseline: str) -> None:

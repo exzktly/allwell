@@ -153,6 +153,15 @@ invocation). Prefer writing new behaviour so it's testable **without** the full
 app — that's why the `collect.py` / `*_compute.py` / renderer split exists. Do
 not try to "fix" the leak with `gc.collect()` in a fixture; it doesn't work.
 
+**A subset is run through `scripts/test.sh` too — `scripts/test.sh <files>`, never
+`python -m pytest <files>`.** The `-m "not slow"` that keeps full-app tests out lives
+in `scripts/test.sh`, not in `pyproject.toml`'s `addopts`, so a bare `python -m
+pytest` deselects nothing. A file list does not make it safe: a glob such as
+`tests/test_*nanowell*.py` pulls in a full-app file (`test_nanowell_page_app.py`)
+beside the fast ones, and the run then builds real apps and outlives its timeout —
+that happened, and was caught only because it never finished. The only exception is
+deliberately running a full-app file, which is `scripts/test.sh <that file> -m ""`.
+
 CI also tolerates a PySide6 teardown SIGSEGV by gating on the JUnit report
 instead of the exit code — a 139 after a green run is expected, a missing report
 is a real failure.

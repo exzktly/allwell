@@ -28,23 +28,8 @@ import pandas as pd
 
 from review.features.nanowell.series_compute import exclusion_reason
 
-#: Metrics read on a log scale: compared to control by difference, and "responding" above 0.
+#: Metrics read on a log scale: compared to control by difference.
 LOG_METRICS = frozenset({"log2_count_fc"})
-
-
-def responding_threshold(metric: str) -> float | None:
-    """The value above which a nanowell counts as responding: 1 for a fold change, 0 for a log₂ fold change.
-
-    A measurement (a count, a confluence, an intensity) has no natural "responding" cut, so it has none and
-    the fraction responding is undefined rather than guessed. A nanowell seeded later (empty at baseline,
-    cells afterwards) has no count fold change, so it is not among those responding on ``count_fc`` — it is
-    counted under "seeded later" in the exclusions — while ``log2_count_fc`` (defined with the +1) counts it.
-    """
-    if metric in LOG_METRICS:
-        return 0.0
-    if "_fc" in metric:
-        return 1.0
-    return None
 
 
 def well_summary(metrics: pd.DataFrame, metric: str, channels=(), *,
@@ -56,8 +41,13 @@ def well_summary(metrics: pd.DataFrame, metric: str, channels=(), *,
     ``fraction_occupied`` is over nanowells with a count at that timepoint, whatever the metric. *reasons*, when
     given, is each row's exclusion reason already worked out (the fixed cohort adds one of its own); otherwise it
     is computed here.
+
+    ``fraction_responding`` is the share of the nanowells used whose value is above *responding_above*, the cut
+    the user sets for this metric (tracker I9). There is no default cut: a fold change of 1 or a log₂ fold change
+    of 0 is "any growth at all", and a count, a confluence or an intensity has no natural cut, so without one the
+    fraction is undefined (NaN) rather than computed at a guess.
     """
-    threshold = responding_threshold(metric) if responding_above is None else responding_above
+    threshold = responding_above
     # Occupancy classes are ordinal; "3+" stands at 3 for the median and quartiles, as the class it is.
     values = (metrics[metric].map({"0": 0.0, "1": 1.0, "2": 2.0, "3+": 3.0}) if metric == "occupancy_class"
               else pd.to_numeric(metrics[metric], errors="coerce"))
@@ -112,6 +102,8 @@ def group_summary(wells: pd.DataFrame, groups: dict, *, metric: str = "", contro
     those medians, ``sd`` / ``sem`` their spread, and ``ci_low`` / ``ci_high`` a 95% Student-t interval
     (undefined with fewer than two wells). ``n_wells`` counts wells with a value; ``wells_without_value``
     names the rest. ``vs_control`` compares to *control*'s centre (see the module docstring).
+    ``fraction_responding`` is the mean of the wells' own fractions, each well once, like the centre; undefined
+    when no well has one (no threshold was set).
     """
     rows = []
     timeline = wells.drop_duplicates("timepoint").sort_values(["time_h", "tp_order", "timepoint"], kind="stable",
@@ -124,6 +116,8 @@ def group_summary(wells: pd.DataFrame, groups: dict, *, metric: str = "", contro
             # without a value, named, not a well that was never in the group.
             absent = sorted(set(members) - set(part["well"]))
             values = part["median"].dropna()
+            fractions = (part["fraction_responding"].dropna() if "fraction_responding" in part
+                         else pd.Series(dtype=float))
             k = len(values)
             centre = float(values.mean()) if k else math.nan
             sd = float(values.std(ddof=1)) if k >= 2 else math.nan
@@ -137,9 +131,10 @@ def group_summary(wells: pd.DataFrame, groups: dict, *, metric: str = "", contro
                          "wells": sorted(part.loc[part["median"].notna(), "well"]),
                          "wells_without_value": sorted(set(part.loc[part["median"].isna(), "well"]) | set(absent)),
                          "centre": centre, "sd": sd, "sem": sem, "ci_low": centre - half, "ci_high": centre + half,
-                         "n_sites_used": int(part["n_used"].sum()), "excluded": excluded})
+                         "n_sites_used": int(part["n_used"].sum()), "excluded": excluded,
+                         "fraction_responding": float(fractions.mean()) if len(fractions) else math.nan})
     columns = ["group", "timepoint", "time_h", "tp_order", "n_wells", "wells", "wells_without_value", "centre",
-               "sd", "sem", "ci_low", "ci_high", "n_sites_used", "excluded"]
+               "sd", "sem", "ci_low", "ci_high", "n_sites_used", "excluded", "fraction_responding"]
     out = pd.DataFrame(rows, columns=columns)
     out["vs_control"] = np.nan
     if control is not None and len(out):

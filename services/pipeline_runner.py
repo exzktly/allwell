@@ -60,6 +60,7 @@ from services.remote_run_state import refuse_remote_nanowell_incremental
 from services.subprocess_kill import signal_subprocess
 from pipeline.slurm_node import parse_node_specs
 from util.aw_safe import swallow, swallowed
+from util.zip_append import recover_paths as recover_appends
 from pipeline.suspend import LOG_MARKER as _SUSPEND_LOG_MARKER
 
 _LOG = logging.getLogger("allwell.pipeline_runner")
@@ -1223,6 +1224,20 @@ class PipelineRunner:
             f"{where} stopped: the wells that finished are kept; the rest were "
             "not processed.\n")
 
+    def _recover_appends(self, *paths) -> bool:
+        """Undo an unfinished in-place append under *paths*; ``False`` stops the run.
+
+        A run still going elsewhere, or an undo refused as unsafe, fails this
+        run rather than letting it read a half-appended archive.
+        """
+        recovered = recover_appends(*paths)
+        for line in recovered.lines:
+            self._enqueue(("line", f"[recover] {line}\n"))
+        if recovered.blocked:
+            self._enqueue_error(f"{recovered.blocked}\n")
+            return False
+        return True
+
     def _enqueue_error(self, message: str) -> None:
         """Queue a failure. The queue itself records the cancel state."""
         self._enqueue(("error", message))
@@ -1340,6 +1355,12 @@ class PipelineRunner:
             # not a fallback, it is a second pass over a directory the first
             # one had already changed. Without `proc_hook` the grouping
             # subprocess is also untracked, so Stop cannot reach it.
+            # An in-place append (Concatenate's "add to dataset 1") that a crash
+            # left unfinished is undone *before* the resolver runs: the resolver
+            # folds loose images into ``in/<WELL>.zip`` by rewriting it whole,
+            # after which the journalled tail no longer describes the file.
+            if not self._recover_appends(opts.get("raw")):
+                return
             resolved = resolve_dirs(
                 opts, self.log_q, proc_hook=self._track_zipper_proc)
             # Stop button may have fired during the (potentially long)
@@ -1361,6 +1382,9 @@ class PipelineRunner:
                 input_dir, output_dir, on_success = resolved  # type: ignore[misc]
             else:
                 input_dir, output_dir = resolved  # type: ignore[misc]
+            # The resolved folder may differ from the one named in the form.
+            if not self._recover_appends(input_dir):
+                return
             # A *well* archive, not any archive. ``has_well_zip`` asks the
             # well-token canonicaliser, which is the same question the pipeline
             # asks when it decides to segment from ``in/<WELL>.zip`` — so a

@@ -28,7 +28,9 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFormLayout,
     QHBoxLayout,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -54,6 +56,10 @@ _draw_view = _lazy("review.features.nanowell.controller", "draw_view")
 _resolve_metric = _lazy("review.features.nanowell.controller", "resolve_metric")
 _wells_summary = _lazy("review.features.nanowell.distribution_compute", "wells_summary")
 _metric_labels = _lazy("review.features.nanowell.distribution_compute", "metric_labels")
+_metric_column = _lazy("review.features.nanowell.distribution_compute", "metric_column")
+_match_channel = _lazy("review.features.nanowell.distribution_compute", "match_channel")
+_format_cut = _lazy("review.features.nanowell.distribution_compute", "format_cut")
+_parse_threshold = _lazy("review.features.nanowell.controller", "parse_threshold")
 _load_nanowell_data = _lazy("review.features.nanowell.collect", "load_nanowell_data")
 _site_metrics = _lazy("review.features.nanowell.series_compute", "site_metrics")
 _render_message = _lazy("review.features.nanowell.renderer", "render_message")
@@ -139,6 +145,21 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                            + _FRAME_EDGES * self._metric_list.frameWidth())
         row.addWidget(self._metric_list, 1)
         layout.addLayout(row)
+
+        # One "responding above" cut per ticked metric, and every ticked metric must have one (tracker I9): the
+        # summary CSV's fraction responding is computed at it, and there is no default cut to fall back on.
+        row = QHBoxLayout()
+        row.setContentsMargins(12, 2, 12, 2)
+        self._add_bold_label(row, "Responding above:", min_width=_FIELD_LABEL_W)
+        self._threshold_host = QWidget()
+        self._threshold_form = QFormLayout(self._threshold_host)
+        self._threshold_form.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self._threshold_host, 1)
+        layout.addLayout(row)
+        self._threshold_edits: dict = {}
+        self._threshold_text: dict = {}
+        self._metric_list.itemChanged.connect(lambda _item: self._rebuild_thresholds())
+        self._rebuild_thresholds()
         self._view_cb.currentIndexChanged.connect(lambda _i: self._refresh_view_controls())
         self._refresh_view_controls()
 
@@ -159,6 +180,45 @@ class NanowellBatchExportPanel(BatchExportPanel):
         row.addStretch(1)
         layout.addLayout(row)
         return combo
+
+    def _rebuild_thresholds(self) -> None:
+        """A cut field for each ticked metric. One left empty is seeded from the page's cut for it on the shared
+        channel — again each time the panel is shown, since the page's cut may be set after the panel is built —
+        and what was typed survives a metric being unticked and ticked again."""
+        for key, edit in self._threshold_edits.items():
+            self._threshold_text[key] = edit.text()
+        while self._threshold_form.rowCount():
+            self._threshold_form.removeRow(0)
+        self._threshold_edits = {}
+        labels = _metric_labels()
+        for key in self._selected_metrics():
+            edit = QLineEdit(self._threshold_text.get(key) or self._page_threshold(key))
+            edit.setPlaceholderText("required")
+            edit.setToolTip(f"A nanowell counts as responding on {labels[key]} when its value is above this.")
+            self._threshold_edits[key] = edit
+            self._threshold_form.addRow(labels[key], edit)
+
+    def _page_threshold(self, metric: str) -> str:
+        """The Nanowells page's cut for *metric* on the shared channel, as text, or ``""``."""
+        st = self._ctx.state.feature_slice("nanowell")
+        data = getattr(st, "data", None)
+        try:
+            channel = _match_channel(self._ctx.state.channel.active_channel, data.channels) if data else None
+            cut = getattr(st, "thresholds", {}).get(_metric_column(metric, channel))
+        except ValueError:                               # a channel metric with no channel to resolve
+            return ""
+        return "" if cut is None else _format_cut(cut)
+
+    def _thresholds(self) -> tuple[dict, list]:
+        """``(metric -> cut, the ticked metrics without a readable cut)``."""
+        cuts, missing = {}, []
+        for key, edit in self._threshold_edits.items():
+            value = _parse_threshold(edit.text())
+            if value is None:
+                missing.append(key)
+            else:
+                cuts[key] = value
+        return cuts, missing
 
     def _refresh_view_controls(self) -> None:
         """Each view's controls enabled only where they reach its figure, as on the page."""
@@ -183,12 +243,13 @@ class NanowellBatchExportPanel(BatchExportPanel):
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         self._refresh_timepoints()
+        self._rebuild_thresholds()
 
     # ── the run summary ──────────────────────────────────────────────────
     _SUMMARY_FIGURE_LEAD = "One figure per ticked metric"
     _SUMMARY_FIGURE_NOTE = "the chosen view, as the Nanowells page draws it (the Array map: one per well)"
-    _SUMMARY_CSV_LINE = ("One CSV of each well's summary per timepoint and metric — median, quartiles, nanowells "
-                         "used and excluded by reason")
+    _SUMMARY_CSV_LINE = ("One CSV of each well's summary per timepoint and metric — median, quartiles, the "
+                         "fraction responding above each metric's cut, nanowells used and excluded by reason")
 
     def _extra_summary_signals(self) -> list:
         return [self._view_cb.currentIndexChanged, self._metric_list.itemChanged]
@@ -207,7 +268,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
         return {"view": self._view_cb.currentData(), "axis": self._axis_cb.currentData(),
                 "baseline": self._baseline_cb.currentData(), "timepoint": self._tp_cb.currentData(),
                 "cohort": self._cohort_box.isChecked(), "metrics": self._selected_metrics(),
-                "fmt": self._fmt_cb.currentText(), "channel": self._ctx.state.channel.active_channel}
+                "fmt": self._fmt_cb.currentText(), "channel": self._ctx.state.channel.active_channel,
+                "thresholds": self._thresholds()[0]}
 
     def _load(self, baseline: str) -> tuple | None:
         """``(data, metrics)`` for the open dataset at *baseline*, or ``None`` with the user told why."""
@@ -235,6 +297,14 @@ class NanowellBatchExportPanel(BatchExportPanel):
         settings = self._run_settings()
         if not settings["metrics"]:
             QMessageBox.warning(self, "No metrics", "Tick at least one metric.")
+            return
+        _cuts, missing = self._thresholds()
+        if missing:
+            labels = _metric_labels()
+            QMessageBox.warning(self, "Responding above not set",
+                                "Set a number in Responding above for each ticked metric — the summary's fraction "
+                                "responding is computed at it, and there is no default:\n\n"
+                                + "\n".join(labels[m] for m in missing))
             return
         groups = [g for g in self._groups_for_export() if g.wells]
         if not groups:
@@ -286,6 +356,9 @@ class NanowellBatchExportPanel(BatchExportPanel):
         tables, labels = [], _metric_labels()
         for metric in settings["metrics"]:
             drawn, channel, note = _resolve_metric(view, metric, settings["channel"], data.channels)
+            # The cut was set for the ticked metric. When another is drawn in its place (a channel metric with no
+            # channel), applying it there would count against a number chosen for something else.
+            cut = settings["thresholds"].get(metric) if drawn == metric else None
             targets = wells if view == "array_map" else [None]
             for well in targets:
                 stem = f"{safe}_{metric}" + (f"_{well}" if well else "")
@@ -303,7 +376,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                    axis=settings["axis"], timepoint=self._timepoint_for(data, wells, settings),
                                    control="", baseline=settings["baseline"], cohort=settings["cohort"],
                                    well=well or "", well_timepoint=shown if well else "",
-                                   note=note, tableless=tableless)
+                                   note=note, tableless=tableless, responding_above=cut)
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
                                          "well": well or "", "timepoint": shown}
@@ -312,9 +385,10 @@ class NanowellBatchExportPanel(BatchExportPanel):
                 except Exception as exc:
                     return f"{grp.name} {metric} figure: {exc}"
             table = _wells_summary(metrics, wells, drawn, channels=data.channels, channel=channel,
-                                   cohort=settings["cohort"] and view in ("distribution", "trajectories"))
+                                   cohort=settings["cohort"] and view in ("distribution", "trajectories"),
+                                   responding_above=cut)
             tables.append(table.assign(metric=drawn, channel=channel or "", requested_metric=metric,
-                                       group=grp.name, note=note))
+                                       group=grp.name, note=note, responding_above=cut))
         try:
             self._write_summary(self._out_path(write_dir, f"{safe}_summary.csv"), tables, grp, tableless,
                                 settings)

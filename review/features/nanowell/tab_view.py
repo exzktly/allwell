@@ -11,12 +11,16 @@ a control that does not work (CLAUDE.md §7.6).
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSlider, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox, QComboBox, QLabel, QLineEdit, QPushButton, QSlider, QSplitter, QVBoxLayout, QWidget,
+)
 
 from review.features.export.service import export_cell_data_from
 from review.features.nanowell import controller as nwc
 from review.features.nanowell.cell_scope_compute import cell_scope
-from review.features.nanowell.distribution_compute import BASELINE_METRICS, METRICS, PER_NANOWELL, match_channel
+from review.features.nanowell.distribution_compute import (
+    BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut, match_channel,
+)
 from widgets.control_band import ControlBand
 
 #: The views the page draws, in the order the switch lists them.
@@ -49,6 +53,10 @@ _BASELINE_TIP = ("The timepoint a fold change and the occupancy class are measur
                  "Earliest: the well's first timepoint; a nanowell unmeasurable there has no fold change.\n"
                  "First measurable: each nanowell's first timepoint at which the measurement exists.")
 _TP_TIP = "The timepoint drawn on Along x: Wells (the latest by default)."
+_RESPONDING_TIP = ("A nanowell counts as responding when its value is above this number. Set one for each metric — "
+                   "a fold change, a count, a confluence, an intensity — and the figure states each group's fraction "
+                   "responding at it; empty, no fraction is computed. Kept per metric and channel.")
+_RESPONDING_W = 90
 _CONTROL_TIP = "Compare each group's centre with this group's, computed the same way (× ratio, or a difference on log₂)."
 
 
@@ -142,6 +150,14 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_tp_cb", tp_cb)
     grp_tp = band.add_scope("Timepoint", tp_cb)
 
+    responding_edit = QLineEdit()
+    responding_edit.setPlaceholderText("not set")
+    responding_edit.setToolTip(_RESPONDING_TIP)
+    responding_edit.setFixedWidth(_RESPONDING_W)
+    responding_edit.editingFinished.connect(lambda: nwc.set_responding_above(ctx, responding_edit.text()))
+    reg.register("_nw_responding_edit", responding_edit)
+    grp_responding = band.add_scope("Responding above", responding_edit)
+
     control_cb = QComboBox()
     control_cb.setToolTip(_CONTROL_TIP)
     control_cb.currentIndexChanged.connect(lambda _i: nwc.set_control(ctx, control_cb.currentData() or ""))
@@ -208,7 +224,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     def page_visible() -> bool:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
-    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box)
+    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box, responding_edit)
 
     def refresh_controls() -> None:
         channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None
@@ -264,6 +280,10 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             # applies to what it draws, so its box stays where it can be turned off.
             grp_cohort.setVisible((distribution and not per_nanowell) or view == "trajectories")
             grp_control.setVisible(wells_axis)
+            column = nwc.drawn_metric_column(ctx)
+            cut = st.thresholds.get(column) if column else None
+            responding_edit.setText("" if cut is None else format_cut(cut))
+            grp_responding.setVisible(distribution)
             grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position")
             grp_well.setVisible(view in ONE_WELL_VIEWS)
             grp_slider.setVisible(view in ONE_WELL_VIEWS)

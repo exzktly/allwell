@@ -66,12 +66,16 @@ def test_a_checkpoint_is_not_taken_back_under_a_different_roster_or_record(tmp_p
     record, load = well
     store = nt.TimepointCheckpoints(tmp_path / "staging", "key")
     _run(record, load, checkpoint=store)
-    base = {"radius_um": None, "record_digest": nr.record_digest(record, "A01", "0h"), "located": ["ok", "fiducial"]}
-    radius = _run(record, load).radius["radius_um"]
-    assert store.load("0h", {**base, "radius_um": radius}) is not None
-    assert store.load("0h", {**base, "radius_um": radius + 10.0}) is None             # another roster
-    assert store.load("0h", {**base, "radius_um": radius, "record_digest": "0" * 16}) is None   # another placement
-    assert nt.TimepointCheckpoints(tmp_path / "staging", "other settings").load("0h", {**base, "radius_um": radius}) is None
+    shared = _run(record, load).radius
+    # The key a default well's timepoint is checkpointed under: its radius and roster (tracker X35a), its record.
+    base = {"radius_um": shared["radius_um"], "record_digest": nr.record_digest(record, "A01", "0h"),
+            "located": ["ok", "fiducial"], "roster": shared["roster"], "roster_rule": nr.ROSTER_RULE_EVIDENCE}
+    assert store.load("0h", base) is not None
+    assert store.load("0h", {**base, "radius_um": base["radius_um"] + 10.0}) is None      # another radius
+    assert store.load("0h", {**base, "roster": base["roster"][1:]}) is None              # another roster
+    assert store.load("0h", {k: v for k, v in base.items() if k not in ("roster", "roster_rule")}) is None  # disk rule
+    assert store.load("0h", {**base, "record_digest": "0" * 16}) is None                 # another placement
+    assert nt.TimepointCheckpoints(tmp_path / "staging", "other settings").load("0h", base) is None
 
 
 def test_a_checkpoint_without_its_marker_is_ignored(tmp_path, well):
@@ -79,6 +83,7 @@ def test_a_checkpoint_without_its_marker_is_ignored(tmp_path, well):
     store = nt.TimepointCheckpoints(tmp_path / "staging", "key")
     _run(record, load, checkpoint=store)
     (tmp_path / "staging" / ".fov_nw_0h.done").unlink()                  # killed between the two writes
-    radius = _run(record, load).radius["radius_um"]
-    assert store.load("0h", {"radius_um": radius, "record_digest": nr.record_digest(record, "A01", "0h"),
-                             "located": ["ok", "fiducial"]}) is None
+    shared = _run(record, load).radius
+    assert store.load("0h", {"radius_um": shared["radius_um"], "record_digest": nr.record_digest(record, "A01", "0h"),
+                             "located": ["ok", "fiducial"], "roster": shared["roster"],
+                             "roster_rule": nr.ROSTER_RULE_EVIDENCE}) is None

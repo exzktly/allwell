@@ -8927,9 +8927,7 @@ there are reported missing; a well on a circle's rim never seen at any timepoint
 whose outline lost a whole edge row is unaddressed unless the central square or the plate anchors it; a speck
 forming a lit group of three or more touching the array at one timepoint would be kept as an edge. The
 thresholds are synthetic choices: real phase images (tracker Q7) decide whether they hold. The hexagonal lattice
-in a circle stays the default, and its own roster (`roster`, the shared radius plus a quarter pitch) holds a ring
-of sites beyond a circular array's rim — 18 on a rendered 265-site array, each written as `occluded` (tracker
-X35a).
+in a circle stays the default.
 
 ### 6.2h What is inside each nanowell
 
@@ -9068,8 +9066,9 @@ prediction handed in) and indexes the sites. With `--nanowell_geometry infer` (`
 section 6.2g's last part) the per-tile fits, the working pitch and the montage's sites come from
 `pipeline/nanowell_infer.py` instead of the matched filter and the spectrum, and the grid record gains a
 `geometry` block; everything from the central square on is the same. `run_well` locates every timepoint first,
-takes **one shared array radius per well** (`shared_array_radius`) so every timepoint has the same roster — for an
-inferred geometry **one shared set of addresses** instead (`_shared_roster`) — and only then
+takes **one shared array radius per well** (`shared_array_radius`) and from it **one roster**, so every timepoint
+has the same sites — for an inferred geometry one shared set of addresses without a radius (`_shared_roster`) —
+and only then
 — with each located montage spilled meanwhile to a memory-mapped `.npy` under the well's scratch
 (`spill_dir`, `<scratch>/.montages`), so a long time-course does not hold every montage in memory at once —
 `measure_timepoint`s each: owner-tile geometry at full resolution (fused sites on the montage),
@@ -9098,9 +9097,29 @@ size per timepoint). A re-run by the re-anchoring logs `Well X — re-anchored.`
 settings (every `nanowell_*` option is in `util.settings_digest.KEYED_ON`, and is digested only on a run with
 `nanowell_format` set: the options carry parser defaults on every run, and keyed outside the mode they would
 make every plate recorded before they existed read as recorded under other settings) and the same digest of the
-record's tiles and calibration for it; others are recomputed, onto the roster radius the earlier run shared.
+record's tiles and calibration for it; others are recomputed, onto the roster the earlier run shared.
 Resume checkpoints are written per timepoint through the per-field path's atomic record-then-marker files
-(`.fov_nw_<timepoint>.done`), and taken back only under the same radius and record digest. Completeness counts
+(`.fov_nw_<timepoint>.done`), and taken back only under the same radius, roster (and roster rule) and record
+digest — and, for an inferred geometry, the same registration step and diameter.
+
+**Which sites a circle holds (`_evidence_roster`).** The roster of a default well is the sites the evidence
+supports: every site a quarter pitch inside the shared radius; every site where a nanowell was detected at an
+anchored timepoint, within a pitch of the rim; and every site within a quarter pitch beyond the rim whose whole
+disk no anchored timepoint imaged, since nothing could have shown it absent. A site in that band whose whole disk
+was imaged and where no nanowell was ever detected is floor, and is left out. The disk rule it replaces — every
+site within the radius plus a quarter pitch — wrote 18 rows of floor beyond the rim of a rendered 265-site array,
+every one `occluded`, and on a 61-site 50 µm plate, whose fitted circle ran through the midpoints of its hexagonal
+outline, left out six corner nanowells it had detected. No tolerance on the radius separates the two: a drawn
+site of an array the image cuts lay 0.24 pitch beyond the fitted radius, a phantom on another plate 0.15. On
+rendered plates — the 100 µm fixture at three rotations, cut by the image's edge, larger, under an inner bubble,
+and the 100 µm, 50 µm and two custom geometries at 1.3 and 2.0 µm per pixel — the roster is the drawn sites
+exactly (`tests/test_nanowell_run.py::test_a_circular_array_s_roster_is_every_drawn_site_and_no_other`). What it
+gives up: a rim nanowell a bubble hides at every timepoint, wholly imaged, is left out (2 sites under a rendered
+rim bubble on a one-timepoint well; detected at any other timepoint, it stays). The grid record keeps the roster
+as `array_radius.roster` with `roster_rule: "evidence"`, and an incremental or re-anchoring run keeps it. A well
+analysed before rosters were kept has a radius and no roster in its record, and keeps the disk rule it was
+analysed with, so its new timepoints get the same sites as its old ones; its checkpoints carry no roster, so none
+is taken back into a well of the other rule. The default's settings digest is unchanged. Completeness counts
 timepoints, not (fov, timepoint) pairs (`completeness.nanowell_coverage`): a well of empty nanowells has no
 cell rows and is whole.
 

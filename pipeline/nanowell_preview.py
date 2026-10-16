@@ -122,7 +122,7 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
     px = located.pixel_size_um
     try:
         segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
-        radius, own = nr.own_array_model(located)
+        radius, own = nr.own_array_model(located, settings)
         measured = nr.measure_timepoint(located, images, settings, radius, roster=own, segmenter=segment)
     except Exception as exc:          # the location above is still worth showing; the reason goes with it (X27)
         log.warning("Test detection: measuring %s %s failed", well, timepoint, exc_info=True)

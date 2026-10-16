@@ -1128,12 +1128,94 @@ def _settle_inferred(outcome, timepoints, anchored, unaddressed, fixed_roster, r
             [tp for tp in timepoints if tp in unaddressed or tp in ambiguous], reference_tp, shifts)
 
 
-def own_array_model(located: Located) -> tuple[float | None, frozenset | None]:
-    """``(radius, roster)`` a single timepoint is measured against on its own (Test detection): an inferred array's
-    own sites (none without an origin), otherwise its boundary's radius."""
+#: The roster rule a default (hexagonal lattice in a circle) well's grid record names when it keeps its roster as a
+#: set of addresses (tracker X35a). A record without one was analysed with the disk rule — every site within the
+#: shared radius plus a quarter pitch — and keeps it.
+ROSTER_RULE_EVIDENCE = "evidence"
+
+
+def _evidence_roster(located: dict, anchored, radius_um: float, settings: NanowellSettings) -> frozenset:
+    """The sites of a circular array the evidence supports (tracker X35a).
+
+    The disk rule, every site within the shared radius plus a quarter pitch, added a ring the plate does not have
+    (18 sites on a rendered 265-site array, every one written ``occluded``) and, where the fitted circle ran through
+    the midpoints of a hexagonal outline, left out six detected nanowells at its corners (a 61-site 50 um array). No
+    tolerance on the radius separates the two: a drawn site of an array the image cuts lay 0.24 pitch beyond the
+    fitted radius, a phantom 0.15 beyond it on another plate. So a site belongs to the array when it lies a quarter
+    pitch inside the circle; or a nanowell was detected there at some anchored timepoint (within a pitch of the
+    rim); or it lies within the old quarter pitch of the rim and no anchored timepoint imaged its whole disk, so
+    nothing could have shown it absent. A site within that band whose whole disk was imaged and where no nanowell was
+    ever detected is floor, and is not in the roster. The first anchored timepoint's lattice measures the distances.
+    """
+    from pipeline.nanowell_lattice import _disk_covered, roster as disk_roster
+    from pipeline.nanowell_lattice import TileRectangle
+
+    first = located[anchored[0]]
+    pitch = float(first.fit.pitch)
+    candidates = disk_roster(first.fit, first.origin_montage, radius_um + 0.75 * pitch)
+    basis = np.column_stack((first.fit.a1, first.fit.a2))
+    distance = {a: float(np.linalg.norm(basis @ np.asarray(a, dtype=float))) for a in candidates}
+    detected = {(e.q, e.r) for tp in anchored for e in located[tp].indexed if e.q is not None}
+    seen_whole: set = set()
+    for tp in anchored:
+        loc = located[tp]
+        tiles = [TileRectangle(p.tile_id, loc.positions[p.tile_id][0], loc.positions[p.tile_id][1],
+                               loc.positions[p.tile_id][0] + p.width_um, loc.positions[p.tile_id][1] + p.height_um)
+                 for p in loc.plan.placements]
+        tp_basis = np.column_stack((loc.fit.a1, loc.fit.a2))
+        origin = np.asarray(loc.origin_montage) + np.asarray(loc.montage.origin_um)
+        for a in candidates:
+            if a not in seen_whole and radius_um - pitch / 4 < distance[a] <= radius_um + pitch / 4:
+                x, y = origin + tp_basis @ np.asarray(a, dtype=float)
+                if _disk_covered(x, y, settings.diameter_um / 2, tiles):
+                    seen_whole.add(a)
+    return frozenset(a for a in candidates
+                     if distance[a] <= radius_um - pitch / 4
+                     or (a in detected and distance[a] <= radius_um + pitch)
+                     or (distance[a] <= radius_um + pitch / 4 and a not in seen_whole))
+
+
+def _circle_roster(outcome, anchored, radius_um, settings, fixed_roster, fixed_radius_um):
+    """``(roster, own)`` of a default well (tracker X35a): a kept set of addresses; or, for a well first analysed
+    before sets were kept (a radius and no roster), ``(None, None)`` — the disk rule it was analysed with, so its new
+    timepoints get the same roster as its old ones; or, for a fresh well, the sites the evidence supports. A set is
+    recorded in ``outcome.radius`` with its rule."""
+    roster = None
+    if fixed_roster:
+        roster = frozenset(tuple(map(int, a)) for a in fixed_roster)
+    elif fixed_radius_um is None and anchored:
+        roster = _evidence_roster(outcome.located, anchored, radius_um, settings)
+    if roster is None:
+        return None, None
+    outcome.radius.update(roster=[list(a) for a in sorted(roster)], roster_rule=ROSTER_RULE_EVIDENCE)
+    return roster, {tp: roster for tp in anchored}
+
+
+def _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts) -> dict:
+    """What a timepoint's checkpoint must match to be taken back: everything its rows depend on beyond the settings
+    the store is keyed on — the radius, the record, how it was located, and the roster: for an inferred well with the
+    step its addresses were moved by and the diameter (X35-R1, R5, R14); for a default well with its rule, so a
+    disk-rule checkpoint is never taken back into an evidence-rule well (X35a)."""
+    key = {"radius_um": radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
+           "located": [located.status, located.origin_method]}
+    if roster is not None and settings.infer:
+        key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))),
+                   diameter_used_um=outcome.radius["diameter_used_um"])
+    elif roster is not None:
+        key.update(roster=outcome.radius["roster"], roster_rule=ROSTER_RULE_EVIDENCE)
+    return key
+
+
+def own_array_model(located: Located, settings: NanowellSettings | None = None) -> tuple[float | None, frozenset | None]:
+    """``(radius, roster)`` a single timepoint is measured against on its own (Test detection), as a run would: an
+    inferred array's own sites (none without an origin), otherwise its boundary's radius and, when it is anchored
+    and *settings* are given, the sites the evidence supports (:func:`_evidence_roster`)."""
     if located.array_sites is not None:
         return None, (_own_roster(located) if located.origin_montage is not None else frozenset())
-    return located.boundary["radius_um"], None
+    radius = located.boundary["radius_um"]
+    if settings is None or located.origin_montage is None:
+        return radius, None
+    return radius, _evidence_roster({located.timepoint: located}, [located.timepoint], radius, settings)
 
 
 def _consistency(located: dict, anchored, radius_um: float | None, reference: dict | None,
@@ -1236,6 +1318,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
                 outcome.timepoints[tp].update(status=NO_LATTICE, reason="No timepoint fitted an array boundary, so "
                                                                        "no roster radius could be shared")
             return outcome
+        roster, own = _circle_roster(outcome, anchored, radius_um, settings, fixed_roster, fixed_radius_um)
 
     consistency = _consistency(outcome.located, anchored, radius_um, reference, own, reference_tp,
                                frozenset(map(tuple, fixed_roster)) if fixed_roster and own is not None else None)
@@ -1246,11 +1329,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     measurable = set(anchored) | set(unaddressed)
     for tp in [t for t in timepoints if t in measurable]:          # in time, so "earliest" means it
         located = outcome.located[tp]
-        key = {"radius_um": radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
-               "located": [located.status, located.origin_method]}
-        if roster is not None:                  # the roster, and the step the addresses were moved by (X35-R1)
-            key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))),
-                       diameter_used_um=outcome.radius["diameter_used_um"])
+        key = _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts)
         measured = checkpoint.load(tp, key) if checkpoint is not None else None
         if measured is None:
             images = _images_for(record, well, tp, load_phase)

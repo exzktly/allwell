@@ -1,5 +1,6 @@
 """The (well, timepoint) task body on rendered tiles, against the array that was drawn."""
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -424,3 +425,136 @@ def test_a_plate_is_located_at_its_own_pitch_and_pixel_size(pitch_um, diameter_u
         addressed += 1
         wrong += (entry.q, entry.r) != truth[tuple(sites[np.argmin(np.linalg.norm(sites - point, axis=1))])]
     assert wrong == 0 and addressed >= 0.9 * len(located.indexed)
+
+
+# ── tracker X35a: the circle's roster holds the drawn sites and no others ────
+def _x34_plate(pitch_um, diameter_um, px):
+    from tests._nanowell_run_fixture import record_for
+    from tests._nanowell_synth import TilePlan, render_tiles
+
+    plan = TilePlan(2, 2, (900, 900), 0.1, px)
+    rendered = render_tiles(plan, pitch_um=pitch_um, diameter_um=diameter_um,
+                            radius_um=0.26 * (plan.step_um[0] + plan.extent_um[0]), rotation_deg=7.0,
+                            noise_sigma=0.05, blur_px=1.0, seed=1)
+    return rendered, record_for(rendered)
+
+
+@pytest.mark.parametrize("make, settings", [
+    (lambda: build_well(), SETTINGS),                                         # 283 rows by the disk rule
+    (lambda: build_well(rotation=13.0, seed=3), SETTINGS),
+    (lambda: build_well(rotation=-20.0, seed=3), SETTINGS),
+    (lambda: build_well(array_shift_um=(1500.0, 0.0), radius_fraction=0.3), SETTINGS),   # cut by the image
+    (lambda: _x34_plate(143.0, 50.0, 1.3), nr.NanowellSettings("50um")),       # disk rule lost 6 detected corners
+    (lambda: _x34_plate(120.0, 70.0, 1.3), nr.NanowellSettings("custom", custom=(120.0, 70.0))),
+    (lambda: _x34_plate(300.0, 200.0, 2.0), nr.NanowellSettings("custom", custom=(300.0, 200.0))),
+], ids=["fixture", "rot13", "rot-20", "clipped", "50um-1.3", "custom-120-1.3", "custom-300-2.0"])
+def test_a_circular_array_s_roster_is_every_drawn_site_and_no_other(make, settings):
+    """Tracker X35a. The disk rule (the shared radius plus a quarter pitch) wrote 18 rows of floor beyond the rim of the
+    265-site fixture, every one ``occluded``, and on the 50 um plate left out six corner nanowells it had detected.
+    No tolerance on the radius separates the two (a drawn site of the cut array lies 0.24 pitch beyond the fitted
+    radius, a phantom elsewhere 0.15), so the rim is decided by evidence: detected, or never wholly imaged."""
+    rendered, record = make()
+    outcome = nr.run_well("A01", record, ["T0"], _loader(rendered), settings, segmenter=threshold_segmenter())
+    assert outcome.timepoints["T0"]["status"] == nr.OK
+    assert {(r["nw_q"], r["nw_r"]) for r in outcome.sites} == set(rendered.array.addresses)
+    assert outcome.radius["roster_rule"] == nr.ROSTER_RULE_EVIDENCE
+    assert sorted(map(tuple, outcome.radius["roster"])) == sorted(rendered.array.addresses)
+
+
+def _plate_of(tmp_path, items, record):
+    """``plate/in`` holding one well archive of every ``(token, rendered)`` in *items*, and *record*."""
+    import zipfile
+
+    from tifffile import imwrite
+
+    from util.acquisition_record import write_record_file
+
+    plate = tmp_path / "plate"
+    (plate / "in").mkdir(parents=True, exist_ok=True)
+    tif = tmp_path / "frame.tif"
+    with zipfile.ZipFile(plate / "in" / "A01.zip", "w") as zf:
+        for token, rendered in items:
+            for fov, image in rendered.images.items():
+                for channel, frame in (("PHASE", image), ("GFP", image * 0 + 10.0)):
+                    imwrite(str(tif), frame.astype("float32"))
+                    zf.write(tif, f"exp_{channel}_A01_{fov}_{token}.tif")
+    write_record_file(plate / "in" / "acquisition.json", record)
+    return plate
+
+
+def test_a_well_analysed_with_the_disk_rule_keeps_it_for_its_new_timepoints(tmp_path, monkeypatch):
+    """An incremental run of a dataset analysed before X35a (its record holds a radius and no roster) addresses the new
+    timepoint onto the roster its old timepoints have — the disk rule's 283 sites — not a different count; a fresh run
+    of the same plate writes 265 at both."""
+    from tests.test_nanowell_cli import _rows, _run_main
+
+    first, record = build_well(timepoint="0h")
+    second, later = build_well(rotation=9.0, array_shift_um=(120.0, -80.0), seed=2, timepoint="24h")
+    plate = _plate_of(tmp_path, [("0h", first)], record)
+    with monkeypatch.context() as old_code:                 # the disk rule, as the code before X35a ran it
+        old_code.setattr(nr, "_evidence_roster", lambda *a, **k: None)
+        out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
+    assert "roster" not in json.loads((out / "nanowells" / "A01_grid.json").read_text())["array_radius"]
+    record["timepoints"].update(later["timepoints"])
+    record["tiles"] += later["tiles"]
+    _plate_of(tmp_path, [("0h", first), ("24h", second)], record)
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    rows = _rows(out, "A01.csv")
+    assert [sum(r["timepoint"] == tp for r in rows) for tp in ("0h", "24h")] == [283, 283]
+    assert "roster_rule" not in json.loads((out / "nanowells" / "A01_grid.json").read_text())["array_radius"]
+    fresh = _run_main(monkeypatch, _plate_of(tmp_path / "fresh", [("0h", first), ("24h", second)], record),
+                      "--nanowell_format", "100um")
+    assert [sum(r["timepoint"] == tp for r in _rows(fresh, "A01.csv")) for tp in ("0h", "24h")] == [265, 265]
+
+
+class _Checkpoints:
+    """A checkpoint store that gives a timepoint back only under the key it was saved with, as the real one does."""
+
+    def __init__(self):
+        self.saved = {}
+
+    def save(self, tp, key, measured):
+        self.saved[tp] = (json.dumps(key, sort_keys=True, default=str), measured)
+
+    def load(self, tp, key):
+        stored = self.saved.get(tp)
+        return stored[1] if stored and stored[0] == json.dumps(key, sort_keys=True, default=str) else None
+
+
+def test_a_disk_rule_checkpoint_is_not_taken_back_into_an_evidence_rule_well():
+    """X35a's reuse key: a timepoint measured under the disk rule (killed before X35a, resumed after) has the same
+    radius and record digest, and must not come back with its 283 rows into a well whose roster is 265."""
+    rendered, record = build_well()
+    checkpoints = _Checkpoints()
+    run = lambda: nr.run_well("A01", record, ["T0"], _loader(rendered), SETTINGS,     # noqa: E731
+                              segmenter=threshold_segmenter(), checkpoint=checkpoints)
+    with pytest.MonkeyPatch.context() as old_code:
+        old_code.setattr(nr, "_evidence_roster", lambda *a, **k: None)
+        assert len(run().sites) == 283
+    assert len(run().sites) == 265
+
+
+def test_a_checkpoint_of_a_timepoint_measured_under_another_registration_step_is_not_taken_back():
+    """Tracker X35-R5. A resumed inferred well whose registration step for a timepoint differs from the one it was
+    checkpointed under (the reference timepoint's evidence changed between kill and resume) has the same radius,
+    roster and record digest; the step alone tells the stale measurement apart, so it is in the key."""
+    from tests.test_nanowell_infer import INFER, _SQUARE, _corner, _timepoints
+
+    clean, _ = build_well(rotation=-15.0, timepoint="T0", seed=1, **_SQUARE)
+    record, sources = _timepoints(_corner(clean))
+    load = lambda tp, tile: sources[tp].images.get(tile)                                 # noqa: E731
+    checkpoints = _Checkpoints()
+    first = nr.run_well("A01", record, list(sources), load, INFER, segmenter=threshold_segmenter(),
+                        checkpoint=checkpoints)
+    assert first.timepoints["T1"]["origin_shift"] == [-1, -1]
+    key, measured = checkpoints.saved["T1"]
+    # The key that timepoint was checkpointed under when its step was (0, 0): everything the same but the step, where
+    # the key carries one (a key without it cannot tell the two apart, which is the defect this pins).
+    stale = json.loads(key)
+    if "origin_shift" in stale:
+        stale["origin_shift"] = [0, 0]
+    marker = nr.Measured("T1", sites=[{"timepoint": "T1", "nw_q": 99, "nw_r": 99}], template=measured.template)
+    checkpoints.saved["T1"] = (json.dumps(stale, sort_keys=True, default=str), marker)
+    again = nr.run_well("A01", record, list(sources), load, INFER, segmenter=threshold_segmenter(),
+                        checkpoint=checkpoints)
+    assert (99, 99) not in {(r["nw_q"], r["nw_r"]) for r in again.sites if r["timepoint"] == "T1"}

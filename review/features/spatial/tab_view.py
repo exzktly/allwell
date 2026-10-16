@@ -25,7 +25,7 @@ from review.features.spatial.cell_scope_compute import cell_scope
 from core.safe import swallowed
 from review.features.spatial import state as sp_state
 from review.features.spatial import controller as sp_ctrl
-from review.features.spatial.collect import available_metric_columns
+from review.features.spatial.collect import available_metric_columns, available_timepoints
 from domain.tp_match import tp_close
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -506,6 +506,4 @@ def _select_combo_by_data(combo, value) -> None:
 def _loaded_timepoints(ctx):
     """Unique finite timepoints across every well already in the dataset
     cache. Pure ``ctx.state`` reader; empty when nothing has been loaded."""
-    from review.features.spatial.collect import available_timepoints
-
     return available_timepoints(ctx)

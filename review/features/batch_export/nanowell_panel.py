@@ -63,6 +63,8 @@ _logger = logging.getLogger("review")
 _FIELD_LABEL_W = 110
 #: Rows of the metric list shown before it scrolls; the list holds every page metric (eleven).
 _METRIC_ROWS = 6
+#: The list's frame is drawn above its first row and below its last.
+_FRAME_EDGES = 2
 
 #: The views a batch run can draw, as the page names them. Array QC is the page's alone: it reads a montage per
 #: (well, timepoint) and is a check of one acquisition, not a figure for a folder.
@@ -134,7 +136,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
             item.setCheckState(Qt.Checked if key == "n" else Qt.Unchecked)
             self._metric_list.addItem(item)
         self._metric_list.setMaximumHeight(self._metric_list.sizeHintForRow(0) * _METRIC_ROWS
-                                           + 2 * self._metric_list.frameWidth())
+                                           + _FRAME_EDGES * self._metric_list.frameWidth())
         row.addWidget(self._metric_list, 1)
         layout.addLayout(row)
         self._view_cb.currentIndexChanged.connect(lambda _i: self._refresh_view_controls())

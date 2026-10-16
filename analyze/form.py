@@ -73,10 +73,10 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         self._build_folders_section(parent)
         self._build_channel_tokens_section(parent)
         self._refresh_schema_preview()
-        self._build_nanowell_section(parent)
-        # Quality Control leads the optional sections and stays open: its
-        # correction stages are common tuning knobs, not an afterthought.
+        # Quality Control leads the optional sections and stays open (common tuning
+        # knobs); Nanowells follows it, folded, since most plates never use it.
         self._build_qc_section(parent)
+        self._build_nanowell_section(parent)
         self._build_auto_threshold_section(parent)
         self._build_shape_features_section(parent)
         self._build_output_options_section(parent)

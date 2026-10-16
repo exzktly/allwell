@@ -108,6 +108,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # process_microscopy and pipeline.io — without it the remote run aborts
     # before it compresses its first well.
     "util/zip_write.py",
+    # The in-place append journal and its crash recovery, which the Analyze
+    # runner calls before reading a dataset; listed because the manifest
+    # mirrors every ``util/`` file.
+    "util/zip_append.py",
     # The dataset's append-only provenance log. Written client-side only — a
     # remote run's events are appended locally by the Analyze runner — so the
     # worker never imports it; listed because the manifest mirrors every

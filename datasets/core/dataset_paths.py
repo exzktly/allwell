@@ -27,7 +27,9 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.csv_gz import csv_stem, glob_csvs
+from util.image_exts import is_run_input_member
 from util.well_token import canonical_well_label
+from util.zip_append import pending_journals
 from types import SimpleNamespace
 
 
@@ -102,7 +104,27 @@ def resolve_dataset(root: Path | str, *, label: str) -> DatasetPaths:
             f"{label} ({root}) is not a dataset — it needs both an 'in' and an "
             "'out' folder."
         )
+    refuse_unfinished_append(in_dir, label=label, error_cls=DatasetPathsError)
     return DatasetPaths(root=root, in_dir=in_dir, out_dir=out_dir)
+
+
+def refuse_unfinished_append(in_dir: Path, *, label: str, error_cls: type[Exception]) -> None:
+    """Raise *error_cls* while *in_dir* holds an in-place append's journals.
+
+    Every Datasets tool that opens an existing dataset comes through
+    :func:`resolve_dataset`, and a journal there means an append into its
+    archives may not have committed: Subset or Merge Plates would copy a
+    partial timepoint into a new dataset, and Validate would report on it.
+    Read-only on purpose — this runs from page previews on the GUI thread too —
+    so it names the journals and the places that undo them
+    (:func:`util.zip_append.recover`) rather than undoing anything itself.
+    """
+    pending = pending_journals(in_dir)
+    if pending:
+        raise error_cls(
+            f"{label} ({in_dir.parent}) holds an unfinished in-place addition "
+            f"({', '.join(p.name for p in pending[:3])}). Open it in Review, run Analyze on it, "
+            "or use Concatenate's \"Undo the unfinished addition\" to undo it first.")
 
 
 def read_info(paths: DatasetPaths, *, label: str) -> dict:
@@ -414,7 +436,7 @@ def collect_input_image_stems(
     in_dir: Path, *, known_zip_members: dict[Path, set[str]] | None = None,
 ) -> set[str]:
     """Every image filename stem findable under *in_dir* — loose top-level
-    TIFs, one level of well subfolders, or well zips' TIF members.
+    images, one level of well subfolders, or well zips' image members.
 
     *known_zip_members* maps a zip path to member names a caller has **already**
     listed, so that zip is not opened again here. Validate reads every well's
@@ -423,33 +445,42 @@ def collect_input_image_stems(
     every archive in the folder, serially, after the scan had finished with them.
     A path absent from the map (or mapped to nothing) is read normally, so the
     result is identical either way.
+
+    Every candidate goes through :func:`util.image_exts.is_run_input_member`,
+    the predicate ``process_microscopy._collect_image_stems`` (which this
+    mirrors) already applies. A bare suffix test reads an AppleDouble twin
+    (``__MACOSX/._E_GFP_A01_f0_0h.tif``, one per image in an archive packed on
+    a Mac) as an image, and its stem splits into a different set of fields:
+    a raw plate then listed ``f0`` and ``f1`` as timepoints, which made
+    Concatenate's default gap one hour and refused the recorded one.
     """
     stems: set[str] = set()
-    for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
-        for p in in_dir.glob(pat):
-            stems.add(p.stem)
-    with swallow(f"list well subfolders under {in_dir}"):
-        for entry in in_dir.iterdir():
-            if not entry.is_dir():
-                continue
-            for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
-                for p in entry.glob(pat):
+
+    def _add_files(folder: Path) -> None:
+        with swallow(f"list images under {folder}"):
+            for p in folder.iterdir():
+                if p.is_file() and is_run_input_member(p.name):
                     stems.add(p.stem)
 
-    def _add_tif_stems(names) -> None:
+    _add_files(in_dir)
+    with swallow(f"list well subfolders under {in_dir}"):
+        for entry in in_dir.iterdir():
+            if entry.is_dir():
+                _add_files(entry)
+
+    def _add_member_stems(names) -> None:
         for member in names:
-            name = Path(member).name
-            if name.lower().endswith((".tif", ".tiff")):
-                stems.add(Path(name).stem)
+            if is_run_input_member(member):
+                stems.add(Path(member.rsplit("/", 1)[-1]).stem)
 
     for zip_path in in_dir.glob("*.zip"):
         known = (known_zip_members or {}).get(zip_path)
         if known:
-            _add_tif_stems(known)
+            _add_member_stems(known)
             continue
         with swallow(f"scan {zip_path} for image stems"):
             with zipfile.ZipFile(zip_path, "r") as zf:
-                _add_tif_stems(zf.namelist())
+                _add_member_stems(zf.namelist())
     return stems
 
 

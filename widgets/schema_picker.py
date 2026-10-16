@@ -104,6 +104,49 @@ class SchemaPicker(QWidget):
         outer.setSpacing(0)
         self._row = row_factory or self._plain_row
 
+        # The detect control is opt-in, and deliberately so. A button that is
+        # always built is a button a host can forget to connect, and a schema
+        # detector that does nothing when pressed looks exactly like one that
+        # found nothing — the failure this whole control exists to stop being
+        # invisible. Passing a label is the host saying it has filenames to
+        # offer and will answer `detectRequested`.
+        #
+        # Built first, so it is the top row of the control. Detecting is what a
+        # user does first — it fills every row beneath it — and a refusal can
+        # then truthfully say the settings *below* are unchanged. Its cell comes
+        # from the same `row_factory` as the rows under it, behind an empty
+        # label, so the button starts at the left edge of the separator box,
+        # the dropdowns and the schema string rather than at the label column.
+        # The readout follows the button directly: a result belongs beside the
+        # control that produced it, not beneath five rows it did not touch.
+        self._detect_btn: QPushButton | None = None
+        self._detect_lbl: QLabel | None = None
+        self._detect_note_lbl: QLabel | None = None
+        if detect_label:
+            cell = self._row(self, "")
+            self._detect_btn = QPushButton(detect_label, cell)
+            set_variant(self._detect_btn, "secondary")
+            self._detect_btn.clicked.connect(lambda: self.detectRequested.emit())
+            cell.layout().addWidget(self._detect_btn)
+            cell.layout().addStretch(1)
+
+            # Two registers, because the two halves carry different weight.
+            # The summary is a neutral statement of what was chosen; the note
+            # is a statement about the user's *data* — files that will not be
+            # analysed, or a scan that declined — and while both were set in
+            # the same muted grey the one worth reading was styled exactly like
+            # the example-filename boilerplate beneath it.
+            self._detect_lbl = QLabel("", self)
+            self._detect_lbl.setObjectName("Muted")
+            self._detect_lbl.setWordWrap(True)
+            outer.addWidget(self._detect_lbl)
+
+            self._detect_note_lbl = QLabel("", self)
+            self._detect_note_lbl.setObjectName("Notice")
+            self._detect_note_lbl.setWordWrap(True)
+            self._detect_note_lbl.setVisible(False)
+            outer.addWidget(self._detect_note_lbl)
+
         sep_cell = self._row(self, "Separator char")
         self._sep_edit = QLineEdit(DEFAULT_SEP, sep_cell)
         self._sep_edit.setFixedWidth(self._sep_edit_w)
@@ -140,47 +183,24 @@ class SchemaPicker(QWidget):
         if self._schema_edit_max_w is not None:
             self._schema_edit.setMaximumWidth(self._schema_edit_max_w)
         self._schema_edit.setCursorPosition(0)
+        # Anchored left, so a capped field starts where every other control in
+        # the picker starts. Once the cap binds, a box layout centres the edit
+        # in the space its stretch claimed: on a full-width page that put the
+        # schema string ~440px right of the Detect button, separator and
+        # dropdowns above it, as though it belonged to another form. The
+        # zero-stretch spacer after it takes only what the capped edit cannot,
+        # so below the cap the edit still fills the row. `Qt.AlignLeft` is not
+        # the fix: under an alignment flag the edit drops to its minimum width
+        # at every host width, sidebar included (measured: 165px in a 177px
+        # cell).
         schema_cell.layout().addWidget(self._schema_edit, 1)
+        schema_cell.layout().addStretch(0)
         # Both halves of this control answer the same question, so both answer
         # it at the same moment: the separator is live per keystroke, and so is
         # this. `editingFinished` additionally re-syncs the dropdowns, which
         # would otherwise thrash through five fields mid-word.
         self._schema_edit.textChanged.connect(lambda _t: self.changed.emit())
         self._schema_edit.editingFinished.connect(self._on_schema_text_committed)
-
-        # The detect control is opt-in, and deliberately so. A button that is
-        # always built is a button a host can forget to connect, and a schema
-        # detector that does nothing when pressed looks exactly like one that
-        # found nothing — the failure this whole control exists to stop being
-        # invisible. Passing a label is the host saying it has filenames to
-        # offer and will answer `detectRequested`.
-        self._detect_btn: QPushButton | None = None
-        self._detect_lbl: QLabel | None = None
-        self._detect_note_lbl: QLabel | None = None
-        if detect_label:
-            cell = self._row(self, "")
-            self._detect_btn = QPushButton(detect_label, cell)
-            set_variant(self._detect_btn, "secondary")
-            self._detect_btn.clicked.connect(lambda: self.detectRequested.emit())
-            cell.layout().addWidget(self._detect_btn)
-            cell.layout().addStretch(1)
-
-            # Two registers, because the two halves carry different weight.
-            # The summary is a neutral statement of what was chosen; the note
-            # is a statement about the user's *data* — files that will not be
-            # analysed, or a scan that declined — and while both were set in
-            # the same muted grey the one worth reading was styled exactly like
-            # the example-filename boilerplate beneath it.
-            self._detect_lbl = QLabel("", self)
-            self._detect_lbl.setObjectName("Muted")
-            self._detect_lbl.setWordWrap(True)
-            outer.addWidget(self._detect_lbl)
-
-            self._detect_note_lbl = QLabel("", self)
-            self._detect_note_lbl.setObjectName("Notice")
-            self._detect_note_lbl.setWordWrap(True)
-            self._detect_note_lbl.setVisible(False)
-            outer.addWidget(self._detect_note_lbl)
 
     # ── layout ───────────────────────────────────────────────────────────────
     def _plain_row(self, parent: QWidget, label: str) -> QWidget:
@@ -285,7 +305,7 @@ class SchemaPicker(QWidget):
 
     def setDetection(self, text: str, *, note: str = "",
                      problem: bool = False) -> None:  # Qt naming
-        """Show the result of a detection beneath the control.
+        """Show the result of a detection beneath the detect button.
 
         *text* is the neutral summary and *note* is what the reader must not
         skim past — a shortfall, or the reason nothing was detected. The widget

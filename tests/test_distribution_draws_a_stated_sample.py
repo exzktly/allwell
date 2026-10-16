@@ -254,3 +254,20 @@ def test_a_failed_collection_releases_its_pool(ctx, monkeypatch):
     with pytest.raises(OSError):
         _pooled_groups(ctx, 300, monkeypatch)
     assert made and all(p._con is None and not p._parts for p in made)
+
+
+def test_a_heavy_tails_every_value_extrema_stay_inside_the_axes(ctx, monkeypatch):
+    """The caps are moved after the violin is drawn, and moving a segment does not
+    rescale the axes: a true maximum far above the sample's must still be in view."""
+    import dataclasses
+
+    groups, exact, pool = _pooled_groups(ctx, 300, monkeypatch)
+    try:
+        span = max(float(np.max(v)) for *_, v in groups) - min(float(np.min(v)) for *_, v in groups)
+        far = [dataclasses.replace(e, hi=float(np.max(v)) + 20 * span, lo=float(np.min(v)) - 20 * span)
+               for e, (*_, v) in zip(exact, groups)]
+        ax = _render(ctx, groups, "Violin (per group)", far)
+        lo, hi = ax.get_ylim()
+        assert lo <= min(e.lo for e in far) and max(e.hi for e in far) <= hi, (lo, hi)
+    finally:
+        pool.close()

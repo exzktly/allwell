@@ -366,6 +366,17 @@ def _notes(model: DistributionModel, metric: str, time_source: str | None) -> No
         model.notes.append("Times are unknown; timepoints are in label order.")
 
 
+def format_cut(value: float) -> str:
+    """A cut as text that reads back as exactly the same number.
+
+    ``:g`` keeps six significant figures, so ``12345.67`` showed as ``12345.7`` — and the field, re-read on its
+    next focus change, then stored the rounded number in place of the typed one. Fifteen significant figures
+    hold any decimal a person types; ``repr`` is the fallback for a value that still would not round-trip.
+    """
+    text = f"{value:.15g}"
+    return text if float(text) == value else repr(value)
+
+
 def responding_note(model: DistributionModel) -> str:
     """The footer's fraction-responding sentence: each group's fraction at the user's cut, or that none is set."""
     if model.responding_above is None:
@@ -375,5 +386,5 @@ def responding_note(model: DistributionModel) -> str:
              for name, fraction, _tp in model.responding]
     at = {tp for _n, _f, tp in model.responding}
     where = f" at {next(iter(at))}" if len(at) == 1 else " at each group's latest timepoint"
-    return (f"Responding: above {model.responding_above:g}. Fraction responding (mean over wells){where}: "
+    return (f"Responding: above {format_cut(model.responding_above)}. Fraction responding (mean over wells){where}: "
             + (", ".join(parts) if parts else "no group has a value") + ".")

@@ -217,3 +217,30 @@ def test_a_cut_is_not_applied_to_the_metric_drawn_in_place_of_the_one_ticked(pan
     drawn = [r for r in rows if r.get("requested_metric") == "brightness"]
     assert drawn and {r["metric"] for r in drawn} == {"n"}
     assert {(r["responding_above"], r["fraction_responding"]) for r in drawn} == {("", "")}
+
+
+def test_a_typed_cut_reads_back_exactly_and_a_refocus_does_not_change_it(page, qtbot):
+    """Review L1: shown with six significant figures, 12345.67 read back as 12345.7 on the next focus change."""
+    from tests.test_nanowell_page import _loaded
+
+    st = _loaded(qtbot, page)
+    edit = page.widgets.get("_nw_responding_edit")
+    _type(page, "12345.67")
+    assert edit.text() == "12345.67" and st.thresholds == {"n": 12345.67}
+    edit.editingFinished.emit()                      # what a later focus-out does with the text shown
+    assert st.thresholds == {"n": 12345.67}
+    assert any("above 12345.67." in line for line in _footer(page)), _footer(page)
+    _type(page, "1234567")
+    assert edit.text() == "1234567" and any("above 1234567." in line for line in _footer(page))
+
+
+def test_a_cut_far_above_every_value_is_still_drawn_inside_the_axes(page, qtbot):
+    """Review L7: the cut joins the y-limits, so a line far from the data is in view, not clipped off."""
+    from tests.test_nanowell_page import _loaded
+
+    _loaded(qtbot, page)
+    _type(page, "100")                               # every count in the fixture is 4 or fewer
+    fig = page.widgets.get("_nw_fig")
+    assert _cut_lines(page) == [100.0, 100.0]
+    assert all(ax.get_ylim()[1] >= 100.0 for ax in fig.axes if any(
+        line.get_gid() == "nw-responding" for line in ax.lines))

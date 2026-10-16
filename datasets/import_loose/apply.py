@@ -307,9 +307,18 @@ def convert_in_place(
     being grouped, then fills as it is zipped.
     """
     from services.input_resolution_service import run_zipper
+    from util.zip_append import pending_journals
 
     emit = log or _null_log
     report = progress or _null_progress
+    # The zipper writes <well>.zip beside archives an in-place append may not
+    # have committed; the next open of the dataset undoes that append first.
+    pending = pending_journals(Path(search_dir))
+    if pending:
+        raise ValueError(
+            f"{search_dir} holds an unfinished in-place addition "
+            f"({', '.join(p.name for p in pending[:3])}). Open the dataset in Review or run "
+            "Analyze on it to undo that first.")
 
     # Measured *before* run_zipper, because after it every grouped well is a
     # well folder too and the two are no longer distinguishable on disk. These

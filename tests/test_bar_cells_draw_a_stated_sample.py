@@ -228,3 +228,31 @@ def test_a_failed_draw_releases_every_columns_pool(ctx, monkeypatch):
         fig, *_ = _draw(ctx, "draw_violin")
     plt.close("all")
     assert made and all(p._con is None and not p._parts for p in made)
+
+
+@pytest.mark.parametrize("name", ["draw_beeswarm", "draw_violin"])
+def test_one_columns_pool_is_held_at_a_time(ctx, monkeypatch, name):
+    """Each column's pool is read only in its own iteration, so the next column's
+    is opened with every earlier one already released."""
+    if name == "draw_violin":
+        pytest.importorskip("scipy")
+    monkeypatch.setattr(_pooled, "BAR_CELL_MAX_POINTS", 400)
+    made, live_at_open, real = [], [], _pooled.CellPool
+
+    def tracked(*a, **k):
+        live_at_open.append(sum(1 for p in made if p._parts))
+        made.append(real(*a, **k))
+        return made[-1]
+
+    monkeypatch.setattr(_pooled, "CellPool", tracked)
+    wells = list(WELLS)
+    fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
+    kw = {"bw": 0.5} if name == "draw_violin" else {}
+    try:
+        getattr(renderer, name)(ctx, ax_mean, ax_frac, wells=wells, colors=["#4488cc"] * 3, xlabels=wells,
+                                target_t=6.0, tp_str="6", threshold=THRESHOLD, pool_groups=None, **kw)
+        assert len(made) == 3 and live_at_open == [0, 0, 0], live_at_open
+        assert _notes(ax_mean) == ["Columns over 400 cells draw a sample of 400 (3 of 3); "
+                                   "fractions, means and medians use every cell"]
+    finally:
+        plt.close(fig)

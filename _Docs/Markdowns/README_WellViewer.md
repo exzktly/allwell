@@ -202,7 +202,7 @@ The section and the Review page belong to the Nanowells feature: a build made fr
 (`ALLWELL_PROFILE`, as for a feature-subset executable) shows neither. The command-line `--nanowell_format` works in every
 build.
 
-In the Analyze pane, open the **Nanowells** section (folded by default), tick **Nanowell arrays**, and mark the
+In the Analyze pane, open the **Nanowells** section (below Quality Control, folded by default), tick **Nanowell arrays**, and mark the
 channel the tiles are imaged in as **Phase** (Channel Tokens). The section asks for the plate format (100 µm or
 50 µm nanowells, or **Custom size**, which shows two more fields: the nanowell diameter and the lattice pitch,
 centre to centre — the run measures the pitch on the tiles, so it is a starting value), the **Array geometry**
@@ -385,6 +385,54 @@ python allwell.py
 python allwell.py --data_dir C:\path\to\results
 ```
 
+#### rsync for remote runs (Windows)
+
+Only needed to run the pipeline on a remote host. Git for Windows ships
+`ssh.exe` but not `rsync.exe`, so rsync is added by hand. What matters is
+that `rsync.exe` and the `ssh.exe` it launches come from the **same**
+MSYS/Cygwin runtime (the same `msys-2.0.dll`). A mismatched pair fails
+before ssh even starts, with `dup() in/out/err failed` / `error in IPC
+code (code 14)` or exit 12 "connection unexpectedly closed". All-Well
+always uses the `ssh.exe` sitting beside the `rsync.exe` it found, so
+putting the two in one folder is the whole fix.
+
+**Option A — copy rsync into Git for Windows.** From
+<https://repo.msys2.org/msys/x86_64/> download the latest `.pkg.tar.zst`
+of each package below, extract it (7-Zip with zstd support, or
+`tar -I zstd -xf <file>` in Git Bash), and copy the listed file from its
+`usr/bin/` into `C:\Program Files\Git\usr\bin\`:
+
+| Package | File |
+|---|---|
+| `rsync` | `rsync.exe` |
+| `libxxhash` | `msys-xxhash-0.dll` |
+| `libzstd` | `msys-zstd-1.dll` |
+| `liblz4` | `msys-lz4-1.dll` |
+| `libopenssl` | `msys-crypto-3.dll` (only if Git lacks it) |
+
+Skip any DLL Git already has, and never copy `msys-2.0.dll` — Git's own
+copy is the runtime its `ssh.exe` uses. Then, in Git Bash, list anything
+still missing (no output means done):
+
+```bash
+ldd /usr/bin/rsync.exe | grep "not found"
+```
+
+**Option B — install MSYS2** (<https://www.msys2.org/>, default
+`C:\msys64`), then in an MSYS2 shell run `pacman -S rsync openssh`. Install
+both: without MSYS2's `openssh`, All-Well falls back to Git's `ssh.exe`,
+which is the mismatched pair above. Remove any `rsync.exe` from Git's
+`usr\bin` first, because All-Well looks there before `C:\msys64`.
+
+All-Well's search order for `rsync.exe` is Git for Windows `usr\bin`,
+cwRsync, `C:\msys64`, `C:\tools\msys64`, `C:\cygwin64`, then `PATH`. To
+check which pair it will use, run this from the repo root; both lines must
+name the same folder:
+
+```powershell
+python -c "from services.remote_config import resolve_rsync_binary as r, resolve_ssh_for_rsync as s; print(r()); print(s())"
+```
+
 To produce a distributable Windows bundle (optional — only if you want
 `AllWell.exe` for users who don't have the env), run this from the same
 Miniforge Prompt you have been using:
@@ -428,8 +476,9 @@ A common end-to-end run, from raw images to plots, takes five clicks:
    nuclear/fluorescent/phase role per channel). Because the filled-in fields
    otherwise look exactly like ones you typed, two places say what happened: the
    status line under the run controls names the channels it found and which one
-   it gave the segmentation role, and a readout under the Filename Schema
-   control says what layout was detected and **how many of the sampled filenames
+   it gave the segmentation role, and a readout at the top of the Filename
+   Schema section, directly under the **Detect from filenames** button, says
+   what layout was detected and **how many of the sampled filenames
    actually match it**. When some do not, it names them and says why — for
    example *"1 of the 25 filenames sampled does not fit this layout:
    Exp01_GFP_ZZ9_f0_t0 — position 3 is 'ZZ9', not a well"*. A name whose **well**
@@ -440,10 +489,13 @@ A common end-to-end run, from raw images to plots, takes five clicks:
    hundred names, not the whole plate. Channels are listed in filename order,
    which is usually alphabetical rather than the order they were acquired in.
 
-   **Detect from filenames** re-runs that scan on demand. Use it after typing
+   **Detect from filenames**, the first row of the Filename Schema section,
+   re-runs that scan on demand and fills the separator, position and schema
+   rows beneath it. Use it after typing
    over the guess, after fixing the separator by hand, or after pointing the
    input field at a different folder without going through the browser. If
-   nothing can be detected it says so in amber and leaves your settings alone —
+   nothing can be detected it says so in amber and leaves the settings below
+   it alone —
    it never overwrites a schema with a worse guess. The same button is on the
    Datasets pane's **Zip Loose Folder** page, which asks the same question about
    the same filenames; that page needs only the well position, so it will accept
@@ -472,7 +524,10 @@ editable directly; the **Position** dropdowns above it are the same value seen
 the other way round, and the two follow each other — pick a field and the
 string rewrites, type a string and the dropdowns reset. When you pick an input
 folder All-Well guesses this schema (and the separator) from a sample of the
-filenames and fills it in — a starting point you can correct, not a lock.
+filenames and fills it in — a starting point you can correct, not a lock. The
+**Detect from filenames** button above the separator asks for that guess again;
+the button, the separator box, the dropdowns and the schema string all start at
+one left edge.
 
 The Datasets pane's [Zip Loose Folder](#zip-loose-folder) tool asks for the
 schema with this same control, since the archives it builds are what Analyze
@@ -696,6 +751,20 @@ else, or once a run has written there again.
     on screen rather than leaving the old counts sitting under a new picture.
     Changing the Probability value does **not** stale it: that is the number
     the curve exists to help you choose.
+  - **Click a point on the curve to see what that threshold finds.** The count
+    alone cannot tell you whether the nuclei are the right ones, so clicking a
+    point puts its threshold into the Playground's **Probability** box and
+    segments the frame on screen at it, exactly as if you had typed the value
+    and pressed **Segment**. The outlines on the image are then that
+    threshold's, the read-out under the image says `prob=` with the value
+    shown, and the point you picked is ringed on the curve. A click snaps to
+    the nearest of the nineteen measured points; a click away from the line,
+    or with the plot toolbar's zoom or pan switched on, does nothing. If the
+    curve no longer describes the frame on screen — you moved to another frame
+    or changed the correction or the Overlap threshold — the click is refused
+    and the read-out says to sweep again, rather than showing one frame at a
+    threshold read off another frame's curve. Clicks are also ignored while a
+    segmentation or a sweep is still running.
   - **Segment** and **Threshold curve…** cannot run at the same time — they
     share one loaded detector — so each greys the other out while it works.
   - A frame with no contrast at all is not swept, and says so in those words
@@ -1249,6 +1318,16 @@ the command box empty would mean *run on the SSH host itself*, which on an HPC
 login node is the one thing the setting exists to avoid, so the form refuses it
 and says so. Switch **Run compute** back to *On the remote machine itself* if
 that is what you meant.
+
+**Test** next to *Scheduler command* checks the command before you spend a
+run on it. It sends a short job the way a run is sent — through the scheduler
+command as it stands in the form, saved or not, into the host's conda
+environment — and reports what the job found on its node: which node and Slurm
+job, how many of the node's CPUs it was given, the GPUs it can see, whether
+Torch can use them, and the Cellpose version. A job given one core of a bigger
+node, a GPU node whose Torch is a CPU-only build, or a missing Torch is called
+out with what to change. A node that has to start can take several minutes;
+closing the window cancels the job.
 
 **Fetch** next to *Compute profile* reads the cluster's JupyterHub
 configuration and lists the compute options its web page offers; picking one
@@ -6443,7 +6522,15 @@ How it works:
    dataset) or no results at all (a raw dataset); **Destination** must be a
    new, empty folder, different from both datasets. Both originals are left
    untouched either way.
-2. Check the **Gap** field. It is the time between dataset 1's *last*
+2. Choose where the result goes. **Create a new dataset in the destination
+   folder** (the default) writes a complete new dataset and leaves both
+   originals as they are. **Add dataset 2 to dataset 1 in place** adds dataset
+   2's images to dataset 1 itself and copies nothing — see
+   [Adding a timepoint in place](#adding-a-timepoint-in-place) below. The
+   destination field is greyed out in that mode, since nothing is written there.
+   If the two datasets can't be combined that way, the option is greyed out and
+   the reason is shown beneath it.
+3. Check the **Gap** field. It is the time between dataset 1's *last*
    timepoint and dataset 2's *first*, written like `24h`, `90m`, `1.5d`, `1d 6h 30m` or a
    bare number of hours (a comma works as the decimal point, `1,5`). Anything
    that could be read two ways, such as `6h30`, `12:30`, `1d6` or `1,500`, is
@@ -6459,7 +6546,7 @@ How it works:
    (or a minute), the page shows both numbers and goes with yours. Underneath,
    the page lists dataset 2's resulting timepoint labels, updating as you type,
    so you can see the result before anything is copied.
-3. Once both folders are picked, a status panel appears below showing a
+4. Once both folders are picked, a status panel appears below showing a
    "Ready — N well(s)" plate preview of what the merge will actually touch —
    before you've pressed anything. Press **Concatenate** and that same plate
    starts colouring per well as the merge progresses (grey → amber "merging"
@@ -6468,7 +6555,7 @@ How it works:
    phase rail (Validate → Merge → Verify → Finalize) and an overall progress
    bar. The full text log is still there if you want it — tick **Show raw
    log** to reveal it below the plate.
-4. On success, click **Open merged dataset in Review** to load the result
+5. On success, click **Open merged dataset in Review** to load the result
    straight into Review (now the page's highlighted default action, in place
    of Concatenate, until you change one of the source folders again).
 
@@ -6568,7 +6655,79 @@ the rest of the plate at the same time, run
 [Validate & Repair](#validate--repair-dataset), which reports the same thing as
 a finding rather than stopping at the first one.
 
-**If a run is interrupted** (the app is closed, the machine loses power, the
+#### Adding a timepoint in place
+
+For an experiment that is still running — a new timepoint converted every day,
+say — writing a fresh copy of the whole plate for each new timepoint quickly
+costs more disk and time than the imaging itself (at 60 wells, 25 tiles and
+3–4 channels, twenty timepoints would mean several terabytes of copying).
+**Add dataset 2 to dataset 1 in place** avoids that: dataset 2's images are
+added to dataset 1's own per-well archives (`in/<WELL>.zip`), under their
+shifted timepoint names, and nothing that is already there is moved, copied or
+rewritten.
+
+- **When it is offered.** Dataset 2 must be a raw dataset (converted images,
+  not yet analysed). Dataset 1 can be raw or analysed. Dataset 1's wells must
+  be zip archives, not folders. If dataset 1 has an acquisition record
+  (`in/acquisition.json`), dataset 2 needs one too, because the record must
+  keep describing every image dataset 1 holds. When any of this is not true the
+  option is greyed out and the page says why.
+- **What changes.** Only dataset 1's `in/` folder: each well's archive gains
+  dataset 2's images, a well only dataset 2 has gets a new archive, and the
+  acquisition record gains dataset 2's timepoints. An analysed dataset 1's
+  results (`out/`) are left exactly as they are. Then run **Analyze** on dataset
+  1 with **Incremental** ticked: only the new timepoint is processed, and its
+  rows are added to each well's measurements and nanowell tables.
+- **Dataset 2 is left where it is.** Nothing in it is changed or deleted. The
+  end of the run log lists every one of dataset 2's files that was added and
+  checked, well by well, so you can delete them yourself once you are happy.
+  Operating-system clutter in its archives (`.DS_Store`, `._` files) is not
+  copied across.
+- **Every image is checked.** Each added image is read back from dataset 1's
+  archive and compared with dataset 2's original before the run counts as done.
+- **All or nothing.** If anything goes wrong — a full disk, an image that does
+  not check out, a press of Stop — every archive the run had touched is put
+  back exactly as it was, byte for byte, along with the acquisition record, and
+  the log says what was restored. Dataset 1 never ends up with the new
+  timepoint in some wells only. Before each archive is touched, a small hidden
+  file beside it (`.<WELL>.zip.aw-append-journal`, a few kilobytes) records how
+  to undo the change, and `in/.aw-append-run.json` marks the run as unfinished.
+- **After a crash.** If the app or the machine stops in the middle, the next
+  time the dataset is opened — in Review, by an Analyze run, or by Concatenate —
+  the unfinished addition is undone first and the log says so. Then run the
+  addition again. Subset, Merge Plates, Validate and Import Loose refuse the
+  dataset until that has happened, so none of them can copy a half-added
+  timepoint. If the addition is still running in another window, or was started
+  on another computer, it is left alone and you are told. When you know it is
+  not running any more — that computer is gone, say — pick the dataset in
+  Concatenate and press **Undo the unfinished addition…**; you are asked to
+  confirm, and asked again, with the reason, before anything recorded as still
+  running is undone.
+- **It never undoes over a changed archive.** If something else has rewritten
+  a well's archive since the addition stopped, the undo refuses rather than
+  damage it and says which archive changed. Copying the dataset to another disk
+  or a sync folder does not count as a change. Concatenate's **Undo the
+  unfinished addition…** then offers to **keep the archives as they are**: nothing is
+  restored, the notes are discarded, and the log lists every archive — exactly
+  as it was before, or with the files added since the addition began, by name —
+  and whether `in/acquisition.json` changed. Analyze checks that record against
+  the archives before it runs.
+- **The notes are hidden files in `in/`**: one `.<WELL>.zip.aw-append-journal`
+  per archive the addition touched (a few kilobytes) and `.aw-append-run.json`.
+  Leave them alone; the app removes them. To check an archive by hand, list it
+  (`unzip -l in/A01.zip`, or open it in Finder or Explorer) and look for the new
+  timepoint's file names.
+- **Folder wells take longer to start.** If dataset 2 keeps a well's images in a
+  folder rather than a zip, every file is read once to checksum it before
+  anything is written; the log says so per well, and Stop ends it there.
+- **The saving is on your own disk.** Remote Analyze runs still upload a
+  well's whole archive again after it grows, because the remote copy is
+  recognised by the archive's size and date (tracker row M24).
+- **Adding the same data twice is refused.** If dataset 2's images (by name, or
+  by content) are already in dataset 1, nothing is added and the message names
+  the files, so a second press of Concatenate cannot duplicate a timepoint.
+
+**If a new-dataset run is interrupted** (the app is closed, the machine loses power, the
 disk fills up) partway through, just point Concatenate at the same three
 folders and press Concatenate again. The app can tell an interrupted attempt
 apart from a folder you've already finished into or one holding unrelated

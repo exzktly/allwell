@@ -14,6 +14,17 @@ suggesting *detect nothing* — or its low-threshold shoulder, which reproduces
 the Analyze form's hardcoded default to three decimal places. What the plot
 marks instead is where the user currently is, so they can see whether that sits
 on a shoulder or on a cliff.
+
+**The curve is clickable, because the real answer is the picture.** A press on
+the line (within matplotlib's own pick radius of it) snaps to the nearest
+*sampled* threshold — never an interpolated one, which no sweep measured — and
+hands that value to the ``on_pick`` callback the controller supplies. The
+controller writes it into the Probability box and re-segments the frame through
+the Segment button's own path, so the outlines on the image are the ones that
+threshold produces. The picked point is ringed on the curve. A press off the
+line, on a refusal figure, or while a toolbar zoom/pan mode is armed picks
+nothing. The view owns only the hit test; what a pick *does* is the
+controller's.
 """
 
 from __future__ import annotations
@@ -22,13 +33,22 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout
 
 from ui import theme
 
+#: ``gid`` of the measured line, so the hit test reads the points the user can
+#: actually see rather than a copy of them held somewhere else.
+CURVE_GID = "threshold-curve"
+#: ``gid`` of the ring marking the threshold last picked by a click.
+PICKED_GID = "picked-threshold"
 
-def show_threshold_curve(ctx, curve) -> None:
+
+def show_threshold_curve(ctx, curve, *, on_pick=None, picked=None) -> None:
     """Open (or repaint) the window plotting *curve*.
 
     A declined curve is shown as its own sentence on empty axes rather than as
     a blank window or no window at all: the user pressed a button and is owed
     an answer, and "no nuclei at any threshold" is an answer.
+
+    *on_pick(threshold)* is called with the sampled threshold nearest a press
+    on the line; *picked* is the threshold to ring on the curve, if any.
     """
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
@@ -49,16 +69,62 @@ def show_threshold_curve(ctx, curve) -> None:
             lambda _r: setattr(ctx.runtime.playground, "sweep_curve_popup", None))
         popup._fig = fig
         popup._canvas = canvas
+        # Connected once per window; the callback it reaches is replaced on
+        # every repaint, so a window reused across sweeps never calls a pick
+        # handler that belongs to an earlier one.
+        canvas.mpl_connect("button_press_event",
+                           lambda ev: _on_press(popup, ev))
         ctx.runtime.playground.sweep_curve_popup = popup
         popup.show()
 
-    draw_threshold_curve(popup._fig, curve)
+    popup._on_pick = on_pick
+    draw_threshold_curve(popup._fig, curve, picked=picked)
     popup._canvas.draw_idle()
     popup.raise_()
     popup.activateWindow()
 
 
-def draw_threshold_curve(fig, curve) -> None:
+def _on_press(popup, event) -> None:
+    """A press on the curve window: pick the sampled point under it, if any."""
+    on_pick = getattr(popup, "_on_pick", None)
+    if on_pick is None or getattr(event, "button", None) != 1:
+        return
+    # An armed zoom or pan mode owns the press; picking as well would
+    # re-segment the frame every time the user drags out a zoom box.
+    toolbar = getattr(event.canvas, "toolbar", None)
+    if toolbar is not None and str(getattr(toolbar, "mode", "") or ""):
+        return
+    hit = point_at(popup._fig, event)
+    if hit is not None:
+        on_pick(hit[0])
+
+
+def point_at(fig, event) -> tuple[float, int] | None:
+    """``(threshold, count)`` of the sampled point a press landed on, or None.
+
+    "On" means within matplotlib's own pick radius of the drawn line, so a
+    press between two markers still counts; it then snaps to the nearest
+    **sampled** point in screen space. An interpolated threshold would be one
+    no sweep measured, and the count beside it would be invented. ``None`` for
+    a press off the line, outside the axes, or on a figure with no curve on it
+    (a refusal, or nothing swept yet).
+    """
+    import numpy as np
+    line = next((ln for ax in fig.axes for ln in ax.lines
+                 if ln.get_gid() == CURVE_GID), None)
+    if line is None or event.inaxes is not line.axes:
+        return None
+    if event.x is None or event.y is None or not line.contains(event)[0]:
+        return None
+    xs, ys = (np.asarray(v, dtype=float) for v in line.get_data())
+    if xs.size == 0:
+        return None
+    px = line.axes.transData.transform(np.column_stack([xs, ys]))
+    i = int(np.argmin(np.hypot(px[:, 0] - event.x, px[:, 1] - event.y)))
+    return float(xs[i]), int(ys[i])
+
+
+def draw_threshold_curve(fig, curve, *, picked=None) -> None:
     """Paint *curve* onto *fig*. Pure matplotlib — no Qt, no app state.
 
     Separate from the window so a test can assert what was *drawn* rather than
@@ -87,7 +153,8 @@ def draw_threshold_curve(fig, curve) -> None:
         return
 
     ax.plot(curve.thresholds, curve.counts, color=theme.Colors.accent, lw=1.8,
-            marker="o", markersize=3.5, label="nuclei detected")
+            marker="o", markersize=3.5, label="nuclei detected", gid=CURVE_GID)
+    _draw_picked(ax, curve, picked)
     if curve.truncated:
         # A hollow marker where the data stops, so the end of the measurement
         # is distinguishable from the end of the axis.
@@ -138,3 +205,25 @@ def draw_threshold_curve(fig, curve) -> None:
         for t in leg.get_texts():
             t.set_color(txt_pri)
     fig.tight_layout()
+
+
+def _draw_picked(ax, curve, picked) -> None:
+    """Ring the sampled point a click picked, labelled with what it measured.
+
+    Only a threshold that IS one of the curve's points is ringed: a value that
+    matches none of them (a new sweep on a different grid) is not drawn at a
+    guessed position.
+    """
+    if picked is None:
+        return
+    import numpy as np
+    xs = np.asarray(curve.thresholds, dtype=float)
+    hits = np.flatnonzero(np.isclose(xs, float(picked)))
+    if hits.size == 0:
+        return
+    i = int(hits[0])
+    ax.plot([xs[i]], [curve.counts[i]], marker="o", markersize=9,
+            markerfacecolor=theme.Colors.accent2,
+            markeredgecolor=theme.Colors.text_primary, markeredgewidth=1.4,
+            linestyle="none", gid=PICKED_GID,
+            label=f"picked: {xs[i]:g} ({curve.counts[i]} on the curve)")

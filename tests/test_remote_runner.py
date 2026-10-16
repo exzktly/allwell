@@ -2051,6 +2051,9 @@ def test_required_files_list_is_what_we_promised():
         # decides from the same question which members survive a rewrite.
         "util/image_exts.py",
         "util/zip_write.py",
+        # The in-place append journal; the Analyze runner recovers with it
+        # client-side, listed because the manifest mirrors every ``util/`` file.
+        "util/zip_append.py",
         # The dataset's append-only provenance log. Written client-side only;
         # listed because the manifest mirrors every ``util/`` file.
         "util/provenance_log.py",

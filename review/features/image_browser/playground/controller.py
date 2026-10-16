@@ -1400,6 +1400,9 @@ def playground_sweep_now(ctx) -> None:
             subject=subject,
             requested=len(grid), requested_span=(grid[0], grid[-1]))
         st.sweep_curve = curve
+        # A new curve has no picked point: a ring carried over from the last
+        # one would mark a threshold this measurement never had clicked.
+        st.sweep_picked = None
         # A sweep the user stopped is still evidence, and saying how far it got
         # is the difference between a partial curve and a wrong one.
         # ``describe`` already says "Stopped after N of M ... so far" when the
@@ -1408,7 +1411,7 @@ def playground_sweep_now(ctx) -> None:
         st.sweep_status = curve.describe()
         if note:
             st.sweep_status = f"{st.sweep_status} — {note}"
-        _sweep_view.show_threshold_curve(ctx, curve)
+        _show_sweep_curve(ctx)
         # ``playground_on_change`` rebuilds the whole read-out, and every one
         # of its exits goes through ``_set_frame_status``, which appends
         # ``_describe_sweep``. Writing the line here as well would be written
@@ -1428,6 +1431,60 @@ def playground_sweep_now(ctx) -> None:
         arr, grid, nms_thresh=st.seg_nms_thresh, on_done=_finish,
         on_failed=_on_failed, on_progress=_on_progress,
         should_stop=lambda: bool(st.sweep_stop))
+
+
+def _show_sweep_curve(ctx) -> None:
+    """Open or repaint the curve window, with clicks wired to a pick."""
+    st = _st(ctx)
+    _sweep_view.show_threshold_curve(
+        ctx, st.sweep_curve, on_pick=lambda t: playground_sweep_pick(ctx, t),
+        picked=st.sweep_picked)
+
+
+def playground_sweep_pick(ctx, threshold: float) -> None:
+    """A point clicked on the threshold curve: segment the frame at it.
+
+    The curve answers "how many", and the question a user is actually asking
+    is "which ones" — so a click turns a point on the plot into outlines on the
+    image. The picked value is written **into the Probability box**, not held
+    beside it, and the Segment button's own path then runs: the box stays the
+    one source of truth for the threshold in force, the read-out names it
+    (``prob=…``) exactly as it does after a typed value, and the labels are
+    keyed on it, so typing a different number afterwards marks them stale the
+    usual way rather than leaving outlines from a threshold no longer shown.
+
+    Refused, with a sentence, when the curve was measured on other pixels
+    (picking a threshold off one frame's curve and showing it on another is
+    the substitution the stale check exists to name) and while either worker
+    is busy — both reach the session's one model. Nothing changes in any of
+    those cases, including the box.
+    """
+    st = _st(ctx)
+    win = ctx.window
+    curve = st.sweep_curve
+    if curve is None or not getattr(curve, "points", None):
+        return
+    if st.sweep_running or st.seg_running:
+        _set_status(win, "Still running — wait for it to finish before "
+                         "picking a threshold off the curve.")
+        return
+    if st.sweep_key is not None and st.sweep_key != _sweep_key(ctx):
+        _set_status(win, "⚠ This threshold curve was measured on a different "
+                         "frame or settings than the one on screen — sweep "
+                         "again before picking from it.")
+        return
+    threshold = float(threshold)
+    edit = getattr(win, "_playground_seg_prob_edit", None)
+    if edit is not None:
+        edit.setText(f"{threshold:g}")
+    else:
+        st.seg_prob_thresh = threshold
+    st.sweep_picked = threshold
+    _show_sweep_curve(ctx)
+    playground_segment_now(ctx)
+    if st.seg_running:
+        _set_status(win, f"StarDist: segmenting at prob={threshold:g}, picked "
+                         f"on the threshold curve…")
 
 
 def playground_sweep_stop(ctx) -> None:

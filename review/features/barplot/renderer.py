@@ -57,6 +57,7 @@ from review.core.plot_annotations import (
 )
 from domain.tp_match import tp_close
 from review.features.barplot._pooled import ColumnCells, column_cells, finish_columns
+from review.features.barplot._pooled import release_previous as _release_previous
 from review.features.barplot._annotations import (
     cluster_header_pad,
     label_bar,
@@ -208,6 +209,7 @@ def draw_violin(
     try:
         for i, (lbl, color) in enumerate(zip(wells, colors)):
             col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
+            _release_previous(columns)
             cells = column_cells(ctx, lbl, pool_groups, col_tp, threshold)
             columns.append(cells)
             vals, n_total, n_above = cells.vals, cells.n_total, cells.n_above
@@ -372,6 +374,7 @@ def draw_beeswarm(
         for i, (lbl, color) in enumerate(zip(wells, colors)):
             col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
             xi = xs[i] if i < len(xs) else i
+            _release_previous(columns)
             cells = column_cells(ctx, lbl, pool_groups, col_tp, threshold)
             columns.append(cells)
             cell_vals = cells.vals

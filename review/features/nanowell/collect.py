@@ -80,6 +80,8 @@ class NanowellData:
     problems: list = field(default_factory=list)
     #: ``well -> the rule its roster was decided by`` (``domain.nanowell_roster``): a dataset can mix them.
     roster_rules: dict = field(default_factory=dict)
+    #: ``well -> why`` for a well an incremental run analysed again over every timepoint (tracker X35a-R8).
+    reanalysed: dict = field(default_factory=dict)
     #: Where the run's files are, for the readers of images (crops, montages): the output folder holding
     #: ``nanowells/``, and the input folder holding ``<well>.zip`` (``None`` when it is not beside the data).
     out_dir: Path | None = None
@@ -301,7 +303,7 @@ def load_nanowell_data(data_dir) -> NanowellData | None:
             f"This dataset's nanowell tables use scheme version {block.get('scheme_version')!r}; this version of "
             f"All-Well reads {sorted(SUPPORTED_SCHEMES)}. Open it with the version that analysed it, or re-run "
             "the analysis.")
-    frames, grids, problems, roster_rules = [], {}, [], {}
+    frames, grids, problems, roster_rules, reanalysed = [], {}, [], {}, {}
     for path in sorted(folder.glob("*.csv")):
         well = path.stem
         grid_path = folder / f"{well}_grid.json"
@@ -333,6 +335,8 @@ def load_nanowell_data(data_dir) -> NanowellData | None:
         frames.append(table)
         grids[well] = grid.get("timepoints") or {}
         roster_rules[well] = roster_rule(grid.get("array_radius"))
+        if (grid.get("array_radius") or {}).get("reanalysed_because"):
+            reanalysed[well] = grid["array_radius"]["reanalysed_because"]
     sites = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["well", "timepoint"])
     phase = _phase_token(sidecar)
     channels = sorted({c[: -len("_integrated")] for c in sites.columns if c.endswith("_integrated")}
@@ -355,4 +359,5 @@ def load_nanowell_data(data_dir) -> NanowellData | None:
                         schema=str(options.get("filename_schema") or sidecar.get("schema") or ""),
                         separator=str(options.get("filename_sep") or sidecar.get("separator") or ""),
                         phase_token=str(options.get("phase_token") or sidecar.get("phase_token") or ""),
-                        channels=channels, problems=problems, roster_rules=roster_rules)
+                        channels=channels, problems=problems, roster_rules=roster_rules,
+                        reanalysed=reanalysed)

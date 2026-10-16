@@ -312,7 +312,8 @@ def test_a_figure_of_wells_whose_rosters_two_versions_decided_says_so(tmp_path):
     rows = [_row("t_c", 0, 0, n=1, c=0.1), _row("t_c", 1, 0, n=3, c=0.1)]
     data = load_nanowell_data(_dataset(tmp_path, {"A01": rows, "B01": rows}, starts={"t_c": STARTS["t_c"]}))
     for well, block in (("A01", {"radius_um": 900.0}), ("B01", {"radius_um": 900.0, "roster": [[0, 0], [1, 0]],
-                                                                  "roster_rule": "evidence"})):
+                                                                  "roster_rule": "evidence",
+                                                                  "reanalysed_because": "a new timepoint"})):
         path = data.out_dir / "nanowells" / f"{well}_grid.json"
         grid = json.loads(path.read_text())
         grid["array_radius"] = block
@@ -329,3 +330,4 @@ def test_a_figure_of_wells_whose_rosters_two_versions_decided_says_so(tmp_path):
     finally:
         controller.render_position = real
     assert "Wells A01 keep an earlier version's nanowell roster" in notes[0]
+    assert "B01: analysed again over every timepoint when a timepoint was added" in notes[0]       # X35a-R8

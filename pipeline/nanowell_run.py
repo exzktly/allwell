@@ -1143,15 +1143,16 @@ class CircleEvidence:
     misanchored: dict                                   # timepoint -> (dq, dr): its nanowells sit that step off
 
 
-def _misanchored(detected: dict) -> dict:
+def _misanchored(detected: dict, kept=()) -> dict:
     """``timepoint -> step`` for each timepoint whose detected sites match the other timepoints' better moved by one
     lattice step than where they are: its origin is a step off (review X35a-R2). A timepoint whose sites the others
     do not overlap better anywhere is not listed. With two timepoints a step apart, both are listed: which of them
-    is wrong cannot be told."""
+    is wrong cannot be told. *kept* are the sites an earlier run's kept timepoints detected: the timepoints of an
+    incremental run are judged against them too, and they are never listed themselves (review X35a-R7)."""
     steps = [(dq, dr) for dq in (-1, 0, 1) for dr in (-1, 0, 1)]
     out = {}
     for tp, mine in detected.items():
-        others = set().union(*(d for t, d in detected.items() if t != tp))
+        others = set(kept).union(*(d for t, d in detected.items() if t != tp))
         if not others:
             continue
         overlap = {s: len({(q + s[0], r + s[1]) for q, r in mine} & others) for s in steps}
@@ -1190,7 +1191,8 @@ def _evidence_roster(located: dict, anchored, radius_um: float, settings: Nanowe
     basis = np.column_stack((first.fit.a1, first.fit.a2))
     distance = {a: float(np.linalg.norm(basis @ np.asarray(a, dtype=float))) for a in candidates}
     found = {tp: {(e.q, e.r) for e in located[tp].indexed if e.q is not None} for tp in anchored}
-    misanchored = _misanchored(found) if len(anchored) > 1 else {}
+    kept = kept or {}
+    misanchored = _misanchored(found, kept.get("detected", ())) if len(anchored) > 1 or kept.get("detected") else {}
     band = {a for a in candidates if radius_um - pitch / 4 < distance[a] <= radius_um + pitch / 4}
     imaged = {tp: set() for tp in anchored}
     for tp in anchored:
@@ -1204,7 +1206,11 @@ def _evidence_roster(located: dict, anchored, radius_um: float, settings: Nanowe
             x, y = origin + tp_basis @ np.asarray(a, dtype=float)
             if _disk_covered(x, y, settings.diameter_um / 2, tiles):
                 imaged[tp].add(a)
-    kept = kept or {}
+    # Under the evidence rule a band site is left out of a roster only when its whole disk was seen empty, and the
+    # rows an earlier run kept exist only for its roster's sites, so a band site absent from the kept roster was seen
+    # whole: without this, a new timepoint that does not image it whole put it back, and every incremental run of the
+    # well re-analysed it to the same roster with a reason that said it had grown (review X35a-R6).
+    kept_out = band - set(map(tuple, kept["roster"])) if kept.get("roster") is not None else set()
 
     def supported(detected, seen_whole):
         return frozenset(a for a in candidates
@@ -1214,7 +1220,7 @@ def _evidence_roster(located: dict, anchored, radius_um: float, settings: Nanowe
 
     trusted = [tp for tp in anchored if tp not in misanchored]
     detected = set(kept.get("detected", ())).union(*(found[tp] for tp in trusted))
-    seen_whole = set(kept.get("imaged", ())).union(*(imaged[tp] for tp in trusted))
+    seen_whole = set(kept.get("imaged", ())).union(kept_out, *(imaged[tp] for tp in trusted))
     return CircleEvidence(supported(detected, seen_whole), {tp: supported(found[tp], imaged[tp]) for tp in anchored},
                           misanchored)
 
@@ -1233,13 +1239,13 @@ def _circle_roster(outcome, anchored, radius_um, settings, fixed_roster, fixed_r
     timepoint: an incremental run must give the roster a run over all of them would (review X35a-R1)."""
     if fixed_roster:
         roster = frozenset(tuple(map(int, a)) for a in fixed_roster)
+        evidence = None
         if kept is not None and anchored:
-            full = _evidence_roster(outcome.located, anchored, radius_um, settings, kept).roster
-            added, removed = full - roster, roster - full
+            evidence = _evidence_roster(outcome.located, anchored, radius_um, settings, {**kept, "roster": roster})
+            added, removed = evidence.roster - roster, roster - evidence.roster
             if added or removed:
                 outcome.roster_change = (f"the new timepoints' evidence adds {len(added)} nanowell(s) to the roster the "
                                          f"earlier run kept and removes {len(removed)}")
-        evidence = None
     elif fixed_radius_um is None and anchored:
         evidence = _evidence_roster(outcome.located, anchored, radius_um, settings)
         roster = evidence.roster
@@ -1252,7 +1258,8 @@ def _circle_roster(outcome, anchored, radius_um, settings, fixed_roster, fixed_r
         outcome.located[tp].notes.append(
             f"Its nanowells sit {step} lattice steps from the other timepoints': its origin is probably wrong, so its "
             "addresses may name neighbouring nanowells, and its detections were not used to decide the well's rim")
-    reference = next((tp for tp in anchored if tp not in evidence.misanchored), None)
+    # Against the first that is not off; in an incremental run, the earlier run's reference (None here).
+    reference = None if fixed_roster else next((tp for tp in anchored if tp not in evidence.misanchored), None)
     return roster, {tp: (evidence.own[tp] if tp in evidence.misanchored else roster) for tp in anchored}, reference
 
 

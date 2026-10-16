@@ -88,7 +88,9 @@ def _kept_evidence(prior: dict | None) -> dict | None:
         return None
     detected, imaged = set(), set()
     for row in prior["sites"]:
-        if not str(row.get("nw_q") or "").strip():
+        # A kept timepoint flagged a roster mismatch may be anchored a step off (review X35a-R2): its rows' addresses
+        # name its neighbours' sites, so what they say was detected or imaged is said of the wrong nanowells.
+        if not str(row.get("nw_q") or "").strip() or row.get("consistency") == "roster_mismatch":
             continue
         address = (int(float(row["nw_q"])), int(float(row["nw_r"])))
         if str(row.get("detected")).strip().lower() == "true":
@@ -404,6 +406,19 @@ def update_montage_archive(out_zip: Path, staging: Path, well_label: str, recomp
             compress_images_to_zip(staging, out_zip)
 
 
+def _reanalysis_reason(kept_radius: dict, radius: dict) -> str:
+    """Why a well was analysed again over every timepoint, measured on the re-analysis's own roster.
+
+    The count compares the roster the earlier run kept with the one the full re-analysis settled on, not with the
+    incremental pass's estimate, so the grid record states what the rewrite actually changed (tracker X35a-R6).
+    """
+    kept = {tuple(map(int, a)) for a in kept_radius.get("roster") or ()}
+    now = {tuple(map(int, a)) for a in radius.get("roster") or ()}
+    return (f"a new timepoint changed the well's roster ({len(now - kept)} nanowell(s) added, "
+            f"{len(kept - now)} removed), so every timepoint was analysed again and the earlier timepoints' rows "
+            "rewritten")
+
+
 def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
                      csv_prefix, schema, sep, *, grouper, parse, extract, scratch_dir, write_csv, segmenter=None,
                      incremental=False, prior_dir=None, settings_key="", staging_dir=None, plate_rigid=None):
@@ -468,12 +483,12 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         # An incremental run must give the roster a run over every timepoint would (tracker X35a-R1): a rim nanowell
         # hidden at the kept timepoints and seen at a new one belongs to all of them. So the well is analysed again
         # from the start, and its grid record says why.
-        log.info("Well %s — %s: analysing every timepoint again on the roster they support.", well_label,
-                 outcome.roster_change)
-        reason = outcome.roster_change
+        kept_radius = prior["grid"]["array_radius"]
         prior, todo = None, list(timepoints)
         outcome, fixed, fixed_roster, saved = run(prior, todo)
+        reason = _reanalysis_reason(kept_radius, outcome.radius)
         outcome.radius["reanalysed_because"] = reason
+        log.warning("Well %s — %s.", well_label, reason)
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)

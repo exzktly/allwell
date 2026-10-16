@@ -612,7 +612,7 @@ def test_an_incremental_run_gives_the_rim_a_run_over_every_timepoint_gives(tmp_p
     grid = json.loads((out / "nanowells" / "A01_grid.json").read_text())
     full_grid = json.loads((full / "nanowells" / "A01_grid.json").read_text())
     assert grid["array_radius"]["roster"] == full_grid["array_radius"]["roster"]
-    assert len(grid["array_radius"]["roster"]) == 265 and "adds 6" in grid["array_radius"]["reanalysed_because"]
+    assert len(grid["array_radius"]["roster"]) == 265 and "6 nanowell(s) added, 0 removed" in grid["array_radius"]["reanalysed_because"]
     pick = lambda rows: sorted((r["timepoint"], r["nw_q"], r["nw_r"], r["state"]) for r in rows)  # noqa: E731
     assert pick(_rows(out, "A01.csv")) == pick(_rows(full, "A01.csv"))
 
@@ -646,3 +646,111 @@ def test_a_timepoint_anchored_a_step_off_neither_widens_the_rim_nor_passes_as_co
     assert [outcome.timepoints[tp]["consistency"] for tp in ("T0", "T1", "T2")] == [
         "consistent", "roster_mismatch", "consistent"]
     assert any("lattice steps from the other timepoints" in n for n in outcome.timepoints["T1"]["notes"])
+
+
+# ── review X35a-R6..R9: re-analysis only when the roster really changes, and said where it is seen ─
+_CLIPPED_RIM = [dict(rotation=7.0, timepoint=tp, seed=seed, cells=10, radius_fraction=0.47, array_shift_um=shift)
+                for tp, seed, shift in (("T0", 1, (-120.0, 0.0)), ("T1", 2, (250.0, 0.0)), ("T2", 3, (250.0, 0.0)))]
+
+
+def test_a_timepoint_added_to_a_clipped_rim_well_is_analysed_alone_unless_the_roster_really_changes(
+        tmp_path, monkeypatch):
+    """X35a-R6. The rim is cut by the image's edge and the plate moves between timepoints. A band site a kept
+    timepoint saw whole and empty has no row, so the incremental estimate put it back whenever a new timepoint did not
+    image it whole, and every run re-analysed the well to the same roster with a reason saying it had grown. Now:
+    T0 alone keeps 890 sites; adding T1 really removes one (T1 sees it empty), so the well is analysed again and the
+    reason says 1 removed, 0 added; adding T2 changes nothing, so only T2 is located."""
+    from tests.test_nanowell_cli import _run_main
+
+    located = []
+    real = nr.locate_timepoint
+    monkeypatch.setattr(nr, "locate_timepoint", lambda tp, *a, **k: (located.append(tp), real(tp, *a, **k))[1])
+    built = [build_well(**spec) for spec in _CLIPPED_RIM]
+    record = None
+    for _rendered, rec in built:
+        if record is None:
+            record = json.loads(json.dumps(rec))
+        else:
+            record["timepoints"].update(rec["timepoints"])
+            record["tiles"] += rec["tiles"]
+    items = [(spec["timepoint"], rendered) for spec, (rendered, _rec) in zip(_CLIPPED_RIM, built)]
+
+    def upto(n):
+        keep = {tp for tp, _ in items[:n]}
+        return {**record, "timepoints": {k: v for k, v in record["timepoints"].items() if k in keep},
+                "tiles": [t for t in record["tiles"] if t["timepoint"] in keep]}
+
+    plate = _plate_of(tmp_path, items[:1], upto(1))
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
+    grid = lambda: json.loads((out / "nanowells" / "A01_grid.json").read_text())["array_radius"]  # noqa: E731
+    assert len(grid()["roster"]) == 890
+    located.clear()
+    from pipeline import nanowell_task as nt
+
+    warned = []
+    monkeypatch.setattr(nt.log, "warning", lambda message, *args: warned.append(message % args))
+    _plate_of(tmp_path, items[:2], upto(2))
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    assert located == ["T1", "T0", "T1"] and len(grid()["roster"]) == 889
+    assert "0 nanowell(s) added, 1 removed" in grid()["reanalysed_because"]
+    assert any("every timepoint was analysed again" in w for w in warned)       # said as a warning in the run log
+    located.clear()
+    _plate_of(tmp_path, items, upto(3))
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    assert located == ["T2"] and len(grid()["roster"]) == 889
+
+
+def test_a_new_timepoint_anchored_a_step_off_is_named_without_re_analysing_the_well(tmp_path, monkeypatch):
+    """X35a-R7. Kept T0 and T2; T1 added incrementally with its origin a step off. Judged only among the run's own
+    timepoints (one), it was caught only by a full re-analysis whose reason said 17 nanowells had been added. Judged
+    against the kept detections, it is named and its detections decide nothing."""
+    from pipeline import nanowell_task as nt
+    from pipeline.nanowell_lattice import index_points
+
+    specs = [dict(rotation=7.0, timepoint="T0", cells=5), dict(rotation=9.0, timepoint="T1", seed=2, cells=5),
+             dict(rotation=9.0, timepoint="T2", seed=3, array_shift_um=(500.0, 0.0), cells=5)]
+    images, record = {}, None
+    for spec in specs:
+        rendered, rec = build_well(**spec)
+        images[spec["timepoint"]] = rendered.images
+        if record is None:
+            record = rec
+        else:
+            record["timepoints"].update(rec["timepoints"])
+            record["tiles"] += rec["tiles"]
+    real = nr.locate_timepoint
+
+    def a_step_off(tp, *args, **kwargs):
+        located = real(tp, *args, **kwargs)
+        if tp == "T1" and located.status == nr.OK:
+            located.origin_montage = tuple(np.asarray(located.origin_montage) + np.asarray(located.fit.a1))
+            located.indexed = index_points(located.detected_common - np.asarray(located.montage.origin_um),
+                                           located.fit, located.origin_montage)
+        return located
+
+    monkeypatch.setattr(nr, "locate_timepoint", a_step_off)
+    run = lambda todo, **k: nr.run_well("A01", record, todo, lambda tp, tile: images[tp].get(tile), SETTINGS,  # noqa: E731
+                                        segmenter=threshold_segmenter(), **k)
+    first = run(["T0", "T2"])
+    nt.write_sites_csv(tmp_path / "sites.csv", first.sites, [])
+    kept = nt._kept_evidence({"grid": {"array_radius": first.radius}, "sites": nt._read_rows(tmp_path / "sites.csv")})
+    block = first.timepoints["T0"]
+    reference = {"timepoint": "T0", "pitch_um": block["pitch_um"], "angle_deg": block["angle_deg"],
+                 "roster_size": block["roster_size"]}
+    added = run(["T1"], fixed_radius_um=first.radius["radius_um"], fixed_roster=first.radius["roster"],
+                kept_evidence=kept, reference=reference)
+    assert added.roster_change == ""
+    assert added.timepoints["T1"]["consistency"] == "roster_mismatch"
+    assert any("lattice steps from the other timepoints" in n for n in added.timepoints["T1"]["notes"])
+
+
+def test_a_kept_timepoint_flagged_a_roster_mismatch_says_nothing_about_the_rim():
+    """X35a-R9: its rows' addresses may name its neighbours' sites, so they are not read as evidence."""
+    from pipeline import nanowell_task as nt
+
+    rows = [{"timepoint": "T0", "nw_q": "3", "nw_r": "0", "detected": "True", "imaged_fraction": "1.0",
+             "consistency": "consistent"},
+            {"timepoint": "T1", "nw_q": "4", "nw_r": "0", "detected": "True", "imaged_fraction": "1.0",
+             "consistency": "roster_mismatch"}]
+    kept = nt._kept_evidence({"grid": {"array_radius": {"roster_rule": "evidence"}}, "sites": rows})
+    assert kept == {"detected": {(3, 0)}, "imaged": {(3, 0)}}

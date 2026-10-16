@@ -9126,11 +9126,17 @@ timepoint put 17 rows of floor into every timepoint — it is compared on its ow
 told. Otherwise every timepoint is compared on the roster, as a rim nanowell a bubble hides at one timepoint is still
 that timepoint's. The grid record keeps the roster as `array_radius.roster` with `roster_rule: "evidence"`, and an
 incremental or re-anchoring run keeps it — unless its new timepoints change it: the kept rows' evidence (sites
-detected, sites whose whole disk was imaged; `nanowell_task._kept_evidence`) and the new timepoints' decide the
-roster a run over every timepoint would, and when that differs from the kept one (a rim nanowell hidden at the kept
-timepoints and seen at a new one, a band site a new timepoint shows empty) the task analyses the well again over
-every timepoint, logs why, and records it as `array_radius.reanalysed_because`. Without that, analysing a well day
-by day gave it 259 sites where one run over both days gave 265. A well analysed before rosters were kept has a
+detected, sites whose whole disk was imaged; `nanowell_task._kept_evidence`, which skips a kept timepoint flagged a
+roster mismatch, since its rows may name its neighbours' sites) and the new timepoints' decide the roster a run over
+every timepoint would. A band site absent from the kept roster counts as seen whole and empty, because under this
+rule that is the only reason one is left out, and the kept rows exist only for roster sites: without that, a well
+whose rim the image cuts was put back together and re-analysed to the same roster on every incremental run. A new
+timepoint is judged a step off against the kept detections too, and is then named without moving anything. When the
+roster really differs (a rim nanowell hidden at the kept timepoints and seen at a new one, a band site a new timepoint
+shows empty) the task analyses the well again over every timepoint, records what the re-analysis changed (sites
+added and removed, measured on its result) as `array_radius.reanalysed_because`, and logs it as a warning; Validate
+lists such wells (`nanowell_reanalysed`) and Nanowells figures drawing them say their earlier rows were rewritten.
+Without the re-analysis, analysing a well day by day gave it 259 sites where one run over both days gave 265. A well analysed before rosters were kept has a
 radius and no roster in its record, and keeps the disk rule it was analysed with, so its new timepoints get the same
 sites as its old ones; its checkpoints carry no roster, so none is taken back into a well of the other rule. The
 default's settings digest is unchanged.

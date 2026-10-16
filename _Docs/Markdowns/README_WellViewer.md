@@ -293,8 +293,10 @@ see, or that was hidden, has a row with its state and **no number**, never a zer
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image
 showed in full; floor just beyond the rim that every image showed empty is not a nanowell and has no row. Adding a
 timepoint to an analysed well gives the same nanowells a run over every timepoint would: when the new images show a
-rim nanowell the earlier ones did not (or show one empty), the well is analysed again over all its timepoints, and
-its grid record says why. A timepoint whose nanowells sit one lattice step from the others' is flagged as a roster
+rim nanowell the earlier ones did not (or show one empty), the well is analysed again over all its timepoints; the
+run log warns, the grid record says how many nanowells were added and removed, Validate lists the well, and the
+Nanowells page notes that its earlier timepoints' numbers were rewritten. Adding a timepoint that changes nothing
+analyses only that timepoint. A timepoint whose nanowells sit one lattice step from the others' is flagged as a roster
 mismatch, with a note, and does not decide the rim. A dataset analysed with an earlier version keeps the set of
 nanowells it was analysed with when timepoints are added to it; Validate, Merge Plates and the Nanowells page name
 wells whose sets two versions decided, since they count the rim differently. Test detection shows the rim one

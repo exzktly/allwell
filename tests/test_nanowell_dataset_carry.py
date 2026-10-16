@@ -237,3 +237,16 @@ def test_validate_names_a_dataset_whose_wells_mix_roster_rules(tmp_path):
     findings = nanowell_findings(paths, {}, ["experiment", "channel", "well", "fov", "timepoint"], "_")
     assert [f[1] for f in findings if f[0] == "warning"] == ["nanowell_roster_rules_mixed"]
     assert "A01 keep an earlier version's" in next(f[2] for f in findings if f[1] == "nanowell_roster_rules_mixed")
+
+
+def test_validate_says_which_wells_were_analysed_again_over_every_timepoint(tmp_path):
+    """Tracker X35a-R8: re-analysis rewrites a well's earlier rows, which Validate names."""
+    from datasets.core.dataset_paths import DatasetPaths
+    from datasets.core.nanowell_tables import nanowell_findings
+
+    root = _dataset(tmp_path / "again", wells=("A01",))
+    _set_rule(root, "A01", {**_EVIDENCE, "reanalysed_because": "a new timepoint changed the well's roster"})
+    paths = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
+    found = [f for f in nanowell_findings(paths, {}, ["experiment", "channel", "well", "fov", "timepoint"], "_")
+             if f[1] == "nanowell_reanalysed"]
+    assert found == [("info", "nanowell_reanalysed", "A01: a new timepoint changed the well's roster")]

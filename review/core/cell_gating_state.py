@@ -71,6 +71,12 @@ class CellGatingState:
     use_scatter_thresh: bool = False
     gating_choices: set[str] | None = None
     thresh_choices: set[str] | None = None
+    #: The fields of view every calculation is restricted to — FOV labels as
+    #: the dataset spells them — or ``None`` for every field. Projected onto
+    #: the row cache as ``FOV_Pass`` by ``review.data.fov_selection``, so it
+    #: composes with the gates above rather than replacing them; persisted in
+    #: the ``cell_gating`` block as ``fov_selection``.
+    fov_selection: set[str] | None = None
     #: The configuration the last gating pass applied (``GatingWorker``), as the
     #: keyword arguments of ``gating_compute.apply_fluor_gating``; ``None`` until a
     #: pass has run on this dataset. The row cache is bounded, so a well can be

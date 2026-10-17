@@ -1168,8 +1168,8 @@ def _dataset_signature(ctx) -> tuple:
     frame — which is what moving a QC threshold or editing the crop region does
     — leaves the counter untouched. The QC params and the crop region are
     therefore folded in beside it, along with the dataset directory (which
-    covers a swap, since ``cache.clear()`` does not bump either) and the gate
-    signature the stats cache already uses.
+    covers a swap, since ``cache.clear()`` does not bump either), the gate
+    signature the stats cache already uses, and the Cell Gating FOV selection.
     """
     ds = ctx.state.dataset
     qc = getattr(ctx.state, "qc", None)
@@ -1180,12 +1180,15 @@ def _dataset_signature(ctx) -> tuple:
         swallowed("cell export: QC params signature")
         qc_sig = None
     from review.domain.stats_compute import _gate_cache_sig
+    fovs = getattr(getattr(ctx.state, "cell_gating", None), "fov_selection", None)
     return (
         int(getattr(ds, "rows_version", 0) or 0),
         str(getattr(ds, "data_dir", "") or ""),
         qc_sig,
         getattr(ds, "crop_region", None),
         _gate_cache_sig(ctx),
+        # The Cell Gating FOV selection rewrites ``FOV_Pass`` the same way.
+        None if fovs is None else tuple(sorted(fovs)),
     )
 
 

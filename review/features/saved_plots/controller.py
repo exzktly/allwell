@@ -907,6 +907,8 @@ class _LiveState:
             scatter_gates=list(gating.scatter_gates or []),
             use_scatter_gates=bool(gating.use_scatter_gates),
             use_scatter_thresh=bool(gating.use_scatter_thresh),
+            fov_selection=(None if gating.fov_selection is None
+                           else sorted(gating.fov_selection)),
         )
         stats = ctx.state.feature_slice("stats")
         self.stats_groups = copy.deepcopy(getattr(stats, "groups", None)) \

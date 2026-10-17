@@ -53,6 +53,7 @@ def save_to_pipeline_info(ctx) -> None:
         # diff each value against the right one.
         seg_channel_token=seg_channel_token_of(ctx),
         thresh_count_on=dict(cg.thresh_count_on),
+        fov_selection=_sorted_or_none(cg.fov_selection),
     )
     save_gating_to_pipeline_info(state.dataset.data_dir, block)
 
@@ -100,6 +101,7 @@ def apply_gating_block(ctx, block) -> bool:
     if not isinstance(block, dict) or not block:
         return False
     applied = _write_gating_block_to_slice(ctx.state.cell_gating, block)
+    _reproject_fov_selection(ctx)
     if not _mirror_gating_to_widgets(ctx):
         return False
     return applied
@@ -145,12 +147,32 @@ def restore_gating_block(ctx, block) -> None:
     cg.use_scatter_thresh = False
     cg.gating_choices = None
     cg.thresh_choices = None
+    cg.fov_selection = None
     # The pass this kicks records its own configuration when it starts; until
     # then a well read from disk must not be re-gated with the one just cleared.
     cg.applied_gating = None
     if isinstance(block, dict) and block:
         _write_gating_block_to_slice(cg, block)
+    _reproject_fov_selection(ctx)
     _mirror_gating_to_widgets(ctx, run_worker=True)
+
+
+def _reproject_fov_selection(ctx) -> None:
+    """Project the just-written FOV selection onto the frames already cached.
+
+    The other gating values reach the frames through the gating pass this
+    module's callers start; the FOV selection is its own verdict layer
+    (``FOV_Pass``), so without this the wells cached before the block was read
+    would go on counting every field until something else re-projected them.
+    """
+    from review.core.selection_controller import invalidate_stats_cache
+    from review.data.fov_selection import apply_fov_selection_to_cache
+
+    apply_fov_selection_to_cache(ctx, None)
+    # A context with no statistics cache (a persistence-only test context) has
+    # nothing derived from the frames to throw away.
+    if getattr(ctx.state, "stats_cache", None) is not None:
+        invalidate_stats_cache(ctx)
 
 
 def _write_gating_block_to_slice(cg, block: dict) -> bool:
@@ -223,6 +245,12 @@ def _write_gating_block_to_slice(cg, block: dict) -> bool:
             setattr(cg, attr, set(str(n) for n in sel) if isinstance(sel, list) else None)
         else:
             setattr(cg, attr, _legacy_selection())
+    # The fields of view every calculation is restricted to; absent ⇒ every
+    # field. Set (rather than merged) because a selection is one decision.
+    sel = block.get("fov_selection")
+    cg.fov_selection = {str(f) for f in sel} if isinstance(sel, list) else None
+    if cg.fov_selection is not None:
+        applied = True
     return applied
 
 

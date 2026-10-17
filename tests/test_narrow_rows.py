@@ -153,11 +153,18 @@ def _switch_on(ctx, layer: str, gating=_intensity_gating) -> None:
         ctx.state.qc.params = dataclasses.replace(params, exclude_soft_cells=True, focus_min=0.1)
     elif layer == "field_exclusions":
         ctx.state.dataset.field_exclusions[(WELL, "8", "0")] = {"reason": "test", "at": "now"}
+    elif layer == "fov_selection":
+        # Every field but 7: the Cell Gating tab's FOV picker.
+        ctx.state.cell_gating.fov_selection = {"1", "2", "3", "4", "5", "6", "8"}
     else:
         raise KeyError(layer)
 
 
 LAYERS = ("gating", "curation", "qc", "crop", "field_quality", "focus", "field_exclusions")
+#: Layers proven here but kept out of :data:`LAYERS`, which four other files
+#: import with cell counts pinned against exactly that roster. The FOV
+#: selection (Cell Gating's FOV picker) excludes FOV 7, cells 24-27.
+LOCAL_LAYERS = LAYERS + ("fov_selection",)
 
 
 def _full(ctx) -> pd.DataFrame:
@@ -183,21 +190,22 @@ def test_each_layer_excludes_its_own_cells(ctx):
     whose verdict failed open on the narrow frame must change the mask."""
     expected = {"gating": {GATED_CELL}, "curation": {CURATED_CELL}, "qc": {QC_CELL},
                 "crop": {CROP_CELL}, "field_quality": {0, 1, 2, 3}, "focus": {FOCUS_CELL},
-                "field_exclusions": {28, 29, 30, 31}}
+                "field_exclusions": {28, 29, 30, 31}, "fov_selection": {24, 25, 26, 27}}
     assert _excluded(_full(ctx)) == set()
-    for layer in LAYERS:
+    for layer in LOCAL_LAYERS:
         ctx.state.qc.params = None
         ctx.state.cell_gating.applied_gating = None
         ctx.runtime.review.included_overrides = {}
         ctx.state.dataset.crop_region = None
         ctx.state.dataset.field_exclusions.clear()
+        ctx.state.cell_gating.fov_selection = None
         _switch_on(ctx, layer)
         assert _excluded(_full(ctx)) == expected[layer], layer
 
 
 @pytest.mark.parametrize("gating", [_intensity_gating, _ratio_scatter_gating], ids=["intensity", "ratio_scatter"])
 def test_with_every_layer_on_the_narrow_mask_is_the_full_mask(ctx, gating):
-    for layer in LAYERS:
+    for layer in LOCAL_LAYERS:
         _switch_on(ctx, layer, gating)
     full, narrow = _full(ctx), _narrow(ctx)
     filler = {f"m{i}" for i in range(10)}
@@ -205,7 +213,7 @@ def test_with_every_layer_on_the_narrow_mask_is_the_full_mask(ctx, gating):
         "the read was not narrow; this measures nothing")
     assert len(_excluded(full)) >= 12, "the layers did not all bite"
     verdicts = ["Included", "QC_Pass", "Crop_Pass", "Gate_Pass", "Gate_On", "Field_Pass",
-                "Focus_Pass", "Excluded_Field_Pass"]
+                "Focus_Pass", "Excluded_Field_Pass", "FOV_Pass"]
     for column in verdicts:
         assert (column in narrow.columns) == (column in full.columns), column
         if column in full.columns:

@@ -100,6 +100,7 @@ def _capture_gating_block(ctx) -> dict:
         use_scatter_thresh=cg.use_scatter_thresh,
         seg_channel_token=seg_channel_token_of(ctx),
         thresh_count_on=dict(cg.thresh_count_on),
+        fov_selection=_sorted_or_none(cg.fov_selection),
     )
 
 

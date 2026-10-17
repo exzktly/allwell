@@ -996,7 +996,7 @@ review/
 │   │   │             (Overview is the report those five modules build; the
 │   │   │              tabs after it are one sub-package each, enumerated from
 │   │   │              the registry — the same shape as image_browser)
-│   │   ├── cell_gating/  controller.py, tab_view.py, renderer.py,
+│   │   ├── cell_gating/  controller.py, tab_view.py, renderer.py, fov_view.py,
 │   │   │                 optimizer_view.py, opt_curve_view.py, gating_compute.py
 │   │   │                      ← split by layer: the tab builder wires controls
 │   │   │                        to the controller, which owns the two QThread
@@ -4465,6 +4465,25 @@ laid out as the two questions it answers, in the order the app applies them:
    is `set_qc_params`: the verdict recomputed over every held cell, a save and a
    redraw of every plot, so a per-keystroke path applied each prefix of a typed
    number (`tests/test_qc_bounds_apply_once.py`).
+
+   Under the QC controls, also *always applied*, sits the **Fields of view**
+   picker (`cell_gating/fov_view.py`): a button naming what is kept ("All
+   FOVs", "FOVs 1–3, 5") that opens a checkbox menu of the dataset's FOVs
+   (`dataset_dims.fov_options`, numerically ordered). The ticks are gathered
+   while the menu is open and applied once when it closes, through
+   `set_fov_selection` — the one write path — which normalises a selection of
+   every field to `None` (so "all" stays all when the dataset later gains a
+   field), saves the `cell_gating` block, re-projects every layer through
+   `qc.recompute_all`, re-reads the tab's CDFs and redraws. The selection is
+   `CellGatingState.fov_selection` and reaches the data as the `FOV_Pass`
+   verdict layer (`review/data/fov_selection.py`, see §6.6b's roster), so it
+   composes with whichever inclusion source the radio pair below chooses. It is
+   also in `_cell_gating_valid_mask` beside QC and crop: the CDFs and the
+   optimizer read the population a threshold is set *for*, and a field
+   excluded from every calculation is not part of it; the CDFs' "first frame of
+   first FOV" is the first *kept* field. A muted line under the button says how
+   many of the dataset's fields are used, names a selected field the dataset
+   does not have, and names the wells the selection could not apply to.
 2. **Fraction-on**, glossed as *which of the included cells count as ON*. The
    same radio pair shape: per-channel cutoffs, or a scatter gate. Then
    Auto-threshold and the button that opens the optimizer.
@@ -14038,8 +14057,9 @@ checks) — and a refusal leaves the session open on the form.
 
 ### 6.6b Why a cell is gone: the Segmentation overlay
 
-Inclusion is the AND of eight verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
-`Gate_Pass`, `Field_Pass`, `Focus_Pass`, `Border_Pass`, `Excluded_Field_Pass`), and the picture that shows a user
+Inclusion is the AND of nine verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
+`Gate_Pass`, `Field_Pass`, `Focus_Pass`, `Border_Pass`, `Excluded_Field_Pass`,
+`FOV_Pass`), and the picture that shows a user
 their cells is the one place that AND is invisible by construction: an excluded
 cell simply has no outline. The **Why removed** toggle
 (`renderer.toggle_review_image_exclusion_layers`) outlines each excluded cell in
@@ -14227,7 +14247,19 @@ projector like the other three. `review/data/focus_gate.py` is the fifth,
 `Focus_Pass`, and `review/data/field_exclusions.py` the sixth,
 `Excluded_Field_Pass` — a field the user excluded by hand from QC triage, which
 refuses the same untrusted wells this layer does. `review/data/border_gate.py`
-writes `Border_Pass`, the `imclearborder` rule — see *The Cell Gating tab*. The
+writes `Border_Pass`, the `imclearborder` rule — see *The Cell Gating tab*.
+`review/data/fov_selection.py` writes `FOV_Pass` from the Cell Gating tab's
+FOV picker (`CellGatingState.fov_selection`, persisted as `fov_selection` in
+the `cell_gating` block of `pipeline_info.json`): 1 when the row's field is one
+of the chosen FOV numbers. Fields match by the number `util.fov.parse_fov`
+reads from the label, so `"1"`, `1.0` and `"f01"` are one field and an opaque
+label matches only itself. No selection writes no column, and it refuses the
+same untrusted wells, which the picker's status line names. The
+`cell_gating` block's three writers (`persistence/cell_gating`, Saved Plots'
+`_capture_gating_block`, and the auto-threshold rebuild) all carry the key, and
+`restore_gating_block` / `apply_gating_block` re-project it onto the frames
+already cached, because unlike the gates it does not travel through the
+gating pass those paths start. The
 field and focus layers are **not
 alternatives**: the field verdict removes a
 whole field or none of it, while the per-cell cut removes the soft *part* of a

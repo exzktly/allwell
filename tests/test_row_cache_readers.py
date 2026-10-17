@@ -40,6 +40,7 @@ _HELD_ONLY_READERS: dict[str, str] = {
     "review/data/cache_projectors.py::project_verdict_column": (
         "A projector walk over the held frames; every frame read later is projected on load."),
     "review/data/field_exclusions.py::apply_field_exclusions_to_cache": "A projector walk, as above.",
+    "review/data/fov_selection.py::apply_fov_selection_to_cache": "A projector walk, as above.",
     "review/data/field_quality_cache.py::apply_field_quality_to_cache": "A projector walk, as above.",
     "review/data/focus_gate.py::apply_focus_gate_to_cache": "A projector walk, as above.",
     "review/data/well_repository.py::rows_or_none": (

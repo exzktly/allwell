@@ -2205,6 +2205,25 @@ buttons — you pick one or the other, because choosing the scatter option
   view's **Why removed** overlay these cells are outlined in magenta and
   labelled *touches the image border*, not as debris.
 
+  **Fields of view** chooses which FOV numbers count. The button reads
+  *All FOVs* until you change it; click it for a checklist of every field of
+  view in the dataset, untick the ones you want left out, and close the menu.
+  From then on only cells in the ticked fields are used — in every plot,
+  statistic, fraction-on value and export, in every well — exactly as if the
+  others had been removed by the debris gate. The button then names what is
+  kept (*FOVs 1–3, 5*), and the line beneath it says how many of the dataset's
+  fields are being used. The Cell Gating curves and the optimizer use the kept
+  fields too, so a threshold is never set from a field you excluded. **All**
+  in the menu puts every field back; **None** keeps no cells at all.
+
+  The choice is saved with the dataset, beside your gates, and comes back when
+  you reopen it; a saved plot remembers the selection it was drawn with.
+  Fields are matched by number, so a field written `1`, `01` or `f1` is the same
+  field. A well whose FOV labels cannot be trusted (see *Exclude fields the run
+  flagged*, above) is not filtered — every field there still counts — and the
+  line names it. In the Segmentation view's **Why removed** overlay these cells
+  are outlined in yellow and labelled *field not in the FOV selection*.
+
   The counts under the checkbox are about the cells that would otherwise be in
   your analysis — a cell the debris gate, the crop, your gates or your own
   deletion has already removed is not counted here, in either direction. That
@@ -4790,14 +4809,15 @@ reviewing and curating individual cells.
   channel (the same per-cell readout the Image Table shows).
 - **Why removed** — a toggle on the control row that outlines every *excluded*
   cell in the colour of the layer that removed it: you deleted it, the debris
-  gate, the crop, the scatter gates, the run's field verdict, the focus cut, or
-  a field you excluded in **Home → QC Triage** (white).
+  gate, the crop, the scatter gates, the run's field verdict, the focus cut,
+  the image border, a field you excluded in **Home → QC Triage** (white), or a
+  field left out of the Cell Gating **Fields of view** selection (yellow).
   A colour key appears under the picture, listing only the layers this field
   actually has cells for, and if the toggle is on and nothing here is excluded
   the line says that rather than leaving you with an unchanged picture and no
   way to tell whether the control worked.
 
-  Being *included* is the AND of all seven layers, so a cell can fail more than
+  Being *included* is the AND of all of these layers, so a cell can fail more than
   one and an outline can only be one colour — it shows the first, and hovering
   the cell names every layer that dropped it. That is also why clicking a cell
   back in cannot restore one a verdict column removed: raise that threshold, or

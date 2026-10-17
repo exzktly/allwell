@@ -6926,8 +6926,13 @@ resume banner's `_resume_suspended` and `resume_aware_spec` both change only
 than running the frozen layout its suspend record also holds. Before it starts
 the run, `_resume_suspended` puts that spec on the form through `hydrate_job`
 (`_show_resumed_settings`), so the sidebar shows the settings the resumed run
-is using — incremental included — rather than whatever it held before; a
-remote the install no longer has is logged as a warning.
+is using — incremental included — rather than whatever it held before. It first
+reads the form back (`_form_snapshot`, the same `collect_spec` the queue uses),
+and when `start_run` refuses — an earlier run still alive, which is the usual
+state right after a crash, a missing input, a remote no longer configured — it
+puts the user's own form back (`_restore_form`) before showing the refusal, and
+logs nothing of what `hydrate_job` could not restore, since that text is the
+queue editor's. `tests/test_analyze_resume_offer.py::test_a_resume_the_run_refuses_leaves_the_user_s_form_alone`.
 
 `detect_layout` infers the schema from a dense sample of the input's names
 (`_INFER_SAMPLE`, 20,000) but reads the **channel list from every name**

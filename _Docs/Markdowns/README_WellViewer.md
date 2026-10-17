@@ -1539,7 +1539,9 @@ and by `remote_fetch_report.txt` in the output folder.
   which plate and when (*Plate_07 · suspended 24 Aug 14:32*), what resuming will
   do, and what the run recorded. **Resume**, at the bottom right, continues it,
   computing only the field/timepoint groups still missing, and fills the
-  sidebar with that run's settings so the form shows what is actually running. **Discard** beside it
+  sidebar with that run's settings so the form shows what is actually running.
+  If the run cannot start — the earlier run is still going, say — the message
+  says why and the form is left as you had it. **Discard** beside it
   forgets the offer and deletes nothing — the results already written stay
   exactly as they are, and you can still finish the plate later by re-running
   that input with **incremental** ticked.

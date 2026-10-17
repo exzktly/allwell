@@ -12,7 +12,7 @@ Counts are derived from the rows below: count the `State` column.
 |----|--------|-------|------|
 | H1 | `remote_batch_resume.find_leftovers` / `take_from_remote` adopt any remote `<well>_out.zip` as a finished well, so a well suspended part way (the mid-batch watchdog after an app crash) is downloaded, journalled ok and never completed | done | `test_a_batched_restart_reuses_the_remote.py::test_a_well_the_remote_left_part_way_is_run_again_not_adopted` (red on main: A02 adopted); `test_a_part_way_well_is_not_sealed.py` (mutations bite) |
 | L1 | `pipeline.io.merge_fetched_csvs` discards a truncated local CSV whole instead of salvaging its readable rows, and logs a contradictory "no local CSV to merge with" line | done | `test_a_stop_mid_download_leaves_nothing_broken.py::test_an_incremental_download_keeps_the_readable_rows_of_a_truncated_local_csv` (red on main: f1/f2 rows 0) |
-| L2 | `analyze/suspend.py` Resume fills the form from the recorded run before `start_run` can refuse, so a refused resume leaves the user's form replaced | open | — |
+| L2 | `analyze/suspend.py` Resume fills the form from the recorded run before `start_run` can refuse, so a refused resume leaves the user's form replaced | done | `test_analyze_resume_offer.py::test_a_resume_the_run_refuses_leaves_the_user_s_form_alone` (red on main: 'Hoechst' == 'MyNuclei') |
 | L3 | `remote_fetch_place.local_output_mb`'s CSV-only branch is unreachable, so a CSV-only well rescued by the end-of-run retry stays uncoloured | open | — |
 | L4 | The mid-batch watchdog's `sleep` survives `kill "$_aw_wd"` and holds the driver's stdout for up to `MID_BATCH_WATCH_POLL_S` | open | — |
 | L5 | `remote_srun_retry` says "Slurm will boot one" on a cluster with no powered-down node to boot | open | — |

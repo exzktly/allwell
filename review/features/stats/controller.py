@@ -1378,18 +1378,14 @@ def _stats_write_result(ctx, text: str) -> None:
 def stats_update_tp_menu(ctx) -> None:
     """Populate the timepoint, channel, and statistic dropdowns."""
     from review.core.ui_helpers import set_combo_values
-    from review.data.data_loading import get_rows
+    from review.data.data_loading import get_timepoints_with_rows
     from review.core.channel_state_controller import ratio_label_for
 
     tp_cb = ctx.widgets.get_or_none("_stats_tp_cb")
-    all_tps: set = set()
-    for label in ctx.state.dataset.well_paths:
-        df = get_rows(ctx, label)
-        if df is None or "timepoint_hours" not in df.columns:
-            continue
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").dropna().unique()
-        all_tps.update(float(t) for t in tp)
-    sorted_tps = sorted(all_tps)
+    # Every acquired timepoint, included or not, from the plate's one memoized
+    # narrow timepoint scan — the one Distribution's menu reads too — rather
+    # than a whole-frame read of every well on each repopulate.
+    sorted_tps = get_timepoints_with_rows(ctx)
     tp_strs = [f"{t:.4g}" for t in sorted_tps]
     if tp_cb is not None:
         # ``set_combo_values`` already blocks signals and keeps the current

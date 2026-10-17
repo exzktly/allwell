@@ -18,17 +18,35 @@ into the key before computing, never after, for the reason that function gives.
 
 A *compute* must return something small and must not keep the frame: a result
 holding the rows would put the plate back in memory through the side door.
+
+**Narrow reads.** A caller that can name the columns its compute reads passes
+them as ``columns=``, and the well is read through
+:func:`review.data.narrow_rows.narrow_rows` instead of ``get_rows``: only those
+columns, every verdict layer's declared inputs and the identity columns, with
+the verdict projectors run on that frame and nothing put in the row cache. A
+plate-wide scan then costs one narrow Parquet read per well rather than a whole
+frame read that evicts a well some view was holding. The memo key does not carry
+the columns, because they say how the answer is read, not what it is: a compute
+given ``columns=`` must answer from the narrow frame exactly what it answers from
+the whole one, and the caller's test holds it to that with every verdict layer
+on. Two callers that share a *kind* must therefore also share a compute.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Hashable, Iterable
 
 from review.data.data_loading import get_rows
+from review.data.narrow_rows import narrow_rows
 
 
-def per_well(ctx, kind: str, label: str, params: Hashable, compute: Callable):
-    """``compute(rows of label)``, memoized for as long as the rows and *params* hold."""
+def per_well(ctx, kind: str, label: str, params: Hashable, compute: Callable, *,
+             columns: Iterable[str] | None = None):
+    """``compute(rows of label)``, memoized for as long as the rows and *params* hold.
+
+    *columns*: the columns *compute* reads, for a narrow read (module docstring);
+    ``None`` reads the whole frame through ``get_rows``.
+    """
     store = getattr(ctx.state, "stats_cache", None)
     version = getattr(ctx.state.dataset, "rows_version", None)
     if version is None:
@@ -39,7 +57,8 @@ def per_well(ctx, kind: str, label: str, params: Hashable, compute: Callable):
         hit = store.cache.get(key, _MISSING)
         if hit is not _MISSING:
             return None if hit is _NONE else hit
-    result = compute(get_rows(ctx, label))
+    rows = get_rows(ctx, label) if columns is None else narrow_rows(ctx, label, set(columns))
+    result = compute(rows)
     if store is not None:
         # ``None`` is remembered too: it is the answer for a well with nothing
         # to contribute (no values of the column, no rows), and not remembering
@@ -54,7 +73,8 @@ _MISSING = object()
 _NONE = object()
 
 
-def every_well(ctx, kind: str, params: Hashable, compute: Callable) -> dict:
+def every_well(ctx, kind: str, params: Hashable, compute: Callable, *,
+               columns: Iterable[str] | None = None) -> dict:
     """``{label: per_well(...)}`` over every well of the dataset, held or not."""
-    return {label: per_well(ctx, kind, label, params, compute)
+    return {label: per_well(ctx, kind, label, params, compute, columns=columns)
             for label in list(ctx.state.dataset.well_paths)}

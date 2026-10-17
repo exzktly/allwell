@@ -820,26 +820,50 @@ def get_all_timepoints(ctx) -> list[float]:
     ``include_gate=False`` — the per-cell scatter draws gates, so timepoint
     enumeration must see the full cloud, not a gate-filtered subset.
 
-    Every well is read once through :func:`get_rows` and its timepoints remembered
-    (``plate_scan``) until its rows or verdicts change: the tabs ask on every
-    activation and channel switch, and with the row cache bounded each ask would
-    otherwise read the plate from disk.
+    Answered from the one timepoint scan of the plate (:func:`_timepoint_scan`),
+    which :func:`get_timepoints_with_rows` shares.
+    """
+    return _timepoint_scan(ctx, included=True)
+
+
+def get_timepoints_with_rows(ctx) -> list[float]:
+    """Unique ``timepoint_hours`` across all loaded wells, included or not.
+
+    The Statistics tab's timepoint menu offers every acquired timepoint, whatever
+    the verdicts say; a different question from :func:`get_all_timepoints`, read
+    from the same scan.
+    """
+    return _timepoint_scan(ctx, included=False)
+
+
+def _timepoint_scan(ctx, *, included: bool) -> list[float]:
+    """The plate's timepoints, included only or all, from one memoized narrow scan.
+
+    Every well is read once — narrowly, ``timepoint_hours`` and the verdict
+    layers' inputs (``plate_scan`` with ``columns=``) — and both answers are
+    remembered per well until its rows or verdicts change. The tabs ask on every
+    activation and channel switch, and two of them (Distribution and Statistics)
+    on every open; with the row cache bounded each ask used to read the plate
+    from disk whole, once per asker.
     """
     from review.data.plate_scan import every_well
 
     timepoints: set = set()
-    for found in every_well(ctx, "included_timepoints", None, _included_timepoints).values():
-        timepoints.update(found)
+    for every, kept in every_well(ctx, "timepoints", None, _well_timepoints,
+                                  columns=("timepoint_hours",)).values():
+        timepoints.update(kept if included else every)
     return sorted(timepoints)
 
 
-def _included_timepoints(df) -> frozenset:
-    """One well's included ``timepoint_hours`` (gates aside), for :func:`get_all_timepoints`."""
+def _well_timepoints(df) -> tuple[frozenset, frozenset]:
+    """One well's ``timepoint_hours``: every one with a row, and the included ones (gates aside)."""
     if df is None or df.empty or "timepoint_hours" not in df.columns:
-        return frozenset()
+        return frozenset(), frozenset()
+    tp = pd.to_numeric(df["timepoint_hours"], errors="coerce")
+    every = frozenset(float(t) for t in tp.dropna().unique())
     mask = df_included_mask(df, include_gate=False)
-    tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
-    return frozenset(float(t) for t in tp.dropna().unique())
+    kept = frozenset(float(t) for t in tp.where(mask).dropna().unique())
+    return every, kept
 
 
 def resolve_value_series(

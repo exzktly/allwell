@@ -214,11 +214,15 @@ def available_timepoints(ctx) -> list[float]:
     """Unique finite included timepoints, in hours, across every well.
 
     Every well, not every *held* well: the row cache is bounded, so each well is
-    read through ``get_rows`` and its timepoints remembered (``plate_scan``) until
-    its rows or verdicts change. Empty when nothing has been loaded.
+    read narrowly — the timepoint columns and the verdicts' inputs, which a
+    narrow read always carries — and its timepoints remembered (``plate_scan``)
+    until its rows or verdicts change. Empty when nothing has been loaded.
+    Not :func:`data_loading.get_all_timepoints`' scan: this one falls back to
+    the ``timepoint`` label where ``timepoint_hours`` is missing.
     """
     seen: set = set()
-    for tps in every_well(ctx, "spatial_timepoints", None, _included_hours).values():
+    for tps in every_well(ctx, "spatial_timepoints", None, _included_hours,
+                          columns=("timepoint_hours", "timepoint")).values():
         seen.update(tps)
     return sorted(seen)
 

@@ -65,15 +65,28 @@ def redraw(
         return
 
     # 1. Line plot — always present (eager-built); the entry point that
-    # established the orchestrator's name.
-    lineplot_redraw(
-        ctx,
-        apply_ax_style=apply_ax_style,
-        all_fluor_values=all_fluor_values,
-        all_fluor_values_filtered=all_fluor_values_filtered,
-        warn=warn,
-        metric_label=metric_label,
-    )
+    # established the orchestrator's name. Drawn unless the tab on screen is
+    # *known* not to be it: then it is marked dirty, like Distribution and the
+    # Heat Map below, and drawn when its tab is shown (the tab change flushes
+    # it, and its activation hook redraws it). Drawing it off screen cost a
+    # pass over every well per redraw — 17 of a 32 s open of an 8-well plate of
+    # large wells, with Home in front. When the tab on screen cannot be told,
+    # it is drawn, as before: a redundant draw costs time, a skipped one a
+    # stale figure.
+    from review.domain.fold_change_scopes import known_visible_scopes
+    _known = known_visible_scopes(ctx.window)
+    if _known is not None and "line" not in _known:
+        ctx.state.plot.fc_dirty_scopes.add("line")
+    else:
+        lineplot_redraw(
+            ctx,
+            apply_ax_style=apply_ax_style,
+            all_fluor_values=all_fluor_values,
+            all_fluor_values_filtered=all_fluor_values_filtered,
+            warn=warn,
+            metric_label=metric_label,
+        )
+        ctx.state.plot.fc_dirty_scopes.discard("line")
 
     # 2 and 3. Distribution and Heat Map — lazy-built, so guard on the
     # registered canvas handle (``register`` stamps ``app._distribution_canvas``
@@ -94,9 +107,11 @@ def redraw(
     # to the same repaint, and no third flag: reusing the existing dirty set is
     # what keeps a figure from being clean by one mechanism's reckoning and
     # dirty by another's.
-    from review.domain.fold_change_scopes import visible_scope_names
     try:
-        _visible = visible_scope_names(ctx.window) or None
+        # ``_known`` from above: ``None`` when the tab on screen cannot be told,
+        # which draws everything built; otherwise the scopes actually on screen,
+        # possibly none (Home in front), and the rest are owed.
+        _visible = _known
         _dirty = ctx.state.plot.fc_dirty_scopes
     except Exception:
         _visible, _dirty = None, None

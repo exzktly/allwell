@@ -122,10 +122,11 @@ def test_a_load_that_starts_gating_draws_the_visible_plot_once_after_it(
     assert not _says_gating(stack), "the gating placeholder stayed up after the pass"
 
 
-def test_a_load_with_no_gate_draws_the_line_plot_once(viewer_app, mini_dataset, monkeypatch):
-    """No pass to wait for: the hold lifts before ``dataset_loaded`` and that
-    emit draws the line plot, which ``redraw_app`` always draws. The channel
-    refresh earlier in the load used to draw it as well."""
+def test_a_load_with_no_gate_draws_the_line_plot_once_when_it_is_shown(viewer_app, mini_dataset, monkeypatch):
+    """No pass to wait for: the hold lifts before ``dataset_loaded``. A load
+    lands on Home, so the line plot — which ``redraw_app`` used to draw whatever
+    was in front — is owed rather than drawn, and opening its tab draws it
+    once. The channel refresh earlier in the load used to draw it as well."""
     app = viewer_app
     app._load_path(mini_dataset)
     draws = _count_line_draws(monkeypatch)
@@ -134,7 +135,10 @@ def test_a_load_with_no_gate_draws_the_line_plot_once(viewer_app, mini_dataset, 
 
     assert app._ctx.runtime.cell_gating.worker is None or not app._ctx.runtime.cell_gating.worker.isRunning()
     assert app._app_state.plot.held_for == ""
-    assert len(draws) == 1, f"one load drew the line plot {len(draws)} times"
+    assert app._notebook.currentName() == "Home"
+    assert draws == [], f"a load drew the line plot {len(draws)} time(s) with Home in front"
+    _show_line_graphs(app)
+    assert len(draws) == 1, f"opening Line Graphs drew it {len(draws)} times"
 
 
 def test_a_load_draws_no_plot_that_is_not_on_screen(viewer_app, mini_dataset, monkeypatch):

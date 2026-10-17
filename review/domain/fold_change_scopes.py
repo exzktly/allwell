@@ -83,6 +83,21 @@ def defer_every_scope(app) -> None:
     _dirty_set(app).update(scope.name for scope in registered_scopes())
 
 
+def known_visible_scopes(app) -> set[str] | None:
+    """The registered scopes on screen, or ``None`` when the tab on screen is unknown.
+
+    :func:`visible_scope_names` answers an empty set both when no plot tab is in
+    front (Home, Statistics, an image tab) and when the lookup itself failed,
+    and a caller that must draw on "unknown" cannot defer on that answer. This
+    one separates them: an empty set means the visible tab is known and draws
+    no registered scope, so every plot can wait until its tab is shown.
+    """
+    tabs = _visible_tab_names(app)
+    if not tabs:
+        return None
+    return {s.name for s in registered_scopes() if tabs.intersection(s.tab_names)}
+
+
 def _visible_tab_names(app) -> frozenset[str]:
     """Leaf tab names currently on screen.
 
@@ -235,7 +250,10 @@ def redraw_scopes_after_load(app, *, default_redraw=None) -> None:
         None) if default_redraw is not None else None
     for scope in registered_scopes():
         if default_name is not None and scope.name == default_name:
-            dirty.discard(scope.name)
+            # ``_redraw`` ran this scope's redraw already and left its mark as it
+            # should be: clean when it drew it, dirty when its tab was known to
+            # be off screen (``plot_orchestrator.redraw``).
+            continue
         elif scope.name in visible:
             _call_redraw(app, scope)
             dirty.discard(scope.name)

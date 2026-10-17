@@ -1774,7 +1774,16 @@ What this means in use:
   (about 4 seconds for a 1.1M-cell well) and kept beside it in a hidden
   `.aw_parquet` folder, with each well's summary; later opens read those instead
   (that well reads back in about a fifth of a second). A new version of All-Well
-  that parses differently re-parses each well once.
+  that parses differently re-parses each well once. Reading a well needs about
+  twice its size in memory while it is parsed, and about one and a half times
+  while it is read back.
+- **An open reads each well once.** After the wells that fit have been read,
+  everything the open still needs from the rest — channel ranges, timepoints,
+  Cell Gating's curves, the Home plate's markers, the gating pass if the dataset
+  has saved gates — comes from narrow reads of only the columns involved, and
+  the plots are drawn only when you look at them. On an 8-well plate of
+  1.5-million-cell wells with saved gates and sample groups, an open made 165
+  whole-well reads before this and makes 3.
 - **Decimal values are read exactly.** Each number in a CSV is read as the
   closest value the computer can hold to what is written. Earlier versions were
   sometimes off by a tiny amount: up to about one part in a trillion
@@ -1784,9 +1793,9 @@ What this means in use:
 - **Plate-wide views read every well the first time**, then remember the few
   numbers they need per well until something changes them (a QC threshold, a
   gate, a crop). On a plate that does not fit, the first draw after such a change
-  reads the plate from disk again. The line and bar charts read only the columns
-  they plot and the ones the active filters use, so that read is a fraction of
-  each well and does not push other wells out of memory.
+  reads the plate from disk again. Those reads take only the columns the view
+  plots and the ones the active filters use, so each is a fraction of a well and
+  does not push other wells out of memory.
 - **Live counts say when they cover part of the plate.** QC's "flagged" count,
   the crop's status line and Cell Gating's "Included for analysis" are
   recalculated on every edit, so they count the wells in memory; when those are
@@ -1825,7 +1834,8 @@ To change the budget, set the environment variable `ALLWELL_ROW_CACHE_MB` before
 starting the app, for example `ALLWELL_ROW_CACHE_MB=8192 python allwell.py` for
 8 GB. `python tests/perf/bench_large_plate.py --dir <folder> --wells 24` writes a
 synthetic plate of large wells and reports the time and peak memory of opening
-it and of one plate-wide plot.
+it and of one plate-wide plot, and how many times the open read each well;
+`--gate` and `--groups` add a saved gate and two sample groups first.
 
 ### Home
 

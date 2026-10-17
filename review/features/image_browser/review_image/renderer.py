@@ -1154,6 +1154,7 @@ def _layer_inks():
         "outside the scatter gates": theme.Colors.accent,
         "field flagged by the run": theme.Colors.text_secondary,
         "out of focus": theme.Colors.heatmap_selection,
+        "touches the image border": theme.Colors.exclusion_border,
         "field excluded in QC triage": theme.Colors.ink_light,
     }
 

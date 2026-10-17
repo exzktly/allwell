@@ -2138,6 +2138,25 @@ buttons — you pick one or the other, because choosing the scatter option
   soon as the cut changes, so the two halves of that page cannot show you
   answers from different thresholds.
 
+  **Exclude cells touching the image border** is the last switch in the
+  section, and it is the same rule as MATLAB's `imclearborder`: any cell whose
+  outline reaches the outermost row or column of its image is dropped. Such a
+  cell is only partly in the picture, so its area, its intensity totals and its
+  shape all describe the visible fragment rather than the whole cell — on a
+  dense plate that is a band of systematically small, dim cells around the edge
+  of every field. It is independent of the debris gate (you do not need to
+  switch that on, or set any bound, for it to work) and off by default. The
+  line beneath it says how many of the cells being analysed touch the border,
+  across the whole plate, and whether they are currently kept or excluded.
+
+  The analysis records border contact for every cell as it segments
+  (`qc_touches_border` in the per-cell CSV: 1 = touches, 0 = whole). A dataset
+  analysed before that column existed has nothing to filter on; the line says
+  so — in amber if the box is ticked, because then nothing you asked for is
+  happening — and re-running the analysis records it. In the Segmentation
+  view's **Why removed** overlay these cells are outlined in magenta and
+  labelled *touches the image border*, not as debris.
+
   The counts under the checkbox are about the cells that would otherwise be in
   your analysis — a cell the debris gate, the crop, your gates or your own
   deletion has already removed is not counted here, in either direction. That
@@ -2301,6 +2320,7 @@ Below the table is the readout:
      QC debris gate: −1,204  →  17,556
      Crop region: not applied
      Scatter gates: not applied
+     Touching image border: not applied
   ```
 
   A layer reads "not applied" when it is not in play at all — which is different

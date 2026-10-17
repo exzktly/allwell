@@ -87,6 +87,16 @@ class QCParams:
     #: a coverslip tilt, neither of which is a whole-field fact and neither of
     #: which is a rectangle.
     exclude_soft_cells: bool = False
+    #: Whether cells the field of view cuts are excluded (MATLAB's
+    #: ``imclearborder`` rule, read from the pipeline's ``qc_touches_border``
+    #: flag — see :mod:`review.data.border_gate`).
+    #:
+    #: **Off by default** like the two switches above: a partial cell's area
+    #: and totals are biased, but dropping them changes every number in the
+    #: app, so it is something the user turns on, not something they discover.
+    #: Independent of ``enabled``: it is not a debris bound and writes its own
+    #: ``Border_Pass`` column, so it needs no debris bound set to take effect.
+    exclude_border_cells: bool = False
     #: The per-cell focus value below which a cell counts as out of focus.
     #:
     #: **Absolute, never relative to the frame.** A score relative to its own
@@ -116,6 +126,7 @@ class QCParams:
             "enabled": bool(self.enabled),
             "exclude_flagged_fields": bool(self.exclude_flagged_fields),
             "exclude_soft_cells": bool(self.exclude_soft_cells),
+            "exclude_border_cells": bool(self.exclude_border_cells),
             "focus_min": self.focus_min,
             "min_area": self.min_area,
             "max_area": self.max_area,
@@ -132,6 +143,7 @@ class QCParams:
             enabled=bool(d.get("enabled", False)),
             exclude_flagged_fields=bool(d.get("exclude_flagged_fields", False)),
             exclude_soft_cells=bool(d.get("exclude_soft_cells", False)),
+            exclude_border_cells=bool(d.get("exclude_border_cells", False)),
             focus_min=_pos(d.get("focus_min")),
             min_area=_pos(d.get("min_area")),
             max_area=_pos(d.get("max_area")),

@@ -258,6 +258,7 @@ EXCLUSION_LAYERS = (
     ("Gate_Pass", "outside the scatter gates"),
     ("Field_Pass", "field flagged by the run"),
     ("Focus_Pass", "out of focus"),
+    ("Border_Pass", "touches the image border"),
     ("Excluded_Field_Pass", "field excluded in QC triage"),
 )
 

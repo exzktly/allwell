@@ -4220,7 +4220,29 @@ none: neither has an ON cutoff of its own. The effective value comes from
 line and every statistic that divides by that cutoff read the same number
 through the same key resolution. Editing either cutoff
 replots the CDFs; a ThreshFracOn edit used to leave its own line where the old
-value was, on the panel the user was looking at to choose it. The optimizer — fourteen controls answering an
+value was, on the panel the user was looking at to choose it.
+
+The QC block's last switch, **Exclude cells touching the image border**, is
+MATLAB's `imclearborder` applied post-hoc. The pipeline emits a per-cell
+`qc_touches_border` flag unconditionally, beside `qc_region_area`:
+`pipeline.shape_features.labels_touching_border` reads only the label image's
+four edge strips and returns the ids found there, and
+`_quantify_image_group` writes `1` for those cells and `0` for the rest
+(`BORDER_COLUMN` is defined once in `pipeline/shape_features.py` and read by
+both sides). `review/data/border_gate.py` turns it into a `Border_Pass` verdict
+column, registered as a cache projector and ANDed in `df_included_mask` like
+`Focus_Pass`. It is a layer of its own rather than a fifth debris bound because
+`QC_Pass` is labelled "debris gate" by the Segmentation overlay and the
+inclusion funnel, and a partial cell is not debris; it is also why the switch
+(`QCParams.exclude_border_cells`) does not depend on the debris gate's
+`enabled`. The overlay inks it `Colors.exclusion_border` (magenta — the only
+hue left at ΔE ≥ 31 from the other six inks that is not the app's "good"
+green), and the funnel carries it as *Touching image border*. The row's
+sentence (`border_status`) counts over the cells the analysis keeps without
+this layer — `df_included_mask(except_layer="Border_Pass")`, the same
+construction as the focus row — and a dataset analysed before the column
+existed says so rather than reporting that no cell touches the border, in the
+`Notice` register when the box is ticked over it. The optimizer — fourteen controls answering an
 occasional question — is not on the tab at all: `optimizer_view` builds it into
 its own **non-modal** window (non-modal because its answer is judged against the
 CDFs behind it), hidden, at tab-build time, so every optimizer widget handle
@@ -13689,8 +13711,8 @@ checks) — and a refusal leaves the session open on the form.
 
 ### 6.6b Why a cell is gone: the Segmentation overlay
 
-Inclusion is the AND of seven verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
-`Gate_Pass`, `Field_Pass`, `Focus_Pass`, `Excluded_Field_Pass`), and the picture that shows a user
+Inclusion is the AND of eight verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
+`Gate_Pass`, `Field_Pass`, `Focus_Pass`, `Border_Pass`, `Excluded_Field_Pass`), and the picture that shows a user
 their cells is the one place that AND is invisible by construction: an excluded
 cell simply has no outline. The **Why removed** toggle
 (`renderer.toggle_review_image_exclusion_layers`) outlines each excluded cell in
@@ -13877,7 +13899,9 @@ as a `Field_Pass` column — the fourth in the same family as `Included`,
 projector like the other three. `review/data/focus_gate.py` is the fifth,
 `Focus_Pass`, and `review/data/field_exclusions.py` the sixth,
 `Excluded_Field_Pass` — a field the user excluded by hand from QC triage, which
-refuses the same untrusted wells this layer does. The first two are **not
+refuses the same untrusted wells this layer does. `review/data/border_gate.py`
+writes `Border_Pass`, the `imclearborder` rule — see *The Cell Gating tab*. The
+field and focus layers are **not
 alternatives**: the field verdict removes a
 whole field or none of it, while the per-cell cut removes the soft *part* of a
 field — a focus gradient, a coverslip tilt — which is not a whole-field fact

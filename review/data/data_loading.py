@@ -485,7 +485,7 @@ def _warn_no_area_column(where: str) -> None:
 #: for a different reason (no curation has happened) and whose blanks mean
 #: dropped rather than kept.
 VERDICT_LAYERS = ("QC_Pass", "Crop_Pass", "Gate_Pass", "Field_Pass", "Focus_Pass",
-                  "Excluded_Field_Pass")
+                  "Border_Pass", "Excluded_Field_Pass")
 
 
 def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
@@ -510,6 +510,9 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
       cut on the per-cell focus column — see :mod:`review.data.focus_gate`.
       It is the one layer here that can remove *part* of a field, which is
       what a focus gradient or a coverslip tilt actually looks like.
+    * ``Border_Pass`` (1 = the image border does not cut this cell) is the
+      ``imclearborder`` rule on the pipeline's ``qc_touches_border`` flag —
+      see :mod:`review.data.border_gate`.
     * ``Excluded_Field_Pass`` (1 = the user did not exclude this row's field
       by hand) is written only for wells holding such an exclusion, from QC
       triage — see :mod:`review.data.field_exclusions`. It refuses the same
@@ -520,7 +523,8 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
     relative to its own frame, which is why the per-cell one is absolute.
 
     Every verdict column — ``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass`` /
-    ``Field_Pass`` / ``Focus_Pass`` / ``Excluded_Field_Pass`` — is optional:
+    ``Field_Pass`` / ``Focus_Pass`` / ``Border_Pass`` / ``Excluded_Field_Pass``
+    — is optional:
     when absent (no such layer / older data / the exclusion switched off /
     nothing excluded in that well) each is treated as all-pass.
 

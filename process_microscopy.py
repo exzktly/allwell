@@ -108,6 +108,7 @@ from util.zip_append import refuse_if_pending as _refuse_if_appending
 # below calls them.
 import pipeline.field_quality as _field_quality
 from pipeline.field_quality import FOCUS_COLUMN
+from pipeline.shape_features import BORDER_COLUMN, labels_touching_border
 import pipeline.stardist as _stardist
 import pipeline.suspend as _suspend
 from pipeline.mixed_input import consolidate_mixed_to_zips
@@ -1254,6 +1255,8 @@ def _quantify_image_group(
     # reject debris that StarDist shattered into many small cells — a size gate
     # on this region area catches the blob that per-cell size misses.
     region_by_id = compute_region_areas(nir_corr, labels)
+    # Cells the field of view cuts (imclearborder's rule); always emitted.
+    border_ids = labels_touching_border(labels)
 
     # Per-cell focus (always emitted), measured at each nucleus's own outline.
     # It is the one focus number comparable between cells, fields, wells and
@@ -1285,6 +1288,7 @@ def _quantify_image_group(
             rec[f"{pfx}_std_intensity"]   = float(stdv[i])
         rec.update(shape_by_id.get(int(nid), {}))
         rec["qc_region_area"] = float(region_by_id.get(int(nid), 0.0))
+        rec[BORDER_COLUMN] = int(int(nid) in border_ids)
         # Absent rather than 0.0 where the outline could not be measured: a
         # cell nobody could measure and a cell measured and found soft are
         # different facts, and pandas reads the empty CSV field as NaN, which

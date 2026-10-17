@@ -364,6 +364,75 @@ def review_build_include_map(
     return {nid: not why for nid, why in reasons.items()}
 
 
+def _mfi_channel(ctx, channel) -> str:
+    """The lower-cased channel whose ``{channel}_mean_intensity`` column is read."""
+    return str(
+        channel if channel is not None
+        else ctx.state.channel.active_image_channel or ""
+    ).strip().lower()
+
+
+def _mfi_rows(ctx, well: str, col: str) -> tuple | None:
+    """``(fov, tp, nid, value)`` arrays for every row of *well* that names a cell.
+
+    Reads through :func:`narrow_rows`, so a well the row cache does not hold costs
+    a read of the identity columns and *col* rather than the whole frame, and the
+    frame is not pushed into the cache (evicting a well a view is using). Only the
+    frame tokens are normalised for every row; nucleus ids are normalised for the
+    rows that survive the empty-id filter, which is the same normalisation chain
+    :func:`domain.image_identity.cell_key_tuples_for_dataframe` applies, without
+    building one Python tuple per row — that construction cost ~1.4 s for a
+    230k-row well and ran on the UI thread on every hover readout.
+
+    Returns ``None`` when the well has no rows, no *col*, or no nucleus id column.
+    """
+    from domain.image_identity import (
+        NUCLEUS_ID_COLUMN_NAMES,
+        frame_token_series,
+        map_distinct,
+        normalize_nucleus_id,
+        resolve_identity_column,
+    )
+    from domain.text_columns import as_text
+    from review.data.narrow_rows import narrow_rows
+
+    df = narrow_rows(ctx, well, {col})
+    if df is None or df.empty or col not in df.columns:
+        return None
+    nid_col = resolve_identity_column(df, *NUCLEUS_ID_COLUMN_NAMES)
+    if nid_col is None:
+        return None
+    fov_n, tp_n = frame_token_series(df)
+    nid_n = map_distinct(as_text(df[nid_col]), lambda u: u.map(normalize_nucleus_id))
+    keep = (nid_n != "").to_numpy()
+    nids = map_distinct(nid_n[keep], lambda u: u.map(_safe_int_or_none)).to_numpy()
+    vals = pd.to_numeric(df[col], errors="coerce").to_numpy()[keep]
+    return (fov_n.to_numpy()[keep], tp_n.to_numpy()[keep], nids, vals)
+
+
+def review_mfi_index(ctx, well: str, channel=None) -> dict[tuple[str, str], dict[int, float]]:
+    """``{(fov, tp): {nid: MFI}}`` for every frame of *well*, built in one pass.
+
+    The Image Table's hover readout asks for one cell's MFI per cell under the
+    cursor; building this once per ``(well, channel)`` and memoizing it turns
+    every later lookup into two dict reads. Keys use the canonical frame tokens
+    (``review_norm_fov`` / ``norm_timepoint`` forms). Empty when the channel has
+    no intensity column (an overlay, a ratio pseudo-channel).
+    """
+    chan = _mfi_channel(ctx, channel)
+    if not chan:
+        return {}
+    rows = _mfi_rows(ctx, well, f"{chan}_mean_intensity")
+    if rows is None:
+        return {}
+    out: dict[tuple[str, str], dict[int, float]] = {}
+    for f, t, nid, v in zip(*rows):
+        if nid is None or not _np.isfinite(v):
+            continue
+        out.setdefault((f, t), {})[int(nid)] = float(v)
+    return out
+
+
 def review_build_mfi_map(
     ctx, mask_arr, well: str, fov: str, tp: str, channel=None,
 ) -> dict[int, float]:
@@ -376,29 +445,19 @@ def review_build_mfi_map(
     nuc+seg overlay or a ratio pseudo-channel), so callers can silently skip the
     readout. Only nuclei actually present in ``mask_arr`` are reported.
     """
-    chan = str(
-        channel if channel is not None
-        else ctx.state.channel.active_image_channel or ""
-    ).strip().lower()
+    chan = _mfi_channel(ctx, channel)
     if not chan:
         return {}
-    col = f"{chan}_mean_intensity"
-    df = get_rows(ctx, well)
-    if df is None or df.empty or col not in df.columns:
+    rows = _mfi_rows(ctx, well, f"{chan}_mean_intensity")
+    if rows is None:
         return {}
-    keys = review_row_keys_series(ctx, df)
-    if keys is None:
+    fovs, tps, nids, vals = rows
+    sel = (fovs == fov) & (tps == tp)
+    if not sel.any():
         return {}
     present = {int(nid) for nid in _np.unique(_np.asarray(mask_arr)) if int(nid) > 0}
-    fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
-    sub = df.loc[fov_eq.fillna(False).to_numpy()]
-    if sub.empty:
-        return {}
-    sub_keys = keys.loc[sub.index]
-    nids = sub_keys.map(lambda k: k[2]).map(_safe_int_or_none)
-    vals = pd.to_numeric(sub[col], errors="coerce").to_numpy()
     out: dict[int, float] = {}
-    for nid, v in zip(nids, vals):
+    for nid, v in zip(nids[sel], vals[sel]):
         if nid is None or (present and nid not in present):
             continue
         if _np.isfinite(v):

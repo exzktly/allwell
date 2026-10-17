@@ -194,10 +194,17 @@ class ImageTableState:
     #: lifetime as the records above.
     scale_bar_plan_note: str = ""
 
+    #: ``{(well, base_chan): {(fov, tp): {nid: MFI}}}`` behind the hover
+    #: readout's MFI suffix, built once per well and channel on first hover
+    #: (``controller._mfi_index``) so moving across cells never re-reads a well's
+    #: rows on the UI thread. Session lifetime, dropped on dataset swap.
+    mfi_index: dict = field(default_factory=dict)
+
     def clear_caches(self) -> None:
         """Drop the per-generate render / image caches (call on dataset swap)."""
         self.last_render.clear()
         self.image_cache.clear()
+        self.mfi_index.clear()
         self.auto_lut_by_channel.clear()
         self.prefetched_cells.clear()
         self.scan_misses.clear()

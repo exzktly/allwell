@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from services.remote_runner import RemoteRunner
     from services.remote_upload import DatasetCache
+import functools
 import io
 import os
 import queue
@@ -70,6 +71,8 @@ from services.remote_run_id import (
     remote_run_paths,
 )
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
+from services.remote_fetch_nanowells import release_batch
+from util.well_token import canonical_well_label
 from services.remote_scratch import (
     source_fingerprint,
 )
@@ -913,6 +916,18 @@ class _BatchedRemoteProcess:
             for event in list(self._batch_events.values()):
                 event.set()
 
+    def _release_nanowell_batch(self, rc: int | None, batch_zips) -> None:
+        """A nanowell batch that ended: free its wells on the remote (``remote_fetch_nanowells.release_batch``).
+
+        Its re-anchoring has run, so nothing of these wells is read again. Queued behind the wells the batch
+        announced, so each one's download has been attempted first. ``None`` means the driver is gone and the
+        batch's end is unknown, so nothing is released.
+        """
+        if rc is None or not self._fetcher.run.nanowell:
+            return
+        wells = [canonical_well_label(z.stem) or z.stem.upper() for z in batch_zips]
+        self._fetcher.after_queued(functools.partial(release_batch, wells=wells, log=self._log))
+
     def _await_batch(self, index: int, n_batches: int) -> int | None:
         """This batch's exit code, or ``None`` if the driver went away."""
         event = self._batch_events.setdefault(index, threading.Event())
@@ -1203,6 +1218,7 @@ class _BatchedRemoteProcess:
                     check=False,
                 )
                 rc = self._await_batch(batch_idx + 1, n_batches)
+                self._release_nanowell_batch(rc, batch_zips)
                 if rc is None:
                     # The driver is gone. Nothing further will ever be run, and
                     # whether that was a Stop or a dead node the outcome is the

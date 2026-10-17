@@ -9200,11 +9200,20 @@ validated and keyed.
 `nanowells/<well>.csv`, `_grid.json` and the template back as each well finishes (`services/remote_fetch_nanowells`).
 A nanowell well announces itself with the same `Well X — done.` marker a field-mode well does, which is what the
 Fetcher and Analyze's progress count. The run record knows it is a nanowell run from its argv
-(`_RemoteRun.nanowell`), and three things follow. Nothing of a well is deleted from the remote mid-run
-(`well_files_to_delete`), because the end-of-run re-anchoring re-runs some wells from their input archives and
-earlier output. At verification the whole `nanowells/` directory and every re-anchored well's CSV and
-`<well>_out.zip` are pulled again — the wells with a timepoint anchored `plate_rigid` in their pulled grid
-records, not the sidecar's summary, which each batch of a batched run writes over the last —
+(`_RemoteRun.nanowell`), and three things follow. Nothing of a well is deleted from the remote as it is
+fetched (`well_files_to_delete`), because the re-anchoring at the end of the pipeline invocation re-runs some
+wells from their input archives and earlier output. In a batched run the well is deleted when its batch ends
+instead: that re-anchoring re-runs only the invocation's own wells and reads nothing of the others but their
+grid records under `nanowells/`, so after `_await_batch` returns, `_run_batches` queues
+`remote_fetch_nanowells.release_batch` on the Fetcher (`Fetcher.after_queued`, which runs it on the worker behind
+every well the batch announced). It pulls the batch's `nanowells/` tables again, pulls the CSV and
+`<well>_out.zip` of each well the batch re-anchored, and then deletes each landed well's input archive, output
+archive and cell CSVs, recording it in `_RemoteRun.nanowell_released`. A well that never landed, or whose second
+pull came up short, is kept for verification; `nanowells/` is never deleted mid-run, since every later batch's
+plate fit reads it. That is what lets the batch size bound a nanowell run's remote disk. At verification the
+whole `nanowells/` directory and every re-anchored well not already released have their CSV and
+`<well>_out.zip` pulled again — the wells with a timepoint anchored `plate_rigid` in their pulled grid records,
+not the sidecar's summary, which each batch of a batched run writes over the last —
 (`pull_nanowell_results`). A well whose sites table or grid record did not arrive fails verification
 (`missing_nanowell_tables`), which keeps the remote copy. An incremental nanowell run is refused on a remote host,
 in Analyze and as a backstop in the run record (`NANOWELL_REMOTE_INCREMENTAL_REFUSAL`): the remote would analyse
@@ -10200,10 +10209,10 @@ parent process supervises the per-well worker pool:
     the download lands (`remote_fetch_nanowells.well_files_to_delete`), so the
     growth can under-count and the "results accumulate" projection over-states
     a need the deletions keep reclaiming — the monitor can only miss a warning
-    there, never invent one. A nanowell run deletes nothing until the end
-    (its re-anchoring may re-run a well from those files), so its output does
-    accumulate across batches, and the monitor, which knows only the wells of
-    the batch in flight, does not project the batches still to come. It warns once, naming the
+    there, never invent one. A batched nanowell run deletes a batch's wells
+    when the batch ends (`remote_fetch_nanowells.release_batch`) rather than as
+    each is fetched, so within a batch its output does accumulate — which is
+    the case the projection describes, bounded to the batch the monitor sees. It warns once, naming the
     measured per-well size — a real number, carrying the real compression ratio
     and FOV count, unlike anything the preflight can estimate — while there is
     still room to act. The estimate of durable output in `estimate_well_output_bytes`

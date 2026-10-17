@@ -129,7 +129,8 @@ def test_a_nanowell_run_deletes_nothing_of_a_well_mid_run():
 
 class _Verifier:
     def __init__(self, local, *, nanowell=True):
-        self._run = SimpleNamespace(local_output_dir=local, remote_output_dir="/r/out", nanowell=nanowell)
+        self._run = SimpleNamespace(local_output_dir=local, remote_output_dir="/r/out", nanowell=nanowell,
+                                    nanowell_released=set())
         self.host = SimpleNamespace(ssh_alias="gpu")
         self.pulled = []
 

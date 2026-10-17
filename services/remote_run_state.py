@@ -130,10 +130,12 @@ class _RemoteRun:
     # skip a well the user asked to have replaced.
     force: bool = False
     force_wells: frozenset[str] = frozenset()
-    #: A nanowell run (``--nanowell_format`` on its argv). Its wells are revisited by the end-of-run re-anchoring,
-    #: which re-runs some of them from their input archives and earlier output, so nothing of a well is deleted
-    #: from the remote mid-run and the final tables are pulled at verification (``remote_fetch_nanowells``).
+    #: A nanowell run (``--nanowell_format`` on its argv). Its wells are revisited by the re-anchoring at the end of
+    #: each pipeline invocation, which re-runs some of them from their input archives and earlier output, so a well
+    #: is deleted from the remote when its batch ends rather than when it is fetched (``remote_fetch_nanowells``).
     nanowell: bool = False
+    #: The nanowell wells whose remote files ``release_batch`` has already pulled again and deleted.
+    nanowell_released: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         # A remote incremental run uploads only the new fields and analyses them alone, without the earlier

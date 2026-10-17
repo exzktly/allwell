@@ -1401,7 +1401,10 @@ because none of it applies:
   `N` wells at a time, which bounds peak disk on the remote to roughly `N` wells
   of input plus about one well of output, at the cost of reloading the
   segmentation model once per batch (a few seconds each). Set it from the
-  remote's free disk, not from its core count.
+  remote's free disk, not from its core count. A nanowell run holds a whole
+  batch's input and output until that batch ends — its end-of-batch
+  re-anchoring may re-run any of those wells — and then frees them, so for
+  nanowells the peak is about `N` wells of input plus `N` wells of output.
 - **Auto-delete remote files when done.** On by default. After a run the app
   verifies succeeded, it deletes both the per-run output directory and the
   cached input on the remote, so a shared machine does not fill up. It never

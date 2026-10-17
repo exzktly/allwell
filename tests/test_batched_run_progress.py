@@ -157,7 +157,7 @@ def _bare_batched(tmp_path: Path, wells: list[str]) -> remote_process._BatchedRe
     p._returncode = None
     p._suspending = threading.Event()
     p._fetcher = types.SimpleNamespace(
-        run=types.SimpleNamespace(well_count_total=0),
+        run=types.SimpleNamespace(well_count_total=0, nanowell=False),
         flush_and_join=lambda: None,
     )
     # The local auto-threshold pass imports process_microscopy (heavy); the

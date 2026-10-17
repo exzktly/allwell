@@ -457,7 +457,7 @@ class Fetcher:
         self._progress = progress_fn
         self._delete_after_download = delete_after_download
         self._stop = threading.Event()
-        self._pending: queue.Queue[str | None] = queue.Queue()
+        self._pending: queue.Queue = queue.Queue()  # well labels, after_queued tasks, None
         # (well, step, since) for the drain heartbeat; replaced whole, never mutated.
         self._activity: tuple[str, str, float] | None = None
         self._worker = threading.Thread(target=self._loop, daemon=True)
@@ -503,6 +503,10 @@ class Fetcher:
             well = _canonical_well_label(m.group("well")) or m.group("well").upper()
             self.run.expected_wells.add(well)
             self._pending.put(well)
+
+    def after_queued(self, task: Callable[["Fetcher"], None]) -> None:
+        """Run ``task(self)`` on the worker once every well queued so far has been fetched."""
+        self._pending.put(task)
 
     def cancel(self) -> None:
         self._stop.set()
@@ -602,7 +606,7 @@ class Fetcher:
             if item is None:
                 return
             try:
-                self._fetch_one(item)
+                item(self) if callable(item) else self._fetch_one(item)
                 self._activity = None
             except Exception as exc:
                 self._activity = None
@@ -1087,16 +1091,12 @@ class Fetcher:
         if self._progress and self.run.well_count_total > 0:
             self._progress(len(self.run.fetched_wells) / self.run.well_count_total)
 
-        # v5.4.6 — per-well remote cleanup. With the data safely landed
-        # locally, both the remote input zip and the remote output zip
-        # (plus per-well CSVs) become redundant. Deleting them as each
-        # well is fetched bounds peak remote disk to roughly
-        # ``(uploaded-but-not-yet-processed inputs) + 1 well's output``
-        # — independent of how many wells the plate has. Crucial on
-        # constrained remotes where the full plate's outputs would
-        # otherwise overflow before the run completes. Failures are
-        # logged but non-fatal — an end-of-run ``rm -rf`` via
-        # ``verify_and_cleanup`` is the backstop.
+        # Per-well remote cleanup: once the data has landed locally, the remote
+        # input zip, output zip and CSVs are redundant, and deleting them bounds
+        # peak remote disk to the unprocessed inputs plus about one well's
+        # output, whatever the plate's size. Non-fatal; ``verify_and_cleanup``
+        # is the backstop. A nanowell run deletes at the end of the well's
+        # batch instead (``remote_fetch_nanowells.release_batch``).
         if self._delete_after_download:
             self._set_activity(well, "deleting its files on the remote")
             self._delete_well_files_on_remote(well)

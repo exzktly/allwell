@@ -741,17 +741,50 @@ def cell_keys_for_dataframe(
     else:
         well_series = pd.Series([""] * len(df), index=df.index)
 
-    well_n = well_series.map(normalize_well)
+    well_n = map_distinct(well_series, lambda u: u.map(normalize_well))
     fov_n, tp_n = frame_token_series(df)
-    nid_raw = (as_text(df[nid_col])
-               if nid_col else
-               pd.Series([""] * len(df), index=df.index))
-    nid_n = nid_raw.map(normalize_nucleus_id)
+    nid_n = nucleus_id_series(df[nid_col] if nid_col else None, df.index)
 
     return pd.Series(
         [CellKey(w, f, t, n) for w, f, t, n in zip(well_n, fov_n, tp_n, nid_n)],
         index=df.index,
     )
+
+
+def nucleus_id_series(column, index):
+    """``normalize_nucleus_id`` of every value of a nucleus-id *column*, as a string ``Series``.
+
+    Every id in a well is distinct, so :func:`map_distinct` saves nothing here
+    and the per-value normalisation was one Python call per cell — seconds for a
+    million-cell well, paid on every read of a well with manual exclusions (the
+    curation projector keys on these) and by every per-frame image lookup. A
+    numeric column, which is what the pipeline writes, is converted in bulk
+    instead: an integer is its own decimal string, and a float that holds an
+    integer below 1e15 reads as ``"<n>.0"`` and normalises to ``"<n>"``. A
+    missing value is ``""``, as ``as_text`` makes it. Anything else — text, a
+    fractional or huge float — takes the per-value path, so the answer is
+    always :func:`normalize_nucleus_id`'s. *column* ``None`` (no id column)
+    gives ``""`` for every row of *index*.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from domain.text_columns import as_text
+    if column is None:
+        return pd.Series([""] * len(index), index=index, dtype=object)
+    dtype = column.dtype
+    if pd.api.types.is_numeric_dtype(dtype) and not pd.api.types.is_bool_dtype(dtype):
+        values = column.to_numpy(dtype=float, na_value=np.nan)
+        missing = np.isnan(values)
+        present = values[~missing]
+        whole = present.size == 0 or bool(
+            np.all(np.isfinite(present)) and np.all(np.abs(present) < 1e15)
+            and np.all(present == np.trunc(present)))
+        if pd.api.types.is_integer_dtype(dtype) or whole:
+            out = np.full(len(values), "", dtype=object)
+            out[~missing] = list(map(str, present.astype(np.int64).tolist()))
+            return pd.Series(out, index=index, dtype=object)
+    return as_text(column).map(normalize_nucleus_id)
 
 
 def cell_key_tuples_for_dataframe(df) -> pd.Series | None:
@@ -770,10 +803,12 @@ def cell_key_tuples_for_dataframe(df) -> pd.Series | None:
 
     if df is None or df.empty:
         return None
-    keys = cell_keys_for_dataframe(df)
-    if keys.empty:
-        return None
-    return pd.Series([(k.fov, k.tp, k.nid) for k in keys], index=df.index)
+    # The same three normalisations ``cell_keys_for_dataframe`` applies, without
+    # the well token these keys drop or a ``CellKey`` per row to unpack.
+    fov_n, tp_n = frame_token_series(df)
+    nid_col = resolve_identity_column(df, *NUCLEUS_ID_COLUMN_NAMES)
+    nid_n = nucleus_id_series(df[nid_col] if nid_col else None, df.index)
+    return pd.Series(list(zip(fov_n, tp_n, nid_n)), index=df.index)
 
 
 # ── Back-compat helpers ──────────────────────────────────────────────────

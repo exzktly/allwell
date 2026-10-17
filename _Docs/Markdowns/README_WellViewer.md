@@ -1796,7 +1796,20 @@ What this means in use:
   gate, a crop). On a plate that does not fit, the first draw after such a change
   reads the plate from disk again. Those reads take only the columns the view
   plots and the ones the active filters use, so each is a fraction of a well and
-  does not push other wells out of memory.
+  does not push other wells out of memory. The first draw reads up to four wells
+  at a time.
+- **Changing the fraction-on threshold reads nothing.** Review remembers, per
+  well, the cells each view counts (about 10 MB for a 1.5-million-cell well), so
+  moving the ThreshFracOn or count cutoff, or switching SD/SEM or FOV
+  replicates, redraws from memory in about a second even on a plate that does
+  not fit. A change to a gate, QC, the crop or a cell deletion still re-reads
+  the wells, because it changes which cells count. That memory is capped at an
+  eighth of the computer's RAM; set `ALLWELL_POPULATION_CACHE_MB` to change it.
+- **Image Table and Segmentation read one field at a time.** Outlines, the
+  threshold view, the exclusion overlay and the hover value read only the
+  columns they need, select the field before doing any work, and remember the
+  answer until an edit, so a field drawn again (another channel, a LUT or zoom
+  change) reads nothing.
 - **Live counts say when they cover part of the plate.** QC's "flagged" count,
   the crop's status line and Cell Gating's "Included for analysis" are
   recalculated on every edit, so they count the wells in memory; when those are

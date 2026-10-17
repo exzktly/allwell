@@ -772,8 +772,62 @@ def test_an_image_table_redraw_waits_out_a_switch(qapp):
     timer = host.findChild(QTimer)
     with phone_layout.switching():
         timer.timeout.emit()
-        # Not inside the switch: asked again for after it.
-        assert calls == [] and timer.isActive()
+        # Not inside the switch, and not by re-arming its timer there either:
+        # a timer restarting itself is what can hold an event loop.
+        assert calls == [] and not timer.isActive()
+    assert timer.isActive()                    # asked again once, at the end
     timer.stop()
     timer.timeout.emit()
     assert calls == [ctx]
+
+
+def test_work_queued_for_after_a_switch_runs_once_at_its_end():
+    ran = []
+    phone_layout.after_switch(lambda: ran.append("now"))
+    assert ran == ["now"]                       # no switch: at once
+    def later():
+        ran.append("later")
+    with phone_layout.switching():
+        with phone_layout.switching():          # nested: still the one switch
+            phone_layout.after_switch(later)
+            phone_layout.after_switch(later)    # queued once
+        assert ran == ["now"]
+    assert ran == ["now", "later"]
+
+
+def test_no_timer_runs_inside_the_rescale_pass(qapp):
+    # The pass used to call processEvents, which runs due timers. On Windows it
+    # loops until the queue is empty, so a zero-delay timer that re-armed
+    # itself held the restyle — and its busy overlay — up for good.
+    from PySide6.QtCore import QTimer
+
+    from ui.phone_shell import rescale_widgets
+    fired = []
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.setInterval(0)
+    timer.timeout.connect(lambda: fired.append(phone_layout.is_switching()))
+    timer.start()
+    with phone_layout.switching():
+        rescale_widgets(1.0, 1.0, [], {})
+    assert fired == []
+    timer.stop()
+
+
+def test_the_queued_refresh_does_not_re_arm_inside_a_switch(qapp):
+    from types import SimpleNamespace
+
+    from PySide6.QtCore import QTimer
+
+    from ui.phone_shell import PhoneShell
+    refreshed = []
+    shell = SimpleNamespace(_refresh_soon=QTimer(), refresh=lambda: refreshed.append(1),
+                            _sweep=lambda force: None)
+    shell._refresh_soon.setSingleShot(True)
+    with phone_layout.switching():
+        PhoneShell._refresh_when_settled(shell)
+        # The switch ends with a refresh of its own; restarting this timer
+        # from inside the switch is what can hold an event loop.
+        assert refreshed == [] and not shell._refresh_soon.isActive()
+    PhoneShell._refresh_when_settled(shell)
+    assert refreshed == [1]

@@ -128,9 +128,10 @@ def test_thresh_change_handler_syncs_then_fans_out(qtbot, monkeypatch):
         cell_gating_on_threshold_frac_on_change,
     )
     app = _app(fluor=[("gfp", "0.0")], thresh=[("gfp", "50.0")])
-    # The ctx-native invalidate_stats_cache needs the full AppState; on this
-    # pure-logic fake, stub it to record the fan-out step instead.
-    monkeypatch.setattr(cg, "invalidate_stats_cache",
+    # The ctx-native invalidation needs the full AppState; on this pure-logic
+    # fake, stub it to record the fan-out step instead. A threshold edit keeps
+    # the wells' populations, so it calls ``invalidate_threshold_results``.
+    monkeypatch.setattr(cg, "invalidate_threshold_results",
                         lambda ctx: app._calls.append("invalidate"))
     # The fan-out now calls the ctx-native redraw_app orchestrator (was
     # ctx.app._redraw()); on this pure-logic fake, record the step instead.
@@ -156,7 +157,7 @@ def test_editing_finished_signal_drives_the_sync(qtbot, monkeypatch):
     # way the build loop does it must land the value in the slice.
     import review.features.home.cell_gating.controller as cg
     from review.features.home.cell_gating.controller import cell_gating_on_threshold_frac_on_change
-    monkeypatch.setattr(cg, "invalidate_stats_cache", lambda ctx: None)
+    monkeypatch.setattr(cg, "invalidate_threshold_results", lambda ctx: None)
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: None)
     app = _app(fluor=[("gfp", "0.0")], thresh=[("gfp", "50.0")])
     edit = app._cell_gating_thresh_frac_edits["gfp"]

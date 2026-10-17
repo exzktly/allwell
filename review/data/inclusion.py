@@ -22,6 +22,7 @@ another feature.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 
 from review.data.data_loading import df_included_mask, get_rows
 from domain.image_identity import (
@@ -52,15 +53,54 @@ def _inclusion_version(ctx) -> int | None:
     return int(getattr(slice_, "override_version", 0))
 
 
-def _build_excluded_map(df, well: str) -> dict[tuple[str, str], frozenset]:
+class FrameExclusions(Mapping):
+    """``{(fov, tp): frozenset of nucleus ids}`` for one well, built per frame on first use.
+
+    The ids are held as one integer array per frame; the ``frozenset`` a caller
+    gets is made the first time that frame is asked for. A gated well can drop
+    a million cells, and a render asks for the handful of frames on screen, so
+    turning every dropped id into a Python object up front cost seconds and
+    tens of megabytes per well for sets nothing read.
+    """
+
+    def __init__(self, arrays: dict) -> None:
+        self._arrays = arrays
+        self._sets: dict = {}
+
+    def __getitem__(self, key):
+        hit = self._sets.get(key)
+        if hit is None:
+            hit = frozenset(self._arrays[key].tolist())
+            self._sets[key] = hit
+        return hit
+
+    def __iter__(self):
+        return iter(self._arrays)
+
+    def __len__(self) -> int:
+        return len(self._arrays)
+
+    @property
+    def nbytes(self) -> int:
+        """What ``core/stats_cache_state.PopulationStore`` budgets against."""
+        held = sum(int(a.nbytes) for a in self._arrays.values())
+        made = sum(len(v) for v in self._sets.values())
+        return 512 + held + 64 * (len(self._arrays) + made)
+
+
+_NOTHING_EXCLUDED = FrameExclusions({})
+
+
+def _build_excluded_map(df, well: str) -> FrameExclusions:
     """``{(fov, tp): {nucleus ids the analysis drops}}`` for one well's rows."""
+    import numpy as np
     import pandas as pd
 
-    mask = df_included_mask(df)
+    mask = df_included_mask(df).to_numpy()
     # The common case by far: nothing is excluded, so the frame tokens — the
     # expensive part, a per-row normalisation — are never computed at all.
     if bool(mask.all()):
-        return {}
+        return _NOTHING_EXCLUDED
     nid_col = resolve_identity_column(df, *NUCLEUS_ID_COLUMN_NAMES)
     if nid_col is None:
         # Without ids there is no way to say *which* objects to drop, so the
@@ -72,19 +112,44 @@ def _build_excluded_map(df, well: str) -> dict[tuple[str, str], frozenset]:
             "column, so image views cannot filter them — its images will show "
             "cells its plots do not count.", well, int((~mask).sum()),
         )
-        return {}
-    fov_n, tp_n = frame_token_series(df)
-    nids = pd.to_numeric(df[nid_col], errors="coerce")
-    out: dict[tuple[str, str], set] = {}
-    dropped = ~mask
-    for fov, tp, nid in zip(fov_n[dropped], tp_n[dropped], nids[dropped]):
-        if nid != nid:      # NaN — an id that cannot be matched to a label
-            continue
-        out.setdefault((str(fov), str(tp)), set()).add(int(nid))
-    return {k: frozenset(v) for k, v in out.items()}
+        return _NOTHING_EXCLUDED
+    # Only the dropped rows are tokenised and grouped: the frame tokens of a
+    # kept cell are never needed here.
+    dropped = df[~mask]
+    fov_n, tp_n = frame_token_series(dropped)
+    nids = pd.to_numeric(dropped[nid_col], errors="coerce").to_numpy(dtype=float)
+    keep = np.isfinite(nids)   # NaN — an id that cannot be matched to a label
+    if not keep.any():
+        return _NOTHING_EXCLUDED
+    frames = pd.DataFrame({
+        "fov": fov_n.astype(str).to_numpy()[keep],
+        "tp": tp_n.astype(str).to_numpy()[keep],
+        "nid": nids[keep].astype(np.int64),
+    })
+    arrays = {
+        (str(fov), str(tp)): np.unique(group.to_numpy())
+        for (fov, tp), group in frames.groupby(["fov", "tp"], sort=False)["nid"]
+    }
+    return FrameExclusions(arrays)
 
 
-def excluded_nids_by_frame(ctx, well: str) -> dict[tuple[str, str], frozenset]:
+def _rows_for_inclusion(ctx, well: str):
+    """Well *well*'s identity columns and verdicts, read narrowly when it is not held.
+
+    The map needs the nucleus id, the frame tokens and the inclusion verdicts;
+    ``narrow_rows`` carries exactly those (every verdict layer declares its
+    inputs) and hands a held well back as held. Reading the whole frame instead
+    cost about a second per well on a 1.5M-cell well and pushed the frame into
+    the row cache, evicting a well some plot was using.
+    """
+    from review.data.narrow_rows import narrow_rows
+
+    if getattr(ctx.state, "repo", None) is None:
+        return get_rows(ctx, well)
+    return narrow_rows(ctx, well, ())
+
+
+def excluded_nids_by_frame(ctx, well: str) -> Mapping[tuple[str, str], frozenset]:
     """Per-frame excluded nucleus ids for *well*, memoised on its row frame.
 
     Keyed by the inclusion-change counter, so an edit invalidates it; held on
@@ -106,8 +171,21 @@ def excluded_nids_by_frame(ctx, well: str) -> dict[tuple[str, str], frozenset]:
         # There is nothing to filter, so say it once, quietly.
         _logger.debug("inclusion: well %r is not in this dataset", well)
         return {}
+    version = _inclusion_version(ctx)
+    store = getattr(getattr(ctx.state, "stats_cache", None), "populations", None)
+    rows_version = getattr(ctx.state.dataset, "rows_version", None)
+    memo_key = None
+    if store is not None and version is not None and rows_version is not None:
+        # Remembered by the context, not on the frame, so a well the row cache
+        # evicts (or never held) is not read again on every rendered cell. The
+        # store is cleared by every inclusion edit (``invalidate_stats_cache``),
+        # and the key carries both counters such an edit moves.
+        memo_key = ("excluded_nids", well, version, rows_version)
+        hit = store.get(memo_key)
+        if hit is not None:
+            return hit
     try:
-        df = get_rows(ctx, well)
+        df = _rows_for_inclusion(ctx, well) if memo_key is not None else get_rows(ctx, well)
     except Exception:
         _logger.warning(
             "inclusion: could not read rows for well %r; drawing every cell",
@@ -115,7 +193,10 @@ def excluded_nids_by_frame(ctx, well: str) -> dict[tuple[str, str], frozenset]:
         return {}
     if df is None or df.empty:
         return {}
-    version = _inclusion_version(ctx)
+    if memo_key is not None:
+        built = _build_excluded_map(df, well)
+        store[memo_key] = built
+        return built
     if version is not None:
         cached = df.attrs.get(_ATTR)
         if cached is not None and cached[0] == (version, id(df)):

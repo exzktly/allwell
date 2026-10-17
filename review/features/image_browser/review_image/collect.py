@@ -12,6 +12,7 @@ matplotlib drawing stays in ``review_image/renderer``.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 
 import numpy as np
 import numpy as _np
@@ -297,6 +298,74 @@ def exclusion_phrase(ctx, nid: int) -> str:
     return "  removed by: " + ", ".join(layers)
 
 
+def _frame_rows(ctx, well: str, fov: str, tp: str, want):
+    """``(rows, keys)`` for frame ``(fov, tp)`` of *well*: the rows that name a cell, and their keys.
+
+    ``rows`` is ``None`` when the well has no rows at all; ``keys`` (the
+    ``(fov, tp, nid)`` tuples of :func:`review_row_keys_series`, aligned with
+    ``rows``) is ``None`` alongside it. An empty ``rows`` means the well has
+    rows but none for this frame.
+
+    The frame is selected on its tokens first and keys are built only for its
+    rows. Both callers used to build a key tuple — and a ``CellKey`` — for every
+    cell of the well and then keep one frame's worth: 8–9 s per frame on a
+    1.5M-cell well, on the UI thread, for every cell an Image Table drew in its
+    threshold view and every Segmentation overlay. The frame tokens are the same
+    ``frame_token_series`` the keys are built from, so the rows selected are the
+    same rows.
+
+    *want* is the caller's columns for :func:`narrow_rows` (``None``: the whole
+    frame); a context without a repository reads through ``get_rows``.
+    """
+    store = getattr(getattr(ctx.state, "stats_cache", None), "populations", None)
+    memo_key = None
+    if store is not None and want is not None and getattr(ctx.state, "repo", None) is not None:
+        # Remembered per frame: an Image Table draws each field once per channel
+        # and again on every LUT, zoom or crop change. The store is cleared by
+        # every edit that can change a verdict (``invalidate_stats_cache``), and
+        # the key carries the two counters such edits move.
+        review = ctx.state.feature_slice("review_image") if hasattr(ctx.state, "feature_slice") else None
+        memo_key = ("frame_rows", well, fov, tp, frozenset(want),
+                    getattr(ctx.state.dataset, "rows_version", None),
+                    getattr(review, "override_version", None))
+        hit = store.get(memo_key)
+        if hit is not None:
+            return hit.rows, hit.keys
+    rows, keys = _read_frame_rows(ctx, well, fov, tp, want)
+    if memo_key is not None and rows is not None:
+        store[memo_key] = _FrameRows(rows, keys)
+    return rows, keys
+
+
+class _FrameRows:
+    """One frame's rows and keys, as the population store holds them."""
+
+    def __init__(self, rows, keys) -> None:
+        self.rows = rows
+        self.keys = keys
+        self.nbytes = int(rows.memory_usage(deep=False, index=True).sum()) + 100 * len(rows) + 512
+
+
+def _read_frame_rows(ctx, well: str, fov: str, tp: str, want):
+    """:func:`_frame_rows` without the memo."""
+    from domain.image_identity import frame_token_series
+
+    if want is None or getattr(ctx.state, "repo", None) is None:
+        df = get_rows(ctx, well)
+    else:
+        from review.data.narrow_rows import narrow_rows
+        df = narrow_rows(ctx, well, want)
+    if df is None or df.empty:
+        return None, None
+    fov_n, tp_n = frame_token_series(df)
+    in_frame = df.loc[((fov_n == fov) & (tp_n == tp)).to_numpy()]
+    keys = review_row_keys_series(ctx, in_frame)
+    if keys is None:
+        return in_frame, pd.Series([], dtype=object)
+    named = (keys.map(lambda k: k[2] != "")).to_numpy(dtype=bool)
+    return in_frame.loc[named], keys.loc[named]
+
+
 def review_build_exclusion_reasons(
     ctx, mask_arr, well: str, fov: str, tp: str,
 ) -> dict[int, tuple[str, ...]]:
@@ -317,17 +386,11 @@ def review_build_exclusion_reasons(
     reasons: dict[int, tuple[str, ...]] = {
         int(nid): () for nid in _np.unique(center) if int(nid) > 0
     }
-    df = get_rows(ctx, well)
-    if df is None or df.empty:
+    # The verdict columns come with every narrow read (each layer declares its
+    # inputs and is projected onto it), so the caller asks for nothing more.
+    sub, sub_keys = _frame_rows(ctx, well, fov, tp, ())
+    if sub is None or sub.empty:
         return reasons
-    keys = review_row_keys_series(ctx, df)
-    if keys is None:
-        return reasons
-    fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
-    sub = df.loc[fov_eq.fillna(False).to_numpy()]
-    if sub.empty:
-        return reasons
-    sub_keys = keys.loc[sub.index]
     nids = list(sub_keys.map(lambda k: k[2]).map(_safe_int_or_none))
     columns = {col: list(_verdict(sub, col)) for col, _label in EXCLUSION_LAYERS}
     overrides = ctx.runtime.review.included_overrides or {}
@@ -404,14 +467,25 @@ def _mfi_rows(ctx, well: str, col: str) -> tuple | None:
     if nid_col is None:
         return None
     fov_n, tp_n = frame_token_series(df)
-    nid_n = map_distinct(as_text(df[nid_col]), lambda u: u.map(normalize_nucleus_id))
-    keep = (nid_n != "").to_numpy()
-    nids = map_distinct(nid_n[keep], lambda u: u.map(_safe_int_or_none)).to_numpy()
+    raw_ids = df[nid_col]
+    if pd.api.types.is_numeric_dtype(raw_ids) and not pd.api.types.is_bool_dtype(raw_ids):
+        # The pipeline writes nucleus ids as numbers, and every id in a well is
+        # distinct, so the text normalisation below is one Python call per cell
+        # (about 4 s for a 1.5M-cell well). For a number it reduces to this:
+        # ``normalize_nucleus_id`` gives ``str(int(v))`` (empty for NaN) and
+        # ``_safe_int_or_none`` reads that back as ``int(v)``.
+        as_float = raw_ids.to_numpy(dtype=float, na_value=np.nan)
+        keep = np.isfinite(as_float)
+        nids = as_float[keep].astype(np.int64)
+    else:
+        nid_n = map_distinct(as_text(raw_ids), lambda u: u.map(normalize_nucleus_id))
+        keep = (nid_n != "").to_numpy()
+        nids = map_distinct(nid_n[keep], lambda u: u.map(_safe_int_or_none)).to_numpy()
     vals = pd.to_numeric(df[col], errors="coerce").to_numpy()[keep]
     return (fov_n.to_numpy()[keep], tp_n.to_numpy()[keep], nids, vals)
 
 
-def review_mfi_index(ctx, well: str, channel=None) -> dict[tuple[str, str], dict[int, float]]:
+def review_mfi_index(ctx, well: str, channel=None) -> Mapping[tuple[str, str], dict[int, float]]:
     """``{(fov, tp): {nid: MFI}}`` for every frame of *well*, built in one pass.
 
     The Image Table's hover readout asks for one cell's MFI per cell under the
@@ -426,12 +500,44 @@ def review_mfi_index(ctx, well: str, channel=None) -> dict[tuple[str, str], dict
     rows = _mfi_rows(ctx, well, f"{chan}_mean_intensity")
     if rows is None:
         return {}
-    out: dict[tuple[str, str], dict[int, float]] = {}
-    for f, t, nid, v in zip(*rows):
-        if nid is None or not _np.isfinite(v):
-            continue
-        out.setdefault((f, t), {})[int(nid)] = float(v)
-    return out
+    fovs, tps, nids, vals = rows
+    keep = ~pd.isna(nids) & _np.isfinite(vals)
+    if not keep.any():
+        return {}
+    frames = pd.DataFrame({"f": fovs[keep], "t": tps[keep]})
+    nid_arr = nids[keep].astype(_np.int64)
+    val_arr = vals[keep].astype(float)
+    groups = frames.groupby(["f", "t"], sort=False).indices
+    return _FrameMfi({(f, t): (nid_arr[idx], val_arr[idx]) for (f, t), idx in groups.items()})
+
+
+class _FrameMfi(Mapping):
+    """``{(fov, tp): {nid: MFI}}`` for one well, each frame's dict made on first use.
+
+    The ids and values are held as one pair of arrays per frame (in row order,
+    so a later duplicate row still wins, as it did in the dict build). A hover
+    asks for the frame under the cursor; building a Python dict entry for every
+    cell of a 1.5M-cell well up front took about 5 s per well and channel and
+    hundreds of megabytes, for frames nobody hovered.
+    """
+
+    def __init__(self, arrays: dict) -> None:
+        self._arrays = arrays
+        self._dicts: dict = {}
+
+    def __getitem__(self, key):
+        hit = self._dicts.get(key)
+        if hit is None:
+            nid, val = self._arrays[key]
+            hit = dict(zip(nid.tolist(), val.tolist()))
+            self._dicts[key] = hit
+        return hit
+
+    def __iter__(self):
+        return iter(self._arrays)
+
+    def __len__(self) -> int:
+        return len(self._arrays)
 
 
 def review_build_mfi_map(
@@ -528,27 +634,22 @@ def review_build_threshold_map(
     above_by_nid: dict[int, bool] = {
         int(nid): False for nid in _np.unique(center) if int(nid) > 0
     }
-    df = get_rows(ctx, well)
-    if df is None or df.empty:
+    from review.data.narrow_rows import value_inputs
+    inputs = value_inputs(val_col, ratios)
+    want = None if inputs is None else inputs | {"area_px"} | {
+        f"{chan}_mean_intensity" for chan in active_fluor_gates(fluor_gates)}
+    sub, sub_keys = _frame_rows(ctx, well, fov, tp, want)
+    if sub is None:
         _logger.info(
             "[binary-mask] well=%s fov=%s tp=%s | no rows for this well — the "
             "threshold cannot be evaluated, reporting unmeasured", well, fov, tp,
         )
         return None
-    keys = review_row_keys_series(ctx, df)
-    if keys is None:
-        _logger.info(
-            "[binary-mask] well=%s fov=%s tp=%s | row keys unresolvable — the "
-            "threshold cannot be evaluated, reporting unmeasured", well, fov, tp,
-        )
-        return None
-    sel = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "").fillna(False).to_numpy()
-    sub = df.loc[sel]
     if sub.empty:
         _logger.info(
-            "[binary-mask] well=%s fov=%s tp=%s | %d row(s) for the well, none "
+            "[binary-mask] well=%s fov=%s tp=%s | the well has rows, none "
             "covering this field — the threshold cannot be evaluated, reporting "
-            "unmeasured", well, fov, tp, len(df),
+            "unmeasured", well, fov, tp,
         )
         return None
 
@@ -573,7 +674,6 @@ def review_build_threshold_map(
     mask &= np.isfinite(val) & (val > threshold)
     n_above = int(mask.sum())
 
-    sub_keys = keys.loc[sub.index]
     for k, ok in zip(sub_keys, mask):
         nid = _safe_int_or_none(k[2])
         if nid is not None and nid in above_by_nid:

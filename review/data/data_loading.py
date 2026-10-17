@@ -1149,8 +1149,42 @@ def aggregate_with_threshold_df(
     the SD/SEM across per-FOV ``n_above/n_total`` ratios, and the trailing
     fields summarise per-FOV above-threshold counts.
     """
-    if df is None or len(df) == 0:
+    filtered = threshold_free_arrays(
+        df, tp_col=tp_col, val_col=val_col, fluor_gates=fluor_gates,
+        per_fov_spread=per_fov_spread, ratios=ratios, on_col=on_col)
+    if filtered is None:
         return []
+    tp_arr, val_arr, fov_arr, on_arr, fov_trusted = filtered
+    return _aggregate_arrays(tp_arr, val_arr, fov_arr, threshold, use_sem,
+                             per_fov_spread, on_arr=on_arr,
+                             fov_trusted=fov_trusted)
+
+
+def threshold_free_arrays(
+    df: pd.DataFrame,
+    *,
+    tp_col: str = "timepoint_hours",
+    val_col: str = "gfp_mean_intensity",
+    fluor_gates: dict[str, float] | None = None,
+    per_fov_spread: bool = False,
+    ratios: dict[str, RatioMetric] | None = None,
+    on_col: str | None = None,
+) -> tuple | None:
+    """The half of :func:`aggregate_with_threshold_df` that does not depend on the threshold.
+
+    ``(tp, val, fov, on, fov_trusted)`` for the cells the aggregate counts —
+    included, measured, area-finite, past every gate, with a finite timepoint
+    and value — in row order. ``fov`` is ``None`` unless *per_fov_spread*;
+    ``on`` is ``None`` unless the thresholding on-column is in use. ``None``
+    when no cell survives (or the frame cannot answer), which the aggregate
+    reports as no points.
+
+    Split out so ``review/domain/well_population.py`` can keep this result for
+    a well and answer any threshold from it with :func:`_aggregate_timepoint`,
+    the same arithmetic :func:`_aggregate_arrays` runs.
+    """
+    if df is None or len(df) == 0:
+        return None
     if fluor_gates is None:
         fluor_gates = {}
 
@@ -1170,7 +1204,7 @@ def aggregate_with_threshold_df(
             mask &= np.isfinite(area)
     else:
         _warn_no_area_column("aggregate_with_threshold_df")
-        return []
+        return None
 
     for channel, gate in active_fluor_gates(fluor_gates).items():
         col = f"{channel}_mean_intensity"
@@ -1185,22 +1219,22 @@ def aggregate_with_threshold_df(
                     "current dataset's schema.",
                     channel, col,
                 )
-            return []
+            return None
         v = pd.to_numeric(df[col], errors="coerce").to_numpy()
         mask &= np.isfinite(v) & (v > gate)
 
     if not mask.any():
-        return []
+        return None
 
     tp_num = resolved_timepoints(df, tp_col, rows_mask=mask)
 
     val = resolve_value_series(df, val_col, ratios).to_numpy()
     if val.size == 0:
-        return []
+        return None
 
     final = mask & np.isfinite(tp_num) & np.isfinite(val)
     if not final.any():
-        return []
+        return None
 
     tp_arr = tp_num[final]
     val_arr = val[final]
@@ -1234,9 +1268,7 @@ def aggregate_with_threshold_df(
     else:
         fov_arr = None
 
-    return _aggregate_arrays(tp_arr, val_arr, fov_arr, threshold, use_sem,
-                             per_fov_spread, on_arr=on_arr,
-                             fov_trusted=fov_trusted)
+    return tp_arr, val_arr, fov_arr, on_arr, fov_trusted
 
 
 def _aggregate_arrays(
@@ -1275,68 +1307,89 @@ def _aggregate_arrays(
     for t in np.unique(tp_arr):
         idx = tp_arr == t
         v = val_arr[idx]
-        n_total = int(v.size)
         above_mask = on_arr[idx] if on_arr is not None else (v > threshold)
-        above = v[above_mask]
-        n_above = int(above.size)
-        mean = float(above.sum() / n_above) if n_above else float("nan")
-
-        nan = float("nan")
-        spread = nan
-        frac_spread = nan
-        n_above_per_fov_mean = nan
-        n_above_per_fov_spread = nan
-
-        if per_fov_spread and not fov_trusted:
-            pass  # labels don't identify fields — every per-field value stays NaN
-        elif per_fov_spread:
-            f = fov_arr[idx]
-            sub = pd.DataFrame({"fov": f, "v": v, "above": above_mask})
-            grp = sub.groupby("fov", sort=False)
-            fov_total = grp.size()
-            fov_above_count = grp["above"].sum().astype(int)
-            fov_mean = sub.loc[above_mask].groupby("fov", sort=False)["v"].mean()
-
-            valid_fov = fov_total > 0
-            fov_total = fov_total[valid_fov]
-            fov_above_count = fov_above_count.reindex(fov_total.index, fill_value=0)
-            fov_mean = fov_mean.reindex(fov_total.index)
-
-            # Per-FOV spreads treat each FOV as a sample, so use the
-            # sample SD (ddof=1) consistently — matches what the Stats
-            # tab reports for the same groups. The per-cell SD branch
-            # below (line ~454) stays ddof=0 because it's an explicit
-            # population SD of cells around the well mean (labelled
-            # accordingly in the axis title).
-            fov_means = fov_mean.dropna().to_numpy()
-            if fov_means.size > 1:
-                sd = float(fov_means.std(ddof=1))
-                spread = sd / math.sqrt(fov_means.size) if use_sem else sd
-
-            fov_fracs = (fov_above_count.to_numpy() / fov_total.to_numpy()).astype(float)
-            if fov_fracs.size > 1:
-                fsd = float(fov_fracs.std(ddof=1))
-                frac_spread = fsd / math.sqrt(fov_fracs.size) if use_sem else fsd
-
-            fov_n_above = fov_above_count.to_numpy().astype(float)
-            if fov_n_above.size >= 1:
-                n_above_per_fov_mean = float(fov_n_above.sum() / fov_n_above.size)
-            if fov_n_above.size > 1:
-                nsd = float(fov_n_above.std(ddof=1))
-                n_above_per_fov_spread = (nsd / math.sqrt(fov_n_above.size)
-                                          if use_sem else nsd)
-        else:
-            if n_above > 1:
-                m = above.sum() / n_above
-                sd = float(np.sqrt(((above - m) ** 2).sum() / n_above))
-                spread = sd / math.sqrt(n_above) if use_sem else sd
-
-        result.append((float(t), mean, float(spread),
-                       n_above / n_total if n_total else float("nan"),
-                       int(n_above), int(n_total), float(frac_spread),
-                       float(n_above_per_fov_mean),
-                       float(n_above_per_fov_spread)))
+        result.append(_aggregate_timepoint(
+            t, v, above_mask, fov_arr[idx] if per_fov_spread and fov_trusted else None,
+            use_sem=use_sem, per_fov_spread=per_fov_spread, fov_trusted=fov_trusted))
     return result
+
+
+def _aggregate_timepoint(
+    t,
+    v: np.ndarray,
+    above_mask: np.ndarray,
+    f: np.ndarray | None,
+    *,
+    use_sem: bool,
+    per_fov_spread: bool,
+    fov_trusted: bool,
+) -> AggPoint:
+    """One timepoint's :data:`AggPoint` from its cells' values *v* (row order).
+
+    *above_mask* is the on-population; *f* the cells' field labels, read only
+    when *per_fov_spread* and the labels are trusted. The body of
+    :func:`_aggregate_arrays`, and what ``review/domain/well_population.py``
+    runs for each timepoint it holds, so the two answer identically.
+    """
+    n_total = int(v.size)
+    above = v[above_mask]
+    n_above = int(above.size)
+    mean = float(above.sum() / n_above) if n_above else float("nan")
+
+    nan = float("nan")
+    spread = nan
+    frac_spread = nan
+    n_above_per_fov_mean = nan
+    n_above_per_fov_spread = nan
+
+    if per_fov_spread and not fov_trusted:
+        pass  # labels don't identify fields — every per-field value stays NaN
+    elif per_fov_spread:
+        sub = pd.DataFrame({"fov": f, "v": v, "above": above_mask})
+        grp = sub.groupby("fov", sort=False)
+        fov_total = grp.size()
+        fov_above_count = grp["above"].sum().astype(int)
+        fov_mean = sub.loc[above_mask].groupby("fov", sort=False)["v"].mean()
+
+        valid_fov = fov_total > 0
+        fov_total = fov_total[valid_fov]
+        fov_above_count = fov_above_count.reindex(fov_total.index, fill_value=0)
+        fov_mean = fov_mean.reindex(fov_total.index)
+
+        # Per-FOV spreads treat each FOV as a sample, so use the
+        # sample SD (ddof=1) consistently — matches what the Stats
+        # tab reports for the same groups. The per-cell SD branch
+        # below (line ~454) stays ddof=0 because it's an explicit
+        # population SD of cells around the well mean (labelled
+        # accordingly in the axis title).
+        fov_means = fov_mean.dropna().to_numpy()
+        if fov_means.size > 1:
+            sd = float(fov_means.std(ddof=1))
+            spread = sd / math.sqrt(fov_means.size) if use_sem else sd
+
+        fov_fracs = (fov_above_count.to_numpy() / fov_total.to_numpy()).astype(float)
+        if fov_fracs.size > 1:
+            fsd = float(fov_fracs.std(ddof=1))
+            frac_spread = fsd / math.sqrt(fov_fracs.size) if use_sem else fsd
+
+        fov_n_above = fov_above_count.to_numpy().astype(float)
+        if fov_n_above.size >= 1:
+            n_above_per_fov_mean = float(fov_n_above.sum() / fov_n_above.size)
+        if fov_n_above.size > 1:
+            nsd = float(fov_n_above.std(ddof=1))
+            n_above_per_fov_spread = (nsd / math.sqrt(fov_n_above.size)
+                                      if use_sem else nsd)
+    else:
+        if n_above > 1:
+            m = above.sum() / n_above
+            sd = float(np.sqrt(((above - m) ** 2).sum() / n_above))
+            spread = sd / math.sqrt(n_above) if use_sem else sd
+
+    return (float(t), mean, float(spread),
+            n_above / n_total if n_total else float("nan"),
+            int(n_above), int(n_total), float(frac_spread),
+            float(n_above_per_fov_mean),
+            float(n_above_per_fov_spread))
 
 
 def _all_fluor_values(df: pd.DataFrame, val_col: str = "gfp_mean_intensity") -> np.ndarray:

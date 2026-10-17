@@ -1094,16 +1094,11 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
             added = merge_records_into_gz_csv(target, rows)
         except GZ_READ_ERRORS as exc:
             # The local archive does not read to its end — a download a Stop cut off part-way, which is all that
-            # can leave one. It is a partial copy of what is being fetched now, not rows of its own: set it aside
-            # (kept, never deleted) and put the fetched file in its place. An OSError is the other case below — a
-            # volume that would not read — where the existing file is left exactly as it is.
-            existing = existing_csv(target)
-            if existing is not None:
-                os.replace(existing, existing.with_name(f".{existing.name}.truncated"))
-            if log_fn:
-                log_fn(f"[remote] {target.name}: the local copy was cut short ({exc}); kept as "
-                       f".{existing.name if existing else target.name}.truncated and replaced by the download\n")
-            total += _place_fetched_csv(partial, target_dir, log_fn=log_fn)
+            # can leave one. Its readable rows are the well's earlier field groups, and on an incremental fetch the
+            # download holds only the new ones, so they are kept (whole groups only) and the download merged onto
+            # them; the cut-off file is set aside, never deleted. An OSError is the other case below — a volume
+            # that would not read — where the existing file is left exactly as it is.
+            total += _merge_onto_cut_csv(target, rows, exc, log_fn=log_fn)
             continue
         except (OSError, UnicodeDecodeError, _csv.Error) as exc:
             if log_fn:
@@ -1116,6 +1111,72 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
             log_fn(f"[remote] merge: {partial.name} \u2192 +{added} new row(s) "
                    f"into {target_dir.name}/\n")
     return total
+
+def _salvage_cut_csv(path: Path) -> tuple[list[dict], tuple[str, str] | None]:
+    """The rows a CSV cut short still holds, in whole field groups, and the ``(fov, timepoint)`` the cut fell in.
+
+    Every complete line is readable; the line the cut fell in is not. The group that line belonged to may have lost
+    rows after it too, so its rows are dropped rather than kept short — a group missing from the CSV is a gap
+    Validate & Repair names, while a group with a few cells fewer is a wrong number nothing would ever flag. The
+    rows are assumed grouped, as the pipeline writes them: one group's rows, then the next's.
+    """
+    import csv as _csv
+    import io as _io
+
+    from util.csv_gz import GZ_READ_ERRORS, open_csv_text
+
+    lines: list[str] = []
+    try:
+        with open_csv_text(path) as fh:
+            for line in fh:
+                lines.append(line)
+    except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError):
+        pass                                     # the cut: everything before it is in `lines`
+    if lines and not lines[-1].endswith("\n"):
+        lines.pop()
+    rows = list(_csv.DictReader(_io.StringIO("".join(lines))))
+    if not rows:
+        return [], None
+    cut = (str(rows[-1].get("fov", "")), str(rows[-1].get("timepoint", "")))
+    return [r for r in rows if (str(r.get("fov", "")), str(r.get("timepoint", ""))) != cut], cut
+
+
+def _merge_onto_cut_csv(target: Path, fetched: list[dict], exc: BaseException, *, log_fn=None) -> int:
+    """Rebuild a well's CSV whose local copy is cut short: its readable whole groups plus the fetched rows.
+
+    The shortfall is written to ``errors/`` beside the run's own failure records as well as logged, because the
+    well's ``<well>_out.zip`` still lists the dropped group as done (``pipeline.incremental_keys``), so no
+    incremental run will ever compute it again — only a forced re-run of the well restores it, and a log line
+    scrolls away. Returns how many fetched rows were added.
+    """
+    from util.csv_gz import csv_stem, existing_csv
+
+    existing = existing_csv(target)
+    salvaged, cut = _salvage_cut_csv(existing) if existing is not None else ([], None)
+    aside = existing.with_name(f".{existing.name}.truncated") if existing is not None else None
+    if existing is not None:
+        os.replace(existing, aside)
+    added = merge_records_into_gz_csv(target, salvaged + list(fetched)) - len(salvaged)
+    well = csv_stem(target.name).rpartition("_")[2] or csv_stem(target.name)
+    kept = (f"the local {target.name} was cut short ({type(exc).__name__}: {exc}). Kept its {len(salvaged)} "
+            f"readable row(s) in whole field groups and merged the download onto them; the cut-off file is kept "
+            f"as {aside.name if aside else '(none)'}.")
+    if cut is None or cut in {(str(r.get("fov", "")), str(r.get("timepoint", ""))) for r in fetched}:
+        if log_fn:                               # the download carries the group the cut fell in: nothing lost
+            log_fn(f"[remote] {well}: {kept}\n")
+        return max(0, added)
+    message = (f"{kept} Dropped the group the cut fell in (fov {cut[0]} timepoint {cut[1]}) rather than keep it "
+               f"short. The well's out.zip still lists that group as done, so an incremental run will not "
+               f"recompute it: re-run well {well} with --force (Force in Analyze) to restore it.")
+    with swallow(f"recording the cut-short CSV of {well}"):
+        errors = target.parent / "errors"
+        errors.mkdir(parents=True, exist_ok=True)
+        (errors / f"{well}_local_csv_cut_short.txt").write_text(
+            f"Well: {well}\nException type: {type(exc).__name__}\n\n{message}\n")
+    if log_fn:
+        log_fn(f"[remote] WARNING {well}: {message}\n")
+    return max(0, added)
+
 
 def _place_fetched_csv(partial: Path, target_dir: Path, *, log_fn=None) -> int:
     """Move a fetched CSV with no local counterpart into *target_dir* as it is (gzipping a plain one); return its

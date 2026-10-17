@@ -1829,6 +1829,14 @@ What this means in use:
   column with more cells draws a sample of 5,000, and the figure says which
   columns did; the fraction, the mean line and the median line still use every
   cell.
+- **Where the cells behind those samples are kept.** The Scatter, Distribution
+  and bar-chart views keep a large selection's cells in a compressed file in a
+  folder under the system temp directory (`allwell-cellpool-…`), removed when the
+  view is redrawn or the app closes. A load stops before it would leave less than
+  a tenth of the disk's free space, and a disk that fills anyway stops it too;
+  either way the message names the folder and its free space — free some space
+  there, point `TMPDIR` at a larger disk, or select fewer wells. Folders left by
+  an app that crashed are removed the next time a large selection is loaded.
 - **Cell Gating's distribution curves** are drawn through 2,000 of their points
   when a curve has more cells than that; every point drawn is on the full curve,
   and the figure says so.
@@ -5308,12 +5316,19 @@ exact correction and segmentation code).
     diameter** and **Lattice pitch** to enter.
   - **Array geometry** — *Hexagonal lattice in a circle* when that is what the
     array is; *Infer from the image* for a square lattice or an outline that is
-    not a circle.
+    not a circle. Left **blank** when the image never shows the array's rim —
+    one tile from inside a large array, wells running off every edge — since the
+    only outline such an image has is its own rectangle; the outline, the array
+    centre and the ring count are then reported as not in view rather than
+    measured. Search a stitched well archive, or a tile that shows the rim.
   - **Square edge angle** — the angle of the central square's edges to a lattice
     row. Left at the default 0 when the square sits within 5° of a row, or when
     no square was found (it is hidden, or the plate has none). On a hexagonal
-    lattice a non-zero value is flagged for checking against the plate's mask,
-    since a lattice turned past ±30° shifts the reading by 30°.
+    lattice a lattice turned past ±30° folds onto another row and shifts the
+    reading by 30°, so a reading more than 15° from a row is reported as a fold
+    and no value is offered: left at 0, a run refuses that rotation instead of
+    addressing on the wrong row. A smaller non-zero value is flagged for
+    checking against the plate's mask.
   - Everything it cannot measure is left **blank** with the reason: cell
     diameter, margin, the occlusion and clipping thresholds, and the tile-grid
     fields (blank whenever an acquisition record places the tiles, which it

@@ -11,6 +11,8 @@ same rows on every call.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -266,30 +268,148 @@ def test_a_pool_larger_than_its_memory_does_not_live_on_the_temp_cap(monkeypatch
         assert pool.value_range("w") is not None
 
 
-def test_a_full_pool_says_it_is_out_of_disk_and_keeps_its_counts():
-    """When there is truly no room left, the error names the directory and its
-    free space rather than DuckDB's RAM-sounding "Out of Memory", and the
-    counts still describe what the table holds — not the well that failed."""
-    duckdb = pytest.importorskip("duckdb")
+# A volume that fills up, for real: the probe runs in a child process whose file-size limit (RLIMIT_FSIZE, with
+# SIGXFSZ ignored so a write past it fails with EFBIG rather than killing the process) is what DuckDB's own write
+# hits. Which DuckDB error that is depends on which write fails: the WAL at a commit (TransactionException), or the
+# database file at an automatic checkpoint (FatalException, which invalidates the database for every later query).
+_FULL_DISK_PROBE = r"""
+import json, os, resource, signal, sys
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+os.environ["ALLWELL_CELL_POOL_MB"] = "32"
+sys.path.insert(0, sys.argv[2])
+import numpy as np
+from review.data import cell_pool
+pool = cell_pool.CellPool(["v", "w"], backend="duckdb")
+spill = pool._spill
+resource.setrlimit(resource.RLIMIT_FSIZE, (int(sys.argv[1]) * 2**20, resource.RLIM_INFINITY))
+rng, n, out = np.random.default_rng(0), int(sys.argv[3]), {}
+for i in range(100_000):
+    try:
+        pool.add("g", f"W{i}", np.arange(n), np.full(n, 24.0),
+                 {"v": rng.standard_normal(n), "w": rng.uniform(0, 1, n)})
+    except Exception as exc:
+        out["raised"], out["message"], out["added"] = type(exc).__name__, str(exc), i
+        out["cause"] = type(exc.__cause__).__name__
+        break
+def ask(name, call):
+    try:
+        out[name] = call()
+    except Exception as exc:
+        out[name] = "raised " + type(exc).__name__
+ask("count", pool.count)
+ask("value_range", lambda: pool.value_range("v"))
+ask("median_is_nan", lambda: bool(np.isnan(pool.quantiles("v", [0.5])).all()))
+ask("sample", lambda: {g: len(s) for g, s in pool.sample(10).items()})
+ask("failure", lambda: type(getattr(pool, "failure", None)).__name__)
+def again():
+    pool.add("g", "X", np.arange(3), np.zeros(3), {"v": np.ones(3), "w": np.ones(3)})
+    return "accepted"
+ask("add_again", again)
+pool.close()
+out["spill_removed"] = not os.path.exists(spill)
+print(json.dumps(out))
+"""
 
+
+@pytest.mark.skipif(not hasattr(__import__("signal"), "SIGXFSZ"), reason="needs RLIMIT_FSIZE / SIGXFSZ (POSIX)")
+@pytest.mark.parametrize("limit_mb, rows, duckdb_error", [
+    (8, 2_000, "TransactionException"),       # the WAL cannot be written at a commit
+    (20, 20_000, "FatalException"),            # the checkpoint cannot write the database file
+], ids=["commit-fails", "checkpoint-fails"])
+def test_a_pool_on_a_full_volume_says_so_and_then_answers_as_empty(limit_mb, rows, duckdb_error, tmp_path):
+    """Review M8. The out-of-room error must be the pool's own, naming the directory, whichever of DuckDB's errors
+    a file-backed table raises; and since a fatal one invalidates the database, the pool then answers as an empty
+    one — with the failure kept on it, and a later add refused with the same error — rather than raising DuckDB's
+    "database has been invalidated" from every question a figure asks it."""
+    pytest.importorskip("duckdb")
+    import json
+    import os
+    import subprocess
+    import sys
+
+    repo = str(Path(__file__).resolve().parents[1])
+    script = tmp_path / "probe.py"
+    script.write_text(_FULL_DISK_PROBE)
+    done = subprocess.run([sys.executable, str(script), str(limit_mb), repo, str(rows)], capture_output=True,
+                          text=True, timeout=240, env={**os.environ, "TMPDIR": str(tmp_path)})
+    assert done.returncode == 0, done.stderr[-2000:]
+    got = json.loads(done.stdout.strip().splitlines()[-1])
+    assert got["raised"] == "CellPoolFullError", f"{got['raised']} reached the caller: {got['message'][:300]}"
+    assert got["cause"] == duckdb_error
+    assert f"after {got['added'] * rows:,} cells" in got["message"] and str(tmp_path) in got["message"]
+    assert (got["count"], got["value_range"], got["median_is_nan"], got["sample"]) == (0, None, True, {"g": 0})
+    assert got["failure"] == "CellPoolFullError"
+    assert got["add_again"] == "raised CellPoolFullError"
+    assert got["spill_removed"]
+
+
+def test_a_pool_stops_short_of_filling_the_disk(monkeypatch):
+    """Review L9. An in-memory pool was held to DuckDB's temp cap of 90% of the free disk; a file-backed one has no
+    such cap, so the pool keeps its own: it refuses a well whose rows would take the volume below a tenth of what
+    was free when it opened, before DuckDB writes any of them, and keeps answering for the rows it holds."""
+    pytest.importorskip("duckdb")
+    free = {"bytes": 1000 * 2**20}
+    monkeypatch.setattr(cell_pool, "_free_bytes", lambda path: free["bytes"])
     pool = CellPool(["v"], backend="duckdb")
     pool.add("g", "A1", np.arange(5), np.zeros(5), {"v": np.arange(5.0)})
-    real = pool._con
-
-    class _Full:
-        def __getattr__(self, name):
-            return getattr(real, name)
-
-        def execute(self, sql, *args):
-            if sql.startswith("INSERT"):
-                raise duckdb.OutOfMemoryException("failed to offload data block (2.2 GiB/2.2 GiB used)")
-            return real.execute(sql, *args)
-
-    pool._con = _Full()
+    free["bytes"] = 100 * 2**20 + 10_000                   # 10 kB above the reserve: 1,000 rows (48 kB) do not fit
     with pytest.raises(cell_pool.CellPoolFullError) as err:
-        pool.add("g", "A2", np.arange(7), np.zeros(7), {"v": np.arange(7.0)})
-    assert "after 5 cells" in str(err.value) and "GiB free" in str(err.value)
-    assert pool.count() == 5 and pool.count("g") == 5
-    assert pool.value_range("v") == (0.0, 4.0)
-    pool._con = real
+        pool.add("g", "A2", np.arange(1000), np.zeros(1000), {"v": np.arange(1000.0)})
+    assert "after 5 cells" in str(err.value) and "a tenth" in str(err.value)
+    assert pool.count() == 5 and pool.value_range("v") == (0.0, 4.0)
+    assert pool._con.execute("SELECT count(*) FROM cells").fetchone()[0] == 5
+    assert pool.groups() == ["g"] and pool.failure is None
+    pool.add("g", "A3", np.arange(3), np.zeros(3), {"v": np.arange(3.0)})   # a small well still fits
+    assert pool.count() == 8
     pool.close()
+
+
+def test_a_refused_first_add_lists_no_group_or_well(monkeypatch):
+    """A group or well is listed only once its rows are in, so a refused first well leaves nothing behind."""
+    pytest.importorskip("duckdb")
+    free = {"bytes": 1000 * 2**20}
+    monkeypatch.setattr(cell_pool, "_free_bytes", lambda path: free["bytes"])
+    pool = CellPool(["v"], backend="duckdb")
+    free["bytes"] = 100 * 2**20
+    with pytest.raises(cell_pool.CellPoolFullError):
+        pool.add("g", "A1", np.arange(10), np.zeros(10), {"v": np.arange(10.0)})
+    assert pool.groups() == [] and pool._wells == [] and pool.count() == 0
+    pool.close()
+
+
+def test_a_crashed_pool_s_directory_is_swept_and_a_live_one_is_not(tmp_path, monkeypatch):
+    """Review L10. A pool killed with its process leaves its spill directory (and its compressed table) behind.
+    The next pool sweeps those of processes that no longer exist — never one whose owner is alive, nor an
+    unmarked one young enough to be a pool between creating its directory and marking it."""
+    pytest.importorskip("duckdb")
+    import os
+    import subprocess
+    import sys
+    import time
+
+    monkeypatch.setattr(cell_pool.tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(cell_pool, "_swept", False)
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    crashed = tmp_path / "allwell-cellpool-crashed"
+    crashed.mkdir()
+    (crashed / cell_pool.OWNER_FILE).write_text(f"{dead.pid}\n")
+    (crashed / "cells.duckdb").write_bytes(b"\0" * 4096)
+    live = tmp_path / "allwell-cellpool-live"
+    live.mkdir()
+    (live / cell_pool.OWNER_FILE).write_text(f"{os.getppid()}\n")          # a running process
+    old_unmarked = tmp_path / "allwell-cellpool-oldunmarked"
+    old_unmarked.mkdir()
+    stale = time.time() - 2 * cell_pool.UNMARKED_STALE_S
+    os.utime(old_unmarked, (stale, stale))
+    young_unmarked = tmp_path / "allwell-cellpool-youngunmarked"
+    young_unmarked.mkdir()
+    unrelated = tmp_path / "someone-elses-dir"
+    unrelated.mkdir()
+
+    with CellPool(["v"], backend="duckdb") as pool:
+        assert (Path(pool._spill) / cell_pool.OWNER_FILE).read_text().strip() == str(os.getpid())
+        assert Path(pool._spill).parent == tmp_path
+        assert not crashed.exists() and not old_unmarked.exists()
+        assert live.exists() and young_unmarked.exists() and unrelated.exists()
+

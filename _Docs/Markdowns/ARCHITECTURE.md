@@ -162,11 +162,19 @@ back is the ⋯ menu's *Desktop layout*. `PhoneShell.set_on(on)`:
 2. closes the side rail — or, on the way out, restores the left panel's desk
    state;
 3. restyles at the phone's type scale and touch unit (§8) — the only slow step,
-   about 6 s, under a busy overlay, and skipped when neither changes. Widgets
+   7–9 s on a 4,000-widget window, under a busy overlay, and skipped when
+   neither changes. Nearly all of it is `QApplication.setStyleSheet`
+   re-polishing every widget: a near-empty stylesheet still costs most of it,
+   so the cost scales with the widget count, not with the sheet. Widgets
    that take a different *form* on a phone — a stepper's − / +, an Analyze form
    row's stacked label — take it after the restyle on the way in and give it up
    before the restyle on the way out, so the rescale pass only ever sees
-   desk-shaped widgets;
+   desk-shaped widgets. The restyle is a *switch* (`phone_layout.switching()`,
+   read by `is_switching()`): its rescale pass lets Qt deliver pending events,
+   and timers fire with them, so anything a listener scheduled for after the
+   switch checks the flag and re-arms until it is over. The Image Table's refit
+   ran inside the restyle before it did, deleting and rebuilding its grid while
+   the pass was walking the window's widgets;
 4. pins the touch sizes (`_apply_sizes`), scales the plots, and, while phone
    layout is on, installs an app event filter (`_PhoneEventFilter`) that gives
    anything shown later the same treatment: a plot its DPI and height, a dialog a

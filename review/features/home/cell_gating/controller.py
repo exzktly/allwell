@@ -77,6 +77,7 @@ from review.features.home.cell_gating.gating_compute import (
 from review.features.home.cell_gating.opt_curve_view import (
     _cell_gating_show_opt_curve_popup,
 )
+from review.features.home.cell_gating.fov_view import refresh_fov_selection_widgets
 from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -497,7 +498,6 @@ def cell_gating_apply_persisted_state(ctx) -> None:
     _cell_gating_refresh_gate_filter(ctx)
     _cell_gating_apply_scatter_gate_mode(ctx)
     _cell_gating_refresh_gate_summary(ctx)
-    from review.features.home.cell_gating.fov_view import refresh_fov_selection_widgets
     refresh_fov_selection_widgets(ctx)
 
 
@@ -773,7 +773,6 @@ def cell_gating_refresh_included_count(ctx, *, pending: bool = False,
         funnel.setText(format_inclusion_funnel(inclusion_funnel(frames)))
     # The FOV picker's status names the wells its selection could not reach,
     # which changes as wells load — and this runs on every load and re-gate.
-    from review.features.home.cell_gating.fov_view import refresh_fov_selection_widgets
     refresh_fov_selection_widgets(ctx)
 
 

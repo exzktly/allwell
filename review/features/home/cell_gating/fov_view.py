@@ -20,6 +20,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from core.safe import swallow
+from review.persistence.cell_gating import save_to_pipeline_info
 from review.data.fov_selection import (
     fov_button_text,
     fov_match_key,
@@ -106,13 +107,12 @@ def set_fov_selection(ctx, selection) -> None:
     which also clears the statistics cache and repaints the tab's inclusion
     readout — and redraws the app.
     """
-    from review.features.home.cell_gating.controller import _cell_gating_persist_params
-
     new = normalise_selection(selection, available_fovs(ctx))
     if new == selected_fovs(ctx):
         return
     ctx.state.cell_gating.fov_selection = new
-    _cell_gating_persist_params(ctx)
+    with swallow("save the FOV selection to pipeline_info.json"):
+        save_to_pipeline_info(ctx)
     with swallow("re-project the inclusion layers after an FOV selection change"):
         ctx.features.call("qc.recompute_all", ctx)
     refresh_fov_selection_widgets(ctx)

@@ -160,8 +160,11 @@ def _switch_on(ctx, layer: str, gating=_intensity_gating) -> None:
         raise KeyError(layer)
 
 
-LAYERS = ("gating", "curation", "qc", "crop", "field_quality", "focus", "field_exclusions",
-          "fov_selection")
+LAYERS = ("gating", "curation", "qc", "crop", "field_quality", "focus", "field_exclusions")
+#: Layers proven here but kept out of :data:`LAYERS`, which four other files
+#: import with cell counts pinned against exactly that roster. The FOV
+#: selection (Cell Gating's FOV picker) excludes FOV 7, cells 24-27.
+LOCAL_LAYERS = LAYERS + ("fov_selection",)
 
 
 def _full(ctx) -> pd.DataFrame:
@@ -189,7 +192,7 @@ def test_each_layer_excludes_its_own_cells(ctx):
                 "crop": {CROP_CELL}, "field_quality": {0, 1, 2, 3}, "focus": {FOCUS_CELL},
                 "field_exclusions": {28, 29, 30, 31}, "fov_selection": {24, 25, 26, 27}}
     assert _excluded(_full(ctx)) == set()
-    for layer in LAYERS:
+    for layer in LOCAL_LAYERS:
         ctx.state.qc.params = None
         ctx.state.cell_gating.applied_gating = None
         ctx.runtime.review.included_overrides = {}
@@ -202,7 +205,7 @@ def test_each_layer_excludes_its_own_cells(ctx):
 
 @pytest.mark.parametrize("gating", [_intensity_gating, _ratio_scatter_gating], ids=["intensity", "ratio_scatter"])
 def test_with_every_layer_on_the_narrow_mask_is_the_full_mask(ctx, gating):
-    for layer in LAYERS:
+    for layer in LOCAL_LAYERS:
         _switch_on(ctx, layer, gating)
     full, narrow = _full(ctx), _narrow(ctx)
     filler = {f"m{i}" for i in range(10)}

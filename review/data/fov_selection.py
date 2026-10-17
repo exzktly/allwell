@@ -97,7 +97,7 @@ def apply_fov_selection_to_cache(ctx, label: str | None = None) -> list[str]:
     from review.data.field_quality_cache import untrusted_wells
 
     selection = selected_fovs(ctx)
-    cache = ctx.state.dataset.cache
+    cache = getattr(ctx.state.dataset, "cache", None) or {}
     labels = [label] if label is not None else list(cache.keys())
     if selection is None:
         for lbl in labels:

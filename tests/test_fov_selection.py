@@ -226,3 +226,18 @@ def test_unticking_a_field_in_the_picker_removes_its_cells_everywhere(
     assert ctx.state.cell_gating.fov_selection is None
     assert fs.FOV_PASS_COLUMN not in get_rows(ctx, well).columns
     assert "cell_gating" not in json.loads((dataset / "pipeline_info.json").read_text())
+
+
+def test_a_running_cell_export_notices_the_selection_change(tmp_path, monkeypatch):
+    """The export re-checks this signature around every well it slices; a
+    selection changed mid-export rewrites ``FOV_Pass`` without bumping
+    ``rows_version``, so the signature itself has to carry it."""
+    from review.domain import stats_compute
+    from review.features.export.service import _dataset_signature
+
+    monkeypatch.setattr(stats_compute, "_gate_cache_sig", lambda _ctx: None)
+    ctx = _ctx(tmp_path)
+    ctx.state.qc = SimpleNamespace(params=None)
+    before = _dataset_signature(ctx)
+    ctx.state.cell_gating.fov_selection = {"1"}
+    assert _dataset_signature(ctx) != before

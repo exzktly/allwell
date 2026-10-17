@@ -169,7 +169,10 @@ def _reproject_fov_selection(ctx) -> None:
     from review.data.fov_selection import apply_fov_selection_to_cache
 
     apply_fov_selection_to_cache(ctx, None)
-    invalidate_stats_cache(ctx)
+    # A context with no statistics cache (a persistence-only test context) has
+    # nothing derived from the frames to throw away.
+    if getattr(ctx.state, "stats_cache", None) is not None:
+        invalidate_stats_cache(ctx)
 
 
 def _write_gating_block_to_slice(cg, block: dict) -> bool:

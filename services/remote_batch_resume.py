@@ -240,7 +240,13 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     wanted = [w for w in (canonical_well_label(z.stem) for z in zips) if w and w in found.finished]
     adopted = set(adopt_finished(runner._cache, wanted, found, own_output_dir=own_output,
                                  nanowell=bool(proc._fetcher.run.nanowell), log=proc._log))
-    return [z for z in zips if canonical_well_label(z.stem) not in adopted], sorted(adopted)
+    remaining = [z for z in zips if canonical_well_label(z.stem) not in adopted]
+    if getattr(run, "reattached", False):
+        report_resumable_checkpoints(runner, run, [canonical_well_label(z.stem) or z.stem for z in remaining],
+                                     scratch=_recorded_scratch(earlier, own_output),
+                                     settings_stamps=_settings_stamps(_remote_argv(proc)),
+                                     log=proc._log)
+    return remaining, sorted(adopted)
 
 
 def nothing_left_to_run(adopted: list[str]) -> str:
@@ -354,3 +360,105 @@ def reattach_output_dir(runner, local_output_dir, keys: dict, legacy_digests, *,
                 f"checkpoints of any well it left part-way, carry over.\n")
             return out
     return fresh
+
+
+# ── the remote scratch: where a well's part-way checkpoints are ──
+
+_SCRATCH_LINE = re.compile(r"Scratch\s{1,4}:\s+(\S.*?)(?:\s+\(= output dir\))?\s*$")
+
+
+def note_remote_scratch(proc, line: str) -> None:
+    """Record, once per run, the scratch base the remote pipeline names on its ``Scratch  :`` line."""
+    if getattr(proc, "_scratch_noted", False) or "Scratch" not in line:
+        return
+    m = _SCRATCH_LINE.search(line)
+    if not m:
+        return
+    proc._scratch_noted = True
+    from services import run_journal
+
+    try:
+        run_journal.record_remote_scratch(proc._local_output_dir, m.group(1))
+    except OSError:
+        pass                              # the record is a convenience; the pipeline finds its own scratch
+
+
+def _recorded_scratch(earlier: list[dict], output_dir: str) -> str:
+    """The scratch base the journal recorded for the attempt that wrote into *output_dir*, or ``""``."""
+    for addr in earlier:
+        if addr.get("remote_output_dir") == output_dir and addr.get("remote_scratch_dir"):
+            return str(addr["remote_scratch_dir"])
+    return ""
+
+
+def _remote_argv(proc) -> list[str]:
+    """The pipeline arguments as the host receives them: the local argv plus the flags the host adds."""
+    argv = list(getattr(proc, "_pipeline_argv", []) or [])
+    extras = getattr(proc._runner, "_host_argv_extras", None)
+    if callable(extras):
+        try:
+            argv += list(extras(getattr(proc, "_output_filter", None)))
+        except (AttributeError, TypeError, ValueError):
+            pass
+    return argv
+
+
+def _settings_stamps(pipeline_argv: list[str]) -> tuple[str, ...]:
+    """The settings stamps this run's checkpoint directories may carry — the current digest's and the earlier
+    builds' — derived the way the pipeline derives its settings key, or ``()`` when the argv cannot be parsed."""
+    import hashlib
+
+    from pipeline.cli_args import build_parser
+    from util.settings_digest import settings_key_aliases, settings_key_for
+
+    try:
+        start = next(i for i, a in enumerate(pipeline_argv) if str(a).startswith("--"))
+        opts = vars(build_parser().parse_known_args([str(a) for a in pipeline_argv[start:]])[0])
+    except (StopIteration, SystemExit, ValueError):
+        return ()
+    return tuple(hashlib.blake2b(k.encode(), digest_size=4).hexdigest()
+                 for k in settings_key_aliases(settings_key_for(opts)))
+
+
+def report_resumable_checkpoints(runner, run, wells: list[str], *, scratch: str, log: Callable[[str], None],
+                                 settings_stamps: tuple[str, ...] = ()) -> None:
+    """Say, before anything runs, which wells left part-way will continue from their checkpoints.
+
+    The pipeline names a well's staging directory ``_tmp_images_<output stamp>_<settings stamp>_<well>`` under its
+    scratch base (``pipeline.fov_checkpoint._staging_dir_for``); the output stamp hashes the output directory's
+    resolved path, which only the host can resolve, so it is asked for (``pwd -P``) rather than guessed. The scratch
+    base is the one the journal recorded, else what the host's configuration gives the pipeline. Informational: a
+    probe that fails says nothing, and the pipeline decides for itself.
+    """
+    import hashlib
+
+    if not wells:
+        return
+    base = scratch or (runner.host.remote_scratch_dir or "~/.allwell/scratch")
+    probe = runner._cache._ssh_script(
+        f"cd {_remote_quote(run.remote_output_dir)} 2>/dev/null && pwd -P\n", check=False)
+    resolved = ((probe.stdout or "").strip().splitlines() or [""])[-1] if probe is not None else ""
+    if not resolved:
+        return
+    stamp = hashlib.blake2b(resolved.encode(), digest_size=6).hexdigest()
+    where = base if base.startswith("$") else _remote_quote(base)     # `$TMPDIR` must expand; a path must not split
+    listing = runner._cache._ssh_script(
+        f"cd {where} 2>/dev/null || exit 0\n"
+        f"for d in _tmp_images_{stamp}_*; do\n"
+        f"  [ -d \"$d\" ] || continue\n"
+        f"  echo \"$d $(ls -A \"$d\" | grep -c '^\\.fov_.*\\.done$')\"\n"
+        f"done\n", check=False)
+    counts: dict[str, int] = {}
+    for line in ((listing.stdout or "") if listing is not None else "").splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[-1].isdigit():
+            if settings_stamps and not any(parts[0].startswith(f"_tmp_images_{stamp}_{s}_") for s in settings_stamps):
+                continue                  # another configuration's, which this run's pipeline prunes rather than reads
+            well = parts[0].rsplit("_", 1)[-1]
+            counts[well] = counts.get(well, 0) + int(parts[-1])
+    resumable = {w: n for w, n in counts.items() if n and w in set(wells)}
+    if resumable:
+        log(f"[remote] {len(resumable)} well(s) left part-way will continue from their checkpoints in {base}: "
+            + ", ".join(f"{w} ({n} field group(s) done)" for w, n in sorted(resumable.items())) + "\n")
+    else:
+        log(f"[remote] no part-way checkpoints for this plate in {base} — wells left part-way start again.\n")

@@ -373,3 +373,51 @@ def test_staging_from_a_re_attached_directory_moves_rather_than_links(tmp_path, 
     assert [line.split()[1] for line in observed] == ["A02"]
     assert not (run_dir / "out").exists() or not any((run_dir / "out").iterdir()), (
         "finished output in the re-attached directory was linked somewhere else")
+
+
+# ── the remote scratch: recorded in the journal, and read back to say which wells will resume ──
+
+def test_the_remote_scratch_line_is_recorded_in_the_journal(tmp_path, monkeypatch):
+    from services import run_journal as J
+    from services.remote_batch_resume import note_remote_scratch
+
+    out = _journal_with(tmp_path, monkeypatch, ("run-first", "d-old"))
+    proc = types.SimpleNamespace(_local_output_dir=out)
+    note_remote_scratch(proc, "2026-10-17 01:00:00  INFO     Scratch  : /home/u/.allwell/scratch\n")
+    note_remote_scratch(proc, "2026-10-17 02:00:00  INFO     Scratch  : /somewhere/else\n")   # once per run
+    assert J.read_journal(out).remote["remote_scratch_dir"] == "/home/u/.allwell/scratch"
+
+
+def test_a_restart_says_which_part_way_wells_will_resume(tmp_path, monkeypatch):
+    """Against a stand-in host: the earlier attempt's output directory, re-attached, and its scratch holding A03's
+    checkpoint under this run's settings — and an unrelated directory of another configuration, not counted."""
+    import hashlib
+
+    from pipeline.fov_checkpoint import _output_stamp
+    from services.remote_batch_resume import _settings_stamps
+
+    old = tmp_path / "remote" / "runs" / "run-old"
+    scratch = tmp_path / "remote-scratch"
+    p, plate, run_dir, sent, _, _ = _harness(tmp_path, monkeypatch)
+    p._pipeline_argv = ["python", "pm.py", "--input_dir", "/in", "--output_dir", "/out", "--nuclear_token", "DAPI"]
+    p._runner._run.remote_output_dir = str(old / "out")
+    p._runner._run.reattached = True
+    p._runner.host.remote_scratch_dir = str(scratch)
+    (old / "out").mkdir(parents=True)
+    stamp = _output_stamp(old / "out")
+    assert stamp == hashlib.blake2b(str((old / "out").resolve()).encode(), digest_size=6).hexdigest()
+    (settings,) = _settings_stamps(p._pipeline_argv)[:1]
+    ours = scratch / f"_tmp_images_{stamp}_{settings}_A03"
+    ours.mkdir(parents=True)
+    (ours / ".fov_exp_A03_F001.done").touch()
+    (ours / ".fov_exp_A03_F002.done").touch()
+    theirs = scratch / f"_tmp_images_{stamp}_deadbeef_A04"
+    theirs.mkdir()
+    (theirs / ".fov_exp_A04_F001.done").touch()
+
+    _run(p, monkeypatch)
+
+    log = "".join(p._logged)
+    assert "1 well(s) left part-way will continue from their checkpoints" in log, log
+    assert "A03 (2 field group(s) done)" in log
+    assert "A04" not in log.split("will continue from their checkpoints")[1].split("\n")[0]

@@ -1371,7 +1371,10 @@ the remote's home directory, which on an HPC system is exactly the volume with
 the small quota, and a run that overflows it fails partway through with a
 message about space. Set it to your site's real scratch: `$TMPDIR`,
 `$SLURM_TMPDIR` and `/scratch/$USER` all work as written — the value is expanded
-on the remote, not here. This is separate from **Scratch disk** in the form
+on the remote, not here. A per-job folder (`$TMPDIR` or `$SLURM_TMPDIR` on most
+clusters) is emptied when the job ends, which costs the resume of a well a
+stopped run left part-way — it starts that well again; `/scratch/$USER` and the
+default keep it. This is separate from **Scratch disk** in the form
 above, which governs local runs and is not used when the pipeline runs remotely.
 
 **Empty-well correction works with batching.** If you set background or flat-field correction to **empty_well** and name a blank well, that well is uploaded once, on its own, before the batches start — every batch then corrects against the same reference. A blank that still needs processing is run once, with the last batch; one that a re-run has already completed is uploaded as a reference only and not processed again. The blank is never diffed or skipped by the incremental filters either, since it is the input the correction is built from rather than a well whose output you are waiting for. If it cannot be found at all, the run stops and says which well it looked for and where, instead of quietly producing uncorrected numbers.
@@ -1546,7 +1549,12 @@ and by `remote_fetch_report.txt` in the output folder.
   nonetheless being redone, with the reason. A well the earlier attempt left
   part-way continues from its last finished field rather than starting again —
   provided the host's scratch folder survives between runs (the default
-  `~/.allwell/scratch` does; a per-job `$SLURM_TMPDIR` does not). This holds for
+  `~/.allwell/scratch` does; a per-job `$SLURM_TMPDIR` does not). The run log
+  names the folder on each batch's `Scratch  :` line, and the host's
+  **Remote scratch dir** field (*Advanced (remote paths)* in the host dialog) is empty when
+  it is the default. A
+  restart that picks up an earlier attempt says, before anything runs, which
+  wells will continue and from how many finished fields. This holds for
   a run stopped on an earlier version too, as long as the settings and images
   are unchanged. With Force, finished wells are recomputed, but uploaded inputs
   are still reused. On an incremental remote

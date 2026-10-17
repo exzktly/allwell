@@ -74,7 +74,8 @@ from services.remote_run_id import (
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import release_batch
 from services.remote_batch_resume import (
-    announce_adopted, nothing_left_to_run, reattach_output_dir, stage_leftovers, take_from_remote)
+    announce_adopted, note_remote_scratch, nothing_left_to_run, reattach_output_dir, stage_leftovers,
+    take_from_remote)
 from util.well_token import canonical_well_label
 from services.remote_scratch import (
     source_fingerprint,
@@ -881,6 +882,7 @@ class _BatchedRemoteProcess:
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
+                note_remote_scratch(self, line)
                 m = _BATCH_DONE_RE.search(line)
                 if m:
                     # Consumed, not forwarded: this is the handshake between the

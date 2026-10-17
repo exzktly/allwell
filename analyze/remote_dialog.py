@@ -500,7 +500,9 @@ class RemoteFormDialog(QDialog):
             "Leave empty to use the remote's home directory. On a cluster set it "
             "to real scratch —\n$TMPDIR, $SLURM_TMPDIR or /scratch/$USER — since "
             "a run's working set is several\nuncompressed images per field, and a "
-            "home quota is the wrong volume for it."
+            "home quota is the wrong volume for it.\nA per-job folder such as "
+            "$SLURM_TMPDIR is emptied when the job ends, so a run\nstopped "
+            "part-way through a well starts that well again; /scratch/$USER keeps it."
         )
         adv_form.addRow("Remote scratch dir", self._scratch_dir_edit)
 

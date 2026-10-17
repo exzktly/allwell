@@ -453,6 +453,22 @@ def record_remote(
     return _atomic_write_json(_run_path(output_dir), payload)
 
 
+def record_remote_scratch(output_dir: Path | str, scratch_dir: str) -> bool:
+    """Add where the remote pipeline keeps its working files to the current remote address.
+
+    The pipeline resolves its scratch base on the host (``ALLWELL_SCRATCH_DIR`` or ``~/.allwell/scratch``) and
+    names it on its ``Scratch  :`` line; this is where a well's part-way checkpoints live, so a later run that
+    resumes the address can look for them there rather than re-deriving a path the host expanded.
+    """
+    payload = _read_run_payload(output_dir)
+    if payload is None or not isinstance(payload.get("remote"), dict) or not scratch_dir:
+        return False
+    if payload["remote"].get("remote_scratch_dir") == str(scratch_dir):
+        return True
+    payload["remote"]["remote_scratch_dir"] = str(scratch_dir)
+    return _atomic_write_json(_run_path(output_dir), payload)
+
+
 def record_well(
     output_dir: Path | str,
     well: str,

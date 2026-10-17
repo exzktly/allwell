@@ -202,8 +202,14 @@ def test_resume_downloads_the_finished_wells_and_uploads_nothing(
         assert [(r["fov"], r["timepoint"]) for r in rows] == [("1", "T01"), ("2", "T01")]
     kinds = [e[0] for e in events]
     assert "error" not in kinds, text
-    assert ("done", "Nothing to upload: every well is already complete "
-                    "locally.\n") in events, text
+    if batch_size:
+        # A batched run downloads them as part of the run (remote_batch_resume), alongside any batches it still
+        # has to compute, rather than before staging; with nothing to compute it ends as a completed run.
+        assert "downloading the 2 finished there, nothing to run" in text, text
+        assert ("done", "Remote pipeline completed successfully.\n") in events, text
+    else:
+        assert ("done", "Nothing to upload: every well is already complete "
+                        "locally.\n") in events, text
 
 
 @pytest.mark.parametrize("incremental", [True, False],

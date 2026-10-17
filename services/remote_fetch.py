@@ -85,7 +85,7 @@ from services.remote_run_state import (
 )
 from services.remote_log_adapter import LogFnLogger as _LogFnLogger
 from services.remote_staging import input_well_containers
-from services.remote_fetch_place import Placer, merge_fetched_csv_dir, place_whole
+from services.remote_fetch_place import Placer, local_output_mb, merge_fetched_csv_dir, place_whole
 from services.remote_fetch_nanowells import (
     fetch_nanowell_tables, missing_nanowell_tables, pull_nanowell_results, well_files_to_delete)
 from services.remote_wire import (
@@ -1715,10 +1715,8 @@ class FetchedOutputVerifier:
             registered neither, because the in-stream fetcher returns on a
             failed zip pull before it ever gets to the CSVs.
             """
-            out_zip = run.local_output_dir / f"{well}_out.zip"
-            try:
-                mb = out_zip.stat().st_size / (1024 * 1024)
-            except OSError:
+            mb = local_output_mb(run, well)          # also a FOLDER-mode or CSV-only well (remote_fetch_place)
+            if mb is None:
                 return
             log(f"[remote] ↓ {well}: {mb:.1f} MB zip in {_fmt_secs(elapsed)} "
                 f"(end-of-run retry)\n")

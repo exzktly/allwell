@@ -1542,7 +1542,8 @@ and by `remote_fetch_report.txt` in the output folder.
   A remote run in batches that is restarted — after Stop, Suspend, or a lost
   node — first checks what the host still holds from the earlier attempt with
   the same settings. A well that finished there but had not been downloaded
-  yet is downloaded rather than uploaded and run again, and an input archive
+  yet is downloaded rather than uploaded and run again — alongside the new
+  batches, not all of it before the job starts — and an input archive
   that was already uploaded is reused rather than sent again (one that differs
   from your copy is still re-sent). The log lists both, and names any well the
   earlier attempt's record says was finished, uploaded or downloaded that is

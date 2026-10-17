@@ -1761,6 +1761,12 @@ class PipelineRunner:
         """
         if opts.get("force", False):
             return False
+        if int(opts.get("remote_batch_size", 0) or 0) > 0:
+            # A batched run takes what an earlier attempt finished as part of the run (remote_batch_resume): the
+            # Fetcher downloads those wells while the batches upload and compute, instead of every one of them being
+            # pulled here, one after another, before anything is staged or the scheduler is asked for a node — and
+            # before the wells already local are even painted on the plate.
+            return bool(opts.get("incremental", False))
         recovery = recover_finished_outputs(
             self._remote_runner, output_dir, args,
             output_filter=OutputFilter(self._output_filter),

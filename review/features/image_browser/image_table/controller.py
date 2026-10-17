@@ -1070,8 +1070,15 @@ def generate_status_message(ctx, cells, n, rendered, unrendered, failed,
     return msg
 
 
-def image_table_generate(ctx) -> None:
-    """Load images for every cell and lay out the rendered image table."""
+def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
+    """Load images for every cell and lay out the rendered image table.
+
+    ``retry_missing`` re-walks folders that already came up empty for a
+    well/channel. Only the Generate button passes it: every other caller (zoom,
+    spacing, display, threshold, crop, a per-cell override, a refit) is a
+    re-render of the same request, and re-walking a missing well's folders on a
+    network drive is what made a click on the zoom percentage hang for minutes.
+    """
     from review.core.ui_helpers import make_overlay_thumb
     from review.core.ui_helpers import clear_layout
 
@@ -1102,10 +1109,11 @@ def image_table_generate(ctx) -> None:
     if not isinstance(cache, dict):
         cache = {}
         ctx.state.image_table.image_cache = cache
-    # Empty scans are remembered for THIS pass only (data/frame_load.load_well_channel),
-    # so one Generate scans a missing well/channel once and the next Generate
-    # gives a drive that had stalled another chance.
-    reset_scan_misses(ctx)
+    # Empty scans are remembered until the next explicit Generate
+    # (data/frame_load.load_well_channel): one Generate scans a missing
+    # well/channel once, re-renders reuse that answer, and pressing Generate
+    # again gives a drive that had stalled another chance.
+    reset_scan_misses(ctx, retry_misses=retry_missing)
     rendered: dict[tuple[int, int], Any] = {}
     # Cells that produced no picture, and the subset of those whose render raised.
     unrendered = 0

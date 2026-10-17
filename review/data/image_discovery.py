@@ -639,6 +639,28 @@ def _raw_file_well_passes(
     return True
 
 
+def _walk_capped(root: Path, max_depth: int) -> list[Path]:
+    """Every entry under *root* at most *max_depth* levels down, sorted.
+
+    The same list ``sorted(p for p in root.rglob("*") if depth(p) <= max_depth)``
+    gives — order included, which matters because the merge is first-hit-wins —
+    but it stops descending at the cap instead of listing the whole tree and
+    discarding the deep part afterwards. ``rglob`` walked everything below the
+    output folder, on a network drive, to keep three levels of it. Symlinked
+    directories are followed, as ``rglob`` follows them.
+    """
+    out: list[Path] = []
+    base = len(root.parts)
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        here = Path(dirpath)
+        depth = len(here.parts) - base
+        for name in (*dirnames, *filenames):
+            out.append(here / name)
+        if depth + 1 >= max_depth:
+            dirnames[:] = []        # their children would be deeper than the cap
+    return sorted(out)
+
+
 def _scan_raw_disk_files(
     search_dirs,
     well_token: str,
@@ -660,10 +682,7 @@ def _scan_raw_disk_files(
     # layout with headroom.
     _MAX_DEPTH = 3
     for search_root in search_dirs:
-        search_root_parts = len(search_root.parts)
-        for p in sorted(search_root.rglob("*")):
-            if (len(p.parts) - search_root_parts) > _MAX_DEPTH:
-                continue
+        for p in _walk_capped(search_root, _MAX_DEPTH):
             if p.suffix.lower() not in _IMAGE_EXTS or p.name.startswith("."):
                 continue
             kind, fov, tp = classify_member(

@@ -3,7 +3,9 @@
 The Cell Gating tab is the QC editing home: the QC debris gate is a *fundamental*
 inclusion layer that is always applied (``QC_Pass`` at the ``df_included_mask``
 chokepoint), composing with the FluorGating thresholds and the scatter gates that
-also live on this tab. Editing is live — each change recomputes the per-cell
+also live on this tab. A checkbox applies when it is clicked and a typed bound
+when the user presses Enter or leaves its box, never per keystroke; each change
+that alters a value recomputes the per-cell
 ``QC_Pass`` verdict, re-flags every plot/stat/the Review table, and refreshes the
 Segmentation overlay (which still *renders* the verdict so excluded cells show
 there).
@@ -16,7 +18,6 @@ step, not part of this gate.
 from __future__ import annotations
 
 
-from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QVBoxLayout, QWidget,
@@ -105,8 +106,9 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
 
     Returns the widget (already laid out): an enable checkbox with the flagged
     count beside it, over a grid with one row per measured quantity and its
-    min / max bounds in aligned columns. Edits apply live to the whole
-    dataset and refresh the Segmentation overlay so excluded cells show there
+    min / max bounds in aligned columns. A typed bound applies to the whole
+    dataset on Enter or focus-out (an unchanged value applies nothing) and
+    refreshes the Segmentation overlay so excluded cells show there
     immediately.
 
     A8 teardown: takes ``ctx`` — reads params off typed state, registers its
@@ -434,7 +436,14 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
 
     def _apply() -> None:
         _sync_enabled()
-        set_qc_params(ctx, _fields_params())  # recompute + persist + redraw
+        params = _fields_params()
+        if params == get_qc_params(ctx):
+            # Enter or a focus change on a box whose value is already in force
+            # (or a box edited back to it) changes nothing, so it recomputes
+            # nothing: the verdict over every held cell, the save and a redraw
+            # of every plot are not free on a large plate.
+            return
+        set_qc_params(ctx, params)  # recompute + persist + redraw
         try:
             from review.features.image_browser.review_image.renderer import refresh_review_image_ctx
             refresh_review_image_ctx(ctx)  # reflect QC in the segmentation overlay
@@ -443,24 +452,20 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         _update_status()
         _update_field_quality_status()
 
-    # Apply live while typing (debounced) as well as on focus-out / Enter, so a
-    # populated bound takes effect without the user having to tab out of the
-    # field first. The debounce only re-fires after a short typing pause to
-    # avoid recomputing the gate on every keystroke; the ``hasFocus`` guard
-    # keeps the programmatic ``refresh_qc_gate_row`` setText calls from
-    # triggering it (they run when the field isn't focused).
-    _debounce = QTimer(row)
-    _debounce.setSingleShot(True)
-    _debounce.setInterval(350)
-    _debounce.timeout.connect(_apply)
-
+    # A typed bound applies when the user is done with it — Enter or leaving
+    # the box (``editingFinished``) — never per keystroke. Typing "120" used to
+    # restart a 350 ms timer on each character, so a user who typed at a
+    # normal pace applied 1, then 12, then 120: three full recomputes of the
+    # verdict over every held cell, three saves and three redraws of every
+    # plot, two of them for numbers nobody meant. ``_apply`` also skips a value
+    # that is already in force, so Enter followed by a click elsewhere costs one
+    # update, not two. Programmatic refills (``qc_gate_refresh_widgets``) call
+    # ``setText``, which does not emit ``editingFinished``.
     enable_cb.toggled.connect(lambda _=None: _apply())
     fq_cb.toggled.connect(lambda _=None: _apply())
     foc_cb.toggled.connect(lambda _=None: _apply())
     brd_cb.toggled.connect(lambda _=None: _apply())
-    # The cut gets the same live-while-typing treatment as the debris bounds,
-    # including the ``hasFocus`` guard that keeps the programmatic refill in
-    # ``qc_gate_refresh_widgets`` from firing it.
+    # The cut applies on ``editingFinished`` like the debris bounds.
     def _finish_cut() -> None:
         """Apply, then make the box show the number that is actually in force.
 
@@ -500,12 +505,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
                 foc_edit.blockSignals(blocked)
 
     foc_edit.editingFinished.connect(_finish_cut)
-    foc_edit.textChanged.connect(
-        lambda _t=None: _debounce.start() if foc_edit.hasFocus() else None)
     for w in _edits:
         w.editingFinished.connect(_apply)
-        w.textChanged.connect(
-            lambda _t=None, _w=w: _debounce.start() if _w.hasFocus() else None)
 
     # Let a reset that clears the QC params re-fill this row without naming the
     # QC feature: the Gating reset scope fires whatever is stamped here and

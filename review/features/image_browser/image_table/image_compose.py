@@ -470,7 +470,7 @@ def _row_log_scale(ctx, row_idx: int, chan=None) -> bool:
     spec = _channel_opts_for(ctx, chan)
     return bool(spec.get("log", False)) if spec is not None else False
 
-def reset_scan_misses(ctx) -> None:
+def reset_scan_misses(ctx, *, retry_misses: bool = True) -> None:
     """Start a render pass with clean per-pass load bookkeeping.
 
     Called at the top of every Generate / export run. Three records are scoped to
@@ -480,12 +480,22 @@ def reset_scan_misses(ctx) -> None:
     last two are counted by the status line, so both have to describe the pass
     that just ran and no earlier one. The refused-scale-bar set is cleared for
     the same reason.
+
+    With ``retry_misses=False`` the empty-scan set is kept: a re-render that
+    changes only how the same cells look (zoom, spacing, a LUT, a crop, a
+    threshold) asks for no image it has not asked for before, so it has no
+    reason to walk a folder that already came up empty. On a dataset whose
+    inputs are not local, every such re-render used to re-walk the output tree
+    for each missing well/channel — over a network drive, minutes per click.
+    Only an explicit Generate (and an export) retries them.
     """
     st = getattr(getattr(ctx, "state", None), "image_table", None)
     if st is None:
         return
-    for attr in ("scan_misses", "raw_fallbacks", "partial_scans",
-                 "scale_bar_refusals"):
+    attrs = ("raw_fallbacks", "partial_scans", "scale_bar_refusals")
+    if retry_misses:
+        attrs = ("scan_misses", *attrs)
+    for attr in attrs:
         rec = getattr(st, attr, None)
         if isinstance(rec, set):
             rec.clear()

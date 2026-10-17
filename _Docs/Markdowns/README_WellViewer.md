@@ -2070,7 +2070,9 @@ buttons — you pick one or the other, because choosing the scatter option
   as one row per measured quantity — Area, Solidity, Region area, Circularity —
   with its lower and upper bound in the `min` and `max` columns. Solidity has no
   upper bound and Region area no lower one, so those cells show an em-dash
-  rather than an empty box you might think you were meant to fill in. Then
+  rather than an empty box you might think you were meant to fill in. A bound
+  you type takes effect when you press Enter or click out of the box, not as
+  you type each digit. Then
   choose the source of the inclusion decision —
   the per-channel **intensity minimum** (the `Include ≥` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
@@ -5112,8 +5114,9 @@ channel for every well).
   could not be drawn. A cell that failed because the source was briefly
   unavailable (an external drive spinning down, a network share that dropped)
   comes back the next time you press **Generate**, so there is no need to
-  reload the dataset. A frame that simply isn't in the dataset is remembered
-  instead, so changing zoom, LUTs or the crop doesn't search for it again — a
+  reload the dataset. Changing zoom, LUTs, spacing or the crop never searches
+  for a missing frame again — only **Generate** does — and a frame that simply
+  isn't in the dataset is remembered until you reload it — a
   plate brought back from a remote run usually has its corrected frames but not
   its raw inputs, so its **Raw** cells read `(no image)`; switch those rows to
   **Corrected**. If you add frames to a dataset while it is open, reload it.

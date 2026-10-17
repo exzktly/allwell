@@ -67,6 +67,43 @@ def test_a_hexagonal_array_whose_outline_is_not_a_circle_needs_the_inferred_geom
     assert fields["Array geometry"] == "Infer from the image"
 
 
+def _interior_tile(**render):
+    """One 1000 px tile at 1.3 µm of an array far larger than it (half-width 1600 µm against a 1300 µm tile),
+    so the tile shows wells to every edge and never the array's rim — what From this frame sees on one tile."""
+    plan = TilePlan(1, 1, (1000, 1000), 0.0, 1.3)
+    return render_tiles(plan, pitch_um=172.0, diameter_um=100.0, radius_um=1600.0, rotation_deg=8.0,
+                        noise_sigma=0.05, blur_px=1.0, **render).images["F0"]
+
+
+@pytest.mark.parametrize("render", [
+    {"array_shape": "square"},             # a hexagonal lattice in a square outline: Infer would be right
+    {"array_shift_um": (400, 0)},          # a circular array, the tile off its centre one way...
+    {"array_shift_um": (0, 400)},          # ...and the other: the two read as a circle and a polygon
+], ids=["square-outline", "circle-shifted-x", "circle-shifted-y"])
+def test_a_tile_that_never_shows_the_rim_leaves_the_geometry_blank_and_says_why(render):
+    """Review M14. With the rim out of view the only outline there is to fit is the image's own rectangle, so
+    the circle-or-not answer flipped with where the tile sat and read "a circle" for a square outline. The field
+    is left blank with the reason, and no array centre or ring count is stated."""
+    s = nc.suggest_from_image(_interior_tile(**render), 1.3)
+    geometry = next(f for f in s.fields if f.label == "Array geometry")
+    assert geometry.value == "", f"geometry {geometry.value!r} read from an outline the tile never shows"
+    assert "not in view" in geometry.note
+    facts = dict(s.facts)
+    assert facts["Array outline"].startswith("not in view")
+    assert "Array centre" not in facts and "ring(s) out to the rim" not in facts["Address origin (0.0)"]
+    assert s.radius_px is None and s.centre_px is None        # no fitted circle drawn over the image either
+
+
+def test_a_tile_that_shows_part_of_the_rim_still_reads_the_geometry():
+    """The array cut by the image's edge on one side, its rim in view on the other: the circle is a real one."""
+    plan = TilePlan(1, 1, (1500, 1500), 0.0, 2.0)
+    image = render_tiles(plan, pitch_um=172.0, diameter_um=100.0, radius_um=1300.0, rotation_deg=8.0,
+                         array_shift_um=(700, 0), noise_sigma=0.05, blur_px=1.0).images["F0"]
+    s = nc.suggest_from_image(image, 2.0)
+    assert _fields(s)["Array geometry"] == "Hexagonal lattice in a circle"
+    assert "runs off the image" in dict(s.facts)["Array outline"]
+
+
 def test_a_plate_of_no_known_format_gets_its_measured_diameter_and_pitch():
     s = nc.suggest_from_image(_frame(pitch=120.0, diameter=60.0, px=2.5, radius=900.0), 2.5)
     fields = _fields(s)

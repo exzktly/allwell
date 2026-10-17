@@ -39,6 +39,10 @@ GEOMETRY_LABELS = {"hex_circle": "Hexagonal lattice in a circle", "infer": "Infe
 #: tolerates 15 degrees either way (``nanowell_detect.SQUARE_AXIS_TOLERANCE_DEG``), and a few degrees of
 #: measurement scatter is not a reason to send a non-default value (which also changes the run's reuse key).
 SQUARE_SNAP_DEG = 5.0
+#: An image shows the array's rim when at least this many lattice sites one step out from the array lie wholly on
+#: it and hold no well. Measured on 1000 px tiles inside a 3200 µm array: 0-2 such sites from wells the search
+#: missed at the image's edge; a rim arc in view gives 8 or more, a whole array in frame ~50.
+RIM_SITES_IN_VIEW = 6
 #: Channel names that are the phase (or brightfield) image nanowells are found in, matched case-insensitively.
 _PHASE_HINTS = ("phase", "ph", "bf", "bright", "trans", "dic")
 
@@ -300,38 +304,43 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
     fit = geometry.fit
     pitch, diameter = float(fit.pitch), float(wells.diameter_um)
     out.roster_px, out.roster_found = to_px(geometry.roster_um), geometry.found
-    if geometry.centre_um is not None:
-        out.centre_px = tuple(to_px(geometry.centre_um))
-    if geometry.radius_um is not None:
+    # A tile that shows wells to every edge it has never shows the rim, and the only outline there is to fit is
+    # the image's own: its circle, centre and ring count would change with where the tile sat (review M14).
+    rim_seen = not geometry.clipped or _rim_in_view(geometry, covered, um_per_px, diameter)
+    centre_um = geometry.centre_um if rim_seen else None
+    if centre_um is not None:
+        out.centre_px = tuple(to_px(centre_um))
+    if geometry.radius_um is not None and rim_seen:
         out.radius_px = geometry.radius_um / um_per_px
 
     # The central square and the origin, as a run resolves them: the square when it clears its margin, else
     # the array's centre (a circle's, or the middle site of a whole polygon).
-    candidate, scores = score_fiducial(image, um_per_px, diameter, wells.points_um, centre_um=geometry.centre_um,
-                                       search_radius_um=2.2 * pitch if geometry.centre_um is not None else None)
+    candidate, scores = score_fiducial(image, um_per_px, diameter, wells.points_um, centre_um=centre_um,
+                                       search_radius_um=2.2 * pitch if centre_um is not None else None)
     square = max(scores, key=lambda s: s.coherence) if candidate is not None and scores else None
     if square is not None:
         out.square_px = tuple(to_px(square.position_um))
-    resolved = resolve_origin(fit, fiducial=candidate, array_centre=geometry.centre_um, fiducial_margin=FIDUCIAL_MARGIN)
+    resolved = resolve_origin(fit, fiducial=candidate, array_centre=centre_um, fiducial_margin=FIDUCIAL_MARGIN)
     rings = None
     if resolved.status == "anchored":
         out.origin_px = tuple(to_px(resolved.origin_xy))
         addresses = [p for p in index_points(geometry.roster_um, fit, resolved.origin_xy) if not p.outlier]
         rings = max((NanowellAddress(p.q, p.r, kind=fit.kind).ring for p in addresses), default=0)
 
-    out.fields, edge_value = _field_rows(fit, geometry, square, pitch, diameter, record_places_tiles)
+    out.fields, edge_value = _field_rows(fit, geometry, square, pitch, diameter, record_places_tiles, rim_seen)
     kind = "hexagonal" if fit.kind == "hex" else "square"
     out.facts = [
         ("Lattice", f"{kind}, pitch {pitch:.1f} µm, row angle {fit.angle_deg:+.1f}°"),
         ("Nanowell diameter", f"{diameter:.1f} µm (median of {len(wells.points_um)} wells found)"),
-        ("Array outline", (f"circle, radius {geometry.radius_um:.0f} µm" if geometry.shape == ARRAY_CIRCLE
+        ("Array outline", "not in view (the array runs off the image on every side it shows)" if not rim_seen else
+                          (f"circle, radius {geometry.radius_um:.0f} µm" if geometry.shape == ARRAY_CIRCLE
                            else "polygon (the hull of the wells found)") + (", runs off the image" if geometry.clipped
                                                                              else "")),
         ("Lattice sites", f"{len(geometry.found)} in the array, {sum(geometry.found)} with a well found, "
                           f"{geometry.missing} imaged but dark (a bubble, or not detected)"),
     ]
-    if geometry.centre_um is not None:
-        cx, cy = geometry.centre_um
+    if centre_um is not None:
+        cx, cy = centre_um
         out.facts.append(("Array centre", f"x {cx:.0f}, y {cy:.0f} µm in the image ({cx / um_per_px:.0f}, "
                                           f"{cy / um_per_px:.0f} px)"))
     if square is not None:
@@ -341,8 +350,8 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
         ox, oy = resolved.origin_xy
         how = {"fiducial": "the central square", "array_centre": "the array's centre"}.get(resolved.method,
                                                                                             resolved.method)
-        out.facts.append(("Address origin (0.0)", f"from {how}, at x {ox:.0f}, y {oy:.0f} µm; "
-                                                  f"{rings} ring(s) out to the rim"))
+        out.facts.append(("Address origin (0.0)", f"from {how}, at x {ox:.0f}, y {oy:.0f} µm; " + (
+            f"{rings} ring(s) out to the rim" if rim_seen else f"{rings} ring(s) in view (the rim is not)")))
     else:
         out.facts.append(("Address origin (0.0)", f"not resolved: {resolved.reason}"))
         out.notes.append("Addresses cannot be anchored from this image alone; in a run the rest of the plate "
@@ -361,8 +370,41 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
     return out
 
 
-def _field_rows(fit, geometry, square, pitch: float, diameter: float,
-                record_places_tiles: bool) -> tuple[list[FieldSuggestion], str]:
+def _rim_in_view(geometry, covered, um_per_px: float, diameter_um: float) -> bool:
+    """Whether the image shows the array's rim anywhere: at least :data:`RIM_SITES_IN_VIEW` lattice sites one step
+    out from the array lie wholly on the image and hold no well — the floor past the last ring.
+
+    A tile inside the array shows wells to every edge, so every site one step out is off the image (or cut by its
+    edge) and none qualifies; a stray dark site at the edge (a well the contrast search missed) makes one or two.
+    """
+    from scipy import ndimage
+    from scipy.spatial import cKDTree
+
+    fit = geometry.fit
+    roster = np.asarray(geometry.roster_um, dtype=float).reshape(-1, 2)
+    if len(roster) == 0:
+        return False
+    a1, a2 = np.asarray(fit.a1, dtype=float), np.asarray(fit.a2, dtype=float)
+    steps = [i * a1 + j * a2 for i in (-1, 0, 1) for j in (-1, 0, 1) if (i, j) != (0, 0)]
+    steps = np.array([v for v in steps if abs(math.hypot(*v) / fit.pitch - 1.0) < 0.1])
+    beyond = (roster[:, None, :] + steps[None, :, :]).reshape(-1, 2)
+    distance, _ = cKDTree(roster).query(beyond)
+    beyond = beyond[distance > fit.pitch / 2]
+    if len(beyond) == 0:
+        return False
+    # One entry per lattice site (several roster sites share an outward neighbour).
+    beyond = beyond[np.unique(np.rint(beyond / (fit.pitch / 4)).astype(np.int64), axis=0, return_index=True)[1]]
+    depth = ndimage.distance_transform_edt(np.pad(np.asarray(covered, dtype=bool), 1))[1:-1, 1:-1] * um_per_px
+    index = np.rint(beyond / um_per_px - 0.5).astype(int)
+    h, w = depth.shape
+    on = (index[:, 0] >= 0) & (index[:, 0] < w) & (index[:, 1] >= 0) & (index[:, 1] < h)
+    whole = np.zeros(len(beyond), dtype=bool)
+    whole[on] = depth[index[on, 1], index[on, 0]] > diameter_um / 2
+    return int(whole.sum()) >= RIM_SITES_IN_VIEW
+
+
+def _field_rows(fit, geometry, square, pitch: float, diameter: float, record_places_tiles: bool,
+                rim_seen: bool = True) -> tuple[list[FieldSuggestion], str]:
     """The form's rows for what was measured, and the square-edge value suggested ("" for the default)."""
     from pipeline.nanowell_detect import SQUARE_AXIS_TOLERANCE_DEG
     from pipeline.nanowell_infer import ARRAY_CIRCLE
@@ -374,6 +416,11 @@ def _field_rows(fit, geometry, square, pitch: float, diameter: float,
                      f"a {'hexagonal' if fit.kind == 'hex' else 'square'} lattice in a "
                      f"{'circular' if geometry.shape == ARRAY_CIRCLE else 'non-circular'} array, which only "
                      "Infer from the image addresses")
+    geometry_label = GEOMETRY_LABELS[geometry_choice]
+    if not rim_seen:
+        geometry_label, geometry_note = "", (
+            "the array's outline is not in view (its wells run off every side of the image), so whether it is a "
+            "circle cannot be read here and no choice is suggested: search a montage, or a tile that shows the rim")
     if square is None:
         edge_value, edge_note = "", ("no central square was found (hidden, or the plate has none), so the angle "
                                      "cannot be measured: the default 0 is assumed")
@@ -397,7 +444,7 @@ def _field_rows(fit, geometry, square, pitch: float, diameter: float,
     fields = [
         FieldSuggestion("Mode", "nanowell_format", "Nanowell arrays (on)", "tick it: this well is a nanowell array"),
         FieldSuggestion("Plate format", "nanowell_format", FORMAT_LABELS[plate_format], format_note),
-        FieldSuggestion("Array geometry", "nanowell_geometry", GEOMETRY_LABELS[geometry_choice], geometry_note),
+        FieldSuggestion("Array geometry", "nanowell_geometry", geometry_label, geometry_note),
         FieldSuggestion("Nanowell diameter (µm)", "nanowell_diameter_um", _fmt(diameter) if custom else "",
                         "measured" if custom else "set by the plate format"),
         FieldSuggestion("Lattice pitch (µm)", "nanowell_pitch_um", _fmt(pitch) if custom else "",

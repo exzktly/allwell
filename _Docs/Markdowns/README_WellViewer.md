@@ -5305,7 +5305,11 @@ exact correction and segmentation code).
     diameter** and **Lattice pitch** to enter.
   - **Array geometry** — *Hexagonal lattice in a circle* when that is what the
     array is; *Infer from the image* for a square lattice or an outline that is
-    not a circle.
+    not a circle. Left **blank** when the image never shows the array's rim —
+    one tile from inside a large array, wells running off every edge — since the
+    only outline such an image has is its own rectangle; the outline, the array
+    centre and the ring count are then reported as not in view rather than
+    measured. Search a stitched well archive, or a tile that shows the rim.
   - **Square edge angle** — the angle of the central square's edges to a lattice
     row. Left at the default 0 when the square sits within 5° of a row, or when
     no square was found (it is hidden, or the plate has none). On a hexagonal

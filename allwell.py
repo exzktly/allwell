@@ -226,11 +226,13 @@ def _log_line_tone(line: str) -> str:
 class AllWellApp(QMainWindow):
     """Root window containing the Review and Analyze notebook tabs."""
 
-    def __init__(self, data_path: Path | None = None) -> None:
+    def __init__(self, data_path: Path | None = None, *,
+                 start_in_phone_layout: bool = False) -> None:
         super().__init__()
         self.setWindowTitle("All-Well")
         self.resize(1640, 980)
         self.setMinimumSize(_WINDOW_MIN_W, _WINDOW_MIN_H)
+        self._phone = None  # ui.phone_shell.PhoneShell, built in _build_ui
 
         self._review: QWidget | None = None
         self._analyze: QWidget | None = None
@@ -239,6 +241,12 @@ class AllWellApp(QMainWindow):
         self._install_shortcuts()
         self._apply_stylesheet()
         self._restore_window_state()
+        if self._phone is not None:
+            # ``main`` scaled the tokens before this window was built, so every
+            # widget already has phone-sized text; only the layout is left.
+            if start_in_phone_layout:
+                self._phone.set_on(True, restyle=False)
+            self._phone.fit_window()
         # Defer the icon render — it builds 8 QPainter pixmaps and that
         # work was blocking first paint. Queue it after the event loop
         # picks up; the window briefly shows the default Qt icon, which
@@ -297,6 +305,8 @@ class AllWellApp(QMainWindow):
             f"border-radius: {theme_v2.Radii.xs}px;"
         )
         hl.addWidget(self._version_pill)
+        self._header = header
+        self._header_layout = hl
 
         hl.addSpacing(theme_v2.Spacing.md)
         # Review / Analyze / Datasets — the app's top-level interface switch.
@@ -515,6 +525,9 @@ class AllWellApp(QMainWindow):
         # Kbd hints — each one is a real shortcut wired in _install_shortcuts.
         # ("Search ⌘K" used to sit here but no global search exists; replaced
         #  with the help-drawer toggle, which is a real binding.)
+        # Kept in a list so phone layout can take them away: a phone over
+        # remote desktop has no keyboard to press them on.
+        self._status_hints: list[QWidget] = []
         for label, hint in (("Open", "⌘O"), ("Help", "⌘/"), ("Export", "⌘E")):
             l = QLabel(label)
             l.setStyleSheet(
@@ -522,8 +535,10 @@ class AllWellApp(QMainWindow):
                 f"font-size: {theme_v2.Typography.caption_size}px;"
             )
             sb_layout.addWidget(l)
-            sb_layout.addWidget(_KbdHint(hint))
+            kbd = _KbdHint(hint)
+            sb_layout.addWidget(kbd)
             sb_layout.addSpacing(theme_v2.Spacing.xs)
+            self._status_hints += [l, kbd]
         # Application-log tray button (far-right of the status bar). Opens the
         # shell log drawer (_toggle_log_drawer); also bound to ⌘/Ctrl+L. Mirrors
         # the title-bar help-drawer button (self._help_btn).
@@ -545,6 +560,92 @@ class AllWellApp(QMainWindow):
         # Capture logs from startup (not lazily on first drawer-open) so the
         # drawer shows history the moment it opens — and onto the right logger.
         self._attach_log_ring_buffer()
+        self._build_phone_shell(review_topbar)
+
+    # ── phone layout ─────────────────────────────────────────────────────
+    def _build_phone_shell(self, band) -> None:
+        """Hand phone layout (``ui/phone_shell.py``) the widgets it rearranges.
+
+        This is the one place that knows where each of them lives, so the
+        shell itself imports no pane.
+        """
+        from core.app_settings import app_settings
+        from review.core.tab_controller import set_sidebar_collapsed
+        from ui.phone_shell import PhoneHandles, PhoneShell
+
+        review = self._review
+        nav = getattr(review, "_section_nav", None)
+
+        def _mode() -> str:
+            return review.currentMode() if hasattr(review, "currentMode") else "review"
+
+        def _set_navigator(open_: bool) -> None:
+            set_sidebar_collapsed(review._ctx, not open_)
+            self._sync_mode_bar()
+            if self._phone is not None:
+                self._phone.refresh()
+
+        def _relayout() -> None:
+            # Re-announce the mode: its two listeners are exactly the syncs a
+            # layout change needs — Split View closes and re-decides its
+            # toggle, and this window re-syncs the mode bar and the cluster.
+            review.modeChanged.emit(_mode())
+
+        def _current_page_bar():
+            notebook = getattr(review, "_notebook", None)
+            bars = getattr(review, "_page_tabs_bar_by_name", {})
+            return bars.get(notebook.currentName()) if notebook is not None else None
+
+        def _dashboards() -> list:
+            dash = getattr(self._analyze, "_dashboard", None)
+            return [dash] if dash is not None else []
+
+        # Kept: refresh (reloading a dataset is the one action useful while
+        # watching from a phone). Gone: the publication look, both resets,
+        # copy-analysis and reveal-folder — three of them destructive, a
+        # fat-finger target on a phone, and none of them for reading results.
+        desk_only = [w for w in (
+            getattr(self, "_present_btn", None), getattr(self, "_reset_saves_btn", None),
+            getattr(self, "_copy_analysis_btn", None), getattr(self, "_open_btn", None),
+            getattr(self, "_reset_view_btn", None),
+        ) if w is not None] + list(getattr(self, "_status_hints", []))
+        if nav is not None:
+            # Sections move to the ☰ menu, so the rail opens straight onto the
+            # well plate rather than a screenful of section names above it.
+            desk_only.append(nav)
+
+        handles = PhoneHandles(
+            header=getattr(self, "_header", None),
+            band=band,
+            mode_bar=getattr(self, "_mode_seg", None),
+            band_insert_at=0,
+            desk_only=desk_only,
+            page_tabs_host=getattr(review, "_page_tabs_host", None),
+            current_page_bar=_current_page_bar,
+            rail=getattr(review, "_sidebar_root", None),
+            sections=(lambda: [(k, nav.itemLabel(k)) for k in nav.items()
+                               if nav.isItemOffered(k)]) if nav is not None else None,
+            current_section=nav.currentKey if nav is not None else None,
+            go_section=nav.setCurrentKey if nav is not None else None,
+            mode=_mode,
+            navigator_open=lambda: not getattr(review, "_sidebar_collapsed", False),
+            set_navigator=_set_navigator,
+            relayout=_relayout,
+            selected_count=lambda: len(review._app_state.selection.selected_wells),
+            dashboards=_dashboards,
+        )
+        self._phone = PhoneShell(self, handles, settings=app_settings)
+        self._header_layout.insertWidget(
+            self._header_layout.indexOf(self._version_pill) + 1, self._phone.desk_button)
+        notebook = getattr(review, "_notebook", None)
+        if notebook is not None and hasattr(notebook, "currentChanged"):
+            notebook.currentChanged.connect(lambda *_a: self._phone.refresh())
+
+    def showEvent(self, event) -> None:  # Qt naming
+        super().showEvent(event)
+        if self._phone is not None and not getattr(self, "_phone_watching", False):
+            self._phone_watching = True
+            self._phone.watch_screen()
 
     def _install_shortcuts(self) -> None:
         """Global ⌘/Ctrl shortcuts the statusbar + help drawer advertise.
@@ -1140,6 +1241,16 @@ class AllWellApp(QMainWindow):
         bar = getattr(self, "_mode_seg", None)
         if bar is None:
             return
+        from core import phone_layout
+        if phone_layout.is_on():
+            # Phone layout: the bar is a control of its own on a band of
+            # several, not the head of a left column. It is always there — the
+            # left panel is closed most of the time — at its own width.
+            bar.setVisible(True)
+            natural = bar.sizeHint().width()
+            if bar.width() != natural:
+                bar.setFixedWidth(natural)
+            return
         collapsed = bool(getattr(getattr(self, "_review", None),
                                  "_sidebar_collapsed", False))
         if bar.isVisibleTo(bar.parentWidget() or self) == collapsed:
@@ -1241,6 +1352,8 @@ class AllWellApp(QMainWindow):
         # and the action cluster belongs to Review alone.
         self._sync_mode_bar()
         self._sync_review_actions()
+        if self._phone is not None:
+            self._phone.refresh()
 
     def _on_review_mode_changed(self, mode: str) -> None:
         """Mirror ReviewApp's mode change into the titlebar seg + status."""
@@ -1254,6 +1367,8 @@ class AllWellApp(QMainWindow):
                 seg.blockSignals(blocked)
         self._sync_mode_bar()
         self._sync_review_actions()
+        if self._phone is not None:
+            self._phone.refresh()
         # Status dot now reflects dataset state (set by _update_dataset_chip),
         # not the Review/Analyze mode toggle — that's already shown by the
         # SegmentedControl itself.
@@ -1711,6 +1826,25 @@ class AllWellApp(QMainWindow):
         except Exception:
             swallowed()  # was: pass (silent except)
 
+    def _confirm_close_in_phone_layout(self) -> bool:
+        """Ask before a close in phone layout stops a run.
+
+        Closing stops an in-flight run (``_stop_analyze_runner``). At the desk
+        that is a deliberate act; on a phone the window's close button is a
+        corner of a maximized window under the thumb, and watching a run is
+        what the phone is there for. Desktop layout keeps its behaviour.
+        """
+        from core import phone_layout
+        if not phone_layout.is_on() or not _analyze_run_busy(self._analyze):
+            return True
+        from PySide6.QtWidgets import QMessageBox
+        answer = QMessageBox.question(
+            self, "Stop the running analysis?",
+            "An analysis is running. Closing All-Well stops it.\n\n"
+            "Close anyway?",
+            QMessageBox.Close | QMessageBox.Cancel, QMessageBox.Cancel)
+        return answer == QMessageBox.Close
+
     def _qsettings(self):
         """This window's settings handle. See ``core/app_settings``.
 
@@ -1751,6 +1885,16 @@ class AllWellApp(QMainWindow):
             swallowed()  # was: pass (silent except)
 
     def _save_window_state(self) -> None:
+        # The geometry and splitter sizes saved here are the *desk* layout's.
+        # Phone layout's maximized one-column window, or any window on a
+        # phone-shaped desktop, would open the next desk launch in that shape.
+        from core import phone_layout
+        screen = self.screen()
+        avail = screen.availableGeometry() if screen is not None else None
+        if phone_layout.is_on() or (
+                avail is not None
+                and phone_layout.is_phone_shaped(avail.width(), avail.height())):
+            return
         try:
             s = self._qsettings()
             s.setValue("window/geometry", self.saveGeometry())
@@ -1763,6 +1907,9 @@ class AllWellApp(QMainWindow):
             swallowed()  # was: pass (silent except)
 
     def closeEvent(self, event) -> None:
+        if not self._confirm_close_in_phone_layout():
+            event.ignore()
+            return
         self._save_window_state()
         if self._review is not None and hasattr(self._review, "_persistence"):
             try:
@@ -1818,6 +1965,17 @@ class AllWellApp(QMainWindow):
                 swallowed()
         super().closeEvent(event)
 
+def _analyze_run_busy(analyze) -> bool:
+    """Is an Analyze run in flight that closing the window would stop?"""
+    runner = getattr(analyze, "_runner", None)
+    if runner is None:
+        return False
+    busy = getattr(runner, "is_busy", None)
+    if busy is None:
+        busy = getattr(runner, "is_running", False)
+    return bool(busy) and not getattr(runner, "was_suspended", False)
+
+
 def _install_combobox_popup_widener() -> None:
     """Patch QComboBox.showPopup so the popup view sizes itself to the
     widest item text instead of inheriting the field's width — dropdown
@@ -1846,6 +2004,37 @@ def _install_combobox_popup_widener() -> None:
         _original_show(self)
 
     QComboBox.showPopup = _wide_show
+
+
+def _phone_layout_at_startup(app) -> bool:
+    """Start in phone layout? And if so, scale the size tokens now.
+
+    Only when the user left it on *and* the screen is still phone-shaped: a
+    preference saved on the phone must not open the next desk launch as a
+    phone. Scaling here — after the theme, before any widget exists — builds
+    every widget at the phone's text size, including the ones that freeze a
+    size at construction, at no cost; a live switch pays ~6 s for the same.
+    """
+    from core import phone_layout
+    from core.app_settings import app_settings
+    try:
+        s = app_settings()
+        if not phone_layout.parse_bool(s.value(phone_layout.KEY_ON, False)):
+            return False
+        screen = app.primaryScreen()
+        if screen is None:
+            return False
+        avail = screen.availableGeometry()
+        if not phone_layout.is_phone_shaped(avail.width(), avail.height()):
+            return False
+        stored = phone_layout.parse_text_size(
+            s.value(phone_layout.KEY_TEXT_SIZE, phone_layout.AUTO))
+        theme_v2.apply_ui_scale(
+            phone_layout.resolve_text_size(stored, avail.width(), avail.height()))
+        return True
+    except Exception:
+        swallowed()
+        return False
 
 
 def main() -> None:
@@ -1943,9 +2132,10 @@ def main() -> None:
     _active_theme = (theme_v2.apply_theme(args.theme) if args.theme
                      else theme_v2.select_theme_from_env())
     _boot_diag.boot(f"theme applied: {_active_theme}")
+    _start_phone = _phone_layout_at_startup(app)
     app.setStyleSheet(theme_v2.qss())
     _boot_diag.boot("building main window (AllWellApp) …")
-    win = AllWellApp(data_path=args.data_dir)
+    win = AllWellApp(data_path=args.data_dir, start_in_phone_layout=_start_phone)
     _boot_diag.boot("main window built; showing")
     win.show()
     _boot_diag.boot("entering Qt event loop (startup complete)")

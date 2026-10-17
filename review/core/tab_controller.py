@@ -625,6 +625,82 @@ def apply_sidebar_visibility(ctx) -> None:
         pane_sb = getattr(pane, "_left_sidebar", None)
         if pane_sb is not None:
             pane_sb.setVisible(not collapsed)
+    _apply_phone_columns(ctx, mode, collapsed)
+
+
+def _apply_phone_columns(ctx, mode: str, collapsed: bool) -> None:
+    """In phone layout, a left panel and its content never share the screen.
+
+    Phone layout is one column: the pane shows either its content (the
+    plots, the run dashboard) or its left panel (the well plate, the run form)
+    across the full width — the left panel being what this module already
+    calls "not collapsed". So when the active mode's panel is showing, its
+    splitter siblings are hidden and the panel's fixed rail width is lifted;
+    when it is not, everything goes back. Outside phone layout every panel is
+    put back exactly as it was, which is also what leaving phone layout runs.
+
+    Works on each pane's splitter from outside, so Analyze and Datasets need
+    no code of their own for it: their left panels sit beside their content in
+    their own splitter inside the centre stack, while Review's rail sits beside
+    that whole stack in ``_h_pane``.
+    """
+    from core import phone_layout
+    app = ctx.window  # transitional bridge (A3)
+    phone = phone_layout.is_on()
+    panels = {"review": getattr(app, "_sidebar_root", None)}
+    for m, attr in (("analyze", "_analyze_pane"), ("datasets", "_datasets_pane")):
+        panels[m] = getattr(getattr(app, attr, None), "_left_sidebar", None)
+    for m, panel in panels.items():
+        if panel is not None:
+            _show_panel_alone(panel, phone and m == mode and not collapsed)
+
+
+def _show_panel_alone(panel, alone: bool) -> None:
+    """Give *panel* its splitter to itself, or hand the space back.
+
+    Remembers which siblings it hid and the width pin it lifted, and undoes
+    exactly those — a sibling that was already hidden (a closed dock) stays
+    hidden, and the pin comes back at the value it had, not a guess.
+    """
+    from PySide6.QtWidgets import QSplitter
+    splitter = panel.parentWidget()
+    if not isinstance(splitter, QSplitter):
+        return
+    hidden = getattr(panel, "_aw_phone_hidden", None)
+    if alone and hidden is None:
+        hidden = []
+        for i in range(splitter.count()):
+            w = splitter.widget(i)
+            if w is not panel and not w.isHidden():
+                w.hide()
+                hidden.append(w)
+        panel._aw_phone_hidden = hidden
+        panel._aw_phone_pin = (panel.minimumWidth(), panel.maximumWidth())
+        panel.setMinimumWidth(0)
+        panel.setMaximumWidth(16_777_215)   # Qt's QWIDGETSIZE_MAX
+    elif not alone and hidden is not None:
+        for w in hidden:
+            w.show()
+        panel._aw_phone_hidden = None
+        lo, hi = panel._aw_phone_pin
+        panel.setMinimumWidth(lo)
+        panel.setMaximumWidth(hi)
+
+
+def set_sidebar_collapsed(ctx, collapsed: bool) -> None:
+    """Collapse or expand the left rail to *collapsed*, and sync its toggle."""
+    app = ctx.window  # transitional bridge (A3)
+    app._sidebar_collapsed = bool(collapsed)
+    apply_sidebar_visibility(ctx)
+    btn = getattr(app, "_sidebar_toggle_btn", None)
+    if btn is not None:
+        blocked = btn.blockSignals(True)
+        try:
+            btn.setChecked(app._sidebar_collapsed)
+        finally:
+            btn.blockSignals(blocked)
+        btn.setIconName("panel-right-open" if collapsed else "panel-right-close")
+        btn.setToolTip("Show sidebar" if collapsed else "Hide sidebar")
 
 
 def toggle_sidebar(ctx) -> None:
@@ -634,18 +710,7 @@ def toggle_sidebar(ctx) -> None:
     Flips the persistent collapse flag, re-applies the effective visibility,
     and syncs the floating toggle button's checked state / glyph.
     """
-    app._sidebar_collapsed = not getattr(app, "_sidebar_collapsed", False)
-    apply_sidebar_visibility(ctx)
-    btn = getattr(app, "_sidebar_toggle_btn", None)
-    if btn is not None:
-        collapsed = app._sidebar_collapsed
-        blocked = btn.blockSignals(True)
-        try:
-            btn.setChecked(collapsed)
-        finally:
-            btn.blockSignals(blocked)
-        btn.setIconName("panel-right-open" if collapsed else "panel-right-close")
-        btn.setToolTip("Show sidebar" if collapsed else "Hide sidebar")
+    set_sidebar_collapsed(ctx, not getattr(app, "_sidebar_collapsed", False))
 
 
 def on_central_pane_changed(ctx, idx: int) -> None:

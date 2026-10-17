@@ -306,6 +306,24 @@ class Stepper(QFrame):
         for b in (self._up, self._down):
             b.setFixedHeight(inner // 2)
 
+    #: Phone layout's rescale pass leaves the inner edit and buttons alone:
+    #: this frame measures them itself (below), and a second, outside scaling
+    #: of the edit's pinned height would apply the factor twice. The frame's
+    #: own fixed width, when a caller pinned one, it does scale.
+    _aw_owns_sizes = True
+    _aw_fits_text = True
+
+    def _aw_rescale(self) -> None:
+        """Re-measure after a UI scale: the digits are a new size.
+
+        The width is re-derived only when it is this widget's own (a range
+        between a floor and the widest value); a width its caller pinned has
+        already been scaled by the pass, and re-deriving would discard it.
+        """
+        if self.minimumWidth() != self.maximumWidth():
+            self._update_size()
+        self._apply_row_height()
+
     def changeEvent(self, event) -> None:  # Qt naming
         """Re-measure when the stylesheet or font moves under us.
 

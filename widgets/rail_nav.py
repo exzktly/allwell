@@ -124,6 +124,9 @@ class _RailNavRow(QFrame):
     def key(self) -> str:
         return self._key
 
+    def label(self) -> str:
+        return self._label.text()
+
     def setActive(self, on: bool) -> None:
         self.setProperty("active", bool(on))
         # Mirror the property onto the body widget so QSS rules targeting
@@ -245,6 +248,21 @@ class RailNav(QFrame):
     def items(self) -> list[str]:
         return list(self._order)
 
+    def itemLabel(self, key: str) -> str:
+        """The text the row shows for *key* (``""`` for an unknown key)."""
+        row = self._rows.get(key)
+        return row.label() if row is not None else ""
+
+    def isItemOffered(self, key: str) -> bool:
+        """Is *key*'s row one the user could click right now?
+
+        Enabled, and not hidden by its owner (a profile or a dataset that
+        leaves a section out) — so a list built from this, such as phone
+        layout's ☰ menu, offers what the rail offers and nothing more.
+        """
+        row = self._rows.get(key)
+        return row is not None and row.isEnabled() and not row.isHidden()
+
     # ── binding adapter ──────────────────────────────────────────────────
     def bindingAdapter(self):
         return (self.currentKey, self.setCurrentKey, self.currentChanged)
@@ -347,7 +365,7 @@ if __name__ == "__main__":
 
     head = QLabel("SECTION", host)
     head.setStyleSheet(
-        f"color: {theme.Colors.text_muted}; font-size: 11px; "
+        f"color: {theme.Colors.text_muted}; font-size: {theme.Typography.caption_size}px; "
         f"letter-spacing: 0.08em; font-weight: 600;"
     )
     head.setContentsMargins(9, 0, 0, 0)

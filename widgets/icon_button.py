@@ -43,7 +43,12 @@ class IconButton(QToolButton):
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         else:
             self.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        self._px = int(size) if size else max(14, round(self.fontMetrics().height() * 1.0))
+        # The glyph size before any UI scale: the caller's, or one line of the
+        # application font. ``_px`` is that times ``theme.ui_scale()``, so a
+        # button built — or rescaled — while phone layout's larger text is in
+        # force gets a glyph to match its label.
+        self._px_base = int(size) if size else max(14, round(self.fontMetrics().height() * 1.0))
+        self._px = round(self._px_base * theme.ui_scale())
         self._refresh_icon()
         self.setStyleSheet(self._build_qss())
 
@@ -65,7 +70,14 @@ class IconButton(QToolButton):
         return _KbdHint.attach(self, text)
 
     def setIconPixels(self, px: int) -> None:
-        self._px = int(px)
+        self._px_base = int(px)
+        self._px = round(self._px_base * theme.ui_scale())
+        self._refresh_icon()
+
+    def _aw_rescale(self) -> None:
+        """Re-size the glyph after a UI scale (the label's size is in the sheet,
+        which the rescale pass already scaled)."""
+        self._px = round(self._px_base * theme.ui_scale())
         self._refresh_icon()
 
     def _refresh_icon(self) -> None:

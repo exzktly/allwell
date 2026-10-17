@@ -1694,6 +1694,37 @@ QProgressBar::chunk {{
     background-color: {c.accent};
     border-radius: {r.sm}px;
 }}
+
+/* ── Phone layout's band controls (ui/phone_shell.py) ─────────────────────
+   Built from the scaled tokens like everything else, so they grow with the
+   text size. The menu buttons carry no drop-down arrow: the ☰ glyph and the
+   "Bar Plots ▾" label already say a menu opens, and the arrow Qt draws in
+   the corner is a second, smaller target beside the real one. */
+QToolButton#PhoneMenuButton, QToolButton#PhonePageButton {{
+    background-color: transparent;
+    border: 1px solid {c.control_border};
+    border-radius: {r.sm}px;
+    padding: {m.btn_pad_v}px {m.btn_pad_h}px;
+    font-weight: {t.semibold};
+}}
+QToolButton#PhoneMenuButton {{ font-size: {t.h2_size}px; }}
+QToolButton#PhoneMenuButton:hover, QToolButton#PhonePageButton:hover {{
+    background-color: {c.hover};
+}}
+QToolButton#PhoneMenuButton::menu-indicator,
+QToolButton#PhonePageButton::menu-indicator {{
+    image: none;
+    width: 0px;
+}}
+QPushButton#PhoneShowPlots {{
+    border-radius: 0px;
+    padding: {s.md}px;
+    font-size: {t.h3_size}px;
+}}
+QToolButton#PhoneLayoutButton {{
+    border: 1px solid {c.control_border};
+    border-radius: {r.sm}px;
+}}
 """
 
 
@@ -1817,6 +1848,56 @@ def register_theme_hook(fn):
     return fn
 
 
+#: Size tokens a UI scale multiplies: every type size, and the padding inside
+#: controls (which is what makes a button bigger to touch, not just its text).
+#: Layout widths — ``Metrics.rail_w`` / ``dock_w`` — are deliberately absent:
+#: a scaled rail would be wider than a phone-shaped screen, and phone layout
+#: lifts those widths anyway. ``Spacing`` (gutters) stays put for the same
+#: reason — it is space between things, not the size of a thing.
+_SCALED_TOKENS = (
+    (Typography, ("caption_size", "small_size", "body_size", "emph_size",
+                  "h3_size", "h2_size")),
+    (Metrics, ("btn_pad_v", "btn_pad_h", "toolbtn_pad_h", "input_pad_v",
+               "input_pad_h", "spin_min_w", "spin_buttons_w")),
+)
+# The values the scale multiplies, captured when a scale is first applied and
+# dropped when it returns to 1, so scales never compound: 1.5 then 2.0 is 2.0
+# of the original, never 3.0.
+_SCALE_BASE: dict = {}
+_UI_SCALE = [1.0]
+
+
+def ui_scale() -> float:
+    """The UI scale currently applied to the size tokens (1.0 = none)."""
+    return _UI_SCALE[0]
+
+
+def apply_ui_scale(factor: float) -> float:
+    """Multiply the type sizes and control paddings by *factor*.
+
+    Measured from the unscaled values every time, so calls never compound,
+    and ``apply_ui_scale(1.0)`` restores exactly what was there before the
+    first scale. Changes the tokens only: the caller re-runs :func:`qss` and
+    rebuilds whatever froze a size at construction (phone layout's rescale
+    pass, ``ui/phone_shell.py``). Returns the factor applied.
+    """
+    factor = float(factor) if factor and factor > 0 else 1.0
+    if not _SCALE_BASE:
+        for cls, names in _SCALED_TOKENS:
+            for name in names:
+                _SCALE_BASE[(cls, name)] = getattr(cls, name)
+    for (cls, name), base in _SCALE_BASE.items():
+        setattr(cls, name, max(1, round(base * factor)) if base else 0)
+    t = Typography
+    t.title, t.heading = (t.h2_size, t.semibold), (t.h3_size, t.semibold)
+    t.body, t.label = (t.body_size, t.regular), (t.small_size, t.medium)
+    t.caption, t.mono = (t.caption_size, t.medium), (t.small_size, t.regular)
+    _UI_SCALE[0] = factor
+    if factor == 1.0:
+        _SCALE_BASE.clear()
+    return factor
+
+
 def apply_theme(name: str) -> str:
     """Apply the named theme's token overrides onto the token classes.
 
@@ -1826,6 +1907,10 @@ def apply_theme(name: str) -> str:
     """
     if name not in THEMES:
         raise KeyError(f"unknown theme {name!r}; choose from {available_themes()}")
+    # 0) take any UI scale off first, so the reset below restores unscaled
+    # values and the scale is re-applied on top of the new theme's (step 3).
+    scale = ui_scale()
+    apply_ui_scale(1.0)
     # 1) restore defaults for anything any theme might have changed
     for _cname, _defaults in _THEME_DEFAULTS.items():
         _cls = _THEMEABLE_CLASSES[_cname]
@@ -1836,6 +1921,8 @@ def apply_theme(name: str) -> str:
         _cls = _THEMEABLE_CLASSES[_cname]
         for _attr, _val in _attrs.items():
             setattr(_cls, _attr, _val)
+    # 3) put the UI scale back, measured from this theme's values.
+    apply_ui_scale(scale)
     for _hook in list(_THEME_HOOKS):
         try:
             _hook(name)

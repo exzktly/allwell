@@ -108,6 +108,10 @@ class _ModeSegment(QWidget):
     def isActive(self) -> bool:
         return self._active
 
+    def setIconShown(self, shown: bool) -> None:
+        """Show or drop the glyph; the label always stays."""
+        self._icon_lbl.setVisible(bool(shown and self._icon))
+
     def text(self) -> str:
         return self._text
 
@@ -137,6 +141,7 @@ class ModeBar(QWidget):
         self._segments: list[_ModeSegment] = []
         self._data: list[object] = []
         self._current = -1
+        self._fill = False
         # Default to the tab bar's height rather than to the segments' own
         # content height: a segment is a label and a glyph, so left to itself
         # the bar collapses to about 14px and sits as a thin strip beside a
@@ -151,6 +156,7 @@ class ModeBar(QWidget):
         height leaves a gap above and below and the bar reads as a floating chip
         row rather than one solid band down the left edge.
         """
+        self._fill = bool(fill)
         if fill:
             self.setMinimumHeight(0)
             self.setMaximumHeight(16_777_215)   # Qt's QWIDGETSIZE_MAX
@@ -195,6 +201,25 @@ class ModeBar(QWidget):
 
     def count(self) -> int:
         return len(self._segments)
+
+    def setCompact(self, compact: bool) -> None:
+        """Labels only, no glyphs — for a band too narrow for both.
+
+        The labels stay because they are the only thing that says what each
+        segment is on a touch screen, where a tooltip never appears.
+        """
+        pad = theme.Spacing.sm if compact else 0
+        for seg in self._segments:
+            seg.setIconShown(not compact)
+            # Flush, the segments are as wide as the bar shares out; at its
+            # own width in a band, they need their own room around the label.
+            seg.layout().setContentsMargins(pad, 0, pad, 0)
+        self.updateGeometry()
+
+    def _aw_rescale(self) -> None:
+        """Re-measure the pinned height after a UI scale (segments do their own)."""
+        if not self._fill:
+            self.setFixedHeight(tab_bar_height())
 
     def segmentText(self, index: int) -> str:
         return self._segments[index].text()

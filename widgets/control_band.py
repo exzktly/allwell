@@ -272,7 +272,12 @@ class ControlBand(QWidget):
         else:
             for w, _hidden in getattr(self, "_moved_actions", []):
                 hidden = w.isHidden()
-                self._scope.removeWidget(w)
+                # By index, through the flow's own ``takeAt``: QLayout's
+                # ``removeWidget`` deletes the item the flow still holds.
+                for i in range(self._scope.count()):
+                    if self._scope.itemAt(i).widget() is w:
+                        self._scope.takeAt(i)
+                        break
                 w.setParent(self)
                 self._actions.addWidget(w)
                 w.setHidden(hidden)

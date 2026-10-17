@@ -202,24 +202,40 @@ class ModeBar(QWidget):
     def count(self) -> int:
         return len(self._segments)
 
-    def setCompact(self, compact: bool) -> None:
+    def setCompact(self, compact: bool, *, pad: int | None = None) -> None:
         """Labels only, no glyphs — for a band too narrow for both.
 
         The labels stay because they are the only thing that says what each
         segment is on a touch screen, where a tooltip never appears.
         """
-        pad = theme.Spacing.sm if compact else 0
+        pad = (theme.Spacing.sm if pad is None else int(pad)) if compact else 0
+        self._compact = compact
         for seg in self._segments:
             seg.setIconShown(not compact)
             # Flush, the segments are as wide as the bar shares out; at its
             # own width in a band, they need their own room around the label.
             seg.layout().setContentsMargins(pad, 0, pad, 0)
+        self._equalise_widths()
+
+    def _equalise_widths(self) -> None:
+        """One width for all three segments while compact, so the active fill
+        does not jump in size as the mode changes. Measured from the labels'
+        current font, so it is re-run after every UI scale: the widest label
+        measured before a restyle enlarged it would clip it afterwards."""
+        for seg in self._segments:
+            seg.setMinimumWidth(0)
+        if getattr(self, "_compact", False):
+            widest = max((s.sizeHint().width() for s in self._segments), default=0)
+            for seg in self._segments:
+                seg.setMinimumWidth(widest)
         self.updateGeometry()
 
     def _aw_rescale(self) -> None:
-        """Re-measure the pinned height after a UI scale (segments do their own)."""
+        """Re-measure the pinned height and the compact widths after a UI scale
+        (segments rescale their own fonts)."""
         if not self._fill:
             self.setFixedHeight(tab_bar_height())
+        self._equalise_widths()
 
     def segmentText(self, index: int) -> str:
         return self._segments[index].text()

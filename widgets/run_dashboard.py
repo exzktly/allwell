@@ -409,6 +409,8 @@ class RunDashboard(PlateProgress):
         self._clear(self._rail_lay)
         self._rail = {}
         head = QLabel("Stages", self._rail_host)
+        head.setObjectName("StageRailHead")
+        head.setVisible(not self.isStacked())
         head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
         self._rail_lay.addWidget(head)
         rows = _RAIL_REMOTE if self._remote else _RAIL_LOCAL

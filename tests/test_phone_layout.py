@@ -35,6 +35,7 @@ def _restore_scale_and_flag():
     """Token classes and the flag are process-wide; a worker runs many files."""
     yield
     theme.apply_ui_scale(1.0)
+    theme.set_touch_unit(None)
     phone_layout.set_on(False)
 
 
@@ -45,38 +46,52 @@ def _restore_scale_and_flag():
     (1000, 800, True),     # narrower than the desk window's minimum
     (1600, 700, True),     # shorter than it
     (1920, 1040, False),   # a monitor
-    (2532, 1170, False),   # a phone sideways at full resolution: by size alone,
-                           # a wide monitor — the toggle is how to say otherwise
 ])
 def test_is_phone_shaped(w, h, expected):
     assert phone_layout.is_phone_shaped(w, h) is expected
 
 
 @pytest.mark.parametrize("w,h,expected", [
-    (540, 1170, 1.0),      # small desktop: no enlargement
-    (1080, 2000, 1.75),    # 1080 / 600 = 1.8 → nearest preset 1.75
-    (1170, 2532, 2.0),     # 1.95 → 2.0
-    (2000, 900, 1.5),      # landscape: the short side decides (1.5 exactly)
-    (3000, 3000, 2.5),     # clamped to the largest preset
+    (390, 844, 1.0),       # a desktop already phone-sized: one px per point
+    (1080, 2000, 1080 / 390),
+    (2340, 1080, 1080 / 390),   # sideways: the short side, so the same unit
+    (300, 600, 1.0),       # never below one
 ])
-def test_auto_text_size_targets_the_short_side(w, h, expected):
-    assert phone_layout.auto_text_size(w, h) == expected
+def test_phone_unit_is_the_short_side_over_390(w, h, expected):
+    assert phone_layout.phone_unit(w, h) == pytest.approx(expected)
 
 
-def test_a_stored_preset_wins_over_auto_and_junk_reads_as_auto():
-    assert phone_layout.resolve_text_size(1.25, 1080, 2000) == 1.25
-    assert phone_layout.resolve_text_size(phone_layout.AUTO, 1080, 2000) == 1.75
-    assert phone_layout.parse_text_size("1.5") == 1.5
-    assert phone_layout.parse_text_size("1.3") == phone_layout.AUTO   # not offered
-    assert phone_layout.parse_text_size(None) == phone_layout.AUTO
+def test_type_scale_puts_body_text_at_15_points_times_the_size():
+    u = 1080 / 390
+    assert phone_layout.type_scale(u, "M", 13) * 13 == pytest.approx(15 * u)
+    assert phone_layout.type_scale(u, "L", 13) == pytest.approx(
+        phone_layout.type_scale(u, "M", 13) * 1.13)
+    assert phone_layout.touch_px(u, 44) == round(44 * u)      # targets: unit only
+
+
+def test_a_stored_size_reads_back_and_junk_reads_as_medium():
+    assert phone_layout.parse_text_size("L") == "L"
+    assert phone_layout.parse_text_size("1.5") == "M"
+    assert phone_layout.parse_text_size(None) == "M"
     assert phone_layout.parse_bool("true") is True
     assert phone_layout.parse_bool("false") is False
 
 
-def test_plot_factor_is_the_square_root_and_never_shrinks():
-    assert phone_layout.plot_factor(2.25) == 1.5
-    assert phone_layout.plot_factor(1.0) == 1.0
-    assert phone_layout.plot_factor(0.5) == 1.0
+def test_plot_dpi_factor_makes_a_point_a_phone_point():
+    u = 1080 / 390
+    assert phone_layout.plot_dpi_factor(u) == pytest.approx(0.72 * u)
+    assert phone_layout.plot_dpi_factor(1.0) == 1.0      # never shrinks a plot
+
+
+@pytest.mark.parametrize("w,h,expected", [
+    (2340, 1080, True),    # 19.5:9 phone sideways at full resolution
+    (2532, 1170, True),
+    (1920, 1080, False),   # 16:9 monitor
+    (2560, 1440, False),   # 16:9, taller
+    (3440, 1440, False),   # 21:9 ultrawide at 1440: too tall for a phone
+])
+def test_a_phone_on_its_side_reads_as_a_phone(w, h, expected):
+    assert phone_layout.is_phone_shaped(w, h) is expected
 
 
 def test_listeners_hear_only_real_changes():
@@ -293,6 +308,31 @@ def test_mode_bar_compact_drops_glyphs_keeps_labels(qapp):
     assert not any(s._icon_lbl.isHidden() for s in bar._segments)
 
 
+def test_compact_mode_bar_widths_follow_labels_enlarged_by_a_restyle(qapp):
+    # Phone layout makes the bar compact *before* the restyle enlarges its
+    # labels; widths measured then clipped "Datasets" to "Dataset:" on a
+    # phone. The rescale hook has to measure them again.
+    from widgets.mode_bar import ModeBar
+    bar = ModeBar()
+    for name in ("Review", "Analyze", "Datasets"):
+        bar.addSegment(name, icon="eye")
+    bar.setCompact(True, pad=12)
+    before = bar._segments[2].minimumWidth()
+    from PySide6.QtWidgets import QWidget
+
+    from ui.phone_shell import rescale_widgets
+    tree = [bar, *bar.findChildren(QWidget)]
+    rescale_widgets(1.0, 2.0, tree)       # the restyle's own pass
+    for seg in bar._segments:
+        seg.layout().activate()
+    widest = max(s.sizeHint().width() for s in bar._segments)
+    assert widest > before                    # the fixture can tell them apart
+    assert [s.minimumWidth() for s in bar._segments] == [widest] * 3
+    bar.setCompact(False)
+    bar._aw_rescale()
+    assert [s.minimumWidth() for s in bar._segments] == [0] * 3
+
+
 def test_a_lent_panel_goes_back_to_its_place_pin_and_sizes(qapp):
     from review.core.phone_drawer import _give_back, _lend
     split = QSplitter(Qt.Horizontal)
@@ -358,6 +398,9 @@ class _Screen:
     def availableGeometry(self):
         return self._r
 
+    def geometry(self):
+        return self._r
+
 
 class _App:
     def __init__(self, w, h):
@@ -367,7 +410,7 @@ class _App:
         return self._s
 
 
-def _store(on, size=phone_layout.AUTO):
+def _store(on, size=phone_layout.DEFAULT_TEXT_SIZE):
     from core.app_settings import app_settings
     s = app_settings()
     s.setValue(phone_layout.KEY_ON, on)
@@ -380,18 +423,160 @@ def test_startup_reenters_phone_layout_only_on_a_phone_shaped_screen():
     _store(True)
     # Left on at the phone, launched at the desk: the desk wins, unscaled.
     assert allwell._phone_layout_at_startup(_App(1920, 1040)) is False
-    assert theme.ui_scale() == 1.0
+    assert theme.ui_scale() == 1.0 and theme.touch_unit() is None
     # Launched on the phone: phone layout, tokens scaled before any widget.
     assert allwell._phone_layout_at_startup(_App(1080, 2000)) is True
-    assert theme.ui_scale() == 1.75
+    u = 1080 / 390
+    assert theme.touch_unit() == pytest.approx(u)
+    assert theme.ui_scale() == pytest.approx(15 * u / 13)
 
 
 def test_startup_honours_a_chosen_text_size_and_an_off_preference():
     import allwell
-    _store(True, 1.25)
+    _store(True, "L")
     assert allwell._phone_layout_at_startup(_App(1080, 2000)) is True
-    assert theme.ui_scale() == 1.25
+    assert theme.ui_scale() == pytest.approx(15 * (1080 / 390) * 1.13 / 13)
     theme.apply_ui_scale(1.0)
+    theme.set_touch_unit(None)
     _store(False)
     assert allwell._phone_layout_at_startup(_App(1080, 2000)) is False
     assert theme.ui_scale() == 1.0
+
+
+# ── touch sizing ────────────────────────────────────────────────────────────
+
+def test_touch_unit_adds_44_and_48_point_floors_to_the_stylesheet():
+    u = 1080 / 390
+    assert "min-height: 122px" not in theme.qss()
+    theme.set_touch_unit(u)
+    q = theme.qss()
+    assert f"min-height: {round(44 * u)}px" in q        # buttons, combos, fields
+    assert f"min-height: {round(48 * u)}px" in q        # list and popup rows
+    theme.set_touch_unit(None)
+    assert f"min-height: {round(44 * u)}px" not in theme.qss()
+
+
+def test_stepper_touch_mode_swaps_arrows_for_minus_plus_and_gives_its_pin_back(qapp):
+    from widgets.stepper import Stepper
+    st = Stepper(value=50.0, decimals=1)
+    st.setFixedWidth(96)
+    st.setTouchMode(True)
+    assert st._up.isHidden() and st._down.isHidden()
+    assert not st._minus.isHidden() and not st._plus.isHidden()
+    # Wide enough for the value *and* two square buttons — the pinned 96 left
+    # the value a sliver between them.
+    assert st.maximumWidth() >= st._full_width() > 96
+    st._plus.click()
+    assert st.value() == 51.0
+    st.setTouchMode(False)
+    assert (st.minimumWidth(), st.maximumWidth()) == (96, 96)
+    assert not st._up.isHidden() and st._minus.isHidden()
+
+
+def test_a_stacked_control_band_flows_its_actions_and_puts_them_back(qapp):
+    from PySide6.QtWidgets import QPushButton
+    from widgets.control_band import ControlBand
+    band = ControlBand()
+    band.add_scope("Channel", QLineEdit())
+    a, b = QPushButton("Fold change"), QPushButton("Save")
+    band.add_action(a)
+    band.add_action(b)
+    b.hide()                                    # a page's own choice
+    band.setStacked(True)
+    assert band.action_count() == 0 and band.scope_count() == 3
+    assert a.parentWidget() is band.scope_host
+    band.setStacked(False)
+    assert band.action_count() == 2 and band.scope_count() == 1
+    assert [band._actions.itemAt(i).widget() for i in range(2)] == [a, b]
+    assert b.isHidden() and not a.isHidden()   # hidden stays hidden
+
+
+def test_rail_nav_grid_puts_shown_rows_first_and_goes_back_to_a_list(qapp):
+    from PySide6.QtWidgets import QGridLayout, QVBoxLayout as _V
+    from widgets.rail_nav import RailNav
+    nav = RailNav()
+    for t in ("Home", "Plotting", "Review CSV", "Statistics"):
+        nav.addItem(t, icon="home")
+    nav._rows["Review CSV"].hide()
+    nav.setColumns(2)
+    grid = nav.layout()
+    assert isinstance(grid, QGridLayout)
+    # Statistics fills the hole Review CSV would have left at row 1, col 0.
+    assert grid.itemAtPosition(1, 0).widget() is nav._rows["Statistics"]
+    nav.setColumns(1)
+    assert isinstance(nav.layout(), _V)
+    nav.setCurrentKey("Statistics")
+    assert nav.currentKey() == "Statistics"
+
+
+def test_rail_nav_item_clicked_is_a_users_click_only(qapp):
+    from widgets.rail_nav import RailNav
+    nav = RailNav()
+    for t in ("Home", "Plotting"):
+        nav.addItem(t)
+    clicked = []
+    nav.itemClicked.connect(clicked.append)
+    nav.setCurrentKey("Plotting")              # code: no click
+    assert clicked == []
+    nav._rows["Plotting"].clicked.emit("Plotting")   # the current one, tapped
+    assert clicked == ["Plotting"]
+
+
+def test_drawer_takes_a_live_width_and_a_scrim(qapp):
+    from widgets.drawer import Drawer
+    host = QWidget()
+    host.resize(1000, 800)
+    width = [300]
+    d = Drawer(host, edge="left", width_hint=lambda: width[0], scrim=0.5)
+    assert d._open_rect().width() == 300
+    width[0] = 700                              # the screen turned
+    assert d._open_rect().width() == 700
+    assert d._backdrop._alpha == 0.5
+
+
+def test_a_stacked_dashboard_is_the_page_and_says_what_a_tapped_well_is(qapp):
+    from widgets.run_dashboard import RunDashboard
+    d = RunDashboard()
+    d.reset(total=96)
+    d.set_well_stage("C05", "error")
+    d.show()
+    cap = d._plate.maximumWidth()
+    d.setStacked(True)
+    assert d._title_label.isHidden() and d._toggle.isHidden()
+    assert d._plate.maximumWidth() > cap        # the desk cap is lifted
+    d._plate.wellActivated.emit("C05")
+    assert d._detail.text() == "C05: failed" and not d._detail.isHidden()
+    d.setStacked(False)
+    assert d._plate.maximumWidth() == cap
+    assert not d._title_label.isHidden() and d._detail.isHidden()
+    d.hide()
+
+
+def test_a_form_row_stacks_its_label_and_gets_its_pin_back(qapp):
+    from PySide6.QtWidgets import QBoxLayout, QHBoxLayout
+    from ui.phone_shell import PhoneShell
+    row = QWidget()
+    row.setObjectName("AnalyzeFormRow")
+    lay = QHBoxLayout(row)
+    label = QLabel("Nucleus probability")
+    label.setFixedWidth(110)
+    lay.addWidget(label)
+    lay.addWidget(QLineEdit())
+    PhoneShell._stack_form_row(None, row, True)
+    assert lay.direction() == QBoxLayout.TopToBottom
+    assert label.maximumWidth() > 110
+    PhoneShell._stack_form_row(None, row, False)
+    assert lay.direction() == QBoxLayout.LeftToRight
+    assert (label.minimumWidth(), label.maximumWidth()) == (110, 110)
+
+
+def test_a_title_too_wide_for_a_phone_is_broken_into_full_lines():
+    from review.core.plot_style import _break_to_fit
+    text = "GFP Mean Intensity (above threshold) ± SEM — t = 0 h"
+    # Measured 1.5× the room: two lines, each as full as the room allows —
+    # not three short ones, and never split mid-word.
+    out = _break_to_fit(text, 1500, 1000)
+    assert out.count("\n") == 1
+    assert all(len(line) <= len(text) * 1000 / 1500 for line in out.split("\n"))
+    assert _break_to_fit(text, 900, 1000) == text           # fits: untouched
+    assert _break_to_fit("a\nb", 5000, 10) == "a\nb"        # already broken

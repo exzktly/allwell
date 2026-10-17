@@ -641,6 +641,8 @@ class AllWellApp(QMainWindow):
             rail_drawer=drawer,
             analyze_body=analyze_page.layout() if analyze_page is not None else None,
             analyze_rule=getattr(self._analyze, "_log_sep", None),
+            logs=lambda: [w for w in (getattr(self._analyze, "_log", None),) if w is not None],
+            status_text=lambda: self._status_lbl_app.text() if self._status_lbl_app else "",
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
         self._header_layout.insertWidget(

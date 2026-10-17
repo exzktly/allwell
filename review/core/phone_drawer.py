@@ -52,12 +52,18 @@ def ensure_drawer(ctx):
     app = ctx.window  # transitional bridge (A3)
 
     def _below_band() -> int:
+        # Under the top bar itself, covering any strip below it: the strip's
+        # page menu and Controls belong to the page the rail hides.
+        bar = getattr(app, "_top_bar", None)
+        if bar is not None:
+            return bar.geometry().bottom() + 1
         pane = getattr(app, "_h_pane", None)
         return pane.geometry().top() if pane is not None else 0
 
     drawer = Drawer(app, edge="left", width_fraction=DRAWER_WIDTH_FRACTION,
                     margin=0, top_inset=_below_band)
-    drawer.setObjectName("PhoneRailDrawer")
+    # Keeps the object name "Drawer", which its own sheet styles by.
+    drawer.setProperty("phoneRail", True)
     holder = QWidget()
     lay = QVBoxLayout(holder)
     lay.setContentsMargins(0, 0, 0, 0)

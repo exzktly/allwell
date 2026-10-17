@@ -1737,6 +1737,10 @@ QLabel#PlateHeadline[phone="true"] {{
     font-size: {t.h3_size}px;
     font-weight: {t.semibold};
 }}
+QLabel#PhoneRailStatus {{
+    color: {c.text_secondary};
+    padding: {s.sm}px {s.md}px;
+}}
 QLabel#PlateWellDetail {{
     color: {c.text_secondary};
     padding: {s.xs}px 0px;
@@ -1937,7 +1941,14 @@ QTreeView::item {{
     min-height: {pt(48)}px;
 }}
 QMenu::item {{
-    padding: {pt(13)}px {pt(20)}px {pt(13)}px {pt(16)}px;
+    padding: {pt(14)}px {pt(20)}px {pt(14)}px {pt(16)}px;
+}}
+QFrame#RailNavRow {{ min-height: {pt(48)}px; }}
+QWidget#Drawer[phoneSheet="true"] QPushButton,
+QWidget#Drawer[phoneSheet="true"] QToolButton,
+QWidget#Drawer[phoneSheet="true"] QComboBox,
+QWidget#Drawer[phoneSheet="true"] QLineEdit {{
+    min-height: {pt(48)}px;
 }}
 QMenu::separator {{ height: 1px; margin: {pt(4)}px 0px; }}
 QCheckBox::indicator, QRadioButton::indicator {{

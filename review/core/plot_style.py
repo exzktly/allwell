@@ -12,6 +12,8 @@ card), falls back directly to ``theme.CPub`` (publication-style).
 
 from __future__ import annotations
 
+import re
+
 import logging
 from collections.abc import MutableMapping
 
@@ -1583,16 +1585,23 @@ def _fit_labels_to_phone(fig) -> None:
     constrained layout measures before wrapping, so a wrapped title still ran
     off the top of the figure."""
     renderer = fig.canvas.get_renderer()
-    fig_w = fig.bbox.width
     for ax in fig.axes:
         title = ax.title
-        if title.get_text():
-            # A title is centred over its axes, not the figure, so the room it
-            # has is twice the distance from that centre to the nearer edge.
-            cx = (ax.bbox.x0 + ax.bbox.x1) / 2 - fig.bbox.x0
-            room = 2 * min(cx, fig_w - cx) * 0.96
+        text = title.get_text()
+        if text and "\n" not in text:
+            # The axes' own width: constrained layout moves the axes after
+            # this runs (it widens the left margin for larger tick labels),
+            # so the room the title will have is the axes', not the figure's.
+            room = ax.bbox.width
             w = title.get_window_extent(renderer).width
-            title.set_text(_break_to_fit(title.get_text(), w, room))
+            if w > room:
+                # A clause after " — " (the timepoint, a scope) is the natural
+                # second line; break there first, then fit each part.
+                pieces = re.split(r"\s+—\s+", text, maxsplit=1)
+                parts = pieces[:1] + [f"— {p}" for p in pieces[1:]]
+                per_char = w / len(text)
+                title.set_text("\n".join(
+                    _break_to_fit(p, per_char * len(p), room) for p in parts))
         ylab = ax.yaxis.label
         if ylab.get_text():
             h = ylab.get_window_extent(renderer).height

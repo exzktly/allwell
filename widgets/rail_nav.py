@@ -154,6 +154,13 @@ class _RailNavRow(QFrame):
         self._glyph.setVisible(bool(name))
         self._refresh_icon()
 
+    def _aw_rescale(self) -> None:
+        """Re-size the glyph box and ink off the rescaled font (24 pt on a
+        phone at the Medium size) after a UI scale."""
+        self._glyph_px = max(12, round(self.fontMetrics().height() * 1.0))
+        self._glyph.setFixedSize(self._glyph_px, self._glyph_px)
+        self._refresh_icon()
+
     def _refresh_icon(self) -> None:
         if not self._icon_name:
             return

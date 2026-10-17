@@ -106,6 +106,12 @@ class PhoneHandles:
     #: landscape), the rule between dashboard and log, and the dashboard.
     analyze_body: object | None = None
     analyze_rule: QWidget | None = None
+    #: Logs that wrap in phone layout (a sideways-scrolled log on a phone
+    #: hides the end of every error line, which is the part that matters).
+    logs: Callable[[], list] = lambda: []
+    #: The status line's text ("4 well(s) | 72 nuclei"), shown at the top of
+    #: the side rail since the status bar is gone on a phone.
+    status_text: Callable[[], str] | None = None
 
 
 # ── the rescale pass ──────────────────────────────────────────────────────
@@ -368,6 +374,7 @@ class _PhoneEventFilter(QObject):
             clamp_to_screen(obj)
         elif getattr(type(obj), "draw_idle", None) is not None and hasattr(obj, "figure"):
             scale_canvas(obj, self._shell.plot_factor())
+            self._shell.size_canvas(obj, True)
         else:
             self._shell.adapt(obj)
         return False
@@ -439,8 +446,17 @@ LANDSCAPE_PANEL_PT = 360
 #: The Controls sheet's share of an upright screen: the plot above it stays in
 #: view and redraws as its controls change.
 SHEET_HEIGHT_SHARE = 0.6
-#: Analyze's summary column, sideways.
+#: Analyze's summary column, sideways, and the run plate's height in it.
+#: Sideways the screen is always 390 pt tall (the unit is its short side), so
+#: the plate's share is fixed: 390 less the 44 pt bar, less about 165 pt for
+#: the ETA, headline, progress bar, three stage rows and the tapped-well line
+#: at the largest text size. 200 pt measured row H cut off at text size M.
 LANDSCAPE_SUMMARY_PT = 300
+LANDSCAPE_PLATE_PT = 160
+#: How often the side rail's status line follows the status bar while out.
+_RAIL_STATUS_MS = 400
+#: The least height a plot gets per row of axes in phone layout.
+PLOT_ROW_PT = 220
 
 
 class PhoneShell(QObject):
@@ -613,10 +629,37 @@ class PhoneShell(QObject):
             if host_lay is not None:
                 host_lay.insertWidget(host_lay.indexOf(band) + 1, self._strip)
         self._place_page_controls(landscape=False)
-        if self._h.log_badge is not None:
-            self._h.log_badge.installEventFilter(self)
+        changed = getattr(self._h.log_badge, "changed", None)
+        if changed is not None:
+            changed.connect(self._sync_log_badge)
+        # The status line ("4 well(s) | 72 nuclei") at the top of the side
+        # rail: the status bar is gone on a phone, and the rail is where the
+        # wells it counts are picked — so it follows them while the rail is out.
+        self._rail_status = QLabel()
+        self._rail_status.setObjectName("PhoneRailStatus")
+        self._rail_status.hide()
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(_RAIL_STATUS_MS)
+        self._status_timer.timeout.connect(self._sync_rail_status)
+        drawer = self._h.rail_drawer
+        holder = drawer.contentWidget() if drawer is not None else None
+        if holder is not None and holder.layout() is not None:
+            holder.layout().insertWidget(0, self._rail_status)
+            drawer.opened.connect(self._on_rail_opened)
+            drawer.closed.connect(self._status_timer.stop)
         for w in self._phone_only():
             w.hide()
+
+    def _on_rail_opened(self) -> None:
+        self._sync_rail_status()
+        self._status_timer.start()
+
+    def _sync_rail_status(self) -> None:
+        fn = self._h.status_text
+        text = fn() if fn is not None else ""
+        show = phone_layout.is_on() and self._h.mode() == "review" and bool(text)
+        self._rail_status.setText(text)
+        self._rail_status.setVisible(show)
 
     def _phone_only(self) -> list[QWidget]:
         return [self.menu_button, self.page_button, self.controls_button,
@@ -629,24 +672,19 @@ class PhoneShell(QObject):
         band_lay = band.layout() if band is not None else None
         if landscape and band_lay is not None:
             at = band_lay.indexOf(self._band_spacer)
-            band_lay.insertWidget(at, self.page_button)
-            band_lay.insertWidget(at + 1, self.controls_button)
+            band_lay.insertWidget(at, self.page_button, 0, Qt.AlignVCenter)
+            band_lay.insertWidget(at + 1, self.controls_button, 0, Qt.AlignVCenter)
         else:
             strip_lay.insertWidget(0, self.page_button)
             strip_lay.addWidget(self.controls_button)
 
-    def eventFilter(self, obj, event) -> bool:  # Qt naming
-        # The log button's "!" lives in the status bar, which phone layout
-        # hides; mirror it onto ⋯, where the App log item is.
-        if obj is self._h.log_badge and event.type() in (QEvent.Show, QEvent.Hide):
-            self._sync_log_badge()
-        return False
-
     def _sync_log_badge(self) -> None:
+        """Mirror the log button's "!" onto ⋯, where the App log item is: the
+        button lives in the status bar, which phone layout hides. Driven by
+        the badge's ``changed`` signal — its Show and Hide events never
+        arrive while the status bar is hidden, which is the whole time."""
         badge = self._h.log_badge
-        lit = (phone_layout.is_on() and badge is not None
-               and not badge.isHidden())
-        tone = badge.tone() if lit else None
+        tone = badge.tone() if (phone_layout.is_on() and badge is not None) else None
         if tone:
             self._options_badge.notify(tone)
         else:
@@ -720,7 +758,15 @@ class PhoneShell(QObject):
             self._hid = []
         bar = self._h.mode_bar
         if bar is not None and hasattr(bar, "setCompact"):
-            bar.setCompact(on)
+            bar.setCompact(on, pad=self.pt(12))
+        from PySide6.QtWidgets import QTextEdit
+        for log in self._h.logs():
+            # Wrapped, a log trimmed at its block cap re-anchors a scrolled-up
+            # reader slightly off (the trim fix-up counts a block as one line;
+            # ARCHITECTURE §6.1). Reading the end of an error line on a phone
+            # is worth that.
+            log.setLineWrapMode(QTextEdit.WidgetWidth if on else QTextEdit.NoWrap)
+        self._options_badge.setInset(self.pt(2) if on else 0)
         for w in self._phone_only():
             w.setVisible(on)
         for d in self._h.dashboards():
@@ -861,6 +907,10 @@ class PhoneShell(QObject):
             strip_lay = self._strip.layout()
             strip_lay.setContentsMargins(self.pt(8), self.pt(4), self.pt(8), self.pt(4))
             strip_lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
+            self._strip.setFixedHeight(self.pt(phone_layout.TOP_BAR_PT))
+            for b in (self.page_button, self.controls_button):
+                b.setFixedHeight(self.pt(phone_layout.TOUCH_MIN_PT))
+        self._size_canvases(on)
         if band is not None and band.layout() is not None:
             if on:
                 bar = self.pt(LANDSCAPE_BAR_PT if land else phone_layout.TOP_BAR_PT)
@@ -888,6 +938,35 @@ class PhoneShell(QObject):
             drawer._backdrop._alpha = 0.5
         self._apply_analyze_columns(on and land)
 
+    def _size_canvases(self, on: bool) -> None:
+        """Give each plot at least 220 pt of height per row of axes.
+
+        Sideways, a three-panel figure squeezed into the screen's height drew
+        axes eight times wider than tall. The plot pages scroll, so a taller
+        canvas is a scroll away rather than a squashed one.
+        """
+        for c in _canvases():
+            try:
+                self.size_canvas(c, on)
+            except RuntimeError:
+                swallowed()  # canvas deleted while the list was walked
+
+    def size_canvas(self, c, on: bool) -> None:
+        base = c.property("_awMinH")
+        if on:
+            if base is None:
+                base = c.minimumHeight()
+                c.setProperty("_awMinH", base)
+            rows = 1
+            for ax in c.figure.axes:
+                spec = ax.get_subplotspec()
+                if spec is not None:
+                    rows = max(rows, spec.get_gridspec().nrows)
+            c.setMinimumHeight(max(int(base), rows * self.pt(PLOT_ROW_PT)))
+        elif base is not None:
+            c.setMinimumHeight(int(base))
+            c.setProperty("_awMinH", None)
+
     def _apply_analyze_columns(self, two: bool) -> None:
         """Sideways, Analyze is two columns: the run summary and plate on the
         left, the log on the right; upright, one above the other."""
@@ -900,6 +979,12 @@ class PhoneShell(QObject):
             self._h.analyze_rule.setVisible(not two)
         for d in self._h.dashboards():
             d.setMaximumWidth(self.pt(LANDSCAPE_SUMMARY_PT) if two else _QWIDGETSIZE_MAX)
+            plate = getattr(d, "_plate", None)
+            if plate is not None and phone_layout.is_on():
+                # Sideways the column is short: the plate is as tall as leaves
+                # room for the summary above it and the tapped well's line.
+                plate.setMaximumHeight(self.pt(LANDSCAPE_PLATE_PT) if two
+                                       else _QWIDGETSIZE_MAX)
 
     # ── window ────────────────────────────────────────────────────────────
     def _avail(self) -> QRect:
@@ -1022,7 +1107,7 @@ class PhoneShell(QObject):
         self._hide_banner()
 
     # ── the Controls sheet ────────────────────────────────────────────────
-    def _current_band(self):
+    def _current_band(self) -> QWidget | None:
         """The control band of the Review page on screen, if it has controls."""
         for w in QApplication.allWidgets():
             if type(w).__name__ != "ControlBand" or not self._band_managed(w):
@@ -1047,14 +1132,25 @@ class PhoneShell(QObject):
         def _below_band() -> int:
             return band.mapTo(self._win, band.rect().bottomLeft()).y() + 1 if band else 0
 
+        def _content_height() -> int:
+            # As tall as what it holds, up to its share of the window: a sheet
+            # taller than its controls is dead space where the plot could be.
+            holder = getattr(sheet, "_aw_holder", None)
+            lay = holder.layout() if holder is not None else None
+            want = (lay.totalHeightForWidth(self._win.width()) if lay is not None
+                    and lay.hasHeightForWidth() else
+                    holder.sizeHint().height() if holder is not None else 0)
+            return min(int(self._win.height() * SHEET_HEIGHT_SHARE), want + self.pt(8))
+
+        # No scrim: the plot above the sheet redraws as its controls change,
+        # and a dimmed plot is one the user cannot judge the change by.
         if land:
             sheet = Drawer(self._win, edge="right", width_hint=lambda: self.pt(LANDSCAPE_PANEL_PT),
-                           margin=0, top_inset=_below_band, scrim=0.25)
+                           margin=0, top_inset=_below_band, scrim=0.0)
         else:
-            sheet = Drawer(self._win, edge="bottom",
-                           height_hint=lambda: int(self._win.height() * SHEET_HEIGHT_SHARE),
-                           margin=0, scrim=0.25)
-        sheet.setObjectName("PhoneControlsSheet")
+            sheet = Drawer(self._win, edge="bottom", height_hint=_content_height,
+                           margin=0, scrim=0.0)
+        sheet.setProperty("phoneSheet", True)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
@@ -1091,9 +1187,10 @@ class PhoneShell(QObject):
         holder.layout().insertWidget(0, band)
         band.setStacked(True)
         band.show()
+        band._scope.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
         self._grab_scrolling(True)
         sheet.open()
-        self.controls_button.setText("⚙ Done")
+        self.controls_button.setText("Done ✕")
 
     def close_controls(self, *, now: bool = False) -> None:
         if self._sheet is None:
@@ -1110,6 +1207,7 @@ class PhoneShell(QObject):
             return
         try:
             band.setStacked(False)
+            band._scope.setSpacing(-1)
             home = getattr(self, "_sheet_home", None)
             index = band.property("_awHome")
             if home is not None and home.layout() is not None:
@@ -1209,7 +1307,7 @@ class PhoneShell(QObject):
         if self._h.show_help is not None:
             m.addAction("Help").triggered.connect(self._h.show_help)
         if self._h.show_log is not None:
-            lit = self._h.log_badge is not None and not self._h.log_badge.isHidden()
+            lit = self._h.log_badge is not None and self._h.log_badge.tone() is not None
             m.addAction("App log  •" if lit else "App log").triggered.connect(self._h.show_log)
         m.addSeparator()
         m.addAction("Desktop layout").triggered.connect(lambda: self.set_on(False))

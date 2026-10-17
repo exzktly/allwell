@@ -18,6 +18,9 @@ API
 * ``notify(tone="accent")`` — show the badge, escalating its tone.
 * ``clear()`` — hide it and forget the tone.
 * ``tone()`` — the current tone, or ``None`` while hidden.
+* ``changed`` — emitted whenever the tone changes, raised or cleared. A
+  widget mirroring the badge listens to this rather than to Show / Hide,
+  which never arrive while the badge's own host is hidden.
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtWidgets import QLabel, QWidget
 
 from ui import theme
@@ -39,6 +42,8 @@ TONES = ("accent", "warn", "danger")
 
 
 class NoticeBadge(QLabel):
+    changed = Signal()
+
     def __init__(self, host: QWidget) -> None:
         super().__init__("!", host)
         self.setObjectName("NoticeBadge")
@@ -69,6 +74,11 @@ class NoticeBadge(QLabel):
                 self.show()
             return
         self._tone = tone
+        self._paint_tone()
+        self.changed.emit()
+
+    def _paint_tone(self) -> None:
+        tone = self._tone
         self.setStyleSheet(
             f"#NoticeBadge {{ background-color: {getattr(theme.Colors, tone)}; "
             f"color: {theme.Colors.accent_fg}; "
@@ -79,13 +89,30 @@ class NoticeBadge(QLabel):
         self.raise_()
 
     def clear(self) -> None:
-        self._tone = None
+        was, self._tone = self._tone, None
         self.hide()
+        if was is not None:
+            self.changed.emit()
+
+    def setInset(self, px: int) -> None:
+        """Sit *px* inside the host's top-right corner rather than on it —
+        for a host at the screen's edge, where a corner pip is half off it."""
+        self._inset = max(0, int(px))
+        self._place()
+
+    def _aw_rescale(self) -> None:
+        """Re-measure the pip off its (rescaled) font after a UI scale."""
+        self._diameter = self.fontMetrics().height()
+        self.setFixedSize(self._diameter, self._diameter)
+        if self._tone is not None:
+            self._paint_tone()
+        self._place()
 
     def _place(self) -> None:
         host = self.parentWidget()
+        inset = getattr(self, "_inset", 0)
         if host is not None:
-            self.move(max(0, host.width() - self._diameter), 0)
+            self.move(max(0, host.width() - self._diameter - inset), inset)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if watched is self.parentWidget() and event.type() in (

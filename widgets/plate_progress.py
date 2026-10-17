@@ -539,6 +539,11 @@ class PlateProgress(QWidget):
         # state the run is in — so it is set larger (``PlateHeadline[phone]``).
         self._title_label.setVisible(not self._stacked)
         self._toggle.setVisible(not self._stacked)
+        # The status word repeats the headline's first word on a phone, and
+        # the "Stages" heading names what its rows already say.
+        self._status.setVisible(not self._stacked)
+        for head in self._rail_host.findChildren(QLabel, "StageRailHead"):
+            head.setVisible(not self._stacked)
         if self._stacked and not self._body.isVisible():
             self._toggle.setChecked(True)
             self._on_toggle()
@@ -547,12 +552,15 @@ class PlateProgress(QWidget):
         self._headline.style().polish(self._headline)
         plate = getattr(self, "_plate", None)
         if plate is not None:
+            center = self._center_host.layout()
             if self._stacked:
                 # As wide as the column: the status plate's desk cap leaves a
                 # phone's wells a third of the width they could have.
                 plate.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
+                center.setAlignment(plate, Qt.AlignHCenter)
             else:
                 apply_plate_geometry(plate, role="status")
+                center.setAlignment(plate, PLATE_ALIGNMENT)
         self._detail.setVisible(self._stacked and bool(self._detail.text()))
         self._pin_rail_width()
 

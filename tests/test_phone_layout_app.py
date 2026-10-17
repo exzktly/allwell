@@ -8,8 +8,8 @@ wired together — a button connected to nothing, a pane whose sidebar comes
 back on the next resize, a desktop that does not come back at all.
 
 The offscreen screen is 800×800, narrower than the desk window's 1100 minimum,
-so it is phone-shaped: the window must fit it in either layout, and Auto picks
-the 1.25 preset (800 / 600 = 1.33).
+so it is phone-shaped: the window must fit it in either layout. Its unit is
+800 / 390 px per phone point, which every touch size is checked against.
 """
 
 from __future__ import annotations
@@ -58,15 +58,22 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
 
     shell.desk_button.click()
     _pump(qapp)
+    u = 800 / 390
     assert phone_layout.is_on()
-    assert theme.ui_scale() == 1.25
+    assert theme.ui_scale() == pytest.approx(15 * u / 13)    # body at 15 pt
+    assert theme.touch_unit() == pytest.approx(u)
     assert not _visible(win._header)
     assert not _visible(shell._banner)
     for w in (win._present_btn, win._reset_saves_btn, win._copy_analysis_btn,
-              win._open_btn, win._reset_view_btn, *win._status_hints):
+              win._open_btn, win._reset_view_btn, win._refresh_btn,
+              win._help_btn, win._statusbar):
         assert not _visible(w), w
-    assert _visible(win._refresh_btn) and _visible(win._help_btn)
-    assert _visible(win._mode_seg)
+    assert _visible(win._mode_seg) and _visible(shell.options_button)
+    # Thumb-sized: 48 pt square ☰ and ⋯, a 52 pt bar, 44 pt everything else.
+    assert shell.menu_button.height() == round(48 * u)
+    assert review._top_bar.height() == round(52 * u)
+    assert shell.page_button.height() >= round(44 * u)
+    assert shell.controls_button.height() >= round(44 * u)
     assert all(not _visible(s._icon_lbl) for s in win._mode_seg._segments)
     assert not _visible(review._page_tabs_host)
     assert (win.minimumWidth(), win.minimumHeight()) <= (320, 400)
@@ -81,12 +88,16 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     shell.menu_button.click()
     _pump(qapp)
     assert drawer.isOpen() and drawer.isVisible()
+    assert shell.menu_button.text() == "✕"
+    assert drawer.width() == win._review.width() - round(56 * u)
     assert review._sidebar_root.parentWidget() is drawer.contentWidget()
     assert _visible(review._section_nav) and _visible(review._sidebar_plate_slot)
     assert _visible(review._central_pane_stack)
     assert shell.menu_button.isChecked()
-    # Below the band, so ☰ and the mode bar stay in reach.
-    assert drawer.geometry().top() >= review._h_pane.geometry().top()
+    # Right under the top bar, so ☰ and the mode bar stay in reach, and over
+    # the strip, whose page menu and Controls belong to the page it hides.
+    assert drawer.geometry().top() == review._top_bar.geometry().bottom() + 1
+    assert drawer.geometry().top() < review._h_pane.geometry().top()
 
     # Code that used to put the desktop chrome back on its own: a resize
     # re-parks (and re-shows) the rail toggle, a mode switch re-shows Split.
@@ -110,6 +121,19 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert not drawer.isOpen()
     assert review._section_nav.currentKey() == key
 
+    # ⚙ Controls: the page's band slides up in a sheet, flowing, and goes
+    # back to its page when the sheet closes.
+    shell.controls_button.click()
+    _pump(qapp)
+    band = shell._sheet_band
+    assert band is not None and _visible(band) and band._stacked
+    assert shell._sheet.isOpen()
+    shell.controls_button.click()
+    _pump(qapp)
+    assert shell._sheet_band is None and not band._stacked
+    assert band.parentWidget() is not shell._sheet._aw_holder
+    assert not _visible(band)                      # hidden in its page again
+
     # Analyze: the run dashboard first, stacked; ☰ slides the form out.
     win._mode_seg.setCurrentIndex(1)
     _pump(qapp)
@@ -129,11 +153,11 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert split_btn is None or not _visible(split_btn)
     assert not _visible(review._sidebar_toggle_btn)
 
-    # The Aa menu: the text size, and the way back.
+    # The ⋯ menu: text size as one row, reload, help, the log, and the way back.
     shell._fill_menu()
     texts = [a.text() for a in shell._menu.actions()]
-    assert "Desktop layout" in texts and "Text size" in texts
-    assert [a.text() for a in shell._size_menu.actions()][0] == "Auto (125 %)"
+    assert {"Reload dataset", "Help", "Desktop layout"} <= set(texts)
+    assert any(t.startswith("App log") for t in texts)
     next(a for a in shell._menu.actions() if a.text() == "Desktop layout").trigger()
     _pump(qapp)
 
@@ -144,8 +168,12 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
               review._page_tabs_host, review._sidebar_root,
               review._central_pane_stack, review._sidebar_toggle_btn):
         assert _visible(w), w
-    for w in (shell.menu_button, shell.page_button, shell.options_button):
+    for w in (shell.menu_button, shell.page_button, shell.options_button,
+              shell.controls_button, shell._strip):
         assert not _visible(w), w
+    assert theme.touch_unit() is None
+    for w in (win._refresh_btn, win._help_btn, win._statusbar):
+        assert _visible(w), w
     # Every left panel is back in its own splitter, rail first.
     assert review._h_pane.indexOf(review._sidebar_root) == 0
     assert analyze._left_sidebar.parentWidget() is not drawer.contentWidget()
@@ -159,6 +187,96 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert (win.minimumWidth(), win.minimumHeight()) == (
         min(phone_layout.DESK_MIN_W, avail.width()),
         min(phone_layout.DESK_MIN_H, avail.height()))
+
+
+def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
+    """The UX review's second round, each checked on the widget a thumb meets."""
+    from PySide6.QtWidgets import QComboBox, QPushButton, QTextEdit, QToolButton
+    from core import phone_layout
+
+    shell = win._phone
+    review = win._review
+    u = 800 / 390
+    desk_hidden = {k for k, r in review._section_nav._rows.items() if r.isHidden()}
+    shell.set_on(True)
+    _pump(qapp)
+    try:
+        # Mode switch: every label shows whole, at one shared width.
+        segs = win._mode_seg._segments
+        assert len({s.minimumWidth() for s in segs}) == 1
+        assert all(s.minimumWidth() >= s._text_lbl.sizeHint().width() for s in segs)
+        # The strip: 52 pt, its two buttons 44 pt.
+        assert shell._strip.height() == round(52 * u)
+        assert shell.page_button.height() == round(44 * u)
+        # Review CSV and Batch Export are desk work; the rest is a two-wide grid.
+        nav = review._section_nav
+        for key in shell._h.phone_hidden_sections:
+            assert nav._rows[key].isHidden(), key
+        shown = [r for k, r in nav._rows.items() if not r.isHidden()]
+        assert shown and all(r.minimumHeight() >= round(48 * u) - 1 for r in shown)
+        # The analysis log wraps rather than scrolling sideways.
+        logs = shell._h.logs()
+        assert logs and all(l.lineWrapMode() == QTextEdit.WidgetWidth for l in logs)
+        # The status bar is hidden, so its log "!" is mirrored onto ⋯ — inset,
+        # clear of the button's edge.
+        log_badge = shell._h.log_badge
+        log_badge.notify("warn")
+        _pump(qapp)
+        assert shell._options_badge.tone() == "warn"
+        assert not shell._options_badge.isHidden()
+        btn = shell.options_button
+        assert shell._options_badge.geometry().right() <= btn.width() - round(2 * u)
+        assert shell._options_badge.geometry().top() == round(2 * u)
+        log_badge.clear()
+        _pump(qapp)
+        assert shell._options_badge.isHidden()
+        # The rail carries the status bar's counts, live while it is open.
+        win._status_lbl_app.setText("4 well(s) | 72 nuclei")
+        shell.menu_button.click()
+        _pump(qapp)
+        assert shell._rail_status.text() == "4 well(s) | 72 nuclei"
+        assert _visible(shell._rail_status)
+        shell.menu_button.click()
+        _pump(qapp)
+        # The Controls sheet: 48 pt controls, and a "Done ✕" to close it.
+        shell.controls_button.click()
+        _pump(qapp)
+        assert shell.controls_button.text() == "Done ✕"
+        band = shell._sheet_band
+        ctrls = [w for t in (QPushButton, QToolButton, QComboBox)
+                 for w in band.findChildren(t) if _visible(w)]
+        assert ctrls and all(w.height() >= round(48 * u) - 1 for w in ctrls), [
+            (type(w).__name__, w.height()) for w in ctrls if w.height() < round(48 * u) - 1]
+        shell.controls_button.click()
+        _pump(qapp)
+        assert shell.controls_button.text() != "Done ✕"
+        # The run view drops what repeats the headline.
+        dash = win._analyze._dashboard
+        assert dash.isStacked() and dash._status.isHidden()
+        # Sideways (this offscreen screen is square, so the shape is forced):
+        # the page menu and Controls join the bar, and Analyze becomes two
+        # columns with the plate capped to the screen's height.
+        monkeypatch.setattr(shell, "is_landscape", lambda: True)
+        shell._apply_sizes()
+        _pump(qapp)
+        from PySide6.QtWidgets import QBoxLayout
+        assert shell.page_button.parentWidget() is review._top_bar
+        assert shell._h.analyze_body.direction() == QBoxLayout.LeftToRight
+        assert dash.maximumWidth() == round(300 * u)
+        assert dash._plate.maximumHeight() == round(160 * u)
+        monkeypatch.setattr(shell, "is_landscape", lambda: False)
+        shell._apply_sizes()
+        _pump(qapp)
+        assert shell.page_button.parentWidget() is shell._strip
+        assert shell._h.analyze_body.direction() == QBoxLayout.TopToBottom
+    finally:
+        shell.set_on(False)
+        _pump(qapp)
+    assert not phone_layout.is_on()
+    assert all(l.lineWrapMode() == QTextEdit.NoWrap for l in shell._h.logs())
+    assert {k for k, r in review._section_nav._rows.items()
+            if r.isHidden()} == desk_hidden
+    assert shell._options_badge.isHidden()
 
 
 def test_closing_in_phone_layout_mid_run_asks_first(qapp, win, monkeypatch):

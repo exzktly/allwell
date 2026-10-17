@@ -909,12 +909,24 @@ def get_all_timepoints(ctx) -> list[float]:
 
 
 def get_timepoints_with_rows(ctx) -> list[float]:
-    """Unique ``timepoint_hours`` across all loaded wells, included or not.
+    """Every timepoint some well has a row at, included or not.
 
     The Statistics tab's timepoint menu offers every acquired timepoint, whatever
-    the verdicts say; a different question from :func:`get_all_timepoints`, read
-    from the same scan.
+    the verdicts say — a question about the plate's acquisitions, which every
+    well's summary already answers (``well_summary.WellSummary.timepoints``,
+    taken from its parse when the dataset was first opened and kept beside the
+    Parquet cache). So nothing is read: a scan of the plate for this used to run
+    on every open, a read of every well the row cache did not hold. A context
+    whose wells have no summaries (a test's bare state) falls back to that scan.
     """
+    dataset = ctx.state.dataset
+    summaries = getattr(dataset, "summaries", None) or {}
+    labels = list(getattr(dataset, "well_paths", None) or ())
+    if labels and all(label in summaries for label in labels):
+        timepoints: set[float] = set()
+        for label in labels:
+            timepoints.update(summaries[label].timepoints)
+        return sorted(timepoints)
     return _timepoint_scan(ctx, included=False)
 
 

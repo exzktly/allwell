@@ -25,9 +25,9 @@ pytestmark = pytest.mark.slow
 
 #: Whole-frame reads (``data_loading.read_well_frame``) per well, per open,
 #: including the gating pass the open starts.
-FULL_READS_PER_WELL_BUDGET = 1.5
+FULL_READS_PER_WELL_BUDGET = 0.5
 #: Every Parquet read (whole or narrow, ``parquet_cache.read_cached``) per well.
-PARQUET_READS_PER_WELL_BUDGET = 8.0
+PARQUET_READS_PER_WELL_BUDGET = 0.5
 
 
 def _save_recipe(dataset) -> None:
@@ -87,3 +87,47 @@ def test_one_open_reads_each_well_a_bounded_number_of_times(viewer_app, mini_dat
         "narrowly (plate_scan.every_well(columns=...)) instead of raising the budget.")
     assert parquet <= PARQUET_READS_PER_WELL_BUDGET, (
         f"one open made {parquet:.2f} Parquet reads per well (budget {PARQUET_READS_PER_WELL_BUDGET}).")
+
+
+def test_the_hidden_tabs_menus_are_filled_when_shown(viewer_app, mini_dataset, qtbot, monkeypatch):
+    """The Distribution and Heat Map timepoint menus are a plate scan, and the
+    load no longer runs it for tabs that are not in front. Opening each tab must
+    fill its menu with the plate's included timepoints — the same list the scan
+    gives — or a tab shown after a load would offer the previous plate's."""
+    from review.data.data_loading import get_all_timepoints
+
+    app = viewer_app
+    _save_recipe(mini_dataset)
+    app._load_path(mini_dataset)
+    app._drain_pending_centre_builders()             # both tabs built, as after a first visit
+    worker = app._ctx.runtime.cell_gating.worker
+    if worker is not None:
+        worker.wait()
+    qtbot.waitUntil(lambda: app._app_state.plot.held_for == "", timeout=30_000)
+    # What a previous plate left in the menus: a reopen of the same dataset
+    # would refill them with the same list, so without this a menu nobody
+    # refreshed would pass.
+    for name in ("_distribution_tp_cb", "_heatmap_tp_cb"):
+        stale = app._ctx.widgets.get(name)
+        stale.clear()
+        stale.addItem("999")
+    counts = _count(monkeypatch)
+    app._load_path(mini_dataset)
+    worker = app._ctx.runtime.cell_gating.worker
+    if worker is not None:
+        worker.wait()
+    qtbot.waitUntil(lambda: app._app_state.plot.held_for == "", timeout=30_000)
+    assert app._notebook.currentName() == "Home"
+    loaded_reads = dict(counts)
+
+    expected = [f"{tp:g}" for tp in get_all_timepoints(app._ctx)]
+    assert expected, "the plate has no timepoints; an empty menu would pass"
+    app._notebook.setCurrentByName("Plotting")
+    app._plotting_notebook.setCurrentByName("Distribution")
+    dist = app._ctx.widgets.get("_distribution_tp_cb")
+    assert [dist.itemText(i) for i in range(dist.count())] == expected
+    app._plotting_notebook.setCurrentByName("Heat Map")
+    heat = app._ctx.widgets.get("_heatmap_tp_cb")
+    assert [heat.itemText(i) for i in range(heat.count())] == [f"{t} h" for t in expected]
+    assert loaded_reads["parquet"] <= len(app._app_state.dataset.well_paths), (
+        f"the load itself scanned for the hidden tabs' menus: {loaded_reads}")

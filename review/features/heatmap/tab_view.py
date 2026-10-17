@@ -306,7 +306,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
 # ── helpers attached or referenced from runtime_app ─────────────────────────
 
-def refresh_heatmap_timepoints(ctx) -> None:
+def refresh_heatmap_timepoints(ctx, *, redraw: bool = True) -> None:
     # A8-teardown T3: modern infrastructure — the combo via ``ctx.widgets``,
     # the timepoint-value cache via ``ctx.runtime.heatmap``, timepoints/focus via
     # the ctx leaves. The onward ``_redraw`` is the one render handoff residual
@@ -336,7 +336,9 @@ def refresh_heatmap_timepoints(ctx) -> None:
             cb.addItem("—")
     finally:
         cb.blockSignals(blocked)
-    _redraw(ctx)
+    # ``redraw=False`` from the tab's own activation, which draws right after.
+    if redraw:
+        _redraw(ctx)
 
 
 def _on_tp_changed(ctx) -> None:

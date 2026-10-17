@@ -56,10 +56,7 @@ class ChannelState:
     # undeclared ``app._label_to_channel_key`` attribute with a lossy fallback.
     label_to_channel_key: dict[str, str] = field(default_factory=dict)
 
-    threshold_min: float = 0.0
-    threshold_max: float = 1.0
     threshold: float = 50.0
-    threshold_range_cache: dict[str, tuple[float, float]] = field(default_factory=dict)
 
     # ── derived value column ─────────────────────────────────────────────────
 
@@ -133,15 +130,3 @@ class ChannelState:
         self.ratio_metrics = list(ratios)
         self.ratio_index = build_ratio_index(self.ratio_metrics)
 
-    # ── threshold range ──────────────────────────────────────────────────────
-
-    def cached_range(self, val_col: str) -> tuple[float, float] | None:
-        return self.threshold_range_cache.get(val_col)
-
-    def cache_range(self, val_col: str, lo: float, hi: float) -> None:
-        self.threshold_range_cache[val_col] = (lo, hi)
-
-    def apply_range(self, lo: float, hi: float) -> None:
-        """Set the (min, max) intensity range the threshold slider spans."""
-        self.threshold_min = lo
-        self.threshold_max = hi

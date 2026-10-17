@@ -542,9 +542,6 @@ def _load_directory_held(ctx, d: Path, label=None) -> None:
     app._app_state.plot.reset_for_new_dataset()
     app._app_state.export_prefs.reset_for_new_dataset()
     app._app_state.image_view.reset_for_new_dataset()
-    # Drop the per-channel threshold (min, max) cache; the new dataset's
-    # ranges may be completely different.
-    app._app_state.channel.threshold_range_cache.clear()
     # Drop the Image Table's persistent decoded-image cache + last render — the
     # new dataset's pixels differ, so the cross-Generate cache must not carry
     # over (it is keyed only by well/channel/variant, not by data dir). Skipped
@@ -768,14 +765,12 @@ def _load_directory_held(ctx, d: Path, label=None) -> None:
     app._dir_label.setText(display)
     from review.core.app_shell_view import refresh_dataset_button
     refresh_dataset_button(app)
-    progress.phase("Measuring channel ranges and restoring gates")
+    progress.phase("Restoring channels and gates")
     recalculate_threshold(ctx)
-    # Cell Gating's CDFs and optimizer lists, read once now that the channels,
-    # ratios and gates are final: every call the load made before this point
-    # rebuilt the tab's controls and left the reading owed (tracker R2), and the
-    # gating pass below has not started reading yet.
-    progress.phase("Reading cells for Cell Gating")
-    ctx.features.call("cell_gating.read_owed_cell_areas", ctx)
+    # Cell Gating's CDFs and optimizer lists are left owed: every call the load
+    # made rebuilt the tab's controls without reading, and the reading is done
+    # when the Cell Gating tab is shown (``home.controller._pay_cell_gating_if_shown``)
+    # — a first-frame read of every well for figures only that tab draws.
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from
     # _recalculate_threshold, which fires on every channel/metric switch)

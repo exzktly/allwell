@@ -134,15 +134,3 @@ def test_set_ratio_metrics_rebuilds_index():
 
 # ── threshold range ──────────────────────────────────────────────────────────
 
-def test_threshold_range_cache_round_trip():
-    cs = ChannelState()
-    assert cs.cached_range("gfp_mean_intensity") is None
-    cs.cache_range("gfp_mean_intensity", 10.0, 99.0)
-    assert cs.cached_range("gfp_mean_intensity") == (10.0, 99.0)
-
-
-def test_apply_range_sets_min_max():
-    cs = ChannelState()
-    cs.apply_range(5.0, 250.0)
-    assert cs.threshold_min == 5.0
-    assert cs.threshold_max == 250.0

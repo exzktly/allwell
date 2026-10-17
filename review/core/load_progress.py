@@ -72,7 +72,10 @@ class LoadProgress:
             return
         self._reads += 1
         now = time.monotonic()
-        if now - self._last_paint < _REPAINT_INTERVAL_S:
+        # The first read of a phase is always shown: with narrow reads a whole
+        # phase can fall inside one repaint interval, and the line would then
+        # never say which wells it was reading.
+        if self._reads > 1 and now - self._last_paint < _REPAINT_INTERVAL_S:
             return
         self._paint(f"{self._phase} — reading well {label} "
                     f"({self._reads} well read{'s' if self._reads != 1 else ''} so far, "

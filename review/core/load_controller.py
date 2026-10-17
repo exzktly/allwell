@@ -770,6 +770,12 @@ def _load_directory_held(ctx, d: Path, label=None) -> None:
     refresh_dataset_button(app)
     progress.phase("Measuring channel ranges and restoring gates")
     recalculate_threshold(ctx)
+    # Cell Gating's CDFs and optimizer lists, read once now that the channels,
+    # ratios and gates are final: every call the load made before this point
+    # rebuilt the tab's controls and left the reading owed (tracker R2), and the
+    # gating pass below has not started reading yet.
+    progress.phase("Reading cells for Cell Gating")
+    ctx.features.call("cell_gating.read_owed_cell_areas", ctx)
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from
     # _recalculate_threshold, which fires on every channel/metric switch)

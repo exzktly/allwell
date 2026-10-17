@@ -222,9 +222,12 @@ def _recalculate_threshold(ctx) -> None:
         # included value of the plate concatenated before taking two numbers
         # from it: 106M floats — 850 MB — for a 96-well plate of 1.1M-cell
         # wells, on top of rows the bounded row cache could no longer hold.
-        # Remembered per well (``plate_scan``) until the rows or verdicts change.
+        # Remembered per well (``plate_scan``) until the rows or verdicts change,
+        # and read narrowly: the value column and the verdicts' inputs, not the
+        # whole frame (``narrow_rows``; tracker R3).
         extents = [e for e in every_well(ctx, "fluor_range", val_col,
-                                         lambda df: _value_extent(df, val_col)).values()
+                                         lambda df: _value_extent(df, val_col),
+                                         columns=(val_col,)).values()
                    if e is not None]
         if not extents:
             # No values for this column anywhere in the loaded dataset. The

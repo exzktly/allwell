@@ -192,3 +192,25 @@ def test_numeric_ids_take_the_fast_path_to_the_same_index(monkeypatch, ids, dtyp
     slow = dict(collect.review_mfi_index(None, "A01", channel="gfp"))
     assert fast == slow == _reference_index(as_text, "gfp_mean_intensity")
     assert all(type(n) is int for frame in fast.values() for n in frame)
+
+
+@pytest.mark.parametrize("column", [
+    pd.Series([1, 2, -3, 40]),
+    pd.Series([1.0, np.nan, 3.0, -7.0]),
+    pd.Series([1.5, 2.0]),                  # fractional: the per-value path
+    pd.Series([1e20, 2.0]),                 # scientific notation as text
+    pd.Series([np.inf, 1.0]),
+    pd.Series([5e-05, 1.0]),
+    pd.Series(["3.0", "04", " 5 ", ""]),
+    pd.Series(["7", "x"], dtype="category"),
+    pd.Series([np.nan, np.nan]),
+    pd.Series([], dtype=float),
+])
+def test_bulk_nucleus_id_normalisation_is_the_per_value_one(column):
+    """``nucleus_id_series`` converts a numeric id column in bulk; whatever path
+    it takes, each id must read as ``normalize_nucleus_id`` of its text."""
+    from domain.image_identity import normalize_nucleus_id, nucleus_id_series
+    from domain.text_columns import as_text
+
+    want = as_text(column).map(normalize_nucleus_id).tolist()
+    assert nucleus_id_series(column, column.index).tolist() == want

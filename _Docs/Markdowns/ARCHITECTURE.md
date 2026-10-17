@@ -146,11 +146,14 @@ times the chosen text size — Small, Medium or Large, 0.87 / 1 / 1.13
 `theme.set_touch_unit(u)` appends the touch floors to the application stylesheet
 (`theme._touch_qss`), so a control built later is touch-sized too.
 
-**Switching.** A labelled `Phone layout` button sits at the header's *left*,
-beside the version pill — the left edge is the part of an oversized window still
-on a narrow screen, and the label says what it does without a tooltip, which a
-touch screen never shows. In phone layout the header row is hidden and the way
-back is the ⋯ menu's *Desktop layout*. `PhoneShell.set_on(on)`:
+**Switching.** The way in is a phone icon (`PhoneShell.desk_button`, an
+`IconButton`) among the small icon buttons at the right end of the mode band,
+just before help — outside Review's own action cluster, like help, so it is there
+in every mode (Analyze, watching a run, is the commonest reason to be on a
+phone). The right end is in reach on a narrow screen because the window always
+fits its screen (below), and a phone-shaped screen also gets the banner, whose
+*Switch* says in words what the glyph does. In phone layout the button and the
+header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `PhoneShell.set_on(on)`:
 
 1. hides the header and the desk-only buttons (`desk_only`: the publication
    look, both resets, copy analysis, reveal folder — three of them destructive, a
@@ -162,11 +165,19 @@ back is the ⋯ menu's *Desktop layout*. `PhoneShell.set_on(on)`:
 2. closes the side rail — or, on the way out, restores the left panel's desk
    state;
 3. restyles at the phone's type scale and touch unit (§8) — the only slow step,
-   about 6 s, under a busy overlay, and skipped when neither changes. Widgets
+   7–9 s on a 4,000-widget window, under a busy overlay, and skipped when
+   neither changes. Nearly all of it is `QApplication.setStyleSheet`
+   re-polishing every widget: a near-empty stylesheet still costs most of it,
+   so the cost scales with the widget count, not with the sheet. Widgets
    that take a different *form* on a phone — a stepper's − / +, an Analyze form
    row's stacked label — take it after the restyle on the way in and give it up
    before the restyle on the way out, so the rescale pass only ever sees
-   desk-shaped widgets;
+   desk-shaped widgets. The restyle is a *switch* (`phone_layout.switching()`,
+   read by `is_switching()`): its rescale pass lets Qt deliver pending events,
+   and timers fire with them, so anything a listener scheduled for after the
+   switch checks the flag and re-arms until it is over. The Image Table's refit
+   ran inside the restyle before it did, deleting and rebuilding its grid while
+   the pass was walking the window's widgets;
 4. pins the touch sizes (`_apply_sizes`), scales the plots, and, while phone
    layout is on, installs an app event filter (`_PhoneEventFilter`) that gives
    anything shown later the same treatment: a plot its DPI and height, a dialog a
@@ -234,7 +245,13 @@ fits the sheet upright fits the panel (`LANDSCAPE_SHEET_PT`; at 360 pt the Image
 Table's LUT rows overflowed it). A page whose controls are not a `ControlBand`
 marks the block that holds them with the `phoneControls` property and gives it a
 `setStacked`; `_current_band` takes a band with controls first and a marked block
-otherwise, and the same lend, stack and give-back apply to either.
+otherwise, and the same lend, stack and give-back apply to either. Whether
+⚙ Controls shows is decided in `refresh()`, which follows the notebook's page
+changes — but a lazily built page (Image Browser) has no controls yet at that
+signal, since it builds on being shown. So `adapt()`, which hides a page's
+controls as they appear, also queues one more `refresh()` on a zero-delay
+single-shot timer; without it the button stayed hidden on a page's first visit
+in phone layout, and with it every control the page has.
 `ControlBand.setStacked(True)` flows the band's
 actions into its scope flow so it wraps to the sheet's width; the sheet's buttons,
 combos and fields are 48 pt (`QWidget#Drawer[phoneSheet="true"]` in the touch
@@ -275,7 +292,9 @@ panel's channel-naming hints wrap, at the desk as well, where with room for one
 line they lay out as before. The grid's cells share the page's width
 (`image_table/_phone_fit.py`): `fit_cell_px` divides what the row labels, the
 facet gaps and each column's spacing leave between the columns, and the zoom
-multiplies that, so 100 % fills the screen and zooming in scrolls sideways; the
+multiplies that, so 100 % fills the screen and zooming in scrolls sideways (the
+page's vertical scrollbar is reserved while it is not shown, since the grid being
+sized is what usually brings it on); the
 desk keeps its 240 px × zoom. The label width is measured with the fonts the
 labels are drawn in, corner text included, since the corner ("T:0h · FOV:F001")
 sits over the label columns and widened them past the screen when it was left
@@ -1179,8 +1198,9 @@ allwell.main()
     ├── AllWellApp().__init__
     │       ├── _build_ui()
     │       │    ├── title bar (logo + version pill; the mode seg, the Review
-    │       │    │            action cluster and the help button after it are
-    │       │    │            re-parented into the Review pane's mode band below)
+    │       │    │            action cluster, the phone-layout button and the
+    │       │    │            help button after it are re-parented into the
+    │       │    │            Review pane's mode band below)
     │       │    └── central stack:
     │       │         ├── page 0  ←  ReviewApp() (Review)
     │       │         │       ├── _build_ui()

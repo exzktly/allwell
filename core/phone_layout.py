@@ -16,7 +16,8 @@ packages away from the button that changes it.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 #: Phone layout sizes everything in *phone points*. RealVNC shrinks the whole
 #: desktop to the phone's width, so one logical pixel on the desktop lands on
@@ -61,7 +62,7 @@ PHONE_MAX_SHORT_SIDE = 1300
 KEY_ON = "ui/phone_layout"
 KEY_TEXT_SIZE = "ui/phone_text_size"
 
-_state = {"on": False}
+_state = {"on": False, "switching": 0}
 _listeners: list[Callable[[bool], None]] = []
 
 
@@ -78,6 +79,28 @@ def set_on(on: bool) -> None:
     _state["on"] = on
     for fn in list(_listeners):
         fn(on)
+
+
+def is_switching() -> bool:
+    """True while the shell is re-laying the window out — entering or leaving
+    phone layout, a text-size change, the phone turning.
+
+    The restyle inside a switch lets Qt deliver its pending style and font
+    events, and timers fire with them. Work a listener scheduled for "after the
+    switch" must check this and wait: an Image Table redraw that ran here
+    deleted and rebuilt its grid while the restyle was walking the widgets.
+    """
+    return _state["switching"] > 0
+
+
+@contextmanager
+def switching() -> Iterator[None]:
+    """Mark a switch in progress for :func:`is_switching`. Re-entrant."""
+    _state["switching"] += 1
+    try:
+        yield
+    finally:
+        _state["switching"] -= 1
 
 
 def add_listener(fn: Callable[[bool], None]) -> None:

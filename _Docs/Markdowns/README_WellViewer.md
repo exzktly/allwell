@@ -7357,8 +7357,8 @@ window with the same data: one column instead of a sidebar beside the page, text
 and plots sized for the phone, and buttons big enough for a thumb, whatever
 resolution the remote desktop has. Switching never touches a run in progress.
 
-**Turning it on.** Tap **Phone layout** at the top left of the window, beside the
-version number. If All-Well notices the screen has turned phone-shaped (upright,
+**Turning it on.** Tap the phone icon among the small buttons at the top right of
+the window, just left of ⓘ (help). If All-Well notices the screen has turned phone-shaped (upright,
 too small for the desktop window, or sideways at a phone's long proportions), a
 strip across the top offers the switch — tap **Switch**, or **Not now**. It never
 switches on its own.

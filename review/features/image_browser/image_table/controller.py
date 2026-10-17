@@ -90,6 +90,7 @@ from review.data.frame_load import missing_frame_note
 # Faceted render placement (axis labels + group spacing) — same-feature sibling,
 # module-scope like the grid_layout import above so it isn't a deferred import.
 from review.features.image_browser.image_table import facet_view as _facet
+from review.features.image_browser.image_table._phone_fit import phone_cell_px
 
 _logger = logging.getLogger("review.image_table")
 
@@ -1070,6 +1071,10 @@ def image_table_generate(ctx) -> None:
     plan = None
     with swallow("image table: facet plan"):
         plan = _facet.plan_facets(ctx, cells)
+
+    # Phone layout: the columns share the screen's width (``_phone_fit``).
+    with swallow("image table: fit cells to the phone"):
+        sz = phone_cell_px(ctx, cells, plan, zoom, grid) or sz
 
     def _pos(r, c):
         if plan is None:

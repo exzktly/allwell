@@ -5237,3 +5237,35 @@ def test_row_cache_reader_guard_clears_a_read_through_get_rows(tmp_path, monkeyp
                   "def other(ctx):\n    return ctx.state.stats_cache.cache\n")
     assert _run_scan(monkeypatch, "tests.test_row_cache_readers",
                      "test_every_reader_of_the_row_cache_is_on_the_roster", [path]) is None
+
+
+# ── font sizes come from the type tokens ────────────────────────────────────
+
+FONT_SIZE_VIOLATIONS = {
+    # The shapes that shipped: a QSS template with whole and half pixels (the
+    # Image Table shelf's 12.5px slipped past a whole-number pattern), and a
+    # literal inside an f-string whose other values were tokens.
+    "half_pixel": 'QSS = "QLabel#T { color: $c; font-size: 12.5px; }"\n',
+    "whole": 'QSS = "QLabel#T { font-size:11px; }"\n',
+    "fstring": ('def qss(c):\n'
+                '    return f"color: {c.text}; font-size: 11px; font-weight: 600;"\n'),
+    "shorthand": 'QSS = "QLabel { font: bold 9pt; }"\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FONT_SIZE_VIOLATIONS))
+def test_font_size_guard_catches_a_literal(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_font_{shape}.py", FONT_SIZE_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_font_sizes_come_from_tokens",
+                    "test_no_literal_font_size_in_a_stylesheet", [bad])
+    assert exc is not None and f"bad_font_{shape}.py" in str(exc)
+
+
+def test_font_size_guard_clears_a_token_and_a_docstring(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_font.py",
+                  '"""A docstring may say font-size: 11px when explaining."""\n'
+                  'def qss(t):\n'
+                  '    return f"font-size: {t.caption_size}px; padding: 3px;"\n'
+                  'TPL = "QLabel { font-size: ${fs_small}px; }"\n')
+    assert _run_scan(monkeypatch, "tests.test_font_sizes_come_from_tokens",
+                     "test_no_literal_font_size_in_a_stylesheet", [good]) is None

@@ -25,8 +25,10 @@ extraction.
 from __future__ import annotations
 
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QProgressBar, QToolButton, QVBoxLayout, QWidget,
+    QBoxLayout, QFrame, QHBoxLayout, QLabel, QProgressBar, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
@@ -50,6 +52,13 @@ _PLATE_STACK_GAP_PX = 6
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site).
 _LEGEND_HOST_W = 190
 _RAIL_HOST_W = 238
+#: Qt's QWIDGETSIZE_MAX — what lifts a fixed width.
+_QWIDGETSIZE_MAX = 16_777_215
+
+
+def scaled_px(px: int) -> int:
+    """A fixed size at the current UI scale (phone layout's larger text)."""
+    return round(px * theme.ui_scale())
 #: Gap between a legend row's dot and its label. The same 7 px the stage rows
 #: use, and off the 4-px scale for the same reason: these are dense fixed-width
 #: rows whose legibility, not the scale, decides the number.
@@ -202,6 +211,7 @@ class PlateProgress(QWidget):
         root.addLayout(hdr)
 
         self._headline = QLabel("Idle", self)
+        self._headline.setObjectName("PlateHeadline")
         # A real failure message (e.g. naming every colliding well token) is
         # long enough to force a horizontal scrollbar on the whole page and
         # push everything above the dashboard off-screen without this — the
@@ -225,12 +235,18 @@ class PlateProgress(QWidget):
         self._rail_lay = QVBoxLayout(self._rail_host)
         self._rail_lay.setContentsMargins(0, 0, 0, 0)
         self._rail_lay.setSpacing(theme.Spacing.sm)
-        self._rail_host.setFixedWidth(_RAIL_HOST_W)
+        self._rail_host.setFixedWidth(scaled_px(_RAIL_HOST_W))
         body.addWidget(self._rail_host)
+        self._body_lay = body
+        self._stacked = False
+        # The column dividers, kept so a stacked body can drop them: between
+        # rows a vertical rule is a stray stub, not a divider.
+        self._dividers: list[QFrame] = []
 
         if show_plate or show_legend:
             d1 = QFrame(self._body); d1.setFrameShape(QFrame.VLine); d1.setObjectName("VRule")
             body.addWidget(d1)
+            self._dividers.append(d1)
 
         # A subclass whose page already has its own interactive plate map
         # for input (e.g. Subset's well picker) passes show_plate=False —
@@ -269,6 +285,7 @@ class PlateProgress(QWidget):
             # reads as misaligned against the picker above.
             apply_plate_geometry(self._plate, role="status")
             self._plate.setWellTooltipProvider(self._well_tooltip)
+            self._plate.wellActivated.connect(self._show_well_detail)
             center.addWidget(self._plate, 0, PLATE_ALIGNMENT)
 
             center.addStretch(1)
@@ -277,6 +294,7 @@ class PlateProgress(QWidget):
             if show_legend:
                 d2 = QFrame(self._body); d2.setFrameShape(QFrame.VLine); d2.setObjectName("VRule")
                 body.addWidget(d2)
+                self._dividers.append(d2)
 
         if show_legend:
             self._legend_host = QWidget(self._body)
@@ -288,7 +306,7 @@ class PlateProgress(QWidget):
             # legend labels also carry setWordWrap(True) as a second line of
             # defence, so a future longer label wraps to two lines instead of
             # being silently clipped the way a fixed-but-too-narrow column did.
-            self._legend_host.setFixedWidth(_LEGEND_HOST_W)
+            self._legend_host.setFixedWidth(scaled_px(_LEGEND_HOST_W))
             body.addWidget(self._legend_host)
         if not show_plate:
             # With the centre column skipped there is no widget carrying a
@@ -303,6 +321,13 @@ class PlateProgress(QWidget):
             body.addStretch(1)
 
         root.addWidget(self._body)
+        # One line under the plate for a tapped well's detail (stacked only).
+        self._well_detail = QLabel("", self)
+        self._well_detail.setObjectName("PlateWellDetail")
+        self._well_detail.setWordWrap(True)
+        self._well_detail.setTextFormat(Qt.PlainText)
+        self._well_detail.hide()
+        root.addWidget(self._well_detail)
         self._build_rail()
         if show_legend:
             self._build_legend()
@@ -490,6 +515,87 @@ class PlateProgress(QWidget):
             r.addStretch(1)
             self._legend_lay.addWidget(row)
         self._legend_lay.addStretch(1)
+
+    # ── phone layout ────────────────────────────────────────────────────────
+    def setStacked(self, stacked: bool) -> None:
+        """Lay the body out as a column (rail above plate) instead of a row.
+
+        For phone layout, where the pane is one narrow column: side by side,
+        the fixed-width stage rail and legend leave the plate a sliver. The
+        legend goes while stacked — it explains colours the stage rail above
+        already names, and a third block below the plate would push the plate
+        off a short screen — and so do the column dividers.
+        """
+        self._stacked = bool(stacked)
+        self._body_lay.setDirection(
+            QBoxLayout.TopToBottom if self._stacked else QBoxLayout.LeftToRight)
+        for d in self._dividers:
+            d.setVisible(not self._stacked)
+        legend = getattr(self, "_legend_host", None)
+        if legend is not None:
+            legend.setVisible(not self._stacked)
+        # The header's title and collapse toggle are desk chrome: on a phone
+        # the dashboard *is* the page, and the headline under them says what
+        # state the run is in — so it is set larger (``PlateHeadline[phone]``).
+        self._title_label.setVisible(not self._stacked)
+        self._toggle.setVisible(not self._stacked)
+        # The status word repeats the headline's first word on a phone, and
+        # the "Stages" heading names what its rows already say.
+        self._status.setVisible(not self._stacked)
+        for head in self._rail_host.findChildren(QLabel, "StageRailHead"):
+            head.setVisible(not self._stacked)
+        if self._stacked and not self._body.isVisible():
+            self._toggle.setChecked(True)
+            self._on_toggle()
+        self._headline.setProperty("phone", self._stacked)
+        self._headline.style().unpolish(self._headline)
+        self._headline.style().polish(self._headline)
+        plate = getattr(self, "_plate", None)
+        if plate is not None:
+            if self._stacked:
+                # As wide as the column: the status plate's desk cap leaves a
+                # phone's wells a third of the width they could have. It stays
+                # centred (PLATE_ALIGNMENT) when a cap narrows it again.
+                plate.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
+            else:
+                apply_plate_geometry(plate, role="status")
+        self._well_detail.setVisible(self._stacked and bool(self._well_detail.text()))
+        self._pin_rail_width()
+
+    def _show_well_detail(self, well_id: str) -> None:
+        """Say what a tapped well's hover would have said — there is no hover
+        on a touch screen, and on a phone the tap is how to ask."""
+        if not self._stacked:
+            return
+        self._well_detail.setText(self._well_tooltip(well_id))
+        self._well_detail.setVisible(True)
+
+    def isStacked(self) -> bool:
+        return self._stacked
+
+    def _pin_rail_width(self) -> None:
+        if self._stacked:
+            self._rail_host.setMinimumWidth(0)
+            self._rail_host.setMaximumWidth(_QWIDGETSIZE_MAX)
+        else:
+            self._rail_host.setFixedWidth(scaled_px(_RAIL_HOST_W))
+
+    #: Phone layout's rescale pass leaves this widget's subtree alone: every
+    #: fixed size in it is set here from ``scaled_px``, so scaling it again
+    #: from outside would apply the factor twice.
+    _aw_owns_sizes = True
+
+    def _aw_rescale(self) -> None:
+        """Re-size the fixed columns and rebuild the rail after a UI scale."""
+        plate = getattr(self, "_plate", None)
+        if plate is not None:
+            apply_plate_geometry(plate, role="status")
+        self._pin_rail_width()
+        legend = getattr(self, "_legend_host", None)
+        if legend is not None:
+            legend.setFixedWidth(scaled_px(_LEGEND_HOST_W))
+            self._build_legend()
+        self._build_rail()
 
     def _on_toggle(self) -> None:
         show = self._toggle.isChecked()

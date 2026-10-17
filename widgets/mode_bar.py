@@ -108,6 +108,10 @@ class _ModeSegment(QWidget):
     def isActive(self) -> bool:
         return self._active
 
+    def setIconShown(self, shown: bool) -> None:
+        """Show or drop the glyph; the label always stays."""
+        self._icon_lbl.setVisible(bool(shown and self._icon))
+
     def text(self) -> str:
         return self._text
 
@@ -137,6 +141,7 @@ class ModeBar(QWidget):
         self._segments: list[_ModeSegment] = []
         self._data: list[object] = []
         self._current = -1
+        self._fill = False
         # Default to the tab bar's height rather than to the segments' own
         # content height: a segment is a label and a glyph, so left to itself
         # the bar collapses to about 14px and sits as a thin strip beside a
@@ -151,6 +156,7 @@ class ModeBar(QWidget):
         height leaves a gap above and below and the bar reads as a floating chip
         row rather than one solid band down the left edge.
         """
+        self._fill = bool(fill)
         if fill:
             self.setMinimumHeight(0)
             self.setMaximumHeight(16_777_215)   # Qt's QWIDGETSIZE_MAX
@@ -195,6 +201,41 @@ class ModeBar(QWidget):
 
     def count(self) -> int:
         return len(self._segments)
+
+    def setCompact(self, compact: bool, *, pad: int | None = None) -> None:
+        """Labels only, no glyphs — for a band too narrow for both.
+
+        The labels stay because they are the only thing that says what each
+        segment is on a touch screen, where a tooltip never appears.
+        """
+        pad = (theme.Spacing.sm if pad is None else int(pad)) if compact else 0
+        self._compact = compact
+        for seg in self._segments:
+            seg.setIconShown(not compact)
+            # Flush, the segments are as wide as the bar shares out; at its
+            # own width in a band, they need their own room around the label.
+            seg.layout().setContentsMargins(pad, 0, pad, 0)
+        self._equalise_widths()
+
+    def _equalise_widths(self) -> None:
+        """One width for all three segments while compact, so the active fill
+        does not jump in size as the mode changes. Measured from the labels'
+        current font, so it is re-run after every UI scale: the widest label
+        measured before a restyle enlarged it would clip it afterwards."""
+        for seg in self._segments:
+            seg.setMinimumWidth(0)
+        if getattr(self, "_compact", False):
+            widest = max((s.sizeHint().width() for s in self._segments), default=0)
+            for seg in self._segments:
+                seg.setMinimumWidth(widest)
+        self.updateGeometry()
+
+    def _aw_rescale(self) -> None:
+        """Re-measure the pinned height and the compact widths after a UI scale
+        (segments rescale their own fonts)."""
+        if not self._fill:
+            self.setFixedHeight(tab_bar_height())
+        self._equalise_widths()
 
     def segmentText(self, index: int) -> str:
         return self._segments[index].text()

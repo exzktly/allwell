@@ -463,7 +463,12 @@ def _exit_on_mode(ctx, mode: str = "review") -> None:
 
 
 def _set_toggle_visible_for_mode(ctx, mode: str) -> None:
-    is_review = mode == "review"
+    from core import phone_layout
+    # Two panes side by side is the one thing a one-column phone layout
+    # cannot hold, so the toggle goes with it (and ``_exit_on_mode`` has
+    # already closed an open split: the shell re-announces the mode on every
+    # layout change).
+    is_review = mode == "review" and not phone_layout.is_on()
     btn = getattr(ctx.runtime.split, "toggle_btn", None)
     if btn is not None:
         btn.setVisible(is_review)

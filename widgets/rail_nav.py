@@ -154,6 +154,13 @@ class _RailNavRow(QFrame):
         self._glyph.setVisible(bool(name))
         self._refresh_icon()
 
+    def _aw_rescale(self) -> None:
+        """Re-size the glyph box and ink off the rescaled font (24 pt on a
+        phone at the Medium size) after a UI scale."""
+        self._glyph_px = max(12, round(self.fontMetrics().height() * 1.0))
+        self._glyph.setFixedSize(self._glyph_px, self._glyph_px)
+        self._refresh_icon()
+
     def _refresh_icon(self) -> None:
         if not self._icon_name:
             return
@@ -176,6 +183,10 @@ class _RailNavRow(QFrame):
 
 class RailNav(QFrame):
     currentChanged = Signal(str)
+    #: A row the *user* clicked — including the current one. Unlike
+    #: ``currentChanged`` it does not fire for navigation done by code, which
+    #: is what lets a host react to a tap (phone layout closes its drawer).
+    itemClicked = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -242,6 +253,41 @@ class RailNav(QFrame):
         if row is not None:
             row.setEnabled(bool(enabled))
 
+    def setColumns(self, n: int) -> None:
+        """Lay the rows out in *n* columns (1, the default, is the rail's list).
+
+        Phone layout's side rail uses two: nine sections as a column of 48-pt
+        rows fill the rail before the well plate is reached, and as a grid of
+        tiles they take half that. The rows are moved, not rebuilt, so their
+        state and connections are untouched.
+        """
+        n = max(1, int(n))
+        if n == getattr(self, "_columns", 1):
+            return
+        self._columns = n
+        from PySide6.QtWidgets import QGridLayout
+        old = self.layout()
+        rows = [self._rows[k] for k in self._order]
+        for r in rows:
+            old.removeWidget(r)
+        holder = QWidget()
+        holder.setLayout(old)          # re-home the old layout so it can die
+        holder.deleteLater()
+        if n == 1:
+            lay = QVBoxLayout(self)
+            for r in rows:
+                lay.addWidget(r)
+        else:
+            lay = QGridLayout(self)
+            # Shown rows first, so a hidden one leaves no hole in the grid.
+            ordered = ([r for r in rows if not r.isHidden()]
+                       + [r for r in rows if r.isHidden()])
+            for i, r in enumerate(ordered):
+                lay.addWidget(r, i // n, i % n)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(1)
+        self._lay = lay
+
     def items(self) -> list[str]:
         return list(self._order)
 
@@ -251,9 +297,9 @@ class RailNav(QFrame):
 
     # ── internals ────────────────────────────────────────────────────────
     def _on_row_clicked(self, key: str) -> None:
-        if key == self._current:
-            return
-        self._set_current_internal(key, emit=True)
+        if key != self._current:
+            self._set_current_internal(key, emit=True)
+        self.itemClicked.emit(key)
 
     def _set_current_internal(self, key: str, *, emit: bool) -> None:
         prev = self._current
@@ -347,7 +393,7 @@ if __name__ == "__main__":
 
     head = QLabel("SECTION", host)
     head.setStyleSheet(
-        f"color: {theme.Colors.text_muted}; font-size: 11px; "
+        f"color: {theme.Colors.text_muted}; font-size: {theme.Typography.caption_size}px; "
         f"letter-spacing: 0.08em; font-weight: 600;"
     )
     head.setContentsMargins(9, 0, 0, 0)

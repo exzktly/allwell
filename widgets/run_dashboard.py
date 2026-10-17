@@ -29,7 +29,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QWidget
 
 from ui import theme
-from widgets.plate_progress import PlateProgress, canon_well, status_dot
+from widgets.plate_progress import PlateProgress, scaled_px, canon_well, status_dot
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -409,6 +409,8 @@ class RunDashboard(PlateProgress):
         self._clear(self._rail_lay)
         self._rail = {}
         head = QLabel("Stages", self._rail_host)
+        head.setObjectName("StageRailHead")
+        head.setVisible(not self.isStacked())
         head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
         self._rail_lay.addWidget(head)
         rows = _RAIL_REMOTE if self._remote else _RAIL_LOCAL
@@ -418,14 +420,14 @@ class RunDashboard(PlateProgress):
             row.setSpacing(_STAGE_ROW_SPACING_PX)
             dot = status_dot(theme.Colors.text_muted)
             row.addWidget(dot)
-            nm = QLabel(label, row_w); nm.setFixedWidth(_NM_W)
+            nm = QLabel(label, row_w); nm.setFixedWidth(scaled_px(_NM_W))
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             bar = QProgressBar(row_w)
             bar.setRange(0, max(1, self._total)); bar.setValue(0)
-            bar.setTextVisible(False); bar.setFixedSize(_BAR_W, _BAR_H)
+            bar.setTextVisible(False); bar.setFixedSize(scaled_px(_BAR_W), _BAR_H)
             row.addWidget(bar)
-            cnt = QLabel("0/0", row_w); cnt.setFixedWidth(_CNT_W)
+            cnt = QLabel("0/0", row_w); cnt.setFixedWidth(scaled_px(_CNT_W))
             cnt.setStyleSheet(f"color:{theme.Colors.text_muted};")
             row.addWidget(cnt)
             row.addStretch(1)

@@ -10,11 +10,14 @@ of 300 MB wells that is minutes with nothing on screen to say it is not stuck.
 
 A :class:`LoadProgress` names each of those phases on the status line and in
 the opening dialog, and — through ``DatasetState.read_listener``, which both
-read paths call just before reading a well from disk — counts the wells each
-phase reads: ``Measuring channel ranges — reading well B03 (12 of 40)``, with
-the progress bar at 12 of 40. A phase that walks the plate more than once says
-which pass it is on (``… (3 of 40, pass 2)``) rather than sitting at 40 of 40. A phase that reads nothing from disk (everything
-it needs is held or remembered) shows only its name, briefly.
+read paths call just before reading a well from disk — names the well being
+read and how far through the plate the pass is: ``Preparing tabs — reading
+well B03 (12 of 40)``. The count is of distinct wells in the current pass; a
+well read again starts a new pass and the count restarts, so it never exceeds
+the plate (a count of reads printed "70 well reads so far, 40 wells in the
+plate" for a phase that walked the plate twice). The bar is a busy bar, because
+a phase does not know in advance how many passes it makes. A phase that reads
+nothing from disk shows only its name, briefly.
 
 Only reads on the GUI thread are reported: the Cell Gating worker reads on its
 own thread and reports through its own progress signal, whose status text waits
@@ -40,7 +43,7 @@ class LoadProgress:
         self._ctx = ctx
         self._n = max(1, int(n_wells))
         self._phase = ""
-        self._reads = 0
+        self._seen: set[str] = set()
         self._last_paint = 0.0
         self._thread = threading.main_thread()
 
@@ -59,7 +62,7 @@ class LoadProgress:
     def phase(self, text: str) -> None:
         """Start a phase: name it, reset the well count, repaint now."""
         self._phase = text
-        self._reads = 0
+        self._seen = set()
         # One flushed line per phase in the boot log: a load the system kills
         # for memory leaves no traceback, and this is then the only record of
         # which phase it reached.
@@ -70,16 +73,20 @@ class LoadProgress:
         """A well is about to be read from disk in the current phase."""
         if threading.current_thread() is not self._thread or not self._phase:
             return
-        self._reads += 1
+        if label in self._seen:
+            # The phase has come back to a well it already read: a second pass
+            # over the plate (or part of it). Counting starts again, so the line
+            # never claims more wells than the plate has.
+            self._seen = set()
+        self._seen.add(label)
         now = time.monotonic()
         # The first read of a phase is always shown: with narrow reads a whole
         # phase can fall inside one repaint interval, and the line would then
         # never say which wells it was reading.
-        if self._reads > 1 and now - self._last_paint < _REPAINT_INTERVAL_S:
+        if len(self._seen) > 1 and now - self._last_paint < _REPAINT_INTERVAL_S:
             return
         self._paint(f"{self._phase} — reading well {label} "
-                    f"({self._reads} well read{'s' if self._reads != 1 else ''} so far, "
-                    f"{self._n} wells in the plate)")
+                    f"({min(len(self._seen), self._n)} of {self._n})")
 
     def _paint(self, text: str) -> None:
         from review.core.load_controller import _opening_set_phase

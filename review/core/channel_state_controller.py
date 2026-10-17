@@ -22,9 +22,7 @@ import math  # noqa: F401 — keeps parity with the original method bodies
 import pandas as pd
 
 from core import debug_flags as _debug_flags
-from review.data.plate_scan import every_well
 from review.data.data_loading import (
-    _all_fluor_values,
     detect_fluor_channels,
     detect_nuclear_channel_token,
     detect_review_image_channels,
@@ -98,14 +96,6 @@ def recalculate_threshold(ctx) -> None:
         _RECALC_IN_PROGRESS.discard(id(ctx))
 
 
-def _value_extent(df, val_col: str) -> tuple[float, float] | None:
-    """``(min, max)`` of one well's included finite values of *val_col*, or ``None``."""
-    values = _all_fluor_values(df, val_col=val_col)
-    if values.size == 0:
-        return None
-    return float(values.min()), float(values.max())
-
-
 def _sample_frame(ctx) -> pd.DataFrame:
     """One well's frame, for channel detection: a held one when any is held.
 
@@ -121,20 +111,6 @@ def _sample_frame(ctx) -> pd.DataFrame:
     held = [label for label in dataset.well_paths if label in dataset.cache]
     label = held[0] if held else next(iter(dataset.well_paths), None)
     return get_rows(ctx, label) if label is not None else pd.DataFrame()
-
-
-def reset_threshold_range(channel_state) -> None:
-    """Return the threshold slider range to ``ChannelState``'s own defaults.
-
-    Read off a freshly constructed slice rather than written as literals, so
-    the reset cannot drift from the declared defaults the way a hand-copied
-    pair would. Public because a dataset swap wants the same guarantee from
-    outside a recompute: the range names intensities, so it is per-dataset
-    state, and "the value the previous plate had" is never a valid answer for
-    the plate now open.
-    """
-    fresh = type(channel_state)()
-    channel_state.apply_range(fresh.threshold_min, fresh.threshold_max)
 
 
 def _recalculate_threshold(ctx) -> None:
@@ -208,49 +184,6 @@ def _recalculate_threshold(ctx) -> None:
     if feats is not None:
         for _desc in feats.with_hook("on_channel_changed"):
             _desc.on_channel_changed(ctx)
-
-    # Per-channel (min, max) cache — keyed on val_col so a channel toggle
-    # reuses the previous channel's range when the user flips back. Audit
-    # M7: the unconditional concat across every loaded well × every cell
-    # was the hot loop on channel switch (~3.5M float scans for 96 wells
-    # × 12 tp × 3k cells). The cache lives on ChannelState and is invalidated
-    # by `load_directory` on dataset swap.
-    val_col = channel_state.active_val_col
-    cached = channel_state.cached_range(val_col)
-    if cached is None:
-        # Each well's own (min, max), one well at a time, rather than every
-        # included value of the plate concatenated before taking two numbers
-        # from it: 106M floats — 850 MB — for a 96-well plate of 1.1M-cell
-        # wells, on top of rows the bounded row cache could no longer hold.
-        # Remembered per well (``plate_scan``) until the rows or verdicts change,
-        # and read narrowly: the value column and the verdicts' inputs, not the
-        # whole frame (``narrow_rows``; tracker R3).
-        extents = [e for e in every_well(ctx, "fluor_range", val_col,
-                                         lambda df: _value_extent(df, val_col),
-                                         columns=(val_col,)).values()
-                   if e is not None]
-        if not extents:
-            # No values for this column anywhere in the loaded dataset. The
-            # range is *undefined*, which is not the same as "unchanged":
-            # returning here left ``threshold_min`` / ``threshold_max`` holding
-            # the previous dataset's numbers, because ``begin_load`` clears the
-            # per-column cache and nothing else. The sliders then spanned a
-            # range belonging to a plate that is no longer open, and every
-            # threshold read off them was silently wrong.
-            reset_threshold_range(channel_state)
-            _logger.info(
-                "No %s values in this dataset; the threshold range is back to "
-                "its default (%g, %g) rather than the previous dataset's.",
-                val_col, channel_state.threshold_min, channel_state.threshold_max,
-            )
-            return
-        lo, hi = min(e[0] for e in extents), max(e[1] for e in extents)
-        if hi <= lo:
-            hi = lo + 1.0
-        channel_state.cache_range(val_col, lo, hi)
-    else:
-        lo, hi = cached
-    channel_state.apply_range(lo, hi)
 
     # Hydrate persisted gating params from pipeline_info.json.
     from review.persistence.cell_gating import load_from_pipeline_info

@@ -236,6 +236,18 @@ def current_help_subject(ctx) -> str:
     return current_layer(ctx) or name
 
 
+def _pay_cell_gating_if_shown(ctx) -> None:
+    """Read Cell Gating's curves now, if a load left them owed and the tab is in front.
+
+    A dataset load rebuilds the Cell Gating controls but reads no cells for its
+    CDFs and optimizer lists — a first-frame read of every well, for figures only
+    this tab draws. The reading is done here, the first time the tab is shown
+    after the load (and is a no-op when nothing is owed).
+    """
+    if current_subtab(ctx) == "Cell Gating":
+        ctx.features.call("cell_gating.read_owed_cell_areas", ctx)
+
+
 def on_home_subtab_changed(ctx, idx: int) -> None:
     """Build the now-current tab if the drain has not reached it, then refresh."""
     build_home_subtab(ctx, idx)
@@ -243,6 +255,7 @@ def on_home_subtab_changed(ctx, idx: int) -> None:
     if name == "Cell Gating":
         # Pick up any gates drawn on the Scatter tab since the last visit.
         _cell_gating_sync_scatter_gates(ctx)
+        _pay_cell_gating_if_shown(ctx)
     elif name == "Pipeline Info":
         cb = ctx.runtime.pipeline_info.refresh
         if callable(cb):
@@ -283,6 +296,7 @@ def activate_home(ctx) -> None:
     resync_run_check(ctx)
     refresh_home(ctx)
     sync_home_sidebar(ctx)
+    _pay_cell_gating_if_shown(ctx)
     if current_subtab(ctx) in definition_subtabs(ctx):
         groups_centre_refresh(ctx)
         _cell_gating_sync_scatter_gates(ctx)
@@ -328,7 +342,15 @@ def on_home_dataset_loaded(ctx) -> None:
     status = _widget(ctx, "_home_notes_status")
     if status is not None:
         status.setText(NOTES_IDLE)
-    refresh_home(ctx)
+    # During a load the page is repainted by the load's own tab refresh, at its
+    # end (``load_controller`` re-runs the current tab's activation, and a load
+    # lands on Home). Painting it here as well scanned every well for the
+    # quality markers twice per open, and with a gating pass started in between,
+    # the first scan was thrown away. Outside a load (a hook fired on its own),
+    # it is painted here as before.
+    from review.domain.fold_change_scopes import plots_held
+    if not plots_held(ctx):
+        refresh_home(ctx)
 
 
 def on_home_selection_changed(ctx) -> None:
@@ -436,6 +458,21 @@ def _paint_next_step(ctx) -> None:
     button.setText(step["label"])
 
 
+def _plate_has_focus(ctx) -> bool:
+    """Whether the dataset carries what the quality markers are scored from.
+
+    The per-field quality block the run recorded, or the per-cell focus column
+    (read from the wells' summaries, so nothing is read from disk to ask).
+    """
+    from pipeline.field_quality import FIELD_QUALITY_BLOCK
+    from pipeline.field_quality_record import FOCUS_COLUMN
+
+    if (ctx.state.dataset.pipeline_info or {}).get(FIELD_QUALITY_BLOCK):
+        return True
+    summaries = getattr(ctx.state.dataset, "summaries", None) or {}
+    return any(FOCUS_COLUMN in summary.columns for summary in summaries.values())
+
+
 def _paint_plate(ctx) -> None:
     plate = _widget(ctx, "_home_plate")
     if plate is None:
@@ -457,7 +494,14 @@ def _paint_plate(ctx) -> None:
     # marker exists for, and no whole-field verdict can see it. See
     # ``review.domain.well_composite`` for the three reasons and where each
     # of their bounds comes from.
-    quality = wells_needing_review(ctx)
+    # Held while the gating pass a load started runs (``core/plot_hold.py``):
+    # the markers count *included* cells, the pass is changing which cells are
+    # included one well at a time, and every well it gates invalidates what a
+    # scan read before it. So the scan waits for the pass, whose end repaints
+    # this page, and the legend says the markers are pending rather than
+    # showing a plate with none — which would read as "no well needs a look".
+    gating_pending = getattr(ctx.state.plot, "held_for", "") == "gating" and _plate_has_focus(ctx)
+    quality = {} if gating_pending else wells_needing_review(ctx)
     paint_field_quality(plate, quality)
     plate.setWellTooltipProvider(
         lambda well: well_tooltip(well, cells, record_wells, quality))
@@ -512,6 +556,11 @@ def _paint_plate(ctx) -> None:
         layout.addWidget(
             QLabel("Wells needing a look", host), row, 1)
         layout.addWidget(QLabel(str(len(quality)), host), row, 2)
+    elif gating_pending:
+        # The markers are owed, not absent: say so where they would be counted.
+        pending = QLabel("Wells needing a look — counted once cell gating finishes", host)
+        pending.setObjectName("Muted")
+        layout.addWidget(pending, len(hc.plate_legend(ctx)) + 1, 0, 1, 3)
 
     totals = ((ctx.state.dataset.pipeline_info or {}).get("run_check") or {}
               ).get("totals") or {}

@@ -1977,10 +1977,13 @@ handoff carries it, and Analyze says on its dashboard what it just set up.
 **While a dataset opens, the status bar says what it is doing.** It counts the
 CSV files first. On a plate too large to hold in memory that count races ahead,
 because only the first wells are read then; the work after it is named phase by
-phase — restoring the saved analysis, measuring channel ranges and restoring
-gates, preparing tabs, drawing plots — together with the well being read from
-disk and how many reads the phase has made so far, so a slow open is visibly
-moving rather than stuck. *Loaded N well(s)* appears only when it has finished.
+phase — restoring the saved analysis, restoring channels and gates, preparing
+tabs, drawing plots — together with any well being read from disk and how far
+through the plate that pass is (*reading well B03 (12 of 40)*), so a slow open is
+visibly moving rather than stuck. *Loaded N well(s)* appears only when it has
+finished. An open reads only what the page in front of you shows: a tab's own
+lists and figures — Cell Gating's curves, the Distribution and Heat Map
+timepoint menus — are read when you first open that tab.
 
 **If the dataset has saved Cell Gating gates, the plots wait for them.** Opening
 it starts a gating pass over every well; until that pass ends each plot shows
@@ -3760,7 +3763,7 @@ still exported (see below).
   traceback to show, because the system stopped the process from outside. The
   log of that session is still kept as `allwell-boot.log.1`, with a note at the
   bottom saying it never shut down cleanly; while a dataset opens, the log
-  records each phase of the load (`dataset load: Measuring channel ranges` and
+  records each phase of the load (`dataset load: Restoring channels and gates` and
   so on), so its last lines say how far the load got. The next time you start
   All-Well, the application log says the previous session ended this way and
   names the file — send it with the report, together with how much memory the

@@ -3,7 +3,7 @@
 End to end, through ``ReviewApp._load_path``: the same dataset opened once with
 the default budget and once with a budget that holds a single well. The second
 must open, hold less than the plate, and agree with the first on everything the
-open produces — the timepoint and FOV lists, the channels, the threshold range,
+open produces — the timepoint and FOV lists, the channels,
 the FOV verdicts — and on every well's included rows when they are read back.
 """
 
@@ -30,7 +30,6 @@ def _facts(app):
         "timepoints": list(dataset.all_timepoints_cache),
         "fovs": list(dataset.all_fovs_cache),
         "channels": list(channel.fluor_channels),
-        "range": (channel.threshold_min, channel.threshold_max),
         "fov_verdicts": {w: v.trusted for w, v in dataset.fov_integrity.items()},
         "included": {w: int(df_included_mask(app._get_rows(w)).sum()) for w in dataset.well_paths},
     }

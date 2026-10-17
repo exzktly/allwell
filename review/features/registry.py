@@ -421,6 +421,9 @@ def _activate_scatter(ctx) -> None:
 
 def _activate_heatmap(ctx) -> None:
     from review.core.plot_orchestrator import redraw_app
+    # The timepoint menu is a plate scan (remembered per well); filled when the
+    # tab is shown rather than on every channel change while it is hidden.
+    _refresh_heatmap_timepoints(ctx, redraw=False)     # drawn below
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
     ctx.coordinator.refresh_sidebar_map()
     if ctx.widgets.has("_heatmap_sidebar_frame"):
@@ -432,6 +435,19 @@ def _activate_heatmap(ctx) -> None:
         except Exception:
             _logger.exception("Heatmap sidebar refresh failed")
     redraw_app(ctx)
+
+
+def _activate_distribution(ctx) -> None:
+    """Fill the timepoint menu, then draw — the menu is not filled while the tab is hidden.
+
+    The menu offers the timepoints that hold an included cell, which is a scan
+    of the plate (remembered per well). ``_channel_distribution`` used to run it
+    on every channel change and dataset load whether or not the tab was open;
+    it is run here instead, when the tab is shown, and the scan's memo makes a
+    second visit free.
+    """
+    _refresh_distribution_timepoints(ctx)
+    _activate_default_plot(ctx)
 
 
 def _activate_default_plot(ctx) -> None:
@@ -826,6 +842,15 @@ def _channel_stats(ctx) -> None:
 
 
 def _channel_distribution(ctx) -> None:
+    """Refresh the timepoint menu only while the tab is on screen; it is refreshed on show."""
+    from review.domain.fold_change_scopes import known_visible_scopes
+    visible = known_visible_scopes(ctx.window)
+    if visible is not None and "distribution" not in visible:
+        return
+    _refresh_distribution_timepoints(ctx)
+
+
+def _refresh_distribution_timepoints(ctx) -> None:
     if ctx.widgets.has("_distribution_tp_cb"):
         try:
             from review.features.distribution.tab_view import (
@@ -837,12 +862,21 @@ def _channel_distribution(ctx) -> None:
 
 
 def _channel_heatmap(ctx) -> None:
+    """Refresh the timepoint menu only while the tab is on screen; it is refreshed on show."""
+    from review.domain.fold_change_scopes import known_visible_scopes
+    visible = known_visible_scopes(ctx.window)
+    if visible is not None and "heatmap" not in visible:
+        return
+    _refresh_heatmap_timepoints(ctx)
+
+
+def _refresh_heatmap_timepoints(ctx, *, redraw: bool = True) -> None:
     if ctx.widgets.has("_heatmap_tp_cb"):
         try:
             from review.features.heatmap.tab_view import (
                 refresh_heatmap_timepoints,
             )
-            refresh_heatmap_timepoints(ctx)
+            refresh_heatmap_timepoints(ctx, redraw=redraw)
         except Exception:
             _logger.exception("Heatmap timepoint refresh failed")
 
@@ -1140,7 +1174,7 @@ def _features() -> list[FeatureDescriptor]:
         ),
         FeatureDescriptor(
             name="Distribution", parent="Plotting", build=_build_distribution,
-            on_activate=_activate_default_plot,
+            on_activate=_activate_distribution,
             on_channel_changed=_channel_distribution,
             redraw=_redraw_distribution,
             states=(StateSpec("distribution", _state_distribution),),

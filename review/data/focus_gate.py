@@ -474,6 +474,14 @@ def per_well_focus_tallies(ctx, cut: float | None) -> dict:
     """
     from review.domain.well_composite import tally_focus
 
+    if _no_well_has_focus(ctx):
+        # Every well's summary lists its columns and none has the focus column:
+        # each tally is the empty one :func:`focus_values` returning ``None``
+        # gives below, so the answer is known without reading a well. The Home
+        # plate asks on every paint, and a plate with no focus column was read
+        # whole-plate, narrowly, to find that out each time.
+        return {label: tally_focus((), cut) for label in ctx.state.dataset.well_paths}
+
     def _tally(df):
         vals = focus_values(candidate_rows(df))
         if vals is None:
@@ -481,6 +489,24 @@ def per_well_focus_tallies(ctx, cut: float | None) -> dict:
         return tally_focus([None if v != v else float(v) for v in vals], cut)
 
     return _every_well_narrow(ctx, "focus_tally", cut, _tally)
+
+
+def _no_well_has_focus(ctx) -> bool:
+    """True only when every well has a summary and none lists the focus column.
+
+    The summaries (``well_summary.WellSummary.columns``) are written from each
+    well's parse at first open, so they answer which columns a well carries
+    without reading it. A well with no summary — a test's bare state — answers
+    ``False``, and the caller reads as before.
+    """
+    from pipeline.field_quality_record import FOCUS_COLUMN
+
+    dataset = ctx.state.dataset
+    summaries = getattr(dataset, "summaries", None) or {}
+    labels = list(getattr(dataset, "well_paths", None) or ())
+    if not labels or not all(label in summaries for label in labels):
+        return False
+    return not any(FOCUS_COLUMN in summaries[label].columns for label in labels)
 
 
 def wells_needing_review(ctx) -> dict[str, str]:

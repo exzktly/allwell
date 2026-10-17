@@ -138,37 +138,6 @@ def test_the_fixture_would_catch_a_leaked_cell(ctx):
     assert kept_hours == {0.0}, kept_hours
 
 
-def test_the_threshold_range_is_the_whole_frame_s_and_read_narrowly(ctx, monkeypatch, tmp_path):
-    """Through ``recalculate_threshold`` itself. Its channel detection reads the
-    first well whole (``_sample_frame``) and holds it, and a held well is read as
-    held — so a plain well goes first, and the fixture's well is the one the
-    extent scan has to read from disk."""
-    from review.core import channel_state_controller as csc
-
-    plain = tmp_path / "A00.csv"
-    # One value for every cell, so the range is the fixture well's at both ends
-    # and a scan that lost that well's cells (a verdict failing closed) shows too.
-    _frame().assign(well="A00", **{VAL_COL: 250.0}).to_csv(plain, index=False)
-    dl.read_well_frame(plain)
-    ctx.state.dataset.well_paths = {"A00": plain, **ctx.state.dataset.well_paths}
-    ctx.state.channel.set_active_channel("mcherry")
-    whole = _whole(ctx)
-    extents = [csc._value_extent(whole, VAL_COL), csc._value_extent(dl.get_rows(ctx, "A00"), VAL_COL)]
-    ctx.state.dataset.cache.clear()
-    expected = (min(e[0] for e in extents), max(e[1] for e in extents))
-    assert expected[1] < 1000.0, "the excluded cells' values are the plate's maximum only if they leak"
-    assert expected[0] < 250.0 < expected[1], "the plain well spans the range; the fixture's well is not measured"
-    calls = _count_reads(monkeypatch)
-    csc.recalculate_threshold(ctx)
-    channel = ctx.state.channel
-    assert channel.active_val_col == VAL_COL, "the recompute switched columns; this compared the wrong one"
-    assert (channel.threshold_min, channel.threshold_max) == expected
-    of_well = [cols for name, cols in calls if name == WELL]
-    assert of_well and all(cols is not None and "m0" not in cols for cols in of_well), (
-        f"the range scan read {WELL} whole: {of_well}")
-    assert WELL not in ctx.state.dataset.cache, "the range scan put the whole frame in the row cache"
-
-
 def test_the_included_timepoints_are_the_whole_frame_s(ctx):
     whole = _whole(ctx)
     tp = pd.to_numeric(whole["timepoint_hours"], errors="coerce")

@@ -1,4 +1,4 @@
-"""A real load reads Cell Gating's wells once, narrowly, after the last input is final.
+"""A real load reads none of Cell Gating's wells; showing the tab reads them once, narrowly.
 
 Tracker R2 (``_Docs/Markdowns/REREAD_TRACKER.md``). The unit half is
 ``tests/test_cell_gating_reads_narrowly.py``; this is the caller's sequence
@@ -9,11 +9,16 @@ statistics cache the per-well memo lives in is cleared in between. Before the fi
 a reopen of the mini dataset with a ratio and a saved gate made 36 whole-frame
 reads from Cell Gating's controller alone.
 
+The load rebuilds the tab's controls and leaves the reading owed: the CDFs and
+optimizer lists are a first-frame read of every well for figures only the Cell
+Gating tab draws, so they are read when that tab is shown, not by the load (the
+reporter's rule: read a value only when it is needed).
+
 The reopen runs with a row cache of one byte, so at most one well is held and
 every other read reaches the disk, as on a plate larger than the budget. What the
-tab shows afterwards — the CDF arrays, the optimizer's timepoints and its Min/Max
-fit — is held to the whole-frame computation, so a load that never paid its owed
-reading, or paid it before the ratios were in, fails on the values.
+tab shows once opened — the CDF arrays, the optimizer's timepoints and its
+Min/Max fit — is held to the whole-frame computation, so a tab that never paid
+its owed reading, or paid it before the ratios were in, fails on the values.
 """
 
 from __future__ import annotations
@@ -81,6 +86,13 @@ def test_a_reopen_reads_cell_gating_s_wells_once_and_narrowly(viewer_app, mini_d
     ctx = app._ctx
     ctx.state.dataset.cache.set_budget(1)
     app._load_path(mini_dataset)
+    _settle(app, qtbot)
+    during_load = [(kind, who, cols) for kind, who, cols in reads if who is not None]
+    assert during_load == [], f"the load read wells for Cell Gating: {during_load}"
+    assert ctx.runtime.cell_gating.areas_owed, "the load neither read nor owed the reading"
+
+    sub = ctx.runtime.home.subtabs                # the user opens Cell Gating
+    sub.setCurrentIndex(next(i for i in range(sub.count()) if sub.tabText(i) == "Cell Gating"))
     _settle(app, qtbot)
     monkeypatch.undo()
 

@@ -49,7 +49,6 @@ from core.safe import swallowed
 from review.core.selection_controller import invalidate_stats_cache
 from review.data.curation import apply_curation_to_cache
 from review.data.data_loading import get_rows, held_wells_note
-from review.data.narrow_rows import narrow_rows
 from review.data.plate_scan import per_well
 from review.domain.gating_state import (
     default_thresh_count_on, default_thresh_frac_on, fluor_gate_for,
@@ -195,15 +194,21 @@ class GatingWorker(QThread):
                 invalidate_stats_cache(self._ctx)
                 return
 
-            # Narrowly (tracker R9). A held well comes back as held and is gated
-            # in place, as before. A well the row cache does not hold used to be
-            # read whole, gated, and evicted — and nothing reads that write: the
-            # gating projector applies the configuration recorded above to any
-            # later read of the well. All the pass needs from it is its count,
-            # and ``narrow_rows`` carries every verdict layer's inputs, gating's
-            # included, so the count is the one the whole frame gives.
-            df = narrow_rows(self._ctx, label, ())
-            row_count = 0 if df is None else len(df)
+            # Only the wells the row cache holds are gated here. A well it does
+            # not hold is not read at all: the gating projector applies the
+            # configuration recorded above to the next read of that well, so a
+            # frame gated now would only be evicted unread, and the count the
+            # pass would take from it is used by nothing but the debug log. It
+            # used to be read whole for that, then narrowly; it is now skipped,
+            # with ``rows_version`` still bumped so nothing remembered of it is
+            # served.
+            repo = getattr(self._ctx.state, "repo", None)
+            df = repo.rows_or_none(label) if repo is not None else None
+            if df is None:
+                self._ctx.state.dataset.note_rows_changed()
+                self.progress.emit(idx + 1, total)
+                continue
+            row_count = len(df)
             # Per-well gating math lives in cell_gating_compute.apply_fluor_gating
             # (audit A3) — it writes Included / Gate_Pass / Gate_On and returns
             # the included count. Pure (df + gate config in), so it's unit-tested

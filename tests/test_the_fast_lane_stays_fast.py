@@ -32,6 +32,7 @@ from __future__ import annotations
 import ast
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -345,3 +346,54 @@ def test_a_module_fixture_extracts_into_this_worker_s_own_scratch(_scratch_seen_
     seen = _scratch_seen_by_a_module_fixture
     assert seen, "a module-scoped fixture would extract into ~/.allwell/scratch, shared by every worker"
     assert Path(seen).resolve().is_relative_to(tmp_path_factory.getbasetemp().resolve())
+
+
+# ── the nanowell end-to-end lane ────────────────────────────────────────────
+#
+# About 1,075 s of rendered-tile nanowell tests took the fast lane from ~2.5 to
+# ~9.5 min and CI to within three minutes of its cap. They run in a lane of
+# their own; these keep that split from quietly undoing itself. Either way it
+# fails silently: a renamed file drops out of the roster back into the fast
+# lane, and a CI job that stopped running the lane would leave 250 tests run
+# nowhere while every check stays green.
+
+def test_every_nanowell_lane_file_exists():
+    from tests.conftest import NANOWELL_E2E_FILES
+
+    here = Path(__file__).resolve().parent
+    missing = [name for name in NANOWELL_E2E_FILES if not (here / name).is_file()]
+    assert not missing, f"roster names files that do not exist: {missing}"
+
+
+def test_the_fast_lane_leaves_the_nanowell_lane_out_and_ci_runs_it():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "test.sh").read_text()
+    assert 'MARK="not slow and not nanowell_e2e"' in script
+    assert 'MARK="nanowell_e2e and not slow"' in script
+    workflow = (root / ".github" / "workflows" / "ci.yml").read_text()
+    assert "scripts/test.sh --nanowell --junitxml=.pytest-report.xml" in workflow, \
+        "CI no longer runs the nanowell lane"
+    assert workflow.count("python scripts/junit_gate.py .pytest-report.xml") >= 2, \
+        "a CI test job is not gated on its JUnit report"
+
+
+def test_the_roster_marks_its_tests():
+    """The collection hook marks a roster file's tests, and only those.
+
+    Asked of the hook directly: in a fast-lane run the roster's tests are
+    deselected, so looking for them among the session's items would find none
+    and pass without measuring anything.
+    """
+    from types import SimpleNamespace
+
+    import tests.conftest as harness
+
+    class _Item(SimpleNamespace):
+        def add_marker(self, mark):
+            self.marks.append(mark.name)
+
+    inside = _Item(fspath=Path(__file__).parent / next(iter(harness.NANOWELL_E2E_FILES)),
+                   fixturenames=(), marks=[])
+    outside = _Item(fspath=Path(__file__), fixturenames=(), marks=[])
+    harness.pytest_collection_modifyitems(None, [inside, outside])
+    assert inside.marks == ["nanowell_e2e"] and outside.marks == []

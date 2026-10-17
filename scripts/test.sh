@@ -10,6 +10,7 @@
 # Extra arguments are forwarded to pytest, which is how CI adds --junitxml.
 #
 #   scripts/test.sh                      # the fast lane
+#   scripts/test.sh --nanowell           # the nanowell end-to-end lane
 #   scripts/test.sh -k threshold         # a subset of it
 #   scripts/test.sh tests/test_app_smoke.py -m ""   # one full-app file
 #
@@ -60,13 +61,35 @@ fi
 # within a file still do. ALLWELL_TEST_WORKERS=0 runs serially — the right setting for
 # ``--durations`` profiling, which a parallel run reports per worker; any other number sets the
 # worker count. Without xdist installed the lane runs serially, as it always did.
+#
+# Two lanes share this script. The default is the fast lane. `--nanowell` runs the nanowell
+# end-to-end files instead (tests/conftest.py NANOWELL_E2E_FILES: rendered tiles through the real
+# detection, about 1,075 s of work), which CI runs as a job of its own beside the fast lane. That
+# lane distributes by test (`--dist load`) rather than by file: one of its files is 475 s, and kept
+# on one worker it would set the lane's wall time. Naming test files on the command line selects
+# them whichever lane they belong to, so `scripts/test.sh tests/test_nanowell_run.py` runs it.
+MARK="not slow and not nanowell_e2e"
+DIST=loadfile
+if [[ "${1:-}" == "--nanowell" ]]; then
+    shift
+    MARK="nanowell_e2e and not slow"
+    DIST=load
+else
+    for arg in "$@"; do
+        if [[ "$arg" == tests/* || "$arg" == *.py || "$arg" == *.py::* ]]; then
+            MARK="not slow"
+            break
+        fi
+    done
+fi
+
 XDIST=()
 workers="${ALLWELL_TEST_WORKERS:-auto}"
 if [[ "$workers" != "0" ]] && python -c "import xdist" 2>/dev/null; then
-    XDIST=(-n "$workers" --dist loadfile)
+    XDIST=(-n "$workers" --dist "$DIST")
 fi
 
-exec python -m pytest -m "not slow" -q \
+exec python -m pytest -m "$MARK" -q \
     "${XDIST[@]+"${XDIST[@]}"}" \
     --timeout=90 --timeout-method=signal \
     "${COV[@]+"${COV[@]}"}" \

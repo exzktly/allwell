@@ -16216,12 +16216,25 @@ you're in before you type the command.
 - **Pure-logic / unit tests** (Qt-free: `pipeline/*`, `domain/*`,
   `spatial_compute`, `multivariate_compute`, layout math, …). Fast, cheap,
   safe to run in bulk. This is the CI "fast lane" — run it with
-  **`scripts/test.sh`** (~7,260 tests of ~7,710 collected, ~3.5 min on a quiet
-  container). CI invokes that same script, so a local run and the CI run cannot
+  **`scripts/test.sh`** (~12,340 tests of ~13,160 collected, ~4 min on a quiet
+  four-CPU container). CI invokes that same script, so a local run and the CI run cannot
   drift in flags or config; hand-rolling `pytest tests/ -m "not slow"` skips the
   `--timeout=90` CI applies. Re-count rather than trusting the figure when it
   matters: `python -m pytest tests -m "not slow" -q --collect-only | tail -1`
   prints the split in a few seconds.
+- **Nanowell end-to-end tests** (`tests/conftest.py::NANOWELL_E2E_FILES`, ~250
+  tests in eleven Qt-free files). Each renders synthetic tiles and runs the real
+  lattice and site detection over them, so a test body is seconds to a minute;
+  together about 1,075 s of work, with `test_nanowell_run.py` alone at 475 s. The
+  collection hook marks them `nanowell_e2e`; the fast lane excludes them and
+  **`scripts/test.sh --nanowell`** runs them, distributed by test rather than by
+  file so the 475 s file does not set the wall time. CI runs that lane as a job
+  of its own beside the fast lane, both gated on their JUnit reports
+  (`scripts/junit_gate.py`), and `scripts/preflight.sh` runs it when the branch
+  touches `pipeline/`, nanowell code, `tests/conftest.py` or `scripts/test.sh`.
+  Naming test files on the command line selects them whichever lane they belong
+  to. `tests/test_the_fast_lane_stays_fast.py` holds the roster to real files,
+  the hook to marking them, and CI to running the lane.
 - **Full-app tests** (anything using the `viewer_app` / `loaded_app` /
   `loaded_app_shape` / `image_table_app` fixtures — ~70 files). Each one
   constructs a **real `ReviewApp`** under the offscreen QPA. `conftest.py`'s

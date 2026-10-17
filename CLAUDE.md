@@ -40,6 +40,7 @@ python process_microscopy.py --input_dir … --output_dir …   # pipeline only,
 
 ruff check .                                   # lint — CI pins ruff==0.15.8, config in pyproject.toml
 scripts/test.sh                                # THE test command — CI runs this same script
+scripts/test.sh --nanowell                     # the nanowell end-to-end lane (CI's second test job)
 scripts/test.sh tests/test_app_smoke.py -m ""  # full-app tests: one or two files at a time
 
 scripts/build_executable.sh --clean            # macOS .app (always pass --clean)
@@ -65,13 +66,23 @@ for a bare `python -m pytest`.
 
 ## 2. Running tests — read this before typing `pytest`
 
-The suite has two lanes and **running the wrong one hangs the run and OOM-kills
+The suite has three lanes and **running the wrong one hangs the run and OOM-kills
 the container**:
 
-- **Fast lane** (~10,280 tests of ~10,830 collected, across ~870 files):
-  `scripts/test.sh`. Pure-logic, guardrail, and per-feature tests. CI invokes
-  this same script, so local and CI runs cannot drift in flags or config —
-  don't hand-roll a `pytest` command.
+- **Fast lane** (~12,340 tests of ~13,160 collected): `scripts/test.sh`.
+  Pure-logic, guardrail, and per-feature tests. CI invokes this same script, so
+  local and CI runs cannot drift in flags or config — don't hand-roll a `pytest`
+  command.
+- **Nanowell lane** (~250 tests): `scripts/test.sh --nanowell`. The nanowell
+  files that render synthetic tiles and run the real detection end to end
+  (`tests/conftest.py::NANOWELL_E2E_FILES`, each with its cost). About 1,075 s of
+  work: in the fast lane they took it from ~2.5 to ~9.5 min and CI to within
+  three minutes of its cap. CI runs this lane as its own job, in parallel;
+  `scripts/preflight.sh` runs it when the branch touches the pipeline, nanowell
+  code or the lane split. It distributes by test (`--dist load`), not by file,
+  because one of its files is 475 s. Naming files (`scripts/test.sh
+  tests/test_nanowell_run.py`) runs them whichever lane they belong to. A new
+  nanowell test that renders tiles and detects joins the roster.
 - **Full-app tests** (~440 tests): anything using the `viewer_app`
   / `loaded_app` / `loaded_app_shape` / `image_table_app` fixtures, auto-marked
   `slow` by `conftest.py`. Each builds a real `ReviewApp` (~1,800 QObjects)
@@ -116,7 +127,8 @@ one that is wedged:
 
 | | Measured |
 |---|---|
-| Fast lane, local, quiet container, 4 CPUs | ~2.3 min in parallel (11,031 tests); ~7 min serial (`ALLWELL_TEST_WORKERS=0`) |
+| Fast lane, local, quiet container, 4 CPUs | ~4 min in parallel (12,333 tests); ~2.3 min at 11,031 tests, before the nanowell work |
+| Nanowell lane, local, 4 CPUs | ~4.8 min (250 tests) |
 | Fast lane, 2 workers (what CI's runner gets) | ~4.1 min |
 | Fast lane, local, under contention from other work in the same container | roughly 2–3× that |
 | Fast lane, CI job end to end | add ~2 min for checkout and installing the test stack. The job cap is 15 min (`ci.yml`) |

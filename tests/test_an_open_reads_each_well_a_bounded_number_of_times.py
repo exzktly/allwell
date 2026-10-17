@@ -25,9 +25,9 @@ pytestmark = pytest.mark.slow
 
 #: Whole-frame reads (``data_loading.read_well_frame``) per well, per open,
 #: including the gating pass the open starts.
-FULL_READS_PER_WELL_BUDGET = 2.5
+FULL_READS_PER_WELL_BUDGET = 1.5
 #: Every Parquet read (whole or narrow, ``parquet_cache.read_cached``) per well.
-PARQUET_READS_PER_WELL_BUDGET = 8.25
+PARQUET_READS_PER_WELL_BUDGET = 8.0
 
 
 def _save_recipe(dataset) -> None:

@@ -49,6 +49,7 @@ from core.safe import swallowed
 from review.core.selection_controller import invalidate_stats_cache
 from review.data.curation import apply_curation_to_cache
 from review.data.data_loading import get_rows, held_wells_note
+from review.data.narrow_rows import narrow_rows
 from review.data.plate_scan import per_well
 from review.domain.gating_state import (
     default_thresh_count_on, default_thresh_frac_on, fluor_gate_for,
@@ -194,7 +195,14 @@ class GatingWorker(QThread):
                 invalidate_stats_cache(self._ctx)
                 return
 
-            df = get_rows(self._ctx, label)
+            # Narrowly (tracker R9). A held well comes back as held and is gated
+            # in place, as before. A well the row cache does not hold used to be
+            # read whole, gated, and evicted — and nothing reads that write: the
+            # gating projector applies the configuration recorded above to any
+            # later read of the well. All the pass needs from it is its count,
+            # and ``narrow_rows`` carries every verdict layer's inputs, gating's
+            # included, so the count is the one the whole frame gives.
+            df = narrow_rows(self._ctx, label, ())
             row_count = 0 if df is None else len(df)
             # Per-well gating math lives in cell_gating_compute.apply_fluor_gating
             # (audit A3) — it writes Included / Gate_Pass / Gate_On and returns

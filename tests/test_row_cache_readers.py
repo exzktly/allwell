@@ -39,6 +39,10 @@ _HELD_ONLY_READERS: dict[str, str] = {
         "re-projected from the same switch when it is read again."),
     "review/data/cache_projectors.py::project_verdict_column": (
         "A projector walk over the held frames; every frame read later is projected on load."),
+    "review/data/curation.py::apply_curation_to_cache": (
+        "Without a label it re-asserts overrides on the held frames only: it is also a "
+        "registered projector, so an unheld well gets them when it is next read "
+        "(REREAD_TRACKER.md, R9); it bumps rows_version for those wells instead."),
     "review/data/field_exclusions.py::apply_field_exclusions_to_cache": "A projector walk, as above.",
     "review/data/field_quality_cache.py::apply_field_quality_to_cache": "A projector walk, as above.",
     "review/data/focus_gate.py::apply_focus_gate_to_cache": "A projector walk, as above.",

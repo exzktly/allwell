@@ -173,11 +173,17 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    row's stacked label — take it after the restyle on the way in and give it up
    before the restyle on the way out, so the rescale pass only ever sees
    desk-shaped widgets. The restyle is a *switch* (`phone_layout.switching()`,
-   read by `is_switching()`): its rescale pass lets Qt deliver pending events,
-   and timers fire with them, so anything a listener scheduled for after the
-   switch checks the flag and re-arms until it is over. The Image Table's refit
-   ran inside the restyle before it did, deleting and rebuilding its grid while
-   the pass was walking the window's widgets;
+   read by `is_switching()`), and no timer runs inside it: its rescale pass
+   delivers posted events only (`QApplication.sendPostedEvents`), never
+   `processEvents`, which runs due timers and on Windows keeps going until the
+   message queue is empty — so a zero-delay timer that re-armed itself held the
+   restyle, and its busy overlay, up for good. Work that meets a switch anyway
+   never re-arms its own timer: it queues itself with
+   `phone_layout.after_switch(fn)`, which runs it once when the outermost
+   switch ends (the Image Table's refit), or drops it when the switch's end
+   already does it (the shell's queued `refresh()`). The Image Table's refit,
+   run inside the restyle, once deleted and rebuilt its grid while the pass was
+   walking the window's widgets;
 4. pins the touch sizes (`_apply_sizes`), scales the plots, and, while phone
    layout is on, watches the widgets it adapts so that anything shown later gets
    the same treatment: a plot its DPI and height, a dialog a place inside the
@@ -14964,7 +14970,8 @@ at the desk. `ui/phone_shell.PhoneShell._restyle(factor, unit)` does it in order
      scale was already in force is left alone: it may be a literal or measured
      off the scaled font, and halving a literal on the way out would be worse;
    - the recorded fonts are put back, scaled;
-   - pending font and style events are processed (user input held back), then
+   - the posted font, style and layout events are delivered
+     (`sendPostedEvents` — no timers, no input; see §2, *Switching*), then
      every widget defining `_aw_rescale()` re-derives its own sizes: the
      IconButton glyph, the ModeBar's pinned height and its compact segments'
      shared width, the RailNav row glyphs, the NoticeBadge pip, PlateProgress's

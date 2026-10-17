@@ -36,8 +36,16 @@ from tests.test_a_resumed_run_keeps_its_field_quality import (  # noqa: F401 —
 pytestmark = pytest.mark.usefixtures("stubbed_segmenter")
 
 
-def _main(monkeypatch, plate, *, suspend_after: int | None = None) -> None:
-    """Run the pipeline over *plate*; with *suspend_after*, a suspend lands once that many groups have run."""
+def _main(monkeypatch, plate, *, suspend_after: int | None = None, remote: bool = True) -> None:
+    """Run the pipeline over *plate*; with *suspend_after*, a suspend lands once that many groups have run.
+
+    *remote* publishes a suspend request file as ``--suspend_file`` does (``pipeline.suspend.watch_request_file``),
+    which only the remote launch paths pass; the request itself is the stubbed ``is_suspended``.
+    """
+    if remote:
+        monkeypatch.setenv(_suspend.REQUEST_FILE_ENV, str(plate / "never-written-request"))
+    else:
+        monkeypatch.delenv(_suspend.REQUEST_FILE_ENV, raising=False)
     ran: list[str] = []
 
     def _group(nuclear_path, fluor_paths, **kwargs):
@@ -105,6 +113,15 @@ def test_a_well_suspended_part_way_is_not_sealed_and_keeps_its_checkpoints(tmp_p
     assert "resumed from checkpoint" in caplog.text, "the finished group was computed again"
     assert {fov for fov, _tp in read_done_fov_keys(_csv(plate))} == {"F001", "F002", "F003"}
     assert complete_seal_path(plate / "out", "C01").is_file(), "the resumed, now whole, well was not sealed"
+
+
+def test_a_local_suspend_does_not_hold_the_staging(tmp_path, monkeypatch):
+    """Locally the resume is ``--incremental`` and reads the finished groups from the CSV, so checkpoints kept
+    there would be scratch disk held for nothing. The part-way well is still unsealed."""
+    plate = _plate(tmp_path)
+    _main(monkeypatch, plate, suspend_after=1, remote=False)
+    assert _checkpoints(plate) == []
+    assert not complete_seal_path(plate / "out", "C01").exists()
 
 
 def test_rewriting_a_well_withdraws_its_seal_first(tmp_path, monkeypatch):

@@ -160,13 +160,17 @@ def release_staging(output_dir: Path, well_label: str, tmp_images: Path) -> None
     output directory (``remote_batch_resume.reattach_output_dir``), and the well
     then had nothing to resume from and recomputed every group. Kept, the
     checkpoints carry the finished groups across the suspend exactly as they
-    carry them across a kill. A well whose record says it is whole has nothing
-    left to resume, so its staging goes as before.
+    carry them across a kill. Only for a run suspended through a request file
+    (``--suspend_file``, which only the remote paths pass): a local resume is
+    incremental and never reads them, so there they would be disk held in the
+    scratch folder for nothing. A well whose record says it is whole has
+    nothing left to resume, so its staging goes as before.
     """
     from pipeline import suspend
     from pipeline.run_report import recorded_well_report, well_is_whole
 
-    if (suspend.is_suspended() and any(tmp_images.glob(".fov_*.done"))
+    if (suspend.is_suspended() and os.environ.get(suspend.REQUEST_FILE_ENV)
+            and any(tmp_images.glob(".fov_*.done"))
             and not well_is_whole(recorded_well_report(output_dir, well_label))):
         log.info("Well %s — keeping its %d FOV checkpoint(s) for the resume.",
                  well_label, sum(1 for _ in tmp_images.glob(".fov_*.done")))

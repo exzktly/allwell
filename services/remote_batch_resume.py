@@ -116,8 +116,8 @@ def find_leftovers(cache, *, own_run_dir: str, own_output_dir: str, earlier: Ite
                 if well:
                     found.finished.setdefault(well, f"{root.path}/{sub}")
             continue
-        if root.run_dir and not (sub == "in" or _BATCH_DIR.fullmatch(sub)):
-            continue             # bg/ is the empty-well reference, staged by the run itself; the rest is not input
+        if root.run_dir and not (sub in ("in", "bg") or _BATCH_DIR.fullmatch(sub)):
+            continue             # in/, a staged batch, or bg/ (the empty-well reference); nothing else is input
         if not root.run_dir and sub:
             continue
         found.inputs.setdefault(name, []).append(f"{root.path}/{PurePosixPath(*parts)}")
@@ -170,16 +170,21 @@ def adopt_finished(cache, wells: Iterable[str], found: Leftovers, *, own_output_
 
 
 def stage_from_leftovers(cache, batches: list[list], found: Leftovers, *, own_run_dir: str,
-                         log: Callable[[str], None], also_own: tuple[str, ...] = ()) -> int:
-    """Put every archive the remote already holds into the batch directory its well now belongs to.
+                         log: Callable[[str], None], also_own: tuple[str, ...] = (), blanks: list = ()) -> int:
+    """Put every archive the remote already holds into the directory this run uploads it to.
 
-    Returns how many were placed. A copy in this run's own directory is moved; one in an earlier attempt's is
-    hard-linked or copied. rsync's quick check then decides, per archive, whether anything is still to send.
+    Each batch's wells go to ``b<i>``; the empty-well blanks go to ``bg/``, which every batch's correction reads
+    and which a resume, in a new run directory, would otherwise fill by sending the blank again. Returns how many
+    were placed. A batch archive in this run's own directory is moved; anything else is hard-linked or copied — a
+    blank always, since the copy it is taken from may be the one a batch directory still needs. rsync's quick check
+    then decides, per archive, whether anything is still to send.
     """
     lines, placed, placed_names = [], 0, []
-    for index, batch in enumerate(batches, start=1):
-        dest = f"{own_run_dir}/b{index}"
-        for zip_path in batch:
+    groups = [(f"{own_run_dir}/b{i}", batch, True) for i, batch in enumerate(batches, start=1)]
+    if blanks:
+        groups.append((f"{own_run_dir}/bg", list(blanks), False))
+    for dest, members, may_move in groups:
+        for zip_path in members:
             copies = found.inputs.get(zip_path.name) or []
             if not copies:
                 continue
@@ -189,7 +194,7 @@ def stage_from_leftovers(cache, batches: list[list], found: Leftovers, *, own_ru
             if src == f"{dest}/{zip_path.name}":
                 continue                 # already where this batch is uploaded
             q_src, q_dest = _remote_quote(src), _remote_quote(dest)
-            mine = any(src.startswith(d + "/") for d in (own_run_dir, *also_own))
+            mine = may_move and any(src.startswith(d + "/") for d in (own_run_dir, *also_own))
             move = (f"mv -f {q_src} {q_dest}/" if mine else
                     f"{{ ln -f {q_src} {q_dest}/ 2>/dev/null || cp -p {q_src} {q_dest}/; }}")
             lines.append(f"mkdir -p {q_dest} && {move} || true")
@@ -339,12 +344,14 @@ def download_adopted(proc) -> None:
 
 def stage_leftovers(proc, run_dir: str) -> None:
     """Put the remote's archives into this run's batch directories, before ``in/`` is cleared."""
-    found, batches = getattr(proc, "_leftovers", None), getattr(proc, "_batches", None)
-    if found is None or not found.inputs or not batches:
+    found, batches = getattr(proc, "_leftovers", None), getattr(proc, "_batches", None) or []
+    blank_stems = getattr(proc, "_blank_stems", ())
+    blanks = [z for z in getattr(getattr(proc, "_zipped", None), "well_zips", ()) if z.stem in blank_stems]
+    if found is None or not found.inputs or not (batches or blanks):
         return
     out = proc._runner._run.remote_output_dir
     stage_from_leftovers(proc._runner._cache, batches, found, own_run_dir=run_dir, log=proc._log,
-                         also_own=(run_dir_of(out),) if run_dir_of(out) != run_dir else ())
+                         also_own=(run_dir_of(out),) if run_dir_of(out) != run_dir else (), blanks=blanks)
 
 
 def reattach_output_dir(runner, local_output_dir, keys: dict, legacy_digests, *, fresh: str, forced: bool,

@@ -450,3 +450,24 @@ def test_the_job_gets_its_first_batch_before_the_earlier_attempt_s_wells_downloa
     assert order.index("painted A02") < first_batch, order
     assert order.index("download A02") > first_batch, f"the download did not wait for the job: {order}"
     assert any("↑ A03.zip already on the remote" in m for m in p._logged), "a reused input is not painted uploaded"
+
+
+def test_a_resume_does_not_send_the_empty_well_blank_again(tmp_path, monkeypatch):
+    """The blank lives in the run directory's bg/; a resume in a new run directory found its bg/ empty and sent
+    the blank again — for a background well, a whole well's upload. The earlier attempt's copy is linked over."""
+    import tests.test_a_batched_restart_reuses_the_remote as here
+
+    monkeypatch.setattr(here, "WELLS", ["A01", "A02", "H12"])
+    old = tmp_path / "remote" / "runs" / "run-old"
+    earlier = [{"remote_output_dir": str(old / "out"), "remote_input_dir": str(old / "in")}]
+    p, plate, run_dir, sent, _, _ = _harness(tmp_path, monkeypatch, earlier=earlier)
+    p._pipeline_argv = ["--background", "empty_well", "--background_well", "H12"]
+    _uploaded_copy(plate, old / "bg", "H12")
+    (old / "out").mkdir(parents=True)
+
+    _run(p, monkeypatch)
+
+    assert p._returncode == 0, p._logged
+    assert not any(s.endswith("H12.zip") for s in sent), f"the blank was uploaded again: {sent}"
+    assert (run_dir / "bg" / "H12.zip").exists()
+    assert (old / "bg" / "H12.zip").exists(), "an earlier attempt's directory is linked from, never emptied"

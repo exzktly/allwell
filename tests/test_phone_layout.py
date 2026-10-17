@@ -726,3 +726,54 @@ def test_image_table_builder_stacks_into_one_column_and_back(qapp):
     assert not shape.isHidden()
     assert [axes.stretch(i) for i in range(2)] == [1, 1]
     assert [z.minimumHeight() for z in zones] == [_Z_MIN_H, _Z_MIN_H]
+
+
+# ── the switch itself ───────────────────────────────────────────────────────
+
+def test_the_restyle_is_a_switch_and_its_notice_breaks_its_line(qapp, monkeypatch):
+    from types import SimpleNamespace
+
+    import ui.phone_shell as ps
+    texts, during = [], []
+
+    class _Recording(ps._BusyOverlay):
+        def __init__(self, parent, text):
+            texts.append(text)
+            super().__init__(parent, text)
+
+    monkeypatch.setattr(ps, "_BusyOverlay", _Recording)
+    monkeypatch.setattr(ps, "rescale_widgets", lambda *a, **k: 0)
+    monkeypatch.setattr(QApplication, "setStyleSheet",
+                        lambda self, _s: during.append(phone_layout.is_switching()))
+    shell = SimpleNamespace(_win=QWidget(), _applying=False)
+    try:
+        ps.PhoneShell._restyle(shell, 1.5, None)
+    finally:
+        theme.apply_ui_scale(1.0)
+        theme.set_touch_unit(None)
+    # A line break, not the two characters "\" and "n" on screen.
+    assert texts == ["Resizing for your screen…\nThis takes a few seconds."]
+    assert during == [True] and not phone_layout.is_switching()
+
+
+def test_an_image_table_redraw_waits_out_a_switch(qapp):
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QScrollArea
+    from types import SimpleNamespace
+
+    from review.features.image_browser.image_table._phone_fit import install_refit
+    scroll = QScrollArea()
+    host = QWidget()
+    scroll.setWidget(host)
+    ctx = SimpleNamespace(state=SimpleNamespace(
+        image_table=SimpleNamespace(last_render={(0, 0): None})))
+    calls = []
+    install_refit(ctx, scroll, host, calls.append)
+    timer = host.findChild(QTimer)
+    with phone_layout.switching():
+        timer.timeout.emit()
+        # Not inside the switch: asked again for after it.
+        assert calls == [] and timer.isActive()
+    timer.stop()
+    timer.timeout.emit()
+    assert calls == [ctx]

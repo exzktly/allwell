@@ -657,7 +657,7 @@ class PhoneShell(QObject):
         self._refresh_soon = QTimer(self)
         self._refresh_soon.setSingleShot(True)
         self._refresh_soon.setInterval(0)
-        self._refresh_soon.timeout.connect(self.refresh)
+        self._refresh_soon.timeout.connect(self._refresh_when_settled)
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(_RAIL_STATUS_MS)
         self._status_timer.timeout.connect(self._sync_rail_status)
@@ -897,22 +897,26 @@ class PhoneShell(QObject):
         if abs(factor - theme.ui_scale()) < 1e-6 and unit == theme.touch_unit():
             return
         app = QApplication.instance()
-        overlay = _BusyOverlay(self._win, "Resizing for your screen…\\n"
+        overlay = _BusyOverlay(self._win, "Resizing for your screen…\n"
                                           "This takes a few seconds.")
         overlay.show()
         overlay.raise_()
         overlay.repaint()
         self._applying = True
         try:
-            prev = theme.ui_scale()
-            fonts = explicit_fonts()
-            theme.apply_ui_scale(factor)
-            theme.set_touch_unit(unit)
-            if app is not None:
-                app.setStyleSheet(theme.qss())
-            rescale_widgets(prev, factor, [w for w in QApplication.allWidgets()
-                                           if w is not overlay and w.parentWidget() is not overlay],
-                            fonts)
+            # A switch, for anything waiting on one to finish: the rescale
+            # pass below lets Qt deliver pending events, and timers with them.
+            with phone_layout.switching():
+                prev = theme.ui_scale()
+                fonts = explicit_fonts()
+                theme.apply_ui_scale(factor)
+                theme.set_touch_unit(unit)
+                if app is not None:
+                    app.setStyleSheet(theme.qss())
+                rescale_widgets(prev, factor, [w for w in QApplication.allWidgets()
+                                               if w is not overlay
+                                               and w.parentWidget() is not overlay],
+                                fonts)
         finally:
             self._applying = False
             QTimer.singleShot(_OVERLAY_LINGER_MS, overlay.deleteLater)
@@ -1271,6 +1275,12 @@ class PhoneShell(QObject):
                                     or self.controls_button.isVisibleTo(self._strip)))
         if not review:
             self.close_controls()
+
+    def _refresh_when_settled(self) -> None:
+        if phone_layout.is_switching():
+            self._refresh_soon.start()     # the switch ends with a refresh of its own
+            return
+        self.refresh()
 
     def _current_page_bar(self):
         fn = self._h.current_page_bar

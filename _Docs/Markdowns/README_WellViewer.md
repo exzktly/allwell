@@ -3713,6 +3713,22 @@ still exported (see below).
   file is normally rewritten each time the app starts, **but a copy carrying a
   crash is kept** — as `allwell-boot.log.1`, `.2`, `.3`, newest first — so
   relaunching to try again no longer throws away the record of what went wrong.
+  The folder is hidden (it starts with a dot): in Finder use **Go → Go to
+  Folder…** and type `~/.cache/allwell`, or press ⌘⇧. to show hidden files. It
+  is *not* `~/Library/Caches`. The application log drawer (⌘L, or the terminal
+  icon at the right of the status bar) names the exact path at its top. The
+  files called `bootstrap-….log` beside it are from setting up remote hosts,
+  not from the app crashing.
+- **If the app vanishes without any dialog** — most often macOS ending it for
+  using too much memory while opening a very large dataset — there is no
+  traceback to show, because the system stopped the process from outside. The
+  log of that session is still kept as `allwell-boot.log.1`, with a note at the
+  bottom saying it never shut down cleanly; while a dataset opens, the log
+  records each phase of the load (`dataset load: Measuring channel ranges` and
+  so on), so its last lines say how far the load got. The next time you start
+  All-Well, the application log says the previous session ended this way and
+  names the file — send it with the report, together with how much memory the
+  Mac has.
   If a message like *"Timers cannot be stopped from another thread"* appears,
   the same log also records which part of the app caused it — send that file
   with the report, even if the app did not close.

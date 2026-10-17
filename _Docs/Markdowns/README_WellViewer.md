@@ -2080,8 +2080,9 @@ buttons — you pick one or the other, because choosing the scatter option
   with its lower and upper bound in the `min` and `max` columns. Solidity has no
   upper bound and Region area no lower one, so those cells show an em-dash
   rather than an empty box you might think you were meant to fill in. A bound
-  you type takes effect when you press Enter or click out of the box, not as
-  you type each digit. Then
+  you type takes effect when you press Enter, click out of the box, or stop
+  typing for a second — not as you type each digit — and one typed just before
+  you close the window is saved with the dataset. Then
   choose the source of the inclusion decision —
   the per-channel **intensity minimum** (the `Include ≥` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have

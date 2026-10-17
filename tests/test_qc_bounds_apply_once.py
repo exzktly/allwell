@@ -56,3 +56,87 @@ def test_typing_a_bound_applies_it_once_on_enter(qtbot, applied):
 
     box.editingFinished.emit()          # Enter, then focus moves on
     assert len(applied) == 1, "an unchanged value was applied a second time"
+
+
+def _typed(qtbot, app, key="min_area", text="120"):
+    """Type *text* into a focused bound box, as a user does, without Enter."""
+    box = app._qc_gate_widgets[key]
+    win = box.window()
+    win.show()
+    qtbot.waitExposed(win)
+    win.activateWindow()
+    QTest.qWaitForWindowActive(win, 1000)
+    box.setFocus()
+    qtbot.waitUntil(box.hasFocus, timeout=2000)
+    QTest.keyClicks(box, text)
+    return box
+
+
+def test_a_bound_typed_then_left_by_a_click_that_takes_no_focus_still_applies(qtbot, applied):
+    """Review of #1004 (M1): clicking a plot canvas, a tool button, a tab bar or
+    a chip moves no focus, so ``editingFinished`` never comes and the box went
+    on showing 120 while the old bound stayed in force — the control and the
+    state disagreeing with nothing to say so. A pause in typing applies it."""
+    from PySide6.QtWidgets import QToolButton
+
+    app = _stub_row(qtbot, {"A01": _frame([0.3, 0.02])}, _params(enabled=True))
+    box = _typed(qtbot, app)
+    tool = QToolButton(box.window())
+    tool.setFocusPolicy(Qt.NoFocus)
+    tool.show()
+    QTest.mouseClick(tool, Qt.LeftButton)
+    assert box.hasFocus(), "fixture: the click must not move focus, or this measures Enter"
+
+    qtbot.wait(2000)                    # well past the typing pause
+    assert len(applied) == 1, "the typed bound was never applied: the box and the state disagree"
+    assert applied[0].min_area == pytest.approx(120.0)
+    assert app._app_state.qc.params.min_area == pytest.approx(120.0)
+
+    box.editingFinished.emit()          # focus finally moves on
+    assert len(applied) == 1, "the debounced value was applied a second time"
+
+
+def test_enter_cancels_the_pending_apply(qtbot, applied):
+    """Enter applies at once; the typing pause that follows must not apply
+    the same value again."""
+    app = _stub_row(qtbot, {"A01": _frame([0.3, 0.02])}, _params(enabled=True))
+    box = _typed(qtbot, app)
+    QTest.keyClick(box, Qt.Key_Return)
+    qtbot.wait(1300)
+    assert len(applied) == 1
+
+
+def test_a_bound_typed_as_the_window_closes_is_saved(qtbot):
+    """Review of #1004 (M2), through the close sequence the app runs
+    (``allwell._save_review_before_close``). Closing a window moves no focus
+    until it hides, so ``editingFinished`` came *after* the drain: the bound
+    was applied during teardown and its save armed on a timer that never
+    fired. What the drain must see is the typed value already in state and
+    queued."""
+    from types import SimpleNamespace
+
+    from allwell import _save_review_before_close
+
+    app = _stub_row(qtbot, {"A01": _frame([0.3, 0.02])}, _params(enabled=True))
+    ctx = app._ctx
+    seen = []
+
+    class _Persistence:
+        def save(self, name):
+            seen.append(("save", name))
+
+        def schedule_save(self, name):
+            seen.append(("schedule_save", name))
+
+        def flush_all(self):
+            params = ctx.state.qc.params
+            seen.append(("flush_all", params.min_area if params else None))
+
+    ctx.persistence = _Persistence()
+    _typed(qtbot, app)
+
+    _save_review_before_close(SimpleNamespace(_persistence=ctx.persistence, _ctx=ctx))
+
+    assert ("schedule_save", "qc_params") in seen, seen
+    assert seen[-1] == ("flush_all", pytest.approx(120.0)), seen
+    assert seen.index(("schedule_save", "qc_params")) < len(seen) - 1

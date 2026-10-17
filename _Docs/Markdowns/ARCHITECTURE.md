@@ -4462,11 +4462,22 @@ laid out as the two questions it answers, in the order the app applies them:
    bound (solidity has no upper, region area no lower) renders an em-dash in the
    other column: a bound that does not exist must not look like one left blank.
    A typed bound (and the focus cut) applies on `editingFinished` — Enter or
-   leaving the box — never per keystroke, and `_apply` returns without touching
-   anything when the boxes describe the `QCParams` already in force. Each apply
-   is `set_qc_params`: the verdict recomputed over every held cell, a save and a
-   redraw of every plot, so a per-keystroke path applied each prefix of a typed
-   number (`tests/test_qc_bounds_apply_once.py`).
+   leaving the box — or after a pause in typing of `_TYPING_PAUSE_MS` (1 s),
+   never per keystroke, and `_apply` returns without touching anything when the
+   boxes describe the `QCParams` already in force. Each apply is
+   `set_qc_params`: the verdict recomputed over every held cell, a save and a
+   redraw of every plot, so a short per-keystroke debounce applied each prefix
+   of a typed number. The pause cannot be dropped in favour of
+   `editingFinished` alone: clicking a control that takes no focus (a plot
+   canvas, a tool button, a tab bar, a chip) emits none, and the box then shows
+   a bound that is not in force. Closing the window has the notes editors'
+   problem — focus moves only after the close has drained the save queue — so
+   the builder stamps `ctx.runtime.qc.commit_pending_cb`, which
+   `ui_helpers.commit_pending_qc_bounds` calls from
+   `allwell._save_review_before_close` before `flush_all`, putting the typed
+   bound into state and queuing its save without a recompute or redraw
+   (`tests/test_qc_bounds_apply_once.py`, which clicks a `NoFocus` tool button
+   and drives the close sequence).
 
    Under the QC controls, also *always applied*, sits the **Fields of view**
    picker (`cell_gating/fov_view.py`): a button naming what is kept ("All

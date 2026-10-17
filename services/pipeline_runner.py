@@ -38,6 +38,7 @@ import queue
 import re
 import subprocess
 import threading
+import time
 from pathlib import Path
 from collections.abc import Callable
 
@@ -726,6 +727,9 @@ class PipelineRunner:
         # never waits on that lock from the GUI thread (see `_spawn_tracked`).
         self._spawning = False
         self._thread: threading.Thread | None = None
+        # The thread `_signal_run` starts to kill and `scancel` a remote run;
+        # held so app close can wait for it (see `wait_for_teardown`).
+        self._cancel_thread: threading.Thread | None = None
         self._last_output_dir: Path | None = None
         self._log_overflow_warned: bool = False
         # Set on Stop; checked between the zipper phase and the pipeline
@@ -1311,8 +1315,28 @@ class PipelineRunner:
                 except Exception:  # best-effort kill
                     swallowed("cancelling the remote run")
 
-            threading.Thread(target=_cancel, name="aw-remote-cancel",
-                             daemon=True).start()
+            self._cancel_thread = threading.Thread(
+                target=_cancel, name="aw-remote-cancel", daemon=True)
+            self._cancel_thread.start()
+
+    def wait_for_teardown(self, timeout_s: float = 25.0) -> bool:
+        """Wait, bounded, for a stopped run to give back what it holds remotely.
+
+        For app close. Stop hands the remote kill and the ``scancel`` to a daemon
+        thread so the button never freezes the window — but daemon threads die
+        with the interpreter, so a Stop issued by closing the app was cut off
+        before its ssh reached the host and the allocation was left running. The
+        run thread's own ``finally`` (the scheduler-job close) is waited on too:
+        a stop during the upload never reaches ``_signal_run`` at all.
+
+        Returns whether everything finished inside *timeout_s*.
+        """
+        deadline = time.monotonic() + timeout_s
+        threads = (self._cancel_thread, self._thread)
+        for thread in threads:
+            if thread is not None and thread.is_alive():
+                thread.join(max(0.0, deadline - time.monotonic()))
+        return not any(t is not None and t.is_alive() for t in threads)
 
     @staticmethod
     def _signal_subprocess(proc: subprocess.Popen | None, *,

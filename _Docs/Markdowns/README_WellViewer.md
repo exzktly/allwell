@@ -1515,7 +1515,13 @@ and by `remote_fetch_report.txt` in the output folder.
   wind-down leaves it to finish. If All-Well closes or crashes while a local run is going,
   the run notices and suspends itself; starting that plate again right
   after a restart tells you to wait until it has wound down, rather than
-  racing it for the same files. On a remote run, Suspend leaves the connection open: the host
+  racing it for the same files. Closing All-Well during a remote run stops it
+  the way **Stop** does, and the window waits (up to about 25 seconds) until
+  the job on the cluster has been cancelled, so no Slurm allocation is left
+  running behind it. If All-Well crashes or is force-quit instead, a batched
+  run notices within about ten minutes that the app has gone, finishes the
+  fields in flight, and gives the node back; Resume then picks up the wells it
+  finished. On a remote run, Suspend leaves the connection open: the host
   finishes the fields in flight and the wells it finished keep downloading, so
   the run can take a little longer to end than a local one. Pressed while the
   plate is still uploading, there is nothing running on the host yet, so it
@@ -1531,7 +1537,8 @@ and by `remote_fetch_report.txt` in the output folder.
   carry on. It reads top to bottom: what state the run is in (*Suspended run*),
   which plate and when (*Plate_07 · suspended 24 Aug 14:32*), what resuming will
   do, and what the run recorded. **Resume**, at the bottom right, continues it,
-  computing only the field/timepoint groups still missing. **Discard** beside it
+  computing only the field/timepoint groups still missing, and fills the
+  sidebar with that run's settings so the form shows what is actually running. **Discard** beside it
   forgets the offer and deletes nothing — the results already written stay
   exactly as they are, and you can still finish the plate later by re-running
   that input with **incremental** ticked.

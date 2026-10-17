@@ -8,6 +8,7 @@ top-level window and is exercised by the slow full-app suite).
 """
 from __future__ import annotations
 
+import threading
 import types
 
 from allwell import _stop_analyze_runner
@@ -49,3 +50,75 @@ def test_stop_analyze_runner_also_stops_the_log_poller():
     )
     _stop_analyze_runner(analyze)
     assert analyze._alive is False
+
+
+# ── a remote run: the close must outlast the scancel ─────────────────────────
+
+class _LiveProc:
+    def poll(self):
+        return None
+
+
+class _SlowRemote:
+    """A remote whose cancel takes as long as an ssh round trip to a far host."""
+
+    def __init__(self):
+        self.cancelled = []
+
+    def cancel(self, proc):
+        import time
+        time.sleep(0.5)
+        self.cancelled.append(proc)
+
+
+def _remote_runner(monkeypatch):
+    import services.pipeline_runner as pr
+    monkeypatch.setattr(pr, "signal_subprocess", lambda proc, **k: None)
+    r = pr.PipelineRunner()
+    r._proc = _LiveProc()
+    r._remote_runner = _SlowRemote()
+    # The run thread, which ends once it sees the stop, as the real one does.
+    r._thread = threading.Thread(target=lambda: r._stop_requested.wait(5),
+                                 daemon=True)
+    r._thread.start()
+    return r
+
+
+def test_closing_waits_for_the_remote_cancel_to_reach_the_host(monkeypatch):
+    """The Stop's ssh `kill` + `scancel` run on a daemon thread, which the
+    interpreter ends at exit: returning before it finished left the SLURM job
+    holding its node after the app had gone."""
+    runner = _remote_runner(monkeypatch)
+    _stop_analyze_runner(types.SimpleNamespace(_runner=runner))
+    assert runner._remote_runner.cancelled == [runner._proc], (
+        "the app closed before the remote job was cancelled")
+
+
+class _StopEvent(threading.Event):
+    """The runner's stop flag, which also interrupts the stand-in upload."""
+
+    def __init__(self, upload: threading.Event):
+        super().__init__()
+        self._upload = upload
+
+    def set(self):
+        super().set()
+        self._upload.set()
+
+
+def test_closing_during_the_upload_still_stops_the_run(monkeypatch):
+    """No pipeline subprocess exists while the input uploads, so a close keyed
+    on `is_running` stopped nothing and the run thread was killed mid-upload."""
+    import services.pipeline_runner as pr
+    r = pr.PipelineRunner()
+    release = threading.Event()     # the upload, which a stop interrupts
+    r._stop_requested = _StopEvent(release)
+    r._thread = threading.Thread(
+        target=lambda: release.wait(5) or r._stop_requested.wait(5), daemon=True)
+    r._thread.start()
+    assert r.is_busy and not r.is_running
+    try:
+        _stop_analyze_runner(types.SimpleNamespace(_runner=r))
+        assert r._stop_requested.is_set(), "a close during the upload did not stop it"
+    finally:
+        release.set()

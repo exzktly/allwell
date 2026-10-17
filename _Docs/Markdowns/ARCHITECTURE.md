@@ -5857,8 +5857,19 @@ subprocess and returns, and `_spawn_tracked` signals whatever the spawn launched
 if a Stop landed meanwhile. The interrupted upload's rsync failure is reported
 through `_enqueue_stopped`, not as a failure. The host-side kill
 (`RemoteRunner.cancel` — an ssh `kill`, then `scancel`) runs on a daemon thread
-(`_signal_run`) rather than in the button's slot.
+(`_signal_run`, held as `_cancel_thread`) rather than in the button's slot.
 `tests/test_stop_never_waits_on_a_remote_upload.py`.
+
+**Closing the app is a Stop that is waited for.** `AnalyzeTab` is a child
+widget, so its own `closeEvent` never fires; `allwell._stop_analyze_runner`,
+called from `AllWellApp.closeEvent`, stops the runner instead. It keys on
+`is_busy` (the run thread is alive), not `is_running` (the subprocess is), since
+no subprocess exists while the input uploads and a close there used to stop
+nothing. It then calls `PipelineRunner.wait_for_teardown` — a bounded join (25 s)
+of `_cancel_thread` and the run thread — because both are daemon threads that
+the interpreter ends at exit: without the join, the `scancel` was cut off before
+its ssh reached the host and the SLURM job outlived the app. A run winding down
+after Suspend is left alone, as before. `tests/test_close_stops_analyze_runner.py`.
 
 A **Stop or Suspend is not a failure**, and neither is a completion. A Stop
 sends SIGTERM, which the pipeline answers by winding down (`pipeline.suspend`),
@@ -6539,7 +6550,11 @@ replaces exactly the `opts` keys in `run_detect.DETECTED_OPTS` (schema,
 separator, segmentation channel, fluorescent channels, phase channel). The
 resume banner's `_resume_suspended` and `resume_aware_spec` both change only
 `opts` (`dataclasses.replace`), so a resumed detection run detects again rather
-than running the frozen layout its suspend record also holds.
+than running the frozen layout its suspend record also holds. Before it starts
+the run, `_resume_suspended` puts that spec on the form through `hydrate_job`
+(`_show_resumed_settings`), so the sidebar shows the settings the resumed run
+is using — incremental included — rather than whatever it held before; a
+remote the install no longer has is logged as a warning.
 
 `detect_layout` infers the schema from a dense sample of the input's names
 (`_INFER_SAMPLE`, 20,000) but reads the **channel list from every name**
@@ -10682,7 +10697,20 @@ driver still alive — the job still queued, so it has seen no request file —
 `_release_driver` terminates the ssh holding the queue position and cancels the
 job, as it does for a failed run, rather than letting the job take a node later
 only to give it straight back; a driver that has already exited on its own is
-left alone. A suspended batched run skips the
+left alone.
+
+**An app that vanishes mid-batch suspends the batch.** The driver's heartbeat
+check otherwise runs only between batches, and an app that crashes or is
+force-quit leaves its ssh child alive as an orphan, so the srun holding the node
+lived on for the rest of the batch with nobody left to fetch it. Each batch
+therefore runs beside a background watchdog (the same
+`_heartbeat_stale_snippet`, with `MID_BATCH_HEARTBEAT_STALE_S` = 600 s and a
+30 s poll, both in `remote_wait_snippets.py`) whose `on_stale` writes the
+suspend request: the batch winds down keeping what it finished, the driver's
+next check sees the request and exits 0, and a later Resume adopts the finished
+wells from the remote. It is more patient than the 120 s between-batch check
+because a false positive costs a working batch, not an idle node. It is killed
+as soon as its batch returns. `tests/test_a_vanished_app_suspends_the_batch_in_flight.py`. A suspended batched run skips the
 end-of-run auto-threshold pass, which is for a finished plate; the resumed run
 that finishes it writes the thresholds.
 

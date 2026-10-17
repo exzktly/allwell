@@ -46,8 +46,21 @@ _UPLOAD_WAIT_EXIT = 75
 UPLOAD_HEARTBEAT_S = 30
 UPLOAD_HEARTBEAT_STALE_S = 120
 
+# The same question asked *while a batch is running*, by a watchdog beside the
+# pipeline. Silence there is answered more patiently, because the answer is
+# costlier to get wrong: a false "the app is gone" suspends a batch that was
+# doing useful work and leaves the run waiting for a Resume. Ten minutes of no
+# beat is not a slow network. The app crashing or being force-quit leaves its
+# ssh child alive as an orphan, so the allocation would otherwise be held until
+# the batch ended — hours, on a large batch — with nobody left to fetch it.
+MID_BATCH_HEARTBEAT_STALE_S = 600
+MID_BATCH_WATCH_POLL_S = 30
 
-def _heartbeat_stale_snippet(heartbeat: str, message: str) -> tuple[str, str]:
+
+def _heartbeat_stale_snippet(heartbeat: str, message: str, *,
+                             stale_s: int = UPLOAD_HEARTBEAT_STALE_S,
+                             poll_s: int = UPLOAD_WAIT_POLL_S,
+                             on_stale: str = "") -> tuple[str, str]:
     """``(init, check)`` shell for "has the app stopped beating?".
 
     Both waiting loops — the single-shot job waiting for its upload and the
@@ -69,11 +82,16 @@ def _heartbeat_stale_snippet(heartbeat: str, message: str) -> tuple[str, str]:
       before the job can look, but the two see it across a shared filesystem
       whose metadata may lag. An absent file is tolerated for the same window as
       a stale one before the node is handed back.
+
+    *stale_s* and *poll_s* time the check (the loop around it sleeps *poll_s*
+    between calls), and *on_stale* is the shell run once the app is judged gone
+    — by default the exit that hands the node back.
     """
     if not heartbeat:
         return "", ""
     hb_q = _remote_quote(heartbeat)
-    misses = max(1, int(UPLOAD_HEARTBEAT_STALE_S // UPLOAD_WAIT_POLL_S))
+    misses = max(1, int(stale_s // poll_s))
+    gone = f'echo "{message}"; {on_stale or f"exit {_UPLOAD_WAIT_EXIT}"}; '
     init = "_aw_miss=0; _aw_warn=0; "
     check = (
         f'if [ -e {hb_q} ]; then '
@@ -87,12 +105,12 @@ def _heartbeat_stale_snippet(heartbeat: str, message: str) -> tuple[str, str]:
         f'time, so the job cannot tell whether the app is still there — it '
         f'will hold the node until the pipeline runs or the walltime ends"; '
         f'fi; '
-        f'elif [ "$((_aw_now - $_aw_hb))" -gt {UPLOAD_HEARTBEAT_STALE_S} ]; '
-        f'then echo "{message}"; exit {_UPLOAD_WAIT_EXIT}; fi; '
+        f'elif [ "$((_aw_now - $_aw_hb))" -gt {int(stale_s)} ]; '
+        f'then {gone}fi; '
         f'else '
         f'_aw_miss=$((_aw_miss+1)); '
         f'if [ "$_aw_miss" -gt {misses} ]; then '
-        f'echo "{message}"; exit {_UPLOAD_WAIT_EXIT}; fi; '
+        f'{gone}fi; '
         f'fi; '
     )
     return init, check

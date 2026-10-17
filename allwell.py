@@ -90,9 +90,20 @@ def _stop_analyze_runner(analyze) -> None:
         # pipeline suspends itself when the app goes (`watch_parent`), while a
         # Stop here is a hard kill that throws away the wells in flight — the
         # work Suspend was pressed to keep.
-        if getattr(runner, "is_running", False) and not getattr(
-                runner, "was_suspended", False):
+        #
+        # Keyed on `is_busy`, not `is_running`: the subprocess does not exist
+        # yet while the input is still uploading, and a close then stopped
+        # nothing. And the stop is *waited for*, bounded — the remote kill and
+        # `scancel` run on a daemon thread that the interpreter would otherwise
+        # end before its ssh reached the host, leaving the SLURM job running.
+        busy = getattr(runner, "is_busy", None)
+        if busy is None:
+            busy = getattr(runner, "is_running", False)
+        if busy and not getattr(runner, "was_suspended", False):
             runner.stop()
+            wait = getattr(runner, "wait_for_teardown", None)
+            if callable(wait):
+                wait()
     except Exception:
         swallowed()
 

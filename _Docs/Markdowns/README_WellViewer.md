@@ -2026,9 +2026,18 @@ across the plate, what to call them, and what ratios to derive. **Import**, at
 the right end of the page's controls row, brings in groups from a JSON file —
 one saved with a group's **Export**, a `pipeline_info.json`, or an older
 group-definitions file. When the dataset already has groups it asks whether to
-**Add to current groups** (a name already in use gets a suffix, nothing is
-overwritten) or **Replace current groups**; with no groups yet they are simply
-added. It is the app's only groups import, and it is hidden on Overview and on
+**Add to current groups** (a name already in use gets a suffix) or **Replace
+current groups**; with no groups yet they are simply added. A well can be in
+only one group, so when adding would bring in wells that are already in a group
+here — the usual case when the file came from a plate with the same layout —
+a second question lists those wells and the group each is in, and offers
+**Skip** (they stay in their current groups and the imported groups get only
+the wells in no group; an imported group left with none is not added) or
+**Move** (they go to the imported groups; a current group left with no wells is
+removed). Cancel on either question leaves everything as it was. Each imported
+group keeps its colour, whether it was hidden, and (unless a group here already
+uses it) its identity, so plots saved
+with that group hidden keep it hidden. It is the app's only groups import, and it is hidden on Overview and on
 the Variables layer, where there are no groups to import into. Everything on these tabs autosaves to the dataset folder as you
 edit, so there is no Save button to look for; to discard definitions, use
 **Reset analysis** in the title bar ([Starting over](#starting-over)), which
@@ -2079,8 +2088,9 @@ buttons — you pick one or the other, because choosing the scatter option
   with its lower and upper bound in the `min` and `max` columns. Solidity has no
   upper bound and Region area no lower one, so those cells show an em-dash
   rather than an empty box you might think you were meant to fill in. A bound
-  you type takes effect when you press Enter or click out of the box, not as
-  you type each digit. Then
+  you type takes effect when you press Enter, click out of the box, or stop
+  typing for a second — not as you type each digit — and one typed just before
+  you close the window is saved with the dataset. Then
   choose the source of the inclusion decision —
   the per-channel **intensity minimum** (the `Include ≥` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
@@ -2200,7 +2210,10 @@ buttons — you pick one or the other, because choosing the scatter option
   except for datasets analysed in nanowell mode, where it starts off: there an
   image is a tile of a lattice of wells, a tile's edge is not a well's edge,
   and the nanowell measurement already decides which well each cell belongs
-  to. Unticking or ticking it is remembered with the dataset like the rest of
+  to. A plate made with **Merge Plates** from a nanowell dataset and an
+  ordinary one starts with it on, because the ordinary plate's edge cells
+  really are cut; untick it if you want the nanowell wells' tile-edge cells
+  kept. Unticking or ticking it is remembered with the dataset like the rest of
   the panel, and a Gating reset returns it to that default. The
   line beneath it says how many of the cells being analysed touch the border,
   across the whole plate, and whether they are currently kept or excluded.
@@ -2209,7 +2222,13 @@ buttons — you pick one or the other, because choosing the scatter option
   (`qc_touches_border` in the per-cell CSV: 1 = touches, 0 = whole). A dataset
   analysed before that column existed has nothing to filter on; the line says
   so — in amber if the box is ticked, because then nothing you asked for is
-  happening — and re-running the analysis records it. In the Segmentation
+  happening. A plate only partly analysed since then (a run continued with
+  **Incremental**, or some wells re-run) is checked only for the cells analysed
+  after it: the line then says how many cells were checked out of how many,
+  and that the rest are kept unjudged, again in amber when the box is ticked.
+  Only a **Force** re-run records the column for the older cells — an ordinary
+  re-run skips every well whose results already exist, and an incremental one
+  with the same settings finds them up to date. In the Segmentation
   view's **Why removed** overlay these cells are outlined in magenta and
   labelled *touches the image border*, not as debris.
 

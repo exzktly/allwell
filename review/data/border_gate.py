@@ -32,7 +32,7 @@ silent substitution.**
 
 * A dataset with **no column** (analysed before it was emitted) gets no
   ``Border_Pass`` column, and the panel says the dataset predates the
-  measurement and that a re-run records it — rather than writing an all-pass
+  measurement and that a Force re-run records it — rather than writing an all-pass
   column that would assert the plate was checked and found clean.
 * A missing value keeps the row (``fillna(1)`` at the chokepoint): a cell
   nobody measured is not a cell measured and found wanting.
@@ -119,34 +119,49 @@ def candidate_rows(df):
     return df.loc[df_included_mask(df, except_layer=BORDER_PASS_COLUMN)]
 
 
-def border_counts(df) -> tuple[int, int]:
-    """``(touching, total)`` over one frame's :func:`candidate_rows`.
+def border_counts(df) -> tuple[int, int, int]:
+    """``(touching, checked, total)`` over one frame's :func:`candidate_rows`.
 
-    ``total`` counts the candidate rows whether or not the frame carries the
-    column, so a mixed plate (some wells analysed before the column existed)
-    is reported over the cells that could be judged — see
-    :func:`border_status`.
+    ``checked`` is the rows whose flag was recorded; ``total`` is every
+    candidate row, flag or not. They differ on a plate partly analysed before
+    the column existed: ``merge_records_into_gz_csv`` adds the column to a
+    continued well with the old rows blank, and a well never re-analysed has
+    no column at all. Counting those rows into a "checked" total — or dropping
+    the well — made a plate of which a tenth was checked read exactly like one
+    checked in full (§7: degraded output indistinguishable from good), so the
+    two numbers are kept apart and :func:`border_status` says both.
     """
     rows = candidate_rows(df)
     if rows is None or len(rows) == 0:
-        return (0, 0)
+        return (0, 0, 0)
     flags = border_flags(rows)
     if flags is None:
-        return (0, 0)
-    return (int((flags.notna() & flags.eq(1)).sum()), int(len(rows)))
+        return (0, 0, int(len(rows)))
+    measured = flags.notna()
+    return (int((measured & flags.eq(1)).sum()), int(measured.sum()), int(len(rows)))
 
 
-def plate_border_counts(ctx) -> tuple[int, int]:
-    """``(touching, total)`` summed over every well of the plate, held or not.
+def plate_border_counts(ctx) -> tuple[int, int, int]:
+    """``(touching, checked, total)`` summed over every well of the plate, held or not.
 
     Counted whether or not the gate is on, so the panel can say what ticking
-    the box *would* do before it is ticked.
+    the box *would* do before it is ticked. Each well is read **narrowly** —
+    the border column plus whatever the verdict layers need, through
+    ``plate_scan.every_well(columns=)`` like ``focus_gate.plate_focus_counts``
+    — because every QC change clears the memo and re-counts the plate, and a
+    whole-frame read of every well would evict the wells a view is holding.
+    ``tests/test_narrow_rows.py`` holds the narrow verdicts to the whole
+    frame's with this layer on.
     """
-    touching = total = 0
-    for t, n in every_well(ctx, "border_counts", None, border_counts).values():
+    from pipeline.shape_features import BORDER_COLUMN
+
+    touching = checked = total = 0
+    for t, c, n in every_well(ctx, "border_counts", None, border_counts,
+                              columns=(BORDER_COLUMN,)).values():
         touching += t
+        checked += c
         total += n
-    return (touching, total)
+    return (touching, checked, total)
 
 
 def dataset_has_border_column(ctx) -> bool | None:
@@ -201,25 +216,38 @@ def border_status(ctx) -> tuple[str, bool]:
     """``(sentence, is_problem)`` for the Cell Gating panel's border row.
 
     * nothing loaded to look at → ``""``;
-    * no column → the dataset predates the measurement and a re-run records it
-      (a problem only when the box is ticked, because then the user has asked
-      for something that is not happening);
+    * no cell checked (no column, or a column blank on every row) → the dataset
+      predates the measurement and a **Force** re-run records it — a plain
+      re-run skips every well whose output already exists, and an
+      ``--incremental`` one with unchanged settings finds them up to date, so
+      neither records the column (a problem only when the box is ticked,
+      because then the user has asked for something that is not happening);
+    * some cells checked and some not → how many were checked, out of how
+      many, what the switch does to the checked ones, and that the rest are
+      kept unjudged (a problem when the box is ticked, for the same reason);
     * otherwise how many of the analysed cells touch the border, with what the
       switch is doing to them right now.
     """
     has_column = dataset_has_border_column(ctx)
     if has_column is None:
         return ("", False)
-    if not has_column:
+    touching, checked, total = plate_border_counts(ctx) if has_column else (0, 0, 0)
+    if not has_column or (total and not checked):
         return ("This dataset was analysed before border contact was recorded, "
-                "so nothing can be excluded — re-run the analysis to record it.",
-                gate_is_on(ctx))
-    touching, total = plate_border_counts(ctx)
+                "so nothing can be excluded — Force re-run the analysis to "
+                "record it.", gate_is_on(ctx))
     if not total:
         return ("", False)
-    if not touching:
-        return (f"None of the {_cells(total)} touch the image border.", False)
     touch = "touches" if touching == 1 else "touch"
     verb = "excluded" if gate_is_on(ctx) else "kept"
+    if checked < total:
+        found = (f"{_cells(touching)} {touch} the image border — currently {verb}"
+                 if touching else "none touch the image border")
+        return (f"Border contact was checked for {checked:,} of {total:,} cells: "
+                f"{found}. The other {_cells(total - checked)} were analysed "
+                f"before it was recorded and are kept unjudged; Force re-run "
+                f"the analysis to record it.", gate_is_on(ctx))
+    if not touching:
+        return (f"None of the {_cells(total)} touch the image border.", False)
     return (f"{_cells(touching)} of {total:,} {touch} the image border — "
             f"currently {verb}, across the plate.", False)

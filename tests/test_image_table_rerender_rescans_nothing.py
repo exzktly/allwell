@@ -140,3 +140,26 @@ def test_the_capped_walk_is_the_rglob_filter_without_the_deep_part(tmp_path, mon
     monkeypatch.setattr(idisc.os, "walk", _spy)
     assert idisc._walk_capped(root, 3) == expected
     assert max(visited) == 2, "the walk entered folders below the depth it keeps"
+
+
+def test_the_capped_walk_does_not_follow_a_symlinked_folder(tmp_path):
+    """``rglob`` lists a symlinked folder and does not descend into it; the walk
+    that replaced it followed links, so the missing-well fallback scan went
+    into a linked tree — the network-drive walk it exists to avoid — and could
+    classify files the old scan never saw, changing which file a first-hit-wins
+    merge used. A link back up the tree makes it a loop as well."""
+    root = tmp_path / "out"
+    _tree(root, depth=2)
+    ext = tmp_path / "ext"
+    (ext / "x").mkdir(parents=True)
+    (ext / "x" / "5.tif").write_bytes(b"")
+    (root / "lnk").symlink_to(ext, target_is_directory=True)
+    (root / "sub0" / "loop").symlink_to(root, target_is_directory=True)
+    base = len(root.parts)
+
+    got = idisc._walk_capped(root, 3)
+
+    assert root / "lnk" in got and root / "sub0" / "loop" in got, "the links themselves are entries"
+    assert not [p for p in got if "lnk" in p.parts[base:-1] or "loop" in p.parts[base:-1]], (
+        "the walk descended through a symlinked folder")
+    assert got == sorted(p for p in root.rglob("*") if len(p.parts) - base <= 3)

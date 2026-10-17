@@ -492,6 +492,55 @@ def names_for_well_sets(vset: VariableSet, well_sets) -> list[str]:
             for (_labels, complete), name, wells in zip(resolved, names, sets)]
 
 
+def replicate_groups(vset: VariableSet, wells) -> tuple[list[list[str]], list[str]]:
+    """``(groups, wells left out)``: wells with identical assignments, together.
+
+    A replicate group is one condition, and a condition is exactly what the
+    Variables tab records about a well: which value it holds for every variable.
+    Two wells are replicates when those records are identical — the same value
+    for each variable, and no value for the same variables — so the key is the
+    whole record, never one variable picked out of it. Grouping by one variable
+    of several would pool every dose of a cell line into one "replicate" group,
+    which is a different question (the plotting band's *Group by* answers it).
+
+    *No value* is part of the record rather than a reason to drop the well: two
+    wells that both hold ``HeLa`` and were both never given a dose are the same
+    condition as far as anything recorded says, and the group's name shows the
+    gap (:func:`names_for_well_sets` completes a partial name with its wells).
+    Only a well with no value for **any** variable joins no group — nothing is
+    recorded about it, so nothing says what it replicates — and is returned in
+    the second list for the caller to name.
+
+    A variable that annotates nothing (begun, never filled) is left out of the
+    key, for the reason :func:`_annotates_anything` gives: it is true of every
+    well at once and distinguishes none of them.
+
+    Order is each variable's declared value order, the first variable moving
+    slowest and a missing value after every value, then plate order within a
+    group — the order the Variables tab lists them in, so a dose series comes
+    out as a dose series rather than in whatever order the wells were filled.
+    Wells come back in the order given, which callers pass in plate order.
+    """
+    keyed = [v for v in vset.variables if _annotates_anything(vset, v)]
+    rank = [{value.id: i for i, value in enumerate(v.values)} for v in keyed]
+    by_key: dict[tuple, list[str]] = {}
+    left_out: list[str] = []
+    for well in wells:
+        key = tuple(vset.value_id_for(v.id, well) for v in keyed)
+        # A value id the definition no longer holds says nothing either.
+        key = tuple(vid if vid in order else None for vid, order in zip(key, rank))
+        if all(vid is None for vid in key):
+            left_out.append(well)
+            continue
+        by_key.setdefault(key, []).append(well)
+
+    def sort_key(key):
+        return tuple(len(order) if vid is None else order[vid]
+                     for vid, order in zip(key, rank))
+
+    return [by_key[k] for k in sorted(by_key, key=sort_key)], left_out
+
+
 def labels_for_axis_lines(vset: VariableSet, line_wells, *,
                           fallbacks=()) -> list[str]:
     """One tick label per line of a grid, said in the variables that line holds.

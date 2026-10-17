@@ -196,6 +196,22 @@ class _ModeBarWidthSync(QObject):
             self._window._sync_mode_bar()
         return False
 
+def _log_line_tone(line: str) -> str:
+    """Badge tone for one line formatted by the log drawer's handler.
+
+    That handler's format is ``"<time>  <LEVEL>  <logger>  <message>"``, so the
+    level is the second field — read from there rather than searched for, since
+    a message is free to contain the word "ERROR" on a line that is not one.
+    """
+    parts = line.split(None, 2)
+    level = parts[1] if len(parts) > 1 else ""
+    if level in ("ERROR", "CRITICAL"):
+        return "danger"
+    if level == "WARNING":
+        return "warn"
+    return "accent"
+
+
 class AllWellApp(QMainWindow):
     """Root window containing the Review and Analyze notebook tabs."""
 
@@ -504,6 +520,10 @@ class AllWellApp(QMainWindow):
         self._log_btn.setToolTip("Open the application log (⌘L)")
         self._log_btn.clicked.connect(self._toggle_log_drawer)
         sb_layout.addWidget(self._log_btn)
+        # "!" pip on the log button: raised by a line that arrives while the
+        # drawer is shut (_append_log_line), cleared when the drawer opens.
+        from widgets.notice_badge import NoticeBadge
+        self._log_badge = NoticeBadge(self._log_btn)
         statusbar.setStyleSheet(
             f"#StatusBar {{ background-color: {theme_v2.Colors.titlebar}; "
             f"border-top: 1px solid {theme_v2.Colors.border_subtle}; }}"
@@ -1335,6 +1355,9 @@ class AllWellApp(QMainWindow):
             self._log_drawer.close()
         else:
             self._log_drawer.open()
+            badge = getattr(self, "_log_badge", None)
+            if badge is not None:
+                badge.clear()
 
     def _append_log_line(self, text: str) -> None:
         """Append one formatted record to the open drawer view (main-thread only).
@@ -1347,6 +1370,9 @@ class AllWellApp(QMainWindow):
         try:
             drawer = getattr(self, "_log_drawer", None)
             if drawer is None or not drawer.isVisible():
+                badge = getattr(self, "_log_badge", None)
+                if badge is not None:
+                    badge.notify(_log_line_tone(text))
                 return
             view = getattr(self, "_log_view", None)
             if view is not None:

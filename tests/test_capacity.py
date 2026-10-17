@@ -212,7 +212,6 @@ def test_monitor_warns_once_and_only_while_wells_remain(tmp_path, monkeypatch):
 
     out = tmp_path / "out"
     out.mkdir()
-    (out / "A01_out.zip").write_bytes(b"x" * 4096)
     monkeypatch.setattr(cap, "free_bytes", lambda _p: 1)
 
     warnings: list[str] = []
@@ -222,6 +221,7 @@ def test_monitor_warns_once_and_only_while_wells_remain(tmp_path, monkeypatch):
             warnings.append(fmt % args)
 
     monitor = OutputCapacityMonitor(out, total_wells=8, log=_Log())
+    (out / "A01_out.zip").write_bytes(b"x" * 4096)
     for _ in range(4):
         monitor.well_done()
     assert len(warnings) == 1, "one warning, not one per remaining well"
@@ -230,6 +230,62 @@ def test_monitor_warns_once_and_only_while_wells_remain(tmp_path, monkeypatch):
     quiet = OutputCapacityMonitor(out, total_wells=1, log=_Log())
     quiet.well_done()
     assert len(warnings) == 1, "the last well has no remainder to project"
+
+
+def test_monitor_measures_only_what_this_run_wrote(tmp_path, monkeypatch):
+    """Output already in the folder is not this run's per-well cost.
+
+    The reported case: a 12-well batch of a 60-well plate, one well finished,
+    and the log said the 11 left needed 2057.9 GiB "at the 187.1 GiB per well
+    measured from the 1 already written" — the earlier batches' results in the
+    same folder, divided by one well. Here the folder starts with 48 wells of
+    earlier output and this run's first well writes one more; the projection
+    must be 11 x one well, not 11 x 49.
+    """
+    import pipeline.capacity as cap
+
+    gib = 1 << 30
+    out = tmp_path / "out"
+    out.mkdir()
+    sizes = {"A": 0}
+
+    def fake_dir_bytes(_p):
+        return sizes["A"]
+
+    monkeypatch.setattr(cap, "directory_bytes", fake_dir_bytes)
+    monkeypatch.setattr(cap, "free_bytes", lambda _p: 10 * gib)
+    sizes["A"] = 48 * 4 * gib            # earlier batches, already on disk
+
+    warnings: list[str] = []
+
+    class _Log:
+        def warning(self, fmt, *args):
+            warnings.append(fmt % args)
+
+    monitor = OutputCapacityMonitor(out, total_wells=12, log=_Log())
+    sizes["A"] += 4 * gib                # this run's first well
+    monitor.well_done()
+    assert len(warnings) == 1
+    assert "about 44.0 GiB at the 4.0 GiB per well" in warnings[0], warnings[0]
+
+
+def test_monitor_projects_nothing_when_the_folder_shrank(tmp_path, monkeypatch):
+    """A Fetcher deleting downloaded archives must not read as negative output."""
+    import pipeline.capacity as cap
+
+    sizes = {"A": 100 << 30}
+    monkeypatch.setattr(cap, "directory_bytes", lambda _p: sizes["A"])
+    monkeypatch.setattr(cap, "free_bytes", lambda _p: 1)
+    warnings: list[str] = []
+
+    class _Log:
+        def warning(self, fmt, *args):
+            warnings.append(fmt % args)
+
+    monitor = OutputCapacityMonitor(tmp_path, total_wells=12, log=_Log())
+    sizes["A"] = 1 << 30
+    monitor.well_done()
+    assert warnings == []
 
 
 # ── What the user sees when a volume fills anyway ───────────────────────────

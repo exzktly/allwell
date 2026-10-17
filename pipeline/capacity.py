@@ -395,6 +395,16 @@ class OutputCapacityMonitor:
     directory (a few dozen entries, once per well) rather than trusting an
     estimate, and warns at most once — the point is to reach the user while
     there is still room to act, not to repeat itself for every remaining well.
+
+    The measurement is the bytes this run has *added* to the output directory,
+    not the directory's total. The directory routinely holds output this run
+    did not write — earlier batches of a batched plate, the wells an
+    incremental re-run skips, a previous run's results — and dividing all of
+    that by the wells finished so far turned one well of a 12-well batch into
+    "187.1 GiB per well" on a plate whose wells each wrote about 4 GB, and a
+    warning that the plate would not fit when it fitted comfortably. So the directory is sized once
+    when the monitor is built and every projection is taken from the growth
+    since then.
     """
 
     def __init__(self, output_dir: Path, total_wells: int, *, log) -> None:
@@ -403,6 +413,8 @@ class OutputCapacityMonitor:
         self._log = log
         self._done = 0
         self._warned = False
+        # Only worth a directory walk when a projection could ever be made.
+        self._baseline = directory_bytes(self._output_dir) if self._total > 1 else 0
 
     def well_done(self) -> None:
         """Record a finished well and warn if the remainder will not fit."""
@@ -410,7 +422,11 @@ class OutputCapacityMonitor:
         if self._warned or self._done >= self._total:
             return
         message = project_output_shortfall(
-            written=directory_bytes(self._output_dir),
+            # Clamped: an incremental re-run rewrites archives in place and a
+            # remote Fetcher deletes them as they download, so the directory
+            # can shrink. A negative growth is "nothing measured yet", which
+            # projects nothing rather than a nonsense figure.
+            written=max(0, directory_bytes(self._output_dir) - self._baseline),
             wells_done=self._done,
             wells_total=self._total,
             free=free_bytes(self._output_dir / "probe"),

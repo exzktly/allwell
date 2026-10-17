@@ -501,6 +501,7 @@ allwell/
 │                                  separator.py (the two divider builders every pane
 │                                  uses) and page_stack.py (NamedPageStack, the
 │                                  name-keyed QStackedWidget all three panes build on)
+│                                  and notice_badge.py (the "!" unread pip on the log button)
 ├── startup/                     ← what runs before the application exists (§4)
 │   ├── boot_diag.py            ← the per-launch boot log + faulthandler, so a native crash or a
 │   │                              hang names the step that never returned
@@ -10186,7 +10187,23 @@ parent process supervises the per-well worker pool:
     logged on the `Scratch  :` line either way.
   - **The mid-run projection.** `OutputCapacityMonitor`, fed one call per
     completed well by `_run_well_worker_pool`, measures the output actually
-    written and projects the wells still to come. It warns once, naming the
+    written and projects the wells still to come. "Written" is the growth of the
+    output directory since the monitor was built, not its total: the folder
+    routinely holds output this invocation did not write — earlier batches of a
+    batched remote plate, wells an incremental re-run skips, a previous run's
+    results — and dividing that by the wells finished so far reported one well
+    of a 12-well batch as 187 GiB. Growth is clamped at zero, because a remote
+    Fetcher deleting downloaded archives (or an incremental rewrite) can shrink
+    the folder, and a negative measurement projects nothing. Two limits follow
+    from the pipeline seeing one batch at a time. In an ordinary batched remote
+    run the Fetcher deletes each well's input, `<well>_out.zip` and CSV once
+    the download lands (`remote_fetch_nanowells.well_files_to_delete`), so the
+    growth can under-count and the "results accumulate" projection over-states
+    a need the deletions keep reclaiming — the monitor can only miss a warning
+    there, never invent one. A nanowell run deletes nothing until the end
+    (its re-anchoring may re-run a well from those files), so its output does
+    accumulate across batches, and the monitor, which knows only the wells of
+    the batch in flight, does not project the batches still to come. It warns once, naming the
     measured per-well size — a real number, carrying the real compression ratio
     and FOV count, unlike anything the preflight can estimate — while there is
     still room to act. The estimate of durable output in `estimate_well_output_bytes`
@@ -15624,6 +15641,15 @@ remote UTF-8 stream is decoded on a cp1252 Windows client).
   `allwell.*` and `__name__` logger reaches it too. It also turns on
   `logging.captureWarnings`, so Python `warnings.warn` calls arrive on
   `py.warnings` instead of only on stderr.
+- **The log button flags unseen lines.** The status bar's log button carries a
+  `widgets.notice_badge.NoticeBadge` ("!" pip, `allwell._log_badge`).
+  `_append_log_line` — the GUI-thread half of the ring handler — raises it for
+  any line that arrives while the drawer is shut or not yet built, and
+  `_toggle_log_drawer` clears it on open. The tone escalates with the worst
+  level since the last open (`accent` → `warn` → `danger`, read from the
+  formatter's level field by `allwell._log_line_tone`, never from the message
+  text) and never steps back down, so an ERROR is not repainted to the routine
+  colour by the INFO line after it.
 - **The application log holds every pane's warnings and errors.** Two of the
   app's logs are not fed by `logging` at all: the Analyze run log is the
   pipeline subprocess's stdout written straight into a widget

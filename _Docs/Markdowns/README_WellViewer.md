@@ -3705,7 +3705,9 @@ still exported (see below).
   room for even one well, stops — see **Start even if the disk looks too
   small** under Compute options for when that refusal is wrong and how to
   overrule it); as wells complete it measures what they
-  actually wrote and warns once if the rest of the plate will not fit; and if a
+  actually wrote — only what this run added, so results already in the output
+  folder from earlier batches or an earlier run do not count against each new
+  well — and warns once if the rest of the plate will not fit; and if a
   volume does fill, the error names *which* volume and how much is left on it
   instead of the bare system message. Free space, or point **Scratch disk** at a
   roomier volume, and re-run with **incremental** — the wells already written are
@@ -7294,7 +7296,7 @@ architecture-specific and can't produce a universal binary.
 | `⌘←` / `Ctrl+←` | Back through tab history |
 | `⌘→` / `Ctrl+→` | Forward through tab history |
 | `⌘/` / `Ctrl+/` | Open the help drawer |
-| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception |
+| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception. While the drawer is shut, a "!" badge on the status bar's log button says new lines have arrived — blue for routine messages, amber once a warning has come in, red once an error has — and it clears when you open the drawer |
 | `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |
 | `⌘W` / `Ctrl+W` | Close window |
 

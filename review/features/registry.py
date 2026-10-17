@@ -276,7 +276,18 @@ def _activate_multivariate(ctx) -> None:
 
 
 _NANOWELL = "review.features.nanowell.controller"
-_activate_nanowell = _lazy_hook(_NANOWELL, "nw_on_activate")
+
+
+def _activate_nanowell(ctx) -> None:
+    # The tab switch hides every sidebar section before the hook runs, so the
+    # hook has to put the rail plate back — Nanowells is a per-well page whose
+    # well comes from that plate, and a bare ``nw_on_activate`` left it hidden.
+    from review.features.nanowell.controller import nw_on_activate
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.coordinator.refresh_sidebar_map()
+    nw_on_activate(ctx)
+
+
 _loaded_nanowell = _lazy_hook(_NANOWELL, "nw_on_dataset_loaded")
 _sel_nanowell = _lazy_hook(_NANOWELL, "nw_on_selection_changed")
 _channel_nanowell = _lazy_hook(_NANOWELL, "nw_on_channel_changed")

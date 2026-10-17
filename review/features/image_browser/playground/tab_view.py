@@ -32,10 +32,12 @@ from review.features.image_browser.playground.controller import (
     playground_open_loose_image, playground_repopulate_dropdowns,
     playground_segment_now,
     playground_focus_now,
+    playground_nanowell_archive_dir, playground_nanowell_from_archive, playground_nanowell_from_frame,
     playground_sweep_now,
     playground_sweep_stop,
 )
 from review.features.image_browser.playground.renderer import render_playground_display
+from review.features.image_browser.playground.nanowell_view import build_nanowell_section
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -597,8 +599,8 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # into a bug report.
     # The nanowell array search: its controls and handlers live with its window.
     _section("Nanowell array")
-    from review.features.image_browser.playground.nanowell_view import build_nanowell_section
-    build_nanowell_section(ctx, controls, cl, _row)
+    build_nanowell_section(ctx, controls, cl, _row, archive_dir=playground_nanowell_archive_dir,
+                           from_archive=playground_nanowell_from_archive, from_frame=playground_nanowell_from_frame)
 
     _section("What you're looking at")
     status = QLabel("Select a frame to begin.", controls)

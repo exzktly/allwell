@@ -209,16 +209,14 @@ def show_nanowell_suggestion(ctx, suggestion) -> QDialog:
     return popup
 
 
-def build_nanowell_section(ctx, controls: QWidget, layout, row) -> None:
+def build_nanowell_section(ctx, controls: QWidget, layout, row, *, archive_dir, from_archive, from_frame) -> None:
     """The dock's Nanowell array controls: the two sources, and the pixel size a lone frame needs.
 
-    *row* is the dock's own label+cell row builder, so these rows line up with the rest of the dock.
+    *row* is the dock's own label+cell row builder, so these rows line up with the rest of the dock. The three
+    callbacks are the controller's (``playground_nanowell_archive_dir`` / ``_from_archive`` / ``_from_frame``),
+    handed in by the tab builder so this module does not import the controller that imports it.
     """
     from PySide6.QtWidgets import QFileDialog, QLineEdit
-
-    from review.features.image_browser.playground.controller import (
-        playground_nanowell_archive_dir, playground_nanowell_from_archive, playground_nanowell_from_frame,
-    )
 
     note = QLabel("Find the nanowell array in one well and get the settings to type into Analyze → Nanowells.",
                   controls)
@@ -257,11 +255,11 @@ def build_nanowell_section(ctx, controls: QWidget, layout, row) -> None:
     ctx.widgets.register("_playground_nw_px_edit", px_edit)
 
     def _on_archive() -> None:
-        folder, current = playground_nanowell_archive_dir(ctx)
+        folder, current = archive_dir(ctx)
         path, _filt = QFileDialog.getOpenFileName(controls, "Choose a nanowell well archive", current or folder,
                                                   "Well archives (*.zip);;All files (*)")
         if path:
-            playground_nanowell_from_archive(ctx, path)
+            from_archive(ctx, path)
 
     archive_btn.clicked.connect(lambda _=False: _on_archive())
-    frame_btn.clicked.connect(lambda _=False: playground_nanowell_from_frame(ctx))
+    frame_btn.clicked.connect(lambda _=False: from_frame(ctx))

@@ -52,6 +52,10 @@ from review.features.image_browser.playground import (
 from review.features.image_browser.playground.worker import (
     request_reference_fields, request_stardist_labels,
 )
+from review.features.image_browser.playground import (
+    nanowell_compute as _nanowell_compute,
+    nanowell_view as _nanowell_view,
+)
 from pipeline.io import load_2d_gray
 
 
@@ -1748,7 +1752,6 @@ def _set_nanowell_busy(ctx, busy: bool) -> None:
 def _start_nanowell_search(ctx, job, what: str) -> None:
     """Run *job()* (returning a ``NanowellSuggestion``) off the GUI thread and show the result."""
     from core.worker_bridge import run_off_thread
-    from review.features.image_browser.playground import nanowell_view
 
     if getattr(ctx.runtime.playground, "nanowell_running", False):
         _set_status(ctx.window, "A nanowell search is already running.")
@@ -1760,7 +1763,7 @@ def _start_nanowell_search(ctx, job, what: str) -> None:
         _set_nanowell_busy(ctx, False)
         _set_status(ctx.window, "Nanowell array found: the suggested Analyze settings are in its window."
                     if suggestion.ok else f"No nanowell array: {suggestion.reason}")
-        nanowell_view.show_nanowell_suggestion(ctx, suggestion)
+        _nanowell_view.show_nanowell_suggestion(ctx, suggestion)
 
     def _failed(message: str) -> None:
         _set_nanowell_busy(ctx, False)
@@ -1786,7 +1789,8 @@ def playground_nanowell_archive_dir(ctx) -> tuple[str, str]:
 def playground_nanowell_from_archive(ctx, path: str) -> None:
     """Stitch the well archive at *path* and suggest the Nanowells settings for its array."""
     from domain.image_identity import load_schema
-    from review.features.image_browser.playground import nanowell_compute as nc
+
+    nc = _nanowell_compute
 
     path = Path(path)
     fields = sep = None
@@ -1812,7 +1816,7 @@ def playground_nanowell_from_archive(ctx, path: str) -> None:
 
 def playground_nanowell_from_frame(ctx) -> None:
     """Suggest the Nanowells settings from the raw frame on screen, at the pixel size typed beside the button."""
-    from review.features.image_browser.playground import nanowell_compute as nc
+    nc = _nanowell_compute
 
     win = ctx.window
     edit = ctx.widgets.get_or_none("_playground_nw_px_edit")

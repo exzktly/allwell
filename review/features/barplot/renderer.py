@@ -72,6 +72,30 @@ from review.features.barplot.collect import (
 )
 
 
+def _annotate_group_key_headers(axes, xs, group_keys) -> int:
+    """Each cluster's label centred above every panel of a per-cell figure.
+
+    Returns the title pad the panels need to clear it (the one-header-row pad
+    ``cluster_header_pad`` uses when anything was drawn, the standard 6 pt
+    otherwise). Over
+    every panel rather than the mean one alone, for the reason the bar figure
+    does it (``controller.render_bar_items``): each panel is read on its own.
+    """
+    cluster_x: dict = {}
+    for gk, x in zip(group_keys or [], xs or []):
+        if gk:
+            cluster_x.setdefault(gk, []).append(x)
+    for ax in axes:
+        if ax is None:
+            continue
+        for gk, positions in cluster_x.items():
+            ax.text(sum(positions) / len(positions), 1.02, gk,
+                    transform=ax.get_xaxis_transform(),
+                    ha="center", va="bottom", fontsize=8, fontweight="bold")
+    from review.features.barplot._annotations import _TITLE_PAD_PT
+    return _TITLE_PAD_PT[1] if cluster_x else _TITLE_PAD_PT[0]
+
+
 def _annotate_cluster_footers(items, axes, fontsize=8, xs=None) -> None:
     """Per-cluster well/rset label centred under each axis's xtick row.
 
@@ -287,25 +311,7 @@ def draw_violin(
                            ha="right" if n > 8 else "center",
                            fontsize=7)
         ax.set_xlim(xlim_lo, xlim_hi)
-    if group_keys:
-        # Headers above the mean panel showing the cluster identity.
-        cluster_x: dict = {}
-        cluster_order: list[str] = []
-        for gk, x in zip(group_keys, xs):
-            gk = gk or ""
-            if not gk:
-                continue
-            if gk not in cluster_x:
-                cluster_x[gk] = []
-                cluster_order.append(gk)
-            cluster_x[gk].append(x)
-        for gk in cluster_order:
-            positions = cluster_x[gk]
-            if not positions:
-                continue
-            cx = sum(positions) / len(positions)
-            ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
-                         ha="center", va="bottom", fontsize=8, fontweight="bold")
+    _hdr_pad = _annotate_group_key_headers((ax_mean, ax_frac), xs, group_keys)
     # The per-cell fraction is raw whatever the fold-change state
     # says — it is ``n_above / n_total`` off the rows — which is why
     # its title carries no fold-change suffix either.
@@ -319,7 +325,7 @@ def draw_violin(
     _tp_suffix = timepoint_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  {_tp_suffix}",
-        color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
+        color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=_hdr_pad)
     ax_mean.set_ylabel(f"{ctx.state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     # The fraction panel of the per-cell display modes is NOT normalised: its
     # value is ``n_above / n_total`` off the raw rows, and only the per-cell
@@ -329,7 +335,7 @@ def draw_violin(
     # events panel beside it.
     ax_frac.set_title(
         f"{fraction_title(ctx.state.channel.active_metric)}  —  {_tp_suffix}",
-        color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
+        color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=_hdr_pad)
 
 
 def draw_beeswarm(
@@ -437,24 +443,7 @@ def draw_beeswarm(
                            ha="right" if n > 8 else "center",
                            fontsize=7)
         ax.set_xlim(xlim_lo, xlim_hi)
-    if group_keys:
-        cluster_x: dict = {}
-        cluster_order: list[str] = []
-        for gk, x in zip(group_keys, xs):
-            gk = gk or ""
-            if not gk:
-                continue
-            if gk not in cluster_x:
-                cluster_x[gk] = []
-                cluster_order.append(gk)
-            cluster_x[gk].append(x)
-        for gk in cluster_order:
-            positions = cluster_x[gk]
-            if not positions:
-                continue
-            cx = sum(positions) / len(positions)
-            ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
-                         ha="center", va="bottom", fontsize=8, fontweight="bold")
+    _hdr_pad = _annotate_group_key_headers((ax_mean, ax_frac), xs, group_keys)
     # The per-cell fraction is raw whatever the fold-change state
     # says — it is ``n_above / n_total`` off the rows — which is why
     # its title carries no fold-change suffix either.
@@ -472,7 +461,7 @@ def draw_beeswarm(
     _tp_suffix = timepoint_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{ctx.state.channel.active_channel.upper()} {_metric_label} per cell{_thr_q}{_fc_suffix}  —  {_tp_suffix}",
-        color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
+        color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=_hdr_pad)
     ax_mean.set_ylabel(f"{ctx.state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     # The fraction panel of the per-cell display modes is NOT normalised: its
     # value is ``n_above / n_total`` off the raw rows, and only the per-cell
@@ -482,7 +471,7 @@ def draw_beeswarm(
     # events panel beside it.
     ax_frac.set_title(
         f"{fraction_title(ctx.state.channel.active_metric)}  —  {_tp_suffix}",
-        color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
+        color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=_hdr_pad)
 
 
 #: Vertical room one value label occupies, in typographic points: the offset it
@@ -1098,9 +1087,9 @@ def draw_grouped_bar_mode(
     _thr_q = threshold_qualifier(_metric_key)
     _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar")
     _tp_suffix = timepoint_title(target_ts, tp_str)
-    # Cluster headers (_annotate_cluster_headers) sit at y≈1.02 on ax_mean only;
-    # when any survive normalization, push the title up so it clears them rather
-    # than overlapping. items were normalized in place by render_bar_items.
+    # Cluster headers (annotate_cluster_headers) sit at y≈1.02 over every panel;
+    # when any survive normalization, push each panel's title up so it clears
+    # them rather than overlapping. items were normalized in place by render_bar_items.
     # A second split level (*Then by*) stacks a second header row, so the title
     # clears both; ``cluster_header_pad`` is shared with Batch Export's figure.
     ax_mean.set_title(
@@ -1111,7 +1100,8 @@ def draw_grouped_bar_mode(
     ax_mean.set_ylabel(f"{_ch} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(
         f"{fraction_title(_metric_key)}{_fc_suffix}  —  {_tp_suffix}",
-        color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6,
+        color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold",
+        pad=cluster_header_pad(items),
     )
     if ax_n is not None:
         fov_active = ctx.state.plot.use_fov_replicates
@@ -1122,7 +1112,8 @@ def draw_grouped_bar_mode(
             n_title = f"{events_total_title(_metric_key)}{_fc_suffix}  —  {_tp_suffix}"
             n_ylabel = "N(above)"
         ax_n.set_title(
-            n_title, color=tokens_for(ax_n)[1], fontsize=9, fontweight="bold", pad=6,
+            n_title, color=tokens_for(ax_n)[1], fontsize=9, fontweight="bold",
+            pad=cluster_header_pad(items),
         )
         ax_n.set_ylabel(n_ylabel, fontsize=8, labelpad=5)
     # Significance brackets (N7) — the helper extends the Mean panel's top to fit

@@ -66,13 +66,13 @@ def user_y_ceiling(ctx, ax) -> float | None:
 #: split level is on. One 8 pt line plus a little air.
 _BAND_ROW_LIFT_PT = 11
 
-#: The mean panel's title pad, in points, for none / one / two header rows.
+#: A bar panel's title pad, in points, for none / one / two header rows.
 #: The standard pad is ``apply_ax_style``'s; each header row adds a line.
 _TITLE_PAD_PT = (6, 18, 30)
 
 
 def cluster_header_pad(items) -> int:
-    """The title pad the mean panel needs to clear its cluster header rows.
+    """The title pad each bar panel needs to clear its cluster header rows.
 
     One answer for both figures that draw these headers — the Bar tab and
     Batch Export's bar panel — because Batch Export styles its title through
@@ -88,7 +88,7 @@ def cluster_header_pad(items) -> int:
 
 
 def annotate_cluster_headers(items, xs: list[float], ax) -> None:
-    """Per-cluster label centred above the mean panel.
+    """Per-cluster label centred above a panel — each of the bar figure's panels.
 
     With a second split level (*Then by*), two rows: the sub-band labels sit
     where the band labels normally do, directly over their bars, and the band
@@ -228,8 +228,13 @@ DECORATION_TAG = "_aw_decoration"
 
 
 def annotate_decorations(ctx, items, xs, ax, *, headers: bool,
-                         wells_by_key=None) -> None:
+                         wells_by_key=None, header_axes=()) -> None:
     """Every annotation pass over the mean panel, in one call.
+
+    The cluster headers also go over each of *header_axes* — the bar figure's
+    Fraction and Events panels. Each panel is read on its own and its bars are
+    banded the same way; with the headers on the top panel alone, the lower two
+    showed the grouping as gaps between bars, with nothing naming the groups.
 
     The cluster headers, the Colour-by legend and the Split-by notice. Together
     because they always go together and are all about the same thing — how the
@@ -245,7 +250,9 @@ def annotate_decorations(ctx, items, xs, ax, *, headers: bool,
     if ax is None:
         return
     if headers:
-        annotate_cluster_headers(items, xs, ax)
+        for _ax in (ax, *header_axes):
+            if _ax is not None:
+                annotate_cluster_headers(items, xs, _ax)
     setattr(ax, "_aw_bar_items", list(items or ()))
     annotate_colour_legend(ctx, ax, wells_by_key=wells_by_key)
     annotate_split_notice(ctx, ax)

@@ -2605,7 +2605,9 @@ They name that plate's variables, and the next plate's are different ones.
 moves a single number: with two cell lines at six doses, set **Group by** to
 `Dose` and **Colour by** to `Cell line` and you get the same twelve bars in two
 colours, with a legend naming the two lines. **Split by** the same variable and
-those bars are laid out in two labelled bands instead of one run.
+those bars are laid out in two labelled bands instead of one run; each of the
+bar figure's panels — the mean, the fraction and the events — names the bands
+above it, so any panel can be read on its own.
 
 Because they only decorate, nothing is dropped: a group whose wells hold two
 different values gets its own ink and its own band called `—mixed—`, and one
@@ -2625,8 +2627,8 @@ a row above the doses, and a wider gap separates two cell lines than two doses
 within one. Then by is greyed out until Split by holds a variable, and clearing
 Split by clears it too — bands inside nothing would just be bands. It never
 offers the variable Split by is using, since sub-bands by the same variable
-would only repeat the band names. Batch Export draws both header rows too, with
-the panel title moved up to clear them. Like the
+would only repeat the band names. Batch Export draws both header rows too, over every
+panel, with each panel's title moved up to clear them. Like the
 first split, it moves no number and drops no bar.
 
 **Batch Export draws them the same way.** A plate exported group by group gets

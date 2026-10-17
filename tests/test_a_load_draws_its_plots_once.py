@@ -183,3 +183,94 @@ def test_a_failed_pass_still_lifts_the_hold_and_draws(viewer_app, mini_dataset, 
     _show_line_graphs(app)
     assert len(draws) == 1
     assert not _says_gating(_line_stack(app))
+
+
+def _gate_the_threaded_pass(monkeypatch):
+    """Like :func:`_gate_the_pass`, but only the worker thread waits: a pass run
+    synchronously on the GUI thread (``cell_gating_recompute_now``) goes straight
+    through, as it does in the app."""
+    from review.features.home.cell_gating import controller as cg
+
+    go = threading.Event()
+    real = cg.GatingWorker._run_inner
+
+    def waiting(self):
+        if threading.current_thread() is not threading.main_thread():
+            assert go.wait(60), "the test never released the gating pass"
+        return real(self)
+
+    monkeypatch.setattr(cg.GatingWorker, "_run_inner", waiting)
+    return go
+
+
+def test_a_synchronous_recompute_that_cancels_the_load_s_pass_lifts_its_hold(
+        viewer_app, mini_dataset, qtbot, monkeypatch):
+    """The third way a load's pass can end: cancelled, with no async pass to
+    replace it. ``cell_gating_recompute_now`` (the Saved Plots export and the
+    headless report) cancels the running worker — which then emits nothing —
+    and runs the pass itself. The hold belonged to the cancelled pass, so the
+    synchronous one must lift it and draw the visible plot; otherwise every
+    redraw stays a no-op for the rest of the session."""
+    from review.features.home.cell_gating.controller import cell_gating_recompute_now
+
+    app = viewer_app
+    app._load_path(mini_dataset)
+    _save_gate(mini_dataset)
+    go = _gate_the_threaded_pass(monkeypatch)
+    app._load_path(mini_dataset)
+    worker = app._ctx.runtime.cell_gating.worker
+    assert worker is not None and worker.isRunning(), "the saved gate started no pass; this measures nothing"
+    assert app._app_state.plot.held_for == "gating"
+    _show_line_graphs(app)
+    draws = _count_line_draws(monkeypatch)
+    try:
+        assert cell_gating_recompute_now(app._ctx) is True
+        assert app._app_state.plot.held_for == "", (
+            "the synchronous recompute cancelled the pass that owned the 'gating' hold "
+            "and left the hold in place: every redraw is now a no-op")
+        assert len(draws) == 1, f"the visible plot was drawn {len(draws)} times by lifting the hold"
+        assert not _says_gating(_line_stack(app)), "the gating placeholder stayed up"
+    finally:
+        go.set()
+        worker.wait()
+    for _ in range(20):                              # the cancelled worker emits nothing
+        qtbot.wait(10)
+    assert app._app_state.plot.held_for == ""
+
+
+def test_the_report_does_not_call_a_figure_drawn_while_the_plots_are_held(
+        viewer_app, mini_dataset, monkeypatch):
+    """``render_saved_plot`` captures ``card.figure`` after asking for a redraw.
+    While a hold is in force every redraw body returns early, so the capture is
+    of whatever the figure last held — a non-empty PNG of the wrong thing, which
+    the report's manifest would list as ``drawn``. A held capture must come back
+    with a reason instead."""
+    from review.core import plot_hold
+    from review.features.saved_plots import _render
+    from review.features.saved_plots.state import get_store
+
+    app = viewer_app
+    ctx = app._ctx
+    app._load_path(mini_dataset)
+    assert app._sel_add(name="P", wells=["A01", "A02"], source="user")
+    app._notebook.setCurrentByName("Bar Plots")
+    card = ctx.runtime.saved_plots.cards_by_tab["Bar Plots"]
+    card.saveFigureToGallery()
+    store = get_store(ctx)
+    store.ensure_loaded(ctx)
+    rec = store.records[-1]
+
+    def recompute_that_leaves_the_hold(c):
+        plot_hold.hold(c, plot_hold.HOLD_GATING)
+        return True
+
+    monkeypatch.setattr(_render, "_gating_recompute_now", recompute_that_leaves_the_hold)
+    out = _render.render_saved_plot(ctx, rec)
+    assert out.png == b"" and "held" in out.reason, (
+        f"a figure captured while every redraw was a no-op was reported as drawn "
+        f"(png {len(out.png)} bytes, reason {out.reason!r})")
+
+    plot_hold.release(ctx)
+    monkeypatch.setattr(_render, "_gating_recompute_now", lambda c: True)
+    drawn = _render.render_saved_plot(ctx, rec)
+    assert drawn.png and drawn.reason == "", f"an unheld render was refused: {drawn.reason!r}"

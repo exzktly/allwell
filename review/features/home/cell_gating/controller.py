@@ -1845,7 +1845,25 @@ def cell_gating_recompute_now(ctx) -> bool:
     Any worker already in flight is cancelled first, so the pass this runs is the
     one whose result survives. Returns False when the recompute could not run, so
     a caller that depends on it can decline rather than capture the wrong thing.
+
+    A cancelled worker emits nothing, so when the pass it replaces is the one a
+    load handed the plot hold to (``plot_hold.HOLD_GATING``), nothing else would
+    ever lift that hold and every redraw after it would be a silent no-op. This
+    pass therefore ends the hold itself, whether it succeeds or fails — the same
+    two ends ``_cell_gating_on_finished`` / ``_cell_gating_on_failed`` give the
+    asynchronous pass.
     """
+    from review.core import plot_hold
+    owns_the_hold = plot_hold.held_for(ctx) == plot_hold.HOLD_GATING
+    try:
+        return _recompute_now_on_this_thread(ctx)
+    finally:
+        if owns_the_hold:
+            plot_hold.release_after_gating(ctx)
+
+
+def _recompute_now_on_this_thread(ctx) -> bool:
+    """The body of :func:`cell_gating_recompute_now`: cancel, gate, invalidate."""
     prev = ctx.runtime.cell_gating.worker
     if prev is not None and prev.isRunning():
         prev.cancel()

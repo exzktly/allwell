@@ -20,7 +20,7 @@ def _pump(qapp, n: int = 15) -> None:
         qapp.processEvents()
 
 
-def test_a_logged_warning_raises_the_log_buttons_badge_until_opened(qapp):
+def test_a_logged_warning_raises_the_log_buttons_badge_until_opened(qapp, monkeypatch):
     from allwell import AllWellApp
     from widgets.notice_badge import NoticeBadge
 
@@ -42,5 +42,23 @@ def test_a_logged_warning_raises_the_log_buttons_badge_until_opened(qapp):
         _pump(qapp)
         assert badge.tone() is None
         assert not badge.isVisible()
+
+        # The drawer names the boot log, which lives in a hidden folder and is
+        # needed only after the app has died — when nobody remembers the path.
+        from PySide6.QtWidgets import QLabel
+
+        from startup import boot_diag
+        texts = [lbl.text() for lbl in win._log_drawer.findChildren(QLabel)]
+        assert any(str(boot_diag.log_path()) in t for t in texts), texts
+
+        # A previous session that was killed is announced at the next start
+        # through the same drawer: the sentence, with the kept file's path,
+        # reaches the history the drawer shows.
+        monkeypatch.setattr(boot_diag, "_PREVIOUS_ENDING",
+                            (boot_diag.log_path().with_name("allwell-boot.log.1"), "killed"))
+        boot_diag.announce_previous_ending()
+        _pump(qapp)
+        assert any("WARNING  allwell.boot" in line and "allwell-boot.log.1" in line
+                   for line in win._log_ring), win._log_ring[-3:]
     finally:
         win.close()

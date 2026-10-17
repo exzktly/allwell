@@ -26,6 +26,8 @@ from __future__ import annotations
 import threading
 import time
 
+from startup import boot_diag
+
 #: The status line is repainted at most this often while wells are read, so a
 #: phase reading small wells from a warm cache does not spend its time painting.
 _REPAINT_INTERVAL_S = 0.1
@@ -47,6 +49,7 @@ class LoadProgress:
         return self
 
     def __exit__(self, *_exc) -> None:
+        boot_diag.boot("dataset load: finished")
         if self._ctx.state.dataset.read_listener == self.well_read:
             self._ctx.state.dataset.read_listener = None
         bar = self._ctx.widgets.get_or_none("_progress_bar")
@@ -57,6 +60,10 @@ class LoadProgress:
         """Start a phase: name it, reset the well count, repaint now."""
         self._phase = text
         self._reads = 0
+        # One flushed line per phase in the boot log: a load the system kills
+        # for memory leaves no traceback, and this is then the only record of
+        # which phase it reached.
+        boot_diag.boot(f"dataset load: {text}")
         self._paint(f"{text}…")
 
     def well_read(self, label: str) -> None:

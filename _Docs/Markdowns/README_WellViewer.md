@@ -5085,8 +5085,13 @@ channel for every well).
   override.
 - **Pixel readout** — hover a rendered cell to see that pixel's intensity (prefixed
   with the cell's combo identity), plus the segmented cell's id and **mean intensity
-  (MFI)** when the cursor is over one; the readout now stays put when the cursor comes
-  to rest instead of reverting to the plain cell tooltip.
+  (MFI)** when the cursor is over one. The MFI is read in the background, so the
+  first hover over a cell may show `MFI: loading…` briefly; the readout fills in by
+  itself when the value arrives, even if the cursor is resting, and only the cell
+  under the cursor is ever waited for. The readout stays put when the cursor comes
+  to rest instead of reverting to the plain cell tooltip. Opening another dataset,
+  or reloading this one, drops every remembered MFI, so the readout always quotes
+  the data that is open.
 - **Per-cell tweak** — right-click any rendered cell to override just that cell's
   well / channel / timepoint / FOV.
 - **Export to PowerPoint…** — writes the grid as a slide of **editable frames**

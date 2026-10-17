@@ -196,21 +196,33 @@ class ImageTableState:
 
     #: ``{(well, base_chan): {(fov, tp): {nid: MFI}}}`` behind the hover
     #: readout's MFI suffix, built once per well and channel on first hover
-    #: (``controller._mfi_index``) so moving across cells never re-reads a well's
-    #: rows on the UI thread. Session lifetime, dropped on dataset swap.
+    #: (``_hover_mfi.mfi_frame``) so moving across cells never re-reads a well's
+    #: rows on the UI thread. Session lifetime, replaced on every dataset load.
     mfi_index: dict = field(default_factory=dict)
 
+    #: Which dataset load the caches above describe. ``clear_caches`` bumps it,
+    #: and the hover readout stamps every background lookup and its one held
+    #: frame with it, so a lookup queued before a swap cannot be served (or
+    #: written) after it, and a cell drawn for the previous dataset quotes no MFI.
+    generation: int = 0
+
     def clear_caches(self) -> None:
-        """Drop the per-generate render / image caches (call on dataset swap)."""
-        self.last_render.clear()
-        self.image_cache.clear()
-        self.mfi_index.clear()
-        self.auto_lut_by_channel.clear()
-        self.prefetched_cells.clear()
-        self.scan_misses.clear()
-        self.raw_fallbacks.clear()
-        self.partial_scans.clear()
-        self.scale_bar_refusals.clear()
+        """Drop every per-dataset render / image / hover cache (the load calls this).
+
+        Replaces each container rather than emptying it: a background job that
+        captured the old one (the prefetch, a hover MFI lookup) then writes into
+        an orphan instead of into the new dataset's cache.
+        """
+        self.generation += 1
+        self.last_render = {}
+        self.image_cache = {}
+        self.mfi_index = {}
+        self.auto_lut_by_channel = {}
+        self.prefetched_cells = set()
+        self.scan_misses = set()
+        self.raw_fallbacks = set()
+        self.partial_scans = set()
+        self.scale_bar_refusals = set()
         self.scale_bar_plan_note = ""
 
     def effective_row_dims(self) -> list:

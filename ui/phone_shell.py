@@ -649,6 +649,15 @@ class PhoneShell(QObject):
         self._rail_status = QLabel()
         self._rail_status.setObjectName("PhoneRailStatus")
         self._rail_status.hide()
+        # A page's controls can appear after the page change that refresh()
+        # follows: a lazily built tab (Image Browser) builds its body only once
+        # it is shown, so at the notebook's currentChanged it has no controls
+        # yet and ⚙ Controls stayed hidden. adapt() sees the controls arrive and
+        # asks for one more refresh, coalesced to the next turn of the loop.
+        self._refresh_soon = QTimer(self)
+        self._refresh_soon.setSingleShot(True)
+        self._refresh_soon.setInterval(0)
+        self._refresh_soon.timeout.connect(self.refresh)
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(_RAIL_STATUS_MS)
         self._status_timer.timeout.connect(self._sync_rail_status)
@@ -809,6 +818,7 @@ class PhoneShell(QObject):
         if name == "ControlBand" or _is_phone_controls(w):
             if on and w is not self._sheet_band and self._band_managed(w):
                 self._hide(w)
+                self._refresh_soon.start()
         elif name == "MplToolbar":
             # Its pan and zoom are modes a mouse drag over VNC fights with;
             # the plot is for reading on a phone, and Reset is in Controls.

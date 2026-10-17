@@ -374,12 +374,16 @@ def _image_cell_widths(grid) -> list[int]:
 
 def test_the_image_table_opens_on_its_grid_in_phone_layout(qapp, win, tmp_path):
     """The Image Table's builder and action strip go behind ⚙ Controls, and its
-    grid is fitted to the screen and drawn again when the layout changes."""
+    grid is fitted to the screen and drawn again when the layout changes.
+
+    Reached the way a user reaches it: phone layout on first, then Image Browser
+    picked from the side rail. The page builds lazily on that first visit, after
+    the page change the strip refreshes on — which left ⚙ Controls hidden, and
+    with it every control for building a table (a reported bug)."""
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QScrollArea
 
     from core import phone_layout
-    from review.features.image_browser.controller import show_image_browser_subtab
     from review.features.image_browser.image_table import controller as C
 
     review, shell = win._review, win._phone
@@ -389,34 +393,36 @@ def test_the_image_table_opens_on_its_grid_in_phone_layout(qapp, win, tmp_path):
     _pump(qapp)
     review._set_selected_wells({"A01", "A02"}, commit=True)
     ctx = review._ctx
-    show_image_browser_subtab(ctx, "Image Table")
-    review._drain_pending_centre_builders()
-    _pump(qapp)
-    C.image_table_repopulate_dropdowns(ctx)
-    review._app_state.image_table.active_channels = {"DAPI", "GFP"}
-    C.image_table_apply_dims_preset(ctx, ["well"], ["channel"])
-    C.image_table_generate(ctx)
-    _pump(qapp)
-    grid = ctx.runtime.image_table.render_grid
-    desk = _image_cell_widths(grid)
-    assert desk and max(desk) <= 240                      # the desk's own rule
-    controls = review.findChild(QWidget, "ImageTableControls")
-    assert controls is not None and _visible(controls)
+    assert ctx.runtime.image_table.render_grid is None    # not built yet
 
     shell.set_on(True)
-    QTest.qWait(600)                                      # past the refit debounce
     _pump(qapp)
     try:
-        # The page opens on the images; the builder is behind ⚙ Controls.
-        assert not _visible(controls)
+        shell.menu_button.click()
+        _pump(qapp)
+        review._section_nav._rows["Image Browser"].clicked.emit("Image Browser")
+        QTest.qWait(50)
+        _pump(qapp)
+        # The page opens on the images; the builder is behind ⚙ Controls, and
+        # the button to reach it is there on this first, lazily built visit.
+        controls = review.findChild(QWidget, "ImageTableControls")
+        assert controls is not None and not _visible(controls)
         assert _visible(shell.controls_button)
+        empty = ctx.runtime.image_table.empty_state
+        assert "⚙ Controls" in empty._hint.text()       # not "above"
+        C.image_table_repopulate_dropdowns(ctx)
+        review._app_state.image_table.active_channels = {"DAPI", "GFP"}
+        C.image_table_apply_dims_preset(ctx, ["well"], ["channel"])
+        C.image_table_generate(ctx)
+        _pump(qapp)
+        grid = ctx.runtime.image_table.render_grid
         # Two columns share the width: wider than the desk's cells, and the grid
         # inside the page's width — no sideways scroll.
         scroll = grid.parentWidget()
         while not isinstance(scroll, QScrollArea):
             scroll = scroll.parentWidget()
         phone = _image_cell_widths(grid)
-        assert phone and min(phone) > max(desk)
+        assert phone and min(phone) > 240                 # the desk's rule, exceeded
         assert grid.parentWidget().sizeHint().width() <= scroll.viewport().width()
         assert scroll.horizontalScrollBar().maximum() == 0
         # ⚙ Controls lends the builder and the action strip to the sheet,
@@ -445,4 +451,6 @@ def test_the_image_table_opens_on_its_grid_in_phone_layout(qapp, win, tmp_path):
     assert not phone_layout.is_on()
     assert _visible(controls)
     assert controls.layout().itemAt(0).widget().objectName() == "ITBShelf"
-    assert _image_cell_widths(grid) == desk               # back to the desk's size
+    desk = _image_cell_widths(grid)                       # redrawn at the desk's size
+    assert desk and max(desk) <= 240 < min(phone)
+    assert "above" in empty._hint.text()

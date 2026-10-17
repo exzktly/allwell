@@ -622,7 +622,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     il.addWidget(render_host, 0, Qt.AlignTop | Qt.AlignLeft)
     # In phone layout the grid is fitted to the screen, and drawn again when the
     # layout or the screen changes (``_phone_fit``).
-    install_refit(ctx, scroll, render_host, image_table_generate)
+    install_refit(ctx, scroll, render_host, image_table_generate,
+                  relabel=image_table_refresh_empty_state)
 
     il.addStretch(1)
 

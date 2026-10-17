@@ -126,7 +126,10 @@ def test_ui_scale_multiplies_from_the_desk_value_and_never_compounds():
 def test_a_theme_applied_under_a_scale_keeps_the_scale():
     body = theme.Typography.body_size
     theme.apply_ui_scale(1.5)
-    theme.apply_theme(theme.DEFAULT_THEME)
+    # "blue" overrides nothing (the token classes' own palette, which the test
+    # session runs on), so the reset runs without leaving another theme's
+    # colours behind for the next test file on this worker.
+    theme.apply_theme("blue")
     assert theme.ui_scale() == 1.5
     assert theme.Typography.body_size == round(body * 1.5)
     theme.apply_ui_scale(1.0)

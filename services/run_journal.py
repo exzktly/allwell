@@ -357,6 +357,13 @@ def open_run(
     prior = _read_run_payload(output_dir) or {}
     carried = prior.get("remote")
     history = prior.get("remote_history")
+    # Where each well got to in the runs before this one. The per-well records are cleared below, because they
+    # describe *this* run; but a restart has to know what the attempt it resumes did — which wells it uploaded,
+    # which the remote finished, which never arrived — and these were the only record of it. Carried as the
+    # latest state per well across every earlier run since, so a run that dies before recording anything does
+    # not erase what the one before it knew (`previous_well_states`).
+    earlier_wells = dict(prior.get("previous_wells") or {}) if isinstance(prior.get("previous_wells"), dict) else {}
+    earlier_wells.update({w: rec.state for w, rec in _read_wells(output_dir).items()})
     now = time.time()
     payload = {
         "version": JOURNAL_VERSION,
@@ -371,6 +378,7 @@ def open_run(
         "spec": spec if isinstance(spec, dict) else {},
         "remote": carried if isinstance(carried, dict) else {},
         "remote_history": history if isinstance(history, list) else [],
+        "previous_wells": earlier_wells,
         "queued": bool(queued),
     }
     ok = _atomic_write_json(_run_path(output_dir), payload)
@@ -442,6 +450,22 @@ def record_remote(
         "source_key": str(source_key),
         "recorded_at": time.time(),
     }
+    return _atomic_write_json(_run_path(output_dir), payload)
+
+
+def record_remote_scratch(output_dir: Path | str, scratch_dir: str) -> bool:
+    """Add where the remote pipeline keeps its working files to the current remote address.
+
+    The pipeline resolves its scratch base on the host (``ALLWELL_SCRATCH_DIR`` or ``~/.allwell/scratch``) and
+    names it on its ``Scratch  :`` line; this is where a well's part-way checkpoints live, so a later run that
+    resumes the address can look for them there rather than re-deriving a path the host expanded.
+    """
+    payload = _read_run_payload(output_dir)
+    if payload is None or not isinstance(payload.get("remote"), dict) or not scratch_dir:
+        return False
+    if payload["remote"].get("remote_scratch_dir") == str(scratch_dir):
+        return True
+    payload["remote"]["remote_scratch_dir"] = str(scratch_dir)
     return _atomic_write_json(_run_path(output_dir), payload)
 
 
@@ -657,6 +681,13 @@ def _read_wells(output_dir: Path | str) -> dict[str, WellRecord]:
 #: bytes; the bound exists only so a plate re-run every day for years does not
 #: grow its journal for ever.
 REMOTE_HISTORY_MAX = 20
+
+
+def previous_well_states(output_dir: Path | str) -> dict[str, str]:
+    """The last state each well reached in the runs before the current one (see :func:`open_run`), or ``{}``."""
+    payload = _read_run_payload(output_dir)
+    wells = (payload or {}).get("previous_wells")
+    return {str(k): str(v) for k, v in wells.items()} if isinstance(wells, dict) else {}
 
 
 def stored_remote_addresses(

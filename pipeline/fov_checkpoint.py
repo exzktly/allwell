@@ -24,6 +24,7 @@ import logging
 from pipeline.io import (
     _sweep_stale_scratch_dirs_all, remove_directory, scratch_base_for)
 from util.aw_safe import swallow
+from util.settings_digest import primary_settings_key, settings_key_aliases
 
 log = logging.getLogger(__name__)
 
@@ -83,9 +84,22 @@ def _staging_dir_for(output_dir: Path, well_label: str,
     :func:`prune_superseded_staging` can recognise this plate's own
     superseded directories without having to guess at another plate's.
     """
-    return (scratch_base_for(output_dir)
-            / f"_tmp_images_{_output_stamp(output_dir)}"
-              f"_{_settings_stamp(settings_key)}_{well_label}")
+    base = scratch_base_for(output_dir)
+    aliases = settings_key_aliases(settings_key) or ("",)
+    here = base / f"_tmp_images_{_output_stamp(output_dir)}_{_settings_stamp(aliases[0])}_{well_label}"
+    if not here.exists():
+        # A directory an earlier build named after its own digest for these same options
+        # (`util.settings_digest.legacy_settings_digests`) holds this well's resumable groups: take it over, so a
+        # well half-finished on that build continues here rather than starting again.
+        for alias in aliases[1:]:
+            earlier = base / f"_tmp_images_{_output_stamp(output_dir)}_{_settings_stamp(alias)}_{well_label}"
+            if earlier.is_dir():
+                with swallow(f"taking over {earlier.name}"):
+                    os.replace(earlier, here)
+                    log.info("Resuming %s from the checkpoints an earlier build left in %s",
+                             well_label, earlier.name)
+                break
+    return here
 
 
 def _output_stamp(output_dir: Path) -> str:
@@ -95,7 +109,7 @@ def _output_stamp(output_dir: Path) -> str:
 
 def _settings_stamp(settings_key: str) -> str:
     return hashlib.blake2b(
-        str(settings_key or "").encode(), digest_size=4).hexdigest()
+        primary_settings_key(settings_key).encode(), digest_size=4).hexdigest()
 
 
 def prune_superseded_staging(output_dir: Path, settings_key: str) -> int:
@@ -120,13 +134,14 @@ def prune_superseded_staging(output_dir: Path, settings_key: str) -> int:
     """
     if not settings_key:
         return 0
-    keep = _settings_stamp(settings_key)
+    # Every digest the key accepts: a directory an earlier build named for these same options is this run's.
+    keep = tuple(_settings_stamp(alias) for alias in settings_key_aliases(settings_key))
     prefix = f"_tmp_images_{_output_stamp(output_dir)}_"
     removed = 0
     base = scratch_base_for(output_dir)
     with swallow(f"pruning superseded staging under {base}"):
         for stale in sorted(base.glob(f"{prefix}*")):
-            if not stale.is_dir() or stale.name.startswith(f"{prefix}{keep}_"):
+            if not stale.is_dir() or any(stale.name.startswith(f"{prefix}{k}_") for k in keep):
                 continue
             log.info("Removing staging left by a previous settings "
                      "combination: %s", stale.name)
@@ -175,7 +190,7 @@ def _load_fov_checkpoint(tmp_images: Path, fov_id: str,
     # recorded value is a checkpoint written before this existed and is
     # accepted, matching how the per-well settings marker grandfathers.
     recorded = str(payload.get("settings") or "")
-    if recorded and settings_key and recorded != settings_key:
+    if recorded and settings_key and recorded not in settings_key_aliases(settings_key):
         return None
     records = payload.get("records")
     if not isinstance(records, list):
@@ -210,7 +225,7 @@ def _save_fov_checkpoint(
     records_file, marker = _checkpoint_paths(tmp_images, fov_id)
     tmp = records_file.with_suffix(".records.json.tmp")
     payload = {"schema": _FOV_CHECKPOINT_SCHEMA,
-               "settings": str(settings_key or ""),
+               "settings": primary_settings_key(settings_key),
                "quality": _json_safe([dict(quality or {})])[0],
                "records": _json_safe(records)}
     text = json.dumps(payload)

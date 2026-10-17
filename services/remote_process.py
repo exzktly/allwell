@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from services.remote_runner import RemoteRunner
     from services.remote_upload import DatasetCache
+import functools
 import io
 import os
 import queue
@@ -65,11 +66,17 @@ from services.remote_run_id import (
     _forced_from_argv,
     _local_input_dir_from_argv,
     _parse_argv_flags,
+    legacy_argv_digests,
     pipeline_argv_digest,
     remote_run_dir,
     remote_run_paths,
 )
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
+from services.remote_fetch_nanowells import release_batch
+from services.remote_batch_resume import (
+    announce_adopted, note_remote_scratch, nothing_left_to_run, reattach_output_dir, stage_leftovers,
+    take_from_remote)
+from util.well_token import canonical_well_label
 from services.remote_scratch import (
     source_fingerprint,
 )
@@ -502,14 +509,24 @@ class _BatchedRemoteProcess:
         # either way.
         own = remote_run_paths(runner.host, run_id)
         remote_input = f"{own.run_dir}/in"
-        remote_output = own.out
         remote_pidfile = own.pidfile
+        self._journal_keys = dict(
+            argv_digest=pipeline_argv_digest(pipeline_argv, extras=runner._host_argv_extras(output_filter)),
+            source_key=source_fingerprint(_local_input_dir_from_argv(pipeline_argv)),
+            host_alias=runner.host.ssh_alias)
+        # What an earlier build recorded for this configuration, for finding its leftovers only.
+        self._legacy_digests = legacy_argv_digests(pipeline_argv, extras=runner._host_argv_extras(output_filter))
+        _force, _forced_wells = _forced_from_argv(pipeline_argv)
+        # The earlier attempt's output directory, when there is one to resume: the pipeline keys a well's
+        # part-way checkpoints on its output directory, so only there does a half-finished well continue.
+        remote_output = reattach_output_dir(
+            runner, local_output_dir, self._journal_keys, self._legacy_digests, fresh=own.out,
+            forced=bool(_force or _forced_wells), log=self._log)
         runner._cache._ssh_run(
             ["mkdir", "-p", remote_input, remote_output],
             check=True,
         )
 
-        _force, _forced_wells = _forced_from_argv(pipeline_argv)
         runner._run = _RemoteRun(
             run_id=run_id,
             cache_key=key,
@@ -523,6 +540,7 @@ class _BatchedRemoteProcess:
             incremental=zipped.incremental,
             force=_force, force_wells=_forced_wells, nanowell="--nanowell_format" in pipeline_argv,
             pre_run_artifacts=_snapshot_local_artifacts(local_output_dir),
+            reattached=remote_output != own.out,
         )
         # Batched runs record their address too. Without this a plate run in
         # batches journalled a ``remote-batched`` mode beside an empty remote
@@ -535,14 +553,7 @@ class _BatchedRemoteProcess:
         # complete, and had output with no tophat images fetched back as its
         # own — and in the other direction, after a batched run on a host with
         # overrides, the two never matched and re-attach silently never fired.
-        _record_remote_in_journal(
-            local_output_dir, run=runner._run, host_alias=runner.host.ssh_alias,
-            argv_digest=pipeline_argv_digest(
-                pipeline_argv,
-                extras=runner._host_argv_extras(output_filter)),
-            source_key=source_fingerprint(
-                _local_input_dir_from_argv(pipeline_argv)),
-        )
+        _record_remote_in_journal(local_output_dir, run=runner._run, **self._journal_keys)
 
         # One Fetcher persisting across batches. Pre-set the total well
         # count: each batch's pipeline banner reports just THAT
@@ -699,8 +710,10 @@ class _BatchedRemoteProcess:
                for t in (BATCH_READY, BATCH_DONE)],
             check=False,
         )
-        # An aborted run's half-processed `in/` is cleared; its staged batches
-        # and `bg/` are kept for the retry (`remote_batch_staging`).
+        # Whatever input archives the remote already holds — in `in/`, in a staged batch, or in an earlier
+        # attempt's directory — go into the batch they now belong to first; then the half-processed `in/` is
+        # cleared, its staged batches and `bg/` kept for the retry (`remote_batch_staging`).
+        stage_leftovers(self, run_dir)
         self._runner._cache._ssh_run(["rm", "-rf", f"{run_dir}/in"], check=False)
 
         # The empty-well blank(s), uploaded once for the whole run. They sit
@@ -869,6 +882,7 @@ class _BatchedRemoteProcess:
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
+                note_remote_scratch(self, line)
                 m = _BATCH_DONE_RE.search(line)
                 if m:
                     # Consumed, not forwarded: this is the handshake between the
@@ -912,6 +926,18 @@ class _BatchedRemoteProcess:
             # whose event is created after this still stops within the poll.
             for event in list(self._batch_events.values()):
                 event.set()
+
+    def _release_nanowell_batch(self, rc: int | None, batch_zips) -> None:
+        """A nanowell batch that ended: free its wells on the remote (``remote_fetch_nanowells.release_batch``).
+
+        Its re-anchoring has run, so nothing of these wells is read again. Queued behind the wells the batch
+        announced, so each one's download has been attempted first. ``None`` means the driver is gone and the
+        batch's end is unknown, so nothing is released.
+        """
+        if rc is None or not self._fetcher.run.nanowell:
+            return
+        wells = [canonical_well_label(z.stem) or z.stem.upper() for z in batch_zips]
+        self._fetcher.after_queued(functools.partial(release_batch, wells=wells, log=self._log))
 
     def _await_batch(self, index: int, n_batches: int) -> int | None:
         """This batch's exit code, or ``None`` if the driver went away."""
@@ -1020,6 +1046,9 @@ class _BatchedRemoteProcess:
                             + "\n"
                         )
                     all_zips = kept
+            # Before anything is sent: what the remote already holds — finished wells to download instead, and
+            # uploaded archives to put into this run's batches (`remote_batch_resume`).
+            all_zips, adopted = take_from_remote(self, all_zips, force=force)
 
             # Inject a synthetic "Zip mode: <total> wells" banner BEFORE
             # batch 1's stdout. The GUI's ``ProgressTracker`` locks on the
@@ -1043,17 +1072,15 @@ class _BatchedRemoteProcess:
                     f"SKIP well {p.stem.upper()} — output already exists "
                     f"locally; not uploaded. Use --force to reprocess.\n"
                 )
+            announce_adopted(self, adopted)
 
             if not all_zips:
-                self._log(
-                    "[remote] batched mode: every well already complete "
-                    "locally — nothing to do.\n"
-                )
-                self._fetcher.run.well_count_total = 0
+                self._log(nothing_left_to_run(adopted))
+                self._fetcher.run.well_count_total = len(adopted)
                 self._returncode = 0
                 return
 
-            self._fetcher.run.well_count_total = len(all_zips)
+            self._fetcher.run.well_count_total = len(all_zips) + len(adopted)
 
             # Empty-well correction reads the blank from the input directory at
             # model-build time, and batched mode stages one batch at a time — so
@@ -1121,6 +1148,7 @@ class _BatchedRemoteProcess:
                 self._returncode = 130
                 return
 
+            self._batches = batches
             if not self._start_driver(n_batches):
                 return
             failed: dict[int, int] = {}
@@ -1203,6 +1231,7 @@ class _BatchedRemoteProcess:
                     check=False,
                 )
                 rc = self._await_batch(batch_idx + 1, n_batches)
+                self._release_nanowell_batch(rc, batch_zips)
                 if rc is None:
                     # The driver is gone. Nothing further will ever be run, and
                     # whether that was a Stop or a dead node the outcome is the

@@ -1371,7 +1371,10 @@ the remote's home directory, which on an HPC system is exactly the volume with
 the small quota, and a run that overflows it fails partway through with a
 message about space. Set it to your site's real scratch: `$TMPDIR`,
 `$SLURM_TMPDIR` and `/scratch/$USER` all work as written — the value is expanded
-on the remote, not here. This is separate from **Scratch disk** in the form
+on the remote, not here. A per-job folder (`$TMPDIR` or `$SLURM_TMPDIR` on most
+clusters) is emptied when the job ends, which costs the resume of a well a
+stopped run left part-way — it starts that well again; `/scratch/$USER` and the
+default keep it. This is separate from **Scratch disk** in the form
 above, which governs local runs and is not used when the pipeline runs remotely.
 
 **Empty-well correction works with batching.** If you set background or flat-field correction to **empty_well** and name a blank well, that well is uploaded once, on its own, before the batches start — every batch then corrects against the same reference. A blank that still needs processing is run once, with the last batch; one that a re-run has already completed is uploaded as a reference only and not processed again. The blank is never diffed or skipped by the incremental filters either, since it is the input the correction is built from rather than a well whose output you are waiting for. If it cannot be found at all, the run stops and says which well it looked for and where, instead of quietly producing uncorrected numbers.
@@ -1401,7 +1404,10 @@ because none of it applies:
   `N` wells at a time, which bounds peak disk on the remote to roughly `N` wells
   of input plus about one well of output, at the cost of reloading the
   segmentation model once per batch (a few seconds each). Set it from the
-  remote's free disk, not from its core count.
+  remote's free disk, not from its core count. A nanowell run holds a whole
+  batch's input and output until that batch ends — its end-of-batch
+  re-anchoring may re-run any of those wells — and then frees them, so for
+  nanowells the peak is about `N` wells of input plus `N` wells of output.
 - **Auto-delete remote files when done.** On by default. After a run the app
   verifies succeeded, it deletes both the per-run output directory and the
   cached input on the remote, so a shared machine does not fill up. It never
@@ -1533,6 +1539,28 @@ and by `remote_fetch_report.txt` in the output folder.
   incrementally on its own, and the log says so. **Force reprocess all wells**
   overrides that: every well is recomputed from scratch, and on a remote run
   every well is uploaded whole, even one that is already complete locally.
+  A remote run in batches that is restarted — after Stop, Suspend, or a lost
+  node — first checks what the host still holds from the earlier attempt with
+  the same settings. A well that finished there but had not been downloaded
+  yet is downloaded rather than uploaded and run again, and an input archive
+  that was already uploaded is reused rather than sent again (one that differs
+  from your copy is still re-sent). The log lists both, and names any well the
+  earlier attempt's record says was finished, uploaded or downloaded that is
+  nonetheless being redone, with the reason. A well the earlier attempt left
+  part-way continues from its last finished field rather than starting again —
+  provided the host's scratch folder survives between runs (the default
+  `~/.allwell/scratch` does; a per-job `$SLURM_TMPDIR` does not). The run log
+  names the folder on each batch's `Scratch  :` line, and the host's
+  **Remote scratch dir** field (*Advanced (remote paths)* in the host dialog) is empty when
+  it is the default. A
+  restart that picks up an earlier attempt says, before anything runs, which
+  wells will continue and from how many finished fields. This holds for
+  a run stopped on an earlier version too, as long as the settings and images
+  are unchanged. With Force, finished wells are recomputed, but uploaded inputs
+  are still reused. On an incremental remote
+  run, merging a downloaded well into your local results happens alongside the
+  next downloads rather than holding them, and the merged CSV is written
+  straight to its `.csv.gz`.
 - **Stop** signals the entire pipeline process group (sub-workers included) and
   discards whatever is in flight. Press it a second time during a Suspend if you
   do not want to wait for the in-flight fields.
@@ -3705,7 +3733,9 @@ still exported (see below).
   room for even one well, stops — see **Start even if the disk looks too
   small** under Compute options for when that refusal is wrong and how to
   overrule it); as wells complete it measures what they
-  actually wrote and warns once if the rest of the plate will not fit; and if a
+  actually wrote — only what this run added, so results already in the output
+  folder from earlier batches or an earlier run do not count against each new
+  well — and warns once if the rest of the plate will not fit; and if a
   volume does fill, the error names *which* volume and how much is left on it
   instead of the bare system message. Free space, or point **Scratch disk** at a
   roomier volume, and re-run with **incremental** — the wells already written are
@@ -7338,7 +7368,7 @@ architecture-specific and can't produce a universal binary.
 | `⌘←` / `Ctrl+←` | Back through tab history |
 | `⌘→` / `Ctrl+→` | Forward through tab history |
 | `⌘/` / `Ctrl+/` | Open the help drawer |
-| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception |
+| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception. While the drawer is shut, a "!" badge on the status bar's log button says new lines have arrived — blue for routine messages, amber once a warning has come in, red once an error has — and it clears when you open the drawer |
 | `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |
 | `⌘W` / `Ctrl+W` | Close window |
 

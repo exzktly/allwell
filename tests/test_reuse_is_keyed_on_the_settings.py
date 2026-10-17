@@ -389,7 +389,10 @@ def test_a_remote_run_brings_the_settings_marker_back_with_the_well():
 
     from services.remote_fetch import Fetcher
 
-    src = inspect.getsource(Fetcher._fetch_one)
+    # Every fetched well is put into the output by `_place` — inline, or on the Placer's thread for an
+    # incremental run (services/remote_fetch_place) — and `_fetch_one` hands every well to it.
+    assert "self._place" in inspect.getsource(Fetcher._fetch_one)
+    src = inspect.getsource(Fetcher._place)
     assert "_pull_settings_marker" in src, (
         "a fetched well is never asked for the record of which configuration "
         "produced it, so the settings check cannot fire on a remote plate")

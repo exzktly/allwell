@@ -254,7 +254,7 @@ def _batched(tmp_path, wells, batch_size=1):
     p._output_filter = None
     p._progress = None
     p._fetcher = types.SimpleNamespace(
-        run=types.SimpleNamespace(well_count_total=0, fetched_wells=set()),
+        run=types.SimpleNamespace(well_count_total=0, fetched_wells=set(), nanowell=False),
         observe=lambda line: None,
         flush_and_join=lambda *a, **k: None,
         cancel=lambda: p._cancelled.append(True),

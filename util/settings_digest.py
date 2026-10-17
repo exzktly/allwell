@@ -205,13 +205,64 @@ def settings_digest(opts) -> str:
     Returns ``""`` when *opts* sets none of them, which a caller must read as
     "unknown", never as "matches".
     """
+    return _digest(opts, KEYED_ON, skip_nanowell_outside_mode=True)
+
+
+#: The ways earlier builds computed :func:`settings_digest`, newest first. Each is a change to the *definition*
+#: that left the same options hashing to a different value, so a plate recorded by such a build would read as
+#: recorded under other settings — its finished wells re-run, its half-finished wells' checkpoints refused — though
+#: nothing it computes differs. Each entry says what the earlier definition did differently.
+_EARLIER_DEFINITIONS: tuple[dict, ...] = (
+    # Before the nanowell options stopped counting outside nanowell mode, and before ``nanowell_geometry``
+    # existed. Their parser defaults were hashed into every run's digest.
+    {"skip_nanowell_outside_mode": False, "without": frozenset({"nanowell_geometry"})},
+)
+
+#: Joins a settings key's current digest to the digests earlier builds would have recorded for the same options
+#: (:func:`settings_key_for`). Not a hex character, so it can never occur inside a digest.
+KEY_ALIAS_SEP = "~"
+
+
+def legacy_settings_digests(opts) -> tuple[str, ...]:
+    """The digests earlier builds would have recorded for *opts*, distinct and without the current one."""
+    current = settings_digest(opts)
+    found = []
+    for definition in _EARLIER_DEFINITIONS:
+        digest = _digest(opts, KEYED_ON.keys() - definition["without"],
+                         skip_nanowell_outside_mode=definition["skip_nanowell_outside_mode"])
+        if digest and digest != current and digest not in found:
+            found.append(digest)
+    return tuple(found)
+
+
+def settings_key_for(opts) -> str:
+    """The run's settings key: its digest, then the digests earlier builds would have recorded, ``~``-joined.
+
+    Passed everywhere the pipeline asks "was this made under these settings?", so a well or a checkpoint an
+    earlier build recorded for the same options is recognised as this run's. Only the first part is ever
+    *written* (:func:`primary_settings_key`); the rest are accepted, never recorded.
+    """
+    return KEY_ALIAS_SEP.join((settings_digest(opts), *legacy_settings_digests(opts)))
+
+
+def primary_settings_key(key: str) -> str:
+    """The digest a settings key records and names directories after: its first part."""
+    return str(key or "").split(KEY_ALIAS_SEP, 1)[0]
+
+
+def settings_key_aliases(key: str) -> tuple[str, ...]:
+    """Every digest a settings key accepts, the current one first."""
+    return tuple(part for part in str(key or "").split(KEY_ALIAS_SEP) if part)
+
+
+def _digest(opts, keys, *, skip_nanowell_outside_mode: bool) -> str:
     payload = {}
     try:
         nanowell = bool(opts["nanowell_format"])
     except (KeyError, TypeError):
         nanowell = False
-    for key in sorted(KEYED_ON):
-        if key.startswith(_NANOWELL_PREFIX) and not nanowell:
+    for key in sorted(keys):
+        if skip_nanowell_outside_mode and key.startswith(_NANOWELL_PREFIX) and not nanowell:
             # The nanowell options carry parser defaults on every run, nanowell or not. Keyed on them
             # outside the mode, every plate recorded before they existed would read as recorded under
             # other settings and be re-run (roll-up review X5); they describe nothing such a run did.
@@ -247,4 +298,6 @@ def settings_match(recorded: str, current: str) -> bool:
     """
     if not recorded or not current:
         return True
-    return recorded == current
+    # *current* may carry the digests earlier builds would have recorded for the same options
+    # (:func:`settings_key_for`); a well recorded under any of them was made under these settings.
+    return recorded in settings_key_aliases(current)

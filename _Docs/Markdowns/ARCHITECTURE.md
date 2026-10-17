@@ -8226,8 +8226,9 @@ Four things about it are load-bearing:
   `TimeScan`, so a helper-only change cannot retain an old reader signature.
 - **It never writes into the images' own folder.** A plate is routinely on a
   read-only archive, a share somebody else administers, or a cloud-sync root.
-  The cache lives beside the boot log — `%LOCALAPPDATA%\allwell\czi-scans` or
-  `~/.cache/allwell/czi-scans` — one file per scanned folder, named for the
+  The cache lives beside the boot log — `czi-scans` in the first usable folder
+  of `util.state_dir.candidate_dirs()`, normally `~/.cache/allwell/czi-scans` —
+  one file per scanned folder, named for the
   folder and hashed on its absolute path so two plates called `split` under
   different parents do not share an entry. `ALLWELL_SCAN_CACHE` points it
   elsewhere, or `off` disables it.
@@ -16878,9 +16879,12 @@ Three places to check:
 ### 12.8 "The app died with no Python traceback (segfault / access violation)"
 
 `startup.boot_diag` is imported before PySide6 and arms `faulthandler` onto a per-launch
-**boot log** in `startup.boot_diag.user_state_dir()` — `%LOCALAPPDATA%\allwell` on
-Windows, `~/.cache/allwell` elsewhere, the system temp directory if neither is
-writable (a candidate that exists but fails `os.access(…, W_OK)` is passed over,
+**boot log** in `startup.boot_diag.user_state_dir()`, which is
+`util.state_dir.user_state_dir()` — the one folder every local log and cache
+shares, so the remote-bootstrap logs (`services/remote_bootstrap.py`) and the
+CZI scan cache always sit beside the boot log. It is `~/.cache/allwell` on every
+platform, falling back to `%LOCALAPPDATA%\allwell` (when set) and then the
+system temp directory when the folder before it is not writable (a candidate that exists but fails `os.access(…, W_OK)` is passed over,
 since `mkdir(exist_ok=True)` succeeds on it and the log's `open` would then fail
 silently with nothing else tried), and also where a frozen build's matplotlib
 font cache goes — so a

@@ -1816,8 +1816,9 @@ What this means in use:
 - **Image Table and Segmentation read one field at a time.** Outlines, the
   threshold view, the exclusion overlay and the hover value read only the
   columns they need, select the field before doing any work, and remember the
-  answer until an edit, so a field drawn again (another channel, a LUT or zoom
-  change) reads nothing.
+  answer until an edit that changes which cells count, so a field drawn again
+  (another channel, a LUT or zoom change, a new fraction-on threshold) reads
+  nothing.
 - **Live counts say when they cover part of the plate.** QC's "flagged" count,
   the crop's status line and Cell Gating's "Included for analysis" are
   recalculated on every edit, so they count the wells in memory; when those are
@@ -5123,8 +5124,13 @@ channel for every well).
   override.
 - **Pixel readout** — hover a rendered cell to see that pixel's intensity (prefixed
   with the cell's combo identity), plus the segmented cell's id and **mean intensity
-  (MFI)** when the cursor is over one; the readout now stays put when the cursor comes
-  to rest instead of reverting to the plain cell tooltip.
+  (MFI)** when the cursor is over one. The MFI is read in the background, so the
+  first hover over a cell may show `MFI: loading…` briefly; the readout fills in by
+  itself when the value arrives, even if the cursor is resting, and only the cell
+  under the cursor is ever waited for. The readout stays put when the cursor comes
+  to rest instead of reverting to the plain cell tooltip. Opening another dataset,
+  or reloading this one, drops every remembered MFI, so the readout always quotes
+  the data that is open.
 - **Per-cell tweak** — right-click any rendered cell to override just that cell's
   well / channel / timepoint / FOV.
 - **Export to PowerPoint…** — writes the grid as a slide of **editable frames**

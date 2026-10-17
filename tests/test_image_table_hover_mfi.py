@@ -35,6 +35,7 @@ import pandas as pd
 import pytest
 
 from domain.image_identity import cell_key_tuples_for_dataframe, map_distinct, normalize_tp
+from review.features.image_browser.image_table import _hover_mfi
 from review.features.image_browser.image_table import controller as it_controller
 from review.features.image_browser.image_table.state import ImageTableState
 from review.features.image_browser.review_image import collect
@@ -117,9 +118,9 @@ def _ctx():
 def test_moving_across_cells_of_one_well_builds_the_index_once(reads, monkeypatch):
     mask = np.zeros((4, 4), dtype=np.int32)
     mask[1, 2] = 4
-    monkeypatch.setattr(it_controller, "_load_mask_array",
+    monkeypatch.setattr(_hover_mfi, "_load_mask_array",
                         lambda ctx, cache, well, tp, fov: mask)
-    monkeypatch.setattr(it_controller, "_submit_mfi", lambda job: job())
+    monkeypatch.setattr(_hover_mfi, "_submit_mfi", lambda job, **_k: job())
     ctx = _ctx()
     first, second = SimpleNamespace(), SimpleNamespace()
 
@@ -130,9 +131,37 @@ def test_moving_across_cells_of_one_well_builds_the_index_once(reads, monkeypatc
     assert it_controller._cell_mfi(ctx, second, "gfp", "A01", "0", "1", 0, 0) is None
     assert len(reads) == 1
 
-    ctx.state.image_table.clear_caches()
-    it_controller._cell_mfi(ctx, SimpleNamespace(), "gfp", "A01", "0", "1", 2, 1)
-    assert len(reads) == 2, "a dataset swap must drop the memoized index"
+
+
+def test_a_new_generation_drops_the_index_and_disowns_old_cells(reads, monkeypatch):
+    """What ``clear_caches`` — which the load's swap path calls; the slow-lane
+    ``test_image_table_hover_follows_the_dataset.py`` drives that real path —
+    must do to the hover readout: a fresh memo, and a cell drawn for the previous
+    generation quoting nothing rather than the previous dataset's MFI. A lookup
+    queued before the bump writes into the memo it captured, never the new one."""
+    mask = np.zeros((4, 4), dtype=np.int32)
+    mask[1, 2] = 4
+    monkeypatch.setattr(_hover_mfi, "_load_mask_array",
+                        lambda ctx, cache, well, tp, fov: mask)
+    queued: list = []
+    monkeypatch.setattr(_hover_mfi, "_submit_mfi", lambda job, **_k: queued.append(job))
+    ctx, old_cell, queued_cell = _ctx(), SimpleNamespace(), SimpleNamespace()
+    assert it_controller._cell_mfi(ctx, old_cell, "gfp", "A01", "0", "1", 2, 1) is it_controller.MFI_PENDING
+    queued.pop()()
+    assert it_controller._cell_mfi(ctx, old_cell, "gfp", "A01", "0", "1", 2, 1) == 20.0
+    assert it_controller._cell_mfi(ctx, queued_cell, "gfp", "A01", "0", "1", 2, 1) is it_controller.MFI_PENDING
+    st = ctx.state.image_table
+    st.mfi_index.clear()                     # so the queued job has to build it
+
+    st.clear_caches()
+    queued.pop()()                           # lands after the swap
+
+    assert st.mfi_index == {}, "a lookup queued before the swap wrote into the new memo"
+    assert it_controller._cell_mfi(ctx, old_cell, "gfp", "A01", "0", "1", 2, 1) is None, (
+        "a cell drawn for the previous dataset still quotes its MFI")
+    monkeypatch.setattr(_hover_mfi, "_submit_mfi", lambda job, **_k: job())
+    assert it_controller._cell_mfi(ctx, SimpleNamespace(), "gfp", "A01", "0", "1", 2, 1) == 20.0
+    assert len(reads) == 3, "the new generation must read the well again"
 
 
 def test_the_mouse_handler_never_reads_the_disk_itself(reads, monkeypatch):
@@ -145,8 +174,8 @@ def test_the_mouse_handler_never_reads_the_disk_itself(reads, monkeypatch):
         return np.full((4, 4), 4, dtype=np.int32)
 
     queued: list = []
-    monkeypatch.setattr(it_controller, "_load_mask_array", _mask)
-    monkeypatch.setattr(it_controller, "_submit_mfi", queued.append)
+    monkeypatch.setattr(_hover_mfi, "_load_mask_array", _mask)
+    monkeypatch.setattr(_hover_mfi, "_submit_mfi", lambda job, **_k: queued.append(job))
     ctx, label = _ctx(), SimpleNamespace()
 
     for _ in range(3):  # three mouse moves before the worker gets to it

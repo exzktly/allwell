@@ -29,7 +29,9 @@ Bar, Scatter, Scatter Aggregate, Response, Distribution and the Heat Map's own
 ``redraw_*`` — return early while held, for the same reason.
 
 A pass the user restarts by editing a gate is cancelled without a signal and
-replaced, so the replacement's end lifts the hold. A pass that belongs to a
+replaced, so the replacement's end lifts the hold. A pass cancelled by
+``cell_gating_recompute_now`` has no asynchronous replacement, so that function
+lifts the hold itself once its synchronous pass ends. A pass that belongs to a
 previous dataset is cancelled by that dataset's swap and emits nothing.
 """
 

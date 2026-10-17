@@ -201,7 +201,7 @@ REMOTE_STAGING_BUDGET = 1348
 # feature landed there rather than growing the controller, and the controller
 # re-exports the names so call sites are unchanged. Genuine extraction — ratchet
 # down to the new size.
-IMAGE_TABLE_CONTROLLER_BUDGET = 1333
+IMAGE_TABLE_CONTROLLER_BUDGET = 1230
 # 875 -> 831: the aggregate figure's two compact legend keys moved into
 # ``scatter/_annotations.py`` beside the value-label overlay — both are text
 # written over the points rather than anything deciding what a point is, the

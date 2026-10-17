@@ -238,13 +238,15 @@ def current_help_subject(ctx) -> str:
     return current_layer(ctx) or name
 
 
-def _pay_cell_gating_if_shown(ctx) -> None:
+def pay_cell_gating_if_shown(ctx) -> None:
     """Read Cell Gating's curves now, if a load left them owed and the tab is in front.
 
     A dataset load rebuilds the Cell Gating controls but reads no cells for its
     CDFs and optimizer lists — a first-frame read of every well, for figures only
     this tab draws. The reading is done here, the first time the tab is shown
-    after the load (and is a no-op when nothing is owed).
+    after the load (and is a no-op when nothing is owed). While a gating pass
+    is still writing the frames it would read, the reading stays owed and the
+    pass's end calls this again (the ``home.pay_cell_gating_if_shown`` service).
     """
     if current_subtab(ctx) == "Cell Gating":
         ctx.features.call("cell_gating.read_owed_cell_areas", ctx)
@@ -257,7 +259,7 @@ def on_home_subtab_changed(ctx, idx: int) -> None:
     if name == "Cell Gating":
         # Pick up any gates drawn on the Scatter tab since the last visit.
         _cell_gating_sync_scatter_gates(ctx)
-        _pay_cell_gating_if_shown(ctx)
+        pay_cell_gating_if_shown(ctx)
     elif name == "Pipeline Info":
         cb = ctx.runtime.pipeline_info.refresh
         if callable(cb):
@@ -298,7 +300,7 @@ def activate_home(ctx) -> None:
     resync_run_check(ctx)
     refresh_home(ctx)
     sync_home_sidebar(ctx)
-    _pay_cell_gating_if_shown(ctx)
+    pay_cell_gating_if_shown(ctx)
     if current_subtab(ctx) in definition_subtabs(ctx):
         groups_centre_refresh(ctx)
         _cell_gating_sync_scatter_gates(ctx)

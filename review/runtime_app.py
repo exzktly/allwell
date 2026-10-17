@@ -210,6 +210,9 @@ def teardown_review_pane(app) -> None:
     # A per-cell export renames its temp file only at the end, so a writer
     # killed at exit leaves that temp hidden in the user's own folder.
     stop_runtime_callable(runtime, "export", "cell_stop")
+    # The Image Table's hover MFI lookups run on a daemon thread; dropping the
+    # pending one means a quit after a cursor sweep does not read on for it.
+    stop_runtime_callable(runtime, "image_table", "mfi_stop")
     try:
         from review.core.split_view import _remove_split_focus_filter
         _remove_split_focus_filter(app._ctx)

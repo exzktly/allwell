@@ -916,11 +916,16 @@ def get_timepoints_with_rows(ctx) -> list[float]:
 
     The Statistics tab's timepoint menu offers every acquired timepoint, whatever
     the verdicts say — a question about the plate's acquisitions, which every
-    well's summary already answers (``well_summary.WellSummary.timepoints``,
+    well's summary already answers (``well_summary.WellSummary.hour_timepoints``,
     taken from its parse when the dataset was first opened and kept beside the
     Parquet cache). So nothing is read: a scan of the plate for this used to run
     on every open, a read of every well the row cache did not hold. A context
     whose wells have no summaries (a test's bare state) falls back to that scan.
+
+    Only ``timepoint_hours`` counts, as in the scan: the Statistics collectors
+    select rows on that column alone, so a timepoint that only a ``timepoint``
+    label names (``WellSummary.timepoints`` parses those too) would be offered
+    and then compute nothing at all.
     """
     dataset = ctx.state.dataset
     summaries = getattr(dataset, "summaries", None) or {}
@@ -928,7 +933,7 @@ def get_timepoints_with_rows(ctx) -> list[float]:
     if labels and all(label in summaries for label in labels):
         timepoints: set[float] = set()
         for label in labels:
-            timepoints.update(summaries[label].timepoints)
+            timepoints.update(summaries[label].hour_timepoints)
         return sorted(timepoints)
     return _timepoint_scan(ctx, included=False)
 

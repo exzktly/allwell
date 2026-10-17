@@ -20,6 +20,8 @@ import io
 import logging
 from dataclasses import dataclass
 
+from review.core import plot_hold
+
 from .controller import (
     absent_wells_sentence,
     _card_for_tab, _gating_recompute_now, _reapply_target_tab,
@@ -65,6 +67,13 @@ def render_saved_plot(ctx, rec) -> RenderedPlot:
         restore_saved_plot(ctx, rec.id, adopt_groups=True)
         if _gating_recompute_now(ctx):
             _reapply_target_tab(ctx, rec.params.get("active_centre_tab") or rec.tab)
+        held = plot_hold.held_for(ctx)
+        if held:
+            # Every redraw body returns early while plots are held, so the figure
+            # still holds whatever it last drew. Capturing it would hand the
+            # report a non-empty picture of the wrong thing, listed as drawn.
+            return RenderedPlot(reason=f"plots were held ({held}) when it was "
+                                       f"drawn, so the figure was never redrawn")
         figure = card.figure
         buf = io.BytesIO()
         with card._publication_capture():

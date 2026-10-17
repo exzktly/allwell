@@ -1710,11 +1710,10 @@ class FetchedOutputVerifier:
 
             Emitted whenever the well's zip is complete locally by the time this
             pass is done with it — including the case where it was already
-            there. That is not padding: the pair only completes when *both*
-            halves are reported, and a well reaches this backstop having
-            registered neither, because the in-stream fetcher returns on a
-            failed zip pull before it ever gets to the CSVs.
-            """
+            there, and under CSV-only, which keeps none (the in-stream fetch
+            reports that half too). Not padding: the pair completes only when
+            *both* halves are reported, and a well reaches this backstop having
+            registered neither."""
             mb = local_output_mb(run, well)          # also a FOLDER-mode or CSV-only well (remote_fetch_place)
             if mb is None:
                 return
@@ -1745,6 +1744,7 @@ class FetchedOutputVerifier:
                     _pull(f)
                 retire_superseded_csvs(files, run.local_output_dir)
             _report_csvs(well, time.monotonic() - well_t0)
+            if run.output_filter is OutputFilter.CSV_ONLY: _report_zip(well, 0.0)     # its zip half: nothing to pull
             # Re-pull {well}_out.zip ONLY when the user's output mode wants it
             # AND it isn't already present locally. Pulling a multi-hundred-MB
             # zip just because a CSV was missing is what dragged this backstop

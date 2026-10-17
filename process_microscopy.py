@@ -178,7 +178,7 @@ from pipeline.fov_checkpoint import (
     _load_fov_checkpoint,
     _save_fov_checkpoint,
     _staging_dir_for,
-    sweep_run_scratch,
+    release_staging, sweep_run_scratch,
 )
 from pipeline.settings_record import (
     record_well_settings,
@@ -194,7 +194,7 @@ from pipeline.well_skip import (
 from pipeline.run_report import (
     clear_run_report,
     finalize_run_report, read_run_report_block,
-    record_well_completeness,
+    record_well_completeness, seal_well_complete,
 )
 from pipeline.completeness import record_run_check
 from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
@@ -2386,7 +2386,7 @@ def process_well_zip_task(
             # Here, and not in the parent's result loop: see
             # `record_well_settings` on why the caller has to be past every
             # short circuit and after both artefacts are written.
-            record_well_settings(output_dir, well_label, settings_key)
+            record_well_settings(output_dir, well_label, settings_key); seal_well_complete(output_dir, well_label)
             log.info("Well %s — done.", well_label)
             return records, failed
         except BaseException as exc:
@@ -2407,7 +2407,7 @@ def process_well_zip_task(
 
     finally:
         remove_directory(tmp_extract)
-        remove_directory(tmp_images)
+        release_staging(output_dir, well_label, tmp_images)    # kept when a suspend left the well part way
         log.info("Well %s — temporary directories removed.", well_label)
 
 
@@ -2602,7 +2602,7 @@ def process_well_folder_task(
             # Here, and not in the parent's result loop: see
             # `record_well_settings` on why the caller has to be past every
             # short circuit and after both artefacts are written.
-            record_well_settings(output_dir, well_label, settings_key)
+            record_well_settings(output_dir, well_label, settings_key); seal_well_complete(output_dir, well_label)
             log.info("Well %s — done.", well_label)
             return records, failed
         except BaseException as exc:

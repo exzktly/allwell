@@ -4,7 +4,8 @@ The Cell Gating tab is the QC editing home: the QC debris gate is a *fundamental
 inclusion layer that is always applied (``QC_Pass`` at the ``df_included_mask``
 chokepoint), composing with the FluorGating thresholds and the scatter gates that
 also live on this tab. A checkbox applies when it is clicked and a typed bound
-when the user presses Enter or leaves its box, never per keystroke; each change
+when the user presses Enter, leaves its box, or stops typing for
+:data:`_TYPING_PAUSE_MS` — never per keystroke; each change
 that alters a value recomputes the per-cell
 ``QC_Pass`` verdict, re-flags every plot/stat/the Review table, and refreshes the
 Segmentation overlay (which still *renders* the verdict so excluded cells show
@@ -18,6 +19,7 @@ step, not part of this gate.
 from __future__ import annotations
 
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QVBoxLayout, QWidget,
@@ -95,6 +97,14 @@ _FQ_TEXT_INDENT = 27
 #: it sits on a checkbox's row and a box wider than its text reads as an empty
 #: field somebody forgot.
 _FOCUS_EDIT_W = 64
+
+#: How long typing must pause before a typed bound applies on its own. Enter
+#: and leaving the box apply at once; this is for the click that moves no focus
+#: — a plot canvas, a tool button, a tab bar, a chip — after which
+#: ``editingFinished`` never comes and the box would go on showing a bound that
+#: is not in force. Long enough that typing "120" at an ordinary pace applies
+#: only 120: the 350 ms this once was applied 1, then 12, then 120.
+_TYPING_PAUSE_MS = 1000
 
 
 def _fmt(v: float | None) -> str:
@@ -452,15 +462,28 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         _update_status()
         _update_field_quality_status()
 
-    # A typed bound applies when the user is done with it — Enter or leaving
-    # the box (``editingFinished``) — never per keystroke. Typing "120" used to
-    # restart a 350 ms timer on each character, so a user who typed at a
-    # normal pace applied 1, then 12, then 120: three full recomputes of the
-    # verdict over every held cell, three saves and three redraws of every
-    # plot, two of them for numbers nobody meant. ``_apply`` also skips a value
-    # that is already in force, so Enter followed by a click elsewhere costs one
-    # update, not two. Programmatic refills (``qc_gate_refresh_widgets``) call
-    # ``setText``, which does not emit ``editingFinished``.
+    # A typed bound applies when the user is done with it: Enter or leaving
+    # the box (``editingFinished``), or a pause in typing of _TYPING_PAUSE_MS.
+    # The pause is not optional. Clicking a control that takes no focus — a
+    # plot canvas, a tool button, a tab bar, a chip — emits no
+    # ``editingFinished``, and without the pause the box went on showing the
+    # typed bound while the old one stayed in force. It is long because the
+    # 350 ms it once was fired between characters typed at a normal pace,
+    # applying 1, then 12, then 120: three recomputes of the verdict over every
+    # held cell, three saves and three redraws of every plot. ``_apply`` skips
+    # a value that is already in force, so the pause and a later Enter or focus
+    # change cost one update between them, not two. The pause is armed only
+    # while the box has focus, so a programmatic refill
+    # (``qc_gate_refresh_widgets``'s ``setText``) does not start it.
+    _pause = QTimer(row)
+    _pause.setSingleShot(True)
+    _pause.setInterval(_TYPING_PAUSE_MS)
+    _pause.timeout.connect(_apply)
+
+    def _arm_pause(edit) -> None:
+        if edit.hasFocus():
+            _pause.start()
+
     enable_cb.toggled.connect(lambda _=None: _apply())
     fq_cb.toggled.connect(lambda _=None: _apply())
     foc_cb.toggled.connect(lambda _=None: _apply())
@@ -504,9 +527,40 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
             finally:
                 foc_edit.blockSignals(blocked)
 
-    foc_edit.editingFinished.connect(_finish_cut)
+    def _finish(handler) -> None:
+        _pause.stop()
+        handler()
+
+    foc_edit.editingFinished.connect(lambda: _finish(_finish_cut))
+    foc_edit.textChanged.connect(lambda _t=None: _arm_pause(foc_edit))
     for w in _edits:
-        w.editingFinished.connect(_apply)
+        w.editingFinished.connect(lambda: _finish(_apply))
+        w.textChanged.connect(lambda _t=None, _w=w: _arm_pause(_w))
+
+    def _commit_for_close() -> None:
+        """Put a bound still being typed into state and queue its save.
+
+        Closing a window moves no focus until it hides, so ``editingFinished``
+        arrived *after* the close had drained the save queue, and the bound was
+        applied during teardown with its save armed on a timer that never
+        fired. The close sequence calls this first, through
+        ``ctx.runtime.qc.commit_pending_cb``
+        (:func:`review.core.ui_helpers.commit_pending_qc_bounds`), as it calls
+        ``commit_focused_notes``. State and the save only: the verdict
+        recompute and the redraw of every plot are work for a window about to
+        disappear, and the later ``editingFinished`` finds the value in force
+        and does nothing.
+        """
+        _pause.stop()
+        params = _fields_params()
+        if params == get_qc_params(ctx):
+            return
+        ctx.state.qc.params = params
+        pers = getattr(ctx, "persistence", None)
+        if pers is not None:
+            pers.schedule_save("qc_params")
+
+    ctx.runtime.qc.commit_pending_cb = _commit_for_close
 
     # Let a reset that clears the QC params re-fill this row without naming the
     # QC feature: the Gating reset scope fires whatever is stamped here and

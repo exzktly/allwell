@@ -523,6 +523,56 @@ def test_a_value_that_duplicates_an_existing_label_is_not_added(plate):
     assert len(sv.add_value(plate, "dose", " 1 ").by_id("dose").values) == before
 
 
+def _numeric_dose(*labels, unit="µM"):
+    vset, vid = sv.new_variable(sv.VariableSet(), "Dose")
+    vset = sv.set_kind(vset, vid, sv.NUMBER, unit=unit)
+    for label in labels:
+        vset = sv.add_value(vset, vid, label)
+    return vset, vid
+
+
+@pytest.mark.parametrize("existing, typed", [
+    ("1", "1.0"), ("1.0", "1"), ("1uM", "1 µM"), ("1 µM", "1uM"),
+    ("1 µM", "1"), ("1", "1 μM"), ("0,5", "0.5"),
+])
+def test_a_number_equal_to_an_existing_value_is_not_added(existing, typed):
+    """``1`` and ``1.0`` are one dose. Accepting both gave wells dosed ``1`` and
+    wells dosed ``1.0`` two value ids, and ``replicate_groups`` — keyed on value
+    id — then split one condition into two replicate groups called ``1`` and
+    ``1.0``, each holding part of the wells (review of #996, probe output
+    ``[('1', 1.0), ('1.0', 1.0)]``)."""
+    vset, vid = _numeric_dose(existing)
+    after = sv.add_value(vset, vid, typed)
+    assert [v.label for v in after.by_id(vid).values] == [existing]
+    assert sv.refusal_for_value(vset.by_id(vid), typed) is not None
+
+
+@pytest.mark.parametrize("existing, typed", [("1 µM", "1 nM"), ("1", "10"), ("1", "vehicle")])
+def test_a_different_number_or_unit_is_still_added(existing, typed):
+    """The other half: a rule that refused every number would pass the test
+    above. ``1 nM`` beside ``1 µM`` is a different dose, said by its unit."""
+    vset, vid = _numeric_dose(existing)
+    after = sv.add_value(vset, vid, typed)
+    assert [v.label for v in after.by_id(vid).values] == [existing, typed]
+    assert sv.refusal_for_value(vset.by_id(vid), typed) is None
+
+
+def test_a_text_variable_keeps_labels_that_read_as_the_same_number():
+    """On a text variable a label is a name, not a quantity: clone ``1`` and
+    clone ``1.0`` may be two different things."""
+    vset, vid = sv.new_variable(sv.VariableSet(), "Clone")
+    for label in ("1", "1.0"):
+        vset = sv.add_value(vset, vid, label)
+    assert [v.label for v in vset.by_id(vid).values] == ["1", "1.0"]
+
+
+def test_renaming_a_value_onto_another_values_number_is_refused():
+    vset, vid = _numeric_dose("1", "3")
+    three = vset.by_id(vid).values[1]
+    after = sv.rename_value(vset, vid, three.id, "1.0")
+    assert after.by_id(vid).value_by_id(three.id).label == "3"
+
+
 def test_renaming_a_value_onto_another_values_label_is_refused(plate):
     values = plate.by_id("dose").values
     after = sv.rename_value(plate, "dose", values[0].id, values[1].label)

@@ -100,10 +100,13 @@ def apply_gating_block(ctx, block) -> bool:
     """
     if not isinstance(block, dict) or not block:
         return False
+    previous = _fov_selection_of(ctx)
     applied = _write_gating_block_to_slice(ctx.state.cell_gating, block)
-    _reproject_fov_selection(ctx)
+    changed = _reproject_fov_selection(ctx, previous)
     if not _mirror_gating_to_widgets(ctx):
         return False
+    if changed:
+        _reread_cell_gating_cdfs(ctx)
     return applied
 
 
@@ -139,6 +142,7 @@ def restore_gating_block(ctx, block) -> None:
     Best-effort — a missing / empty / all-default block still resets + refreshes.
     """
     cg = ctx.state.cell_gating
+    previous = _fov_selection_of(ctx)
     cg.fluor_gates.clear()
     cg.thresh_frac_on.clear()
     cg.thresh_count_on.clear()
@@ -153,18 +157,34 @@ def restore_gating_block(ctx, block) -> None:
     cg.applied_gating = None
     if isinstance(block, dict) and block:
         _write_gating_block_to_slice(cg, block)
-    _reproject_fov_selection(ctx)
+    changed = _reproject_fov_selection(ctx, previous)
     _mirror_gating_to_widgets(ctx, run_worker=True)
+    if changed:
+        _reread_cell_gating_cdfs(ctx)
 
 
-def _reproject_fov_selection(ctx) -> None:
-    """Project the just-written FOV selection onto the frames already cached.
+def _fov_selection_of(ctx) -> frozenset | None:
+    """The live FOV selection as a comparable value (``None`` = every field)."""
+    selection = getattr(ctx.state.cell_gating, "fov_selection", None)
+    return None if selection is None else frozenset(selection)
+
+
+def _reproject_fov_selection(ctx, previous) -> bool:
+    """Project the just-written FOV selection onto the frames already cached,
+    if it differs from *previous*. Returns whether it did.
 
     The other gating values reach the frames through the gating pass this
     module's callers start; the FOV selection is its own verdict layer
     (``FOV_Pass``), so without this the wells cached before the block was read
     would go on counting every field until something else re-projected them.
+
+    Nothing is done when the selection did not change — which is every dataset
+    load whose block carries no selection, and every saved-plot restore drawn
+    under the selection already live. Re-projecting then would rewrite nothing
+    and still throw away every memoised statistic and population on the plate.
     """
+    if _fov_selection_of(ctx) == previous:
+        return False
     from review.core.selection_controller import invalidate_stats_cache
     from review.data.fov_selection import apply_fov_selection_to_cache
 
@@ -173,6 +193,26 @@ def _reproject_fov_selection(ctx) -> None:
     # nothing derived from the frames to throw away.
     if getattr(ctx.state, "stats_cache", None) is not None:
         invalidate_stats_cache(ctx)
+    return True
+
+
+def _reread_cell_gating_cdfs(ctx) -> None:
+    """Re-read the Cell Gating CDFs after the FOV selection changed under them.
+
+    They are drawn from the first frame of the first *kept* field, so a restored
+    or loaded selection moves them exactly as an edit on the picker does
+    (``controller.set_fov_selection`` re-reads them too). Without this they kept
+    showing the previous selection's field, and a threshold set from them was
+    set against cells no calculation used. A no-op until the tab is built; during
+    a dataset load the reading is owed to the end of the load, as always.
+    """
+    from core.safe import swallow
+
+    features = getattr(ctx, "features", None)
+    if features is None:
+        return
+    with swallow("re-read the Cell Gating CDFs after the FOV selection changed"):
+        features.call("cell_gating.load_cell_areas", ctx)
 
 
 def _write_gating_block_to_slice(cg, block: dict) -> bool:

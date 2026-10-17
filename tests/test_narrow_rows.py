@@ -294,6 +294,35 @@ def _same(a, b) -> bool:
     return len(a) == len(b) and all(len(p) == len(q) and all(map(same, p, q)) for p, q in zip(a, b))
 
 
+def test_the_image_border_layer_is_read_narrowly_too(ctx):
+    """The border gate (``Border_Pass``), with every other layer on beside it.
+
+    Not part of :data:`LAYERS` or the shared :func:`_frame`: the gate is on by
+    default for an ordinary plate (``default_exclude_border_cells``), so a
+    flagged cell in the shared fixture would be excluded in every other test's
+    pinned count. The frame is rewritten here instead, with one cell on the
+    border and no other layer excluding it. Without this, a
+    ``border_input_columns`` that returned ``()`` while the gate is on — a
+    narrow read that fails open and keeps every border cell — passed the file.
+    """
+    border_cell = 11
+    path = ctx.state.dataset.well_paths[WELL]
+    frame = _frame()
+    frame["qc_touches_border"] = 0
+    frame.loc[border_cell, "qc_touches_border"] = 1
+    frame.to_csv(path, index=False)
+    dl.read_well_frame(path)
+    for layer in LOCAL_LAYERS:
+        _switch_on(ctx, layer)
+    ctx.state.qc.params = dataclasses.replace(ctx.state.qc.params, exclude_border_cells=True)
+
+    full, narrow = _full(ctx), _narrow(ctx)
+    assert "m0" in full.columns and "m0" not in narrow.columns, "the read was not narrow"
+    assert border_cell in _excluded(full), "the border layer did not bite"
+    assert narrow["Border_Pass"].tolist() == full["Border_Pass"].tolist()
+    assert df_included_mask(narrow).tolist() == df_included_mask(full).tolist()
+
+
 def test_the_narrow_frame_never_enters_the_row_cache(ctx):
     _switch_on(ctx, "qc")
     _narrow(ctx)

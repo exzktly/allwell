@@ -31,12 +31,29 @@ from services.remote_commands import (
 )
 
 
-def _the_reported_batched_launch() -> str:
+_STAGING = "/home/zakary.singer/allwell_staging/runs"
+
+
+def _run_dir(i: int) -> str:
+    """A run directory named as ``remote_run_id`` names them: two 16-hex-digit halves, which gzip cannot shrink."""
+    import hashlib
+
+    digest = hashlib.sha256(str(i).encode()).hexdigest()
+    return f"{_STAGING}/{digest[:16]}-{digest[16:32]}"
+
+
+def _the_reported_batched_launch(aliases: int = 0) -> str:
     """The batched launch for the reporting cluster's L4 profile, with a
-    pipeline argv the length of a real Analyze run's (47 arguments)."""
-    run = "/home/zakary.singer/allwell_staging/runs/run-0123456789abcdef"
+    pipeline argv the length of a real Analyze run's (47 arguments) and what
+    ``_BatchedRemoteProcess._start_driver`` appends to it: the auto-threshold
+    switch, the suspend request, and — for every run with an empty-well blank —
+    ``--background_dir`` plus one ``--background_dir_alias`` per earlier
+    attempt the journal recorded."""
+    run = _run_dir(0)
     argv = (["/home/zakary.singer/miniforge3/envs/allwell/bin/python"]
-            + [f"--option_{i:02d}_with_a_realistic_length" for i in range(46)])
+            + [f"--option_{i:02d}_with_a_realistic_length" for i in range(46)]
+            + [f"--background_dir={run}/bg", "--no_auto_threshold", "--suspend_file", f"{run}/.aw_suspend"]
+            + [f"--background_dir_alias={_run_dir(i)}/bg" for i in range(1, aliases + 1)])
     driver = rc._batch_driver_snippet(
         run, 4, argv, heartbeat=f"{run}/.aw_heartbeat",
         suspend_request=f"{run}/.aw_suspend")
@@ -46,14 +63,37 @@ def _the_reported_batched_launch() -> str:
         f"{run}/run.pid", driver)
 
 
+#: The most earlier attempts a launch can name: the journal keeps ``REMOTE_HISTORY_MAX`` addresses, and the
+#: re-attached output directory names one more.
+_MOST_ALIASES = 21
+
+
 def test_the_reported_launch_packs_into_a_short_single_line():
     script = _the_reported_batched_launch()
     assert len(script) > 8191 and script.count("\n") >= 16, (
         "the fixture no longer has the size and shape that failed")
     packed = pack_for_login_shell(script)
     assert "\n" not in packed and "'" not in packed
-    assert len(packed) < 4096, len(packed)
+    assert len(packed) < len(script) / 2, (len(packed), len(script))
     assert unpack_login_shell_command(packed) == script
+
+
+@pytest.mark.parametrize("aliases", [0, 1, _MOST_ALIASES])
+def test_the_whole_windows_command_line_stays_under_the_limit(aliases):
+    """What the limit is about: the ssh command line Windows builds (``list2cmdline``) and Git for Windows'
+    ssh.exe parses again, which cut a launch past 8,191 characters. Measured whole — ssh, its options, the host and
+    the packed command — for a run with a blank and as many earlier attempts as the journal can name, because each
+    alias is a path of incompressible hex. Measured: the packed command is 4,172 / 4,224 / 4,948 characters for
+    0 / 1 / 21 aliases, and the whole line 4,418 / 4,470 / 5,194. This replaced a bar of 4,096 on the packed
+    command alone, which the fixture met only because it left out the blank's flags that every blank run sends."""
+    from services.run_journal import REMOTE_HISTORY_MAX
+
+    assert _MOST_ALIASES == REMOTE_HISTORY_MAX + 1
+    ssh = [r"C:\Program Files\Git\usr\bin\ssh.exe", "-tt", "-i", r"C:\Users\zakary.singer\.ssh\allwell_ed25519",
+           "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=20",
+           "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=20", "hpc-login.example.org"]
+    line = subprocess.list2cmdline(ssh + [pack_for_login_shell(_the_reported_batched_launch(aliases))])
+    assert len(line) < 8191, len(line)
 
 
 @pytest.mark.parametrize("shell", ["sh", "bash"])

@@ -601,11 +601,19 @@ def test_an_in_progress_note_is_committed_before_the_queue_is_drained():
     typing."""
     src = (REPO_ROOT / "allwell.py").read_text()
     tree = ast.parse(src)
+    # The close-time saves live in ``_save_review_before_close`` so the QC
+    # half of this order can be driven by a test
+    # (``test_qc_bounds_apply_once.py::test_a_bound_typed_as_the_window_closes_is_saved``);
+    # ``closeEvent`` must still call it.
+    close = next(n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef) and n.name == "closeEvent")
+    assert "_save_review_before_close" in ast.unparse(close)
     fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.FunctionDef) and n.name == "closeEvent")
+              if isinstance(n, ast.FunctionDef) and n.name == "_save_review_before_close")
     body = ast.unparse(fn)
     assert "commit_focused_notes" in body
     assert body.index("commit_focused_notes") < body.index("flush_all")
+    assert body.index("commit_pending_qc_bounds") < body.index("flush_all")
 
 
 # ── 8. the second review round ───────────────────────────────────────────────

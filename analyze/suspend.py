@@ -889,11 +889,19 @@ class AnalyzeSuspendMixin:
             opts["incremental"] = True
             # Every other field as recorded — see `resume_aware_spec`.
             spec = dataclasses.replace(spec, opts=opts)
-            self._show_resumed_settings(spec)
+            # The form is filled before the run starts, so that it reads as the run while it starts — and
+            # `start_run` can still refuse (an earlier run still alive, which is the usual state right after a
+            # crash; the input gone; a remote no longer configured). A refused resume must leave the user's own
+            # form as it was, or their edits are gone and the next Run uses settings they never chose.
+            before = self._form_snapshot()
+            problems = self._show_resumed_settings(spec)
             error = self.start_run(spec)
             if error is not None:
+                self._restore_form(before)
                 QMessageBox.critical(self, "Resume Error", error)
                 return
+            for problem in problems:
+                self._log_line(f"[warn] {problem}\n", "WARNING")
             # Only once the run is actually going: a record cleared on a resume
             # that then failed to start would strand the half-finished output.
             self._forget_resumable(offer)
@@ -907,7 +915,7 @@ class AnalyzeSuspendMixin:
         except Exception:
             swallowed()
 
-    def _show_resumed_settings(self, spec: RunSpec) -> None:
+    def _show_resumed_settings(self, spec: RunSpec) -> list[str]:
         """Put the resumed run's own settings on the form before it starts.
 
         The run is started from the recorded spec, not from the form, so the
@@ -917,18 +925,46 @@ class AnalyzeSuspendMixin:
         inverse of ``collect_spec`` (the job queue's Edit uses it), so the
         sidebar then reads exactly as the run's own settings do, incremental
         included. A failure to show them must not stop the resume itself.
+
+        Returns what ``hydrate_job`` could not restore, for the caller to log
+        once the run has actually started: its wording is the job queue
+        editor's, and a resume that is then refused has nothing to report.
         """
         hydrate = getattr(self, "hydrate_job", None)
         if not callable(hydrate):
-            return
+            return []
         try:
-            for problem in hydrate(spec.to_json()) or ():
-                self._log_line(f"[warn] {problem}\n", "WARNING")
+            return list(hydrate(spec.to_json()) or ())
         except Exception:
             swallowed("showing the resumed run's settings on the form")
             self._log_line(
                 "[warn] The form could not be filled from the resumed run; it "
                 "may not show the settings that run is using.\n", "WARNING")
+            return []
+
+    def _form_snapshot(self) -> dict | None:
+        """The form as it stands, in the shape ``hydrate_job`` restores, or ``None`` when it cannot be read."""
+        collect = getattr(self, "collect_spec", None)
+        if not callable(collect):
+            return None
+        try:
+            return collect()
+        except Exception:
+            swallowed("reading the form before a resume fills it")
+            return None
+
+    def _restore_form(self, snapshot: dict | None) -> None:
+        """Put back the form :meth:`_form_snapshot` read, after a resume that did not start."""
+        hydrate = getattr(self, "hydrate_job", None)
+        if snapshot is None or not callable(hydrate):
+            return
+        try:
+            hydrate(snapshot)
+        except Exception:
+            swallowed("restoring the form after a refused resume")
+            self._log_line(
+                "[warn] The resume did not start, and the form could not be put back as it was; check its "
+                "settings before the next Run.\n", "WARNING")
 
     def _discard_suspended(self) -> None:
         """Forget the record. The output folder itself is left alone."""

@@ -635,7 +635,8 @@ def imported_selection_items(payload) -> list | None:
     return None
 
 
-def merge_imported_selections(ctx, payload, *, replace: bool = False) -> int | None:
+def merge_imported_selections(ctx, payload, *, replace: bool = False,
+                              overlap: str = "skip") -> int | None:
     """Add every selection in *payload* to the plate; ``None`` if it holds none.
 
     With ``replace`` the plate's current groups are discarded first — but only
@@ -643,6 +644,29 @@ def merge_imported_selections(ctx, payload, *, replace: bool = False) -> int | N
     parses and holds nothing can never empty the plate. Without it the file's
     groups are added beside the current ones, and a name already in use gets a
     suffix rather than overwriting anything.
+
+    A well belongs to at most one group, so adding beside the current groups
+    has to decide what happens to a file's well that is already in a group
+    here — the ordinary case when groups exported from one plate are imported
+    into a sister plate with the same layout, or a plate's own export is
+    imported back. ``overlap`` is that decision, the answer
+    :func:`ask_import_overlap` gives. :data:`IMPORT_SKIP`, the default because
+    it takes nothing from any group, leaves the well where it is and gives the
+    imported group only its ungrouped wells; an imported group whose every
+    well is taken is left out rather than added empty. :data:`IMPORT_MOVE`
+    gives the well to the imported group; an existing group that this leaves
+    with no wells at all is removed, rather than kept as an empty husk that the
+    imported group of the same name would then be renamed around.
+
+    What the file says about each group is kept: its colour, its
+    ``name_is_verbatim`` flag, its ``hidden`` flag, and its id unless that id is
+    already in use here (a saved plot hides groups by id, through
+    ``selection_visibility.hidden_ids``, so a reminted id would un-hide it). The
+    file's ``current_id`` becomes the current group when that group was
+    imported; otherwise the last imported group does. The plate is redrawn
+    **once**, after every group is in — not once per group, which a 96-group
+    Quick Replicates file turned into 96 full redraws against plates holding
+    part of the file.
 
     Returns how many were added, or ``None`` for a payload with nothing
     importable in it — a distinct answer rather than ``0``, because "this file
@@ -658,46 +682,124 @@ def merge_imported_selections(ctx, payload, *, replace: bool = False) -> int | N
     written for it called ``sel_add`` directly, one step past the thing that
     was in doubt.
     """
+    result = _merge_imported(ctx, payload, replace=replace, overlap=overlap)
+    return None if result is None else result[0]
+
+
+def _file_current_id(payload) -> str | None:
+    """The ``current_id`` a groups file names, wherever its block sits."""
+    if not isinstance(payload, dict):
+        return None
+    block = payload.get("sample_definitions")
+    block = block if isinstance(block, dict) else payload
+    cid = block.get("current_id")
+    return cid if isinstance(cid, str) and cid else None
+
+
+def _merge_imported(ctx, payload, *, replace: bool,
+                    overlap: str) -> tuple[int, int] | None:
+    """:func:`merge_imported_selections`, also counting the groups Skip left
+    out because every one of their wells was already in a group."""
+    from domain.selections_format import _clean_wells, make_selection
+
     items = imported_selection_items(payload)
     if not items:
         return None
     usable = [sel for sel in items if isinstance(sel, dict)]
+    sel_state = ctx.state.selection
     if replace and usable:
-        ctx.state.selection.selections = []
-        ctx.state.selection.current_selection_id = None
+        sel_state.selections = []
+        sel_state.current_selection_id = None
 
-    added = 0
+    owned = {w for s in sel_state.selections for w in (s.get("wells") or [])}
+    if overlap == IMPORT_MOVE and owned and usable:
+        incoming = {w for sel in usable for w in _clean_wells(sel.get("wells"))}
+        had_wells = {s.get("id") for s in sel_state.selections if s.get("wells")}
+        sel_strip_wells(ctx, incoming)
+        sel_state.selections = [s for s in sel_state.selections
+                                if s.get("wells") or s.get("id") not in had_wells]
+        if not any(s.get("id") == sel_state.current_selection_id
+                   for s in sel_state.selections):
+            sel_state.current_selection_id = None
+        owned = set()
+
+    used_names = {s.get("name") for s in sel_state.selections}
+    used_ids = {s.get("id") for s in sel_state.selections}
+    file_current = _file_current_id(payload)
+    added = left_out = 0
+    last = from_file = None
     for sel in usable:
         name = sel.get("name") or "Imported"
-        wells = sel.get("wells") or []
-        replicates = sel.get("replicates")
-        source = sel.get("source") or "imported"
+        wells = _clean_wells(sel.get("wells"))
+        if owned:
+            kept = [w for w in wells if w not in owned]
+            if wells and not kept:
+                left_out += 1
+                continue
+            wells = kept
         try:
             # The file's own flag, carried rather than re-derived: an
             # imported group called ``10`` was named after a dose on the plate
             # it came from, and dropping that here would relabel it as its
             # wells on every axis in this dataset.
-            sel_add(ctx, name=name, wells=list(wells),
-                    replicates=replicates, source=source,
-                    name_is_verbatim=bool(sel.get("name_is_verbatim")),
-                    color=sel.get("color"))
-            added += 1
+            new = make_selection(
+                name=name, wells=wells, replicates=sel.get("replicates"),
+                source=sel.get("source") or "imported",
+                hidden=sel.get("hidden", False), sel_id=sel.get("id"),
+                name_is_verbatim=bool(sel.get("name_is_verbatim")),
+                color=sel.get("color"), used_names=used_names, used_ids=used_ids,
+                fallback_color_idx=len(sel_state.selections))
         except Exception:
             _logger = __import__("logging").getLogger("review.runtime_app")
             _logger.exception("Import selection failed for %r", name)
-    return added
+            continue
+        # Within one file, too, a well belongs to one group: a later entry
+        # naming an earlier entry's well takes it, as sel_add always did.
+        sel_strip_wells(ctx, new["wells"], keep_id=new["id"])
+        sel_state.selections.append(new)
+        added += 1
+        last = new["id"]
+        if file_current is not None and sel.get("id") == file_current:
+            from_file = new["id"]
+    if added:
+        sel_state.current_selection_id = from_file or last
+        ctx.coordinator.rebuild_all()
+    return added, left_out
+
+
+def import_overlap(ctx, payload) -> dict[str, str]:
+    """The file's wells that are already in a group here → that group's name.
+
+    In plate order of the file's own listing; empty when nothing overlaps,
+    which is when Add has nothing to ask.
+    """
+    from domain.selections_format import _clean_wells
+
+    owner = {w: (s.get("name") or "")
+             for s in ctx.state.selection.selections for w in (s.get("wells") or [])}
+    out: dict[str, str] = {}
+    for sel in imported_selection_items(payload) or ():
+        if isinstance(sel, dict):
+            for w in _clean_wells(sel.get("wells")):
+                if w in owner:
+                    out.setdefault(w, owner[w])
+    return out
 
 
 #: The two answers :func:`ask_import_mode` can give besides cancelling.
 IMPORT_ADD, IMPORT_REPLACE = "add", "replace"
+#: The two answers :func:`ask_import_overlap` can give besides cancelling.
+IMPORT_SKIP, IMPORT_MOVE = "skip", "move"
 
 
 def ask_import_mode(ctx, existing: int, incoming: int) -> str | None:
     """Ask whether a groups file adds to the current groups or replaces them.
 
     Returns :data:`IMPORT_ADD`, :data:`IMPORT_REPLACE`, or ``None`` for Cancel.
-    Adding is the default button because it is the answer that cannot lose
-    anything. A module-level function so a test can answer it.
+    Adding is the default button because it never discards a current group
+    outright. It is not by itself the whole answer: when the file's wells are
+    already in groups here, :func:`ask_import_overlap` asks a second question
+    before anything changes. A module-level function so a test can answer it.
     """
     from PySide6.QtWidgets import QMessageBox
 
@@ -724,13 +826,58 @@ def ask_import_mode(ctx, existing: int, incoming: int) -> str | None:
     return None
 
 
+def ask_import_overlap(ctx, overlap: dict[str, str]) -> str | None:
+    """Ask what Add does with the file's wells that are already in a group.
+
+    *overlap* maps each such well to the group it is in now
+    (:func:`import_overlap`). Returns :data:`IMPORT_SKIP` (keep them where they
+    are; the imported groups get only the ungrouped wells), :data:`IMPORT_MOVE`
+    (give them to the imported groups), or ``None`` for Cancel, which aborts
+    the import with nothing changed. Skip is the default because it takes
+    nothing from any current group. A module-level function so a test can
+    answer it — a modal reached from a test blocks for ever offscreen.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    by_group: dict[str, list[str]] = {}
+    for well, group in overlap.items():
+        by_group.setdefault(group, []).append(well)
+    n = len(overlap)
+    box = QMessageBox(ctx.window)
+    box.setIcon(QMessageBox.Question)
+    box.setWindowTitle("Import groups")
+    box.setText(f"{n} {'well' if n == 1 else 'wells'} in this file "
+                f"{'is' if n == 1 else 'are'} already in a group here.")
+    box.setInformativeText(
+        "\n".join(f"{group}: {', '.join(wells)}" for group, wells in by_group.items())
+        + "\n\nSkip keeps them where they are, and the imported groups get only "
+        "the wells in no group (an imported group left with none is not added). "
+        "Move gives them to the imported groups; a current group left with no "
+        "wells is removed.")
+    skip_btn = box.addButton("Skip these wells", QMessageBox.AcceptRole)
+    move_btn = box.addButton("Move them to the imported groups",
+                             QMessageBox.DestructiveRole)
+    box.addButton(QMessageBox.Cancel)
+    box.setDefaultButton(skip_btn)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is skip_btn:
+        return IMPORT_SKIP
+    if clicked is move_btn:
+        return IMPORT_MOVE
+    return None
+
+
 def import_selections_from_json(ctx) -> None:
     """Import a groups JSON file into the plate — the app's one groups import.
 
     Reads every shape :func:`imported_selection_items` does. When the dataset
     already has groups the user chooses between adding the file's groups beside
     them and replacing them (:func:`ask_import_mode`); with none there is
-    nothing to choose and they are simply added.
+    nothing to choose and they are simply added. When adding would put a well
+    that is already in a group here into an imported one, a second question
+    (:func:`ask_import_overlap`) names those wells and asks whether to skip
+    them or move them; cancelling either question changes nothing.
     """
     import json
     from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -760,15 +907,26 @@ def import_selections_from_json(ctx) -> None:
         if mode is None:
             return
         replace = mode == IMPORT_REPLACE
+    overlap = IMPORT_SKIP
+    if not replace:
+        taken = import_overlap(ctx, payload)
+        if taken:
+            answer = ask_import_overlap(ctx, taken)
+            if answer is None:
+                return
+            overlap = answer
 
-    added = merge_imported_selections(ctx, payload, replace=replace)
+    added, left_out = _merge_imported(ctx, payload, replace=replace,
+                                      overlap=overlap) or (0, 0)
     try:
         groups_centre_refresh(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     from pathlib import Path
     verb = "Replaced the groups with" if replace else "Imported"
-    ctx.notify.toast(f"{verb} {added or 0} group(s) from {Path(path).name}.",
+    tail = (f"; {left_out} left out, every well of it already in a group"
+            if left_out else "")
+    ctx.notify.toast(f"{verb} {added} group(s) from {Path(path).name}{tail}.",
                      kind="success")
 
 

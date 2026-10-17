@@ -67,6 +67,43 @@ def test_a_hexagonal_array_whose_outline_is_not_a_circle_needs_the_inferred_geom
     assert fields["Array geometry"] == "Infer from the image"
 
 
+def _interior_tile(**render):
+    """One 1000 px tile at 1.3 µm of an array far larger than it (half-width 1600 µm against a 1300 µm tile),
+    so the tile shows wells to every edge and never the array's rim — what From this frame sees on one tile."""
+    plan = TilePlan(1, 1, (1000, 1000), 0.0, 1.3)
+    return render_tiles(plan, pitch_um=172.0, diameter_um=100.0, radius_um=1600.0, rotation_deg=8.0,
+                        noise_sigma=0.05, blur_px=1.0, **render).images["F0"]
+
+
+@pytest.mark.parametrize("render", [
+    {"array_shape": "square"},             # a hexagonal lattice in a square outline: Infer would be right
+    {"array_shift_um": (400, 0)},          # a circular array, the tile off its centre one way...
+    {"array_shift_um": (0, 400)},          # ...and the other: the two read as a circle and a polygon
+], ids=["square-outline", "circle-shifted-x", "circle-shifted-y"])
+def test_a_tile_that_never_shows_the_rim_leaves_the_geometry_blank_and_says_why(render):
+    """Review M14. With the rim out of view the only outline there is to fit is the image's own rectangle, so
+    the circle-or-not answer flipped with where the tile sat and read "a circle" for a square outline. The field
+    is left blank with the reason, and no array centre or ring count is stated."""
+    s = nc.suggest_from_image(_interior_tile(**render), 1.3)
+    geometry = next(f for f in s.fields if f.label == "Array geometry")
+    assert geometry.value == "", f"geometry {geometry.value!r} read from an outline the tile never shows"
+    assert "not in view" in geometry.note
+    facts = dict(s.facts)
+    assert facts["Array outline"].startswith("not in view")
+    assert "Array centre" not in facts and "ring(s) out to the rim" not in facts["Address origin (0.0)"]
+    assert s.radius_px is None and s.centre_px is None        # no fitted circle drawn over the image either
+
+
+def test_a_tile_that_shows_part_of_the_rim_still_reads_the_geometry():
+    """The array cut by the image's edge on one side, its rim in view on the other: the circle is a real one."""
+    plan = TilePlan(1, 1, (1500, 1500), 0.0, 2.0)
+    image = render_tiles(plan, pitch_um=172.0, diameter_um=100.0, radius_um=1300.0, rotation_deg=8.0,
+                         array_shift_um=(700, 0), noise_sigma=0.05, blur_px=1.0).images["F0"]
+    s = nc.suggest_from_image(image, 2.0)
+    assert _fields(s)["Array geometry"] == "Hexagonal lattice in a circle"
+    assert "runs off the image" in dict(s.facts)["Array outline"]
+
+
 def test_a_plate_of_no_known_format_gets_its_measured_diameter_and_pitch():
     s = nc.suggest_from_image(_frame(pitch=120.0, diameter=60.0, px=2.5, radius=900.0), 2.5)
     fields = _fields(s)
@@ -111,11 +148,48 @@ def _turned_square(monkeypatch, extra_deg: float) -> None:
 
 
 def test_the_square_edge_angle_is_the_square_s_edges_against_the_lattice_row(monkeypatch):
-    # The lattice is turned 12 degrees, so the square's edges read 32: what the form takes is the 20 between them.
-    _turned_square(monkeypatch, 20.0)
+    # The lattice is turned 12 degrees, so the square's edges read 22: what the form takes is the 10 between them.
+    _turned_square(monkeypatch, 10.0)
     s = nc.suggest_from_image(_frame(rotation_deg=12.0), PX)
-    assert _fields(s)["Square edge angle (°)"] == "20"
+    assert _fields(s)["Square edge angle (°)"] == "10"
     assert any("30°" in n for n in s.notes)            # the hexagonal fold is named beside a non-default angle
+
+
+def _run_orientation_check(image, edge_value: str):
+    """What a run's ``check_orientation`` says about *image* with the Square edge angle set to *edge_value*
+    ("" is the form's default 0): the lattice and the square measured by the pipeline's own detectors."""
+    from pipeline.nanowell_detect import check_orientation, score_fiducial
+    from pipeline.nanowell_infer import find_wells_by_contrast, infer_array
+
+    wells = find_wells_by_contrast(image, PX)
+    geometry = infer_array(wells.points_um, pixel_size_um=PX, covered=np.ones(image.shape, bool),
+                           edge_points_um=wells.edge_points_um, diameter_um=wells.diameter_um)
+    _candidate, scores = score_fiducial(image, PX, wells.diameter_um, wells.points_um, centre_um=geometry.centre_um,
+                                        search_radius_um=2.2 * geometry.fit.pitch)
+    square = max(scores, key=lambda s: s.coherence)
+    return check_orientation(geometry.fit, square.orientation_deg, square_to_axis_deg=float(edge_value or 0))
+
+
+@pytest.mark.parametrize("rotation", [35.0, 40.0, 50.0, -40.0])
+def test_a_folded_hexagonal_lattice_is_reported_and_never_given_an_angle_that_hides_the_fold(rotation):
+    """Review H4. The synthetic plate's square edges run along a lattice row (its true edge angle is 0). Turned
+    35-55 degrees, the lattice fit takes the row nearest east, 60 degrees from the true one, and the square reads
+    ±30 against it: the fold signature, not a property of the plate. Typed into the form, that ±30 is exactly
+    what makes the run's orientation check pass on the wrong row — so the field must stay at the default, under
+    which the run refuses the fold, and the note must say why."""
+    image = _frame(rotation_deg=rotation)
+    s = nc.suggest_from_image(image, PX)
+    edge = next(f for f in s.fields if f.label == "Square edge angle (°)")
+    assert edge.value == "", f"the Playground offers {edge.value!r}, which hides the fold from the run"
+    assert "folded" in edge.note and "refuse" in edge.note
+    assert not _run_orientation_check(image, edge.value).ok        # the run refuses rather than mis-addresses
+
+
+def test_an_unfolded_hexagonal_lattice_keeps_the_default_the_run_accepts():
+    image = _frame(rotation_deg=12.0)
+    edge = next(f for f in nc.suggest_from_image(image, PX).fields if f.label == "Square edge angle (°)")
+    assert edge.value == "" and "folded" not in edge.note
+    assert _run_orientation_check(image, edge.value).ok
 
 
 def test_a_square_within_a_few_degrees_of_a_row_keeps_the_default(monkeypatch):
@@ -138,7 +212,7 @@ def test_a_pixel_size_that_is_not_a_length_is_refused(px):
 
 
 # ── a well archive ───────────────────────────────────────────────────────────
-def _archive(tmp_path, *, record=True, channels=("Phase", "GFP")):
+def _archive(tmp_path, *, record=True, channels=("Phase", "GFP"), tail=""):
     import tifffile
 
     from tests._nanowell_run_fixture import build_well
@@ -151,7 +225,7 @@ def _archive(tmp_path, *, record=True, channels=("Phase", "GFP")):
                 buffer = io.BytesIO()
                 # The fluorescence channel is blank: the stitched channel must be the phase one.
                 tifffile.imwrite(buffer, image if channel == "Phase" else np.zeros_like(image))
-                zf.writestr(f"exp_{channel}_A01_{name}_T0.tif", buffer.getvalue())
+                zf.writestr(f"exp_{channel}_A01_{name}_T0{tail}.tif", buffer.getvalue())
         # What a real archive also carries (CLAUDE.md §7.1 #4).
         zf.writestr(".DS_Store", b"\0")
         zf.writestr("__MACOSX/._exp_Phase_A01_F0_T0.tif", b"\0")
@@ -194,3 +268,49 @@ def test_the_dataset_s_own_filename_schema_reads_the_archive(tmp_path):
     montage = nc.montage_from_archive(renamed, fields=("well", "fov", "timepoint", "channel"), sep="-")
     assert montage.ok, montage.reason
     assert montage.channel == "Phase"
+
+
+def test_an_archive_named_with_extra_trailing_tokens_is_read_as_a_run_reads_it(tmp_path):
+    """Review L21. A run's parser takes the schema's slots and ignores tokens past them, so
+    ``exp_Phase_A01_F0_T0_z0.tif`` is a run input; the Playground must stitch the same archive."""
+    import process_microscopy as pm
+
+    path = _archive(tmp_path, tail="_z0")
+    groups, _ = pm.find_image_groups_in_zip(path, "Phase", [], tmp_path / "x")
+    assert len(groups) == 4                                         # the run takes all four tiles
+    montage = nc.montage_from_archive(path)
+    assert montage.ok, montage.reason
+    assert (montage.timepoint, montage.channel) == ("T0", "Phase")
+    assert dict(montage.facts)["Tiles"] == "4 (2 × 2 grid)"
+
+
+def test_the_loaded_dataset_s_archive_is_read_with_the_dataset_s_schema(tmp_path, monkeypatch):
+    """The controller reads the archive with the loaded dataset's own schema (from ``pipeline_info``) when the
+    archive sits in the dataset's ``in/``, and with the default otherwise."""
+    from types import SimpleNamespace
+
+    from review.features.image_browser.playground import controller
+
+    src = _archive(tmp_path)
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+    renamed = in_dir / "A01.zip"
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(renamed, "w") as zout:
+        for name in zin.namelist():
+            if name.endswith(".tif") and not name.startswith("__MACOSX"):
+                exp, channel, well, fov, tp = name[:-4].split("_")
+                zout.writestr(f"{well}-{fov}-{tp}-{channel}.tif", zin.read(name))
+    (in_dir / "acquisition.json").write_text((tmp_path / "acquisition.json").read_text())
+    jobs = []
+    monkeypatch.setattr(controller, "_start_nanowell_search", lambda ctx, job, what: jobs.append(job))
+    info = {"schema_fields": ["well", "fov", "timepoint", "channel"], "separator": "-"}
+
+    def search(dataset_in_dir):
+        ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(in_dir=dataset_in_dir,
+                                                                            pipeline_info=info)))
+        controller.playground_nanowell_from_archive(ctx, str(renamed))
+        return jobs.pop()()
+
+    assert search(str(in_dir)).ok                                   # the dataset's archive: its own schema
+    other = search(str(tmp_path))                                   # an archive from elsewhere: the default
+    assert not other.ok and "experiment_channel_well_fov_timepoint" in other.reason

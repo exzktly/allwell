@@ -2381,19 +2381,22 @@ a well in no group puts that one well on the plots by itself, beside the
 groups and labelled with its own name; click it again to take it off. Both
 reach Bar Plots, Line Graphs, Scatter and Distribution alike.
 
-**Make groups from a variable.** If you have already recorded what you did to
-each well on the **Variables** tab, the row under Quick Replicates turns that
-into groups: pick a variable under **Make groups from** and press **Make groups
-from variable**, and every well holding the same value becomes one group, named
-by the value (`10 µM`). With two or more variables you can also pick **Every
-variable combined**, which makes one group per combination the plate actually
-holds (`HeLa · 10 µM`) rather than pooling every dose of a cell line together.
-The result replaces your current groups — you are asked first — and the groups
-it makes are ordinary groups: rename, recolour, or click wells in and out of
-them like any other. A well with no value for the variable joins no group, and
-the status line names it. If the plotting band's **Group by** is still set to a
-variable, the plots go on pooling by that variable and the status line says so;
-set Group by back to *Wells / groups* to plot the new groups.
+**Make replicates from variables.** If you have already recorded what you did
+to each well on the **Variables** tab, the button under Quick Replicates turns
+that into replicate groups: press **Make replicates from variables**, and wells
+whose values are identical for every variable become replicates of one group,
+named by those values (`HeLa · 10 µM`). Two wells with the same dose but
+different cell lines are different conditions and land in different groups. A
+well missing a value is grouped with the wells missing the same one, and the
+group's name lists its wells (`HeLa (C01/C02)`) so it cannot be mistaken for a
+fully described condition. The result replaces your current groups — you are
+asked first — and the groups it makes are ordinary groups: rename, recolour, or
+click wells in and out of them like any other. The status line says how many
+groups were made, which of them hold only one well (no error bar can be drawn
+for those), and which wells have no values at all and so are in no group. If the
+plotting band's **Group by** is still set to a variable, the plots go on pooling
+by that variable and the status line says so; set Group by back to *Wells /
+groups* to plot the new groups.
 
 **Once you have filled in Variables, new groups are named after them.** A group
 whose wells all hold `HeLa` and `10 µM` is created as `HeLa · 10 µM`, whether it

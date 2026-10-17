@@ -98,7 +98,10 @@ def apply_fov_selection_to_cache(ctx, label: str | None = None) -> list[str]:
     from review.data.field_quality_cache import untrusted_wells
 
     selection = selected_fovs(ctx)
-    cache = getattr(getattr(ctx.state, "dataset", None), "cache", None) or {}
+    # Read as a plain attribute so ``tests/test_row_cache_readers.py`` sees it;
+    # a hand-built context may carry no dataset slice at all.
+    ds = getattr(ctx.state, "dataset", None)
+    cache = (ds.cache if hasattr(ds, "cache") else None) or {}
     labels = [label] if label is not None else list(cache.keys())
     if selection is None:
         if not cache:

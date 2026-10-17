@@ -47,6 +47,7 @@ from ui import theme
 from core.safe import swallowed
 from widgets.separator import build_hline_separator
 from widgets.run_dashboard import RunDashboard
+from analyze.slurm_job_view import SlurmJobIndicator
 
 
 #: Longest failure text the dashboard headline takes before it is cut back.
@@ -206,6 +207,10 @@ class AnalyzeLogPaneMixin:
         # status + ETA (header), overall % (headline + bar), per-stage rail and
         # the live per-well plate map. The raw log sits beneath it.
         self._dashboard = RunDashboard(parent)
+        # Lit while this run holds an open Slurm job, its tooltip the node: in the run's own status line, which is
+        # on screen for the whole run, rather than in the form above it.
+        self._slurm_indicator = SlurmJobIndicator(self._dashboard)
+        self._dashboard.add_header_widget(self._slurm_indicator)
         rl.addWidget(self._dashboard)
 
         self._log_sep = build_hline_separator(parent)

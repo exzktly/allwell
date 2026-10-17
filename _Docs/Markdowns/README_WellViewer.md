@@ -1294,7 +1294,7 @@ about the form above it — the same schema, channels, folders and options are
 sent — only where the segmentation runs. Results come back into the same output
 folder, so Review cannot tell the difference afterwards.
 
-**A small server icon beside Manage… shows the run's Slurm job** on a host that
+**A small server icon in the run panel's status line, beside the run status, shows the run's Slurm job** on a host that
 runs through a scheduler. It is green while the job is open — granted a node
 and holding it — and grey while the job is still queued for a node; once the
 job closes, or on a host with no scheduler, there is no icon. Hover over it

@@ -258,7 +258,7 @@ allwell/
 │   ├── seg_params.py           ← per-method segmentation params + StarDist thresholds
 │   ├── well_scope.py           ← the Only these wells / Force these wells rows and the
 │   │                              run options they contribute
-│   ├── slurm_job_view.py       ← the Slurm-job icon in the Run on: row — lit while a job
+│   ├── slurm_job_view.py       ← the Slurm-job icon in the run dashboard's status line — lit while a job
 │   │                              is open, dimmed while queued, its tooltip the node
 │   ├── log_pane.py             ← the output pane — log view, raw-log toggle,
 │   │                              run-outcome surfacing, "Last run ·" card

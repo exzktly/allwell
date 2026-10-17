@@ -95,7 +95,8 @@ def apply_curation_to_cache(ctx, label: str | None = None, *,
         if lbl not in ctx.state.dataset.well_paths:
             continue
         if label is None:
-            df = ctx.state.dataset.cache.get(lbl)
+            repo = getattr(ctx.state, "repo", None)
+            df = repo.rows_or_none(lbl) if repo is not None else None
             if df is None:
                 unheld_curated = True       # projected when it is next read
                 continue

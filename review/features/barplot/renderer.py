@@ -90,9 +90,10 @@ def _annotate_group_key_headers(axes, xs, group_keys) -> int:
         if ax is None:
             continue
         for gk, positions in cluster_x.items():
-            ax.text(sum(positions) / len(positions), 1.02, gk,
-                    transform=ax.get_xaxis_transform(),
-                    ha="center", va="bottom", fontsize=8, fontweight="bold")
+            follows_theme(ax.text(sum(positions) / len(positions), 1.02, gk,
+                                  transform=ax.get_xaxis_transform(),
+                                  ha="center", va="bottom", fontsize=8,
+                                  fontweight="bold", color=tokens_for(ax)[1]))
     return _TITLE_PAD_PT[1] if cluster_x else _TITLE_PAD_PT[0]
 
 

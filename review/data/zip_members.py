@@ -244,12 +244,20 @@ def scan_zip_members(
                     _d.mark_partial(f"{zip_path} could not be opened")
                 return fluor, overlay, mask, tophat, smfish
             logger.info("Scanning %s%s  (%d members)", zip_path.name, f" >> {member_prefix}" if member_prefix else "", len(zf_src.infolist()))
+            # One line per member is a trace for debugging discovery, not a
+            # progress report: an archive holds every timepoint and FOV of the
+            # well, so it filled the log drawer (which shows DEBUG) with
+            # thousands of lines about frames the grid was never going to draw.
+            # The summary line above and the "Result:" line below always print.
+            from core import debug_flags as _debug_flags
+            trace = _debug_flags.review_image_load_debug_enabled()
             for info in zf_src.infolist():
                 iname = Path(info.filename).name
                 if not iname or iname.startswith("."):
                     continue
                 if Path(iname).suffix.lower() not in image_exts:
-                    logger.debug("  SKIP non-image: %s", iname)
+                    if trace:
+                        logger.debug("  SKIP non-image: %s", iname)
                     continue
                 kind, fov, tp = classify_member_fn(
                     iname,
@@ -259,26 +267,32 @@ def scan_zip_members(
                 )
                 member_ref = f"{member_prefix}::{info.filename}" if member_prefix else info.filename
                 full = f"{zip_path} >> {member_ref}"
-                logger.debug("  %-5s fov=%-6s tp=%-12s  %s", kind or "NONE", fov, tp, full)
+                if trace:
+                    logger.debug("  %-5s fov=%-6s tp=%-12s  %s", kind or "NONE", fov, tp, full)
                 if not kind:
                     continue
                 key = (fov, tp)
                 ref = imgref_factory(zip_path, member_ref)
                 if kind == "fluor" and key not in fluor:
                     fluor[key] = ref
-                    logger.info("  + FLUOR      fov=%s tp=%s  %s", fov, tp, full)
+                    if trace:
+                        logger.info("  + FLUOR      fov=%s tp=%s  %s", fov, tp, full)
                 elif kind == "tophat" and key not in tophat:
                     tophat[key] = ref
-                    logger.info("  + TOPHAT     fov=%s tp=%s  %s", fov, tp, full)
+                    if trace:
+                        logger.info("  + TOPHAT     fov=%s tp=%s  %s", fov, tp, full)
                 elif kind == "overlay" and key not in overlay:
                     overlay[key] = ref
-                    logger.info("  + OVERLAY   fov=%s tp=%s  %s", fov, tp, full)
+                    if trace:
+                        logger.info("  + OVERLAY   fov=%s tp=%s  %s", fov, tp, full)
                 elif kind == "mask" and key not in mask:
                     mask[key] = ref
-                    logger.info("  + MASK      fov=%s tp=%s  %s", fov, tp, full)
+                    if trace:
+                        logger.info("  + MASK      fov=%s tp=%s  %s", fov, tp, full)
                 elif kind == "smfish" and key not in smfish:
                     smfish[key] = ref
-                    logger.info("  + SMFISH    fov=%s tp=%s  %s", fov, tp, full)
+                    if trace:
+                        logger.info("  + SMFISH    fov=%s tp=%s  %s", fov, tp, full)
         logger.info("Result: %d fluor, %d tophat, %d smfish, %d overlay(s), %d mask(s) from %s", len(fluor), len(tophat), len(smfish), len(overlay), len(mask), zip_path.name)
     except Exception as exc:
         # The dicts built so far are still returned — dropping them would lose

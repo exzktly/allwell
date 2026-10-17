@@ -276,7 +276,9 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 870
 # 781 -> 737: _validate_run_request moved to analyze.run_spec.AnalyzeRunMixin,
 # beside validate_for_queue and the run-time detection it now defers to. Genuine
 # extraction -- the whole method moved, and its queue-aware rules live there.
-ANALYZE_TAB_BUDGET = 737
+# 737 -> 729: the Stop button's slot `_stop` moved to AnalyzeRunMixin, beside
+# the queue's `stop` hook and the `_build_run_row` that wires the button.
+ANALYZE_TAB_BUDGET = 729
 
 # analyze/form.py carried no budget while analyze/tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it

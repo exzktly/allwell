@@ -5858,6 +5858,14 @@ if a Stop landed meanwhile. The interrupted upload's rsync failure is reported
 through `_enqueue_stopped`, not as a failure. The host-side kill
 (`RemoteRunner.cancel` — an ssh `kill`, then `scancel`) runs on a daemon thread
 (`_signal_run`, held as `_cancel_thread`) rather than in the button's slot.
+A remote run's `_proc` is a wrapper (`_RemoteProcess`, `_BatchedRemoteProcess`)
+whose `pid` is its ssh's, in a process group of its own, so the signal reaches
+the ssh and not the wrapper's threads; `_signal_run` therefore also calls the
+wrapper's `terminate`, which sets its own stop flag. Without it a batched run
+that had requested its node went on uploading its batch after Stop, and the run
+thread never reported back. The button's slot (`AnalyzeRunMixin._stop`) also
+ends the dashboard's scheduler clock at once, since the wait it counts is over.
+`tests/test_stop_reaches_a_batched_run_waiting_for_its_node.py`.
 `tests/test_stop_never_waits_on_a_remote_upload.py`.
 
 **Closing the app is a Stop that is waited for.** `AnalyzeTab` is a child

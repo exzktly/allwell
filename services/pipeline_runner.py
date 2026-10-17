@@ -1296,6 +1296,19 @@ class PipelineRunner:
     def _signal_run(self, proc, *, escalate: bool) -> None:
         """Signal the pipeline process *proc*, and the remote run behind it."""
         self._signal_subprocess(proc, escalate=escalate)
+        # A remote run's *proc* is a wrapper, and the signal above reaches the
+        # ssh inside it (its own process group), not the wrapper's threads. A
+        # batched run's loop therefore never saw the Stop once its node had
+        # been requested: it went on uploading the batch, and the dashboard
+        # went on reporting the scheduler wait, while the log said it had
+        # stopped. `terminate` is what sets the wrapper's own stop flag.
+        if proc is not None and not isinstance(proc, subprocess.Popen):
+            terminate = getattr(proc, "terminate", None)
+            if callable(terminate):
+                try:
+                    terminate()
+                except Exception:
+                    swallowed("stopping the remote run's own threads")
         # For remote runs, the local SIGTERM above tears down the ssh
         # client; ssh -tt propagates SIGHUP to the remote pipeline. The
         # second channel here is belt-and-braces — a fresh ssh that kills

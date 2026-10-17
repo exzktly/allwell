@@ -350,6 +350,20 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         if error is not None:
             self.jobFinished.emit(False, error, "")
 
+    def _stop(self) -> None:
+        """The Stop button."""
+        # Never let an exception escape this Qt slot (PySide6≥6.5 aborts the app).
+        try:
+            self._runner.stop()
+            self._log_line("\n[User stopped the pipeline]\n", "WARNING")
+            # Whatever the run was queued for, it no longer is: the scheduler
+            # clock and its "still waiting" breadcrumbs end with the Stop, not
+            # when the run thread finally reports back.
+            self._stop_scheduler_timer()
+            self._clear_scheduler_status()
+        except Exception:
+            swallowed()
+
     def stop(self) -> None:
         """QueueableController hook: cancel without waiting — callable from
         a queue bridge, which isn't a widget event."""

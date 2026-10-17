@@ -542,14 +542,6 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
             filename_sep=opts["filename_sep"],
         )
 
-    def _stop(self) -> None:
-        # Never let an exception escape this Qt slot (PySide6≥6.5 aborts the app).
-        try:
-            self._runner.stop()
-            self._log_line("\n[User stopped the pipeline]\n", "WARNING")
-        except Exception:
-            swallowed()
-
     # ------------------------------------------------------------------
     # Log helpers
     # ------------------------------------------------------------------

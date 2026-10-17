@@ -293,21 +293,49 @@ def test_mode_bar_compact_drops_glyphs_keeps_labels(qapp):
     assert not any(s._icon_lbl.isHidden() for s in bar._segments)
 
 
-def test_a_panel_alone_hides_only_what_it_hid_and_restores_its_pin(qapp):
-    from review.core.tab_controller import _show_panel_alone
+def test_a_lent_panel_goes_back_to_its_place_pin_and_sizes(qapp):
+    from review.core.phone_drawer import _give_back, _lend
     split = QSplitter(Qt.Horizontal)
-    panel, content, dock = QWidget(), QWidget(), QWidget()
-    for w in (panel, content, dock):
-        split.addWidget(w)
+    panel, content = QWidget(), QWidget()
+    split.addWidget(panel)
+    split.addWidget(content)
+    split.resize(1000, 600)
     panel.setFixedWidth(329)
-    dock.hide()                                    # a closed dock
-    _show_panel_alone(panel, True)
-    assert content.isHidden() and dock.isHidden()
-    assert panel.maximumWidth() > 329
-    _show_panel_alone(panel, False)
-    assert not content.isHidden()
-    assert dock.isHidden()                         # it was closed before
+    split.setSizes([329, 671])
+    sizes = split.sizes()
+    holder = QWidget()
+    QVBoxLayout(holder)
+    _lend(panel, holder)
+    assert panel.parentWidget() is holder and split.count() == 1
+    assert panel.maximumWidth() > 329            # fills the drawer
+    _lend(panel, holder)                         # idempotent: remembers once
+    _give_back(panel)
+    # Back at index 0 — not appended after the content, which a plain
+    # addWidget would do — with its pin and the splitter's sizes.
+    assert split.indexOf(panel) == 0 and split.count() == 2
     assert (panel.minimumWidth(), panel.maximumWidth()) == (329, 329)
+    assert split.sizes() == sizes
+
+
+def test_a_left_drawer_slides_from_the_left_below_its_inset(qapp):
+    from widgets.drawer import Drawer
+    host = QWidget()
+    host.resize(1000, 800)
+    drawer = Drawer(host, edge="left", width_fraction=0.86, margin=0, top_inset=lambda: 50)
+    content = QLabel("rail")
+    drawer.setContentWidget(content)
+    assert drawer._open_rect() == QRect(0, 50, 860, 750)
+    assert drawer._closed_rect() == QRect(-860, 50, 860, 750)
+    drawer._sync_backdrop_geom()
+    assert drawer._backdrop.geometry() == QRect(0, 50, 1000, 750)   # band left usable
+    closed = []
+    drawer.closed.connect(lambda: closed.append(True))
+    drawer.open()
+    drawer.closeNow()
+    assert closed == [True] and drawer.isHidden() and not drawer._backdrop.isVisible()
+    taken = drawer.takeContentWidget()
+    assert taken is content and taken.parentWidget() is None   # not deleted
+    assert taken.text() == "rail"
 
 
 # ── geometry ────────────────────────────────────────────────────────────────

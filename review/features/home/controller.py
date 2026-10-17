@@ -500,7 +500,8 @@ def _paint_plate(ctx) -> None:
     # scan read before it. So the scan waits for the pass, whose end repaints
     # this page, and the legend says the markers are pending rather than
     # showing a plate with none — which would read as "no well needs a look".
-    gating_pending = getattr(ctx.state.plot, "held_for", "") == "gating" and _plate_has_focus(ctx)
+    gating_pending = (getattr(getattr(ctx.state, "plot", None), "held_for", "") == "gating"
+                      and _plate_has_focus(ctx))
     quality = {} if gating_pending else wells_needing_review(ctx)
     paint_field_quality(plate, quality)
     plate.setWellTooltipProvider(

@@ -188,7 +188,8 @@ def _recalculate_threshold(ctx) -> None:
     # Hydrate persisted gating params from pipeline_info.json.
     from review.persistence.cell_gating import load_from_pipeline_info
     load_from_pipeline_info(ctx)
-    if ctx.runtime.cell_gating.fluor_gate_edits is not None:
+    cell_gating_rt = getattr(getattr(ctx, "runtime", None), "cell_gating", None)
+    if cell_gating_rt is not None and cell_gating_rt.fluor_gate_edits is not None:
         ctx.features.call("cell_gating.load_cell_areas", ctx)
         # cell_gating_load_cell_areas rebuilds the per-channel fluor-gate rows
         # for the freshly-detected channels as fresh (default 0.0) edits, which

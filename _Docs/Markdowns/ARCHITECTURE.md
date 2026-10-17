@@ -134,17 +134,16 @@ changes one line there.
 beside the version pill — the left edge is the part of an oversized window still on
 a narrow screen, and the label says what it does without a tooltip, which a touch
 screen never shows. In phone layout the header row is hidden and the way back is
-the band's ☰ menu, *Desktop layout*. `PhoneShell.set_on(on)`:
+the band's *Aa* menu (*Text size* ▸, *Desktop layout*). `PhoneShell.set_on(on)`:
 
 1. hides the header, the desk-only buttons (`desk_only`: the publication look,
    both resets, copy analysis, reveal folder — three of them destructive, a
-   fat-finger target, none for reading results; Refresh and Help stay), Review's
-   section list (it moves into the ☰ menu) and the status bar's keyboard hints;
-   turns the mode bar to labels only (`ModeBar.setCompact`) and the page tab strip
-   into one *Bar Plots ▾* menu button mirroring it; shows the band's ☰ menu, the
-   navigator button and the rail's *Show plots* bar;
-2. closes the left panel (content first) — or, on the way out, restores the
-   panel's desk state;
+   fat-finger target, none for reading results; Refresh and Help stay) and the
+   status bar's keyboard hints; turns the mode bar to labels only
+   (`ModeBar.setCompact`) and the page tab strip into one *Bar Plots ▾* menu
+   button mirroring it; shows the band's ☰ button and *Aa* menu;
+2. closes the side rail (the page first) — or, on the way out, restores the
+   left panel's desk state;
 3. applies the text scale (below) — the only slow step, ~6 s, and skipped when
    the scale does not change;
 4. re-announces the mode (`review.modeChanged`), whose two listeners are exactly
@@ -156,23 +155,36 @@ the band's ☰ menu, *Desktop layout*. `PhoneShell.set_on(on)`:
 5. maximizes the window (phone) or restores the desk geometry it remembered —
    only one remembered on a desk-shaped screen.
 
-**One column.** A pane shows either its content or its left panel, across the
-full width. That is `tab_controller._apply_phone_columns`, run at the end of
-`apply_sidebar_visibility`: the active mode's left panel, when not collapsed, gets
-its splitter to itself (`_show_panel_alone` hides its siblings and lifts its fixed
-`rail_w`, remembering both, and undoes exactly that — a dock that was already
-closed stays closed). It works on each pane's splitter from outside, so Analyze
-and Datasets have no phone code: their left panels sit beside their content in
-their own splitter inside the centre stack, Review's rail beside the whole stack.
-The "collapsed" flag is the navigator's state; `set_sidebar_collapsed(ctx, …)`
-sets it to a value, and `toggle_sidebar` is now that with the value flipped. The
-navigator button reads `Wells · N` / `Done` in Review, `Run form` / `Progress` in
-Analyze, `Tools` / `Back` in Datasets. Review's sections are in the ☰ menu
-(`RailNav.itemLabel` / `isItemOffered` give it what the rail offers), so the rail
-opens straight onto the well plate; picking a section returns to content, tapping
-wells does not, and *Show plots* at the rail's foot does. The floating rail toggle
-is hidden in phone layout — `position_rail_toggle` ends by showing it on every
-resize and mode switch, so the check is inside it.
+**The side rail slides out over the page.** A phone held upright has no room for
+a column beside the page, so in phone layout `review/core/phone_drawer.py` lends
+every pane's left panel — Review's rail (dataset, sections, well plate, the page's
+own rail frames, saved selections), the Analyze form, the Datasets tool list — to
+one left-edge `widgets.drawer.Drawer`, and the band's ☰ slides the current mode's
+panel out *over* the page, 86 % of the window wide, with the strip of page left
+showing dimmed. The page underneath is not moved or resized, so it is exactly
+where it was when the rail closes.
+
+The drawer is the left panel's *expanded* state: it is driven by the same flag the
+desk's collapse toggle drives (`_sidebar_collapsed`), through
+`tab_controller.apply_sidebar_visibility`, which calls `apply_phone_drawer` last so
+it has the final word in phone layout — only the current mode's panel shows, and
+only in the drawer. `set_sidebar_collapsed(ctx, …)` sets the flag to a value;
+`toggle_sidebar` is that with the value flipped. The drawer closes when the
+dimmed strip is tapped or Esc pressed (its `closed` signal sets the flag, so ☰ and
+the flag never disagree), when ☰ is tapped again, when a section is tapped
+(`RailNav.itemClicked`, which fires for a user's click and not for navigation done
+by code), and when a mode is picked on the mode bar. Tapping wells on the plate
+keeps it open — picking several in a row is normal.
+
+The drawer is hosted on the Review widget, which holds the band, not on a
+splitter (a `QSplitter` adopts any child widget as a pane), and sits below the band
+(`Drawer(top_inset=…)`, re-measured when the band's height changes with the text
+size) so ☰ and the mode bar stay in reach while it is open. Each panel is lent
+once, on entering phone layout, and given back on leaving it — to its splitter, at
+its index, with its width pin and the splitter's sizes — after which the desk's own
+visibility rule is re-applied, since a reparent can show a hidden widget. The
+floating rail toggle is hidden in phone layout — `position_rail_toggle` ends by
+showing it on every resize and mode switch, so the check is inside it.
 
 **The window fits its screen — in both layouts.** `PhoneShell.fit_window` runs at
 startup and on every `screenChanged` / `availableGeometryChanged`: the minimum is
@@ -609,7 +621,7 @@ allwell/
 │   │                              alongside domain/well_palette.py, whose 96 rank colours
 │   │                              this module re-exports)
 │   ├── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
-│   └── phone_shell.py          ← phone layout's Qt half: its controls, the switch both ways,
+│   └── phone_shell.py          ← phone layout's Qt half: its band controls, the switch both ways,
 │                                  the window fitting its screen, the live restyle and the
 │                                  rescale pass (§2, §8). Handed every pane widget it moves
 │                                  by allwell.py, so it imports no pane
@@ -699,6 +711,8 @@ review/
 │   │   qc_state.py, stats_cache_state.py   ← cross-cutting typed state slices
 │   ├── app_shell_view.py, centre_view.py, sidebar_view.py, status_view.py
 │   ├── split_view.py                 ← optional side-by-side double-pane view (one-line removable; §5.10)
+│   ├── phone_drawer.py               ← phone layout's side rail: lends each pane's left panel to one
+│   │                                    left-edge Drawer over the page and gives it back (§2)
 │   ├── feature_registry.py           ← FeatureDescriptor + build_feature_registry (§5.3)
 │   ├── lazy.py                       ← call-time proxy so core never imports a feature
 │   ├── frame_render.py               ← build_frame_rgb: one frame + label mask → RGB

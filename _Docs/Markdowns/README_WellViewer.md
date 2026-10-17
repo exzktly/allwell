@@ -7290,11 +7290,12 @@ ignored rather than landing on whatever is underneath.
 
 | Control | What it does |
 |---|---|
-| **☰** | The Review sections (Home, Plotting, Statistics, …), **Text size**, and **Desktop layout** — the way back. |
-| **Wells · 3** | Opens the well plate full-screen. Tap wells as usual (several taps are fine — the plate stays open); a row or column label selects the whole row or column (except on the smFISH page, which picks one well at a time). **Show plots** at the bottom, or **Done** at the top, goes back to the plots. In Analyze this button reads **Run form**, in Datasets **Tools**. |
+| **☰** | Slides the sidebar out over the page from the left: the dataset, every section (Home, Plotting, Statistics, …) and the well plate, just as at the desk. Tap wells as usual — the sidebar stays out while you pick several; a row or column label selects the whole row or column (except on the smFISH page, which picks one well at a time). Tap a section, ☰ again, or the dimmed strip of page at the right to slide it away. In Analyze it holds the run form, in Datasets the tools. |
 | **Review · Analyze · Datasets** | Switches mode, as on the desktop. |
 | **Bar Plots ▾** | Picks the page's view (Bar Plots, Line Graphs, Heat Map, …). |
-| ⟳ / ⓘ | Reload the dataset / open the help drawer. |
+| ⟳ | Reload the dataset. |
+| **Aa** | **Text size**, and **Desktop layout** — the way back. |
+| ⓘ | Open the help drawer. |
 
 The buttons that change or discard work — Reset view, Reset analysis, Copy
 analysis, the publication look and Reveal folder — are hidden in phone layout so a
@@ -7303,14 +7304,14 @@ stray tap cannot reach them; switch back to the desktop layout to use them.
 **Watching a run.** Analyze opens on the run progress: the overall bar and
 headline, the stages, and the plate map coloured by each well's progress, stacked
 one above the other. The raw log is below it. The run form — including **Stop**
-and **Suspend** — is behind **Run form**. Closing the window while a run is in
+and **Suspend** — slides out from **☰**. Closing the window while a run is in
 progress asks first in phone layout, because closing stops the run.
 
-**Text size.** ☰ → **Text size**. **Auto** picks a size from your screen's shape
+**Text size.** **Aa** → **Text size**. **Auto** picks a size from your screen's shape
 (the larger the remote desktop, the larger the text); 100 % to 250 % fix it.
 Plots grow too, by less than the text, so their titles and labels still fit.
 
-**Back at the desk.** ☰ → **Desktop layout**, or tap **Switch** on the strip that
+**Back at the desk.** **Aa** → **Desktop layout**, or tap **Switch** on the strip that
 appears when the screen is desktop-shaped again. If you close All-Well in phone
 layout, it reopens in phone layout only when the screen is still phone-shaped;
 on a desktop-sized screen it opens as usual. The desktop window's size and

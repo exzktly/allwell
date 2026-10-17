@@ -243,3 +243,53 @@ def test_a_closed_pool_answers_as_empty(backend):
     assert pool.count("ctrl") == 0 and pool.count() == 0
     assert pool.count_at("ctrl", [0.0]) == 0
     assert pool.count_box("v", "w", {"x0": -1e9, "x1": 1e9, "y0": -1e9, "y1": 1e9}, "ctrl") == 0
+
+
+def test_a_pool_larger_than_its_memory_does_not_live_on_the_temp_cap(monkeypatch):
+    """The reported failure: "Out of Memory Error: failed to offload data block
+    (2.2 GiB/2.2 GiB used)" during a load. That cap is DuckDB's
+    ``max_temp_directory_size`` — 90% of the free disk — which an in-memory
+    table's evicted rows count against. The cap is shrunk here far below the
+    rows added, so a pool whose table lives in ``:memory:`` fails exactly as
+    reported, and a file-backed one, whose rows evict to its own file, does not."""
+    pytest.importorskip("duckdb")
+    monkeypatch.setenv("ALLWELL_CELL_POOL_MB", "32")
+    rng = np.random.default_rng(0)
+    n = 500_000
+    with CellPool(["v", "w"], backend="duckdb") as pool:
+        pool._con.execute("SET max_temp_directory_size='16MB'")
+        # 8 wells x 500k rows x 56 bytes = 224 MB of rows: 7x the memory, 14x the cap.
+        for i in range(8):
+            pool.add("g", f"W{i}", np.arange(n), np.full(n, 24.0),
+                     {"v": rng.standard_normal(n), "w": rng.uniform(0, 1, n)})
+        assert pool.count() == 8 * n
+        assert pool.value_range("w") is not None
+
+
+def test_a_full_pool_says_it_is_out_of_disk_and_keeps_its_counts():
+    """When there is truly no room left, the error names the directory and its
+    free space rather than DuckDB's RAM-sounding "Out of Memory", and the
+    counts still describe what the table holds — not the well that failed."""
+    duckdb = pytest.importorskip("duckdb")
+
+    pool = CellPool(["v"], backend="duckdb")
+    pool.add("g", "A1", np.arange(5), np.zeros(5), {"v": np.arange(5.0)})
+    real = pool._con
+
+    class _Full:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def execute(self, sql, *args):
+            if sql.startswith("INSERT"):
+                raise duckdb.OutOfMemoryException("failed to offload data block (2.2 GiB/2.2 GiB used)")
+            return real.execute(sql, *args)
+
+    pool._con = _Full()
+    with pytest.raises(cell_pool.CellPoolFullError) as err:
+        pool.add("g", "A2", np.arange(7), np.zeros(7), {"v": np.arange(7.0)})
+    assert "after 5 cells" in str(err.value) and "GiB free" in str(err.value)
+    assert pool.count() == 5 and pool.count("g") == 5
+    assert pool.value_range("v") == (0.0, 4.0)
+    pool._con = real
+    pool.close()

@@ -19,8 +19,12 @@ the well's frame, the timepoint and the view's value columns.
 
 **Backends.** With DuckDB installed (tracker Q6) the rows live in an in-process
 DuckDB table under a memory limit (:data:`DEFAULT_MEMORY_MB`, overridden by
-``ALLWELL_CELL_POOL_MB``) and a spill directory, so the pool stays inside that
-limit however many cells are selected. Without it, the same interface holds
+``ALLWELL_CELL_POOL_MB``), in a database file inside a private spill directory,
+so the pool stays inside that limit however many cells are selected: rows past
+it are compressed into that file rather than evicted raw to DuckDB's temp
+directory, whose cap of 90% of the free disk a large selection once exhausted.
+A pool that runs out of disk as well raises :class:`CellPoolFullError`, naming
+the directory and its free space. Without it, the same interface holds
 numpy arrays — what the views held before, so a missing engine costs memory
 and nothing else. :func:`backend_name` says which is in use;
 ``ALLWELL_CELL_POOL=numpy`` forces the second.
@@ -181,7 +185,21 @@ class CellPool:
         if duckdb is not None:
             self._spill = tempfile.mkdtemp(prefix="allwell-cellpool-")
             mb = int(os.environ.get("ALLWELL_CELL_POOL_MB") or DEFAULT_MEMORY_MB)
-            self._con = duckdb.connect(config={"memory_limit": f"{mb}MB", "temp_directory": self._spill})
+            # A database *file* in the spill directory, not ``:memory:``. An
+            # in-memory table that outgrows the memory limit is evicted to the
+            # temp directory uncompressed, and DuckDB caps that directory at
+            # 90% of the disk's free space when the pool opens
+            # (``max_temp_directory_size``) — so a large selection on a nearly
+            # full disk failed mid-load with "Out of Memory Error: failed to
+            # offload data block (2.2 GiB/2.2 GiB used)". A file-backed table is
+            # compressed at each checkpoint and evicted to its own file, which
+            # that cap does not govern: 26.4M cells of four values took 797 MB
+            # on disk this way against 2.7 GB of temp files in memory, and
+            # loaded faster. The temp directory is still there for the sorts a
+            # quantile runs.
+            self._con = duckdb.connect(os.path.join(self._spill, "cells.duckdb"),
+                                       config={"memory_limit": f"{mb}MB",
+                                               "temp_directory": os.path.join(self._spill, "tmp")})
             # A pool nobody closed — dropped by an exception, or held until the
             # app exits — still releases its connection and removes its spill
             # directory, when it is collected or at interpreter exit.
@@ -246,13 +264,13 @@ class CellPool:
         grp = self._groups.index(group)
         wid = self._wells.index(well)
         seq = np.arange(self._seq, self._seq + n, dtype=np.int64)
-        self._seq += n
-        self._sizes[group] += n
         tp = np.asarray(tp, dtype=float)
         if self._con is None:
             self._parts.append({"seq": seq, "grp": np.full(n, grp, dtype=np.int32),
                                 "well": np.full(n, wid, dtype=np.int32), "rn": rows, "tp": tp,
                                 **{f"c{i}": c for i, c in enumerate(cols)}})
+            self._seq += n
+            self._sizes[group] += n
             return
         import pyarrow as pa
 
@@ -262,8 +280,14 @@ class CellPool:
         self._con.register("__aw_part", table)
         try:
             self._con.execute("INSERT INTO cells SELECT * FROM __aw_part")
+        except (duckdb_errors().OutOfMemoryException, duckdb_errors().IOException) as exc:
+            raise CellPoolFullError(self._spill, self.count(), exc) from exc
         finally:
             self._con.unregister("__aw_part")
+        # Counted only once the rows are in, so a failed insert leaves the
+        # counts describing the rows the table actually holds.
+        self._seq += n
+        self._sizes[group] += n
 
     # ── questions ───────────────────────────────────────────────────────────
 
@@ -462,6 +486,36 @@ class CellPool:
                 total=self._sizes[group],
             )
         return out
+
+
+def duckdb_errors() -> ModuleType:
+    """The ``duckdb`` module, for its exception classes; only called with a live connection."""
+    import duckdb
+    return duckdb
+
+
+class CellPoolFullError(RuntimeError):
+    """The pool ran out of room: memory at its limit and no disk left to spill to.
+
+    Raised from :meth:`CellPool.add` in place of DuckDB's own error, whose
+    "Out of Memory" wording points at RAM when what has run out is almost
+    always disk space under the system temp directory. The message names
+    that directory, its free space, and how many cells were held.
+    """
+
+    def __init__(self, spill: str | None, held: int, cause: BaseException):
+        free = "unknown"
+        if spill:
+            try:
+                free = f"{shutil.disk_usage(spill).free / 2**30:.1f} GiB"
+            except OSError as exc:
+                _logger.debug("cell pool free-space probe failed (%s)", exc)
+        super().__init__(
+            f"the cell pool ran out of room after {held:,} cells: it keeps "
+            f"{os.environ.get('ALLWELL_CELL_POOL_MB') or DEFAULT_MEMORY_MB} MB in memory and "
+            f"spills the rest to {os.path.dirname(spill or '') or 'the temp directory'}, "
+            f"which has {free} free. Free disk space there, point TMPDIR at a larger "
+            f"disk, or select fewer wells. ({cause})")
 
 
 def _release(con, spill: str | None) -> None:

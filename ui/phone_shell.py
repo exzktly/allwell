@@ -13,10 +13,10 @@ What phone layout does, and where:
   layouts. RealVNC resizes the Windows desktop to the phone's shape; a window
   whose minimum is wider than that desktop hangs off its edge, taking every
   control there with it, including the one that would fix it.
-* **One column.** Each pane's splitter turns vertical: the band's ☰ opens the
-  pane's whole left panel (Review's sections and well plate, the Analyze form)
-  across the top of the window and pushes the page down beneath it —
-  ``review.core.tab_controller._apply_phone_columns`` does the stacking.
+* **One column.** The band's ☰ slides the pane's whole left panel (Review's
+  sections and well plate, the Analyze form) out over the page from the left
+  edge — ``review.core.phone_drawer`` lends the panels to that drawer and
+  gives them back.
 * **Chrome that suits a thumb**: the header row goes, the mode bar drops its
   glyphs, the page sub-tab strip becomes one "Bar Plots ▾" menu, desk-only
   and destructive buttons go, the keyboard hints go; text size and the way
@@ -462,9 +462,8 @@ class PhoneShell(QObject):
             "using All-Well from a phone over remote desktop.")
         self.desk_button.clicked.connect(lambda: self.set_on(True))
 
-        # Phone: ☰ opens the pane's whole left panel — Review's sections and
-        # well plate, the Analyze form — across the top of the window, pushing
-        # the page down beneath it rather than covering it.
+        # Phone: ☰ slides the pane's whole left panel — Review's sections and
+        # well plate, the Analyze form — out over the page from the left.
         self.menu_button = QToolButton()
         self.menu_button.setObjectName("PhoneMenuButton")
         self.menu_button.setText("☰")

@@ -1,20 +1,27 @@
-"""Drawer — an edge slide-in overlay panel (right edge or bottom edge).
+"""Drawer — an edge slide-in overlay panel (right, left or bottom edge).
 
 A child widget of some host (usually the main window) that animates in from an
 edge, over a dim backdrop, and dismisses on outside-click or ``Esc``. Hosts an
 arbitrary content widget.
 
 ``edge="right"`` (default) slides a vertical panel in from the right and is sized
-by ``width_hint`` / ``width_fraction``. ``edge="bottom"`` slides a full-width
+by ``width_hint`` / ``width_fraction``; ``edge="left"`` is its mirror (phone
+layout's side rail). ``edge="bottom"`` slides a full-width
 horizontal panel up from the bottom and is sized by ``height_hint`` /
 ``height_fraction`` — use it for wide, log-style content.
 
 API
 ---
 * ``Drawer(host, parent=None, *, edge="right", width_hint=None,
-  width_fraction=0.34, height_hint=None, height_fraction=0.4)``
-* ``setContentWidget(widget)`` / ``contentWidget()``
-* ``open()`` / ``close()`` / ``toggle()`` / ``isOpen()``
+  width_fraction=0.34, height_hint=None, height_fraction=0.4, margin=None,
+  top_inset=0)`` — *margin* is the padding around the content (default
+  ``Spacing.lg``); *top_inset* (an int, or a callable returning one) keeps the
+  drawer and its backdrop below a strip of the host that stays usable, such as
+  a toolbar holding the button that opens it.
+* ``setContentWidget(widget)`` / ``contentWidget()`` / ``takeContentWidget()``
+  (removes the content without deleting it, for a host lending a widget)
+* ``open()`` / ``close()`` / ``toggle()`` / ``isOpen()`` / ``closeNow()``
+  (no animation)
 * ``opened`` / ``closed`` signals.
 
 Sizes are logical-pixel / fraction based (DPI-aware via the host's logical
@@ -68,12 +75,14 @@ class Drawer(QWidget):
     def __init__(self, host: QWidget, parent: QWidget | None = None, *,
                  edge: str = "right",
                  width_hint: int | None = None, width_fraction: float = 0.34,
-                 height_hint: int | None = None, height_fraction: float = 0.4) -> None:
+                 height_hint: int | None = None, height_fraction: float = 0.4,
+                 margin: int | None = None, top_inset=0) -> None:
         super().__init__(parent or host)
         self.setObjectName("Drawer")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._host = host
-        self._edge = edge if edge in ("right", "bottom") else "right"
+        self._edge = edge if edge in ("right", "left", "bottom") else "right"
+        self._top_inset = top_inset
         self._width_hint = int(width_hint) if width_hint else None
         self._width_fraction = float(width_fraction)
         self._height_hint = int(height_hint) if height_hint else None
@@ -84,7 +93,7 @@ class Drawer(QWidget):
         self._backdrop.clicked.connect(self.close)
 
         self._layout = QVBoxLayout(self)
-        m = theme.Spacing.lg
+        m = theme.Spacing.lg if margin is None else int(margin)
         self._layout.setContentsMargins(m, m, m, m)
         self._layout.setSpacing(theme.Spacing.md)
         self._content: QWidget | None = None
@@ -110,6 +119,14 @@ class Drawer(QWidget):
 
     def contentWidget(self) -> QWidget | None:
         return self._content
+
+    def takeContentWidget(self) -> QWidget | None:
+        """Remove the content and hand it back undeleted (unparented)."""
+        widget, self._content = self._content, None
+        if widget is not None:
+            self._layout.removeWidget(widget)
+            widget.setParent(None)
+        return widget
 
     def isOpen(self) -> bool:
         return self._open
@@ -144,7 +161,21 @@ class Drawer(QWidget):
     def toggle(self) -> None:
         self.close() if self._open else self.open()
 
+    def closeNow(self) -> None:
+        """Dismiss at once, without the slide — for a host tearing down."""
+        was_open = self._open
+        self._open = False
+        self._anim.stop()
+        self.hide()
+        self._backdrop.setVisible(False)
+        if was_open:
+            self.closed.emit()
+
     # ── internals ────────────────────────────────────────────────────────
+    def _inset(self) -> int:
+        inset = self._top_inset() if callable(self._top_inset) else self._top_inset
+        return max(0, min(int(inset or 0), self._host.height()))
+
     def _drawer_width(self) -> int:
         if self._width_hint:
             return min(self._width_hint, self._host.width())
@@ -160,19 +191,22 @@ class Drawer(QWidget):
         if self._edge == "bottom":
             h = self._drawer_height()
             return QRect(0, self._host.height() - h, self._host.width(), h)
-        w = self._drawer_width()
-        return QRect(self._host.width() - w, 0, w, self._host.height())
+        w, top = self._drawer_width(), self._inset()
+        x = 0 if self._edge == "left" else self._host.width() - w
+        return QRect(x, top, w, self._host.height() - top)
 
     def _closed_rect(self) -> QRect:
         """Off-screen (dismissed) geometry the panel animates to/from, per edge."""
         if self._edge == "bottom":
             h = self._drawer_height()
             return QRect(0, self._host.height(), self._host.width(), h)
-        w = self._drawer_width()
-        return QRect(self._host.width(), 0, w, self._host.height())
+        w, top = self._drawer_width(), self._inset()
+        x = -w if self._edge == "left" else self._host.width()
+        return QRect(x, top, w, self._host.height() - top)
 
     def _sync_backdrop_geom(self) -> None:
-        self._backdrop.setGeometry(0, 0, self._host.width(), self._host.height())
+        top = self._inset() if self._edge != "bottom" else 0
+        self._backdrop.setGeometry(0, top, self._host.width(), self._host.height() - top)
 
     def _on_anim_finished(self) -> None:
         if not self._open:
@@ -188,7 +222,9 @@ class Drawer(QWidget):
         if not isinstance(event, QEvent):
             return False
         if obj is self._host:
-            if event.type() == QEvent.Resize and self.isVisible():
+            # LayoutRequest too: a top inset measured off a sibling (a toolbar
+            # that grew with the text size) moves without the host resizing.
+            if event.type() in (QEvent.Resize, QEvent.LayoutRequest) and self.isVisible():
                 self.setGeometry(self._open_rect() if self._open else self._closed_rect())
                 self._sync_backdrop_geom()
         return super().eventFilter(obj, event)
@@ -205,6 +241,8 @@ class Drawer(QWidget):
             frame = (f"border-top: 1px solid {c.border_subtle};"
                      f" border-top-left-radius: {r.lg}px;"
                      f" border-top-right-radius: {r.lg}px;")
+        elif self._edge == "left":
+            frame = f"border-right: 1px solid {c.border_subtle};"
         else:
             frame = (f"border-left: 1px solid {c.border_subtle};"
                      f" border-top-left-radius: {r.lg}px;"

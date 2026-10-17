@@ -633,9 +633,14 @@ class AllWellApp(QMainWindow):
         if nav is not None:
             # A section tapped in the open drawer is a request to see it: the
             # drawer closes. Wells tapped on the plate below the sections keep
-            # it open, since picking several is normal and the plot under the
-            # drawer already redraws in view.
+            # it open, since picking several in a row is normal.
             nav.itemClicked.connect(lambda _key: self._phone.close_drawer())
+        # The drawer also closes from inside (its dimmed strip, Esc); ☰ shows
+        # whichever state it is in.
+        from review.core.phone_drawer import ensure_drawer
+        drawer = ensure_drawer(review._ctx)
+        drawer.opened.connect(self._phone.refresh)
+        drawer.closed.connect(self._phone.refresh)
 
     def showEvent(self, event) -> None:  # Qt naming
         super().showEvent(event)
@@ -1341,6 +1346,10 @@ class AllWellApp(QMainWindow):
         review = getattr(self, "_review", None)
         if review is None:
             return
+        if self._phone is not None:
+            # A mode picked with the side rail out: show that mode's page,
+            # not its rail.
+            self._phone.close_drawer()
         stack = getattr(review, "_central_pane_stack", None)
         if stack is not None and 0 <= idx < stack.count() and stack.currentIndex() != idx:
             stack.setCurrentIndex(idx)

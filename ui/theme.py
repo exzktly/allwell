@@ -1750,10 +1750,6 @@ QLabel#PlateWellDetail {{
     color: {c.text_secondary};
     padding: {s.xs}px 0px;
 }}
-QToolButton#PhoneLayoutButton {{
-    border: 1px solid {c.control_border};
-    border-radius: {r.sm}px;
-}}
 """ + (_touch_qss(_TOUCH_UNIT[0]) if _TOUCH_UNIT[0] else "")
 
 

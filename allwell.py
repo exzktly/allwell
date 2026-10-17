@@ -645,8 +645,15 @@ class AllWellApp(QMainWindow):
             status_text=lambda: self._status_lbl_app.text() if self._status_lbl_app else "",
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
-        self._header_layout.insertWidget(
-            self._header_layout.indexOf(self._version_pill) + 1, self._phone.desk_button)
+        # Among the small icon buttons at the band's right end, just before
+        # help: like help, in every mode, since Analyze (watching a run) is the
+        # commonest reason to be on a phone.
+        band_lay = band.layout() if band is not None else None
+        if band_lay is not None:
+            help_btn = getattr(self, "_help_btn", None)
+            at = band_lay.indexOf(help_btn) if help_btn is not None else -1
+            band_lay.insertWidget(at if at >= 0 else band_lay.count(),
+                                  self._phone.desk_button)
         notebook = getattr(review, "_notebook", None)
         if notebook is not None and hasattr(notebook, "currentChanged"):
             notebook.currentChanged.connect(lambda *_a: self._phone.refresh())

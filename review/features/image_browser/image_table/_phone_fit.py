@@ -95,6 +95,13 @@ def phone_cell_px(ctx, cells, plan, zoom: float, grid) -> int | None:
     margins = inner.layout().contentsMargins() if inner and inner.layout() else None
     avail = scroll.viewport().width() - (
         margins.left() + margins.right() if margins is not None else 0)
+    # The grid this sizes is usually what makes the page tall enough to need a
+    # vertical scrollbar, which then takes its width out of the viewport — a
+    # change too small to trigger a refit, left as a sideways scroll of exactly
+    # that width. So its width is reserved before it appears.
+    bar = scroll.verticalScrollBar()
+    if not bar.isVisible():
+        avail -= bar.sizeHint().width()
     label_w = _label_width(plan, theme.ui_scale()) if plan is not None else 0
     spacer_w = (len(plan.spacer_cols) * plan.col_gap) if plan is not None else 0
     # Each cell widget has 2 px margins either side (controller._render_cell's
@@ -122,10 +129,12 @@ class _RefitOnResize(QObject):
         return False
 
 
-def install_refit(ctx, scroll, render_host, regenerate: Callable[[object], None]) -> None:
+def install_refit(ctx, scroll, render_host, regenerate: Callable[[object], None],
+                  relabel: Callable[[object], None] | None = None) -> None:
     """Redraw a rendered grid (``regenerate(ctx)``, the tab's Generate) when
     phone layout turns on or off, and when the page's width changes while it
-    is on (the phone turned).
+    is on (the phone turned). *relabel(ctx)* runs at once on a layout change,
+    for text that names where the controls are.
 
     The listener is removed with *render_host*, so a torn-down tab is never
     called back.
@@ -136,6 +145,12 @@ def install_refit(ctx, scroll, render_host, regenerate: Callable[[object], None]
     fitted = {"width": None}
 
     def _refit() -> None:
+        # Never inside a switch: its restyle lets timers fire, and a redraw
+        # there deleted and rebuilt the grid while the restyle was walking the
+        # window's widgets. Ask again once it is over.
+        if phone_layout.is_switching():
+            timer.start()
+            return
         # Only a grid that has been drawn is redrawn: an empty tab stays empty
         # until its user presses Generate.
         if not getattr(ctx.state.image_table, "last_render", None):
@@ -151,6 +166,10 @@ def install_refit(ctx, scroll, render_host, regenerate: Callable[[object], None]
             timer.start()
         except RuntimeError:
             phone_layout.remove_listener(_on_layout)  # the tab went first
+            return
+        if relabel is not None:
+            with swallow("image table: relabel for the layout"):
+                relabel(ctx)
 
     phone_layout.add_listener(_on_layout)
     render_host.destroyed.connect(lambda *_: phone_layout.remove_listener(_on_layout))

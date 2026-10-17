@@ -24,7 +24,7 @@ from __future__ import annotations
 from review.data.metric_labels import spread_label
 
 from review.core.plot_orchestrator import redraw_every_scope
-from review.core.selection_controller import invalidate_stats_cache
+from review.core.selection_controller import invalidate_threshold_results
 from core.safe import swallowed
 from review.core.lazy import lazy as _lazy
 
@@ -145,7 +145,7 @@ def refresh_fov_btn_state(ctx) -> None:
 
 
 def toggle_sem(ctx) -> None:
-    invalidate_stats_cache(ctx)
+    invalidate_threshold_results(ctx)
     is_sem = ctx.state.plot.toggle_sem()
     text = spread_label(is_sem)
     variant = "sem" if is_sem else "sem_warn"
@@ -164,7 +164,7 @@ def toggle_sem(ctx) -> None:
 
 def toggle_fov_replicates(ctx) -> None:
     ctx.state.plot.toggle_fov_replicates()
-    invalidate_stats_cache(ctx)
+    invalidate_threshold_results(ctx)
     refresh_fov_btn_state(ctx)
     # Gated on the bar feature being *present*. This is an app-global button and
     # ``_refresh_bar_layout_btn_state`` is a lazy proxy into

@@ -1396,14 +1396,15 @@ def note_group_visibility_changed(ctx) -> None:
     refresh_fov_btn_state(ctx)
 
 
-def invalidate_stats_cache(ctx) -> None:
+def invalidate_stats_cache(ctx, *, keep_populations: bool = False) -> None:
     """Discard cached group statistics. Call whenever group definitions change.
 
     For a change in group *visibility* rather than definition, call
     :func:`note_group_visibility_changed` — it costs nothing and keeps the
-    plate's statistics.
+    plate's statistics. For an edit that moves only the threshold or how a
+    spread is reported, call :func:`invalidate_threshold_results`.
     """
-    ctx.state.stats_cache.invalidate()
+    ctx.state.stats_cache.invalidate(keep_populations=keep_populations)
     # The per-FOV toggle's label and variant are synced from plot state here so
     # every path that disturbs the groups leaves the button bank consistent.
     note_group_visibility_changed(ctx)
@@ -1431,6 +1432,21 @@ def invalidate_stats_cache(ctx) -> None:
         except Exception:
             swallowed()  # a failed cue must not abort the edit that caused it
 
+
+
+def invalidate_threshold_results(ctx) -> None:
+    """:func:`invalidate_stats_cache` for an edit that changes no well's cell population.
+
+    The fraction-on and count-on thresholds, the SEM/SD toggle and the
+    FOV-replicate toggle change what is computed *from* each well's counted
+    cells, never which cells count or what their values are. So every result is
+    dropped as usual, but the threshold-free populations
+    (``review/domain/well_population.py``) are kept, and the redraw that follows
+    answers from memory instead of reading every well from disk again — on a
+    plate larger than the row cache, the difference between about 50 s and under
+    a second for one threshold edit.
+    """
+    invalidate_stats_cache(ctx, keep_populations=True)
 
 
 def sel_clear_all(ctx) -> None:

@@ -222,6 +222,11 @@ def _well_extra(ctx, lbl, target_t, threshold, val_col, fluor_gates, ratios,
 
     table = store.cache.get(key)
     if table is None:
+        table = _extra_table_from_population(ctx, lbl, threshold, val_col, fluor_gates,
+                                             version, on_col)
+        if table is not None:
+            store.cache[key] = table
+    if table is None:
         inputs = _inputs()
         table = {}
         if inputs is None:
@@ -245,6 +250,22 @@ def _well_extra(ctx, lbl, target_t, threshold, val_col, fluor_gates, ratios,
         hit = _extra_at(_inputs(), target_t, threshold)
         store.cache[at_key] = hit
     return hit
+
+
+def _extra_table_from_population(ctx, lbl, threshold, val_col, fluor_gates, version, on_col):
+    """:func:`_well_extra`'s per-timepoint table, from the well's remembered population.
+
+    ``None`` when the population cannot supply it — no store, or a well with too
+    many timepoints to tabulate — and the caller computes it as before.
+    """
+    pop = _population(ctx, lbl, val_col=val_col, tp_col="timepoint_hours",
+                      fluor_gates=fluor_gates, per_fov=False, version=version,
+                      on_col=on_col)
+    if pop is None or not pop.extras_complete:
+        return None
+    from review.domain.well_population import extra_table
+    table = extra_table(pop, threshold)
+    return _EXTRA_UNANSWERABLE if table is None else table
 
 
 #: The table of a well whose frame cannot answer (no area or timepoint column,
@@ -632,12 +653,71 @@ def aggregate_well_cached(
     hit = store.cache.get(key)
     if hit is not None:
         return hit
-    result = tuple(aggregate_well(
-        ctx, label, threshold=threshold, use_sem=use_sem, val_col=val_col,
-        fluor_gates=fluor_gates, per_fov_spread=per_fov_spread, tp_col=tp_col,
-    ) or ())
+    pop = _population(ctx, label, val_col=val_col, tp_col=tp_col,
+                      fluor_gates=fluor_gates, per_fov=per_fov_spread, version=key[-1],
+                      on_col=_thresh_on_col(ctx))
+    if pop is not None:
+        from review.domain.well_population import aggregate as _pop_aggregate
+        result = tuple(_pop_aggregate(pop, threshold=threshold, use_sem=use_sem,
+                                      per_fov_spread=per_fov_spread))
+    else:
+        result = tuple(aggregate_well(
+            ctx, label, threshold=threshold, use_sem=use_sem, val_col=val_col,
+            fluor_gates=fluor_gates, per_fov_spread=per_fov_spread, tp_col=tp_col,
+        ) or ())
     store.cache[key] = result
     return result
+
+
+def _population(ctx, label: str, *, val_col: str, tp_col: str, fluor_gates,
+                per_fov: bool, version, on_col: str | None):
+    """Well *label*'s threshold-free population (``review/domain/well_population.py``), remembered.
+
+    ``None`` when the context has no population store (a thin test context),
+    which sends the caller to the direct computation.
+
+    **The key is everything a population is a function of except the threshold
+    and the spread kind** — which is the point: those two are what a user drags,
+    and neither changes which cells count or what their values are. So the store
+    keeps populations across a threshold, SEM or FOV-replicate edit
+    (``selection_controller.invalidate_threshold_results``) and a redraw after one
+    reads nothing from disk. The other components are
+    :func:`aggregate_well_cached`'s, for the same reasons given there:
+    ``val_col`` / ``tp_col``, the intensity gates, the scatter-gate layers
+    (:func:`_gate_cache_sig`), the thresholding on-column, the ratio definition
+    behind ``val_col``, and ``rows_version`` read before the read. Settings that
+    change a verdict without bumping ``rows_version`` (QC, crop, focus, field
+    exclusions) clear the store through the plain ``invalidate_stats_cache``,
+    which every such edit calls.
+
+    The per-field data is built only when a per-field aggregate asks for it; a
+    population built without it is rebuilt once when one does.
+    """
+    stats = getattr(ctx.state, "stats_cache", None)
+    store = getattr(stats, "populations", None)
+    if store is None or getattr(ctx.state, "repo", None) is None:
+        return None
+    key = ("population", label, val_col, tp_col,
+           tuple(sorted((fluor_gates or {}).items())), on_col,
+           _gate_cache_sig(ctx), _ratio_sig_for(ctx, val_col), version)
+    pop = store.get(key)
+    if pop is not None and (pop.has_fov or not per_fov):
+        return pop
+    from review.domain.well_population import build_population
+    ratios = ctx.state.channel.ratio_index
+    rows = _aggregate_rows(ctx, label, val_col=val_col, tp_col=tp_col,
+                           fluor_gates=fluor_gates, on_col=on_col)
+    # The extras (median above, mean of all) are defined on ``timepoint_hours``;
+    # a population for another timepoint column leaves them to their own path.
+    extra_inputs = (_extra_inputs(rows, val_col, fluor_gates, ratios, on_col)
+                    if tp_col == "timepoint_hours" else None)
+    pop = build_population(rows, tp_col=tp_col, val_col=val_col, fluor_gates=fluor_gates,
+                           ratios=ratios, on_col=on_col, per_fov=per_fov,
+                           extra_inputs=extra_inputs)
+    if tp_col != "timepoint_hours":
+        pop.extras, pop.extras_complete = {}, False
+    store[key] = pop
+    return pop
 
 
 def cdf_values_cached(ctx, label: str, *, val_col: str,

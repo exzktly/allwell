@@ -83,19 +83,27 @@ def _agg(ctx, **over):
 def test_a_repeated_call_is_served_from_the_memo(ctx):
     from review.domain import stats_compute as sc
 
+    from review.domain import well_population as wp
+
+    # A miss is computed either directly or from the well's remembered
+    # population (``review/domain/well_population.py``); count both routes.
     calls = {"n": 0}
-    orig = sc.aggregate_well
+    orig, orig_pop = sc.aggregate_well, wp.aggregate
 
     def counted(*a, **kw):
         calls["n"] += 1
         return orig(*a, **kw)
 
-    sc.aggregate_well = counted
+    def counted_pop(*a, **kw):
+        calls["n"] += 1
+        return orig_pop(*a, **kw)
+
+    sc.aggregate_well, wp.aggregate = counted, counted_pop
     try:
         first = _agg(ctx)
         second = _agg(ctx)
     finally:
-        sc.aggregate_well = orig
+        sc.aggregate_well, wp.aggregate = orig, orig_pop
     assert first == second
     assert calls["n"] == 1, "the second call recomputed instead of reusing"
     assert isinstance(first, tuple), (

@@ -212,7 +212,7 @@ def test_a_pixel_size_that_is_not_a_length_is_refused(px):
 
 
 # ── a well archive ───────────────────────────────────────────────────────────
-def _archive(tmp_path, *, record=True, channels=("Phase", "GFP")):
+def _archive(tmp_path, *, record=True, channels=("Phase", "GFP"), tail=""):
     import tifffile
 
     from tests._nanowell_run_fixture import build_well
@@ -225,7 +225,7 @@ def _archive(tmp_path, *, record=True, channels=("Phase", "GFP")):
                 buffer = io.BytesIO()
                 # The fluorescence channel is blank: the stitched channel must be the phase one.
                 tifffile.imwrite(buffer, image if channel == "Phase" else np.zeros_like(image))
-                zf.writestr(f"exp_{channel}_A01_{name}_T0.tif", buffer.getvalue())
+                zf.writestr(f"exp_{channel}_A01_{name}_T0{tail}.tif", buffer.getvalue())
         # What a real archive also carries (CLAUDE.md §7.1 #4).
         zf.writestr(".DS_Store", b"\0")
         zf.writestr("__MACOSX/._exp_Phase_A01_F0_T0.tif", b"\0")
@@ -268,3 +268,49 @@ def test_the_dataset_s_own_filename_schema_reads_the_archive(tmp_path):
     montage = nc.montage_from_archive(renamed, fields=("well", "fov", "timepoint", "channel"), sep="-")
     assert montage.ok, montage.reason
     assert montage.channel == "Phase"
+
+
+def test_an_archive_named_with_extra_trailing_tokens_is_read_as_a_run_reads_it(tmp_path):
+    """Review L21. A run's parser takes the schema's slots and ignores tokens past them, so
+    ``exp_Phase_A01_F0_T0_z0.tif`` is a run input; the Playground must stitch the same archive."""
+    import process_microscopy as pm
+
+    path = _archive(tmp_path, tail="_z0")
+    groups, _ = pm.find_image_groups_in_zip(path, "Phase", [], tmp_path / "x")
+    assert len(groups) == 4                                         # the run takes all four tiles
+    montage = nc.montage_from_archive(path)
+    assert montage.ok, montage.reason
+    assert (montage.timepoint, montage.channel) == ("T0", "Phase")
+    assert dict(montage.facts)["Tiles"] == "4 (2 × 2 grid)"
+
+
+def test_the_loaded_dataset_s_archive_is_read_with_the_dataset_s_schema(tmp_path, monkeypatch):
+    """The controller reads the archive with the loaded dataset's own schema (from ``pipeline_info``) when the
+    archive sits in the dataset's ``in/``, and with the default otherwise."""
+    from types import SimpleNamespace
+
+    from review.features.image_browser.playground import controller
+
+    src = _archive(tmp_path)
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+    renamed = in_dir / "A01.zip"
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(renamed, "w") as zout:
+        for name in zin.namelist():
+            if name.endswith(".tif") and not name.startswith("__MACOSX"):
+                exp, channel, well, fov, tp = name[:-4].split("_")
+                zout.writestr(f"{well}-{fov}-{tp}-{channel}.tif", zin.read(name))
+    (in_dir / "acquisition.json").write_text((tmp_path / "acquisition.json").read_text())
+    jobs = []
+    monkeypatch.setattr(controller, "_start_nanowell_search", lambda ctx, job, what: jobs.append(job))
+    info = {"schema_fields": ["well", "fov", "timepoint", "channel"], "separator": "-"}
+
+    def search(dataset_in_dir):
+        ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(in_dir=dataset_in_dir,
+                                                                            pipeline_info=info)))
+        controller.playground_nanowell_from_archive(ctx, str(renamed))
+        return jobs.pop()()
+
+    assert search(str(in_dir)).ok                                   # the dataset's archive: its own schema
+    other = search(str(tmp_path))                                   # an archive from elsewhere: the default
+    assert not other.ok and "experiment_channel_well_fov_timepoint" in other.reason

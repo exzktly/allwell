@@ -153,10 +153,14 @@ def archive_contents(zip_path, *, fields=None, sep: str | None = None) -> dict:
     """``{timepoint: {channel: {field: member}}}`` for the images in a well archive.
 
     *fields* are the filename schema's slots in order (the dataset's, from ``pipeline_info.json``) and *sep* its
-    separator; both default to the pipeline's ``experiment_channel_well_fov_timepoint``.
+    separator; both default to the pipeline's ``experiment_channel_well_fov_timepoint``. Each name is read by the
+    run's own ``process_microscopy.parse_filename``, so a name the run takes is a name read here: tokens past the
+    schema's slots are ignored, and a missing timepoint token is the empty timepoint, as in a run. A name with no
+    channel or fov token places no tile and is skipped.
     """
     import zipfile
 
+    from process_microscopy import parse_filename
     from util.image_exts import is_run_input_member
     from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP, parse_schema
 
@@ -167,11 +171,8 @@ def archive_contents(zip_path, *, fields=None, sep: str | None = None) -> dict:
         for name in archive.namelist():
             if not is_run_input_member(name):
                 continue
-            tokens = Path(name).stem.split(sep)
-            if len(tokens) != len(fields):
-                continue
-            meta = dict(zip(fields, tokens))
-            if not {"channel", "fov", "timepoint"} <= set(meta):
+            meta = parse_filename(Path(name).name, schema=fields, sep=sep)
+            if not (meta["channel"] and meta["fov"]):
                 continue
             out.setdefault(meta["timepoint"], {}).setdefault(meta["channel"], {})[meta["fov"]] = name
     return out

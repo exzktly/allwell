@@ -44,11 +44,6 @@ def wire_selections_list(ctx, lst) -> None:
     # A group is one condition (its wells are its implicit replicate set), so
     # there is no separate replicate-partition edit to wire.
     lst.addFromSelectionRequested.connect(lambda *_a: rep_add(ctx))
-    # Bar-group import is a bar-persistence feature action; connect its bound
-    # method off the window (signal wiring, not a behaviour reach-through).
-    load_cb = getattr(ctx.window, "_bar_load_groups", None)
-    if callable(load_cb):
-        lst.importRequested.connect(load_cb)
 
 
 def rep_panel_refresh(ctx) -> None:

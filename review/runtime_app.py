@@ -510,12 +510,6 @@ class ReviewApp(QWidget):
     def _rebuild_all(self, *, invalidate: bool = True) -> None:
         return rebuild_all(self._ctx, invalidate=invalidate)
 
-    # ── Bar group persistence (delegates to review.persistence.bar_groups)
-
-    def _bar_load_groups(self) -> None:
-        from review.persistence import bar_groups as _bg_persist
-        _bg_persist.load_via_dialog(self)
-
     # ── Persistence ──────────────────────────────────────────────────────────
     # The data-dir JSON domains (ratios / heatmap_layouts / cell_overrides /
     # line_order / view_state / notes) are saved and loaded through

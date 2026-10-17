@@ -1974,9 +1974,13 @@ does not come here: it takes you to the tab that plot came from.
 The rest of Home's tabs are where you *declare* things, rather than read them:
 which cells count, which wells are replicates of each other, what you varied
 across the plate, what to call them, and what ratios to derive. **Import**, at
-the right end of the page's controls row, merges definitions from a JSON file
-into what is already there; it is hidden on Overview, where there is nothing to
-merge into. Everything on these tabs autosaves to the dataset folder as you
+the right end of the page's controls row, brings in groups from a JSON file —
+one saved with a group's **Export**, a `pipeline_info.json`, or an older
+group-definitions file. When the dataset already has groups it asks whether to
+**Add to current groups** (a name already in use gets a suffix, nothing is
+overwritten) or **Replace current groups**; with no groups yet they are simply
+added. It is the app's only groups import, and it is hidden on Overview and on
+the Variables layer, where there are no groups to import into. Everything on these tabs autosaves to the dataset folder as you
 edit, so there is no Save button to look for; to discard definitions, use
 **Reset analysis** in the title bar ([Starting over](#starting-over)), which
 lets you pick exactly which kinds to drop.

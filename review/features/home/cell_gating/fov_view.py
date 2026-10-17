@@ -84,8 +84,9 @@ def refresh_fov_selection_widgets(ctx) -> None:
     """Repaint the button text and the status line from the live slice."""
     from review.data.field_quality_cache import untrusted_wells
 
-    btn = ctx.runtime.cell_gating.fov_btn
-    status = ctx.runtime.cell_gating.fov_status
+    rt = ctx.runtime.cell_gating
+    btn = getattr(rt, "fov_btn", None)
+    status = getattr(rt, "fov_status", None)
     if btn is None and status is None:
         return
     selection = selected_fovs(ctx)

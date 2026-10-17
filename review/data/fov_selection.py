@@ -52,7 +52,8 @@ def fov_match_key(value) -> object:
 
 def selected_fovs(ctx) -> set[str] | None:
     """The live selection, or ``None`` when every field counts."""
-    selection = getattr(ctx.state.cell_gating, "fov_selection", None)
+    cell_gating = getattr(ctx.state, "cell_gating", None)
+    selection = getattr(cell_gating, "fov_selection", None)
     return None if selection is None else set(selection)
 
 
@@ -97,9 +98,11 @@ def apply_fov_selection_to_cache(ctx, label: str | None = None) -> list[str]:
     from review.data.field_quality_cache import untrusted_wells
 
     selection = selected_fovs(ctx)
-    cache = getattr(ctx.state.dataset, "cache", None) or {}
+    cache = getattr(getattr(ctx.state, "dataset", None), "cache", None) or {}
     labels = [label] if label is not None else list(cache.keys())
     if selection is None:
+        if not cache:
+            return []
         for lbl in labels:
             drop_verdict_column(ctx, lbl, column=FOV_PASS_COLUMN)
         return []

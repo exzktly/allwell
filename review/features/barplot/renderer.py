@@ -60,6 +60,7 @@ from domain.tp_match import tp_close
 from review.features.barplot._pooled import ColumnCells, column_cells, finish_columns
 from review.features.barplot._pooled import release_previous as _release_previous
 from review.features.barplot._annotations import (
+    _TITLE_PAD_PT,
     cluster_header_pad,
     label_bar,
     user_y_ceiling as _user_y_ceiling,
@@ -92,7 +93,6 @@ def _annotate_group_key_headers(axes, xs, group_keys) -> int:
             ax.text(sum(positions) / len(positions), 1.02, gk,
                     transform=ax.get_xaxis_transform(),
                     ha="center", va="bottom", fontsize=8, fontweight="bold")
-    from review.features.barplot._annotations import _TITLE_PAD_PT
     return _TITLE_PAD_PT[1] if cluster_x else _TITLE_PAD_PT[0]
 
 

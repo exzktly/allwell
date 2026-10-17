@@ -19,6 +19,8 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
+from core.safe import swallow
+
 #: Phone layout sizes everything in *phone points*. RealVNC shrinks the whole
 #: desktop to the phone's width, so one logical pixel on the desktop lands on
 #: the phone as ``390 / short side`` points. ``phone_unit`` is the inverse: how
@@ -64,6 +66,7 @@ KEY_TEXT_SIZE = "ui/phone_text_size"
 
 _state = {"on": False, "switching": 0}
 _listeners: list[Callable[[bool], None]] = []
+_after_switch: list[Callable[[], None]] = []
 
 
 def is_on() -> bool:
@@ -95,12 +98,30 @@ def is_switching() -> bool:
 
 @contextmanager
 def switching() -> Iterator[None]:
-    """Mark a switch in progress for :func:`is_switching`. Re-entrant."""
+    """Mark a switch in progress for :func:`is_switching`. Re-entrant; the
+    calls queued by :func:`after_switch` run when the outermost one ends."""
     _state["switching"] += 1
     try:
         yield
     finally:
         _state["switching"] -= 1
+        if _state["switching"] == 0:
+            pending = list(_after_switch)
+            _after_switch.clear()
+            for fn in pending:
+                with swallow("a call queued for after a phone-layout switch"):
+                    fn()
+
+
+def after_switch(fn: Callable[[], None]) -> None:
+    """Call ``fn()`` once, when the switch in progress ends (at once if none
+    is). How work that met a switch asks again: a timer that re-armed itself
+    instead can hold an event loop for as long as the switch lasts — on
+    Windows, for good."""
+    if not is_switching():
+        fn()
+    elif fn not in _after_switch:
+        _after_switch.append(fn)
 
 
 def add_listener(fn: Callable[[bool], None]) -> None:

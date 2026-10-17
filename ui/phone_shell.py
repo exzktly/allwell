@@ -289,10 +289,13 @@ def rescale_widgets(prev: float, new: float, widgets=None, fonts=None) -> int:
         except RuntimeError:
             swallowed()  # deleted since the fonts were read
     # Let the font and style changes the restyle queued land first: an owner
-    # re-measures off its own font, which is stale until they have. Input is
-    # held back, so a tap made meanwhile still lands on the busy overlay.
-    from PySide6.QtCore import QEventLoop
-    QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+    # re-measures off its own font, which is stale until they have. Posted
+    # events only — never processEvents. That runs timers too, and on Windows
+    # it keeps going until the message queue is empty, so a zero-delay timer
+    # that re-armed itself held it there for good: the restyle never returned
+    # and its busy overlay stayed up (reported: "Resizing for your screen…"
+    # for over two minutes). Nothing a timer does belongs inside the pass.
+    QApplication.sendPostedEvents()
     for w in owners:
         try:
             w._aw_rescale()
@@ -1377,10 +1380,10 @@ class PhoneShell(QObject):
 
     def _refresh_when_settled(self) -> None:
         self._sweep(force=False)
-        if phone_layout.is_switching():
-            self._refresh_soon.start()     # the switch ends with a refresh of its own
-            return
-        self.refresh()
+        # Never re-armed during a switch — every switch ends with a refresh of
+        # its own, and a timer restarting itself is what can hold an event loop.
+        if not phone_layout.is_switching():
+            self.refresh()
 
     def _current_page_bar(self):
         fn = self._h.current_page_bar

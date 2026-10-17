@@ -38,6 +38,7 @@ import queue
 import re
 import subprocess
 import threading
+import time
 from pathlib import Path
 from collections.abc import Callable
 
@@ -726,6 +727,9 @@ class PipelineRunner:
         # never waits on that lock from the GUI thread (see `_spawn_tracked`).
         self._spawning = False
         self._thread: threading.Thread | None = None
+        # The thread `_signal_run` starts to kill and `scancel` a remote run;
+        # held so app close can wait for it (see `wait_for_teardown`).
+        self._cancel_thread: threading.Thread | None = None
         self._last_output_dir: Path | None = None
         self._log_overflow_warned: bool = False
         # Set on Stop; checked between the zipper phase and the pipeline
@@ -1292,6 +1296,19 @@ class PipelineRunner:
     def _signal_run(self, proc, *, escalate: bool) -> None:
         """Signal the pipeline process *proc*, and the remote run behind it."""
         self._signal_subprocess(proc, escalate=escalate)
+        # A remote run's *proc* is a wrapper, and the signal above reaches the
+        # ssh inside it (its own process group), not the wrapper's threads. A
+        # batched run's loop therefore never saw the Stop once its node had
+        # been requested: it went on uploading the batch, and the dashboard
+        # went on reporting the scheduler wait, while the log said it had
+        # stopped. `terminate` is what sets the wrapper's own stop flag.
+        if proc is not None and not isinstance(proc, subprocess.Popen):
+            terminate = getattr(proc, "terminate", None)
+            if callable(terminate):
+                try:
+                    terminate()
+                except Exception:
+                    swallowed("stopping the remote run's own threads")
         # For remote runs, the local SIGTERM above tears down the ssh
         # client; ssh -tt propagates SIGHUP to the remote pipeline. The
         # second channel here is belt-and-braces — a fresh ssh that kills
@@ -1311,8 +1328,28 @@ class PipelineRunner:
                 except Exception:  # best-effort kill
                     swallowed("cancelling the remote run")
 
-            threading.Thread(target=_cancel, name="aw-remote-cancel",
-                             daemon=True).start()
+            self._cancel_thread = threading.Thread(
+                target=_cancel, name="aw-remote-cancel", daemon=True)
+            self._cancel_thread.start()
+
+    def wait_for_teardown(self, timeout_s: float = 25.0) -> bool:
+        """Wait, bounded, for a stopped run to give back what it holds remotely.
+
+        For app close. Stop hands the remote kill and the ``scancel`` to a daemon
+        thread so the button never freezes the window — but daemon threads die
+        with the interpreter, so a Stop issued by closing the app was cut off
+        before its ssh reached the host and the allocation was left running. The
+        run thread's own ``finally`` (the scheduler-job close) is waited on too:
+        a stop during the upload never reaches ``_signal_run`` at all.
+
+        Returns whether everything finished inside *timeout_s*.
+        """
+        deadline = time.monotonic() + timeout_s
+        threads = (self._cancel_thread, self._thread)
+        for thread in threads:
+            if thread is not None and thread.is_alive():
+                thread.join(max(0.0, deadline - time.monotonic()))
+        return not any(t is not None and t.is_alive() for t in threads)
 
     @staticmethod
     def _signal_subprocess(proc: subprocess.Popen | None, *,
@@ -1761,6 +1798,12 @@ class PipelineRunner:
         """
         if opts.get("force", False):
             return False
+        if int(opts.get("remote_batch_size", 0) or 0) > 0:
+            # A batched run takes what an earlier attempt finished as part of the run (remote_batch_resume): the
+            # Fetcher downloads those wells while the batches upload and compute, instead of every one of them being
+            # pulled here, one after another, before anything is staged or the scheduler is asked for a node — and
+            # before the wells already local are even painted on the plate.
+            return bool(opts.get("incremental", False))
         recovery = recover_finished_outputs(
             self._remote_runner, output_dir, args,
             output_filter=OutputFilter(self._output_filter),

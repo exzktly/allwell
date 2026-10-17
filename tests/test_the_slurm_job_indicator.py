@@ -281,3 +281,16 @@ def test_a_settled_run_puts_the_icon_out(qapp):
     assert not tab._slurm_indicator.isHidden()
     tab._on_run_settled()
     assert tab._slurm_indicator.isHidden()
+
+
+def test_the_icon_sits_in_the_run_dashboard_s_status_line_not_the_form(qapp):
+    """It qualifies the run's status, so it is shown with it — in the main panel for the whole run — and not in the
+    form's *Run on:* row, which is the sidebar the user is not looking at once the run has started."""
+    from analyze.tab import AnalyzeTab
+
+    tab = AnalyzeTab()
+    icon = tab._slurm_indicator
+    assert icon.parentWidget() is tab._dashboard
+    header = tab._dashboard._header
+    assert header.indexOf(icon) == header.indexOf(tab._dashboard._status) + 1
+    assert tab._remote_cb.parentWidget().findChildren(type(icon)) == [], "a second icon is still in the form"

@@ -889,6 +889,7 @@ class AnalyzeSuspendMixin:
             opts["incremental"] = True
             # Every other field as recorded — see `resume_aware_spec`.
             spec = dataclasses.replace(spec, opts=opts)
+            self._show_resumed_settings(spec)
             error = self.start_run(spec)
             if error is not None:
                 QMessageBox.critical(self, "Resume Error", error)
@@ -905,6 +906,29 @@ class AnalyzeSuspendMixin:
             QMessageBox.critical(self, "Resume Error", str(exc))
         except Exception:
             swallowed()
+
+    def _show_resumed_settings(self, spec: RunSpec) -> None:
+        """Put the resumed run's own settings on the form before it starts.
+
+        The run is started from the recorded spec, not from the form, so the
+        form went on showing whatever it held before — another folder, other
+        options — beside a dashboard reporting this run, and nothing on screen
+        said what was actually running. ``hydrate_job`` is the form's full
+        inverse of ``collect_spec`` (the job queue's Edit uses it), so the
+        sidebar then reads exactly as the run's own settings do, incremental
+        included. A failure to show them must not stop the resume itself.
+        """
+        hydrate = getattr(self, "hydrate_job", None)
+        if not callable(hydrate):
+            return
+        try:
+            for problem in hydrate(spec.to_json()) or ():
+                self._log_line(f"[warn] {problem}\n", "WARNING")
+        except Exception:
+            swallowed("showing the resumed run's settings on the form")
+            self._log_line(
+                "[warn] The form could not be filled from the resumed run; it "
+                "may not show the settings that run is using.\n", "WARNING")
 
     def _discard_suspended(self) -> None:
         """Forget the record. The output folder itself is left alone."""

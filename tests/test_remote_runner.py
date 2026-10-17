@@ -3294,7 +3294,7 @@ def test_retry_skips_artifacts_already_present(host, tmp_path, monkeypatch):
     nothing — no needless transfer (and no chance to hang)."""
     runner, pulled, _ = _retry_runner(host, tmp_path, monkeypatch)
     (tmp_path / "data_A01.csv").write_text("x")
-    (tmp_path / "A01_out.zip").write_text("zip")
+    __import__("zipfile").ZipFile(tmp_path / "A01_out.zip", "w").close()  # a whole (empty) zip
     runner._output_verifier()._retry_missing_wells(["missing CSV for A01"], log=lambda _m: None)
     assert pulled == []
 
@@ -3303,7 +3303,7 @@ def test_retry_csv_miss_does_not_drag_the_zip(host, tmp_path, monkeypatch):
     """A missing CSV must NOT trigger re-pull of the (present) multi-hundred-MB
     out-zip — the old unconditional zip pull is what fed the wall-clock loop."""
     runner, pulled, rr = _retry_runner(host, tmp_path, monkeypatch)
-    (tmp_path / "A01_out.zip").write_text("zip")  # zip present; CSV absent
+    __import__("zipfile").ZipFile(tmp_path / "A01_out.zip", "w").close()  # a whole (empty) zip  # zip present; CSV absent
     monkeypatch.setattr(
         subprocess, "run",
         lambda *a, **k: MagicMock(stdout=b"/r/out/data_A01.csv\n", returncode=0))

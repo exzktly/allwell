@@ -1092,7 +1092,20 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
             continue
         try:
             added = merge_records_into_gz_csv(target, rows)
-        except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError, _csv.Error) as exc:
+        except GZ_READ_ERRORS as exc:
+            # The local archive does not read to its end — a download a Stop cut off part-way, which is all that
+            # can leave one. It is a partial copy of what is being fetched now, not rows of its own: set it aside
+            # (kept, never deleted) and put the fetched file in its place. An OSError is the other case below — a
+            # volume that would not read — where the existing file is left exactly as it is.
+            existing = existing_csv(target)
+            if existing is not None:
+                os.replace(existing, existing.with_name(f".{existing.name}.truncated"))
+            if log_fn:
+                log_fn(f"[remote] {target.name}: the local copy was cut short ({exc}); kept as "
+                       f".{existing.name if existing else target.name}.truncated and replaced by the download\n")
+            total += _place_fetched_csv(partial, target_dir, log_fn=log_fn)
+            continue
+        except (OSError, UnicodeDecodeError, _csv.Error) as exc:
             if log_fn:
                 log_fn(f"[remote] warn: merging into {partial.name} failed "
                        f"({exc}); the existing CSV is unchanged and this "
@@ -1154,11 +1167,15 @@ def merge_images_into_zip(out_zip: Path | str, image_dir: Path | str) -> int:
     images = _verify_files_complete(candidates)
 
     existing_names: set[str] = set()
+    readable = False
     if out_zip.exists():
         try:
             with zipfile.ZipFile(out_zip, "r") as zf:
                 existing_names = set(zf.namelist())
+            readable = True
         except (OSError, zipfile.BadZipFile):
+            # A truncated archive (a Stop part-way through a download leaves one) holds nothing recoverable; it is
+            # replaced by what this call writes rather than read again below, where it would raise.
             existing_names = set()
 
     to_add = [p for p in images if p.name not in existing_names]
@@ -1182,7 +1199,7 @@ def merge_images_into_zip(out_zip: Path | str, image_dir: Path | str) -> int:
     def _build() -> None:
         try:
             with atomic_zip(out_zip) as zf:
-                if out_zip.exists():
+                if readable:
                     with zipfile.ZipFile(out_zip, "r") as src:
                         for name in src.namelist():
                             zf.writestr(src.getinfo(name), src.read(name))

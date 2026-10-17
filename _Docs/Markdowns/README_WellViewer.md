@@ -1294,7 +1294,7 @@ about the form above it — the same schema, channels, folders and options are
 sent — only where the segmentation runs. Results come back into the same output
 folder, so Review cannot tell the difference afterwards.
 
-**A small server icon beside Manage… shows the run's Slurm job** on a host that
+**A small server icon in the run panel's status line, beside the run status, shows the run's Slurm job** on a host that
 runs through a scheduler. It is green while the job is open — granted a node
 and holding it — and grey while the job is still queued for a node; once the
 job closes, or on a host with no scheduler, there is no icon. Hover over it
@@ -1377,7 +1377,7 @@ stopped run left part-way — it starts that well again; `/scratch/$USER` and th
 default keep it. This is separate from **Scratch disk** in the form
 above, which governs local runs and is not used when the pipeline runs remotely.
 
-**Empty-well correction works with batching.** If you set background or flat-field correction to **empty_well** and name a blank well, that well is uploaded once, on its own, before the batches start — every batch then corrects against the same reference. A blank that still needs processing is run once, with the last batch; one that a re-run has already completed is uploaded as a reference only and not processed again. The blank is never diffed or skipped by the incremental filters either, since it is the input the correction is built from rather than a well whose output you are waiting for. If it cannot be found at all, the run stops and says which well it looked for and where, instead of quietly producing uncorrected numbers.
+**Empty-well correction works with batching.** If you set background or flat-field correction to **empty_well** and name a blank well, that well is uploaded once, on its own, after the cluster job has been requested and before the batches start — every batch then corrects against the same reference. A blank that still needs processing is run once, with the last batch; one that a re-run has already completed is uploaded as a reference only and not processed again. The blank is never diffed or skipped by the incremental filters either, since it is the input the correction is built from rather than a well whose output you are waiting for. If it cannot be found at all, the run stops and says which well it looked for and where, instead of quietly producing uncorrected numbers.
 
 **"Rewriting N well archive(s)" in the log** means the plate holds images this
 run does not want — most often a transmitted-light or brightfield channel that
@@ -1515,7 +1515,13 @@ and by `remote_fetch_report.txt` in the output folder.
   wind-down leaves it to finish. If All-Well closes or crashes while a local run is going,
   the run notices and suspends itself; starting that plate again right
   after a restart tells you to wait until it has wound down, rather than
-  racing it for the same files. On a remote run, Suspend leaves the connection open: the host
+  racing it for the same files. Closing All-Well during a remote run stops it
+  the way **Stop** does, and the window waits (up to about 25 seconds) until
+  the job on the cluster has been cancelled, so no Slurm allocation is left
+  running behind it. If All-Well crashes or is force-quit instead, a batched
+  run notices within about ten minutes that the app has gone, finishes the
+  fields in flight, and gives the node back; Resume then picks up the wells it
+  finished. On a remote run, Suspend leaves the connection open: the host
   finishes the fields in flight and the wells it finished keep downloading, so
   the run can take a little longer to end than a local one. Pressed while the
   plate is still uploading, there is nothing running on the host yet, so it
@@ -1531,7 +1537,8 @@ and by `remote_fetch_report.txt` in the output folder.
   carry on. It reads top to bottom: what state the run is in (*Suspended run*),
   which plate and when (*Plate_07 · suspended 24 Aug 14:32*), what resuming will
   do, and what the run recorded. **Resume**, at the bottom right, continues it,
-  computing only the field/timepoint groups still missing. **Discard** beside it
+  computing only the field/timepoint groups still missing, and fills the
+  sidebar with that run's settings so the form shows what is actually running. **Discard** beside it
   forgets the offer and deletes nothing — the results already written stay
   exactly as they are, and you can still finish the plate later by re-running
   that input with **incremental** ticked.
@@ -1542,7 +1549,13 @@ and by `remote_fetch_report.txt` in the output folder.
   A remote run in batches that is restarted — after Stop, Suspend, or a lost
   node — first checks what the host still holds from the earlier attempt with
   the same settings. A well that finished there but had not been downloaded
-  yet is downloaded rather than uploaded and run again, and an input archive
+  yet is downloaded rather than uploaded and run again. The plate shows every
+  well's state at once — downloaded, finished on the host, already uploaded —
+  then the job is started and handed its first batch, and only then are the
+  finished wells downloaded, filling the queue wait and the compute rather
+  than delaying the job. Stopping while a well downloads is safe: the
+  half-downloaded file is never taken for the finished one, and the next run
+  fetches it again. An input archive
   that was already uploaded is reused rather than sent again (one that differs
   from your copy is still re-sent). The log lists both, and names any well the
   earlier attempt's record says was finished, uploaded or downloaded that is
@@ -6008,7 +6021,7 @@ records the unit of its coordinates the converter recovers from that by itself;
 when it does not, enter the grid and FOVs per well and the plate map follows what
 you typed.
 
-**A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, plus one batch's worth again for the transfers that happen while the node is held, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those. **A node that fails to boot is retried automatically.** On a cluster that powers idle nodes down, Slurm can give a run a sleeping node; if that node does not start within the cluster's own limit, `srun` reports `srun: error: Nodes … are still not ready` and then `Something is wrong with the boot of the nodes`. All-Well then asks for another node with the failed one excluded, up to 3 more times, and says so in the log (`node(s) n01 failed to boot — requesting another node (retry 1 of 3)`); after the third it names every node that failed, which is the list to send your cluster's admins. Before each attempt it also checks which nodes are powered on (`idle`, `mix`, or busy but running) and steers the job away from the ones that are asleep, booting or out of service; when none of the powered-on nodes can take the request — they are a different instance type from the one the command asks for, say — it finds that out first, without queuing anything, says `no powered-on node matches this request — Slurm will start one`, and lets Slurm boot one. Starting a node can take several minutes. A run that does end before its node starts keeps the wells it had already uploaded, so retrying the same plate with the same settings does not send them again. This applies when the host's launcher is an `srun` command. **A word left on its own in that command is refused**, both when you save the host and when a run starts: `srun` would take it for the program to run and the job would fail with `execve(): … No such file or directory` only after a node had started. An instance or node type belongs in a constraint, for example `--constraint=g4dn.12xlarge`.
+**A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, plus one batch's worth again for the transfers that happen while the node is held, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those. **A node that fails to boot is retried automatically.** On a cluster that powers idle nodes down, Slurm can give a run a sleeping node; if that node does not start within the cluster's own limit, `srun` reports `srun: error: Nodes … are still not ready` and then `Something is wrong with the boot of the nodes`. All-Well then asks for another node with the failed one excluded, up to 3 more times, and says so in the log (`node(s) n01 failed to boot — requesting another node (retry 1 of 3)`); after the third it names every node that failed, which is the list to send your cluster's admins. Before each attempt it also checks which nodes are powered on (`idle`, `mix`, or busy but running) and steers the job away from the ones that are asleep, booting or out of service; when none of the powered-on nodes can take the request — they are a different instance type from the one the command asks for, say — it finds that out first, without queuing anything, says `no powered-on node matches this request — Slurm will start one`, and lets Slurm boot one. Starting a node can take several minutes. It also stops avoiding them when the powered-on nodes are all busy, or when Slurm expects the job to wait more than about five minutes for one: the log then says `every powered-on node … is busy` or `the powered-on nodes that fit are busy until <time>`, and Slurm starts a powered-down node instead of keeping the job queued behind other people's jobs. A run that does end before its node starts keeps the wells it had already uploaded, so retrying the same plate with the same settings does not send them again. This applies when the host's launcher is an `srun` command. **A word left on its own in that command is refused**, both when you save the host and when a run starts: `srun` would take it for the program to run and the job would fail with `execve(): … No such file or directory` only after a node had started. An instance or node type belongs in a constraint, for example `--constraint=g4dn.12xlarge`.
 
 If you start the same plate with the same settings from a second window while the first is still running, the second one stops and says so rather than starting: both would use the same folder on the cluster, and the second would clear the first's input out from under it. Wait for the first to finish, or change something about the run.
 

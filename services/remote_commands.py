@@ -28,6 +28,8 @@ from services.remote_srun_retry import (
 from services.remote_transport import _remote_join, _remote_quote
 from services.remote_wait_snippets import (
     _UPLOAD_WAIT_EXIT,
+    MID_BATCH_HEARTBEAT_STALE_S,
+    MID_BATCH_WATCH_POLL_S,
     UPLOAD_WAIT_POLL_S,
     UPLOAD_WAIT_TIMEOUT_S,
     _heartbeat_stale_snippet,
@@ -128,6 +130,15 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     as that batch has written what it finished — rather than being held,
     waiting for a ``ready`` file the app has deliberately stopped sending,
     until the heartbeat or the upload deadline gave up on it.
+
+    **An app that vanishes mid-batch suspends the batch.** The heartbeat check
+    above only runs between batches, and an app that crashed or was force-quit
+    leaves its ssh child running as an orphan, so the allocation used to be held
+    for the rest of the batch — hours on a large one — with nothing left to
+    fetch the result. A watchdog beside each batch asks the same question, more
+    patiently (:data:`MID_BATCH_HEARTBEAT_STALE_S`), and answers a silent app by
+    writing *suspend_request*: the batch winds down keeping what it finished, the
+    driver then exits, and a later Resume adopts that work from the remote.
     """
     pipeline = _remote_join(argv)
     waits = int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S)
@@ -178,6 +189,19 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         f'echo "[remote] batch-driver: suspended — no further batches"; '
         f'exit 0; fi; '
     ) if suspend_request else ""
+    watch_init, watch = _heartbeat_stale_snippet(
+        heartbeat,
+        "[remote] ERROR the app stopped responding mid-batch — suspending the "
+        "batch so the node is handed back",
+        stale_s=MID_BATCH_HEARTBEAT_STALE_S, poll_s=MID_BATCH_WATCH_POLL_S,
+        on_stale=f"touch {_remote_quote(suspend_request)}; exit 0",
+    ) if suspend_request else ("", "")
+    # A subshell in the background, killed as soon as the batch returns: its
+    # `exit` ends only itself, never the driver.
+    watch_on = (f'( {watch_init}while sleep {MID_BATCH_WATCH_POLL_S}; do '
+                f'{watch}done ) & _aw_wd=$!; ') if watch else ""
+    watch_off = ('kill "$_aw_wd" 2>/dev/null; wait "$_aw_wd" 2>/dev/null; '
+                 if watch else "")
     return (
         f'_aw_i=1; '
         f'while [ "$_aw_i" -le {int(n_batches)} ]; do '
@@ -204,7 +228,7 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         f'_aw_i=$((_aw_i+1)); continue; }}; '
         f'{blank_link}'
         f'echo "[remote] batch-driver: batch $_aw_i starting"; '
-        f'{budget}{pipeline}; _aw_rc=$?; '
+        f'{watch_on}{budget}{pipeline}; _aw_rc=$?; {watch_off}'
         f'echo "$_aw_rc" > {done}; '
         f'echo "{marker}"; '
         f'_aw_i=$((_aw_i+1)); done; '

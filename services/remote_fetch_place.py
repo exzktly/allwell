@@ -111,3 +111,26 @@ def place_whole(src: Path, target: Path) -> None:
     shutil.copyfile(src, part)
     os.replace(part, target)
     Path(src).unlink(missing_ok=True)
+
+
+def local_output_mb(run, well: str) -> float | None:
+    """How much of *well*'s fetched output is in place locally, in MB, or ``None`` when none of it is.
+
+    For the "zip" half of the end-of-run retry's report, which is what paints a well downloaded on the plate. The
+    output is the zip itself in ZIP/FLAT mode, its extraction ``<well>_out/`` in FOLDER mode, and nothing at all
+    under CSV-only — and reporting only the first left a well rescued in either of the others uncoloured for good.
+    """
+    from services.remote_run_state import OutputFilter
+    from util.disk_space import directory_bytes
+
+    out_zip, folder = Path(run.local_output_dir) / f"{well}_out.zip", Path(run.local_output_dir) / f"{well}_out"
+    try:
+        if out_zip.is_file():
+            return out_zip.stat().st_size / (1024 * 1024)
+    except OSError:
+        return None
+    if folder.is_dir():
+        return directory_bytes(folder) / (1024 * 1024)
+    if getattr(run, "output_filter", None) == OutputFilter.CSV_ONLY:
+        return 0.0
+    return None

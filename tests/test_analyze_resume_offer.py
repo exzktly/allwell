@@ -240,6 +240,36 @@ def test_resume_starts_a_run_against_the_offered_plate(tab, tmp_path, qtbot,
     assert spec.opts["filename_schema"] == SCHEMA
 
 
+def test_resume_shows_the_resumed_run_s_settings_on_the_form(tmp_path, qtbot,
+                                                              monkeypatch):
+    """The run starts from the recorded spec, so the form went on showing what
+    it held before — an empty input, default options — beside a dashboard
+    reporting a different run. After Resume the sidebar reads as that run."""
+    plate = _plate(tmp_path, "PlateA")
+    J.open_run(plate / "out", mode="local", input_dir=plate / "in", argv=[],
+               spec={"opts": {"raw": str(plate / "in"),
+                              "filename_schema": SCHEMA, "filename_sep": SEP,
+                              "nuclear_token": "Hoechst", "csv_prefix": "cells",
+                              "remote_batch_size": "12", "incremental": False}})
+    J.close_run(plate / "out", outcome="stopped")
+
+    from analyze.tab import AnalyzeTab
+    fresh = AnalyzeTab()                # opens empty, as the app does
+    qtbot.addWidget(fresh)
+    assert fresh._nuclear_token_edit.text() != "Hoechst"
+    monkeypatch.setattr(type(fresh), "start_run", lambda self, spec, **kw: None)
+    resume_btn = next(b for b in fresh._resume_banner.findChildren(type(fresh._run_btn))
+                      if b.text() == "Resume")
+    qtbot.mouseClick(resume_btn, Qt.LeftButton)
+
+    assert fresh._input_edit.text() == str(plate / "in")
+    assert fresh._nuclear_token_edit.text() == "Hoechst"
+    assert fresh._csv_prefix_edit.text() == "cells"
+    assert fresh._remote_batch_size_edit.text() == "12"
+    assert fresh._incremental_cb.isChecked(), (
+        "the run is forced incremental, so the form must say so too")
+
+
 def test_resuming_stops_the_offer_repeating(tab, tmp_path, qtbot, monkeypatch):
     plate = _plate(tmp_path, "PlateA")
     _journal(plate, outcome="error")

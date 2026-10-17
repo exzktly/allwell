@@ -74,7 +74,7 @@ from services.remote_run_id import (
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import release_batch
 from services.remote_batch_resume import (
-    announce_adopted, note_remote_scratch, nothing_left_to_run, reattach_output_dir, stage_leftovers,
+    announce_adopted, download_adopted, note_remote_scratch, nothing_left_to_run, reattach_output_dir, stage_leftovers,
     take_from_remote)
 from util.well_token import canonical_well_label
 from services.remote_scratch import (
@@ -716,51 +716,11 @@ class _BatchedRemoteProcess:
         stage_leftovers(self, run_dir)
         self._runner._cache._ssh_run(["rm", "-rf", f"{run_dir}/in"], check=False)
 
-        # The empty-well blank(s), uploaded once for the whole run. They sit
-        # outside the batch staging so the driver's `rm -rf in && mv b<i> in`
-        # never touches them, and every batch builds its correction from the
-        # same reference. Unconditional: a blank whose CSV is already complete
-        # locally is skipped by the batch filter, which on a re-run would
-        # otherwise leave the whole plate uncorrected.
+        # The empty-well blank(s): the driver is told where they will be (`background_dir`) and they are uploaded
+        # by `_upload_blanks` once it has been launched, so the node request is not held behind a whole well's
+        # transfer — the driver reads them only when batch 1 is handed over, after that upload.
         blanks = [z for z in self._zipped.well_zips
                   if z.stem in getattr(self, "_blank_stems", ())]
-        if blanks:
-            prune_staged(self._runner._cache, f"{run_dir}/bg", blanks,
-                         "empty-well reference", self._log)
-            sent, _elapsed, rc = self._runner._cache.upload_subset(
-                blanks, f"{run_dir}/bg", log_fn=self._log, acquisition_input=self._zipped,
-                # A blank is a full well, and it is the first large transfer of
-                # the run — without a progress callback the plate-wide
-                # "Transferring…" label sits still for its whole duration.
-                progress_fn=self._progress, stop_event=self._stop)
-            if rc != 0:
-                if self._stop.is_set():
-                    # `upload_subset` watches `_stop`, so a Stop comes back here
-                    # as a non-zero rsync code. Reporting the user's own Stop as
-                    # a fault — with rsync's number rather than 130 — is what
-                    # the batch-upload path below already avoids.
-                    self._log("[remote] stopped while uploading the empty-well "
-                              "reference\n")
-                    self._returncode = 130
-                    return False
-                self._log(
-                    f"[remote] ERROR could not upload the empty-well blank(s) "
-                    f"(rsync rc={rc}). Every batch would run without the "
-                    f"background correction this run asked for, and the output "
-                    f"would not show it — stopping instead.\n")
-                self._returncode = rc
-                return False
-            self._log(f"[remote] empty-well reference uploaded once "
-                      f"({sent / (1024**2):.1f} MB) → {run_dir}/bg\n")
-            # A blank uploaded as a reference only was already marked complete
-            # by its SKIP marker; the upload's own per-well line then repaints
-            # its cell as "uploading" and nothing ever moves it off, because
-            # the well is never processed or downloaded. Settle it again.
-            for stem in self._blank_stems:
-                if stem not in getattr(self, "_link_blank_stems", ()):
-                    self._line_q.put(
-                        f"SKIP well {stem.upper()} — empty-well reference only; "
-                        f"already complete locally.\n")
 
         # The heartbeat runs for the whole run, not just one upload: the driver
         # checks it at every batch boundary, so an app that dies between
@@ -829,7 +789,7 @@ class _BatchedRemoteProcess:
             target=self._read_driver, args=(proc,), daemon=True,
             name="aw-batch-driver-reader")
         self._reader.start()
-        return True
+        return self._upload_blanks()        # now the node request is in, not before it
 
     def _release_driver(self) -> None:
         """Stop the heartbeat and hand back an allocation nobody is feeding.
@@ -938,6 +898,44 @@ class _BatchedRemoteProcess:
             return
         wells = [canonical_well_label(z.stem) or z.stem.upper() for z in batch_zips]
         self._fetcher.after_queued(functools.partial(release_batch, wells=wells, log=self._log))
+
+    def _upload_blanks(self) -> bool:
+        """Upload the empty-well blank(s) into ``bg/``, once for the whole run, after the driver is launched.
+
+        Outside the batch staging, so the driver's `rm -rf in && mv b<i> in` never touches them, and every batch
+        corrects against the same reference. Unconditional: a blank whose CSV is already complete locally is
+        skipped by the batch filter, which on a re-run would otherwise leave the whole plate uncorrected.
+        """
+        run_dir = remote_run_dir(self._runner.host, self._run_id)
+        blanks = [z for z in self._zipped.well_zips if z.stem in getattr(self, "_blank_stems", ())]
+        if not blanks:
+            return True
+        prune_staged(self._runner._cache, f"{run_dir}/bg", blanks, "empty-well reference", self._log)
+        sent, _elapsed, rc = self._runner._cache.upload_subset(
+            blanks, f"{run_dir}/bg", log_fn=self._log, acquisition_input=self._zipped,
+            progress_fn=self._progress, stop_event=self._stop)     # a full well: the "Transferring…" label must move
+        if rc != 0:
+            if self._stop.is_set():          # a Stop comes back as rsync's code; it is the user's, not a fault
+                self._log("[remote] stopped while uploading the empty-well reference\n")
+                self._returncode = 130
+                return False
+            self._log(
+                f"[remote] ERROR could not upload the empty-well blank(s) "
+                f"(rsync rc={rc}). Every batch would run without the "
+                f"background correction this run asked for, and the output "
+                f"would not show it — stopping instead.\n")
+            self._returncode = rc
+            return False
+        self._log(f"[remote] empty-well reference uploaded once "
+                  f"({sent / (1024**2):.1f} MB) → {run_dir}/bg\n")
+        # A reference-only blank, repainted "uploading" by the upload's own line and never processed or downloaded,
+        # is settled complete again.
+        for stem in self._blank_stems:
+            if stem not in getattr(self, "_link_blank_stems", ()):
+                self._line_q.put(
+                    f"SKIP well {stem.upper()} — empty-well reference only; "
+                    f"already complete locally.\n")
+        return True
 
     def _await_batch(self, index: int, n_batches: int) -> int | None:
         """This batch's exit code, or ``None`` if the driver went away."""
@@ -1230,6 +1228,7 @@ class _BatchedRemoteProcess:
                     ["touch", self._batch_flag(BATCH_READY, batch_idx + 1)],
                     check=False,
                 )
+                download_adopted(self)      # the job has its first batch: drain the earlier attempt's wells meanwhile
                 rc = self._await_batch(batch_idx + 1, n_batches)
                 self._release_nanowell_batch(rc, batch_zips)
                 if rc is None:
@@ -1288,6 +1287,7 @@ class _BatchedRemoteProcess:
                 # Drain the Fetcher first so every well's CSV + zip lands
                 # locally BEFORE we attempt auto-threshold against
                 # local_output_dir.
+                download_adopted(self)      # a run that launched nothing, or stopped short of batch 1
                 self._fetcher.flush_and_join()
                 # v5.4.7: single auto-threshold pass over the FULL downloaded
                 # output. The per-batch passes were suppressed via

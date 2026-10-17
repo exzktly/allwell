@@ -122,6 +122,22 @@ def glob_csvs(directory: Path | str, pattern: str = "*") -> list[Path]:
     return [by_logical[k] for k in sorted(by_logical)]
 
 
+def csv_is_whole(path: Path | str) -> bool:
+    """Whether *path* reads to its end: a ``.csv.gz`` decompresses without a truncated or corrupt stream, a plain
+    CSV simply exists. A download cut off part-way (rsync's ``--partial``) leaves a gzip stream with no end, which a
+    size check calls present."""
+    p = Path(path)
+    if not is_gz_csv_name(p.name):
+        return p.is_file()
+    try:
+        with gzip.open(p, "rb") as fh:
+            while fh.read(1 << 22):
+                pass
+        return True
+    except (OSError, *GZ_READ_ERRORS):
+        return False
+
+
 def gzip_csv(path: Path | str) -> Path:
     """Compress the plain CSV *path* to ``<path>.gz`` and remove the original.
 

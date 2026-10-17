@@ -25,7 +25,12 @@ retried: the app saw the stream end and reported the allocation lost.
    out first with ``srun --test-only``, which queues nothing, says so in plain
    words and drops the state-based exclusion, rather than letting the real
    ``srun`` fail with ``Requested node configuration is not available``, which
-   reads as an error. A node's state can change between the check and the start
+   reads as an error. **Awake is not the same as free**: the preference holds
+   only while some awake node is ``idle`` or ``mix`` (:data:`FREE_STATES`), and
+   only while ``--test-only``'s expected start is within :data:`BOOT_WAIT_S`.
+   With every awake node busy, excluding the asleep ones left the job queued
+   behind other people's jobs — for as long as they ran — while hundreds of
+   powered-down nodes that boot in minutes were ruled out. A node's state can change between the check and the start
    of the job, so a real launch that still fails that way is retried once
    without the exclusion, and a boot failure is what the retry below is for.
 2. **Retries a boot failure** up to :data:`SRUN_BOOT_RETRIES` times, adding the
@@ -66,6 +71,14 @@ SRUN_BOOT_RETRIES = 3
 #: ``idle#``, ``down``, ``drain``, ``fail`` … — is excluded while an awake node
 #: exists.
 AWAKE_STATES = ("idle", "mix", "alloc", "comp")
+
+#: The awake states with room for a new job now. ``alloc`` and ``comp`` are
+#: awake but full: preferring them means waiting for someone else's job to end.
+FREE_STATES = ("idle", "mix")
+
+#: How long a powered-on node may keep the job waiting before booting one is
+#: the faster route — a cloud node boots in a few minutes.
+BOOT_WAIT_S = 300
 
 #: What ``srun`` prints when the node it was granted did not boot.
 _BOOT_FAILURE_RE = "Something is wrong with the boot of the nodes|Node failure on"
@@ -166,6 +179,7 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
     tokens, user_excl, partition = _split_launcher(shlex.split(launcher))
     launcher_str = shlex.join(tokens)
     awake = "|".join(AWAKE_STATES)
+    free = "|".join(FREE_STATES)
     part_q = shlex.quote(partition)
     part_words = '${_aw_part:+-p "$_aw_part"}'
     where = partition or "the default partitions"
@@ -182,6 +196,13 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         f"_aw_all=$(sinfo -h -N {part_words} -o '%N %t' 2>/dev/null); ",
         f"if printf '%s\\n' \"$_aw_all\" | awk '$2 ~ /^({awake})$/ {{f=1}} END {{exit !f}}'; then ",
         f"_aw_asleep=$(printf '%s\\n' \"$_aw_all\" | awk 'NF==2 && $2 !~ /^({awake})$/ {{print $1}}' | {merge}); ",
+        # Busy is not available. With every powered-on node running someone
+        # else's job, excluding the asleep ones leaves the run queued until a
+        # job ends — which can be hours — when booting a node takes minutes.
+        f"if [ -n \"$_aw_asleep\" ] && ! printf '%s\\n' \"$_aw_all\" | awk '$2 ~ /^({free})$/ {{f=1}} END {{exit !f}}'; then ",
+        '_aw_asleep=""; ',
+        f'echo "[remote] scheduler: every powered-on node in {where} is busy — letting Slurm '
+        'start a powered-down one rather than wait for a running job to end"; fi; ',
         f'else echo "[remote] scheduler: no powered-on node in {where} — Slurm will boot one"; fi; ',
         "fi; ",
         f"_aw_ex=$(printf '%s,%s' \"$_aw_x\" \"$_aw_asleep\" | {merge}); ",
@@ -189,11 +210,22 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         # could ever take this request. If none can, say so in plain words
         # rather than let srun fail with "Requested node configuration is not
         # available" before the real attempt.
-        'if [ -n "$_aw_asleep" ] && ! '
-        f'{launcher_str} --test-only ${{_aw_ex:+--exclude="$_aw_ex"}} true >/dev/null 2>&1; then ',
+        'if [ -n "$_aw_asleep" ]; then ',
+        f'_aw_to=$({launcher_str} --test-only ${{_aw_ex:+--exclude="$_aw_ex"}} true 2>&1); ',
+        'if [ $? != 0 ]; then ',
         f'_aw_asleep=""; _aw_awake=0; _aw_ex=$(printf \'%s\' "$_aw_x" | {merge}); ',
         'echo "[remote] scheduler: no powered-on node matches this request — Slurm will '
-        'start one, which can take several minutes"; fi; ',
+        'start one, which can take several minutes"; ',
+        # 1c. It fits, but *when*? `--test-only` names the expected start. A
+        # start further off than a boot takes means the powered-on nodes that
+        # fit are all taken, and waiting for them is the slower way. `date -d`
+        # is GNU; where it cannot read the time the preference simply stands.
+        "else _aw_at=$(printf '%s\\n' \"$_aw_to\" | sed -n 's/.* to start at \\([^ ]*\\).*/\\1/p' | head -n 1); ",
+        '_aw_ts=""; [ -n "$_aw_at" ] && _aw_ts=$(date -d "$_aw_at" +%s 2>/dev/null); ',
+        f'if [ -n "$_aw_ts" ] && [ $((_aw_ts - $(date +%s))) -gt {BOOT_WAIT_S} ]; then ',
+        f'_aw_asleep=""; _aw_ex=$(printf \'%s\' "$_aw_x" | {merge}); ',
+        'echo "[remote] scheduler: the powered-on nodes that fit are busy until $_aw_at — '
+        'letting Slurm start a powered-down one instead"; fi; fi; fi; ',
         'if [ -n "$_aw_asleep" ]; then ',
         "echo \"[remote] scheduler: avoiding $(printf '%s' \"$_aw_asleep\" | awk -F, '{print NF}') "
         f"node(s) in {where} that are powered down, booting or out of service\"; fi; ",

@@ -36,7 +36,6 @@ from analyze.nanowell_hook import nanowell_section_mixin
 from analyze.qc_section import AnalyzeQCSectionMixin
 from analyze.schema_section import AnalyzeSchemaSectionMixin
 from analyze.seg_params import AnalyzeSegParamsMixin
-from analyze.slurm_job_view import SlurmJobIndicator
 from services.remote_config import default_remote_index, load_remotes
 from widgets.checkable_dropdown import CheckableDropdown
 from widgets.wrap_checkbox import WrapCheckBox
@@ -440,9 +439,6 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         )
         self._manage_remotes_btn.clicked.connect(self._open_manage_remotes)
         rl.addWidget(self._manage_remotes_btn)
-        # Lit while this run holds an open Slurm job; its tooltip is the node.
-        self._slurm_indicator = SlurmJobIndicator(remote_widget)
-        rl.addWidget(self._slurm_indicator)
         rl.addStretch(1)
         parent.layout().addWidget(remote_widget)
 

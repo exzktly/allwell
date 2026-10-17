@@ -189,6 +189,7 @@ class PlateProgress(QWidget):
         hdr.addWidget(self._title_label)
         self._status = QLabel("", self); self._status.setObjectName("Muted")
         hdr.addWidget(self._status)
+        self._header = hdr                       # `add_header_widget` inserts beside the status
         hdr.addStretch(1)
         self._eta = QLabel("", self); self._eta.setObjectName("Muted")
         hdr.addWidget(self._eta)
@@ -450,6 +451,14 @@ class PlateProgress(QWidget):
             if w is not None:
                 w.setParent(None)        # un-render immediately
                 w.deleteLater()
+
+    def add_header_widget(self, widget: QWidget) -> None:
+        """Show *widget* in the header, after the run status and before the ETA.
+
+        For a host's own run-state glyph — Analyze's Slurm-job icon — so it sits with the status it qualifies
+        rather than in a form the user is no longer looking at while the run goes.
+        """
+        self._header.insertWidget(self._header.indexOf(self._status) + 1, widget)
 
     def _build_legend(self) -> None:
         """Draw the legend: a heading, then one dot-and-label row per item.

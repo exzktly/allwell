@@ -158,7 +158,7 @@ def test_the_plate_counts_exclude_cells_other_layers_already_dropped():
     a = _frame([1, 1, 0])
     a["QC_Pass"] = [1, 0, 1]
     ctx = _Ctx({"A01": a, "A02": _frame([0, 1])}, ON)
-    assert plate_border_counts(ctx) == (2, 4)
+    assert plate_border_counts(ctx) == (2, 4, 4)
 
 
 def test_a_dataset_that_predates_the_column_says_so():
@@ -182,6 +182,92 @@ def test_the_sentence_counts_and_says_what_the_switch_is_doing():
     assert border_status(ctx) == (
         "2 cells of 4 touch the image border — currently excluded, across "
         "the plate.", False)
+
+
+# ── a plate only partly analysed with the column (review of #999, M3) ───────
+
+def _merged_well(tmp_path):
+    """The reviewer's case through the pipeline's own writer: a well analysed
+    before the column existed (100 cells), then continued by an ``--incremental``
+    run after it (10 cells, 3 on the border). ``merge_records_into_gz_csv``
+    adds the column with the old rows blank."""
+    from pipeline.io import merge_records_into_gz_csv
+
+    csv = tmp_path / "cells_A1.csv"
+    merge_records_into_gz_csv(csv, [
+        dict(well="A1", fov="1", timepoint="T0", nucleus_id=i, area_px=100.0)
+        for i in range(1, 101)])
+    merge_records_into_gz_csv(csv, [
+        dict(well="A1", fov="2", timepoint="T0", nucleus_id=i, area_px=100.0,
+             **{BORDER_COLUMN: int(i <= 3)}) for i in range(1, 11)])
+    df = pd.read_csv(csv.with_suffix(".csv.gz"))
+    assert int(df[BORDER_COLUMN].isna().sum()) == 100, "fixture: the old rows are blank"
+    return df
+
+
+def test_cells_analysed_before_the_column_are_not_counted_as_checked(tmp_path):
+    """The panel said "3 cells of 110 touch the image border — currently
+    excluded, across the plate" while 100 of the 110 were never checked:
+    degraded output that read exactly like a fully checked plate. The count of
+    unchecked cells, and the remedy that actually records them, must be said."""
+    ctx = _Ctx({"A01": _merged_well(tmp_path)}, ON)
+
+    assert plate_border_counts(ctx) == (3, 10, 110)
+    assert border_status(ctx) == (
+        "Border contact was checked for 10 of 110 cells: 3 cells touch the "
+        "image border — currently excluded. The other 100 cells were analysed "
+        "before it was recorded and are kept unjudged; Force re-run the "
+        "analysis to record it.", True)
+
+
+def test_a_well_without_the_column_is_counted_as_unchecked_not_dropped():
+    """A whole well analysed before the column existed counted (0, 0) and
+    vanished from a total the panel calls "across the plate"."""
+    plain = pd.DataFrame({"nucleus_id": [1, 2], "area_px": [5, 5]})
+    ctx = _Ctx({"A01": plain, "A02": _frame([1, 0])}, QCParams())
+
+    assert plate_border_counts(ctx) == (1, 2, 4)
+    text, problem = border_status(ctx)
+    assert text.startswith("Border contact was checked for 2 of 4 cells: 1 cell "
+                           "touches the image border — currently kept.")
+    assert problem is False, "the box is unticked, so nothing asked for is missing"
+
+
+def test_a_plate_with_none_checked_says_it_predates_the_measurement():
+    """A column that exists and is blank on every row checked nothing."""
+    ctx = _Ctx({"A01": _frame([None, None])}, ON)
+    text, problem = border_status(ctx)
+    assert "before border contact was recorded" in text and problem is True
+    assert "Force re-run" in text, (
+        "a plain re-run skips every well whose output exists, so it records "
+        "nothing; only Force does")
+
+
+def test_the_plate_count_reads_each_well_narrowly(monkeypatch):
+    """Every QC change re-counts the whole plate (the stats cache it is
+    memoized in is cleared by ``recompute_qc_all``). Read whole, that is a full
+    frame read of every well, evicting the wells a view holds. Asserted at the
+    read boundary: which reader was called, and with which columns."""
+    import review.data.plate_scan as ps
+
+    reads = []
+
+    def whole(_ctx, label):
+        reads.append(("get_rows", label, None))
+        return _frame([1, 0])
+
+    def narrow(_ctx, label, want):
+        reads.append(("narrow_rows", label, frozenset(want)))
+        return _frame([1, 0])
+
+    monkeypatch.setattr(ps, "get_rows", whole)
+    monkeypatch.setattr(ps, "narrow_rows", narrow)
+    ctx = _Ctx(dict.fromkeys(("A01", "A02", "A03")), ON)
+    ctx.state.dataset.cache = {}
+
+    assert plate_border_counts(ctx) == (3, 6, 6)
+    assert reads == [("narrow_rows", w, frozenset({BORDER_COLUMN}))
+                     for w in ("A01", "A02", "A03")]
 
 
 # ── the control itself (§7.6) ───────────────────────────────────────────────

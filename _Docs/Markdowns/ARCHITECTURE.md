@@ -4582,9 +4582,26 @@ hue left at ΔE ≥ 31 from the other six inks that is not the app's "good"
 green), and the funnel carries it as *Touching image border*. The row's
 sentence (`border_status`) counts over the cells the analysis keeps without
 this layer — `df_included_mask(except_layer="Border_Pass")`, the same
-construction as the focus row — and a dataset analysed before the column
-existed says so rather than reporting that no cell touches the border, in the
-`Notice` register when the box is ticked over it. The optimizer — fourteen controls answering an
+construction as the focus row — read narrowly per well
+(`plate_scan.every_well(columns=(BORDER_COLUMN,))`, because every QC change
+clears the memo and re-counts the plate), and `border_counts` keeps **checked**
+cells apart from **all** cells. A plate partly analysed before the column
+existed carries it on some rows only: `merge_records_into_gz_csv` adds it to a
+continued well with the old rows blank, and a well never re-analysed has none.
+Counting those rows as checked, or dropping the well, made a plate checked for
+a tenth of its cells read like one checked in full, so the sentence then says
+"checked for N of M cells" and that the rest are kept unjudged. A dataset with
+no checked cell at all says it predates the measurement rather than reporting
+that no cell touches the border. Both name a **Force** re-run as the remedy —
+a plain re-run skips existing wells and an `--incremental` one with unchanged
+settings finds them up to date — and both take the `Notice` register when the
+box is ticked over them. Output lacking the column is **not** treated as stale
+by the reuse checks (`util/settings_digest.settings_key_for`, the FOV
+checkpoints, the incremental done-set, the plain re-run's existing-output
+skip): the settings key deliberately accepts every digest earlier builds
+recorded so their output is reused, and keying on an output column would undo
+that for every plate analysed before it, so the shortfall is made visible here
+instead. The optimizer — fourteen controls answering an
 occasional question — is not on the tab at all: `optimizer_view` builds it into
 its own **non-modal** window (non-modal because its answer is judged against the
 CDFs behind it), hidden, at tab-build time, so every optimizer widget handle

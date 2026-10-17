@@ -2210,7 +2210,13 @@ buttons — you pick one or the other, because choosing the scatter option
   (`qc_touches_border` in the per-cell CSV: 1 = touches, 0 = whole). A dataset
   analysed before that column existed has nothing to filter on; the line says
   so — in amber if the box is ticked, because then nothing you asked for is
-  happening — and re-running the analysis records it. In the Segmentation
+  happening. A plate only partly analysed since then (a run continued with
+  **Incremental**, or some wells re-run) is checked only for the cells analysed
+  after it: the line then says how many cells were checked out of how many,
+  and that the rest are kept unjudged, again in amber when the box is ticked.
+  Only a **Force** re-run records the column for the older cells — an ordinary
+  re-run skips every well whose results already exist, and an incremental one
+  with the same settings finds them up to date. In the Segmentation
   view's **Why removed** overlay these cells are outlined in magenta and
   labelled *touches the image border*, not as debris.
 

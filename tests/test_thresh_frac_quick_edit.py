@@ -144,7 +144,7 @@ class _FakeState:
         self.plot = SimpleNamespace(use_fov_replicates=False)
         # invalidate_stats_cache(ctx) discards the group-stats cache; the double
         # only needs the invalidate() method to exist.
-        self.stats_cache = SimpleNamespace(invalidate=lambda: None)
+        self.stats_cache = SimpleNamespace(invalidate=lambda **_kw: None)
         # R6: gate values live on the typed slice; the edits are the input
         # surface, synced into the slice by the change handlers.
         self.cell_gating = CellGatingState()

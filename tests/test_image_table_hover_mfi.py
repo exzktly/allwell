@@ -171,3 +171,24 @@ def test_map_distinct_is_the_per_row_map(values):
     got = map_distinct(s, lambda u: u.map(normalize_tp))
     assert got.index.equals(expected.index)
     assert list(got) == list(expected)
+
+
+@pytest.mark.parametrize("ids, dtype", [
+    ([3, 4, 3, 3, 3, 9, 4, 7], "int64"),
+    ([3.0, 4.0, 3.0, 3.0, 3.0, np.nan, 4.0, 7.7], "float64"),
+    ([3, 4, 3, 3, 3, None, 4, 7], "Int64"),
+])
+def test_numeric_ids_take_the_fast_path_to_the_same_index(monkeypatch, ids, dtype):
+    """A numeric id column skips the per-cell text normalisation; the index must
+    be the one the text path builds from the same ids written as text."""
+    import review.data.narrow_rows as nr
+
+    numeric = _messy_well().assign(nucleus_id=pd.Series(ids, dtype=dtype))
+    as_text = numeric.assign(nucleus_id=[("" if pd.isna(v) else str(v)) for v in numeric["nucleus_id"]])
+    served = {"frame": numeric}
+    monkeypatch.setattr(nr, "narrow_rows", lambda ctx, well, want: served["frame"])
+    fast = dict(collect.review_mfi_index(None, "A01", channel="gfp"))
+    served["frame"] = as_text
+    slow = dict(collect.review_mfi_index(None, "A01", channel="gfp"))
+    assert fast == slow == _reference_index(as_text, "gfp_mean_intensity")
+    assert all(type(n) is int for frame in fast.values() for n in frame)

@@ -1404,7 +1404,10 @@ def invalidate_stats_cache(ctx, *, keep_populations: bool = False) -> None:
     plate's statistics. For an edit that moves only the threshold or how a
     spread is reported, call :func:`invalidate_threshold_results`.
     """
-    ctx.state.stats_cache.invalidate(keep_populations=keep_populations)
+    if keep_populations:
+        ctx.state.stats_cache.invalidate(keep_populations=True)
+    else:
+        ctx.state.stats_cache.invalidate()
     # The per-FOV toggle's label and variant are synced from plot state here so
     # every path that disturbs the groups leaves the button bank consistent.
     note_group_visibility_changed(ctx)

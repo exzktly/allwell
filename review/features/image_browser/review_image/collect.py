@@ -12,6 +12,7 @@ matplotlib drawing stays in ``review_image/renderer``.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 
 import numpy as np
 import numpy as _np
@@ -403,14 +404,25 @@ def _mfi_rows(ctx, well: str, col: str) -> tuple | None:
     if nid_col is None:
         return None
     fov_n, tp_n = frame_token_series(df)
-    nid_n = map_distinct(as_text(df[nid_col]), lambda u: u.map(normalize_nucleus_id))
-    keep = (nid_n != "").to_numpy()
-    nids = map_distinct(nid_n[keep], lambda u: u.map(_safe_int_or_none)).to_numpy()
+    raw_ids = df[nid_col]
+    if pd.api.types.is_numeric_dtype(raw_ids) and not pd.api.types.is_bool_dtype(raw_ids):
+        # The pipeline writes nucleus ids as numbers, and every id in a well is
+        # distinct, so the text normalisation below is one Python call per cell
+        # (about 4 s for a 1.5M-cell well). For a number it reduces to this:
+        # ``normalize_nucleus_id`` gives ``str(int(v))`` (empty for NaN) and
+        # ``_safe_int_or_none`` reads that back as ``int(v)``.
+        as_float = raw_ids.to_numpy(dtype=float, na_value=np.nan)
+        keep = np.isfinite(as_float)
+        nids = as_float[keep].astype(np.int64)
+    else:
+        nid_n = map_distinct(as_text(raw_ids), lambda u: u.map(normalize_nucleus_id))
+        keep = (nid_n != "").to_numpy()
+        nids = map_distinct(nid_n[keep], lambda u: u.map(_safe_int_or_none)).to_numpy()
     vals = pd.to_numeric(df[col], errors="coerce").to_numpy()[keep]
     return (fov_n.to_numpy()[keep], tp_n.to_numpy()[keep], nids, vals)
 
 
-def review_mfi_index(ctx, well: str, channel=None) -> dict[tuple[str, str], dict[int, float]]:
+def review_mfi_index(ctx, well: str, channel=None) -> Mapping[tuple[str, str], dict[int, float]]:
     """``{(fov, tp): {nid: MFI}}`` for every frame of *well*, built in one pass.
 
     The Image Table's hover readout asks for one cell's MFI per cell under the
@@ -425,12 +437,44 @@ def review_mfi_index(ctx, well: str, channel=None) -> dict[tuple[str, str], dict
     rows = _mfi_rows(ctx, well, f"{chan}_mean_intensity")
     if rows is None:
         return {}
-    out: dict[tuple[str, str], dict[int, float]] = {}
-    for f, t, nid, v in zip(*rows):
-        if nid is None or not _np.isfinite(v):
-            continue
-        out.setdefault((f, t), {})[int(nid)] = float(v)
-    return out
+    fovs, tps, nids, vals = rows
+    keep = ~pd.isna(nids) & _np.isfinite(vals)
+    if not keep.any():
+        return {}
+    frames = pd.DataFrame({"f": fovs[keep], "t": tps[keep]})
+    nid_arr = nids[keep].astype(_np.int64)
+    val_arr = vals[keep].astype(float)
+    groups = frames.groupby(["f", "t"], sort=False).indices
+    return _FrameMfi({(f, t): (nid_arr[idx], val_arr[idx]) for (f, t), idx in groups.items()})
+
+
+class _FrameMfi(Mapping):
+    """``{(fov, tp): {nid: MFI}}`` for one well, each frame's dict made on first use.
+
+    The ids and values are held as one pair of arrays per frame (in row order,
+    so a later duplicate row still wins, as it did in the dict build). A hover
+    asks for the frame under the cursor; building a Python dict entry for every
+    cell of a 1.5M-cell well up front took about 5 s per well and channel and
+    hundreds of megabytes, for frames nobody hovered.
+    """
+
+    def __init__(self, arrays: dict) -> None:
+        self._arrays = arrays
+        self._dicts: dict = {}
+
+    def __getitem__(self, key):
+        hit = self._dicts.get(key)
+        if hit is None:
+            nid, val = self._arrays[key]
+            hit = dict(zip(nid.tolist(), val.tolist()))
+            self._dicts[key] = hit
+        return hit
+
+    def __iter__(self):
+        return iter(self._arrays)
+
+    def __len__(self) -> int:
+        return len(self._arrays)
 
 
 def review_build_mfi_map(

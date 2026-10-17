@@ -408,7 +408,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         # draw the grid from current state, then clear the "edited — press
         # Generate" cue.
         builder_flush_pending(ctx)
-        image_table_generate(ctx)
+        image_table_generate(ctx, retry_missing=True)
         builder_notify_rendered(ctx)
 
     tr.addWidget(btn_primary(action_row, "Generate", _generate))

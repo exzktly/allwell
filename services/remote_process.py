@@ -74,7 +74,7 @@ from services.remote_run_id import (
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import release_batch
 from services.remote_batch_resume import (
-    announce_adopted, note_remote_scratch, nothing_left_to_run, reattach_output_dir, stage_leftovers,
+    announce_adopted, download_adopted, note_remote_scratch, nothing_left_to_run, reattach_output_dir, stage_leftovers,
     take_from_remote)
 from util.well_token import canonical_well_label
 from services.remote_scratch import (
@@ -1230,6 +1230,7 @@ class _BatchedRemoteProcess:
                     ["touch", self._batch_flag(BATCH_READY, batch_idx + 1)],
                     check=False,
                 )
+                download_adopted(self)      # the job has its first batch: drain the earlier attempt's wells meanwhile
                 rc = self._await_batch(batch_idx + 1, n_batches)
                 self._release_nanowell_batch(rc, batch_zips)
                 if rc is None:
@@ -1288,6 +1289,7 @@ class _BatchedRemoteProcess:
                 # Drain the Fetcher first so every well's CSV + zip lands
                 # locally BEFORE we attempt auto-threshold against
                 # local_output_dir.
+                download_adopted(self)      # a run that launched nothing, or stopped short of batch 1
                 self._fetcher.flush_and_join()
                 # v5.4.7: single auto-threshold pass over the FULL downloaded
                 # output. The per-batch passes were suppressed via

@@ -176,7 +176,7 @@ def stage_from_leftovers(cache, batches: list[list], found: Leftovers, *, own_ru
     Returns how many were placed. A copy in this run's own directory is moved; one in an earlier attempt's is
     hard-linked or copied. rsync's quick check then decides, per archive, whether anything is still to send.
     """
-    lines, placed = [], 0
+    lines, placed, placed_names = [], 0, []
     for index, batch in enumerate(batches, start=1):
         dest = f"{own_run_dir}/b{index}"
         for zip_path in batch:
@@ -185,6 +185,7 @@ def stage_from_leftovers(cache, batches: list[list], found: Leftovers, *, own_ru
                 continue
             src = copies[0]
             placed += 1
+            placed_names.append(zip_path.name)
             if src == f"{dest}/{zip_path.name}":
                 continue                 # already where this batch is uploaded
             q_src, q_dest = _remote_quote(src), _remote_quote(dest)
@@ -196,6 +197,10 @@ def stage_from_leftovers(cache, batches: list[list], found: Leftovers, *, own_ru
         result = cache._ssh_script("\n".join(lines) + "\n", check=False)
         if result is None or getattr(result, "returncode", 1) != 0:
             return 0
+    for name in placed_names:
+        # The upload line the plate paints from: the archive is on the remote. A copy rsync then finds different is
+        # sent again, and its own transfer line repaints the well as it goes.
+        log(f"[remote] ↑ {name} already on the remote — not sent again\n")
     if placed:
         log(f"[remote] {placed} input archive(s) already on the remote were put into this run's batches — rsync "
             f"sends only what differs from them.\n")
@@ -301,21 +306,35 @@ def _say_what_the_journal_expected(proc, zips: list, found: Leftovers) -> None:
 
 
 def announce_adopted(proc, adopted: list[str]) -> None:
-    """Hand each adopted well to the Fetcher and to the progress count, as its own completion line would.
+    """Paint each adopted well finished, now; hold its download until the job has its first batch.
 
-    For a nanowell run the release that frees a finished batch is queued behind them as well — these wells are
-    in no batch of this run, so no later re-anchoring re-runs them.
+    The completion line goes to the progress count at once, so the plate shows every well's state before anything
+    else happens. The download waits for :func:`download_adopted`: a resumed run's compute is the long part, so the
+    scheduler is asked for a node and handed its first batch before the earlier attempt's output is drained — that
+    transfer then fills the queue wait and the compute instead of delaying both, and does not share the link with
+    the first batch's upload.
+    """
+    for well in adopted:
+        proc._line_q.put(remote_done_marker(well))
+    proc._adopted_pending = list(adopted)
+
+
+def download_adopted(proc) -> None:
+    """Hand the adopted wells to the Fetcher, once. Called when batch 1 is handed to the job, and again (a no-op by
+    then) as the run winds down, so a run that launched nothing — or stopped before batch 1 — still drains them.
+
+    For a nanowell run the release that frees them is queued behind them as well — these wells are in no batch of
+    this run, so no later re-anchoring re-runs them.
     """
     import functools
 
     from services.remote_fetch_nanowells import release_batch
 
+    adopted, proc._adopted_pending = list(getattr(proc, "_adopted_pending", ()) or ()), []
     for well in adopted:
-        line = remote_done_marker(well)
-        proc._line_q.put(line)
-        proc._fetcher.observe(line)
+        proc._fetcher.observe(remote_done_marker(well))
     if adopted and proc._fetcher.run.nanowell:
-        proc._fetcher.after_queued(functools.partial(release_batch, wells=list(adopted), log=proc._log))
+        proc._fetcher.after_queued(functools.partial(release_batch, wells=adopted, log=proc._log))
 
 
 def stage_leftovers(proc, run_dir: str) -> None:

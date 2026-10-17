@@ -421,3 +421,32 @@ def test_a_restart_says_which_part_way_wells_will_resume(tmp_path, monkeypatch):
     assert "1 well(s) left part-way will continue from their checkpoints" in log, log
     assert "A03 (2 field group(s) done)" in log
     assert "A04" not in log.split("will continue from their checkpoints")[1].split("\n")[0]
+
+
+def test_the_job_gets_its_first_batch_before_the_earlier_attempt_s_wells_download(tmp_path, monkeypatch):
+    """The user's order: paint every well's state, start the job, then drain what is waiting to download — so the
+    transfer fills the queue wait and the compute instead of delaying the job."""
+    p, plate, run_dir, sent, _, _ = _harness(tmp_path, monkeypatch)
+    _finished_on(run_dir / "out", "A02")
+    _uploaded_copy(plate, run_dir / "in", "A03")
+    order: list[str] = []
+    real_ssh = p._runner._cache._ssh_run
+
+    def ssh_run(argv, *, check, **kw):
+        if argv and argv[0] == "touch" and "ready" in argv[-1]:
+            order.append(f"batch handed: {Path(argv[-1]).name}")
+        return real_ssh(argv, check=check, **kw)
+
+    p._runner._cache._ssh_run = ssh_run
+    p._fetcher.observe = lambda line: order.append(f"download {line.split()[1]}")
+    real_put = p._line_q.put
+    p._line_q.put = lambda item: (order.append(f"painted {item.split()[1]}")
+                                  if item and "finished on the remote by an earlier attempt" in item else None,
+                                  real_put(item))[1]
+
+    _run(p, monkeypatch)
+
+    first_batch = next(i for i, e in enumerate(order) if e.startswith("batch handed"))
+    assert order.index("painted A02") < first_batch, order
+    assert order.index("download A02") > first_batch, f"the download did not wait for the job: {order}"
+    assert any("↑ A03.zip already on the remote" in m for m in p._logged), "a reused input is not painted uploaded"

@@ -595,6 +595,11 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # screen, and the data range (the LUT auto-scales, so a correction can move
     # the data without moving the image). Selectable so a line can be pasted
     # into a bug report.
+    # The nanowell array search: its controls and handlers live with its window.
+    _section("Nanowell array")
+    from review.features.image_browser.playground.nanowell_view import build_nanowell_section
+    build_nanowell_section(ctx, controls, cl, _row)
+
     _section("What you're looking at")
     status = QLabel("Select a frame to begin.", controls)
     status.setObjectName("Muted")

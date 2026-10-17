@@ -139,7 +139,9 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     import_btn = ctx.widgets.register(
         IMPORT_KEY, IconButton("plus", band, text="Import"))
     import_btn.setToolTip(
-        "Import selections from a JSON file (merges into the current set).")
+        "Import groups from a JSON file. When this dataset already has groups "
+        "you choose whether to add the file's groups beside them or replace "
+        "them.")
     import_btn.clicked.connect(lambda _=False: import_selections_from_json(ctx))
     band.add_action(import_btn)
 

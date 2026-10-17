@@ -68,10 +68,10 @@ def _commit(ctx, vset: sv.VariableSet, *, note: str = "") -> None:
     with swallow("refresh the Group by control"):
         from review.core.group_by_controller import refresh_group_by_combo
         refresh_group_by_combo(ctx)
-    # Replicates' *Make groups from* combo lists the variables too, for the
-    # same reason. Through the registry hook every definition edit already
-    # uses, rather than an import of a sibling feature.
-    with swallow("refresh the Replicates page's Make-groups-from control"):
+    # Replicates' *Make replicates from variables* button is enabled only
+    # once a variable exists, for the same reason. Through the registry hook
+    # every definition edit already uses, rather than an import of a sibling feature.
+    with swallow("refresh the Replicates page's Make-replicates-from-variables button"):
         ctx.features.call("groups.map_refresh", ctx)
     refresh_variables(ctx, note=note)
 

@@ -2040,6 +2040,7 @@ def test_required_files_list_is_what_we_promised():
         # sides, so the digest has to be computed identically on the worker
         # host and locally.
         "util/settings_digest.py",
+        "util/state_dir.py",
         "util/well_token.py",
         # Free-space primitives + the ENOSPC wording the retry shield rewrites
         # through (util.disk_space).

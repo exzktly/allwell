@@ -90,9 +90,9 @@ _LOCK = threading.Lock()
 def cache_dir() -> "Path | None":
     """The directory the scan caches live in, or ``None`` when disabled.
 
-    ``%LOCALAPPDATA%\\allwell\\czi-scans`` on Windows and
-    ``~/.cache/allwell/czi-scans`` elsewhere, which is where the boot log
-    already goes. ``None`` rather than an exception when nothing is writable:
+    ``czi-scans`` inside the first usable folder of
+    :func:`util.state_dir.candidate_dirs` (``~/.cache/allwell`` first), beside
+    the boot log and the bootstrap logs. ``None`` rather than an exception when nothing is writable:
     a scan that cannot be remembered is a slow scan, not a failed one.
     """
     raw = os.environ.get(_OVERRIDE, "").strip()
@@ -100,14 +100,12 @@ def cache_dir() -> "Path | None":
         return None
     if raw:
         return _usable(Path(raw).expanduser())
-    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
-        found = _usable(Path(os.environ["LOCALAPPDATA"]) / "allwell" / "czi-scans")
+    from util.state_dir import candidate_dirs
+    for base in candidate_dirs():
+        found = _usable(base / "czi-scans")
         if found is not None:
             return found
-    home = _usable(Path.home() / ".cache" / "allwell" / "czi-scans")
-    if home is not None:
-        return home
-    return _usable(Path(tempfile.gettempdir()) / "allwell-czi-scans")
+    return None
 
 
 def _usable(folder: Path) -> "Path | None":

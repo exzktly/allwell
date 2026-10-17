@@ -96,6 +96,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # done". Both the worker host and the client compute it, and they have to
     # agree, so the module has to be the same one on both sides.
     "util/settings_digest.py",
+    # The per-user folder for local logs and caches; pipeline.scan_cache asks
+    # it where the CZI scan cache lives, so the worker needs it too.
+    "util/state_dir.py",
     "util/well_token.py",
     # Free-space primitives + the single wording for a volume that filled. The
     # retry shield below rewrites an ENOSPC through it, so a remote run that

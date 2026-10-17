@@ -201,10 +201,29 @@ def _prune_bootstrap_logs(log_dir: Path, keep: int = _BOOTSTRAP_LOG_RETENTION) -
     return removed
 
 
+def _boot_log_line() -> str:
+    """Where the app that launched this bootstrap says its startup and crash log
+    is, and whether that file exists right now.
+
+    The app exports the path as ``ALLWELL_BOOT_LOG`` before it can start any
+    child process. A user who finds bootstrap logs but no crash log beside them
+    can open this file and read where the crash log actually went — or that the
+    app never created one — instead of anyone guessing.
+    """
+    raw = os.environ.get("ALLWELL_BOOT_LOG", "")
+    if not raw:
+        return "app boot log: not reported (bootstrap not started by the app)"
+    try:
+        exists = Path(raw).exists()
+    except OSError as exc:
+        return f"app boot log: {raw} (could not check: {exc})"
+    return f"app boot log: {raw} ({'exists' if exists else 'MISSING'})"
+
+
 def _open_log_file() -> tuple[Path, object] | tuple[None, None]:
-    """Open a per-invocation bootstrap log file under
-    ``~/.cache/allwell/bootstrap-<timestamp>.log`` on the LOCAL
-    machine. Returns ``(path, file_handle)`` or ``(None, None)`` on
+    """Open a per-invocation bootstrap log file,
+    ``bootstrap-<timestamp>.log``, in :func:`util.state_dir.user_state_dir`
+    (``~/.cache/allwell``) on the LOCAL machine. Returns ``(path, file_handle)`` or ``(None, None)`` on
     failure (logging should never block bootstrap).
 
     Local-only by design: the user asked for a debug log they can
@@ -213,7 +232,13 @@ def _open_log_file() -> tuple[Path, object] | tuple[None, None]:
     cache directory can't grow without bound.
     """
     try:
-        log_dir = Path("~/.cache/allwell").expanduser()
+        # The same folder the app's startup and crash log uses, so the two are
+        # always found together (``util/state_dir.py`` explains why they once
+        # were not).
+        if str(REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(REPO_ROOT))
+        from util.state_dir import user_state_dir
+        log_dir = user_state_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         _prune_bootstrap_logs(log_dir)
         stamp = time.strftime("%Y%m%dT%H%M%S")
@@ -1163,6 +1188,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout = _TeeStream(sys.stdout, _LOG_FILE)
         sys.stderr = _TeeStream(sys.stderr, _LOG_FILE)
         say(f"Debug log: {log_path}")
+        _log_to_file(_boot_log_line())
         _log_to_file(
             f"=== bootstrap started at {time.strftime('%Y-%m-%d %H:%M:%S')} "
             f"alias={args.alias!r} force={args.force} ==="

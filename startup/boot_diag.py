@@ -55,32 +55,17 @@ _LOG_PATH: Path | None = None
 def user_state_dir() -> Path:
     """Per-user directory for anything this app keeps between launches.
 
-    Platform-appropriate, with fallbacks: ``%LOCALAPPDATA%\\allwell`` on
-    Windows, ``~/.cache/allwell`` elsewhere, the system temp dir if neither is
-    writable. The boot log lives here, and so does matplotlib's font cache in a
-    frozen build — ``startup.mpl_bootstrap`` used the directory holding its own source
-    file, which under PyInstaller is inside ``sys._MEIPASS``, a fresh temp tree
-    unpacked per launch. The cache was therefore rebuilt every single launch,
-    which is precisely what that module exists to prevent.
+    :func:`util.state_dir.user_state_dir`, the one folder every local log and
+    cache shares (``~/.cache/allwell`` first, on every platform), so the boot log
+    always sits beside the remote-bootstrap logs. Kept under this name because
+    ``startup.mpl_bootstrap`` and the tests reach it here. matplotlib's font
+    cache lives in it in a frozen build — ``startup.mpl_bootstrap`` used the
+    directory holding its own source file, which under PyInstaller is inside
+    ``sys._MEIPASS``, a fresh temp tree unpacked per launch, so the cache was
+    rebuilt every launch.
     """
-    candidates = []
-    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
-        candidates.append(Path(os.environ["LOCALAPPDATA"]) / "allwell")
-    candidates.append(Path(os.path.expanduser("~/.cache")) / "allwell")
-    import tempfile
-    candidates.append(Path(tempfile.gettempdir()) / "allwell")
-    for d in candidates:
-        try:
-            d.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            continue
-        # ``mkdir(exist_ok=True)`` succeeds on a directory that already exists
-        # and cannot be written — one left owned by another user, say. Taking
-        # it anyway meant the log's ``open`` failed later, silently, and no log
-        # was written anywhere: the temp-dir fallback was never reached.
-        if os.access(d, os.W_OK):
-            return d
-    return Path(tempfile.gettempdir())
+    from util.state_dir import user_state_dir as _shared
+    return _shared()
 
 
 def log_path() -> Path:

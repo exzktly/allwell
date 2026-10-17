@@ -141,6 +141,10 @@ def _toggle_props_dock(ctx) -> None:
     dock = getattr(ctx.runtime.image_table, "props_dock", None)
     if dock is not None:
         dock.setVisible(dock.isHidden())
+        if dock.isVisible():
+            # Phone layout: a full-width sheet, not a column beside the grid.
+            from review.core import phone_panel_sheet
+            phone_panel_sheet.present(dock)
 
 
 def _build_properties_dock(ctx, dock) -> None:

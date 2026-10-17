@@ -3748,7 +3748,9 @@ still exported (see below).
   *Show Details* and copy it; that text names the exact line that failed and is
   the single most useful thing to put in a bug report. It is also written to a
   log file, whose path the dialog gives you: `~/.cache/allwell/allwell-boot.log`
-  on macOS and Linux, `%LOCALAPPDATA%\allwell\allwell-boot.log` on Windows. That
+  on every platform (on Windows `~` is your user folder, `C:\Users\<you>`).
+  Only if that folder cannot be written does it fall back to
+  `%LOCALAPPDATA%\allwell` on Windows, then to the system temp folder. That
   file is normally rewritten each time the app starts, **but a copy carrying a
   crash is kept** — as `allwell-boot.log.1`, `.2`, `.3`, newest first — so
   relaunching to try again no longer throws away the record of what went wrong.
@@ -3757,7 +3759,9 @@ still exported (see below).
   is *not* `~/Library/Caches`. The application log drawer (⌘L, or the terminal
   icon at the right of the status bar) names the exact path at its top. The
   files called `bootstrap-….log` beside it are from setting up remote hosts,
-  not from the app crashing.
+  not from the app crashing; they always land in the same folder as the crash
+  log, and each one records the crash log's path and whether that file existed
+  at the time (`app boot log: … (exists)` or `(MISSING)`).
 - **If the app vanishes without any dialog** — most often macOS ending it for
   using too much memory while opening a very large dataset — there is no
   traceback to show, because the system stopped the process from outside. The
@@ -6420,8 +6424,7 @@ It is remembered per file and keyed on the file's size and modification time,
 so a plate you re-export is read again and only the files that changed cost
 anything. Nothing is written into the folder holding your images — a plate is
 often on a read-only archive or a share you do not administer — it goes with
-All-Well's other working files, in `%LOCALAPPDATA%\allwell\czi-scans` on
-Windows and `~/.cache/allwell/czi-scans` on macOS and Linux, one small file per
+All-Well's other working files, in `~/.cache/allwell/czi-scans`, one small file per
 folder you have opened. Deleting them costs one slow scan and nothing else. Set
 `ALLWELL_SCAN_CACHE` to a folder to keep them somewhere else, or to `off` to
 turn it off.
@@ -7379,6 +7382,10 @@ In Review a second row under it holds:
 |---|---|
 | **Bar Plots ▾** | Picks the page's view (Bar Plots, Line Graphs, Heat Map, …). |
 | **⚙ Controls** | Slides the page's own controls — channel, property, display, threshold and the rest — up from the bottom, with the plot still in view above them so you can watch it change. **Done ✕** puts them away. |
+
+The **Properties** button among those controls (the sliders icon) puts the
+controls away and opens the figure's Properties panel across the whole screen.
+Its **✕** closes it and returns you to the plot.
 
 **The Image Table** opens on its images in phone layout, sized so the columns
 fill the screen; **−** and **+** zoom from there, and past 100 % the table

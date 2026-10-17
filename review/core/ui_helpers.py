@@ -718,6 +718,10 @@ def mount_widget_in_plot_dock(dock: QWidget, widget: QWidget, width: int = 0) ->
     if host is not None and hasattr(host, "set_overlay_dock"):
         host.set_overlay_dock(dock, width)
     dock.setVisible(True)
+    # In phone layout the panel opens as a full-width sheet over the page
+    # instead of squeezing the figure beside it (``phone_panel_sheet``).
+    from review.core import phone_panel_sheet
+    phone_panel_sheet.present(dock)
 
 
 def hide_plot_dock(dock: QWidget) -> None:

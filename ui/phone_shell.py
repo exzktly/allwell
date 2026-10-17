@@ -358,11 +358,35 @@ def _is_phone_controls(w: QWidget) -> bool:
     return bool(w.property("phoneControls")) and hasattr(w, "setStacked")
 
 
+def _phone_relevant(w: QWidget) -> bool:
+    """Whether phone layout adapts *w* when it is shown: a plot canvas, a
+    top-level dialog, a page's controls, a stepper, a plot toolbar, an Analyze
+    form row, or an ⓘ hint. Everything else is left alone and never watched."""
+    if getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure"):
+        return True
+    if w.isWindow() and isinstance(w, QDialog):
+        return True
+    name = type(w).__name__
+    if name in ("ControlBand", "MplToolbar", "Stepper") or _is_phone_controls(w):
+        return True
+    return w.objectName() in ("AnalyzeFormRow", "InfoHint")
+
+
 class _PhoneEventFilter(QObject):
     """While phone layout is on, the things built or shown later get it too:
     a plot its DPI, a dialog a place on the screen, a page's control band a
     place in the Controls sheet, a stepper its − / +, a toolbar its absence, a
-    form row its stacking; and an ⓘ answers a tap, since nothing hovers."""
+    form row its stacking; and an ⓘ answers a tap, since nothing hovers.
+
+    **Installed on those widgets only, never on the application.** It used to
+    be an application-wide filter, so every event of every object in the
+    process — Qt's own internal windows, animations and tooltips included —
+    was handed to Python while phone layout was on. A Windows user hit a native
+    access violation on this method's first line, called straight from
+    ``app.exec()``: an event for an object already being torn down, wrapped for
+    Python. Watching only the widgets :func:`_phone_relevant` names (found by
+    ``PhoneShell._sweep``) keeps Python off every other object's events.
+    """
 
     def __init__(self, shell: PhoneShell) -> None:
         super().__init__(shell)
@@ -468,6 +492,14 @@ LANDSCAPE_PLATE_PT = 160
 _RAIL_STATUS_MS = 400
 #: The least height a plot gets per row of axes in phone layout.
 PLOT_ROW_PT = 220
+
+#: How often, in ms, phone layout checks for widgets built since its last
+#: sweep. A sweep that finds the count unchanged costs one ``allWidgets()``
+#: (about 2 ms with 4,100 widgets); a full one about 25 ms.
+_SWEEP_MS = 300
+
+#: Dynamic property marking a widget the phone filter is installed on.
+_P_WATCHED = "_awPhoneWatched"
 
 
 class PhoneShell(QObject):
@@ -661,6 +693,16 @@ class PhoneShell(QObject):
         self._refresh_soon.setSingleShot(True)
         self._refresh_soon.setInterval(0)
         self._refresh_soon.timeout.connect(self._refresh_when_settled)
+        # Widgets built while phone layout is on are found by a sweep rather
+        # than an application-wide event filter (see _PhoneEventFilter): every
+        # _SWEEP_MS it checks the widget count and, when it changed, adapts and
+        # watches the new ones; a window gaining focus (a dialog opening) and a
+        # page change sweep at once.
+        self._sweep_timer = QTimer(self)
+        self._sweep_timer.setInterval(_SWEEP_MS)
+        self._sweep_timer.timeout.connect(lambda: self._sweep(force=False))
+        self._sweep_count = -1
+        self._focus_hooked = False
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(_RAIL_STATUS_MS)
         self._status_timer.timeout.connect(self._sync_rail_status)
@@ -751,12 +793,7 @@ class PhoneShell(QObject):
         # only known once its labels are at their new size.
         self._h.relayout()
         scale_canvases(self.plot_factor())
-        app = QApplication.instance()
-        if app is not None:
-            if on:
-                app.installEventFilter(self._filter)
-            else:
-                app.removeEventFilter(self._filter)
+        self._set_watching(on)
         self._apply_window(on)
         self._sync_log_badge()
         self.refresh()
@@ -834,6 +871,63 @@ class PhoneShell(QObject):
                 w.setTouchMode(on)
         elif w.objectName() == "AnalyzeFormRow":
             self._stack_form_row(w, on)
+
+    def _set_watching(self, on: bool) -> None:
+        """Start or stop finding and watching the widgets phone layout adapts."""
+        app = QApplication.instance()
+        if on:
+            self._sweep_count = -1
+            self._sweep(force=True)
+            self._sweep_timer.start()
+            if app is not None and not self._focus_hooked:
+                app.focusWindowChanged.connect(self._on_focus_window)
+                self._focus_hooked = True
+            return
+        self._sweep_timer.stop()
+        if app is not None and self._focus_hooked:
+            app.focusWindowChanged.disconnect(self._on_focus_window)
+            self._focus_hooked = False
+        for w in list(QApplication.allWidgets()):
+            try:
+                if w.property(_P_WATCHED):
+                    w.removeEventFilter(self._filter)
+                    w.setProperty(_P_WATCHED, None)
+            except RuntimeError:
+                swallowed()  # deleted while the list was walked
+
+    def _on_focus_window(self, *_a) -> None:
+        if phone_layout.is_on():
+            self._sweep(force=True)
+
+    def _sweep(self, *, force: bool) -> None:
+        """Watch and adapt every widget phone layout cares about that is not
+        watched yet. Skipped when the widget count has not changed, unless
+        *force*: a re-shown widget is already watched, so only new widgets need
+        finding, and they change the count."""
+        if not phone_layout.is_on():
+            return
+        widgets = QApplication.allWidgets()
+        if not force and len(widgets) == self._sweep_count:
+            return
+        self._sweep_count = len(widgets)
+        factor = self.plot_factor()
+        for w in widgets:
+            try:
+                if w.property(_P_WATCHED) or not _phone_relevant(w):
+                    continue
+                w.installEventFilter(self._filter)
+                w.setProperty(_P_WATCHED, True)
+                if not w.isVisible():
+                    continue        # its Show will reach the filter
+                if w.isWindow() and isinstance(w, QDialog):
+                    clamp_to_screen(w)
+                elif getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure"):
+                    scale_canvas(w, factor)
+                    self.size_canvas(w, True)
+                else:
+                    self.adapt(w)
+            except RuntimeError:
+                swallowed()  # deleted while the list was walked
 
     def _adapt_all(self, on: bool) -> None:
         for w in list(QApplication.allWidgets()):
@@ -1282,6 +1376,7 @@ class PhoneShell(QObject):
             self.close_controls()
 
     def _refresh_when_settled(self) -> None:
+        self._sweep(force=False)
         if phone_layout.is_switching():
             self._refresh_soon.start()     # the switch ends with a refresh of its own
             return

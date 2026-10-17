@@ -681,13 +681,34 @@ def frame_token_series(df):
         return empty, empty
     fov_col = resolve_identity_column(df, *FOV_COLUMN_NAMES)
     tp_col = resolve_identity_column(df, *TIMEPOINT_COLUMN_NAMES)
-    fov_n = (normalize_fov_series(as_text(df[fov_col]))
+    fov_n = (map_distinct(as_text(df[fov_col]), normalize_fov_series)
              if fov_col else
              pd.Series(["1"] * len(df), index=df.index))
     tp_raw = (as_text(df[tp_col])
               if tp_col else
               pd.Series([""] * len(df), index=df.index))
-    return fov_n, tp_raw.map(normalize_tp)
+    return fov_n, map_distinct(tp_raw, lambda u: u.map(normalize_tp))
+
+
+def map_distinct(series, transform):
+    """``transform(series)``, computed over the distinct values and spread back.
+
+    *transform* takes a ``Series`` and returns one aligned with it, and must be a
+    pure per-value function — every normaliser in this module is. A well's frame
+    columns hold a handful of distinct labels across up to a million rows, so
+    normalising each label once instead of each row is the difference between
+    milliseconds and seconds: ``normalize_tp`` per row cost ~0.7 s on a 230k-row
+    well, on the UI thread, every time a hover readout asked which frame a row
+    belongs to. A series with missing values goes through *transform* whole, so
+    the result is the same object a per-row call would have produced.
+    """
+    import pandas as pd
+
+    codes, uniques = pd.factorize(series, sort=False)
+    if len(codes) == 0 or (codes < 0).any():
+        return transform(series)
+    mapped = transform(pd.Series(uniques, dtype=object)).to_numpy(dtype=object)
+    return pd.Series(mapped[codes], index=series.index, dtype=object)
 
 
 def cell_keys_for_dataframe(

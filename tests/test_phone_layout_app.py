@@ -467,3 +467,94 @@ def test_the_image_table_opens_on_its_grid_in_phone_layout(qapp, win, tmp_path):
     desk = _image_cell_widths(grid)                       # redrawn at the desk's size
     assert desk and max(desk) <= 240 < min(phone)
     assert "above" in empty._hint.text()
+
+
+def test_properties_from_the_controls_sheet_opens_a_full_width_sheet(qapp, win, mini_dataset):
+    """Bar Plots → ⚙ Controls → Properties: the panel opens over the page at the
+    window's width, with the Controls sheet closed — not in the plot's side dock
+    under the sheet, 360 px wide on a 390 px screen — and its ✕ puts it back."""
+    from PySide6.QtTest import QTest
+
+    from widgets.icon_button import IconButton
+
+    review, shell = win._review, win._phone
+    if win._mode_seg.currentIndex() != 0:
+        win._on_titlebar_mode_seg(0)
+    review._load_path(mini_dataset)
+    _pump(qapp)
+    review._notebook.setCurrentByName("Plotting")
+    review._plotting_notebook.setCurrentByName("Bar Plots")
+    review._drain_pending_centre_builders()
+    _pump(qapp)
+    shell.set_on(True)
+    QTest.qWait(600)
+    _pump(qapp)
+    try:
+        win.resize(390, 780)
+        _pump(qapp)
+        shell.controls_button.click()
+        _pump(qapp)
+        props = [b for b in shell._sheet_band.findChildren(IconButton)
+                 if "properties" in (b.toolTip() or "").lower() and b.isVisible()]
+        assert props, "no Properties button in the Controls sheet"
+        props[0].click()
+        _pump(qapp)
+        dock = review._bar_export_dock
+        assert not shell._sheet.isOpen() and shell._sheet_band is None, \
+            "the panel opened under the Controls sheet"
+        sheet = getattr(win, "_aw_phone_panel_sheet", None)
+        assert sheet is not None and sheet.isOpen(), \
+            "Properties opened in the plot's side dock, not as a phone sheet"
+        assert dock.parentWidget() is sheet.contentWidget()
+        QTest.qWait(400)
+        _pump(qapp)
+        assert sheet.width() == win.width() and dock.width() == win.width()
+
+        sidebar = next(iter(review._export_style_sidebars.values()))
+        sidebar._close_dock()
+        _pump(qapp)
+        assert not sheet.isOpen() and dock.parentWidget() is not sheet.contentWidget()
+    finally:
+        shell.set_on(False)
+        QTest.qWait(600)
+        _pump(qapp)
+
+
+def test_phone_layout_never_filters_every_event_in_the_application(qapp, win, monkeypatch):
+    """Reported: a Windows access violation on ``_PhoneEventFilter.eventFilter``'s
+    first line, called straight from ``app.exec()``. The filter was installed on
+    the application, so every event of every object went through Python. It is
+    now installed only on the widgets phone layout adapts, found by a sweep —
+    including ones built after the switch, which must still be found."""
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QDialog
+
+    from ui.phone_shell import _P_WATCHED
+
+    shell = win._phone
+    on_app = []
+    real = QApplication.installEventFilter
+
+    def _spy(self, obj):
+        if self is QApplication.instance():
+            on_app.append(obj)
+        return real(self, obj)
+
+    monkeypatch.setattr(QApplication, "installEventFilter", _spy)
+    shell.set_on(True)
+    QTest.qWait(600)
+    _pump(qapp)
+    try:
+        assert shell._filter not in on_app, "phone layout filtered the whole application"
+        late = QDialog(win)
+        late.show()
+        QTest.qWait(500)                                  # past one sweep
+        _pump(qapp)
+        assert late.property(_P_WATCHED), "a dialog opened in phone layout was never adapted"
+        late.close()
+        late.deleteLater()
+    finally:
+        shell.set_on(False)
+        QTest.qWait(600)
+        _pump(qapp)
+    assert not any(w.property(_P_WATCHED) for w in QApplication.allWidgets())

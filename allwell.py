@@ -26,6 +26,11 @@ from startup import boot_diag as _boot_diag
 _boot_diag.arm_faulthandler()
 _boot_diag.install_excepthook()
 _boot_diag.boot(f"start pid={__import__('os').getpid()} python={sys.version.split()[0]} platform={sys.platform}")
+# Exported for every child process (the remote bootstrap records it, with
+# whether the file exists, in its own log), so a crash log that is not where it
+# is expected can be traced from a file the user can find.
+__import__("os").environ["ALLWELL_BOOT_LOG"] = str(_boot_diag.log_path())
+_boot_diag.boot(f"boot log: {_boot_diag.log_path()}")
 
 _boot_diag.boot("importing PySide6 (Qt DLLs) …")
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QRectF

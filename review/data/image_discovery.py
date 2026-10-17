@@ -646,12 +646,16 @@ def _walk_capped(root: Path, max_depth: int) -> list[Path]:
     gives — order included, which matters because the merge is first-hit-wins —
     but it stops descending at the cap instead of listing the whole tree and
     discarding the deep part afterwards. ``rglob`` walked everything below the
-    output folder, on a network drive, to keep three levels of it. Symlinked
-    directories are followed, as ``rglob`` follows them.
+    output folder, on a network drive, to keep three levels of it. A symlinked
+    directory is listed as an entry and **not** descended into, which is what
+    ``rglob`` does (Python 3.11 and 3.12): following it would walk a linked
+    tree — possibly the network drive this exists to avoid, possibly a loop —
+    and surface files the old scan never classified, changing which file a
+    first-hit-wins merge uses.
     """
     out: list[Path] = []
     base = len(root.parts)
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         here = Path(dirpath)
         depth = len(here.parts) - base
         for name in (*dirnames, *filenames):

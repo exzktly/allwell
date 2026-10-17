@@ -171,3 +171,46 @@ def test_map_distinct_is_the_per_row_map(values):
     got = map_distinct(s, lambda u: u.map(normalize_tp))
     assert got.index.equals(expected.index)
     assert list(got) == list(expected)
+
+
+@pytest.mark.parametrize("ids, dtype", [
+    ([3, 4, 3, 3, 3, 9, 4, 7], "int64"),
+    ([3.0, 4.0, 3.0, 3.0, 3.0, np.nan, 4.0, 7.7], "float64"),
+    ([3, 4, 3, 3, 3, None, 4, 7], "Int64"),
+])
+def test_numeric_ids_take_the_fast_path_to_the_same_index(monkeypatch, ids, dtype):
+    """A numeric id column skips the per-cell text normalisation; the index must
+    be the one the text path builds from the same ids written as text."""
+    import review.data.narrow_rows as nr
+
+    numeric = _messy_well().assign(nucleus_id=pd.Series(ids, dtype=dtype))
+    as_text = numeric.assign(nucleus_id=[("" if pd.isna(v) else str(v)) for v in numeric["nucleus_id"]])
+    served = {"frame": numeric}
+    monkeypatch.setattr(nr, "narrow_rows", lambda ctx, well, want: served["frame"])
+    fast = dict(collect.review_mfi_index(None, "A01", channel="gfp"))
+    served["frame"] = as_text
+    slow = dict(collect.review_mfi_index(None, "A01", channel="gfp"))
+    assert fast == slow == _reference_index(as_text, "gfp_mean_intensity")
+    assert all(type(n) is int for frame in fast.values() for n in frame)
+
+
+@pytest.mark.parametrize("column", [
+    pd.Series([1, 2, -3, 40]),
+    pd.Series([1.0, np.nan, 3.0, -7.0]),
+    pd.Series([1.5, 2.0]),                  # fractional: the per-value path
+    pd.Series([1e20, 2.0]),                 # scientific notation as text
+    pd.Series([np.inf, 1.0]),
+    pd.Series([5e-05, 1.0]),
+    pd.Series(["3.0", "04", " 5 ", ""]),
+    pd.Series(["7", "x"], dtype="category"),
+    pd.Series([np.nan, np.nan]),
+    pd.Series([], dtype=float),
+])
+def test_bulk_nucleus_id_normalisation_is_the_per_value_one(column):
+    """``nucleus_id_series`` converts a numeric id column in bulk; whatever path
+    it takes, each id must read as ``normalize_nucleus_id`` of its text."""
+    from domain.image_identity import normalize_nucleus_id, nucleus_id_series
+    from domain.text_columns import as_text
+
+    want = as_text(column).map(normalize_nucleus_id).tolist()
+    assert nucleus_id_series(column, column.index).tolist() == want

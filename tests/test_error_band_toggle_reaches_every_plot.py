@@ -122,11 +122,11 @@ def test_the_sem_button_itself_reaches_the_visible_scope(ctx, monkeypatch):
     """Driven through ``toggle_sem``, which is what the button is wired to.
 
     Calling the fan-out directly would test the fan-out; the defect was that
-    the button did not reach it. ``invalidate_stats_cache`` is stubbed because
+    the button did not reach it. ``invalidate_threshold_results`` is stubbed because
     it walks widget banks this ctx does not have — the cache flush is not what
     is under test here.
     """
-    monkeypatch.setattr(plot_toggles, "invalidate_stats_cache", lambda _c: None)
+    monkeypatch.setattr(plot_toggles, "invalidate_threshold_results", lambda _c: None)
     ctx.runtime = _Runtime()
     was = ctx.state.plot.use_sem
 

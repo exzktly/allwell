@@ -5135,6 +5135,50 @@ exact correction and segmentation code).
     looking at — that is what the pipeline segments. If you press Segment while
     viewing Raw, the status says so rather than letting the count look like it
     came from the picture.
+- **Nanowell array** — finds the nanowell array in one well and tells you what
+  to type into **Analyze → Nanowells**, so the first run of a new plate does not
+  start from guesses. Two sources:
+  - **Well archive…** — choose a raw well archive (`<well>.zip`, with the
+    dataset's `acquisition.json` beside it, as in a dataset's `in/` folder). Its
+    tiles at the first timepoint, in the phase (or brightfield) channel, are
+    stitched exactly as a nanowell run stitches them. With a dataset loaded the
+    picker opens on that dataset's archive for the well selected on the plate.
+    Without an acquisition record the tiles cannot be placed; open one tile or an
+    already-stitched image instead and use the second source.
+  - **From this frame** — searches the raw frame on screen (a dataset frame, or a
+    file opened with **Open image…**) at the **Pixel size (µm)** you type beside
+    it. Every length is measured in that pixel size, so a wrong one suggests the
+    wrong plate format.
+
+  The search runs in the background and opens a **Nanowell array** window: the
+  image with every lattice site of the array ringed (green where a nanowell was
+  found, amber where the image shows the site dark, as under a bubble), the
+  array's outline, the central square and the address origin (`0.0`); beside it,
+  every Nanowells field with what to enter and why; and the measurements behind
+  them — lattice kind, pitch and row angle, nanowell diameter, outline, site
+  counts, where the origin was anchored and how many rings the array has.
+  **Copy settings** puts all of it on the clipboard as text.
+
+  What it suggests, and from what:
+  - **Plate format** — a known format when both its nanowell diameter and its
+    pitch agree with what was measured (within the tolerances a run reports a
+    disagreement beyond); otherwise **Custom size**, with the measured **Nanowell
+    diameter** and **Lattice pitch** to enter.
+  - **Array geometry** — *Hexagonal lattice in a circle* when that is what the
+    array is; *Infer from the image* for a square lattice or an outline that is
+    not a circle.
+  - **Square edge angle** — the angle of the central square's edges to a lattice
+    row. Left at the default 0 when the square sits within 5° of a row, or when
+    no square was found (it is hidden, or the plate has none). On a hexagonal
+    lattice a non-zero value is flagged for checking against the plate's mask,
+    since a lattice turned past ±30° shifts the reading by 30°.
+  - Everything it cannot measure is left **blank** with the reason: cell
+    diameter, margin, the occlusion and clipping thresholds, and the tile-grid
+    fields (blank whenever an acquisition record places the tiles, which it
+    always does for a well archive).
+
+  Use **Test detection…** on the Analyze form afterwards to see the addresses a
+  run would give with those settings.
 - **Optimal use** — two jobs, both here. *Before* a run: **Open image…** a
   representative frame, dial in a correction method and the two segmentation
   thresholds, then type those values into the Analyze tab's matching fields and

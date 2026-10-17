@@ -52,6 +52,10 @@ from review.features.image_browser.playground import (
 from review.features.image_browser.playground.worker import (
     request_reference_fields, request_stardist_labels,
 )
+from review.features.image_browser.playground import (
+    nanowell_compute as _nanowell_compute,
+    nanowell_view as _nanowell_view,
+)
 from pipeline.io import load_2d_gray
 
 
@@ -1729,3 +1733,109 @@ def playground_focus_now(ctx) -> None:
     st.focus_distribution = dist
     _focus_view.show_focus_distribution(ctx, dist)
     _set_status(win, dist.describe())
+
+
+# ── Nanowell array: the Analyze settings a well implies ─────────────────────
+# Two sources, the same measurement (``nanowell_compute``): one well's raw
+# archive, stitched as a run stitches it, or the frame on screen at a pixel size
+# the user gives. Both run off the GUI thread — stitching and the contrast search
+# take seconds on a real well — and land in ``nanowell_view``'s window.
+
+def _set_nanowell_busy(ctx, busy: bool) -> None:
+    ctx.runtime.playground.nanowell_running = busy
+    for attr in ("_playground_nw_archive_btn", "_playground_nw_frame_btn"):
+        btn = ctx.widgets.get_or_none(attr)
+        if btn is not None:
+            btn.setEnabled(not busy)
+
+
+def _start_nanowell_search(ctx, job, what: str) -> None:
+    """Run *job()* (returning a ``NanowellSuggestion``) off the GUI thread and show the result."""
+    from core.worker_bridge import run_off_thread
+
+    if getattr(ctx.runtime.playground, "nanowell_running", False):
+        _set_status(ctx.window, "A nanowell search is already running.")
+        return
+    _set_nanowell_busy(ctx, True)
+    _set_status(ctx.window, f"Searching {what} for a nanowell array…")
+
+    def _done(suggestion) -> None:
+        _set_nanowell_busy(ctx, False)
+        _set_status(ctx.window, "Nanowell array found: the suggested Analyze settings are in its window."
+                    if suggestion.ok else f"No nanowell array: {suggestion.reason}")
+        _nanowell_view.show_nanowell_suggestion(ctx, suggestion)
+
+    def _failed(message: str) -> None:
+        _set_nanowell_busy(ctx, False)
+        _set_status(ctx.window, f"The nanowell search failed: {message}")
+
+    # Held on the runtime slice: a collected bridge never delivers.
+    ctx.runtime.playground.nanowell_bridge = run_off_thread(job, on_done=_done, on_failed=_failed)
+
+
+def playground_nanowell_archive_dir(ctx) -> tuple[str, str]:
+    """``(folder, file)`` to open the archive picker at: the loaded dataset's ``in/``, on the selected well's
+    archive when it has one; ``("", "")`` with no dataset."""
+    from review.data.image_discovery import find_plain_well_zips_in_dir
+
+    in_dir = getattr(ctx.state.dataset, "in_dir", None)
+    if not in_dir or not Path(in_dir).is_dir():
+        return "", ""
+    well = _st(ctx).well
+    zips = find_plain_well_zips_in_dir(Path(in_dir), well) if well else []
+    return str(in_dir), (str(zips[0]) if zips else "")
+
+
+def playground_nanowell_from_archive(ctx, path: str) -> None:
+    """Stitch the well archive at *path* and suggest the Nanowells settings for its array."""
+    from domain.image_identity import load_schema
+
+    nc = _nanowell_compute
+
+    path = Path(path)
+    fields = sep = None
+    in_dir = getattr(ctx.state.dataset, "in_dir", None)
+    if in_dir and Path(in_dir).resolve() == path.parent.resolve():
+        # The loaded dataset's own archive: read its names with the dataset's filename schema.
+        schema = load_schema(getattr(ctx.state.dataset, "pipeline_info", None) or {})
+        fields, sep = schema.fields, schema.sep
+
+    def job():
+        montage = nc.montage_from_archive(path, fields=fields, sep=sep)
+        if not montage.ok:
+            return nc.NanowellSuggestion(False, montage.reason, source=path.name)
+        suggestion = nc.suggest_from_image(
+            montage.image, montage.um_per_px, covered=montage.covered, record_places_tiles=True,
+            source=f"well {montage.well} ({path.name}), {montage.channel} at {montage.timepoint}, stitched")
+        suggestion.facts = montage.facts + suggestion.facts
+        suggestion.notes = montage.notes + suggestion.notes
+        return suggestion
+
+    _start_nanowell_search(ctx, job, path.name)
+
+
+def playground_nanowell_from_frame(ctx) -> None:
+    """Suggest the Nanowells settings from the raw frame on screen, at the pixel size typed beside the button."""
+    nc = _nanowell_compute
+
+    win = ctx.window
+    edit = ctx.widgets.get_or_none("_playground_nw_px_edit")
+    text = edit.text().strip() if edit is not None else ""
+    try:
+        px = float(text)
+    except ValueError:
+        px = float("nan")
+    if not (np.isfinite(px) and px > 0):
+        _set_status(win, "Type the frame's pixel size (µm per pixel) beside From this frame: every length the "
+                         "search reports is measured in it.")
+        return
+    raw, label, _key = _resolve_frame(ctx)
+    if raw is None:
+        _set_status(win, label)
+        return
+    image = np.array(raw, dtype=np.float32)        # a copy: the worker must not share the cache's array
+    if image.ndim != 2:
+        _set_status(win, f"{label} is not a single 2-D plane, so no array can be searched in it.")
+        return
+    _start_nanowell_search(
+        ctx, lambda: nc.suggest_from_image(image, px, source=f"{label} at {px:g} µm per pixel"), label)

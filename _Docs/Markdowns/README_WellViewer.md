@@ -2145,7 +2145,12 @@ buttons — you pick one or the other, because choosing the scatter option
   shape all describe the visible fragment rather than the whole cell — on a
   dense plate that is a band of systematically small, dim cells around the edge
   of every field. It is independent of the debris gate (you do not need to
-  switch that on, or set any bound, for it to work) and off by default. The
+  switch that on, or set any bound, for it to work). It is **on by default**,
+  except for datasets analysed in nanowell mode, where it starts off: there an
+  image is a tile of a lattice of wells, a tile's edge is not a well's edge,
+  and the nanowell measurement already decides which well each cell belongs
+  to. Unticking or ticking it is remembered with the dataset like the rest of
+  the panel, and a Gating reset returns it to that default. The
   line beneath it says how many of the cells being analysed touch the border,
   across the whole plate, and whether they are currently kept or excluded.
 

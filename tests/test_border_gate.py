@@ -210,3 +210,63 @@ def test_ticking_the_box_excludes_the_border_cells(qtbot):
     app._app_state.qc.params = ON
     qc_gate_refresh_widgets(app)
     assert box.isChecked() is True
+
+
+# ── the default: on, except for nanowell runs ───────────────────────────────
+
+_NANOWELL_INFO = {"nanowell": {"scheme_version": 1, "settings": {"pitch_um": 50}}}
+
+
+def test_an_ordinary_dataset_opens_with_the_switch_on():
+    assert QCParams.from_pipeline_info({}).exclude_border_cells is True
+    assert QCParams.from_pipeline_info({"qc_options": {}}).exclude_border_cells is True
+
+
+def test_a_nanowell_dataset_opens_with_the_switch_off():
+    """Excludes the default applied regardless of run kind. The sidecar here is
+    otherwise identical to the ordinary one above, so only the nanowell block
+    can be what turns it off."""
+    p = QCParams.from_pipeline_info({"qc_options": {}, **_NANOWELL_INFO})
+    assert p.exclude_border_cells is False
+
+
+def test_a_null_nanowell_entry_is_not_a_nanowell_run():
+    assert QCParams.from_pipeline_info({"nanowell": None}).exclude_border_cells is True
+
+
+def _persisted_ctx(monkeypatch, section, info):
+    from types import SimpleNamespace
+
+    from review.persistence import _doc
+
+    monkeypatch.setattr(_doc, "get_section", lambda _ctx, _key: section)
+    st = SimpleNamespace(
+        dataset=SimpleNamespace(data_dir="/x", pipeline_info=info),
+        qc=SimpleNamespace(params=None))
+    return SimpleNamespace(state=st, window=SimpleNamespace(_app_state=st))
+
+
+@pytest.mark.parametrize("info, expected", [({}, True), (_NANOWELL_INFO, False)])
+def test_a_section_saved_before_the_switch_existed_gets_the_dataset_default(
+        monkeypatch, info, expected):
+    """Every dataset whose panel was ever saved has a ``qc_params`` section
+    without this key. Excludes the loader that lets ``from_dict`` read the
+    absent key as off, which would hold all of them out of the default."""
+    from review.persistence.qc_params import load_from_data_dir
+
+    ctx = _persisted_ctx(monkeypatch, {"enabled": True, "min_area": 30}, info)
+    load_from_data_dir(ctx)
+    assert ctx.state.qc.params.exclude_border_cells is expected
+    assert ctx.state.qc.params.min_area == 30
+
+
+@pytest.mark.parametrize("saved", [True, False])
+def test_a_saved_choice_wins_over_the_default(monkeypatch, saved):
+    """The user's own tick or untick survives a reload, in both directions —
+    including unticking on an ordinary plate and ticking on a nanowell one."""
+    from review.persistence.qc_params import load_from_data_dir
+
+    for info in ({}, _NANOWELL_INFO):
+        ctx = _persisted_ctx(monkeypatch, {"exclude_border_cells": saved}, info)
+        load_from_data_dir(ctx)
+        assert ctx.state.qc.params.exclude_border_cells is saved

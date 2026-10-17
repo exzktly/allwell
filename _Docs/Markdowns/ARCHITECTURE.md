@@ -4235,7 +4235,15 @@ column, registered as a cache projector and ANDed in `df_included_mask` like
 `QC_Pass` is labelled "debris gate" by the Segmentation overlay and the
 inclusion funnel, and a partial cell is not debris; it is also why the switch
 (`QCParams.exclude_border_cells`) does not depend on the debris gate's
-`enabled`. The overlay inks it `Colors.exclusion_border` (magenta — the only
+`enabled`. Its default is decided per dataset rather than by the dataclass:
+`QCParams.from_pipeline_info` seeds it from
+`qc_params.default_exclude_border_cells` — on, unless the sidecar carries the
+`nanowell` block a nanowell run writes (`is_nanowell_run`), because a tile edge
+is not a well edge and the nanowell measurement assigns cells to wells itself.
+`persistence/qc_params.load_from_data_dir` applies the same default when a
+saved `qc_params` section has no `exclude_border_cells` key, so a dataset whose
+panel was saved before the switch existed is not silently held at off, while
+`QCParams.from_dict` alone still reads an absent key as off. The overlay inks it `Colors.exclusion_border` (magenta — the only
 hue left at ΔE ≥ 31 from the other six inks that is not the app's "good"
 green), and the funnel carries it as *Touching image border*. The row's
 sentence (`border_status`) counts over the cells the analysis keeps without

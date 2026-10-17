@@ -13,6 +13,13 @@ the cell. Totals and areas are biased low and circularity is wrong, so a plate
 imaged at high density carries a population of systematically-wrong rows along
 every field's edge.
 
+**Why it is on by default, except for nanowell runs.** For an ordinary plate
+a partial cell is a wrong row, so the default drops it
+(:func:`review.domain.qc_params.default_exclude_border_cells`). A nanowell
+run's image is tiled across a lattice of wells: a tile edge is not a well edge,
+and the nanowell measurement assigns cells to wells itself, so the default
+there is off. The dataset kind is read from the run's own sidecar.
+
 **Why a layer of its own rather than a fifth debris bound.** The debris gate's
 verdict (``QC_Pass``) is labelled "debris gate" on every surface that explains
 an exclusion — the Segmentation hover, the inclusion funnel. A partial cell is

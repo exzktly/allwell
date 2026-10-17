@@ -63,8 +63,9 @@ _BORDER_TOOLTIP = (
     "rule as MATLAB's imclearborder.\n"
     "A cell the field of view cuts is partial: its area, intensity totals and "
     "shape describe the visible fragment rather than the cell.\n"
-    "Independent of the debris gate above. Off by default — turning it on "
-    "changes every number in the app.")
+    "Independent of the debris gate above. On by default, except for a "
+    "nanowell run, where a tile's edge is not a well's edge and the nanowell "
+    "measurement assigns cells to wells itself.")
 
 _GRID_INDENT = 18
 _QUANTITY_LBL_W = 92

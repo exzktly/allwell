@@ -1066,7 +1066,7 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
     """
     import csv as _csv
 
-    from util.csv_gz import GZ_READ_ERRORS, glob_csvs, open_csv_text, plain_name
+    from util.csv_gz import GZ_READ_ERRORS, existing_csv, glob_csvs, open_csv_text, plain_name
 
     tmp_csv_dir, target_dir = Path(tmp_csv_dir), Path(target_dir)
     total = 0
@@ -1075,6 +1075,11 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
         # normally arrives as ``.csv.gz``; the target is named by its plain
         # spelling and recompressed after the merge.
         target = target_dir / plain_name(partial.name)
+        if existing_csv(target) is None:
+            # Nothing local to merge with — a well new to this run. The download *is* the well's CSV: moved into
+            # place as it arrived (gzipped), not parsed and rewritten.
+            total += _place_fetched_csv(partial, target_dir, log_fn=log_fn)
+            continue
         try:
             with open_csv_text(partial) as fh:
                 rows = list(_csv.DictReader(fh))
@@ -1098,6 +1103,32 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
             log_fn(f"[remote] merge: {partial.name} \u2192 +{added} new row(s) "
                    f"into {target_dir.name}/\n")
     return total
+
+def _place_fetched_csv(partial: Path, target_dir: Path, *, log_fn=None) -> int:
+    """Move a fetched CSV with no local counterpart into *target_dir* as it is (gzipping a plain one); return its
+    row count, for the merge tally."""
+    from util.csv_gz import GZ_READ_ERRORS, gzip_csv, is_gz_csv_name, open_csv_text
+
+    try:
+        with open_csv_text(partial) as fh:
+            rows = max(0, sum(1 for _ in fh) - 1)
+        dest = target_dir / partial.name
+        try:
+            os.replace(partial, dest)
+        except OSError:
+            part = dest.with_name(f".{dest.name}.part")
+            shutil.copyfile(partial, part)
+            os.replace(part, dest)
+        if not is_gz_csv_name(dest.name):
+            gzip_csv(dest)
+    except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError) as exc:
+        if log_fn:
+            log_fn(f"[remote] warn: placing fetched CSV {partial.name} failed: {exc}\n")
+        return 0
+    if log_fn:
+        log_fn(f"[remote] {partial.name}: no local CSV to merge with — placed as downloaded\n")
+    return rows
+
 
 def merge_images_into_zip(out_zip: Path | str, image_dir: Path | str) -> int:
     """Add the new images in *image_dir* to *out_zip*, keeping existing members.

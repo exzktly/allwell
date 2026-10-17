@@ -109,3 +109,53 @@ def test_a_large_well_merges_far_faster_than_the_whole_file_rewrite(tmp_path):
     slow = time.perf_counter() - t0
 
     assert fast < slow / 2, f"the merge took {fast:.2f}s against the old {slow:.2f}s"
+
+
+def test_a_downloaded_csv_with_nothing_local_to_merge_with_is_placed_as_it_arrived(tmp_path, monkeypatch):
+    """A well new to this run: no parse, no rewrite — the downloaded archive is the well's CSV."""
+    import pipeline.io as pio
+
+    target_dir, fetched = tmp_path / "out", tmp_path / "transit"
+    target_dir.mkdir(), fetched.mkdir()
+    _gz_csv(fetched / "measurements_C03.csv.gz", [_row("f1", 0), _row("f2", 0)])
+    downloaded = (fetched / "measurements_C03.csv.gz").read_bytes()
+
+    def no_merge(*a, **k):
+        raise AssertionError("a CSV with no local counterpart was merged")
+
+    monkeypatch.setattr(pio, "merge_records_into_gz_csv", no_merge)
+    assert merge_fetched_csvs(fetched, target_dir) == 2
+    assert (target_dir / "measurements_C03.csv.gz").read_bytes() == downloaded
+    assert list(fetched.iterdir()) == []
+
+
+def test_a_downloaded_zip_with_nothing_local_to_merge_with_is_placed_as_it_arrived(tmp_path, monkeypatch):
+    import zipfile
+    from unittest.mock import patch
+
+    import pipeline.io as pio
+    from services.remote_config import RemoteHost
+    from services.remote_fetch import Fetcher
+    from services.remote_run_state import _RemoteRun
+    from services.remote_runner import LocalInputMode, OutputFilter
+
+    host = RemoteHost(name="t", ssh_alias="h", remote_project_dir="~/a", remote_staging_dir="~/.s",
+                      remote_python="/p", cpu_only=False, extra_args=(), cache_budget_gb=1,
+                      measured_bandwidth_mbps=1.0)
+    out = tmp_path / "out"
+    out.mkdir()
+    run = _RemoteRun(run_id="r", cache_key="k", remote_input_dir="/r/in", remote_output_dir="/r/out",
+                     remote_pidfile="/r/pid", local_output_dir=out, local_input_mode=LocalInputMode.ZIP,
+                     incremental=True)
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL, log_fn=lambda _m: None)
+    fetched = tmp_path / "fetched.zip"
+    with zipfile.ZipFile(fetched, "w") as zf:
+        zf.writestr("C03_f1_t0_gfp.tif", b"pixels")
+    downloaded = fetched.read_bytes()
+    monkeypatch.setattr(pio, "merge_images_into_zip",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("merged with nothing")))
+
+    assert fetcher._materialize_incremental("C03", fetched, out) is True
+    assert (out / "C03_out.zip").read_bytes() == downloaded
+    fetcher.cancel()

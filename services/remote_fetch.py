@@ -85,7 +85,7 @@ from services.remote_run_state import (
 )
 from services.remote_log_adapter import LogFnLogger as _LogFnLogger
 from services.remote_staging import input_well_containers
-from services.remote_fetch_place import Placer, merge_fetched_csv_dir
+from services.remote_fetch_place import Placer, merge_fetched_csv_dir, place_whole
 from services.remote_fetch_nanowells import (
     fetch_nanowell_tables, missing_nanowell_tables, pull_nanowell_results, well_files_to_delete)
 from services.remote_wire import (
@@ -1203,8 +1203,9 @@ class Fetcher:
         copy — audit X2)."""
         from pipeline.io import merge_images_into_zip
 
-        # Beside the destination, for the same reason as the transit zip above:
-        # this holds one well's extracted output on its way into `dest`.
+        if not (target := dest / f"{well}_out.zip").exists():   # nothing local to merge into: place it whole
+            return place_whole(well_zip, target) or True
+        # Beside the destination, like the transit zip: one well's extracted output on its way into `dest`.
         tmp_dir = _new_transit_dir(dest, f"allwell-merge-{well}-",
                                    log_fn=self._log)
         try:

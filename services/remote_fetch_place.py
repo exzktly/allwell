@@ -15,6 +15,7 @@ recoverable from the remote.
 
 from __future__ import annotations
 
+import os
 import queue
 import shutil
 import threading
@@ -93,3 +94,20 @@ def merge_fetched_csv_dir(fetcher, tmp_csv_dir: Path) -> None:
             fetcher._merge_fetched_csvs(tmp_csv_dir)
     finally:
         shutil.rmtree(tmp_csv_dir, ignore_errors=True)
+
+
+def place_whole(src: Path, target: Path) -> None:
+    """Move a downloaded file into place unchanged — the case where there is nothing local to merge it with.
+
+    A rename when the transit directory shares the target's volume (the normal case, ``_transit_dir``); otherwise
+    copied to a hidden sibling and renamed, so a half-copied file is never visible under the real name.
+    """
+    try:
+        os.replace(src, target)
+        return
+    except OSError:
+        pass
+    part = target.with_name(f".{target.name}.part")
+    shutil.copyfile(src, part)
+    os.replace(part, target)
+    Path(src).unlink(missing_ok=True)

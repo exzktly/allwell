@@ -188,18 +188,22 @@ def test_the_file_is_not_read_twice_in_full(tmp_path, monkeypatch):
 
     seen: list = []
     real = pd.read_csv
-    real_arrow = pyarrow_csv.read_csv
 
     def spy(*args, **kwargs):
         seen.append(("pandas", kwargs.get("nrows")))
         return real(*args, **kwargs)
 
-    def arrow_spy(*args, **kwargs):
-        seen.append(("pyarrow", None))
-        return real_arrow(*args, **kwargs)
+    def arrow_spy(real_arrow):
+        def wrapped(*args, **kwargs):
+            seen.append(("pyarrow", None))
+            return real_arrow(*args, **kwargs)
+        return wrapped
 
     monkeypatch.setattr(pd, "read_csv", spy)
-    monkeypatch.setattr(pyarrow_csv, "read_csv", arrow_spy)
+    # Either pyarrow reader is the body read: the streamed one, or the
+    # whole-file one when the streamed read declines. Both at once is two.
+    monkeypatch.setattr(pyarrow_csv, "read_csv", arrow_spy(pyarrow_csv.read_csv))
+    monkeypatch.setattr(pyarrow_csv, "open_csv", arrow_spy(pyarrow_csv.open_csv))
     load_well_csv(path)
     assert seen == [("pandas", 0), ("pyarrow", None)], (
         f"expected one header read then one body read, got {seen}")

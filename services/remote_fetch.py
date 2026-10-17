@@ -67,7 +67,7 @@ from services import run_journal
 from util.aw_safe import swallow, swallowed
 from services.remote_csv import (
     compress_remote_csvs, list_remote_csvs, remote_csv_globs, retire_superseded_csvs)
-from util.csv_gz import glob_csvs as _glob_csvs
+from util.csv_gz import csv_is_whole, glob_csvs as _glob_csvs
 # The shared "retry an OSError with a backoff, then fail with an actionable
 # message" shield. A remote run does as much I/O on the user's own volumes as a
 # local one — it reads the whole plate off the input volume to stage the upload
@@ -1203,7 +1203,7 @@ class Fetcher:
         copy — audit X2)."""
         from pipeline.io import merge_images_into_zip
 
-        if not (target := dest / f"{well}_out.zip").exists():   # nothing local to merge into: place it whole
+        if not _zip_is_complete(target := dest / f"{well}_out.zip"):   # nothing (whole) to merge into: place it
             return place_whole(well_zip, target) or True
         # Beside the destination, like the transit zip: one well's extracted output on its way into `dest`.
         tmp_dir = _new_transit_dir(dest, f"allwell-merge-{well}-",
@@ -1692,7 +1692,7 @@ class FetchedOutputVerifier:
         def _pull(remote_src: str) -> None:
             _rsync_with_retry(
                 [resolve_rsync_binary(), *_rsync_ssh_transport(host),
-                 "-a", "--partial", "--timeout=120",
+                 "-a", "--partial-dir=.allwell-partial", "--timeout=120",     # never a half file under its name
                  f"{host.ssh_alias}:{remote_src}",
                  to_rsync_path(run.local_output_dir).rstrip("/") + "/"],
                 log_fn=log, timeout=None, stop_event=self._cancelled,
@@ -1735,7 +1735,7 @@ class FetchedOutputVerifier:
             # Re-pull the per-well CSV(s) only if they're actually missing or
             # empty locally — a present CSV needs no refetch.
             local_csvs = _glob_csvs(run.local_output_dir, f"*_{well}")
-            csv_ok = bool(local_csvs) and all(p.stat().st_size > 0 for p in local_csvs)
+            csv_ok = bool(local_csvs) and all(p.stat().st_size > 0 and csv_is_whole(p) for p in local_csvs)
             if not csv_ok:
                 files = list_remote_csvs(host, run.remote_output_dir, well, log,
                                          compress=well not in run.fetched_wells)
@@ -1763,7 +1763,9 @@ class FetchedOutputVerifier:
                     and out_zip.exists()
                     and not _artifact_changed(run, out_zip)
                 )
-                if not out_zip.exists() or out_zip.stat().st_size == 0 or stale:
+                # Not "exists and non-empty": rsync's --partial leaves a Stop's half-pulled zip under its real
+                # name, and that file is neither the well's output nor a reason to skip pulling it.
+                if not _zip_is_complete(out_zip) or stale:
                     _pull(f"{run.remote_output_dir}/{well}_out.zip")
                 _report_zip(well, time.monotonic() - zip_t0)
             # The record of which settings produced it, as the in-stream fetch

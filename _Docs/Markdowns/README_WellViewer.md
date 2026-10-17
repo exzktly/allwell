@@ -1546,7 +1546,9 @@ and by `remote_fetch_report.txt` in the output folder.
   well's state at once — downloaded, finished on the host, already uploaded —
   then the job is started and handed its first batch, and only then are the
   finished wells downloaded, filling the queue wait and the compute rather
-  than delaying the job — and an input archive
+  than delaying the job. Stopping while a well downloads is safe: the
+  half-downloaded file is never taken for the finished one, and the next run
+  fetches it again. An input archive
   that was already uploaded is reused rather than sent again (one that differs
   from your copy is still re-sent). The log lists both, and names any well the
   earlier attempt's record says was finished, uploaded or downloaded that is

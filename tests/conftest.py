@@ -27,6 +27,7 @@ logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 from review.domain.stats_compute import compute_rep_stats
@@ -893,9 +894,38 @@ def pytest_collection_modifyitems(config, items):
     local/manual full pass. The lightweight ``mock_app`` fixture is unaffected.
     """
     slow = pytest.mark.slow
+    nanowell = pytest.mark.nanowell_e2e
     for item in items:
         if "viewer_app" in getattr(item, "fixturenames", ()):
             item.add_marker(slow)
+        if Path(str(item.fspath)).name in NANOWELL_E2E_FILES:
+            item.add_marker(nanowell)
+
+
+#: The nanowell end-to-end files, which run in their own lane
+#: (``scripts/test.sh --nanowell``, a CI job of its own) rather than the fast
+#: lane. Each renders synthetic tiles and runs the real lattice and site
+#: detection over them, so a test body is seconds to a minute of NumPy and
+#: SciPy: together about 1,075 s of the fast lane's 1,960 s when they joined it,
+#: which took the lane from about 2.5 min to 9.5 min on four workers and put
+#: CI within three minutes of its 15-minute cap. ``test_nanowell_run.py`` alone
+#: was 475 s, and with one file per worker it set the whole lane's wall time.
+#: Qt-free; the nanowell form and page tests stay in the fast lane.
+#: ``tests/test_the_fast_lane_stays_fast.py`` holds every entry to a real file
+#: and the CI workflow to running this lane.
+NANOWELL_E2E_FILES = {
+    "test_nanowell_run.py": "the (well, timepoint) task body on rendered tiles; 475 s",
+    "test_nanowell_infer.py": "array inference on rendered images; 210 s",
+    "test_nanowell_cli.py": "process_microscopy.main in nanowell mode, end to end; 111 s",
+    "test_nanowell_detect.py": "lattice and site detection on rendered tiles; 52 s",
+    "test_nanowell_resume.py": "a killed well resumes; 42 s",
+    "test_nanowell_reanchor.py": "the end-of-run re-anchoring pass; 39 s",
+    "test_nanowell_review_fixes.py": "review findings pinned on rendered runs; 37 s",
+    "test_nanowell_merge_endtoend.py": "two datasets concatenated then analysed; 36 s",
+    "test_nanowell_preview.py": "test detection on one well and timepoint; 33 s",
+    "test_nanowell_sites.py": "site state on rendered tiles; 22 s",
+    "test_nanowell_detection_chain.py": "image in, addresses out; 18 s",
+}
 
 
 @pytest.fixture(autouse=True)

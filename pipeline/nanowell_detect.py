@@ -457,6 +457,20 @@ class SiteGeometry:
     rays_used: int = 0
 
 
+def _row_means(rows):
+    """Each row's ``.mean()``, bit for bit, computed for every row at once.
+
+    ``rows.mean(axis=1)`` matches that only on a C-contiguous array: numpy then
+    reduces each row as it reduces a 1-D array. Selecting columns with a boolean
+    mask returns a Fortran-ordered copy, and an axis mean over that sums column
+    by column, which changes the last bit. These means decide ``drop >=
+    contrast`` for each ray, so a last-bit change could flip a borderline edge.
+    ``tests/test_nanowell_edge_points_vectorised.py`` holds this equal to the
+    per-row ``.mean()`` on Fortran-ordered input of every length up to 200.
+    """
+    return np.ascontiguousarray(rows, dtype=np.float64).mean(axis=1)
+
+
 def _edge_points(image, centre_px, radius_px, contrast):
     """Edge position along each of _RAYS rays: where brightness falls fastest going outward."""
     from scipy import ndimage
@@ -470,24 +484,28 @@ def _edge_points(image, centre_px, radius_px, contrast):
     profile = ndimage.gaussian_filter1d(profile, 1.0 / step, axis=1)     # one pixel of smoothing
     slope = np.gradient(profile, rhos, axis=1)
     peak = np.argmin(slope, axis=1)                                  # steepest fall outward
-    found = []
     inner_zone = rhos <= 0.7 * radius_px                              # inside the disk, away from its rim
     outer_zone = rhos >= 1.3 * radius_px                              # the lattice just outside it
-    for ray in range(_RAYS):
-        k = int(peak[ray])
-        if k < 2 or k > len(rhos) - 3:
-            continue
-        a, b, c = slope[ray, k - 1], slope[ray, k], slope[ray, k + 1]
-        denom = a - 2 * b + c
-        rho = rhos[k] + (0.5 * (a - c) / denom * step if denom > 0 else 0.0)
-        # The contrast an edge must show is the disk's plateau over the lattice's, not the drop across
-        # a pixel or two: a defocused or haloed rim has a soft, wide edge and the same plateaus.
-        drop = profile[ray, inner_zone].mean() - profile[ray, outer_zone].mean()
-        if drop >= contrast:
-            # The edge's width in pixels, as its plateau-to-plateau drop over its steepest slope: the
-            # measure of how soft this rim is, which sets how precisely its position can be read.
-            found.append((angles[ray], rho, drop / max(-slope[ray, k], 1e-9)))
-    return found
+    # Every ray at once: the same arithmetic as a per-ray loop, element for element, without
+    # two small-array means per ray (refine_sites calls this up to three times per site, and
+    # a plate has thousands of sites).
+    ok = (peak >= 2) & (peak <= len(rhos) - 3)
+    rays = np.flatnonzero(ok)
+    k = peak[rays]
+    a, b, c = slope[rays, k - 1], slope[rays, k], slope[rays, k + 1]
+    denom = a - 2 * b + c
+    with np.errstate(divide="ignore", invalid="ignore"):
+        shift = np.where(denom > 0, 0.5 * (a - c) / denom * step, 0.0)
+    rho = rhos[k] + shift
+    # The contrast an edge must show is the disk's plateau over the lattice's, not the drop across
+    # a pixel or two: a defocused or haloed rim has a soft, wide edge and the same plateaus.
+    drop = _row_means(profile[rays][:, inner_zone]) - _row_means(profile[rays][:, outer_zone])
+    # The edge's width in pixels, as its plateau-to-plateau drop over its steepest slope: the
+    # measure of how soft this rim is, which sets how precisely its position can be read.
+    width = drop / np.maximum(-b, 1e-9)
+    keep = drop >= contrast
+    return [(angles[r], float(p), float(w))
+            for r, p, w in zip(rays[keep], rho[keep], width[keep])]
 
 
 def _circle_fit(points):
@@ -529,7 +547,8 @@ def refine_sites(image, pixel_size_um: float, sites_um, nominal_diameter_um: flo
             edges = _edge_points(image, centre, radius, contrast)
             if len(edges) < max(int(_MIN_RAY_FRACTION * _RAYS), 6):
                 break
-            pts = np.array([centre + rho * np.array([math.cos(a), math.sin(a)]) for a, rho, _ in edges])
+            pts = np.array([(centre[0] + rho * math.cos(a), centre[1] + rho * math.sin(a))
+                            for a, rho, _ in edges])
             softness = float(np.median([width for _, _, width in edges]))
             new_centre, new_radius = _circle_fit(pts)
             residual = np.abs(np.linalg.norm(pts - new_centre, axis=1) - new_radius)

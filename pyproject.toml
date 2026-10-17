@@ -27,6 +27,7 @@ addopts = "-v"
 markers = [
     "qt: test constructs Qt objects; needs the offscreen platform",
     "slow: heavy test (e.g. real StarDist model load + inference); deselect with -m \"not slow\"",
+    "nanowell_e2e: nanowell end-to-end test on rendered tiles; runs in its own lane (scripts/test.sh --nanowell), see tests/conftest.py NANOWELL_E2E_FILES",
     "wells: the dataset a fixture builds — {well_token: path}; unmarked tests get a default plate",
 ]
 filterwarnings = [

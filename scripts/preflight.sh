@@ -9,7 +9,7 @@
 # you deleted — and scratch output about to be committed by accident, which is
 # how 21 JUnit XMLs once reached main.
 #
-#   scripts/preflight.sh          # lint + fast lane + working-tree check
+#   scripts/preflight.sh          # lint + fast lane (+ nanowell lane when touched) + tree check
 #   scripts/preflight.sh --quick  # skip the fast lane (lint + tree only, ~2s)
 #
 # Exit status: 0 only when every check passes.
@@ -31,14 +31,17 @@ else
     fail "lint errors above"
 fi
 
-if (( QUICK == 0 )); then
-    step "fast lane (scripts/test.sh)"
-    # Gate on the JUnit report, not the exit code — the same thing ci.yml does.
-    # PySide6 can raise a teardown SIGSEGV *after* a green session has finished
-    # and written its report, so a 139 is not on its own a failure; a missing or
-    # non-empty-failure report is.
+# Run one lane of scripts/test.sh and gate on its JUnit report, not the exit code — the same
+# thing ci.yml does (scripts/junit_gate.py). PySide6 can raise a teardown SIGSEGV *after* a green
+# session has finished and written its report, so a 139 is not on its own a failure; a missing or
+# non-empty-failure report is.
+run_lane() {
+    local name="$1"; shift
+    local log="/tmp/preflight-pytest-${name}.log"
+    local report
     report=$(mktemp -t preflight-junit-XXXXXX.xml)
-    scripts/test.sh --junitxml="$report" > /tmp/preflight-pytest.log 2>&1 || true
+    scripts/test.sh "$@" --junitxml="$report" > "$log" 2>&1 || true
+    local verdict
     verdict=$(python - "$report" <<'PY'
 import sys, xml.etree.ElementTree as ET
 from pathlib import Path
@@ -59,12 +62,27 @@ PY
     rm -f "$report"
     case "$verdict" in
         OK*)      echo "   ${verdict#OK }" ;;
-        MISSING)  tail -25 /tmp/preflight-pytest.log
-                  fail "fast lane wrote no report — it crashed or hung before \
-finishing (log: /tmp/preflight-pytest.log)" ;;
-        *)        grep -E "^(FAILED|ERROR)" /tmp/preflight-pytest.log | head -20
-                  fail "fast lane ${verdict#RED } — full log at /tmp/preflight-pytest.log" ;;
+        MISSING)  tail -25 "$log"
+                  fail "$name wrote no report — it crashed or hung before finishing (log: $log)" ;;
+        *)        grep -E "^(FAILED|ERROR)" "$log" | head -20
+                  fail "$name ${verdict#RED } — full log at $log" ;;
     esac
+}
+
+if (( QUICK == 0 )); then
+    step "fast lane (scripts/test.sh)"
+    run_lane "fast lane"
+
+    # The nanowell end-to-end lane is CI's second test job (tests/conftest.py NANOWELL_E2E_FILES).
+    # It costs about five minutes, so it runs here only when the branch touches what it tests: the
+    # pipeline, the nanowell code and its tests, or the harness that splits the lanes.
+    step "nanowell lane (scripts/test.sh --nanowell)"
+    touched=$( { git diff --name-only origin/main... 2>/dev/null; git diff --name-only HEAD; } | sort -u)
+    if grep -qE '(^pipeline/|^process_microscopy\.py|nanowell|^tests/conftest\.py|^scripts/test\.sh)' <<<"$touched"; then
+        run_lane "nanowell lane" --nanowell
+    else
+        echo "   skipped (nothing on this branch touches the pipeline or nanowell code)"
+    fi
 else
     step "fast lane"
     echo "   skipped (--quick)"

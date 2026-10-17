@@ -292,7 +292,11 @@ def test_line_points_recompute_from_the_exported_cells(
 
     ctx = two_wells._ctx
     # The app's own fan-out, rather than the renderer's keyword-heavy signature
-    # — the point is to compare against what a redraw actually draws.
+    # — the point is to compare against what a redraw actually draws. With the
+    # Line Graphs tab in front, as the user who exports its cells has it: the
+    # fan-out draws only the plot on screen.
+    two_wells._notebook.setCurrentByName("Plotting")
+    two_wells._plotting_notebook.setCurrentByName("Line Graphs")
     redraw_app(ctx)
     fig = ctx.widgets.get_or_none("_line_fig")
     frame, _scope = run_export(ctx, qtbot, monkeypatch, tmp_path, cell_scope)

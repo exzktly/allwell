@@ -225,7 +225,8 @@ def render_bar_items(
         ax.set_xlim(xlim_lo, xlim_hi)
         # Mark categorical x-axis so downstream styling does not reset tick formatters.
         setattr(ax, "_categorical_xaxis", True)
-    annotate_decorations(ctx, items, xs, ax_mean, headers=has_clusters)
+    annotate_decorations(ctx, items, xs, ax_mean, headers=has_clusters,
+                         header_axes=(ax_frac, ax_n))
     # Value labels (Properties → Overlays). Drawn before the y-fit below so the
     # fit can widen the headroom that keeps them inside the panel.
     _labels = value_labels if value_labels is not None else value_label_settings(ctx)

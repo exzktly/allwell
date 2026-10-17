@@ -127,6 +127,9 @@ def scatter_active_mode(ctx) -> str:
 
 def scatter_redraw_active(ctx) -> None:
     """Redraw whichever scatter mode is currently visible."""
+    from review.domain.fold_change_scopes import plots_held
+    if plots_held(ctx):  # a load draws the visible tab once, at its end (core/plot_hold.py)
+        return
     if scatter_active_mode(ctx) == _MODE_AGG:
         redraw_scatter_agg_orchestrate(ctx)
     else:

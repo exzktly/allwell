@@ -27,6 +27,15 @@ A log carrying a crash marker is therefore moved aside first
 overwritten. The dialog also carries the traceback itself now, so the common
 case needs no file at all.
 
+**So is a session that was killed.** A process the system ends — macOS's
+out-of-memory killer above all — runs no Python and no ``faulthandler``, so it
+writes no marker. It does leave a log that reached the event loop and never
+recorded :func:`mark_clean_exit`, and that log is kept the same way, with a
+note saying what its silence means. The next launch then says so in the
+application log (:func:`announce_previous_ending`), naming the file, and a
+dataset load writes each of its phases here, so the last line of a load that
+was killed names the phase it was in.
+
 Stdlib-only and fully defensive: importing or calling anything here never blocks
 or breaks startup. Import it FIRST in ``allwell.py`` — before PySide6 — so the
 riskiest imports are already bracketed.
@@ -63,9 +72,14 @@ def user_state_dir() -> Path:
     for d in candidates:
         try:
             d.mkdir(parents=True, exist_ok=True)
-            return d
         except OSError:
             continue
+        # ``mkdir(exist_ok=True)`` succeeds on a directory that already exists
+        # and cannot be written — one left owned by another user, say. Taking
+        # it anyway meant the log's ``open`` failed later, silently, and no log
+        # was written anywhere: the temp-dir fallback was never reached.
+        if os.access(d, os.W_OK):
+            return d
     return Path(tempfile.gettempdir())
 
 
@@ -107,12 +121,26 @@ def crash_log_paths() -> list[Path]:
     return [p for p in kept if p.exists()]
 
 
-def _looks_like_a_crash(path: Path) -> bool:
-    """Whether *path* holds a traceback or a native dump. False on any error.
+#: The milestone ``allwell.main`` writes when the window is up and the event
+#: loop is about to run — the point from which a session is a *session*, and an
+#: ending without :data:`_CLEAN_EXIT` means something stopped it.
+_SESSION_LIVE = "entering Qt event loop"
 
-    False is the safe direction: it means the log is treated as an ordinary
-    launch record and overwritten, which is what every version before this did.
-    """
+#: The line :func:`mark_clean_exit` writes once the event loop has returned.
+_CLEAN_EXIT = "[boot] clean exit"
+
+#: How ``allwell.py`` records the launching process in its first milestone.
+_START_PID = "[boot] start pid="
+
+#: What the previous launch's log was kept as, and why — set by the rotation
+#: when this process first opens its own log, read by
+#: :func:`previous_session_ending`. ``None`` when the previous launch ended
+#: quietly (or there was none).
+_PREVIOUS_ENDING: tuple[Path, str] | None = None
+
+
+def _read_for_scan(path: Path) -> str | None:
+    """The text of *path* to search for markers, or ``None`` on any error."""
     try:
         size = path.stat().st_size
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -121,33 +149,159 @@ def _looks_like_a_crash(path: Path) -> bool:
                 # crash happened, and a faulthandler dump appends at the end.
                 head = fh.read(_SCAN_BYTES // 2)
                 fh.seek(max(0, size - _SCAN_BYTES // 2))
-                text = head + fh.read()
-            else:
-                text = fh.read()
+                return head + fh.read()
+            return fh.read()
+    except OSError:
+        return None
+
+
+def _looks_like_a_crash(path: Path) -> bool:
+    """Whether *path* holds a traceback or a native dump. False on any error.
+
+    False is the safe direction: it means the log is treated as an ordinary
+    launch record and overwritten, which is what every version before this did.
+    """
+    text = _read_for_scan(path)
+    return text is not None and any(marker in text for marker in _CRASH_MARKERS)
+
+
+def _pid_alive(pid: int) -> bool:
+    """Whether process *pid* still exists. False when it cannot be told.
+
+    POSIX only: on Windows ``os.kill(pid, 0)`` does not probe, it calls
+    ``TerminateProcess`` — so there the answer is always False, which at worst
+    keeps a still-running instance's log as if it had ended.
+    """
+    if os.name == "nt" or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        return True          # it exists; it is just not ours to signal
     except OSError:
         return False
-    return any(marker in text for marker in _CRASH_MARKERS)
+    return True
+
+
+def _ended_uncleanly(text: str) -> bool:
+    """Whether a log describes a session that was stopped from outside.
+
+    A process the operating system kills — macOS's out-of-memory killer, a
+    Force Quit, a power cut — runs no Python and no ``faulthandler``, so it
+    leaves no crash marker at all. What it leaves is a session that reached the
+    event loop and never wrote :data:`_CLEAN_EXIT`. Its last milestone is then
+    the only record of where it was, and before this check the next launch
+    overwrote it. A log whose process is still running (a second copy of the
+    app being started) is not an ending.
+    """
+    if _SESSION_LIVE not in text or _CLEAN_EXIT in text:
+        return False
+    at = text.find(_START_PID)
+    if at >= 0:
+        rest = text[at + len(_START_PID):].split(None, 1)
+        if rest and rest[0].isdigit() and _pid_alive(int(rest[0])):
+            return False
+    return True
+
+
+#: Appended to a kept log that ended without a marker, so whoever opens the file
+#: is told what its silence means.
+_UNCLEAN_NOTE = (
+    "{stamp} [boot] (written by the next launch) this session never shut down "
+    "cleanly and recorded no traceback, so the process was stopped from outside "
+    "it: killed by the system for using too much memory, Force Quit, or a power "
+    "loss. The line above this one is the last thing it reached.\n"
+)
 
 
 def _rotate_if_it_recorded_a_crash() -> None:
     """Move a crashed log aside so this launch's truncation cannot erase it.
 
-    Ordinary launches are overwritten as before, so a user who restarts the app
-    a dozen times does not push their one crash out of the ring. Never raises —
-    a rotation that fails must not stop the app from starting.
+    A crash is either a marker in the log (a traceback or a native dump) or a
+    session that ended without a clean exit (:func:`_ended_uncleanly`). Ordinary
+    launches are overwritten as before, so a user who restarts the app a dozen
+    times does not push their one crash out of the ring. Never raises — a
+    rotation that fails must not stop the app from starting.
     """
+    global _PREVIOUS_ENDING
     base = log_path()
     try:
-        if not base.exists() or not _looks_like_a_crash(base):
+        if not base.exists():
+            return
+        text = _read_for_scan(base)
+        if text is None:
+            return
+        if any(marker in text for marker in _CRASH_MARKERS):
+            kind = "crash"
+        elif _ended_uncleanly(text):
+            kind = "killed"
+        else:
             return
         for i in range(CRASH_LOG_KEEP, 1, -1):
             older = base.with_name(f"{base.name}.{i}")
             newer = base.with_name(f"{base.name}.{i - 1}")
             if newer.exists():
                 os.replace(newer, older)
-        os.replace(base, base.with_name(f"{base.name}.1"))
+        kept = base.with_name(f"{base.name}.1")
+        os.replace(base, kept)
+        _PREVIOUS_ENDING = (kept, kind)
+        if kind == "killed":
+            with open(kept, "a", encoding="utf-8") as fh:
+                fh.write(_UNCLEAN_NOTE.format(stamp=time.strftime("%H:%M:%S")))
     except OSError:
         pass
+
+
+def previous_session_ending() -> tuple[Path, str] | None:
+    """How the previous launch ended, when it did not end cleanly.
+
+    ``(kept log, "crash" | "killed")``, or ``None`` when it ended quietly. Only
+    meaningful once this process has opened its own log — which ``allwell.py``
+    does at import, before anything else.
+    """
+    return _PREVIOUS_ENDING
+
+
+def describe_previous_ending() -> str | None:
+    """One sentence for the application log about the previous launch, or None.
+
+    Said at the next start, because a session the system killed had no chance
+    to say anything itself — and the file holding its last milestone sits in a
+    hidden directory nobody finds without being told where.
+    """
+    ending = previous_session_ending()
+    if ending is None:
+        return None
+    kept, kind = ending
+    how = ("crashed" if kind == "crash" else
+           "was stopped without shutting down (most often the system ending it "
+           "for running out of memory)")
+    return (f"The previous All-Well session {how}. Its log was kept at {kept} — "
+            f"the last lines say what it was doing; please attach the file to a "
+            f"bug report.")
+
+
+def announce_previous_ending() -> None:
+    """Put :func:`describe_previous_ending` in the application log, as a warning.
+
+    ``allwell.main`` calls this once the window — and with it the log drawer's
+    handler — exists, so the sentence lands in the drawer and raises its badge.
+    Logging reports a failing handler itself rather than raising.
+    """
+    text = describe_previous_ending()
+    if text:
+        import logging
+        logging.getLogger("allwell.boot").warning("%s", text)
+
+
+def mark_clean_exit() -> None:
+    """Record that the session ended on its own terms. Never raises.
+
+    ``allwell.main`` calls this once the Qt event loop has returned. A log that
+    reached the event loop and lacks this line is kept by the next launch as an
+    unclean ending (:func:`_ended_uncleanly`).
+    """
+    boot("clean exit")
 
 
 def _handle():

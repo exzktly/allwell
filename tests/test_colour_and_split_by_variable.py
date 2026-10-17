@@ -672,6 +672,29 @@ def test_then_by_naming_the_split_variable_draws_no_second_row():
     assert [i.subgroup_key for i in _items(ctx)] == [""] * 4
 
 
+@pytest.mark.parametrize("then", [False, True])
+def test_every_panel_carries_the_band_headers_clear_of_its_title(then):
+    """Reported: with Split by on, only the first panel named its groups — the
+    Fraction and Events panels below it showed the bands as gaps between bars
+    and nothing else. ``render_bar_items`` (shared by the tab and Batch Export)
+    draws the headers over every panel, and each panel's title clears them.
+    Measured on the rendered extents of the real Batch Export figure."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    fig = _batch_figure(_nested_ctx(then=then, timepoints=(0.0, 24.0)))
+    FigureCanvasAgg(fig).draw()
+    renderer = fig.canvas.get_renderer()
+    headers = {"HeLa", "U2OS", "0 µM", "10 µM"}
+    panels = [ax for ax in fig.axes if ax.get_title()]
+    assert len(panels) == 3, [ax.get_title() for ax in fig.axes]
+    for ax in panels:
+        drawn = [t for t in ax.texts if t.get_text() in headers]
+        assert sorted(t.get_text() for t in drawn) == sorted(
+            ["HeLa", "U2OS"] + (["0 µM", "10 µM"] * 2 if then else [])), ax.get_title()
+        top = max(t.get_window_extent(renderer).y1 for t in drawn)
+        assert top < ax.title.get_window_extent(renderer).y0, ax.get_title()
+
+
 def test_the_band_row_is_drawn_above_the_sub_band_row():
     """Both rows reach the axes, band labels lifted a line above sub-band
     labels — asserted on the artists, not on the centres behind them."""
@@ -1393,3 +1416,24 @@ def test_a_value_reads_the_same_on_a_legend_as_on_an_axis():
     for value in variable.values:
         assert vs.value_label(variable, value.id) == variable.display_label(value.id)
     assert "µM" in vs.value_label(variable, variable.values[0].id)
+
+
+def test_the_per_cell_figures_name_their_clusters_over_every_panel():
+    """The violin and beeswarm figures draw their own cluster headers; they
+    were on the top panel only, under a title padded as if there were none."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from review.features.barplot.renderer import _annotate_group_key_headers
+
+    fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
+    try:
+        pad = _annotate_group_key_headers((ax_mean, ax_frac), [0.0, 1.0, 3.0],
+                                          ["t=0", "t=0", "t=24"])
+        drawn = [sorted((t.get_text(), round(t.get_position()[0], 2)) for t in ax.texts)
+                 for ax in (ax_mean, ax_frac)]
+    finally:
+        plt.close(fig)
+    assert drawn == [[("t=0", 0.5), ("t=24", 3.0)]] * 2
+    assert pad == 18

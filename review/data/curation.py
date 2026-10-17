@@ -52,15 +52,20 @@ def apply_curation_to_cache(ctx, label: str | None = None, *,
     """Project the override map onto cached ``row["Included"]``.
 
     With *label* given, only that well — the form the projector registry calls
-    on a freshly-loaded frame. Without it, every well the map mentions, which is
-    the form the dataset load and the end of a gating pass use to re-assert
-    curation over rows that were just rewritten from thresholds.
+    on a freshly-loaded frame; it is fetched through :func:`data_loading.get_rows`,
+    which re-enters this function as a projector and terminates, because
+    ``get_rows`` stores the frame in the cache *before* it runs the projectors,
+    so the inner call is a hit.
 
-    Fetching through :func:`data_loading.get_rows` rather than reading the cache
-    dict is deliberate: without *label* this must reach wells the cache does not
-    hold. It re-enters ``get_rows`` when the registry calls it as a projector,
-    which terminates — ``get_rows`` stores the frame in the cache *before* it
-    runs the projectors, so the inner call is a hit.
+    Without *label*, every **held** well the map mentions — the form the dataset
+    load and the end of a gating pass use to re-assert curation over rows that
+    were just rewritten from thresholds. A well the bounded row cache does not
+    hold is not read: this function is also a registered projector, so the next
+    read of that well applies the overrides as it loads, and reading it whole
+    here only to write into a frame the cache then evicts was a full read from
+    disk per curated well for nothing (``REREAD_TRACKER.md``, R9). Such a well
+    still counts as changed: ``rows_version`` is bumped for it, so a remembered
+    aggregate of it is not served.
 
     *note_change* is what the registered-projector path turns off. Writing onto
     a frame that ``load_and_project`` built a moment ago cannot invalidate a
@@ -85,14 +90,22 @@ def apply_curation_to_cache(ctx, label: str | None = None, *,
         if label is not None and lbl != label:
             continue
         by_label.setdefault(lbl, {})[(fov, tp, nid)] = val
+    unheld_curated = False
     for lbl, lookup in by_label.items():
         if lbl not in ctx.state.dataset.well_paths:
             continue
-        try:
-            df = get_rows(ctx, lbl)
-        except Exception:
-            swallowed()  # silent except
-            continue
+        if label is None:
+            repo = getattr(ctx.state, "repo", None)
+            df = repo.rows_or_none(lbl) if repo is not None else None
+            if df is None:
+                unheld_curated = True       # projected when it is next read
+                continue
+        else:
+            try:
+                df = get_rows(ctx, lbl)
+            except Exception:
+                swallowed()  # silent except
+                continue
         if df is None or df.empty:
             continue
         keys = cell_key_tuples_for_dataframe(df)
@@ -112,3 +125,5 @@ def apply_curation_to_cache(ctx, label: str | None = None, *,
         # frame the projector path hands over; see *note_change* above.
         if note_change:
             ctx.state.dataset.note_rows_changed()
+    if unheld_curated and note_change:
+        ctx.state.dataset.note_rows_changed()

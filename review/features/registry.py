@@ -868,6 +868,11 @@ def _channel_scatter(ctx) -> None:
                 update_scatter_menus,
             )
             update_scatter_menus(ctx)
+            from review.domain.fold_change_scopes import plots_held
+            if plots_held(ctx):
+                # A load holds every plot (``core/plot_hold.py``) and draws the
+                # visible tab once at its end; the menus above are still current.
+                return
             redraw_scatter_orchestrate(ctx)
             redraw_scatter_agg_orchestrate(ctx)
         except Exception:
@@ -1198,6 +1203,9 @@ def _features() -> list[FeatureDescriptor]:
                                   _svc_cell_gating_threshold_frac_on_changed,
                               "cell_gating.load_cell_areas":
                                   _svc_cell_gating_load_cell_areas,
+                              "cell_gating.read_owed_cell_areas": lambda: _import_attr(
+                                  "review.features.home.cell_gating.controller",
+                                  "cell_gating_read_owed_cell_areas"),
                               "cell_gating.load_threshold_count_on":
                                   _svc_cell_gating_load_threshold_count_on,
                               "cell_gating.load_threshold_frac_on":

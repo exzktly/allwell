@@ -7,6 +7,7 @@ ratio-aware (handled transparently by ``data_loading.resolve_value_series``).
 
 from __future__ import annotations
 
+from review.domain.fold_change_scopes import plots_held
 
 import math
 from collections.abc import Iterable, Sequence
@@ -104,9 +105,26 @@ def _gaussian_kde(values: Sequence[float], grid: np.ndarray) -> np.ndarray:
     h = 0.9 * sigma * (n ** (-1.0 / 5.0))
     if h <= 0.0:
         return np.zeros_like(grid)
-    diff = (grid[:, None] - arr[None, :]) / h
-    kernel = np.exp(-0.5 * diff * diff) / math.sqrt(2.0 * math.pi)
-    return kernel.sum(axis=1) / (n * h)
+    # Summed over the values a block at a time. The whole ``grid x values``
+    # matrix at once costs ``8 * grid.size * n`` bytes per temporary, and the
+    # expression makes four of them: at the 200,000-value sample cap that is
+    # about 1.3 GB on the GUI thread for one curve, and a selection under an
+    # uncapped build reached tens of GB and took the process down. The block
+    # bounds it at ``8 * _KDE_BLOCK_CELLS`` bytes per temporary; the arithmetic
+    # per value is unchanged, so the curve is the same to rounding.
+    grid = np.asarray(grid, dtype=float)
+    flat = grid.reshape(-1)
+    block = max(1, _KDE_BLOCK_CELLS // max(1, flat.size))
+    total = np.zeros(flat.shape, dtype=float)
+    for start in range(0, n, block):
+        diff = (flat[:, None] - arr[None, start:start + block]) / h
+        total += np.exp(-0.5 * diff * diff).sum(axis=1)
+    return (total / (math.sqrt(2.0 * math.pi) * n * h)).reshape(grid.shape)
+
+
+#: Grid points x values evaluated at once by :func:`_gaussian_kde` — 2M float64
+#: cells, 16 MB per temporary, whatever the number of values.
+_KDE_BLOCK_CELLS = 2_000_000
 
 
 def _grid_for(values_lists: Iterable[Sequence[float]], n_pts: int = 200, log_x: bool = False,
@@ -314,6 +332,8 @@ def redraw_distribution(ctx) -> None:
     ``ctx.widgets``, state via ``ctx.state``, and every shared render leaf
     (get_all_fluor_gates / iter_plot_groups / the label + threshold + export-style
     leaves) is now ctx-native, so the renderer names no god-object."""
+    if plots_held(ctx):  # a load draws the visible tab once, at its end (core/plot_hold.py)
+        return
     canvas = ctx.widgets.get_or_none("_distribution_canvas")
     fig = ctx.widgets.get_or_none("_distribution_fig")
     if canvas is None or fig is None:

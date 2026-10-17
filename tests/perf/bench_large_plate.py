@@ -21,7 +21,11 @@ cache and summaries each well gets on first open). Not part of any test lane —
 it takes minutes and gigabytes on purpose.
 
 Prints one JSON line: wells, rows per well, the budget, how many wells the open
-held, and seconds and peak MiB at each stage.
+held, seconds and peak MiB at each stage, and the reads the open made — whole
+frames and Parquet reads, by the pass that asked — so a change to what an open
+reads is a number against the re-read tracker's baseline::
+
+    python tests/perf/bench_large_plate.py --dir /tmp/plate --wells 8 --rows 1500000 --gate --groups
 """
 
 from __future__ import annotations
@@ -74,8 +78,17 @@ def _well_names(n: int) -> list[str]:
     return [f"{row}{col:02d}" for row in "ABCDEFGH" for col in range(1, 13)][:n]
 
 
-def build_plate(directory: Path, wells: int, rows: int) -> None:
-    """Write the plate if it is not there: one CSV, hard-linked per well."""
+def build_plate(directory: Path, wells: int, rows: int, *, gate: bool = False,
+                groups: bool = False) -> None:
+    """Write the plate if it is not there: one CSV, hard-linked per well.
+
+    *gate* and *groups* write what a recipe with Gating and Sample definitions
+    writes into ``pipeline_info.json`` (``_Docs/Markdowns/REREAD_TRACKER.md``'s
+    report): a non-default fluorescence gate, which starts a gating pass on
+    open, and two sample groups splitting the wells, which give every
+    plate-wide plot something to collect. They are rewritten on every run, so
+    one plate serves every configuration.
+    """
     directory.mkdir(parents=True, exist_ok=True)
     source = directory / "_source_well.csv.data"
     if not source.exists():
@@ -84,10 +97,52 @@ def build_plate(directory: Path, wells: int, rows: int) -> None:
         target = directory / f"bench_{well}.csv"
         if not target.exists():
             os.link(source, target)
-    info = directory / "pipeline_info.json"
-    if not info.exists():
-        info.write_text(json.dumps({"schema": "bench", "separator": "_", "fluor_tokens": ["gfp", "mcherry"],
-                                    "nuclear_token": "dapi"}))
+    info = {"schema": "bench", "separator": "_", "fluor_tokens": ["gfp", "mcherry"],
+            "nuclear_token": "dapi"}
+    names = _well_names(wells)
+    if gate:
+        info["cell_gating"] = {"fluor_gates": {"gfp": 50.0}}
+    if groups:
+        from domain.selections_format import make_selection
+        info["sample_definitions"] = {
+            "schema_version": 2, "well_labels": {}, "notes": "", "plot_groups": [],
+            "selections": [make_selection(name="G1", wells=names[0::2]),
+                           make_selection(name="G2", wells=names[1::2])]}
+    (directory / "pipeline_info.json").write_text(json.dumps(info))
+
+
+#: Frames on the way to a read that say nothing about who asked for it.
+_PLUMBING = frozenset({
+    "read_well_frame", "read_cached", "_read_making_room", "_read_one_at_a_time",
+    "load_and_project", "get_rows", "narrow_rows", "per_well", "every_well",
+    "<dictcomp>", "<listcomp>", "rows", "_safe_rows", "call", "<lambda>", "_announce_read",
+})
+
+
+def _count_reads(counts: dict) -> None:
+    """Count every whole-frame and every Parquet read by the pass that asked."""
+    import threading
+    import traceback
+
+    from review.data import data_loading, parquet_cache
+
+    def caller() -> str:
+        names = [f.name for f in reversed(traceback.extract_stack()[:-2])
+                 if "/review/" in f.filename and f.name not in _PLUMBING]
+        thread = "worker" if threading.current_thread() is not threading.main_thread() else "gui"
+        return f"{thread}: " + " < ".join(names[:3])
+
+    def wrap(module, name, kind):
+        real = getattr(module, name)
+
+        def counted(*a, **k):
+            key = f"{kind} {caller()}"
+            counts[key] = counts.get(key, 0) + 1
+            return real(*a, **k)
+        setattr(module, name, counted)
+
+    wrap(data_loading, "read_well_frame", "full")
+    wrap(parquet_cache, "read_cached", "parquet")
 
 
 def run(directory: Path) -> dict:
@@ -97,13 +152,33 @@ def run(directory: Path) -> dict:
     from review.domain.stats_compute import aggregate_well_cached
     from review.runtime_app import ReviewApp
 
-    QApplication.instance() or QApplication([])
+    qapp = QApplication.instance() or QApplication([])
     app = ReviewApp()
     out: dict = {}
+    reads: dict = {}
+    _count_reads(reads)
     started = time.perf_counter()
     app._load_path(directory)
     out["open_s"] = round(time.perf_counter() - started, 1)
+    # A load that started a gating pass is not finished until the pass is: the
+    # plots wait for it (``core/plot_hold.py``).
+    worker = app._ctx.runtime.cell_gating.worker
+    out["gating_pass"] = bool(worker is not None and worker.isRunning())
+    while (worker is not None and worker.isRunning()) or app._app_state.plot.held_for:
+        qapp.processEvents()
+        time.sleep(0.02)
+    qapp.processEvents()
+    out["open_and_gate_s"] = round(time.perf_counter() - started, 1)
     out["open_peak_mib"] = round(_peak_mib())
+    out["full_reads_open"] = sum(n for k, n in reads.items() if k.startswith("full "))
+    out["parquet_reads_open"] = sum(n for k, n in reads.items() if k.startswith("parquet "))
+    out["reads_by_pass"] = dict(sorted(reads.items(), key=lambda kv: -kv[1]))
+    reads.clear()
+    from review.features.home.controller import activate_home
+    started = time.perf_counter()
+    activate_home(app._ctx)
+    out["home_s"] = round(time.perf_counter() - started, 1)
+    out["full_reads_home"] = sum(n for k, n in reads.items() if k.startswith("full "))
     dataset = app._app_state.dataset
     out["wells"] = len(dataset.well_paths)
     out["held_after_open"] = len(dataset.cache)
@@ -126,8 +201,12 @@ def main() -> int:
     parser.add_argument("--wells", type=int, default=24)
     parser.add_argument("--rows", type=int, default=1_104_480)
     parser.add_argument("--build-only", action="store_true")
+    parser.add_argument("--gate", action="store_true",
+                        help="save a non-default fluorescence gate, so the open starts a gating pass")
+    parser.add_argument("--groups", action="store_true",
+                        help="save two sample groups splitting the wells")
     args = parser.parse_args()
-    build_plate(args.dir, args.wells, args.rows)
+    build_plate(args.dir, args.wells, args.rows, gate=args.gate, groups=args.groups)
     if args.build_only:
         return 0
     result = {"rows_per_well": args.rows, **run(args.dir)}

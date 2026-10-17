@@ -702,8 +702,12 @@ class BarBatchExportPanel(BatchExportPanel):
         # the pad added so the title keeps its distance from the suptitle.
         _pad = cluster_header_pad(draw_items)
         if _pad > 6:
-            ax_mean.set_title(ax_mean.get_title(), color=ax_mean.title.get_color(),
-                              fontsize=9, fontweight="bold", pad=_pad)
+            # Every panel carries the band headers (``render_bar_items``), so
+            # every panel's title clears them.
+            for _ax in (ax_mean, ax_frac, ax_n):
+                if _ax is not None:
+                    _ax.set_title(_ax.get_title(), color=_ax.title.get_color(),
+                                  fontsize=9, fontweight="bold", pad=_pad)
             fig.subplots_adjust(
                 top=0.94 - (_pad - 6) / 72.0 / fig.get_figheight())
         # Colour by / Split by, said on the exported figure as well as inked

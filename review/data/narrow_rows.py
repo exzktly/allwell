@@ -165,6 +165,8 @@ def narrow_rows(ctx, label: str, want: Iterable[str] | None) -> pd.DataFrame:
     names = cached_column_names(Path(path))
     if names is None:
         return get_rows(ctx, label)
+    from review.data.data_loading import _announce_read
+    _announce_read(dataset, label)
     frame = read_cached(Path(path), columns=_select(names, set(want) | verdicts))
     if frame is None:
         return get_rows(ctx, label)

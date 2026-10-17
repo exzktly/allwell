@@ -14,10 +14,13 @@ from contextlib import nullcontext
 import re
 from pathlib import Path
 from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 from review.data.cache_projectors import iter_cache_projectors
 from review.domain.fov_integrity import check_fov_labels
@@ -70,6 +73,21 @@ def normalize_fov_series(fov: pd.Series) -> pd.Series:
     matches the single-FOV-extractor convention so plots, gating, and the
     smFISH apply-global writer agree on which rows belong to which image."""
     return _normalize_fov_series(fov)
+
+
+def _normalize_fov_by_value(fov: pd.Series) -> pd.Series:
+    """:func:`normalize_fov_series` applied once per distinct label rather than once per row.
+
+    The rule is elementwise — each label's result depends on that label alone —
+    so normalising the distinct labels and spreading them back over the rows
+    gives the same values, index, name and ``object`` dtype. What it does not do
+    is build a stripped copy of every row's string: a well holds a few dozen
+    field labels across a million rows, and the per-row path allocated a new
+    Python string per row on its way to the same few dozen answers.
+    """
+    codes, uniques = pd.factorize(fov, use_na_sentinel=False)
+    normal = normalize_fov_series(pd.Series(uniques, dtype=object)).to_numpy(dtype=object)
+    return pd.Series(normal[codes], index=fov.index, name=fov.name, dtype=object)
 
 
 def _string_column_dtypes(names) -> dict:
@@ -126,7 +144,8 @@ def _read_well_table(path: Path) -> pd.DataFrame:
     (``1e400``, which pyarrow reads as inf and pandas as text that becomes NaN)
     all fall back to pandas, which reads or rejects them as it always has. Running out of
     memory is raised as ``MemoryError``, not fallen back from. pyarrow is measured 13x faster on a 1,104,480-row, 513 MB well (5.0 s
-    against 64.8 s) at about the same peak (1,417 MiB against 1,334 MiB).
+    against 64.8 s). Its memory is the streamed read's (:func:`_streamed_csv_read`) and the conversion's
+    (``parquet_cache.table_to_frame``); the module docstring of ``parquet_cache`` tables what a read costs.
     """
     # The header alone (``nrows=0``), read once for both readers. An empty file
     # raises pandas' ``EmptyDataError`` here, as it always has.
@@ -135,6 +154,10 @@ def _read_well_table(path: Path) -> pd.DataFrame:
     table = _arrow_read(path, names, text_dtypes)
     if table is not None:
         return table
+    # A file pyarrow declined may have been parsed most of the way first, and
+    # that transient would otherwise stay resident under the pandas parse.
+    from review.data.parquet_cache import release_arrow_memory
+    release_arrow_memory()
     return pd.read_csv(path, dtype=text_dtypes, keep_default_na=False, na_values=[""])
 
 
@@ -146,18 +169,18 @@ def _arrow_read(path: Path, names: list[str], text_dtypes: dict) -> pd.DataFrame
         import pyarrow.csv as pcsv
     except ImportError:
         return None
+    read_options = pcsv.ReadOptions(column_names=names, skip_rows=1)
+    convert_options = pcsv.ConvertOptions(
+        column_types={c: pa.string() for c in text_dtypes},
+        null_values=[""], strings_can_be_null=True, quoted_strings_can_be_null=True,
+        # pandas' own boolean spellings. pyarrow's defaults add "1" and
+        # "0", which read a column holding "True" and "1" as booleans
+        # where pandas reads text (the "True" then coerces to NaN).
+        true_values=list(_PANDAS_TRUE), false_values=list(_PANDAS_FALSE))
     try:
-        table = pcsv.read_csv(
-            path,
-            read_options=pcsv.ReadOptions(column_names=names, skip_rows=1),
-            convert_options=pcsv.ConvertOptions(
-                column_types={c: pa.string() for c in text_dtypes},
-                null_values=[""], strings_can_be_null=True, quoted_strings_can_be_null=True,
-                # pandas' own boolean spellings. pyarrow's defaults add "1" and
-                # "0", which read a column holding "True" and "1" as booleans
-                # where pandas reads text (the "True" then coerces to NaN).
-                true_values=list(_PANDAS_TRUE), false_values=list(_PANDAS_FALSE)),
-        )
+        table = _streamed_csv_read(path, read_options, convert_options)
+        if table is None:
+            table = pcsv.read_csv(path, read_options=read_options, convert_options=convert_options)
     except pa.ArrowMemoryError as exc:
         # Out of memory is not "pyarrow cannot read this file": a pandas parse
         # would only need more. Raised as the MemoryError it is, so the caller's
@@ -177,7 +200,57 @@ def _arrow_read(path: Path, names: list[str], text_dtypes: dict) -> pd.DataFrame
             # inf in both, so only a file carrying the former falls back.
             _logger.info("%s holds an out-of-range number in %s; parsing it with pandas", Path(path).name, field.name)
             return None
-    return table.to_pandas()
+    # Consumes the table: the CSV reader's retained blocks and the table's own
+    # buffers are returned to the system around the conversion, rather than
+    # staying resident under the frame (``parquet_cache.table_to_frame``).
+    from review.data.parquet_cache import table_to_frame
+    return table_to_frame(table)
+
+
+def _streamed_csv_read(path: Path, read_options, convert_options) -> pa.Table | None:
+    """The whole CSV as one Arrow table, read block by block; ``None`` when a later block changes a column's type.
+
+    **Why not ``pyarrow.csv.read_csv``.** Its type inference is allowed to change
+    its mind: a column read as integers until a block holding ``1.5`` is
+    re-converted as floats from the start, so the reader keeps every block's
+    parsed text alive until the end of the file in case it must. On a 1.5M-row
+    well that is about the whole decompressed CSV held beside the table — Arrow's
+    pool peaked at 1,657 MiB for a 514 MiB table, and the read at 1,834 MiB over
+    the process's starting size. The streaming reader fixes each column's type
+    from the first block and converts every later block with it, so it holds one
+    block at a time: 523 MiB pool, 657 MiB peak, and no slower (5.3 s against
+    6.1 s).
+
+    **Why the result is the whole-file read's, value for value.** Inference tries
+    a fixed sequence of types (null, integer, boolean, …, float, text) and keeps
+    the first that converts every value it has seen. The streaming reader keeps
+    the first that converts the first block. Every type before that one already
+    fails on the first block, so it fails on the file; and if that type then
+    converts every later block — which this read requires, or it returns
+    ``None`` — it converts the file. So both choose the same type for every
+    column and convert every value with the same converter. Where a later block
+    does not fit (a column empty for the first thousand rows, an integer column
+    that turns decimal) the streaming reader raises, and the caller re-reads the
+    file with ``read_csv`` exactly as before; that costs the partial read and
+    nothing else. Errors that are not about types (a ragged row, an undecodable
+    byte) raise from the second read too, and are handled there as they always
+    were.
+    """
+    import pyarrow as pa
+    import pyarrow.csv as pcsv
+
+    try:
+        reader = pcsv.open_csv(path, read_options=read_options, convert_options=convert_options)
+        batches = list(reader)
+    except pa.ArrowMemoryError:
+        raise
+    except (pa.ArrowException, ValueError, OSError) as exc:
+        _logger.debug("streamed read of %s declined (%s); reading it whole", Path(path).name,
+                      str(exc).splitlines()[0][:200] if str(exc) else type(exc).__name__)
+        from review.data.parquet_cache import release_arrow_memory
+        release_arrow_memory()
+        return None
+    return pa.Table.from_batches(batches, schema=reader.schema)
 
 
 #: The spellings pandas reads as an infinity, after a sign and case are dropped.
@@ -313,10 +386,12 @@ def load_well_csv(path: Path) -> pd.DataFrame:
         if _should_lower(col) and col != str(col).strip().lower()
     }
     if rename:
-        df = df.rename(columns=rename)
+        # In place: ``rename`` returning a new frame copies every column, which
+        # measured 423 MiB of transient on a 1.5M-row well to change six labels.
+        df.rename(columns=rename, inplace=True)
 
     if "fov" in df.columns:
-        df["fov"] = normalize_fov_series(df["fov"])
+        df["fov"] = _normalize_fov_by_value(df["fov"])
 
     if "Included" not in df.columns:
         df["Included"] = 1
@@ -581,7 +656,7 @@ def read_well_frame(path: Path) -> pd.DataFrame:
     then wrong on every read afterwards with nothing to notice it by.
     """
     from review.data.parquet_cache import (
-        read_cached, source_fingerprint, write_cache,
+        read_cached, release_arrow_memory, source_fingerprint, write_cache,
     )
 
     cached = read_cached(path)
@@ -590,6 +665,9 @@ def read_well_frame(path: Path) -> pd.DataFrame:
     before = source_fingerprint(path)
     frame = load_well_csv(path)
     write_cache(path, frame, before)
+    # The write converted the frame to an Arrow table to encode it; that copy is
+    # freed by now but stays resident in Arrow's pool until handed back.
+    release_arrow_memory()
     return frame
 
 
@@ -702,6 +780,13 @@ def run_projectors(ctx, label: str) -> None:
                 "cache projector %r failed for well %r", _project, label)
 
 
+def _announce_read(dataset, label: str) -> None:
+    """Tell ``dataset.read_listener`` (the load's status line) that *label* is being read."""
+    listener = getattr(dataset, "read_listener", None)
+    if listener is not None:
+        listener(label)
+
+
 def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     """Read well *label* from disk into the row cache, projected and recorded.
 
@@ -728,6 +813,7 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     dataset = ctx.state.dataset
     if path is not None:
         dataset.well_paths[label] = path
+    _announce_read(dataset, label)
     frame = _read_making_room(dataset, label, dataset.well_paths[label])
     pinned = getattr(dataset.cache, "pinned", None)
     # Pinned while the projectors run: they find the frame by label, and one that
@@ -816,26 +902,50 @@ def get_all_timepoints(ctx) -> list[float]:
     ``include_gate=False`` — the per-cell scatter draws gates, so timepoint
     enumeration must see the full cloud, not a gate-filtered subset.
 
-    Every well is read once through :func:`get_rows` and its timepoints remembered
-    (``plate_scan``) until its rows or verdicts change: the tabs ask on every
-    activation and channel switch, and with the row cache bounded each ask would
-    otherwise read the plate from disk.
+    Answered from the one timepoint scan of the plate (:func:`_timepoint_scan`),
+    which :func:`get_timepoints_with_rows` shares.
+    """
+    return _timepoint_scan(ctx, included=True)
+
+
+def get_timepoints_with_rows(ctx) -> list[float]:
+    """Unique ``timepoint_hours`` across all loaded wells, included or not.
+
+    The Statistics tab's timepoint menu offers every acquired timepoint, whatever
+    the verdicts say; a different question from :func:`get_all_timepoints`, read
+    from the same scan.
+    """
+    return _timepoint_scan(ctx, included=False)
+
+
+def _timepoint_scan(ctx, *, included: bool) -> list[float]:
+    """The plate's timepoints, included only or all, from one memoized narrow scan.
+
+    Every well is read once — narrowly, ``timepoint_hours`` and the verdict
+    layers' inputs (``plate_scan`` with ``columns=``) — and both answers are
+    remembered per well until its rows or verdicts change. The tabs ask on every
+    activation and channel switch, and two of them (Distribution and Statistics)
+    on every open; with the row cache bounded each ask used to read the plate
+    from disk whole, once per asker.
     """
     from review.data.plate_scan import every_well
 
     timepoints: set = set()
-    for found in every_well(ctx, "included_timepoints", None, _included_timepoints).values():
-        timepoints.update(found)
+    for every, kept in every_well(ctx, "timepoints", None, _well_timepoints,
+                                  columns=("timepoint_hours",)).values():
+        timepoints.update(kept if included else every)
     return sorted(timepoints)
 
 
-def _included_timepoints(df) -> frozenset:
-    """One well's included ``timepoint_hours`` (gates aside), for :func:`get_all_timepoints`."""
+def _well_timepoints(df) -> tuple[frozenset, frozenset]:
+    """One well's ``timepoint_hours``: every one with a row, and the included ones (gates aside)."""
     if df is None or df.empty or "timepoint_hours" not in df.columns:
-        return frozenset()
+        return frozenset(), frozenset()
+    tp = pd.to_numeric(df["timepoint_hours"], errors="coerce")
+    every = frozenset(float(t) for t in tp.dropna().unique())
     mask = df_included_mask(df, include_gate=False)
-    tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
-    return frozenset(float(t) for t in tp.dropna().unique())
+    kept = frozenset(float(t) for t in tp.where(mask).dropna().unique())
+    return every, kept
 
 
 def resolve_value_series(

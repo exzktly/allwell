@@ -343,8 +343,12 @@ def test_ontab_heatmap(ctx, tmp_path):
     for the active channel/metric."""
     from review.features.export.service import export_heatmap_data
 
-    # The heatmap must be drawn before it can be exported; the loaded app drew
-    # it during load. Export the current grid.
+    # The heatmap must be drawn before it can be exported. A load draws only the
+    # plot on screen (``plot_orchestrator.redraw``), so the export is made where
+    # a user makes it: from the Heat Map tab, which draws it when shown.
+    app = ctx.window
+    app._notebook.setCurrentByName("Plotting")
+    app._plotting_notebook.setCurrentByName("Heat Map")
     rows = _run_ontab_export(ctx, export_heatmap_data, tmp_path, "heatmap")
     assert rows is not None
     assert len(rows) == 96

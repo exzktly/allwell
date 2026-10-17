@@ -1483,6 +1483,21 @@ class AllWellApp(QMainWindow):
             head = QLabel("Application log")
             head.setObjectName("Heading")
             bl.addWidget(head)
+            # Where the crash record lives. It sits in a hidden folder, and the
+            # one time anybody needs it is after the app has died — so the path
+            # is named here, selectable, rather than only in the docs.
+            where = QLabel(
+                f"Startup and crash log: {_boot_diag.log_path()} — after a crash "
+                f"the next launch keeps it as {_boot_diag.log_path().name}.1",
+                body,
+            )
+            where.setWordWrap(True)
+            where.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            where.setStyleSheet(
+                f"color: {theme_v2.Colors.text_muted}; "
+                f"font-size: {theme_v2.Typography.caption_size}px;"
+            )
+            bl.addWidget(where)
             from PySide6.QtWidgets import QTextEdit as _QTextEdit
             self._log_view = _QTextEdit(body)
             self._log_view.setReadOnly(True)
@@ -2166,8 +2181,16 @@ def main() -> None:
     win = AllWellApp(data_path=args.data_dir, start_in_phone_layout=_start_phone)
     _boot_diag.boot("main window built; showing")
     win.show()
+    # After the window: its log drawer's handler now exists, so a previous
+    # session that crashed or was killed is announced there, with its log's path.
+    _boot_diag.announce_previous_ending()
     _boot_diag.boot("entering Qt event loop (startup complete)")
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # Only reached when the event loop returns. A session killed from outside —
+    # out of memory, Force Quit — never writes this, and the next launch keeps
+    # its log because of that (startup.boot_diag._ended_uncleanly).
+    _boot_diag.mark_clean_exit()
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

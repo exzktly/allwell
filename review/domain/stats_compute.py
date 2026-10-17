@@ -121,9 +121,22 @@ def _raw_extra(df, target_t, threshold, val_col, fluor_gates, ratios, on_col):
     mean_all statistics, using the SAME gating chokepoint as the aggregator.
     Returns ``(nan, nan)`` when raw rows aren't available (e.g. the pure-logic
     MockApp, which only exposes pre-aggregated points)."""
+    return _extra_at(_extra_inputs(df, val_col, fluor_gates, ratios, on_col),
+                     target_t, threshold)
+
+
+def _extra_inputs(df, val_col, fluor_gates, ratios, on_col) -> tuple | None:
+    """What :func:`_extra_at` needs from *df*, for any timepoint, or ``None``.
+
+    ``(mask, tp, val, on)``: the included, measured, gated cells before the
+    timepoint filter; their timepoints; their values; and the thresholding
+    on-column as booleans (``None`` when the fraction-on is ``value >
+    threshold``). ``None`` when the frame cannot answer at all, which every
+    timepoint reads as ``(nan, nan)``.
+    """
     if df is None or len(df) == 0 or "area_px" not in df.columns \
             or "timepoint_hours" not in df.columns:
-        return float("nan"), float("nan")
+        return None
     mask = df_included_mask(df).to_numpy(copy=True)
     area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
     with np.errstate(invalid="ignore"):
@@ -134,23 +147,109 @@ def _raw_extra(df, target_t, threshold, val_col, fluor_gates, ratios, on_col):
     for channel, gate in active_fluor_gates(fluor_gates).items():
         col = f"{channel}_mean_intensity"
         if col not in df.columns:
-            return float("nan"), float("nan")
+            return None
         gv = pd.to_numeric(df[col], errors="coerce").to_numpy()
         mask &= np.isfinite(gv) & (gv > gate)
     tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
     val = resolve_value_series(df, val_col, ratios).to_numpy()
     with np.errstate(invalid="ignore"):
-        mask &= np.isfinite(tp) & tp_close_mask(tp, target_t) & np.isfinite(val)
+        mask &= np.isfinite(tp) & np.isfinite(val)
+    on = None
+    if on_col and on_col in df.columns:
+        on = pd.to_numeric(df[on_col], errors="coerce").fillna(0).to_numpy() > 0.5
+    return mask, tp, val, on
+
+
+def _extra_at(inputs, target_t, threshold) -> tuple[float, float]:
+    """``(median_above, mean_all)`` at *target_t* from :func:`_extra_inputs`."""
+    if inputs is None:
+        return float("nan"), float("nan")
+    base, tp, val, on = inputs
+    with np.errstate(invalid="ignore"):
+        mask = base & tp_close_mask(tp, target_t)
     if not mask.any():
         return float("nan"), float("nan")
     all_vals = val[mask]
-    if on_col and on_col in df.columns:
-        above = all_vals[(pd.to_numeric(df[on_col], errors="coerce")
-                          .fillna(0).to_numpy() > 0.5)[mask]]
+    if on is not None:
+        above = all_vals[on[mask]]
     else:
         above = all_vals[all_vals > threshold]
     return ((float(np.median(above)) if above.size else float("nan")),
             (float(all_vals.mean()) if all_vals.size else float("nan")))
+
+
+#: A well with more distinct timepoints than this is not tabulated in one pass
+#: (:func:`_well_extra`); each timepoint asked for is computed and remembered
+#: on its own instead. Each entry costs one pass over the well's cells, so a
+#: well whose timepoint is a per-cell acquisition time would otherwise spend a
+#: pass per cell's time to answer one target.
+_EXTRA_TABLE_MAX_TIMEPOINTS = 64
+
+
+def _well_extra(ctx, lbl, target_t, threshold, val_col, fluor_gates, ratios,
+                on_col) -> tuple[float, float]:
+    """:func:`_raw_extra` for one well at *target_t*, read narrowly and remembered.
+
+    ``group_replicate_stats`` used to call ``_raw_extra`` on the well's whole
+    frame for every group, timepoint and producer that asked: on a plate that
+    does not fit the row cache, a full read from disk each time — 80 of the 165
+    full reads one open of an 8-well plate of 1.5M-cell wells made
+    (``_Docs/Markdowns/REREAD_TRACKER.md``, R1). Now the well is read once,
+    through the same narrow read its aggregate takes (``_aggregate_rows``), and
+    the answer for every one of its timepoints is computed in that pass with the
+    same :func:`_extra_at` the direct path runs, so the numbers are identical.
+    A target that is not one of the well's own timepoints (one matched only by
+    tolerance) is computed for itself and remembered under its own key.
+
+    Keyed like :func:`aggregate_well_cached` — the version read before the
+    compute — plus the thresholding on-column, which decides "above". A context
+    without a statistics cache, a version or a repository (the pure-logic test
+    backends) computes from :func:`_safe_rows` directly, as before.
+    """
+    store = getattr(ctx.state, "stats_cache", None)
+    version = getattr(ctx.state.dataset, "rows_version", None)
+    if store is None or version is None or getattr(ctx.state, "repo", None) is None:
+        return _raw_extra(_safe_rows(ctx, lbl), target_t, threshold, val_col,
+                          fluor_gates, ratios, on_col)
+    key = ("well_extra", lbl, val_col, threshold,
+           tuple(sorted((fluor_gates or {}).items())), on_col,
+           _gate_cache_sig(ctx), _ratio_sig_for(ctx, val_col), version)
+
+    def _inputs():
+        rows = _aggregate_rows(ctx, lbl, val_col=val_col, tp_col="timepoint_hours",
+                               fluor_gates=fluor_gates, on_col=on_col)
+        return _extra_inputs(rows, val_col, fluor_gates, ratios, on_col)
+
+    table = store.cache.get(key)
+    if table is None:
+        inputs = _inputs()
+        table = {}
+        if inputs is None:
+            table = _EXTRA_UNANSWERABLE
+        else:
+            times = np.unique(inputs[1][inputs[0]])
+            if times.size <= _EXTRA_TABLE_MAX_TIMEPOINTS:
+                table = {float(u): _extra_at(inputs, float(u), threshold) for u in times}
+        store.cache[key] = table
+    if table is _EXTRA_UNANSWERABLE:
+        return float("nan"), float("nan")
+    try:
+        hit = table.get(float(target_t))
+    except (TypeError, ValueError):
+        hit = None
+    if hit is not None:
+        return hit
+    at_key = key + ("at", target_t)
+    hit = store.cache.get(at_key)
+    if hit is None:
+        hit = _extra_at(_inputs(), target_t, threshold)
+        store.cache[at_key] = hit
+    return hit
+
+
+#: The table of a well whose frame cannot answer (no area or timepoint column,
+#: or a gated channel it does not carry): every timepoint is ``(nan, nan)``.
+_EXTRA_UNANSWERABLE = {"unanswerable": True}
 
 
 _logger = logging.getLogger(__name__)
@@ -186,14 +285,15 @@ def _fov_verdict(ctx, label: str, df):
 
 
 def _rep_from(df, pts, target_t, threshold, val_col, fluor_gates, ratios,
-              on_col) -> ReplicateStat | None:
+              on_col, *, extra: tuple[float, float] | None = None) -> ReplicateStat | None:
     """Build a ReplicateStat: mean/frac/n from the aggregator point *pts* (plot-
-    identical, delegate-aware), median/mean_all from raw *df* when available."""
+    identical, delegate-aware), median/mean_all from raw *df* when available,
+    or from *extra* when the caller already has them."""
     pt = _point_at(pts, target_t)
     if pt is None:
         return None
-    median, mean_all = _raw_extra(df, target_t, threshold, val_col, fluor_gates,
-                                  ratios, on_col)
+    median, mean_all = extra if extra is not None else _raw_extra(
+        df, target_t, threshold, val_col, fluor_gates, ratios, on_col)
     return ReplicateStat(
         mean=float(pt[1]), median=median, mean_all=mean_all,
         frac=float(pt[3]), n_above=int(pt[4]), n_total=int(pt[5]),
@@ -230,8 +330,14 @@ def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
             pts = aggregate_well_cached(ctx, lbl, threshold=threshold,
                                         use_sem=False, val_col=val_col,
                                         fluor_gates=fluor_gates)
-            rs = _rep_from(_safe_rows(ctx, lbl), pts, target_t, threshold,
-                           val_col, fluor_gates, ratios, on_col)
+            if _point_at(pts, target_t) is None:
+                continue
+            # The median and mean of all cells come from a narrow, memoized
+            # read rather than the whole frame (``_well_extra``).
+            rs = _rep_from(None, pts, target_t, threshold, val_col, fluor_gates,
+                           ratios, on_col,
+                           extra=_well_extra(ctx, lbl, target_t, threshold, val_col,
+                                             fluor_gates, ratios, on_col))
             if rs is not None:
                 reps.append(rs)
     else:  # "fov": every FOV across all loaded wells is one replicate (pooled)
@@ -563,11 +669,16 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
     x-range reads — and one that did would corrupt every other caller's curve.
     If a mutating consumer ever appears, give it ``.copy()`` at that call site
     rather than making this one copy for everybody.
+
+    **The well is read narrowly** (:func:`_cdf_rows`): the filter needs the
+    value column, the area column, the gated channels and the verdicts, and a
+    read of the whole frame for those was 16 of the 165 full reads one open of
+    an 8-well plate of 1.5M-cell wells made (``REREAD_TRACKER.md``, R4).
     """
     store = getattr(ctx.state, "stats_cache", None)
     if store is None:
-        return compute(get_rows(ctx, label), val_col=val_col, fluor_gates=fluor_gates,
-                       ratios=ctx.state.channel.ratio_index)
+        return compute(_cdf_rows(ctx, label, val_col, fluor_gates, compute), val_col=val_col,
+                       fluor_gates=fluor_gates, ratios=ctx.state.channel.ratio_index)
     key = (
         "well_cdf", label, val_col,
         tuple(sorted((fluor_gates or {}).items())),
@@ -587,11 +698,39 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
         return hit
     # Read only on a miss: the row cache is bounded, and reading a well first
     # loaded an evicted one from disk only to return the remembered array.
-    result = compute(get_rows(ctx, label), val_col=val_col, fluor_gates=fluor_gates,
-                     ratios=ctx.state.channel.ratio_index)
+    result = compute(_cdf_rows(ctx, label, val_col, fluor_gates, compute), val_col=val_col,
+                     fluor_gates=fluor_gates, ratios=ctx.state.channel.ratio_index)
     _make_room_for_cdf(ctx, store.cache, int(getattr(result, "nbytes", 0)))
     store.cache[key] = result
     return result
+
+
+def _cdf_rows(ctx, label: str, val_col: str, fluor_gates, compute) -> pd.DataFrame:
+    """Well *label*'s rows for the CDF filter *compute*, read narrowly when it can be.
+
+    Only a filter whose inputs are known can be handed a narrow frame. The one
+    the line plot passes is ``data_loading._all_fluor_values_filtered``, called
+    here without a ``tp_filter``: it reads the inclusion verdicts, ``area_px``,
+    each gated channel's ``<channel>_mean_intensity`` and the value column (a
+    ratio's numerator and denominator). Those go to ``narrow_rows``, which adds
+    every verdict layer's declared inputs and projects them, so the values are
+    the whole frame's. Any other filter — and a ratio whose definition is not in
+    the index — reads the whole frame, because a column it reads and nobody
+    named would be absent from a narrow frame and fail open.
+    ``tests/test_cdf_values_read_narrowly.py`` holds the narrow values to the
+    whole frame's with every verdict layer on.
+    """
+    from review.data.data_loading import _all_fluor_values_filtered
+    from review.data.narrow_rows import narrow_rows, value_inputs
+
+    if compute is not _all_fluor_values_filtered:
+        return get_rows(ctx, label)
+    inputs = value_inputs(val_col, ctx.state.channel.ratio_index)
+    if inputs is None:
+        return get_rows(ctx, label)
+    want = inputs | {"area_px"} | {
+        f"{channel}_mean_intensity" for channel in active_fluor_gates(fluor_gates or {})}
+    return narrow_rows(ctx, label, want)
 
 
 #: Share of the row-cache budget the remembered CDF arrays may hold together.

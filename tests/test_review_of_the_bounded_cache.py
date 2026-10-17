@@ -129,11 +129,12 @@ def test_a_cancelled_pass_records_nothing_and_a_finished_one_reasserts(qtbot, mo
     monkeypatch.setattr(cg, "gating_pass_config", lambda ctx: config("new"))
     ctx.state.dataset.well_paths = {"A01": None}
 
-    def late_predecessor(ctx_, label):
+    def late_predecessor(ctx_, label, want=None):
         state.applied_gating = config("old")
         return pd.DataFrame({"gfp_mean_intensity": [1.0]})
 
-    monkeypatch.setattr(cg, "get_rows", late_predecessor)
+    # The pass reads each well through ``narrow_rows`` (REREAD_TRACKER.md, R9).
+    monkeypatch.setattr(cg, "narrow_rows", late_predecessor)
     monkeypatch.setattr(cg, "apply_fluor_gating", lambda df, **kw: 0)
     ctx.state.dataset.note_rows_changed = lambda: None
     monkeypatch.setattr(cg.time, "sleep", lambda s: None)

@@ -136,7 +136,7 @@ ALLOWLIST = {
     "review/core/centre_view.py::build_centre._build_plotting",
     "review/features/barplot/collect.py::collect_bar_items_for_group",
     "services/remote_staging.py::stage_local_zips",
-    "review/features/heatmap/controller.py::redraw_heatmap",
+    "review/features/heatmap/controller.py::_draw_heatmap",
     "review/features/image_browser/cell_browser/collect.py::collect_cells",
     # DONE: the pipeline's Otsu estimator (was CC 55) moved to
     # pipeline/auto_threshold.py as estimate_thresholds_from_outputs and was
@@ -151,7 +151,8 @@ ALLOWLIST = {
     # (_build_header_lines / _format_group_summary_lines / _format_pairwise_lines
     # / _resolve_sample_units / _sig_marker) were extracted and unit-tested; the
     # function is now CC 30. Removed from the allowlist.
-    "review/core/load_controller.py::load_directory",
+    # The body of the load, behind ``load_directory``'s plot hold (``core/plot_hold.py``).
+    "review/core/load_controller.py::_load_directory_held",
     # DONE: collect_line_series dropped below the threshold once the control
     # denominators moved behind ``fold_change_pairing.ControlDenominators`` and
     # the per-member normalize call became ``normalize_member_pts``, shared with

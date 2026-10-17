@@ -58,6 +58,12 @@ class DatasetState:
     pipeline_info: dict = field(default_factory=dict)
     tok_to_label: dict[str, str] = field(default_factory=dict)
     well_labels: dict[str, str] = field(default_factory=dict)
+    # Called with a well's label just before that well is read from disk, by
+    # either read path (``data_loading.load_and_project`` for a whole frame,
+    # ``narrow_rows`` for a narrow one). Set by the dataset load for its own
+    # length so the status bar can say which well each phase is reading
+    # (``review/core/load_progress.py``); ``None`` otherwise.
+    read_listener: Callable[[str], None] | None = None
     fov_tp_extractor: Callable[[str], tuple[str, str]] | None = None
     persistence_doc: object = None
 

@@ -438,6 +438,27 @@ def _report_unusable_fov_labels(ctx) -> None:
 
 
 def load_directory(ctx, d: Path, label=None) -> None:
+    """Load the per-well CSVs in *d*, holding every plot until the load can draw them once.
+
+    See ``review/core/plot_hold.py``: the hold is lifted before ``dataset_loaded``
+    is emitted, or handed to the Cell Gating pass the load started, and lifted
+    here in any case if the load ends some other way (an early return, a raise).
+    """
+    from review.core import plot_hold
+    plot_hold.hold(ctx, plot_hold.HOLD_LOADING)
+    try:
+        _load_directory_held(ctx, d, label)
+    finally:
+        if plot_hold.held_for(ctx) == plot_hold.HOLD_LOADING:
+            plot_hold.release(ctx)
+        # The load's status line (``load_progress``) stops listening however
+        # the load ended.
+        dataset = getattr(getattr(ctx, "state", None), "dataset", None)
+        if dataset is not None:
+            dataset.read_listener = None
+
+
+def _load_directory_held(ctx, d: Path, label=None) -> None:
     app = ctx.window  # transitional bridge (A3)
     _opening_set_phase(ctx, "Scanning folder…")
     # ``.csv`` and ``.csv.gz`` side by side: a finished well's CSV is gzipped, an
@@ -586,6 +607,12 @@ def load_directory(ctx, d: Path, label=None) -> None:
     _opening_set_phase(ctx, f"Loading {n} well CSV(s)…", value=0, maximum=n)
     _open_wells(ctx, app, csvs)
     app._hide_progress()
+    # From here the load reads wells for its own purposes, not one per CSV, so
+    # the CSV count is finished while much of the work is still ahead. Each
+    # phase names itself, and counts the wells it reads from disk.
+    from review.core.load_progress import LoadProgress
+    progress = LoadProgress(ctx, n).__enter__()
+    progress.phase("Restoring saved analysis")
     app._rebuild_all_timepoints_cache()
     app._rebuild_all_fovs_cache()
     build_tok_to_label(ctx)
@@ -679,6 +706,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # a channel-combo cascade that must see the loaded dataset — the same call the
     # ratios hydrator makes below, and ``recalculate_threshold`` rebuilds the
     # combos afterward.
+    progress.phase("Restoring ratio metrics and sample variables")
     set_ratio_metrics(ctx, [])
     app._persistence.load("ratios")
     # The plate's annotation axes. Unconditional, and its loader assigns even
@@ -740,18 +768,19 @@ def load_directory(ctx, d: Path, label=None) -> None:
     app._dir_label.setText(display)
     from review.core.app_shell_view import refresh_dataset_button
     refresh_dataset_button(app)
-    app._set_status(f"Loaded {n} well(s) — {display}")
-    _report_incomplete_wells(ctx)
-    _report_unusable_fov_labels(ctx)
-    # After the hydrators, because the flags are set by the first ``_doc.read``
-    # and the loads above are what trigger it.
-    _report_persistence_doc_state(ctx)
+    progress.phase("Measuring channel ranges and restoring gates")
     recalculate_threshold(ctx)
+    # Cell Gating's CDFs and optimizer lists, read once now that the channels,
+    # ratios and gates are final: every call the load made before this point
+    # rebuilt the tab's controls and left the reading owed (tracker R2), and the
+    # gating pass below has not started reading yet.
+    progress.phase("Reading cells for Cell Gating")
+    ctx.features.call("cell_gating.read_owed_cell_areas", ctx)
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from
     # _recalculate_threshold, which fires on every channel/metric switch)
     # keeps Included flags consistent with the loaded thresholds.
-    _kick_off_gating_after_load(ctx)
+    gating_started = _kick_off_gating_after_load(ctx)
     # Re-sync the smFISH tab so its cached well→zip map, channel list, and
     # extractor reflect the freshly loaded dataset. Without this, a dataset
     # reload (e.g., after Analyze pipeline completes) leaves the tab pointing
@@ -761,6 +790,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # Feature-owned post-load refresh, fanned out from the registry so core
     # names no feature and imports none that a build profile excluded. Each
     # feature's ``on_dataset_loaded`` hook owns its ordering + guards internally.
+    progress.phase("Preparing tabs")
     for _descriptor in app._features.with_hook("on_dataset_loaded"):
         try:
             _descriptor.on_dataset_loaded(ctx)
@@ -768,7 +798,12 @@ def load_directory(ctx, d: Path, label=None) -> None:
             logging.getLogger("review").exception(
                 "on_dataset_loaded hook for %r failed", _descriptor.name)
     # Announce on the bus. RedrawCoordinator subscribes dataset_loaded and runs
-    # the post-load plot redraw — the emit is the redraw trigger.
+    # the post-load plot redraw — the emit is the redraw trigger. A load that
+    # started a gating pass hands the hold to it instead, so the plate is drawn
+    # once, gated, when the pass ends (``plot_hold.release_after_gating``); the
+    # emit's redraw then only marks every plot owed, and the placeholders say why.
+    progress.phase("Drawing plots")
+    _hand_plots_to_gating_or_release(ctx, app, gating_started)
     app._event_bus.dataset_loaded.emit(app._app_state.dataset)
     # Sync the band's ThreshFracOn quick-edit once everything has settled (the
     # gating edits are now hydrated and the active channel is final), so the box
@@ -785,12 +820,51 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # reads the current leaf itself and every on_activate is idempotent, so this
     # cleanly repopulates whichever tab is active. Guarded so a refresh failure
     # never breaks the (critical) load path.
+    progress.phase("Refreshing the current tab")
     try:
         from review.core.tab_controller import on_tab_change
         on_tab_change(ctx)
     except Exception:
         logging.getLogger("review").exception(
             "post-load active-tab refresh failed")
+    progress.__exit__(None, None, None)
+    _say_loaded(ctx, app, n, display, gating_started)
+
+
+def _hand_plots_to_gating_or_release(ctx, app, gating_started: bool) -> None:
+    """End the load's plot hold: hand it to a running gating pass, or lift it.
+
+    See ``review/core/plot_hold.py``. Asked again rather than taken from
+    *gating_started* alone: the status line repaints between phases, which
+    delivers queued signals, so a short pass can already have finished — and a
+    hold handed to a pass that has ended would never be lifted.
+    """
+    from review.core import plot_hold
+    worker = getattr(getattr(getattr(ctx, "runtime", None), "cell_gating", None), "worker", None)
+    if gating_started and worker is not None and worker.isRunning():
+        plot_hold.hold(ctx, plot_hold.HOLD_GATING)
+        from review.core.ui_helpers import refresh_empty_state_pages
+        refresh_empty_state_pages(app)
+    else:
+        plot_hold.release(ctx)
+
+
+def _say_loaded(ctx, app, n: int, display: str, gating_started: bool) -> None:
+    """The load's last status line, then anything it has to report.
+
+    Said last, so "Loaded" is not on screen while the phases before it still
+    run. A load that started a gating pass says so: the plots wait for it, and
+    its own progress counts the wells as it gates them.
+    """
+    worker = getattr(getattr(getattr(ctx, "runtime", None), "cell_gating", None), "worker", None)
+    still_gating = gating_started and worker is not None and worker.isRunning()
+    app._set_status(f"Loaded {n} well(s) — {display}"
+                    + (" — applying cell gating…" if still_gating else ""))
+    _report_incomplete_wells(ctx)
+    _report_unusable_fov_labels(ctx)
+    # After the hydrators, because the flags are set by the first ``_doc.read``
+    # and the loads above are what trigger it.
+    _report_persistence_doc_state(ctx)
 
 
 def _open_wells(ctx, app, csvs) -> None:
@@ -824,10 +898,11 @@ def _open_wells(ctx, app, csvs) -> None:
         _opening_set_phase(ctx, f"Loading {i}/{n}: {p.name}", value=i)
 
 
-def _kick_off_gating_after_load(ctx) -> None:
+def _kick_off_gating_after_load(ctx) -> bool:
+    """Start the Cell Gating pass when the loaded gates need one. ``True`` when it started."""
     app = ctx.window  # transitional bridge (A3)
     if not hasattr(app, "_cell_gating_fluor_gate_edits"):
-        return
+        return False
     # Cell-area gating is retired (now QC-owned); only a non-default
     # fluorescence gate needs the gating worker kicked off here. Values come
     # from the typed slice (R6), synced from the edits / persistence load.
@@ -842,7 +917,8 @@ def _kick_off_gating_after_load(ctx) -> None:
     use_thresh = app._app_state.cell_gating.use_scatter_thresh
     if has_non_default_gate or use_scatter or use_thresh:
         ctx.features.call("cell_gating.start_worker", ctx)
-        return
+        worker = getattr(getattr(getattr(ctx, "runtime", None), "cell_gating", None), "worker", None)
+        return worker is not None and worker.isRunning()
     # No worker, so nothing else repaints the tab's "Included for analysis"
     # line and its funnel — and this is the commonest path, since a dataset
     # whose gates are all at their defaults takes it. Without the refresh the
@@ -851,6 +927,7 @@ def _kick_off_gating_after_load(ctx) -> None:
     # right one. ``cell_gating_refresh_included_count`` recomputes from the row
     # cache and no-ops when the label has not been built yet.
     ctx.features.call("cell_gating.refresh_included_count", ctx)
+    return False
 
 
 def _looks_like_well_measurement_csv(path: Path) -> bool:

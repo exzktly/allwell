@@ -1775,7 +1775,16 @@ What this means in use:
   (about 4 seconds for a 1.1M-cell well) and kept beside it in a hidden
   `.aw_parquet` folder, with each well's summary; later opens read those instead
   (that well reads back in about a fifth of a second). A new version of All-Well
-  that parses differently re-parses each well once.
+  that parses differently re-parses each well once. Reading a well needs about
+  twice its size in memory while it is parsed, and about one and a half times
+  while it is read back.
+- **An open reads each well once.** After the wells that fit have been read,
+  everything the open still needs from the rest — channel ranges, timepoints,
+  Cell Gating's curves, the Home plate's markers, the gating pass if the dataset
+  has saved gates — comes from narrow reads of only the columns involved, and
+  the plots are drawn only when you look at them. On an 8-well plate of
+  1.5-million-cell wells with saved gates and sample groups, an open made 165
+  whole-well reads before this and makes 3.
 - **Decimal values are read exactly.** Each number in a CSV is read as the
   closest value the computer can hold to what is written. Earlier versions were
   sometimes off by a tiny amount: up to about one part in a trillion
@@ -1785,9 +1794,9 @@ What this means in use:
 - **Plate-wide views read every well the first time**, then remember the few
   numbers they need per well until something changes them (a QC threshold, a
   gate, a crop). On a plate that does not fit, the first draw after such a change
-  reads the plate from disk again. The line and bar charts read only the columns
-  they plot and the ones the active filters use, so that read is a fraction of
-  each well and does not push other wells out of memory.
+  reads the plate from disk again. Those reads take only the columns the view
+  plots and the ones the active filters use, so each is a fraction of a well and
+  does not push other wells out of memory.
 - **Live counts say when they cover part of the plate.** QC's "flagged" count,
   the crop's status line and Cell Gating's "Included for analysis" are
   recalculated on every edit, so they count the wells in memory; when those are
@@ -1826,7 +1835,8 @@ To change the budget, set the environment variable `ALLWELL_ROW_CACHE_MB` before
 starting the app, for example `ALLWELL_ROW_CACHE_MB=8192 python allwell.py` for
 8 GB. `python tests/perf/bench_large_plate.py --dir <folder> --wells 24` writes a
 synthetic plate of large wells and reports the time and peak memory of opening
-it and of one plate-wide plot.
+it and of one plate-wide plot, and how many times the open read each well;
+`--gate` and `--groups` add a saved gate and two sample groups first.
 
 ### Home
 
@@ -1963,6 +1973,20 @@ with the wells an incremental run would otherwise skip forever listed for a full
 reprocess — and limited, through **Only these wells**, to the wells that need
 work, so nothing already complete is touched. You do not have to remember what the original run was told to do; the
 handoff carries it, and Analyze says on its dashboard what it just set up.
+
+**While a dataset opens, the status bar says what it is doing.** It counts the
+CSV files first. On a plate too large to hold in memory that count races ahead,
+because only the first wells are read then; the work after it is named phase by
+phase — restoring the saved analysis, measuring channel ranges and restoring
+gates, preparing tabs, drawing plots — together with the well being read from
+disk and how many reads the phase has made so far, so a slow open is visibly
+moving rather than stuck. *Loaded N well(s)* appears only when it has finished.
+
+**If the dataset has saved Cell Gating gates, the plots wait for them.** Opening
+it starts a gating pass over every well; until that pass ends each plot shows
+*Applying cell gating…* instead of a figure, and the status bar counts the wells
+as they are gated. The plot you are looking at is then drawn once, with the gates
+applied, rather than once before them and again after.
 
 **Opening a dataset always brings you here first**, whichever page you were on
 when you last quit. Everything else about that session is restored as before —
@@ -2617,7 +2641,9 @@ They name that plate's variables, and the next plate's are different ones.
 moves a single number: with two cell lines at six doses, set **Group by** to
 `Dose` and **Colour by** to `Cell line` and you get the same twelve bars in two
 colours, with a legend naming the two lines. **Split by** the same variable and
-those bars are laid out in two labelled bands instead of one run.
+those bars are laid out in two labelled bands instead of one run; each of the
+bar figure's panels — the mean, the fraction and the events — names the bands
+above it, so any panel can be read on its own.
 
 Because they only decorate, nothing is dropped: a group whose wells hold two
 different values gets its own ink and its own band called `—mixed—`, and one
@@ -2637,8 +2663,8 @@ a row above the doses, and a wider gap separates two cell lines than two doses
 within one. Then by is greyed out until Split by holds a variable, and clearing
 Split by clears it too — bands inside nothing would just be bands. It never
 offers the variable Split by is using, since sub-bands by the same variable
-would only repeat the band names. Batch Export draws both header rows too, with
-the panel title moved up to clear them. Like the
+would only repeat the band names. Batch Export draws both header rows too, over every
+panel, with each panel's title moved up to clear them. Like the
 first split, it moves no number and drops no bar.
 
 **Batch Export draws them the same way.** A plate exported group by group gets
@@ -3723,6 +3749,22 @@ still exported (see below).
   file is normally rewritten each time the app starts, **but a copy carrying a
   crash is kept** — as `allwell-boot.log.1`, `.2`, `.3`, newest first — so
   relaunching to try again no longer throws away the record of what went wrong.
+  The folder is hidden (it starts with a dot): in Finder use **Go → Go to
+  Folder…** and type `~/.cache/allwell`, or press ⌘⇧. to show hidden files. It
+  is *not* `~/Library/Caches`. The application log drawer (⌘L, or the terminal
+  icon at the right of the status bar) names the exact path at its top. The
+  files called `bootstrap-….log` beside it are from setting up remote hosts,
+  not from the app crashing.
+- **If the app vanishes without any dialog** — most often macOS ending it for
+  using too much memory while opening a very large dataset — there is no
+  traceback to show, because the system stopped the process from outside. The
+  log of that session is still kept as `allwell-boot.log.1`, with a note at the
+  bottom saying it never shut down cleanly; while a dataset opens, the log
+  records each phase of the load (`dataset load: Measuring channel ranges` and
+  so on), so its last lines say how far the load got. The next time you start
+  All-Well, the application log says the previous session ended this way and
+  names the file — send it with the report, together with how much memory the
+  Mac has.
   If a message like *"Timers cannot be stopped from another thread"* appears,
   the same log also records which part of the app caused it — send that file
   with the report, even if the app did not close.

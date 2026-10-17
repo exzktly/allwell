@@ -145,12 +145,19 @@ def test_the_spatial_matrix_walks_evicted_wells(ctx):
 
 
 def test_a_plate_value_is_read_once_until_the_rows_change(ctx, monkeypatch):
-    from review.data import data_loading
+    from review.data import data_loading, parquet_cache
     from review.data.focus_gate import plate_focus_counts
 
+    # Every read from disk, whole or narrow: the counts read each well through
+    # ``narrow_rows``, which parses the CSV the first time (``read_well_frame``)
+    # and reads the Parquet cache's columns after that (``read_cached``).
+    # Counting only the first would see a re-read as no read at all.
     reads: list = []
     real = data_loading.read_well_frame
+    real_cached = parquet_cache.read_cached
     monkeypatch.setattr(data_loading, "read_well_frame", lambda path: reads.append(path) or real(path))
+    monkeypatch.setattr(parquet_cache, "read_cached",
+                        lambda path, columns=None: reads.append(path) or real_cached(path, columns=columns))
 
     plate_focus_counts(ctx)
     first = len(reads)

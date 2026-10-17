@@ -60,9 +60,16 @@ def test_the_range_spans_every_well_held_or_not(ctx):
 
 def test_a_channel_switch_back_does_not_reread_the_plate(ctx, monkeypatch):
     channel_state_controller.recalculate_threshold(ctx)
+    from review.data import parquet_cache
+
     reads: list = []
     real = data_loading.read_well_frame
     monkeypatch.setattr(data_loading, "read_well_frame", lambda path: reads.append(path) or real(path))
+    # The scan reads narrowly once a well has a Parquet cache, which is a
+    # ``read_cached`` call rather than a ``read_well_frame`` one; count both.
+    real_cached = parquet_cache.read_cached
+    monkeypatch.setattr(parquet_cache, "read_cached",
+                        lambda path, columns=None: reads.append(path) or real_cached(path, columns=columns))
     ctx.state.channel.threshold_range_cache.clear()     # what a dataset reload clears
     channel_state_controller.recalculate_threshold(ctx)
     assert reads == [], f"the per-well extents were not kept: {len(reads)} well(s) re-read"

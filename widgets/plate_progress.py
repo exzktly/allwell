@@ -25,6 +25,7 @@ extraction.
 from __future__ import annotations
 
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QBoxLayout, QFrame, QHBoxLayout, QLabel, QProgressBar, QToolButton, QVBoxLayout,
     QWidget,
@@ -210,6 +211,7 @@ class PlateProgress(QWidget):
         root.addLayout(hdr)
 
         self._headline = QLabel("Idle", self)
+        self._headline.setObjectName("PlateHeadline")
         # A real failure message (e.g. naming every colliding well token) is
         # long enough to force a horizontal scrollbar on the whole page and
         # push everything above the dashboard off-screen without this — the
@@ -283,6 +285,7 @@ class PlateProgress(QWidget):
             # reads as misaligned against the picker above.
             apply_plate_geometry(self._plate, role="status")
             self._plate.setWellTooltipProvider(self._well_tooltip)
+            self._plate.wellActivated.connect(self._show_well_detail)
             center.addWidget(self._plate, 0, PLATE_ALIGNMENT)
 
             center.addStretch(1)
@@ -318,6 +321,13 @@ class PlateProgress(QWidget):
             body.addStretch(1)
 
         root.addWidget(self._body)
+        # One line under the plate for a tapped well's detail (stacked only).
+        self._detail = QLabel("", self)
+        self._detail.setObjectName("PlateWellDetail")
+        self._detail.setWordWrap(True)
+        self._detail.setTextFormat(Qt.PlainText)
+        self._detail.hide()
+        root.addWidget(self._detail)
         self._build_rail()
         if show_legend:
             self._build_legend()
@@ -524,7 +534,35 @@ class PlateProgress(QWidget):
         legend = getattr(self, "_legend_host", None)
         if legend is not None:
             legend.setVisible(not self._stacked)
+        # The header's title and collapse toggle are desk chrome: on a phone
+        # the dashboard *is* the page, and the headline under them says what
+        # state the run is in — so it is set larger (``PlateHeadline[phone]``).
+        self._title_label.setVisible(not self._stacked)
+        self._toggle.setVisible(not self._stacked)
+        if self._stacked and not self._body.isVisible():
+            self._toggle.setChecked(True)
+            self._on_toggle()
+        self._headline.setProperty("phone", self._stacked)
+        self._headline.style().unpolish(self._headline)
+        self._headline.style().polish(self._headline)
+        plate = getattr(self, "_plate", None)
+        if plate is not None:
+            if self._stacked:
+                # As wide as the column: the status plate's desk cap leaves a
+                # phone's wells a third of the width they could have.
+                plate.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
+            else:
+                apply_plate_geometry(plate, role="status")
+        self._detail.setVisible(self._stacked and bool(self._detail.text()))
         self._pin_rail_width()
+
+    def _show_well_detail(self, well_id: str) -> None:
+        """Say what a tapped well's hover would have said — there is no hover
+        on a touch screen, and on a phone the tap is how to ask."""
+        if not self._stacked:
+            return
+        self._detail.setText(self._well_tooltip(well_id))
+        self._detail.setVisible(True)
 
     def isStacked(self) -> bool:
         return self._stacked

@@ -52,6 +52,9 @@ _LOG = logging.getLogger(__name__)
 #: remote viewer's own chrome, with room for the band and one row of content.
 PHONE_MIN_W, PHONE_MIN_H = 320, 400
 
+#: Qt's QWIDGETSIZE_MAX — what lifts a size pin.
+_QWIDGETSIZE_MAX = 16_777_215
+
 #: How long the restyle overlay outlives the restyle. Taps made during the
 #: freeze are queued and delivered once the event loop resumes; the overlay
 #: must still be there to receive them, or a second tap on the ☰ menu's
@@ -83,6 +86,26 @@ class PhoneHandles:
     #: Re-run every mode-dependent sync after a layout change.
     relayout: Callable[[], None] = lambda: None
     dashboards: Callable[[], list] = lambda: []
+    #: The ⋯ menu's actions (each optional).
+    reload: Callable[[], None] | None = None
+    show_help: Callable[[], None] | None = None
+    show_log: Callable[[], None] | None = None
+    #: The log button's "!" badge, mirrored onto ⋯ while the status bar is gone.
+    log_badge: QWidget | None = None
+    #: Roots whose page control bands phone layout moves into the Controls
+    #: sheet (Review's pages, the Analyze output page). Datasets keeps its own:
+    #: its tools put their Run buttons there.
+    band_roots: Callable[[], list] = lambda: []
+    #: Review's section list, laid out as a grid in the side rail.
+    rail_nav: QWidget | None = None
+    #: Sections the phone does not offer (desk tools).
+    phone_hidden_sections: tuple = ()
+    #: The side rail's drawer, sized here to the screen.
+    rail_drawer: QWidget | None = None
+    #: Analyze's output page: its body layout (turned to two columns in
+    #: landscape), the rule between dashboard and log, and the dashboard.
+    analyze_body: object | None = None
+    analyze_rule: QWidget | None = None
 
 
 # ── the rescale pass ──────────────────────────────────────────────────────
@@ -323,20 +346,30 @@ def scale_canvases(factor: float) -> int:
 
 
 class _PhoneEventFilter(QObject):
-    """While phone layout is on: plots built later get its scale, and a
-    dialog that opens larger than the screen is brought inside it."""
+    """While phone layout is on, the things built or shown later get it too:
+    a plot its DPI, a dialog a place on the screen, a page's control band a
+    place in the Controls sheet, a stepper its − / +, a toolbar its absence, a
+    form row its stacking; and an ⓘ answers a tap, since nothing hovers."""
 
     def __init__(self, shell: PhoneShell) -> None:
         super().__init__(shell)
         self._shell = shell
 
     def eventFilter(self, obj, event) -> bool:  # Qt naming
-        if event.type() != QEvent.Show or not isinstance(obj, QWidget):
+        t = event.type()
+        if t == QEvent.MouseButtonRelease and isinstance(obj, QLabel) \
+                and obj.objectName() == "InfoHint" and obj.toolTip():
+            from PySide6.QtWidgets import QToolTip
+            QToolTip.showText(obj.mapToGlobal(obj.rect().bottomLeft()), obj.toolTip(), obj)
+            return True
+        if t != QEvent.Show or not isinstance(obj, QWidget):
             return False
         if obj.isWindow() and isinstance(obj, QDialog):
             clamp_to_screen(obj)
         elif getattr(type(obj), "draw_idle", None) is not None and hasattr(obj, "figure"):
             scale_canvas(obj, self._shell.plot_factor())
+        else:
+            self._shell.adapt(obj)
         return False
 
 
@@ -395,6 +428,21 @@ class _BusyOverlay(QWidget):
         return super().event(ev)
 
 
+#: Mode-dependent sizes of the phone's top bar, in phone points: a full bar
+#: upright, a slimmer one sideways, where height is what the plots lack.
+LANDSCAPE_BAR_PT = 44
+#: The side rail leaves this much of the page showing to its right when the
+#: phone is upright — the strip a thumb taps to close it; sideways it is a
+#: fixed width, since half a landscape screen of sections would be mostly air.
+RAIL_GAP_PT = 56
+LANDSCAPE_PANEL_PT = 360
+#: The Controls sheet's share of an upright screen: the plot above it stays in
+#: view and redraws as its controls change.
+SHEET_HEIGHT_SHARE = 0.6
+#: Analyze's summary column, sideways.
+LANDSCAPE_SUMMARY_PT = 300
+
+
 class PhoneShell(QObject):
     """Owns phone layout's controls and drives the switch both ways."""
 
@@ -406,11 +454,17 @@ class PhoneShell(QObject):
         self._settings = settings
         self._filter = _PhoneEventFilter(self)
         self._desk_state: dict | None = None
-        self._text_size = phone_layout.AUTO
+        self._text_size = phone_layout.DEFAULT_TEXT_SIZE
         self._applying = False
         self._banner = None
         self._banner_dismissed_for: bool | None = None
         self._screen = None
+        #: Widgets this layout hid that were showing, so leaving shows exactly
+        #: those again (a band a page had hidden for its own reasons stays so).
+        self._hid: list[QWidget] = []
+        self._sheet = None
+        self._sheet_band = None
+        self._landscape: bool | None = None
         self._build_controls()
         self._load_settings()
 
@@ -424,7 +478,7 @@ class PhoneShell(QObject):
             return
         try:
             self._text_size = phone_layout.parse_text_size(
-                s.value(phone_layout.KEY_TEXT_SIZE, phone_layout.AUTO))
+                s.value(phone_layout.KEY_TEXT_SIZE, phone_layout.DEFAULT_TEXT_SIZE))
         except Exception:
             swallowed()
 
@@ -447,6 +501,43 @@ class PhoneShell(QObject):
             swallowed()
             return False
 
+    # ── sizes ─────────────────────────────────────────────────────────────
+    def unit(self) -> float:
+        """Logical px per phone point on this window's screen."""
+        screen = self._win.screen() or QGuiApplication.primaryScreen()
+        g = screen.geometry() if screen is not None else QRect(0, 0, 1640, 980)
+        return phone_layout.phone_unit(g.width(), g.height())
+
+    def pt(self, points: float) -> int:
+        return phone_layout.touch_px(self.unit(), points)
+
+    def is_landscape(self) -> bool:
+        a = self._avail()
+        return a.width() > a.height()
+
+    def text_size(self) -> str:
+        """The stored choice: ``"S"``, ``"M"`` or ``"L"``."""
+        return self._text_size
+
+    def text_scale(self) -> float:
+        """The factor the type tokens take on this screen at the chosen size."""
+        return phone_layout.type_scale(self.unit(), self._text_size,
+                                       theme.desk_body_size())
+
+    def plot_factor(self) -> float:
+        """How much plots raise their DPI in phone layout: enough that a
+        matplotlib point is a phone point (``phone_layout.plot_dpi_factor``)."""
+        return phone_layout.plot_dpi_factor(self.unit()) if phone_layout.is_on() else 1.0
+
+    def set_text_size(self, size: str) -> None:
+        self._text_size = phone_layout.parse_text_size(size)
+        self._save(phone_layout.KEY_TEXT_SIZE, self._text_size)
+        if phone_layout.is_on():
+            self._restyle(self.text_scale(), self.unit())
+            scale_canvases(self.plot_factor())
+            self._apply_sizes()
+            self.refresh()
+
     # ── controls ──────────────────────────────────────────────────────────
     def _build_controls(self) -> None:
         from widgets.icon_button import IconButton
@@ -458,12 +549,13 @@ class PhoneShell(QObject):
         self.desk_button = IconButton("smartphone", text="Phone layout")
         self.desk_button.setObjectName("PhoneLayoutButton")
         self.desk_button.setToolTip(
-            "Switch to phone layout: one column, larger text and plots, for "
-            "using All-Well from a phone over remote desktop.")
+            "Switch to phone layout: touch-sized controls, larger text and "
+            "plots, for using All-Well from a phone over remote desktop.")
         self.desk_button.clicked.connect(lambda: self.set_on(True))
 
-        # Phone: ☰ slides the pane's whole left panel — Review's sections and
-        # well plate, the Analyze form — out over the page from the left.
+        # ☰ slides the pane's whole left panel — Review's sections and well
+        # plate, the Analyze form — out over the page from the left; ✕ while
+        # it is out.
         self.menu_button = QToolButton()
         self.menu_button.setObjectName("PhoneMenuButton")
         self.menu_button.setText("☰")
@@ -477,19 +569,36 @@ class PhoneShell(QObject):
         self._page_menu.aboutToShow.connect(self._fill_page_menu)
         self.page_button.setMenu(self._page_menu)
 
+        # The page's own controls (channel, property, fold change, display,
+        # threshold, …) live in a sheet behind this, so the plot gets the screen.
+        self.controls_button = QToolButton()
+        self.controls_button.setObjectName("PhoneControlsButton")
+        self.controls_button.setText("⚙ Controls")
+        self.controls_button.clicked.connect(self.toggle_controls)
+
         self._band_spacer = QWidget()
         self._band_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        # Phone layout's own settings — text size, and the way back to the
-        # desktop layout — behind the same phone glyph the desk button wears.
+        # Upright, the bar has room for ☰, the three modes and ⋯ and no more,
+        # so Review's page menu and Controls take a strip of their own under
+        # it; sideways they join the bar (``_place_page_controls``).
+        from PySide6.QtWidgets import QHBoxLayout
+        self._strip = QWidget()
+        self._strip.setObjectName("PhoneStrip")
+        self._strip.setAttribute(Qt.WA_StyledBackground, True)
+        QHBoxLayout(self._strip).addStretch(1)
+
+        # ⋯: text size, reload, help, the app log, and the way back to the
+        # desk — one flat menu, no submenus.
         self.options_button = QToolButton()
         self.options_button.setObjectName("PhoneOptionsButton")
-        self.options_button.setText("Aa")
+        self.options_button.setText("⋯")
         self.options_button.setPopupMode(QToolButton.InstantPopup)
         self._menu = QMenu(self.options_button)
         self._menu.aboutToShow.connect(self._fill_menu)
-        self._size_menu = QMenu("Text size", self._menu)
         self.options_button.setMenu(self._menu)
+        from widgets.notice_badge import NoticeBadge
+        self._options_badge = NoticeBadge(self.options_button)
 
         band = self._h.band
         layout = band.layout() if band is not None else None
@@ -497,29 +606,66 @@ class PhoneShell(QObject):
             at = self._h.band_insert_at
             layout.insertWidget(at, self.menu_button)
             bar_at = layout.indexOf(self._h.mode_bar) if self._h.mode_bar else at
-            layout.insertWidget(bar_at + 1, self.page_button)
-            layout.insertWidget(bar_at + 2, self._band_spacer)
-            # Before the band's last widget, Help, which keeps the rightmost slot.
-            layout.insertWidget(max(0, layout.count() - 1), self.options_button)
+            layout.insertWidget(bar_at + 1, self._band_spacer)
+            layout.addWidget(self.options_button)
+            host = band.parentWidget()
+            host_lay = host.layout() if host is not None else None
+            if host_lay is not None:
+                host_lay.insertWidget(host_lay.indexOf(band) + 1, self._strip)
+        self._place_page_controls(landscape=False)
+        if self._h.log_badge is not None:
+            self._h.log_badge.installEventFilter(self)
         for w in self._phone_only():
             w.hide()
 
     def _phone_only(self) -> list[QWidget]:
-        return [self.menu_button, self.page_button, self._band_spacer,
-                self.options_button]
+        return [self.menu_button, self.page_button, self.controls_button,
+                self._band_spacer, self.options_button, self._strip]
+
+    def _place_page_controls(self, *, landscape: bool) -> None:
+        """The page menu and Controls: in the strip upright, in the bar sideways."""
+        strip_lay = self._strip.layout()
+        band = self._h.band
+        band_lay = band.layout() if band is not None else None
+        if landscape and band_lay is not None:
+            at = band_lay.indexOf(self._band_spacer)
+            band_lay.insertWidget(at, self.page_button)
+            band_lay.insertWidget(at + 1, self.controls_button)
+        else:
+            strip_lay.insertWidget(0, self.page_button)
+            strip_lay.addWidget(self.controls_button)
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        # The log button's "!" lives in the status bar, which phone layout
+        # hides; mirror it onto ⋯, where the App log item is.
+        if obj is self._h.log_badge and event.type() in (QEvent.Show, QEvent.Hide):
+            self._sync_log_badge()
+        return False
+
+    def _sync_log_badge(self) -> None:
+        badge = self._h.log_badge
+        lit = (phone_layout.is_on() and badge is not None
+               and not badge.isHidden())
+        tone = badge.tone() if lit else None
+        if tone:
+            self._options_badge.notify(tone)
+        else:
+            self._options_badge.clear()
 
     # ── the switch ────────────────────────────────────────────────────────
     def is_on(self) -> bool:
         return phone_layout.is_on()
 
     def set_on(self, on: bool, *, restyle: bool = True) -> None:
-        """Enter or leave phone layout. *restyle* False skips the text scale
+        """Enter or leave phone layout. *restyle* False skips the restyle
         (startup has already built everything at the right size)."""
         on = bool(on)
         if on == phone_layout.is_on() or self._applying:
             return
         self._save(phone_layout.KEY_ON, on)
         self._hide_banner()
+        if not on:
+            self.close_controls(now=True)
         if on:
             self._remember_desk_window()
         phone_layout.set_on(on)
@@ -528,8 +674,18 @@ class PhoneShell(QObject):
             self._h.set_navigator(False)
         else:
             self._restore_navigator()
+        # Steppers and form rows take their phone form *after* the restyle has
+        # scaled their desk sizes, and give it up *before* the restyle scales
+        # them back — so the rescale pass only ever sees desk-shaped widgets.
+        if not on:
+            self._adapt_all(False)
         if restyle:
-            self._apply_text_scale(self.text_scale() if on else 1.0)
+            self._restyle(self.text_scale() if on else 1.0, self.unit() if on else None)
+        elif on:
+            theme.set_touch_unit(self.unit())
+        if on:
+            self._adapt_all(True)
+        self._apply_sizes()
         # After the restyle: the mode bar takes its natural width, which is
         # only known once its labels are at their new size.
         self._h.relayout()
@@ -541,15 +697,27 @@ class PhoneShell(QObject):
             else:
                 app.removeEventFilter(self._filter)
         self._apply_window(on)
+        self._sync_log_badge()
         self.refresh()
 
+    def _hide(self, w: QWidget | None) -> None:
+        if w is not None and not w.isHidden():
+            w.hide()
+            self._hid.append(w)
+
     def _apply_chrome(self, on: bool) -> None:
-        if self._h.header is not None:
-            self._h.header.setVisible(not on)
-        for w in self._h.desk_only:
-            w.setVisible(not on)
-        if self._h.page_tabs_host is not None:
-            self._h.page_tabs_host.setVisible(not on)
+        if on:
+            self._hide(self._h.header)
+            for w in self._h.desk_only:
+                self._hide(w)
+            self._hide(self._h.page_tabs_host)
+        else:
+            for w in self._hid:
+                try:
+                    w.show()
+                except RuntimeError:
+                    swallowed()  # gone with a page torn down meanwhile
+            self._hid = []
         bar = self._h.mode_bar
         if bar is not None and hasattr(bar, "setCompact"):
             bar.setCompact(on)
@@ -557,46 +725,113 @@ class PhoneShell(QObject):
             w.setVisible(on)
         for d in self._h.dashboards():
             d.setStacked(on)
+        nav = self._h.rail_nav
+        if nav is not None:
+            for key in self._h.phone_hidden_sections:
+                row = getattr(nav, "_rows", {}).get(key)
+                if row is not None:
+                    if on:
+                        self._hide(row)
+            nav.setColumns(2 if on else 1)
+
+    # ── adapting individual widgets ───────────────────────────────────────
+    def _band_managed(self, band: QWidget) -> bool:
+        roots = [r for r in self._h.band_roots() if r is not None]
+        p = band.parentWidget()
+        while p is not None:
+            if any(p is r for r in roots):
+                return True
+            p = p.parentWidget()
+        return False
+
+    def adapt(self, w: QWidget) -> None:
+        """Give one widget its phone (or desk) form — on entering and leaving
+        phone layout for those that exist, and on Show for those built later."""
+        on = phone_layout.is_on()
+        name = type(w).__name__
+        if name == "ControlBand":
+            if on and w is not self._sheet_band and self._band_managed(w):
+                self._hide(w)
+        elif name == "MplToolbar":
+            # Its pan and zoom are modes a mouse drag over VNC fights with;
+            # the plot is for reading on a phone, and Reset is in Controls.
+            if on:
+                self._hide(w)
+        elif name == "Stepper" and hasattr(w, "setTouchMode"):
+            if w.isTouchMode() != on:
+                w.setTouchMode(on)
+        elif w.objectName() == "AnalyzeFormRow":
+            self._stack_form_row(w, on)
+
+    def _adapt_all(self, on: bool) -> None:
+        for w in list(QApplication.allWidgets()):
+            try:
+                self.adapt(w)
+            except RuntimeError:
+                swallowed()  # deleted while the list was walked
+        self._grab_scrolling(on)
+
+    def _stack_form_row(self, row: QWidget, on: bool) -> None:
+        """A label above its field on a phone, beside it at the desk."""
+        from PySide6.QtWidgets import QBoxLayout
+        lay = row.layout()
+        if not isinstance(lay, QBoxLayout) or lay.count() == 0:
+            return
+        label = lay.itemAt(0).widget()
+        want = QBoxLayout.TopToBottom if on else QBoxLayout.LeftToRight
+        if lay.direction() == want:
+            return
+        lay.setDirection(want)
+        if label is None:
+            return
+        if on:
+            row.setProperty("_awLabelPin", [label.minimumWidth(), label.maximumWidth()])
+            label.setMinimumWidth(0)
+            label.setMaximumWidth(_QWIDGETSIZE_MAX)
+        else:
+            pin = row.property("_awLabelPin")
+            if pin:
+                label.setMinimumWidth(int(pin[0]))
+                label.setMaximumWidth(int(pin[1]))
+
+    def _grab_scrolling(self, on: bool) -> None:
+        """Let a drag scroll the long panels, the way a thumb expects.
+
+        Over VNC a touch-drag arrives as a left-button mouse drag, which a Qt
+        scroll area ignores. Grabbed only on the side rail, the Controls sheet
+        and the logs — never on the plate or a plot, whose drags mean
+        something else. A press on a control inside still reaches the control.
+        Whether RealVNC's touch mode sends drags this way is not verified on a
+        device.
+        """
+        from PySide6.QtWidgets import QAbstractScrollArea, QScroller
+        roots = [self._h.rail_drawer, self._sheet]
+        targets = []
+        for r in roots:
+            if r is not None:
+                targets += r.findChildren(QAbstractScrollArea)
+        targets += [w for w in QApplication.allWidgets()
+                    if type(w).__name__ in ("QTextEdit", "QPlainTextEdit")
+                    and w.isReadOnly()]
+        for area in targets:
+            vp = area.viewport()
+            if on:
+                QScroller.grabGesture(vp, QScroller.LeftMouseButtonGesture)
+            else:
+                QScroller.ungrabGesture(vp)
 
     def _restore_navigator(self) -> None:
         state = self._desk_state or {}
         self._h.set_navigator(state.get("navigator_open", True))
 
-    # ── text size ─────────────────────────────────────────────────────────
-    def text_size(self) -> float:
-        """The stored choice: a preset, or ``AUTO``."""
-        return self._text_size
-
-    def text_scale(self) -> float:
-        """The scale the stored choice means on this screen."""
-        avail = self._avail()
-        return phone_layout.resolve_text_size(
-            self._text_size, avail.width(), avail.height())
-
-    def plot_factor(self) -> float:
-        """How much larger plots draw their text in phone layout.
-
-        The square root of the text scale, not the scale itself: in one column
-        a plot already gets the screen's full width, and the renderers lay out
-        their axes with fixed margins, so the full factor pushed titles off the
-        figure and y-labels into the tick numbers (measured at 1.75 on a
-        1080-wide portrait desktop). ``phone_layout.plot_factor`` is the rule.
-        """
-        return phone_layout.plot_factor(theme.ui_scale()) if phone_layout.is_on() else 1.0
-
-    def set_text_size(self, stored: float) -> None:
-        self._text_size = stored
-        self._save(phone_layout.KEY_TEXT_SIZE, stored)
-        if phone_layout.is_on():
-            self._apply_text_scale(self.text_scale())
-            scale_canvases(self.plot_factor())
-            self.refresh()
-
-    def _apply_text_scale(self, factor: float) -> None:
-        if abs(factor - theme.ui_scale()) < 1e-6:
+    # ── restyle ───────────────────────────────────────────────────────────
+    def _restyle(self, factor: float, unit: float | None) -> None:
+        """Re-apply the stylesheet at *factor* type scale and touch *unit*."""
+        if abs(factor - theme.ui_scale()) < 1e-6 and unit == theme.touch_unit():
             return
         app = QApplication.instance()
-        overlay = _BusyOverlay(self._win, "Resizing text…\nThis takes a few seconds.")
+        overlay = _BusyOverlay(self._win, "Resizing for your screen…\\n"
+                                          "This takes a few seconds.")
         overlay.show()
         overlay.raise_()
         overlay.repaint()
@@ -605,29 +840,66 @@ class PhoneShell(QObject):
             prev = theme.ui_scale()
             fonts = explicit_fonts()
             theme.apply_ui_scale(factor)
+            theme.set_touch_unit(unit)
             if app is not None:
                 app.setStyleSheet(theme.qss())
             rescale_widgets(prev, factor, [w for w in QApplication.allWidgets()
                                            if w is not overlay and w.parentWidget() is not overlay],
                             fonts)
-            self._repin_band()
         finally:
             self._applying = False
             QTimer.singleShot(_OVERLAY_LINGER_MS, overlay.deleteLater)
 
-    def _repin_band(self) -> None:
-        """The band is pinned to a tab bar's height; re-measure at the new size."""
+    def _apply_sizes(self) -> None:
+        """Pin the touch-sized parts of phone layout, and the desk's back."""
         band = self._h.band
-        if band is None or band.layout() is None:
+        on = phone_layout.is_on()
+        land = self.is_landscape()
+        self._landscape = land if on else None
+        self._place_page_controls(landscape=on and land)
+        if on:
+            strip_lay = self._strip.layout()
+            strip_lay.setContentsMargins(self.pt(8), self.pt(4), self.pt(8), self.pt(4))
+            strip_lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
+        if band is not None and band.layout() is not None:
+            if on:
+                bar = self.pt(LANDSCAPE_BAR_PT if land else phone_layout.TOP_BAR_PT)
+                side = self.pt(phone_layout.TOUCH_ROW_PT if not land else 40)
+                for b in (self.menu_button, self.options_button):
+                    b.setFixedSize(side, side)
+                band.setFixedHeight(bar)
+                band.layout().setContentsMargins(self.pt(4), 0, self.pt(4), 0)
+                band.layout().setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
+            else:
+                from widgets.mode_bar import tab_bar_height
+                needed = tab_bar_height()
+                lay = band.layout()
+                for i in range(lay.count()):
+                    w = lay.itemAt(i).widget()
+                    if w is not None and not w.isHidden():
+                        needed = max(needed, w.sizeHint().height())
+                band.setFixedHeight(needed)
+                band.layout().setContentsMargins(0, 0, theme.Spacing.md, 0)
+                band.layout().setSpacing(theme.Spacing.sm)
+        drawer = self._h.rail_drawer
+        if drawer is not None and on:
+            drawer._width_hint = (lambda: self.pt(LANDSCAPE_PANEL_PT)) if land else (
+                lambda: max(1, drawer._host.width() - self.pt(RAIL_GAP_PT)))
+            drawer._backdrop._alpha = 0.5
+        self._apply_analyze_columns(on and land)
+
+    def _apply_analyze_columns(self, two: bool) -> None:
+        """Sideways, Analyze is two columns: the run summary and plate on the
+        left, the log on the right; upright, one above the other."""
+        from PySide6.QtWidgets import QBoxLayout
+        body = self._h.analyze_body
+        if not isinstance(body, QBoxLayout):
             return
-        from widgets.mode_bar import tab_bar_height
-        needed = tab_bar_height()
-        lay = band.layout()
-        for i in range(lay.count()):
-            w = lay.itemAt(i).widget()
-            if w is not None and not w.isHidden():
-                needed = max(needed, w.sizeHint().height())
-        band.setFixedHeight(needed)
+        body.setDirection(QBoxLayout.LeftToRight if two else QBoxLayout.TopToBottom)
+        if self._h.analyze_rule is not None:
+            self._h.analyze_rule.setVisible(not two)
+        for d in self._h.dashboards():
+            d.setMaximumWidth(self.pt(LANDSCAPE_SUMMARY_PT) if two else _QWIDGETSIZE_MAX)
 
     # ── window ────────────────────────────────────────────────────────────
     def _avail(self) -> QRect:
@@ -692,12 +964,15 @@ class PhoneShell(QObject):
 
     def _on_geometry_changed(self, _rect) -> None:
         self.fit_window()
-        if phone_layout.is_on():
-            # Rotating the phone: VNC resized the desktop under a maximized
-            # window. Auto's pick depends on the screen, so it may change.
-            if self._text_size == phone_layout.AUTO:
-                self._apply_text_scale(self.text_scale())
-                scale_canvases(self.plot_factor())
+        if not phone_layout.is_on() or self._applying:
+            return
+        # The phone turned (VNC resized the desktop under a maximized window),
+        # or a new resolution changed what a phone point is.
+        self.close_controls(now=True)
+        self._restyle(self.text_scale(), self.unit())
+        scale_canvases(self.plot_factor())
+        self._apply_sizes()
+        self.refresh()
 
     # ── the offer ─────────────────────────────────────────────────────────
     def _maybe_offer(self, avail: QRect) -> None:
@@ -746,16 +1021,126 @@ class PhoneShell(QObject):
         self._banner_dismissed_for = bool(getattr(self._banner, "_aw_to_phone", True))
         self._hide_banner()
 
+    # ── the Controls sheet ────────────────────────────────────────────────
+    def _current_band(self):
+        """The control band of the Review page on screen, if it has controls."""
+        for w in QApplication.allWidgets():
+            if type(w).__name__ != "ControlBand" or not self._band_managed(w):
+                continue
+            parent = w.parentWidget()
+            if w is self._sheet_band or (parent is not None and parent.isVisible()):
+                if (w.scope_count() + w.action_count()) > 0:
+                    return w
+        return None
+
+    def _ensure_sheet(self):
+        land = self.is_landscape()
+        if self._sheet is not None and getattr(self._sheet, "_aw_land", None) == land:
+            return self._sheet
+        if self._sheet is not None:
+            self._sheet.closeNow()
+            self._sheet.deleteLater()
+        from PySide6.QtWidgets import QScrollArea
+        from widgets.drawer import Drawer
+        band = self._h.band
+
+        def _below_band() -> int:
+            return band.mapTo(self._win, band.rect().bottomLeft()).y() + 1 if band else 0
+
+        if land:
+            sheet = Drawer(self._win, edge="right", width_hint=lambda: self.pt(LANDSCAPE_PANEL_PT),
+                           margin=0, top_inset=_below_band, scrim=0.25)
+        else:
+            sheet = Drawer(self._win, edge="bottom",
+                           height_hint=lambda: int(self._win.height() * SHEET_HEIGHT_SHARE),
+                           margin=0, scrim=0.25)
+        sheet.setObjectName("PhoneControlsSheet")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        holder = QWidget()
+        lay = QVBoxLayout(holder)
+        lay.setContentsMargins(self.pt(8), self.pt(8), self.pt(8), self.pt(8))
+        lay.addStretch(1)
+        scroll.setWidget(holder)
+        sheet.setContentWidget(scroll)
+        sheet._aw_land = land
+        sheet._aw_holder = holder
+        sheet.closed.connect(self._give_band_back)
+        self._sheet = sheet
+        return sheet
+
+    def toggle_controls(self) -> None:
+        if self._sheet is not None and self._sheet.isOpen():
+            self.close_controls()
+        else:
+            self.open_controls()
+
+    def open_controls(self) -> None:
+        band = self._current_band()
+        if band is None:
+            return
+        sheet = self._ensure_sheet()
+        parent = band.parentWidget()
+        lay = parent.layout() if parent is not None else None
+        index = lay.indexOf(band) if lay is not None else -1
+        self._sheet_band = band
+        band.setProperty("_awHome", index)
+        self._sheet_home = parent
+        holder = sheet._aw_holder
+        holder.layout().insertWidget(0, band)
+        band.setStacked(True)
+        band.show()
+        self._grab_scrolling(True)
+        sheet.open()
+        self.controls_button.setText("⚙ Done")
+
+    def close_controls(self, *, now: bool = False) -> None:
+        if self._sheet is None:
+            return
+        if now:
+            self._sheet.closeNow()
+        elif self._sheet.isOpen():
+            self._sheet.close()
+
+    def _give_band_back(self) -> None:
+        band, self._sheet_band = self._sheet_band, None
+        self.controls_button.setText("⚙ Controls")
+        if band is None:
+            return
+        try:
+            band.setStacked(False)
+            home = getattr(self, "_sheet_home", None)
+            index = band.property("_awHome")
+            if home is not None and home.layout() is not None:
+                home.layout().insertWidget(max(0, int(index or 0)), band)
+            if phone_layout.is_on():
+                band.hide()          # already in self._hid from entering
+            else:
+                band.show()
+        except RuntimeError:
+            swallowed()  # the page went while its controls were out
+
     # ── menus and the drawer ──────────────────────────────────────────────
     def refresh(self) -> None:
         """Sync the band's phone controls with the current mode and drawer."""
         if not phone_layout.is_on():
             return
-        self.menu_button.setChecked(self._h.navigator_open())
+        open_ = self._h.navigator_open()
+        self.menu_button.setChecked(open_)
+        self.menu_button.setText("✕" if open_ else "☰")
+        review = self._h.mode() == "review"
         bar = self._current_page_bar()
-        self.page_button.setVisible(bar is not None and self._h.mode() == "review")
+        self.page_button.setVisible(bar is not None and review)
         if bar is not None:
             self.page_button.setText(f"{bar.tabText(bar.currentIndex())} ▾")
+        self.controls_button.setVisible(review and self._current_band() is not None)
+        land = bool(self._landscape)
+        self._strip.setVisible(review and not land
+                               and (self.page_button.isVisibleTo(self._strip)
+                                    or self.controls_button.isVisibleTo(self._strip)))
+        if not review:
+            self.close_controls()
 
     def _current_page_bar(self):
         fn = self._h.current_page_bar
@@ -763,6 +1148,7 @@ class PhoneShell(QObject):
         return bar if bar is not None and bar.count() > 0 else None
 
     def _on_menu_clicked(self) -> None:
+        self.close_controls()
         self._h.set_navigator(not self._h.navigator_open())
         self.refresh()
 
@@ -788,30 +1174,42 @@ class PhoneShell(QObject):
 
     def _pick_page(self, bar, idx: int) -> None:
         bar.setCurrentIndex(idx)
+        self.close_controls(now=True)
         self.refresh()
+
+    def _text_size_row(self):
+        """The ⋯ menu's first item: Text size, as three buttons in one row."""
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidgetAction
+        act = QWidgetAction(self._menu)
+        row = QWidget()
+        row.setObjectName("PhoneTextSizeRow")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(self.pt(16), self.pt(4), self.pt(12), self.pt(4))
+        lay.setSpacing(self.pt(8))
+        lay.addWidget(QLabel("Text size", row), 1)
+        for size in phone_layout.TEXT_SIZES:
+            b = QPushButton(phone_layout.TEXT_SIZE_LABEL[size][0], row)
+            b.setObjectName("PhoneTextSizeButton")
+            b.setCheckable(True)
+            b.setChecked(size == self._text_size)
+            b.setFixedSize(self.pt(48), self.pt(44))
+            b.clicked.connect(lambda _c=False, s=size: (self._menu.close(),
+                                                        self.set_text_size(s)))
+            lay.addWidget(b)
+        act.setDefaultWidget(row)
+        return act
 
     def _fill_menu(self) -> None:
         m = self._menu
         m.clear()
-        # One submenu for the life of the shell, emptied and refilled here:
-        # ``clear()`` on the parent drops only the actions it owns, so the
-        # submenu survives it, and a submenu made afresh on every open left
-        # callers holding a wrapper onto one already deleted.
-        sizes = self._size_menu
-        sizes.clear()
-        m.addMenu(sizes)
-        group = QActionGroup(sizes)
-        avail = self._avail()
-        auto_pick = phone_layout.auto_text_size(avail.width(), avail.height())
-        for stored in (phone_layout.AUTO, *phone_layout.PRESETS):
-            label = phone_layout.text_size_label(stored)
-            if stored == phone_layout.AUTO:
-                label = f"Auto ({phone_layout.text_size_label(auto_pick)})"
-            act = QAction(label, sizes, checkable=True)
-            act.setChecked(stored == self._text_size)
-            act.triggered.connect(lambda _c=False, s=stored: self.set_text_size(s))
-            group.addAction(act)
-            sizes.addAction(act)
+        m.addAction(self._text_size_row())
         m.addSeparator()
-        desk = m.addAction("Desktop layout")
-        desk.triggered.connect(lambda: self.set_on(False))
+        if self._h.reload is not None and self._h.mode() == "review":
+            m.addAction("Reload dataset").triggered.connect(self._h.reload)
+        if self._h.show_help is not None:
+            m.addAction("Help").triggered.connect(self._h.show_help)
+        if self._h.show_log is not None:
+            lit = self._h.log_badge is not None and not self._h.log_badge.isHidden()
+            m.addAction("App log  •" if lit else "App log").triggered.connect(self._h.show_log)
+        m.addSeparator()
+        m.addAction("Desktop layout").triggered.connect(lambda: self.set_on(False))

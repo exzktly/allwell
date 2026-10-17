@@ -246,6 +246,41 @@ class RailNav(QFrame):
         if row is not None:
             row.setEnabled(bool(enabled))
 
+    def setColumns(self, n: int) -> None:
+        """Lay the rows out in *n* columns (1, the default, is the rail's list).
+
+        Phone layout's side rail uses two: nine sections as a column of 48-pt
+        rows fill the rail before the well plate is reached, and as a grid of
+        tiles they take half that. The rows are moved, not rebuilt, so their
+        state and connections are untouched.
+        """
+        n = max(1, int(n))
+        if n == getattr(self, "_columns", 1):
+            return
+        self._columns = n
+        from PySide6.QtWidgets import QGridLayout
+        old = self.layout()
+        rows = [self._rows[k] for k in self._order]
+        for r in rows:
+            old.removeWidget(r)
+        holder = QWidget()
+        holder.setLayout(old)          # re-home the old layout so it can die
+        holder.deleteLater()
+        if n == 1:
+            lay = QVBoxLayout(self)
+            for r in rows:
+                lay.addWidget(r)
+        else:
+            lay = QGridLayout(self)
+            # Shown rows first, so a hidden one leaves no hole in the grid.
+            ordered = ([r for r in rows if not r.isHidden()]
+                       + [r for r in rows if r.isHidden()])
+            for i, r in enumerate(ordered):
+                lay.addWidget(r, i // n, i % n)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(1)
+        self._lay = lay
+
     def items(self) -> list[str]:
         return list(self._order)
 

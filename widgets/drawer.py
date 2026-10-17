@@ -14,7 +14,9 @@ API
 ---
 * ``Drawer(host, parent=None, *, edge="right", width_hint=None,
   width_fraction=0.34, height_hint=None, height_fraction=0.4, margin=None,
-  top_inset=0)`` — *margin* is the padding around the content (default
+  top_inset=0, scrim=0.35)`` — *width_hint* / *height_hint* may be callables,
+  re-asked on every open and host resize; *scrim* is the backdrop's opacity;
+  *margin* is the padding around the content (default
   ``Spacing.lg``); *top_inset* (an int, or a callable returning one) keeps the
   drawer and its backdrop below a strip of the host that stays usable, such as
   a toolbar holding the button that opens it.
@@ -50,8 +52,9 @@ from widgets._support import with_alpha
 class _Backdrop(QWidget):
     clicked = Signal()
 
-    def __init__(self, parent: QWidget) -> None:
+    def __init__(self, parent: QWidget, alpha: float = 0.35) -> None:
         super().__init__(parent)
+        self._alpha = alpha
         self.setObjectName("DrawerBackdrop")
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setVisible(False)
@@ -62,7 +65,7 @@ class _Backdrop(QWidget):
         # — keep the literal here because Drawer paints a solid backdrop
         # rather than reading a CSS rgba string. The numeric value comes
         # from the same design-token decision.
-        p.fillRect(self.rect(), with_alpha(theme.Colors.ink_dark, 0.35))
+        p.fillRect(self.rect(), with_alpha(theme.Colors.ink_dark, self._alpha))
 
     def mousePressEvent(self, _event) -> None:
         self.clicked.emit()
@@ -76,20 +79,25 @@ class Drawer(QWidget):
                  edge: str = "right",
                  width_hint: int | None = None, width_fraction: float = 0.34,
                  height_hint: int | None = None, height_fraction: float = 0.4,
-                 margin: int | None = None, top_inset=0) -> None:
+                 margin: int | None = None, top_inset=0,
+                 scrim: float = 0.35) -> None:
         super().__init__(parent or host)
         self.setObjectName("Drawer")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._host = host
         self._edge = edge if edge in ("right", "left", "bottom") else "right"
         self._top_inset = top_inset
-        self._width_hint = int(width_hint) if width_hint else None
+        # An int, or a callable re-asked on every open and resize (phone
+        # layout sizes its rail from the screen, which turns).
+        self._width_hint = (width_hint if callable(width_hint)
+                            else int(width_hint) if width_hint else None)
         self._width_fraction = float(width_fraction)
-        self._height_hint = int(height_hint) if height_hint else None
+        self._height_hint = (height_hint if callable(height_hint)
+                             else int(height_hint) if height_hint else None)
         self._height_fraction = float(height_fraction)
         self._open = False
 
-        self._backdrop = _Backdrop(host)
+        self._backdrop = _Backdrop(host, scrim)
         self._backdrop.clicked.connect(self.close)
 
         self._layout = QVBoxLayout(self)
@@ -177,11 +185,15 @@ class Drawer(QWidget):
         return max(0, min(int(inset or 0), self._host.height()))
 
     def _drawer_width(self) -> int:
+        if callable(self._width_hint):
+            return max(1, min(int(self._width_hint()), self._host.width()))
         if self._width_hint:
             return min(self._width_hint, self._host.width())
         return max(280, round(self._host.width() * self._width_fraction))
 
     def _drawer_height(self) -> int:
+        if callable(self._height_hint):
+            return max(1, min(int(self._height_hint()), self._host.height()))
         if self._height_hint:
             return min(self._height_hint, self._host.height())
         return max(200, round(self._host.height() * self._height_fraction))

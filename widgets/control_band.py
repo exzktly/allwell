@@ -246,6 +246,39 @@ class ControlBand(QWidget):
         self._actions.addWidget(widget)
         return widget
 
+    def setStacked(self, on: bool) -> None:
+        """Flow the right-hand actions in with the scope controls.
+
+        For a narrow host — phone layout's Controls sheet — where a row of
+        actions pinned to the right edge runs off it: stacked, every control
+        wraps in one flow, actions last. Moved, not rebuilt, and put back in
+        the same order when stacking ends.
+        """
+        on = bool(on)
+        if on == getattr(self, "_stacked", False):
+            return
+        self._stacked = on
+        if on:
+            self._moved_actions = []
+            while self._actions.count():
+                item = self._actions.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    hidden = w.isHidden()   # setParent hides; keep the choice
+                    self._moved_actions.append((w, hidden))
+                    w.setParent(self._scope_host)
+                    self._scope.addWidget(w)
+                    w.setHidden(hidden)
+        else:
+            for w, _hidden in getattr(self, "_moved_actions", []):
+                hidden = w.isHidden()
+                self._scope.removeWidget(w)
+                w.setParent(self)
+                self._actions.addWidget(w)
+                w.setHidden(hidden)
+            self._moved_actions = []
+        self.updateGeometry()
+
     # ── per-leaf slots ──────────────────────────────────────────────────────
     def slot(self, name: str) -> ControlBandSlot:
         """The :class:`ControlBandSlot` called *name*, created on first ask.

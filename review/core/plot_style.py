@@ -1563,7 +1563,69 @@ def _place_legend(legend, loc_name: str) -> None:
             swallowed()  # was: pass (silent except)
 
 
+def _break_to_fit(text: str, measured_px: float, room_px: float) -> str:
+    """*text* broken at spaces into as many lines as it needs to fit *room_px*,
+    given it measured *measured_px* on one line."""
+    import textwrap
+    if "\n" in text or measured_px <= room_px or room_px <= 0 or not text:
+        return text
+    # As many characters as the room holds at this text's average width:
+    # full lines, so a title that overflows by a word takes two lines, not three.
+    per_char = measured_px / len(text)
+    width = max(8, int(room_px / per_char))
+    return textwrap.fill(text, width=width, break_long_words=False)
+
+
+def _fit_labels_to_phone(fig) -> None:
+    """Break a title wider than its figure, or a y-label taller than its axes,
+    onto more lines — at phone sizes a plot's own title is often longer than a
+    phone is wide. Real line breaks rather than matplotlib's ``wrap``, which
+    constrained layout measures before wrapping, so a wrapped title still ran
+    off the top of the figure."""
+    renderer = fig.canvas.get_renderer()
+    fig_w = fig.bbox.width
+    for ax in fig.axes:
+        title = ax.title
+        if title.get_text():
+            # A title is centred over its axes, not the figure, so the room it
+            # has is twice the distance from that centre to the nearer edge.
+            cx = (ax.bbox.x0 + ax.bbox.x1) / 2 - fig.bbox.x0
+            room = 2 * min(cx, fig_w - cx) * 0.96
+            w = title.get_window_extent(renderer).width
+            title.set_text(_break_to_fit(title.get_text(), w, room))
+        ylab = ax.yaxis.label
+        if ylab.get_text():
+            h = ylab.get_window_extent(renderer).height
+            ylab.set_text(_break_to_fit(ylab.get_text(), h, ax.bbox.height))
+
+
 def _apply_layout_engine(fig, prefs: dict) -> None:
+    from core import phone_layout
+    if phone_layout.is_on():
+        # Phone layout draws plot text at true phone sizes (a larger DPI,
+        # ``ui/phone_shell.scale_canvas``), which the renderers' fixed margins
+        # cannot hold: titles ran off the figure and y-labels into the ticks.
+        # Constrained layout sizes the margins from the text, and a title too
+        # long for a phone's width wraps rather than being cut. The user's own
+        # layout choice is left untouched in their prefs and applies again at
+        # the desk.
+        # ``Axes.set_position`` — which renderers call to place their panels —
+        # takes an axes out of layout, and constrained layout then leaves it
+        # exactly where it was. Grid axes go back in; the renderer places them
+        # again on the next desk redraw. Axes outside a grid (a colorbar
+        # placed by hand) keep their place.
+        for ax in fig.axes:
+            if ax.get_subplotspec() is not None:
+                ax.set_in_layout(True)
+        try:
+            _fit_labels_to_phone(fig)
+        except Exception:
+            swallowed()  # an unmeasurable label keeps its one line
+        try:
+            fig.set_layout_engine("constrained")
+        except Exception:
+            swallowed()  # a figure that refuses an engine keeps its margins
+        return
     use_constrained = bool(prefs.get("layout_constrained", False))
     use_tight = bool(prefs.get("layout_tight", False))
     try:

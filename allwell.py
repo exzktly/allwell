@@ -499,6 +499,7 @@ class AllWellApp(QMainWindow):
         # Status bar v2: status / kbd hints / Log tray IconButton.
         from widgets.kbd_hint import KbdHint as _KbdHint
         statusbar = QWidget(objectName="StatusBar")
+        self._statusbar = statusbar
         sb_layout = QHBoxLayout(statusbar)
         sb_layout.setContentsMargins(theme_v2.Spacing.md, 4,
                                      theme_v2.Spacing.md, 4)
@@ -600,16 +601,23 @@ class AllWellApp(QMainWindow):
             dash = getattr(self._analyze, "_dashboard", None)
             return [dash] if dash is not None else []
 
-        # Kept: refresh (reloading a dataset is the one action useful while
-        # watching from a phone). Gone: the publication look, both resets,
+        # Gone from the phone's top bar: the publication look, both resets,
         # copy-analysis and reveal-folder — three of them destructive, a
-        # fat-finger target on a phone, and none of them for reading results.
+        # fat-finger target on a phone, and none of them for reading results —
+        # and Refresh and Help, which move into the ⋯ menu so the bar's
+        # remaining controls can be thumb-sized. The status bar goes too; its
+        # log "!" is mirrored onto ⋯.
         desk_only = [w for w in (
             getattr(self, "_present_btn", None), getattr(self, "_reset_saves_btn", None),
             getattr(self, "_copy_analysis_btn", None), getattr(self, "_open_btn", None),
-            getattr(self, "_reset_view_btn", None),
-        ) if w is not None] + list(getattr(self, "_status_hints", []))
+            getattr(self, "_reset_view_btn", None), getattr(self, "_refresh_btn", None),
+            getattr(self, "_help_btn", None), getattr(self, "_statusbar", None),
+        ) if w is not None]
 
+        from review.core.phone_drawer import ensure_drawer
+        drawer = ensure_drawer(review._ctx)
+        dash = getattr(self._analyze, "_dashboard", None)
+        analyze_page = dash.parentWidget() if dash is not None else None
         handles = PhoneHandles(
             header=getattr(self, "_header", None),
             band=band,
@@ -623,6 +631,16 @@ class AllWellApp(QMainWindow):
             set_navigator=_set_navigator,
             relayout=_relayout,
             dashboards=_dashboards,
+            reload=self._on_refresh_clicked,
+            show_help=self._toggle_help_drawer,
+            show_log=self._toggle_log_drawer,
+            log_badge=getattr(self, "_log_badge", None),
+            band_roots=lambda: [getattr(review, "_notebook", None), self._analyze],
+            rail_nav=nav,
+            phone_hidden_sections=("Review CSV", "Batch Export"),
+            rail_drawer=drawer,
+            analyze_body=analyze_page.layout() if analyze_page is not None else None,
+            analyze_rule=getattr(self._analyze, "_log_sep", None),
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
         self._header_layout.insertWidget(
@@ -637,8 +655,6 @@ class AllWellApp(QMainWindow):
             nav.itemClicked.connect(lambda _key: self._phone.close_drawer())
         # The drawer also closes from inside (its dimmed strip, Esc); ☰ shows
         # whichever state it is in.
-        from review.core.phone_drawer import ensure_drawer
-        drawer = ensure_drawer(review._ctx)
         drawer.opened.connect(self._phone.refresh)
         drawer.closed.connect(self._phone.refresh)
 
@@ -1248,9 +1264,11 @@ class AllWellApp(QMainWindow):
             # several, not the head of a left column. It is always there — the
             # left panel is closed most of the time — at its own width.
             bar.setVisible(True)
-            natural = bar.sizeHint().width()
-            if bar.width() != natural:
-                bar.setFixedWidth(natural)
+            # Unpinned: the band's spacer takes the slack, and the bar is laid
+            # out at its size hint *when the layout runs* — a width pinned
+            # here was measured before a restyle had grown its labels.
+            bar.setMinimumWidth(0)
+            bar.setMaximumWidth(16_777_215)   # Qt's QWIDGETSIZE_MAX
             return
         collapsed = bool(getattr(getattr(self, "_review", None),
                                  "_sidebar_collapsed", False))
@@ -2032,10 +2050,13 @@ def _phone_layout_at_startup(app) -> bool:
         avail = screen.availableGeometry()
         if not phone_layout.is_phone_shaped(avail.width(), avail.height()):
             return False
-        stored = phone_layout.parse_text_size(
-            s.value(phone_layout.KEY_TEXT_SIZE, phone_layout.AUTO))
+        size = phone_layout.parse_text_size(
+            s.value(phone_layout.KEY_TEXT_SIZE, phone_layout.DEFAULT_TEXT_SIZE))
+        g = screen.geometry()
+        unit = phone_layout.phone_unit(g.width(), g.height())
         theme_v2.apply_ui_scale(
-            phone_layout.resolve_text_size(stored, avail.width(), avail.height()))
+            phone_layout.type_scale(unit, size, theme_v2.desk_body_size()))
+        theme_v2.set_touch_unit(unit)
         return True
     except Exception:
         swallowed()

@@ -1701,22 +1701,31 @@ QProgressBar::chunk {{
    carry no drop-down arrow: the "Bar Plots ▾" label already says a menu
    opens, and the arrow Qt draws in the corner is a second, smaller target
    beside the real one. */
+QWidget#PhoneStrip {{
+    background-color: {c.rail};
+    border-bottom: 1px solid {c.border_subtle};
+}}
 QToolButton#PhoneMenuButton, QToolButton#PhonePageButton,
-QToolButton#PhoneOptionsButton {{
+QToolButton#PhoneOptionsButton, QToolButton#PhoneControlsButton {{
     background-color: transparent;
     border: 1px solid {c.control_border};
     border-radius: {r.sm}px;
     padding: {m.btn_pad_v}px {m.btn_pad_h}px;
     font-weight: {t.semibold};
 }}
-QToolButton#PhoneMenuButton {{ font-size: {t.h2_size}px; }}
+QToolButton#PhoneMenuButton, QToolButton#PhoneOptionsButton {{ font-size: {t.h2_size}px; }}
+QPushButton#PhoneTextSizeButton:checked {{
+    background-color: {c.accent};
+    color: {c.accent_fg};
+    border-color: {c.accent};
+}}
 QToolButton#PhoneMenuButton:checked {{
     background-color: {c.accent};
     color: {c.accent_fg};
     border-color: {c.accent};
 }}
 QToolButton#PhoneMenuButton:hover, QToolButton#PhonePageButton:hover,
-QToolButton#PhoneOptionsButton:hover {{
+QToolButton#PhoneOptionsButton:hover, QToolButton#PhoneControlsButton:hover {{
     background-color: {c.hover};
 }}
 QToolButton#PhonePageButton::menu-indicator,
@@ -1724,11 +1733,19 @@ QToolButton#PhoneOptionsButton::menu-indicator {{
     image: none;
     width: 0px;
 }}
+QLabel#PlateHeadline[phone="true"] {{
+    font-size: {t.h3_size}px;
+    font-weight: {t.semibold};
+}}
+QLabel#PlateWellDetail {{
+    color: {c.text_secondary};
+    padding: {s.xs}px 0px;
+}}
 QToolButton#PhoneLayoutButton {{
     border: 1px solid {c.control_border};
     border-radius: {r.sm}px;
 }}
-"""
+""" + (_touch_qss(_TOUCH_UNIT[0]) if _TOUCH_UNIT[0] else "")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1873,6 +1890,64 @@ _UI_SCALE = [1.0]
 def ui_scale() -> float:
     """The UI scale currently applied to the size tokens (1.0 = none)."""
     return _UI_SCALE[0]
+
+
+def desk_body_size() -> int:
+    """The body type size before any UI scale."""
+    return _SCALE_BASE.get((Typography, "body_size"), Typography.body_size)
+
+
+# Phone layout's touch unit — logical pixels per phone point — or None at the
+# desk. Set, it adds :func:`_touch_qss` to the application stylesheet.
+_TOUCH_UNIT: list = [None]
+
+
+def touch_unit() -> float | None:
+    """Logical px per phone point while phone layout's touch sizing is on."""
+    return _TOUCH_UNIT[0]
+
+
+def set_touch_unit(unit: float | None) -> None:
+    """Turn touch sizing on at *unit* px per phone point, or off with None.
+
+    Tokens only, like :func:`apply_ui_scale`: the caller re-applies
+    :func:`qss`.
+    """
+    _TOUCH_UNIT[0] = float(unit) if unit else None
+
+
+def _touch_qss(u: float) -> str:
+    """Minimum sizes for anything a thumb taps, in phone points × *u*.
+
+    44 pt for controls, 48 for menu and list rows — the floors Apple and
+    Material set — so a control is never smaller than a thumb whatever its
+    text size. Appended last, so it wins over the desk rules above it.
+    """
+    def pt(n: float) -> int:
+        return round(n * u)
+    c = Colors
+    return f"""
+/* ── Phone layout: touch sizes (theme.set_touch_unit) ─────────────────── */
+QPushButton, QToolButton, QComboBox, QLineEdit, QAbstractSpinBox {{
+    min-height: {pt(44)}px;
+}}
+QPushButton, QComboBox {{ padding-left: {pt(12)}px; padding-right: {pt(12)}px; }}
+QComboBox QAbstractItemView::item, QListView::item, QListWidget::item,
+QTreeView::item {{
+    min-height: {pt(48)}px;
+}}
+QMenu::item {{
+    padding: {pt(13)}px {pt(20)}px {pt(13)}px {pt(16)}px;
+}}
+QMenu::separator {{ height: 1px; margin: {pt(4)}px 0px; }}
+QCheckBox::indicator, QRadioButton::indicator {{
+    width: {pt(24)}px; height: {pt(24)}px;
+}}
+QCheckBox, QRadioButton {{ spacing: {pt(10)}px; min-height: {pt(44)}px; }}
+QScrollBar:vertical {{ width: {pt(10)}px; }}
+QScrollBar:horizontal {{ height: {pt(10)}px; }}
+QScrollBar::handle {{ background-color: {c.border_strong}; border-radius: {pt(5)}px; }}
+"""
 
 
 def apply_ui_scale(factor: float) -> float:

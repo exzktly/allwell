@@ -45,7 +45,7 @@ from review.core.channel_state_controller import (
     seg_channel_token_of,
 )
 from review.core.plot_orchestrator import redraw_app
-from core.safe import swallowed
+from core.safe import swallow, swallowed
 from review.core.selection_controller import invalidate_stats_cache, invalidate_threshold_results
 from review.data.curation import apply_curation_to_cache
 from review.data.data_loading import get_rows, held_wells_note
@@ -78,6 +78,7 @@ from review.features.home.cell_gating.opt_curve_view import (
     _cell_gating_show_opt_curve_popup,
 )
 from review.features.home.cell_gating.fov_view import refresh_fov_selection_widgets
+from review.data.fov_selection import available_fovs, normalise_selection, selected_fovs
 from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -1920,3 +1921,29 @@ def _cell_gating_persist_params(ctx) -> None:
         save_to_pipeline_info(ctx)
     except Exception:
         logger.exception("Failed to save gating params to pipeline_info.json")
+
+
+def set_fov_selection(ctx, selection) -> None:
+    """Make *selection* the fields of view every calculation uses.
+
+    The one write path for the Cell Gating FOV picker (``fov_view`` calls it
+    through the ``on_apply`` the tab builder hands it). ``None``, or every field
+    the dataset has, means all of them. A selection equal to the live one does
+    nothing. Otherwise: save the gating block, re-project every verdict layer
+    onto the cached wells — which also clears the statistics and population
+    caches and repaints the tab's inclusion readout — re-read the tab's CDFs,
+    which are drawn from the first *kept* field, and redraw the app.
+    """
+    new = normalise_selection(selection, available_fovs(ctx))
+    if new == selected_fovs(ctx):
+        return
+    ctx.state.cell_gating.fov_selection = new
+    _cell_gating_persist_params(ctx)
+    with swallow("re-project the inclusion layers after an FOV selection change"):
+        ctx.features.call("qc.recompute_all", ctx)
+    refresh_fov_selection_widgets(ctx)
+    with swallow("re-read the Cell Gating CDFs after an FOV selection change"):
+        cell_gating_load_cell_areas(ctx)
+    with swallow("redraw after an FOV selection change"):
+        from review.core.plot_orchestrator import redraw_app
+        redraw_app(ctx)

@@ -364,6 +364,7 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
 def _field_rows(fit, geometry, square, pitch: float, diameter: float,
                 record_places_tiles: bool) -> tuple[list[FieldSuggestion], str]:
     """The form's rows for what was measured, and the square-edge value suggested ("" for the default)."""
+    from pipeline.nanowell_detect import SQUARE_AXIS_TOLERANCE_DEG
     from pipeline.nanowell_infer import ARRAY_CIRCLE
 
     plate_format, format_note = choose_format(pitch, diameter)
@@ -380,6 +381,15 @@ def _field_rows(fit, geometry, square, pitch: float, diameter: float,
         measured = _wrap(square.orientation_deg - fit.angle_deg, 90.0)
         if abs(measured) <= SQUARE_SNAP_DEG:
             edge_value, edge_note = "", f"measured {measured:+.1f}°, within {SQUARE_SNAP_DEG:g}° of a row: the default 0"
+        elif fit.kind == "hex" and abs(measured) > SQUARE_AXIS_TOLERANCE_DEG:
+            # Hexagonal rows repeat every 60 degrees and the square every 90, so a lattice fit that took the row
+            # 60 degrees from the true one reads the square 30 degrees off. A reading this far from 0 is that
+            # fold, not the plate's own angle, and typing it in is exactly what lets a run's orientation check
+            # pass on the wrong row (review H4). Left at the default, under which the run refuses the fold.
+            edge_value, edge_note = "", (
+                f"measured {measured:+.1f}°: the lattice fit has most likely folded onto another row (a hexagonal "
+                f"lattice turned past ±30° reads the square 30° off), so no value is offered; a run will refuse "
+                f"this rotation rather than address on the wrong row — check the plate's mask")
         else:
             edge_value, edge_note = _fmt(round(measured)), f"measured {measured:+.1f}° from the central square's edges"
 

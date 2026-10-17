@@ -5309,8 +5309,11 @@ exact correction and segmentation code).
   - **Square edge angle** — the angle of the central square's edges to a lattice
     row. Left at the default 0 when the square sits within 5° of a row, or when
     no square was found (it is hidden, or the plate has none). On a hexagonal
-    lattice a non-zero value is flagged for checking against the plate's mask,
-    since a lattice turned past ±30° shifts the reading by 30°.
+    lattice a lattice turned past ±30° folds onto another row and shifts the
+    reading by 30°, so a reading more than 15° from a row is reported as a fold
+    and no value is offered: left at 0, a run refuses that rotation instead of
+    addressing on the wrong row. A smaller non-zero value is flagged for
+    checking against the plate's mask.
   - Everything it cannot measure is left **blank** with the reason: cell
     diameter, margin, the occlusion and clipping thresholds, and the tile-grid
     fields (blank whenever an acquisition record places the tiles, which it

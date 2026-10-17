@@ -111,11 +111,48 @@ def _turned_square(monkeypatch, extra_deg: float) -> None:
 
 
 def test_the_square_edge_angle_is_the_square_s_edges_against_the_lattice_row(monkeypatch):
-    # The lattice is turned 12 degrees, so the square's edges read 32: what the form takes is the 20 between them.
-    _turned_square(monkeypatch, 20.0)
+    # The lattice is turned 12 degrees, so the square's edges read 22: what the form takes is the 10 between them.
+    _turned_square(monkeypatch, 10.0)
     s = nc.suggest_from_image(_frame(rotation_deg=12.0), PX)
-    assert _fields(s)["Square edge angle (°)"] == "20"
+    assert _fields(s)["Square edge angle (°)"] == "10"
     assert any("30°" in n for n in s.notes)            # the hexagonal fold is named beside a non-default angle
+
+
+def _run_orientation_check(image, edge_value: str):
+    """What a run's ``check_orientation`` says about *image* with the Square edge angle set to *edge_value*
+    ("" is the form's default 0): the lattice and the square measured by the pipeline's own detectors."""
+    from pipeline.nanowell_detect import check_orientation, score_fiducial
+    from pipeline.nanowell_infer import find_wells_by_contrast, infer_array
+
+    wells = find_wells_by_contrast(image, PX)
+    geometry = infer_array(wells.points_um, pixel_size_um=PX, covered=np.ones(image.shape, bool),
+                           edge_points_um=wells.edge_points_um, diameter_um=wells.diameter_um)
+    _candidate, scores = score_fiducial(image, PX, wells.diameter_um, wells.points_um, centre_um=geometry.centre_um,
+                                        search_radius_um=2.2 * geometry.fit.pitch)
+    square = max(scores, key=lambda s: s.coherence)
+    return check_orientation(geometry.fit, square.orientation_deg, square_to_axis_deg=float(edge_value or 0))
+
+
+@pytest.mark.parametrize("rotation", [35.0, 40.0, 50.0, -40.0])
+def test_a_folded_hexagonal_lattice_is_reported_and_never_given_an_angle_that_hides_the_fold(rotation):
+    """Review H4. The synthetic plate's square edges run along a lattice row (its true edge angle is 0). Turned
+    35-55 degrees, the lattice fit takes the row nearest east, 60 degrees from the true one, and the square reads
+    ±30 against it: the fold signature, not a property of the plate. Typed into the form, that ±30 is exactly
+    what makes the run's orientation check pass on the wrong row — so the field must stay at the default, under
+    which the run refuses the fold, and the note must say why."""
+    image = _frame(rotation_deg=rotation)
+    s = nc.suggest_from_image(image, PX)
+    edge = next(f for f in s.fields if f.label == "Square edge angle (°)")
+    assert edge.value == "", f"the Playground offers {edge.value!r}, which hides the fold from the run"
+    assert "folded" in edge.note and "refuse" in edge.note
+    assert not _run_orientation_check(image, edge.value).ok        # the run refuses rather than mis-addresses
+
+
+def test_an_unfolded_hexagonal_lattice_keeps_the_default_the_run_accepts():
+    image = _frame(rotation_deg=12.0)
+    edge = next(f for f in nc.suggest_from_image(image, PX).fields if f.label == "Square edge angle (°)")
+    assert edge.value == "" and "folded" not in edge.note
+    assert _run_orientation_check(image, edge.value).ok
 
 
 def test_a_square_within_a_few_degrees_of_a_row_keeps_the_default(monkeypatch):

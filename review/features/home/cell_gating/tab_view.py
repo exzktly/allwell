@@ -63,6 +63,7 @@ from review.features.home.cell_gating.controller import (
     cell_gating_refresh_included_count,
     cell_gating_sync_scatter_gates,
     logger,
+    set_fov_selection,
 )
 from review.features.home.cell_gating.fov_view import build_fov_selection_row
 from review.features.home.cell_gating.optimizer_view import (
@@ -285,7 +286,8 @@ def _build_inclusion_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
         swallowed()  # QC controls are best-effort; never block the tab build
     # The field-of-view restriction is always applied too: it composes with
     # whichever source the radio pair below chooses rather than replacing it.
-    layout.addWidget(build_fov_selection_row(ctx, frame, indent=_RADIO_INDENT))
+    layout.addWidget(build_fov_selection_row(
+        ctx, frame, indent=_RADIO_INDENT, on_apply=set_fov_selection))
 
     layout.addWidget(_lead_in(frame, "Then include cells by (choose one):"))
     per_channel = _source_radio(

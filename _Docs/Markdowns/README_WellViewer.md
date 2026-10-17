@@ -2219,7 +2219,10 @@ buttons — you pick one or the other, because choosing the scatter option
   The choice is saved with the dataset, beside your gates, and comes back when
   you reopen it; a saved plot remembers the selection it was drawn with.
   Fields are matched by number, so a field written `1`, `01` or `f1` is the same
-  field. A well whose FOV labels cannot be trusted (see *Exclude fields the run
+  field; a label that holds more than one number, such as `r1c1`, is matched
+  exactly, so `r1c1` and `r2c1` stay two fields. Opening the menu just to look
+  and closing it changes nothing, and a field your selection names that this
+  dataset does not have is kept when you edit the others. A well whose FOV labels cannot be trusted (see *Exclude fields the run
   flagged*, above) is not filtered — every field there still counts — and the
   line names it. In the Segmentation view's **Why removed** overlay these cells
   are outlined in yellow and labelled *field not in the FOV selection*.

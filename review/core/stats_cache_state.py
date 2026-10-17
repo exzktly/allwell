@@ -24,7 +24,7 @@ Two stores, invalidated differently:
     re-filtering wells whose filtered cells had not changed). So this store is
     **bounded by bytes** and **kept across edits that cannot change a
     population** — the fraction-on threshold, the SEM toggle, the FOV-replicate
-    toggle — through ``invalidate_stats_cache(ctx, keep_populations=True)``.
+    toggle — through ``selection_controller.invalidate_threshold_results``.
     Every other edit clears it exactly as before. Its keys carry everything a
     population is a function of except the row contents' projector settings,
     which is why a plain ``invalidate_stats_cache`` still clears it.

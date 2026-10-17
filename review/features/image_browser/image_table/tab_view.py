@@ -49,6 +49,7 @@ from review.features.image_browser.image_table.controller import (
     image_table_set_thresh_frac,
     image_table_set_zoom,
 )
+from review.features.image_browser.image_table._phone_fit import install_refit
 from review.features.image_browser.image_table.build_layout import (
     image_table_clear_render,
     image_table_reset_layout,
@@ -621,8 +622,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     il.addWidget(render_host, 0, Qt.AlignTop | Qt.AlignLeft)
     # In phone layout the grid is fitted to the screen, and drawn again when the
     # layout or the screen changes (``_phone_fit``).
-    from review.features.image_browser.image_table._phone_fit import install_refit
-    install_refit(ctx, scroll, render_host)
+    install_refit(ctx, scroll, render_host, image_table_generate)
 
     il.addStretch(1)
 

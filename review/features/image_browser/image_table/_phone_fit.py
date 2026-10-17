@@ -15,6 +15,10 @@ viewport), from the decode cache — no image is read twice.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from PySide6.QtCore import QEvent, QObject, QTimer
+
 from core import phone_layout
 from core.safe import swallow
 
@@ -100,15 +104,32 @@ def phone_cell_px(ctx, cells, plan, zoom: float, grid) -> int | None:
                        spacer_w=spacer_w, zoom=zoom)
 
 
-def install_refit(ctx, scroll, render_host) -> None:
-    """Redraw a rendered grid when phone layout turns on or off, and when the
-    page's width changes while it is on (the phone turned).
+class _RefitOnResize(QObject):
+    """Restart the refit timer when the page's viewport changes width by more
+    than :data:`REFIT_MIN_CHANGE` while phone layout is on — the phone turned."""
+
+    def __init__(self, parent: QObject, timer: QTimer, fitted: dict) -> None:
+        super().__init__(parent)
+        self._timer = timer
+        self._fitted = fitted
+
+    def eventFilter(self, obj, ev) -> bool:  # Qt naming
+        if ev.type() == QEvent.Resize and phone_layout.is_on():
+            old = self._fitted["width"] or ev.oldSize().width()
+            new = ev.size().width()
+            if old > 0 and abs(new - old) / old > REFIT_MIN_CHANGE:
+                self._timer.start()
+        return False
+
+
+def install_refit(ctx, scroll, render_host, regenerate: Callable[[object], None]) -> None:
+    """Redraw a rendered grid (``regenerate(ctx)``, the tab's Generate) when
+    phone layout turns on or off, and when the page's width changes while it
+    is on (the phone turned).
 
     The listener is removed with *render_host*, so a torn-down tab is never
     called back.
     """
-    from PySide6.QtCore import QEvent, QObject, QTimer
-
     timer = QTimer(render_host)
     timer.setSingleShot(True)
     timer.setInterval(REFIT_DELAY_MS)
@@ -119,11 +140,8 @@ def install_refit(ctx, scroll, render_host) -> None:
         # until its user presses Generate.
         if not getattr(ctx.state.image_table, "last_render", None):
             return
-        from review.features.image_browser.image_table.controller import (
-            image_table_generate,
-        )
         with swallow("image table: redraw for the screen"):
-            image_table_generate(ctx)
+            regenerate(ctx)
         fitted["width"] = scroll.viewport().width()
 
     timer.timeout.connect(_refit)
@@ -136,15 +154,4 @@ def install_refit(ctx, scroll, render_host) -> None:
 
     phone_layout.add_listener(_on_layout)
     render_host.destroyed.connect(lambda *_: phone_layout.remove_listener(_on_layout))
-
-    class _Resize(QObject):
-        def eventFilter(self, obj, ev) -> bool:  # Qt naming
-            if ev.type() == QEvent.Resize and phone_layout.is_on():
-                old = fitted["width"] or ev.oldSize().width()
-                new = ev.size().width()
-                if old > 0 and abs(new - old) / old > REFIT_MIN_CHANGE:
-                    timer.start()
-            return False
-
-    filt = _Resize(render_host)
-    scroll.viewport().installEventFilter(filt)
+    scroll.viewport().installEventFilter(_RefitOnResize(render_host, timer, fitted))

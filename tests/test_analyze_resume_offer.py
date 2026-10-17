@@ -371,3 +371,46 @@ def test_for_one_folder_the_suspend_record_still_wins(tab, tmp_path):
     offer = tab._resumable(str(plate / "out"))
     assert offer is not None
     assert offer.from_journal is False
+
+
+def test_a_resume_the_run_refuses_leaves_the_user_s_form_alone(tmp_path, qtbot, monkeypatch):
+    """Resume put the recorded run's settings on the form *before* ``start_run`` could refuse — and right after a
+    crash it usually does, because the earlier run is still alive. The run did not start, the form now held the
+    recorded settings with Incremental ticked, and the user's own edits were gone: the next Run used settings they
+    had never chosen. Driven through the real ``start_run``; only the liveness probe answers "still running"."""
+    import analyze.run_spec as run_spec_mod
+    import analyze.suspend as suspend_mod
+
+    plate = _plate(tmp_path, "PlateA")
+    J.open_run(plate / "out", mode="local", input_dir=plate / "in", argv=[],
+               spec={"opts": {"raw": str(plate / "in"), "filename_schema": SCHEMA, "filename_sep": SEP,
+                              "nuclear_token": "Hoechst", "csv_prefix": "cells", "incremental": False},
+                     "remote_name": "a-remote-this-install-no-longer-has"})
+    J.close_run(plate / "out", outcome="stopped")
+
+    from analyze.tab import AnalyzeTab
+    fresh = AnalyzeTab()
+    qtbot.addWidget(fresh)
+    _point_at(fresh, plate)
+    fresh._nuclear_token_edit.setText("MyNuclei")
+    fresh._csv_prefix_edit.setText("mine")
+    assert not fresh._incremental_cb.isChecked()
+    refused = "An earlier run on this plate is still running."
+    monkeypatch.setattr(run_spec_mod, "_earlier_run_still_alive", lambda spec: refused)
+    shown: list[str] = []
+    monkeypatch.setattr(suspend_mod.QMessageBox, "critical", lambda _p, _t, text, *a, **k: shown.append(text))
+    logged: list[str] = []
+    real_log = fresh._log_line
+    monkeypatch.setattr(fresh, "_log_line", lambda text, *a, **k: (logged.append(text), real_log(text, *a, **k)))
+
+    resume_btn = next(b for b in fresh._resume_banner.findChildren(type(fresh._run_btn)) if b.text() == "Resume")
+    qtbot.mouseClick(resume_btn, Qt.LeftButton)
+
+    assert shown == [refused], "the refusal was not shown"
+    assert fresh._nuclear_token_edit.text() == "MyNuclei", "a refused resume replaced the user's settings"
+    assert fresh._csv_prefix_edit.text() == "mine"
+    assert fresh._input_edit.text() == str(plate)
+    assert not fresh._incremental_cb.isChecked(), "a refused resume left Incremental ticked on the form"
+    assert not any("saving will move it" in line for line in logged), (
+        "a job-queue editor's warning was logged for a resume that never started")
+    assert fresh._resumable() is not None, "the offer must survive a resume that did not start"

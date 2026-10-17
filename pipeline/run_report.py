@@ -37,8 +37,84 @@ RUN_REPORT_DIRNAME = ".aw_run_report"
 RUN_REPORT_BLOCK = "run_report"
 
 
+#: Where a well's **completion seal** lives: ``<output_dir>/.aw_complete/<well>.json``,
+#: present only while the well's ``<well>_out.zip`` and CSV beside it cover every
+#: FOV-group its input holds. Unlike :data:`RUN_REPORT_DIRNAME` it is never
+#: cleared at the start or end of a run — it is read by a *later* run, which is
+#: the point: a remote resume adopts a well left on the remote only on this
+#: proof (``services/remote_batch_resume.py``). An ``out.zip`` alone proves
+#: nothing, because a well that failed some groups, aborted, or was suspended
+#: part way writes one too, from the groups it finished.
+COMPLETE_DIRNAME = ".aw_complete"
+
+
 def _report_dir(output_dir: Path | str) -> Path:
     return Path(output_dir) / RUN_REPORT_DIRNAME
+
+
+def complete_seal_path(output_dir: Path | str, well_label: str) -> Path:
+    """The completion seal :func:`seal_well_complete` writes for *well_label*."""
+    return Path(output_dir) / COMPLETE_DIRNAME / f"{well_label}.json"
+
+
+def _unseal(output_dir: Path | str, well_label: str) -> None:
+    """Withdraw *well_label*'s completion seal: its output is about to be rewritten.
+
+    Called from :func:`write_well_report`, which every well path reaches before
+    it writes its CSV and ``<well>_out.zip``, so a run that dies between the two
+    leaves an older archive with **no** seal rather than a seal vouching for
+    output it never finished. Best-effort; see :func:`seal_well_complete` for
+    why a seal that cannot be withdrawn is the one case that matters.
+    """
+    try:
+        complete_seal_path(output_dir, well_label).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def recorded_well_report(output_dir: Path | str, well_label: str) -> dict | None:
+    """The completeness record this run wrote for *well_label*, or ``None``."""
+    try:
+        rec = json.loads((_report_dir(output_dir) / f"{well_label}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def well_is_whole(rec) -> bool:
+    """Whether a completeness record describes a well whose output covers its whole input.
+
+    Not merely "not incomplete": a well with groups that failed or were never
+    attempted is not whole even when the coverage arithmetic happens to agree,
+    and a well whose input held nothing (:func:`found_nothing`) has nothing to
+    vouch for.
+    """
+    return (isinstance(rec, dict) and not is_incomplete(rec) and not found_nothing(rec)
+            and not rec.get("failed") and not rec.get("not_attempted")
+            and not rec.get("aborted_reason"))
+
+
+def seal_well_complete(output_dir: Path | str, well_label: str) -> Path | None:
+    """Seal *well_label*'s output as covering its whole input, if this run's record says so.
+
+    **Call it after both artefacts are on disk** — the same place
+    ``record_well_settings`` is called, past every short circuit — because the
+    seal's whole meaning is "the out.zip and CSV beside this are the well's
+    complete output". It reads the record :func:`write_well_report` just wrote
+    rather than taking counts from the caller, so the three well paths (zip,
+    folder, nanowell) cannot each decide "complete" differently. A well whose
+    record is missing, partial or failed gets no seal, which a resume reads as
+    "run it again": costing compute, never a stale well reported as finished.
+    """
+    if not well_is_whole(recorded_well_report(output_dir, well_label)):
+        return None
+    path = complete_seal_path(output_dir, well_label)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json_atomic(path, {"well": str(well_label)})
+    except OSError:
+        return None
+    return path
 
 
 def write_well_report(
@@ -72,6 +148,7 @@ def write_well_report(
         # for twenty tracebacks when three had been written.
         "not_attempted": sorted(not_attempted or ()),
     }
+    _unseal(output_dir, well_label)
     try:
         d = _report_dir(output_dir)
         d.mkdir(parents=True, exist_ok=True)

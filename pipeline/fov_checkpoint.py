@@ -149,6 +149,35 @@ def prune_superseded_staging(output_dir: Path, settings_key: str) -> int:
             removed += 1
     return removed
 
+def release_staging(output_dir: Path, well_label: str, tmp_images: Path) -> None:
+    """End-of-well cleanup of *tmp_images* — unless a suspend left the well part way.
+
+    A well a suspend cuts short still writes its CSV and ``<well>_out.zip`` from
+    the groups it finished, and then this directory went with them, its
+    ``.fov_*.done`` checkpoints included. Locally that was harmless — the resume
+    is ``--incremental`` and reads the finished groups from the CSV — but a
+    remote resume runs the pipeline without ``--incremental``, in the same
+    output directory (``remote_batch_resume.reattach_output_dir``), and the well
+    then had nothing to resume from and recomputed every group. Kept, the
+    checkpoints carry the finished groups across the suspend exactly as they
+    carry them across a kill. Only for a run suspended through a request file
+    (``--suspend_file``, which only the remote paths pass): a local resume is
+    incremental and never reads them, so there they would be disk held in the
+    scratch folder for nothing. A well whose record says it is whole has
+    nothing left to resume, so its staging goes as before.
+    """
+    from pipeline import suspend
+    from pipeline.run_report import recorded_well_report, well_is_whole
+
+    if (suspend.is_suspended() and os.environ.get(suspend.REQUEST_FILE_ENV)
+            and any(tmp_images.glob(".fov_*.done"))
+            and not well_is_whole(recorded_well_report(output_dir, well_label))):
+        log.info("Well %s — keeping its %d FOV checkpoint(s) for the resume.",
+                 well_label, sum(1 for _ in tmp_images.glob(".fov_*.done")))
+        return
+    remove_directory(tmp_images)
+
+
 def _checkpoint_paths(tmp_images: Path, fov_id: str) -> tuple[Path, Path]:
     """Return ``(records_json, done_marker)`` for a given FOV id."""
     return (

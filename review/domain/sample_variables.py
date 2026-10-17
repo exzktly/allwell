@@ -8,7 +8,10 @@ variables defined does not have to paint twelve group names to get twelve series
 **Values are objects, not typed strings.** Each variable carries an *ordered*
 list of :class:`VariableValue`, each with its own id. That list is what makes
 renaming a value rewrite every well holding it, and what stops ``1uM`` /
-``1 µM`` / ``1`` accumulating as three distinct doses in a free-text field. The
+``1 µM`` / ``1`` accumulating as three distinct doses in a free-text field:
+:func:`add_value` and :func:`rename_value` refuse a label that repeats an
+existing one and, on a ``number`` variable, one that reads as the same
+quantity in the same (or no) unit (:func:`_twin_value`). The
 order is the user's and is what a plot's x axis and a legend read — for a
 `number` variable it is also checked against the numbers, because a dose series
 listed out of order is a curve drawn backwards.
@@ -257,13 +260,61 @@ def refusal_for_value(variable: Variable | None, label: str, *,
     label = (label or "").strip()
     if not label:
         return "Type a value first."
-    twin = next((v for v in variable.values
-                 if v.label.strip().casefold() == label.casefold()
-                 and v.id != exclude), None)
-    if twin is not None:
+    twin = _twin_value(variable, label, exclude=exclude)
+    if twin is None:
+        return None
+    if twin.label.strip().casefold() == label.casefold():
         return (f"“{variable.name}” already has a value called “{twin.label}”. "
                 f"Two rows with one label would split that condition into two "
                 f"series holding half the wells each.")
+    return (f"“{label}” is the same number as “{twin.label}”, which "
+            f"“{variable.name}” already has. Two rows for one dose would split "
+            f"that condition into two series holding part of the wells each.")
+
+
+def _unit_suffix(label: str) -> str:
+    """What follows a value's number, normalised so ``uM``, ``µM`` (micro
+    sign) and ``μM`` (Greek mu) compare equal and spacing does not count."""
+    text = label.strip().replace(",", ".")
+    i = 0
+    while i < len(text) and (text[i].isdigit() or text[i] in "+-."
+                             or (text[i] in "eE" and i)):
+        i += 1
+    rest = text[i:].replace(" ", "").casefold()
+    # casefold maps the micro sign onto Greek mu; fold both onto ASCII "u".
+    return rest.replace("μ", "u")
+
+
+def _twin_value(variable: Variable, label: str, *,
+                exclude: str = "") -> VariableValue | None:
+    """The value *label* would duplicate on *variable*, or ``None``.
+
+    The same label, ignoring case and surrounding space, on any variable. On a
+    ``number`` variable also the same **quantity**: ``1`` / ``1.0`` /
+    ``1uM`` / ``1 µM`` parse to one number, and four rows for one dose give
+    the wells four value ids, which ``replicate_groups`` and every Group-by then
+    split into four conditions holding part of the wells each. Units must agree
+    unless either label carries none — a bare ``1`` on a `Dose (µM)` variable
+    means 1 µM, while ``1 nM`` beside ``1 µM`` is a different dose. A label with
+    no readable number (``vehicle``) is compared by label only. On a ``text``
+    variable a label is a name, so clone ``1`` and clone ``1.0`` stay distinct.
+    """
+    folded = label.strip().casefold()
+    number = parse_number(label) if variable.is_numeric() else None
+    unit = _unit_suffix(label) if number is not None else ""
+    for val in variable.values:
+        if val.id == exclude:
+            continue
+        if val.label.strip().casefold() == folded:
+            return val
+        if number is None:
+            continue
+        other = parse_number(val.label)
+        if other is None or other != number:
+            continue
+        other_unit = _unit_suffix(val.label)
+        if not unit or not other_unit or unit == other_unit:
+            return val
     return None
 
 
@@ -1011,7 +1062,10 @@ def add_value(vset: VariableSet, variable_id: str, label: str) -> VariableSet:
 
     Duplicate labels are the failure this whole value list exists to prevent:
     two `1 µM` rows split one dose into two series that each hold half the
-    wells, and neither is visibly wrong.
+    wells, and neither is visibly wrong. On a ``number`` variable a label that
+    reads as the same quantity as an existing one — `1.0` beside `1`, `1uM`
+    beside `1 µM` — is the same failure spelled differently, and is refused too
+    (:func:`_twin_value`).
     """
     variable = vset.by_id(variable_id)
     if variable is None:
@@ -1019,8 +1073,7 @@ def add_value(vset: VariableSet, variable_id: str, label: str) -> VariableSet:
     label = (label or "").strip()
     if not label:
         return vset
-    if any(val.label.strip().casefold() == label.casefold()
-           for val in variable.values):
+    if _twin_value(variable, label) is not None:
         return vset
     value = VariableValue(
         id=_new_id(label, {val.id for val in variable.values}),
@@ -1044,8 +1097,7 @@ def rename_value(vset: VariableSet, variable_id: str, value_id: str,
     label = (label or "").strip()
     if variable is None or not label:
         return vset
-    if any(val.label.strip().casefold() == label.casefold() and val.id != value_id
-           for val in variable.values):
+    if _twin_value(variable, label, exclude=value_id) is not None:
         return vset
     values = tuple(
         replace(val, label=label,

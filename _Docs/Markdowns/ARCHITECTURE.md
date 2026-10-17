@@ -4467,14 +4467,22 @@ laid out as the two questions it answers, in the order the app applies them:
    number (`tests/test_qc_bounds_apply_once.py`).
 
    Under the QC controls, also *always applied*, sits the **Fields of view**
-   picker (`cell_gating/fov_view.py`): a button naming what is kept ("All
-   FOVs", "FOVs 1–3, 5") that opens a checkbox menu of the dataset's FOVs
-   (`dataset_dims.fov_options`, numerically ordered). The ticks are gathered
-   while the menu is open and applied once when it closes, through
-   `set_fov_selection` — the one write path — which normalises a selection of
-   every field to `None` (so "all" stays all when the dataset later gains a
-   field), saves the `cell_gating` block, re-projects every layer through
-   `qc.recompute_all`, re-reads the tab's CDFs and redraws. The selection is
+   picker (`cell_gating/fov_view.py`, widgets only): a button naming what is
+   kept ("All FOVs", "FOVs 1–3, 5") that opens a checkbox menu of the
+   dataset's FOVs (`fov_selection.available_fovs`: `dataset_dims.fov_options`,
+   numerically ordered and remembered per data directory and well set on
+   `ctx.runtime.cell_gating`, because the status line asks on every
+   inclusion-count repaint). The ticks are gathered while the menu is open and
+   applied once when it closes — and only if a box changed, so opening the menu
+   to look writes nothing. A selected FOV the dataset does not have has no box
+   and is carried through an edit untouched. Applying goes through
+   `controller.set_fov_selection` — the one write path, handed to the view by
+   the tab builder as `on_apply` so the view names no controller — which
+   normalises a selection of every field to `None` (so "all" stays all when the
+   dataset later gains a field), saves the `cell_gating` block, re-projects
+   every layer through `qc.recompute_all`, re-reads the tab's CDFs and redraws.
+   With no selection set, the status-line repaint reads nothing but the slice.
+   The selection is
    `CellGatingState.fov_selection` and reaches the data as the `FOV_Pass`
    verdict layer (`review/data/fov_selection.py`, see §6.6b's roster), so it
    composes with whichever inclusion source the radio pair below chooses. It is
@@ -14251,15 +14259,20 @@ writes `Border_Pass`, the `imclearborder` rule — see *The Cell Gating tab*.
 `review/data/fov_selection.py` writes `FOV_Pass` from the Cell Gating tab's
 FOV picker (`CellGatingState.fov_selection`, persisted as `fov_selection` in
 the `cell_gating` block of `pipeline_info.json`): 1 when the row's field is one
-of the chosen FOV numbers. Fields match by the number `util.fov.parse_fov`
-reads from the label, so `"1"`, `1.0` and `"f01"` are one field and an opaque
-label matches only itself. No selection writes no column, and it refuses the
-same untrusted wells, which the picker's status line names. The
-`cell_gating` block's three writers (`persistence/cell_gating`, Saved Plots'
-`_capture_gating_block`, and the auto-threshold rebuild) all carry the key, and
-`restore_gating_block` / `apply_gating_block` re-project it onto the frames
-already cached, because unlike the gates it does not travel through the
-gating pass those paths start. The
+of the chosen FOV numbers. A label that is one number, optionally behind a
+letter prefix, matches by that number, so `"1"`, `1.0` and `"f01"` are one
+field; any other label — `"r1c1"`, `"s2_1"`, `"A-1"` — matches only its own
+text, because reading just its trailing digits would make `"r1c1"` and
+`"r2c1"` one field. The verdict is decided once per distinct label in a frame
+and mapped onto the rows, not parsed per row. No selection writes no column,
+and it refuses the same untrusted wells, which the picker's status line names.
+The `cell_gating` block's three writers (`persistence/cell_gating`, Saved
+Plots' `_capture_gating_block`, and the auto-threshold rebuild) all carry the
+key. When `restore_gating_block` or `apply_gating_block` leaves the selection
+different from what it was, they re-project it onto the frames already cached
+(unlike the gates it does not travel through the gating pass those paths
+start), clear the statistics cache, and re-read the Cell Gating CDFs; when it is
+unchanged — every dataset load without a selection — they do none of that. The
 field and focus layers are **not
 alternatives**: the field verdict removes a
 whole field or none of it, while the per-cell cut removes the soft *part* of a
@@ -17186,7 +17199,10 @@ writing into the repository.
   deliberately: nothing there decides identity. `parse_fov`'s own docstring
   records the reason — only *sorting* depends on it, equality still compares the
   raw token strings, and `sort_key`'s last tuple element is that raw token — so
-  a non-ASCII digit costs an ordering, never a merge.
+  a non-ASCII digit costs an ordering, never a merge. The one caller that does
+  decide identity with it, `review/data/fov_selection.fov_match_key`, first
+  requires the whole label to match an ASCII `[0-9]` single-number pattern, so
+  `parse_fov` only ever sees labels it cannot misread.
   `tests/test_well_token_single_parser.py` fails on any *whole-token* well
   pattern outside `util/well_token.py`. Two neighbouring shapes are deliberately
   not caught by it, because they are different operations: a **trailing**-token

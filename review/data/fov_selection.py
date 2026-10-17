@@ -9,11 +9,14 @@ inclusion chokepoint (:func:`review.data.data_loading.df_included_mask`) like
 every other layer, so every plot, statistic and export honours it without any
 of them knowing it exists.
 
-**Matching is by FOV number, not by spelling.** The same field reaches the app
-as ``"1"`` from ``pipeline_info.json``, as ``1.0`` from a CSV column that pandas
-read as float, and as ``"f1"`` from a prefixed schema. :func:`fov_match_key`
-reduces each to the number :func:`util.fov.parse_fov` reads from it, and keeps
-an unparseable label as its own text, so two distinct opaque labels never merge.
+**Matching is by FOV number, not by spelling — but only for a label that is
+one number.** The same field reaches the app as ``"1"`` from
+``pipeline_info.json``, as ``1.0`` from a CSV column that pandas read as float,
+and as ``"f1"`` from a prefixed schema. :func:`fov_match_key` reduces each of
+those to its number. A label carrying more than one number — ``"r1c1"``,
+``"s2_1"``, ``"A-1"`` — is compared as its own text: reading only its trailing
+digits, as :func:`util.fov.parse_fov` does for sorting, would make ``"r1c1"``
+and ``"r2c1"`` one field, and a selection of either would keep both.
 
 **A well whose FOV labels are untrusted is not filtered.** The refusal
 :mod:`review.data.field_exclusions` and :mod:`review.data.field_quality_cache`
@@ -30,6 +33,7 @@ asserts a layer ran and found nothing.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 from review.data.cache_projectors import drop_verdict_column, project_verdict_column
@@ -38,14 +42,26 @@ from util.fov import parse_fov, sort_key as fov_sort_key
 #: The verdict column this layer owns. 1 = the row's field is in the selection.
 FOV_PASS_COLUMN = "FOV_Pass"
 
+#: A label that is one number, optionally after a letter prefix: ``"1"``,
+#: ``"01"``, ``"1.0"``, ``"f01"``, ``"fov3"``, ``"F_2"``. Anything else is
+#: matched by its text. ``[0-9]`` rather than ``\d`` because this decides
+#: identity — two labels it maps to one number are one field — and ``\d`` (with
+#: the ``float()`` inside ``parse_fov``) also reads digits from other alphabets,
+#: which would merge labels nobody wrote as the same field (ARCHITECTURE §17's
+#: rule for identity parsers).
+_SINGLE_NUMBER_LABEL = re.compile(r"^[A-Za-z_]*[0-9]+(?:\.[0-9]+)?$")
+
 
 def fov_match_key(value) -> object:
     """The key two FOV labels are compared under.
 
-    The parsed number when the label carries one (``"1"``, ``"01"``, ``1.0``,
-    ``"f1"`` all give ``1.0``), else the stripped text itself.
+    The number, when the label is one number with at most a letter prefix
+    (``"1"``, ``"01"``, ``1.0``, ``"f1"`` all give ``1.0``); otherwise the
+    stripped text itself, so ``"r1c1"`` and ``"r2c1"`` stay two fields.
     """
     text = "" if value is None else str(value).strip()
+    if not _SINGLE_NUMBER_LABEL.match(text):
+        return text
     number = parse_fov(text)
     return text if number is None else number
 
@@ -74,19 +90,44 @@ def normalise_selection(selection: Iterable | None, available: Iterable) -> set[
     return chosen
 
 
+def available_fovs(ctx) -> list[str]:
+    """The dataset's FOV labels, numerically ordered.
+
+    Remembered per dataset on ``ctx.runtime.cell_gating`` when it has one: the
+    picker's status line asks on every inclusion-count repaint (each load,
+    re-gate and QC keystroke), and on a dataset whose ``pipeline_info.json`` does
+    not list its FOVs the answer is a walk of every well's summary. The key is
+    the dataset directory and its wells, which is everything the answer reads.
+    """
+    from review.data.dataset_dims import fov_options
+
+    ds = ctx.state.dataset
+    key = (str(getattr(ds, "data_dir", "") or ""),
+           tuple(sorted(getattr(ds, "well_paths", None) or ())))
+    runtime = getattr(getattr(ctx, "runtime", None), "cell_gating", None)
+    memo = getattr(runtime, "fov_options_memo", None)
+    if memo is not None and memo[0] == key:
+        return list(memo[1])
+    found = sorted(fov_options(ctx), key=fov_sort_key)
+    if runtime is not None:
+        runtime.fov_options_memo = (key, tuple(found))
+    return found
+
+
 def fov_selection_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:
     """Nothing beyond the identity columns: the verdict reads ``fov`` alone."""
     return ()
 
 
 def _verdict(df, keys: set):
-    import pandas as pd
-
     from domain.text_columns import fov_text
 
+    # Decided once per distinct label and mapped back, not once per row: a well
+    # holds a few dozen labels and up to millions of cells, and this runs on the
+    # UI thread at every load, re-projection and restore.
     fovs = fov_text(df)
-    return pd.Series([1 if fov_match_key(f) in keys else 0 for f in fovs],
-                     index=df.index)
+    decided = {label: int(fov_match_key(label) in keys) for label in fovs.unique()}
+    return fovs.map(decided).astype(int)
 
 
 def apply_fov_selection_to_cache(ctx, label: str | None = None) -> list[str]:

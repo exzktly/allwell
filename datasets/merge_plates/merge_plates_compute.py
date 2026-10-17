@@ -48,6 +48,7 @@ from datasets.core.dataset_paths import (
 )
 from datasets.core.dataset_paths import check_compatible, known_channel_tokens
 from domain.nanowell_roster import mixed_rules_note
+from domain.nanowell_sidecar import MIXED_WITH_ORDINARY_KEY, is_partly_ordinary
 from datasets.core.nanowell_tables import (
     carried_nanowell_block, has_nanowell_tables, nanowell_block_conflict, refuse_unusable_tables, well_roster_rules,
 )
@@ -352,13 +353,27 @@ def _merge_nanowell_blocks(merged_info: dict, info1: dict, info2: dict, ds1, ds2
 
     ``nanowell`` (scheme, settings, conventions) is the same for both or absent from one, which
     :func:`~datasets.core.nanowell_tables.nanowell_block_conflict` has already established, so whichever
-    dataset has it supplies it, without its ``reanchor`` record (one run's, keyed on that plate's wells).
+    dataset has it supplies it, without its ``reanchor`` record (one run's, keyed on that plate's wells). When only
+    one plate is a nanowell run, or either is already a part-ordinary merge, the block is marked
+    (:data:`domain.nanowell_sidecar.MIXED_WITH_ORDINARY_KEY`) so Review keeps the image-border switch's
+    ordinary-plate default on rather than reading the whole merged plate as a nanowell run.
     ``acquisition`` (pixel and tile size per timepoint) is the union: a timepoint both hold has one calibration,
     which :func:`_calibration_conflict` has already checked.
     """
     block = info1.get("nanowell") or info2.get("nanowell")
     if block:
         merged_info["nanowell"] = carried_nanowell_block(block)
+        if isinstance(merged_info["nanowell"], dict) and (
+                not (info1.get("nanowell") and info2.get("nanowell"))
+                or any(is_partly_ordinary(b)
+                       for b in (info1.get("nanowell"), info2.get("nanowell")))):
+            # Part of this plate is an ordinary run. The block alone would make
+            # Review read the whole plate as a nanowell run and default the
+            # image-border switch off, keeping the ordinary wells' partial cells
+            # in every number; the marker keeps that default on
+            # (``review.domain.qc_params.default_exclude_border_cells``).
+            merged_info["nanowell"] = {**merged_info["nanowell"],
+                                       MIXED_WITH_ORDINARY_KEY: True}
     if info1.get("acquisition") or info2.get("acquisition"):
         merged_info["acquisition"] = {**(info2.get("acquisition") or {}), **(info1.get("acquisition") or {})}
     one, two = has_nanowell_tables(ds1), has_nanowell_tables(ds2)

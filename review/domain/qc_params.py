@@ -67,8 +67,19 @@ def is_nanowell_run(info: dict[str, Any] | None) -> bool:
 
 
 def default_exclude_border_cells(info: dict[str, Any] | None) -> bool:
-    """The border switch's default for a dataset: on, except for nanowell runs."""
-    return not is_nanowell_run(info)
+    """The border switch's default for a dataset: on, except for nanowell runs.
+
+    A plate Merge Plates built from a nanowell run and an ordinary one carries
+    the nanowell block too, marked as partly ordinary
+    (:mod:`domain.nanowell_sidecar`). It defaults **on**: what the switch drops
+    is counted on the panel and in the funnel, whereas a partial cell kept in
+    the ordinary wells is a wrong row nothing marks.
+    """
+    from domain.nanowell_sidecar import is_partly_ordinary
+
+    if not is_nanowell_run(info):
+        return True
+    return is_partly_ordinary(info["nanowell"])
 
 
 @dataclass(frozen=True)

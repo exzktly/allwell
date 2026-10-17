@@ -134,6 +134,44 @@ def test_merge_plates_says_when_only_one_plate_has_nanowell_results(tmp_path):
     assert _tables(tmp_path / "dest", "B01")[0]["well"] == "B01"
 
 
+def _border_default(dest: Path) -> bool:
+    """The border switch a merged dataset opens with, read the way Review reads it."""
+    from review.domain.qc_params import QCParams
+    from review.domain.viewer_state import read_pipeline_info
+
+    return QCParams.from_pipeline_info(read_pipeline_info(dest / "out")[3]).exclude_border_cells
+
+
+@pytest.mark.parametrize("first_is_nanowell", [False, True], ids=["ordinary-first", "nanowell-first"])
+def test_a_nanowell_plate_merged_with_an_ordinary_one_keeps_border_exclusion_on(tmp_path, first_is_nanowell):
+    """The merged sidecar carries the nanowell block, so Review read the whole
+    merged plate as a nanowell run and opened it with the border switch off —
+    keeping the ordinary plate's partial cells, whose area and totals describe
+    a fragment, in every number. The safer of the two defaults for a plate that
+    is part nanowell is on: what it drops is counted on the panel and the
+    funnel, while a partial cell kept is a wrong row nothing marks."""
+    one = _dataset(tmp_path / "one", wells=("A01",), nanowells=first_is_nanowell)
+    two = _dataset(tmp_path / "two", wells=("B01",), nanowells=not first_is_nanowell)
+    merge_execute(build_plate_merge_plan(one, two, tmp_path / "dest"))
+    assert _border_default(tmp_path / "dest") is True
+
+    # Merged again with a pure nanowell plate, on either side, the result is
+    # still part ordinary.
+    three = _dataset(tmp_path / "three", wells=("C01",))
+    pair = (three, tmp_path / "dest") if first_is_nanowell else (tmp_path / "dest", three)
+    merge_execute(build_plate_merge_plan(*pair, tmp_path / "dest2"))
+    assert _border_default(tmp_path / "dest2") is True
+
+
+def test_two_nanowell_plates_merged_keep_the_nanowell_default(tmp_path):
+    """The other half: a rule that turned the switch on for every merge would
+    pass the test above."""
+    one = _dataset(tmp_path / "one", wells=("A01",))
+    two = _dataset(tmp_path / "two", wells=("B01",))
+    merge_execute(build_plate_merge_plan(one, two, tmp_path / "dest"))
+    assert _border_default(tmp_path / "dest") is False
+
+
 def test_a_merged_sidecar_drops_the_re_anchoring_record_and_refuses_two_calibrations(tmp_path):
     one = _dataset(tmp_path / "one", wells=("A01",), nanowells=False)
     two = _dataset(tmp_path / "two", wells=("A01",))
@@ -141,7 +179,9 @@ def test_a_merged_sidecar_drops_the_re_anchoring_record_and_refuses_two_calibrat
     info["nanowell"]["reanchor"] = {"anchored": ["A01/24h"], "remaining": {}}
     (two / "out" / "pipeline_info.json").write_text(json.dumps(info))
     plan = build_plate_merge_plan(one, two, tmp_path / "dest", well_map={"A01": "C03"})
-    assert plan.merged_info["nanowell"] == {"scheme_version": 1, "settings": SETTINGS}   # it named A01, now plate 1's
+    assert plan.merged_info["nanowell"] == {"scheme_version": 1, "settings": SETTINGS,   # it named A01, now plate 1's
+                                            # one is an ordinary plate: the border default stays on
+                                            "mixed_with_ordinary_plate": True}
     three = _dataset(tmp_path / "three", wells=("B01",))
     info = json.loads((three / "out" / "pipeline_info.json").read_text())
     info["acquisition"]["0h"]["pixel_size_um"] = {"x": 0.65, "y": 0.65}

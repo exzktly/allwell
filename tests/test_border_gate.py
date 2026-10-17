@@ -316,6 +316,29 @@ def test_a_nanowell_dataset_opens_with_the_switch_off():
     assert p.exclude_border_cells is False
 
 
+@pytest.mark.parametrize("block, expected", [(_NANOWELL_INFO, False), ({}, True)],
+                         ids=["nanowell", "ordinary"])
+def test_the_default_is_decided_from_the_sidecar_as_the_app_reads_it(tmp_path, block, expected):
+    """Through the reader the app loads with, not a hand-built dict.
+
+    ``dataset.pipeline_info`` is not the file: ``read_pipeline_info`` builds a
+    whitelist of the keys it knows, and it did not know ``nanowell``. Every
+    test above handed ``from_pipeline_info`` a dict holding the block, so the
+    nanowell default was green here and dead in the app, where a nanowell run
+    opened with the switch on like any other plate."""
+    import json
+
+    from review.domain.viewer_state import read_pipeline_info
+
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "pipeline_info.json").write_text(json.dumps({
+        "schema": "experiment:channel:well:fov:timepoint", "fov_index": 3,
+        "tp_index": 4, "well_index": 2, "fluor_tokens": ["gfp"], **block}))
+    info = read_pipeline_info(out)[3]
+    assert QCParams.from_pipeline_info(info).exclude_border_cells is expected
+
+
 def test_a_null_nanowell_entry_is_not_a_nanowell_run():
     assert QCParams.from_pipeline_info({"nanowell": None}).exclude_border_cells is True
 

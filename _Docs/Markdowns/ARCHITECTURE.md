@@ -764,6 +764,8 @@ allwell/
 │   ├── nanowell_roster.py      ← which rule decided a nanowell well's roster (disk,
 │   │                              evidence, inferred), read by Validate, Merge Plates
 │   │                              and Review's Nanowells page
+│   ├── nanowell_sidecar.py     ← the marker Merge Plates puts on a part-ordinary plate's
+│   │                              nanowell block, read by Review's border default
 │   ├── selections_format.py    ← the on-disk sample_definitions block: read it, write
 │   │                              it, repair it, migrate a v1 one, bake the colour.
 │   │                              Written by Review, rewritten by Datasets on a
@@ -4574,6 +4576,19 @@ inclusion funnel, and a partial cell is not debris; it is also why the switch
 `qc_params.default_exclude_border_cells` — on, unless the sidecar carries the
 `nanowell` block a nanowell run writes (`is_nanowell_run`), because a tile edge
 is not a well edge and the nanowell measurement assigns cells to wells itself.
+The block reaches that test only because `viewer_state.read_pipeline_info`
+carries it in its whitelist (`"nanowell"`, `None` for an ordinary run): the app
+holds that whitelist as `dataset.pipeline_info`, not the file, and without the
+key every nanowell run opened with the switch on while tests handing
+`from_pipeline_info` a hand-built dict stayed green
+(`tests/test_border_gate.py::test_the_default_is_decided_from_the_sidecar_as_the_app_reads_it`).
+A plate Merge Plates built from a nanowell run and an ordinary one keeps the
+block for the Nanowells page, so `_merge_nanowell_blocks` marks it
+`mixed_with_ordinary_plate` (`domain/nanowell_sidecar.py`, shared by both
+panes), and `default_exclude_border_cells` reads a marked block as **on**: what
+the switch drops is counted on the panel and in the funnel, while a partial
+cell kept in the ordinary wells is a wrong row nothing marks. A later merge
+with a marked plate stays marked.
 `persistence/qc_params.load_from_data_dir` applies the same default when a
 saved `qc_params` section has no `exclude_border_cells` key, so a dataset whose
 panel was saved before the switch existed is not silently held at off, while

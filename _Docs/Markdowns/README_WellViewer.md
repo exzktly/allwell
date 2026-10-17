@@ -2201,7 +2201,10 @@ buttons — you pick one or the other, because choosing the scatter option
   except for datasets analysed in nanowell mode, where it starts off: there an
   image is a tile of a lattice of wells, a tile's edge is not a well's edge,
   and the nanowell measurement already decides which well each cell belongs
-  to. Unticking or ticking it is remembered with the dataset like the rest of
+  to. A plate made with **Merge Plates** from a nanowell dataset and an
+  ordinary one starts with it on, because the ordinary plate's edge cells
+  really are cut; untick it if you want the nanowell wells' tile-edge cells
+  kept. Unticking or ticking it is remembered with the dataset like the rest of
   the panel, and a Gating reset returns it to that default. The
   line beneath it says how many of the cells being analysed touch the border,
   across the whole plate, and whether they are currently kept or excluded.

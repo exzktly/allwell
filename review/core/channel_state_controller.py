@@ -56,16 +56,15 @@ _logger = logging.getLogger("review")
 # swap, a pipeline run that changed the channel set. The cycle terminates
 # (the second ``set_active_channel`` installs a valid channel, so the third
 # ``update_channel_selector`` does not recurse), but the nested pass redid the
-# whole recompute: the per-well concat for the intensity range, the cell-gating
-# hydration from ``pipeline_info.json`` — which runs ``load_from_pipeline_info``
+# whole recompute: the cell-gating hydration from ``pipeline_info.json`` — which runs ``load_from_pipeline_info``
 # twice on its own — and the seven ``on_channel_changed`` feature hooks, all
 # against a channel the outer pass is about to correct anyway.
 #
 # Skipping the nested pass is safe because everything in
 # ``recalculate_threshold`` that depends on the active channel happens *after*
-# ``update_channel_selector`` returns: ``normalize_metric``, ``sync_val_col``,
-# the range cache and the gating hydration all run in the outer frame, with the
-# channel the nested call installed.
+# ``update_channel_selector`` returns: ``normalize_metric``, ``sync_val_col``
+# and the gating hydration all run in the outer frame, with the channel the
+# nested call installed.
 #
 # A module-level set of context ids rather than runtime state: this is
 # GUI-thread-only control flow, and ``AppRuntime`` fixes its namespaces in

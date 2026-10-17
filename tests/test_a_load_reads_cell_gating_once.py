@@ -143,3 +143,125 @@ def test_a_reopen_reads_cell_gating_s_wells_once_and_narrowly(viewer_app, mini_d
         for w in (well_a, well_b)])
     assert rt.opt_min_edit.text() == f"{float(pooled.min()):.6g}"
     assert rt.opt_max_edit.text() == f"{float(pooled.max()):.6g}"
+
+
+def test_the_owed_reading_waits_for_the_load_s_gating_pass(viewer_app, mini_dataset, qtbot, monkeypatch):
+    """The user is on Home › Cell Gating when the load ends, and the load started a
+    gating pass. The tab's activation is the load's own ``on_tab_change``, which
+    runs after the pass has started; reading the first frames then filters the
+    held frames on the GUI thread while ``GatingWorker`` rewrites ``Included`` /
+    ``Gate_Pass`` / ``Gate_On`` on the same objects from another thread. The
+    reading must wait for the pass to end, and then happen — not stay owed."""
+    import threading
+
+    from review.features.home.cell_gating import controller as cg
+    from review.features.home.controller import current_subtab, show_home_subtab
+
+    info_path = mini_dataset / "pipeline_info.json"
+    app = viewer_app
+    app._load_path(mini_dataset)
+    _settle(app, qtbot)
+    ctx = app._ctx
+    app._notebook.setCurrentByName("Home")
+    show_home_subtab(ctx, "Cell Gating")
+    assert current_subtab(ctx) == "Cell Gating"
+    info = json.loads(info_path.read_text())
+    info["cell_gating"] = {"fluor_gates": {"gfp": 105.0}}
+    info_path.write_text(json.dumps(info))         # the saved gate starts a pass on reload
+
+    go = threading.Event()
+    real_inner = cg.GatingWorker._run_inner
+
+    def held_pass(self):
+        if threading.current_thread() is not threading.main_thread():
+            assert go.wait(60), "the test never released the gating pass"
+        return real_inner(self)
+
+    monkeypatch.setattr(cg.GatingWorker, "_run_inner", held_pass)
+    reads: list = []
+    real_read = cg._read_first_frames
+
+    def spied(c):
+        w = c.runtime.cell_gating.worker
+        reads.append(bool(w is not None and w.isRunning() and not getattr(w, "ended", False)))
+        return real_read(c)
+
+    monkeypatch.setattr(cg, "_read_first_frames", spied)
+    try:
+        app._load_path(mini_dataset)
+        worker = ctx.runtime.cell_gating.worker
+        assert worker is not None and worker.isRunning(), "the saved gate started no pass; this measures nothing"
+        assert current_subtab(ctx) == "Cell Gating" and app._notebook.currentName() == "Home"
+        assert True not in reads, (
+            "Cell Gating read the first frames on the GUI thread while the gating pass "
+            f"was rewriting them (reads, True = pass running: {reads})")
+        assert ctx.runtime.cell_gating.areas_owed
+    finally:
+        go.set()
+    _settle(app, qtbot)
+    for _ in range(200):
+        if not ctx.runtime.cell_gating.areas_owed:
+            break
+        qtbot.wait(50)
+    assert not ctx.runtime.cell_gating.areas_owed, (
+        "the pass ended and the reading the tab deferred was never paid")
+    assert reads and True not in reads, reads
+    assert ctx.runtime.cell_gating.cell_areas, "the owed reading never happened after the pass"
+
+
+def test_a_pass_the_user_started_pays_the_reading_the_tab_deferred(viewer_app, mini_dataset, qtbot, monkeypatch):
+    """No load hold this time: the reading is owed, the user starts a gating pass
+    by editing a gate elsewhere, then opens Cell Gating while it runs. The tab
+    defers the reading; with no hold to lift, the pass's own end must pay it, or
+    the tab sits on "Reading cells…" until it is next re-entered."""
+    import threading
+
+    from review.features.home.cell_gating import controller as cg
+    from review.features.home.controller import current_subtab, show_home_subtab
+
+    app = viewer_app
+    app._load_path(mini_dataset)
+    _settle(app, qtbot)
+    ctx = app._ctx
+    app._notebook.setCurrentByName("Home")
+    show_home_subtab(ctx, "Sample Map")
+    app._load_path(mini_dataset)
+    _settle(app, qtbot)
+    assert ctx.runtime.cell_gating.areas_owed, "nothing owed; this measures nothing"
+
+    go = threading.Event()
+    real_inner = cg.GatingWorker._run_inner
+
+    def held_pass(self):
+        if threading.current_thread() is not threading.main_thread():
+            assert go.wait(60), "the test never released the gating pass"
+        return real_inner(self)
+
+    monkeypatch.setattr(cg.GatingWorker, "_run_inner", held_pass)
+    reads: list = []
+    real_read = cg._read_first_frames
+
+    def spied(c):
+        w = c.runtime.cell_gating.worker
+        reads.append(bool(w is not None and w.isRunning() and not getattr(w, "ended", False)))
+        return real_read(c)
+
+    monkeypatch.setattr(cg, "_read_first_frames", spied)
+    try:
+        ctx.state.cell_gating.fluor_gates["gfp"] = 105.0
+        cg.cell_gating_start_gating_worker(ctx)
+        assert ctx.runtime.cell_gating.worker.isRunning()
+        assert app._app_state.plot.held_for == ""
+        show_home_subtab(ctx, "Cell Gating")
+        assert current_subtab(ctx) == "Cell Gating"
+        assert reads == [], f"the tab read while the pass was writing: {reads}"
+    finally:
+        go.set()
+    for _ in range(200):
+        if not ctx.runtime.cell_gating.areas_owed:
+            break
+        qtbot.wait(50)
+    assert not ctx.runtime.cell_gating.areas_owed, (
+        "the pass ended and the reading the tab deferred was never paid")
+    assert reads == [False], reads
+    assert ctx.runtime.cell_gating.cell_areas

@@ -768,7 +768,7 @@ def _load_directory_held(ctx, d: Path, label=None) -> None:
     recalculate_threshold(ctx)
     # Cell Gating's CDFs and optimizer lists are left owed: every call the load
     # made rebuilt the tab's controls without reading, and the reading is done
-    # when the Cell Gating tab is shown (``home.controller._pay_cell_gating_if_shown``)
+    # when the Cell Gating tab is shown (``home.controller.pay_cell_gating_if_shown``)
     # — a first-frame read of every well for figures only that tab draws.
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from

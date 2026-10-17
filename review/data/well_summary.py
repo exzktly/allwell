@@ -41,7 +41,8 @@ _logger = logging.getLogger("review")
 #: Bumped whenever :func:`summarize_frame` would describe the same frame differently.
 #: 2: ``nucleus_id`` joined :data:`SUMMARY_COLUMNS`; a version-1 summary taken from
 #: the column subset judged the FOV labels without it (see below).
-SUMMARY_VERSION = 2
+#: 3: ``hour_timepoints`` added, for the Statistics menu.
+SUMMARY_VERSION = 3
 
 #: The columns a summary reads, for a subset read of the Parquet cache: what the
 #: timepoint and FOV lists read, and **everything** ``fov_integrity.
@@ -70,6 +71,10 @@ class WellSummary:
     #: Numeric timepoints in hours: ``timepoint_hours``, else the ``timepoint``
     #: label parsed, exactly as ``DatasetState.rebuild_timepoints`` reads them.
     timepoints: tuple[float, ...] = ()
+    #: The timepoints ``timepoint_hours`` itself carries, with no label parsed:
+    #: what the Statistics collectors select rows on, and so the only ones its
+    #: timepoint menu may offer (``data_loading.get_timepoints_with_rows``).
+    hour_timepoints: tuple[float, ...] = ()
     #: Normalised FOV tokens, in order of first appearance.
     fovs: tuple[str, ...] = ()
     #: Normalised ``timepoint`` label tokens, in order of first appearance.
@@ -93,6 +98,7 @@ class WellSummary:
             n_rows=int(data["n_rows"]),
             columns=tuple(data["columns"]),
             timepoints=tuple(float(t) for t in data["timepoints"]),
+            hour_timepoints=tuple(float(t) for t in data["hour_timepoints"]),
             fovs=tuple(data["fovs"]),
             timepoint_tokens=tuple(data["timepoint_tokens"]),
             fov_verdict=FovIntegrity(**data["fov_verdict"]),
@@ -116,10 +122,12 @@ def summarize_frame(df: pd.DataFrame, columns=None) -> WellSummary:
         return WellSummary()
     names = tuple(c for c in (columns if columns is not None else df.columns) if c not in PROJECTED_COLUMNS)
     timepoints: set[float] = set()
+    hours: set[float] = set()
     if len(df):
         if "timepoint_hours" in df.columns:
             tp_num = pd.to_numeric(df["timepoint_hours"], errors="coerce")
-            timepoints.update(float(t) for t in tp_num.dropna().unique())
+            hours.update(float(t) for t in tp_num.dropna().unique())
+            timepoints.update(hours)
             missing = tp_num.isna()
         else:
             missing = pd.Series(True, index=df.index)
@@ -134,6 +142,7 @@ def summarize_frame(df: pd.DataFrame, columns=None) -> WellSummary:
         n_rows=int(len(df)),
         columns=names,
         timepoints=tuple(sorted(timepoints)),
+        hour_timepoints=tuple(sorted(hours)),
         fovs=fovs,
         timepoint_tokens=tp_tokens,
         fov_verdict=check_fov_labels(df),

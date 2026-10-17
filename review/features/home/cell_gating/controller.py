@@ -138,6 +138,11 @@ class GatingWorker(QThread):
         super().__init__(parent)
         self._ctx = ctx
         self._cancelled = False
+        #: Set once the pass has stopped writing to the cached frames and is
+        #: about to report its end — the moment a GUI-thread reader of those
+        #: frames may go ahead (``_gating_pass_writing``), even though the
+        #: thread itself is still unwinding.
+        self.ended = False
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -151,6 +156,7 @@ class GatingWorker(QThread):
             self._run_inner()
         except Exception as exc:
             logger.exception("gating worker failed")
+            self.ended = True
             self.failed.emit(str(exc))
 
     def _run_inner(self) -> None:
@@ -257,6 +263,7 @@ class GatingWorker(QThread):
                     "GatingWorker finished: wells=%d included=%d excluded=%d",
                     total, included_total, excluded_total,
                 )
+            self.ended = True
             self.finished_ok.emit()
 
 
@@ -332,8 +339,10 @@ def _owed_to_the_load(ctx) -> bool:
     next, and ``set_ratio_metrics`` clears the statistics cache the per-well
     memo lives in, so each read the plate again (tracker R2). So while the plots
     are held for a load (``plot_hold.HOLD_LOADING``) a call rebuilds the
-    controls and owes the reading, and the load pays it once, after the
-    channels, ratios and gates are final (:func:`cell_gating_read_owed_cell_areas`).
+    controls and owes the reading. The load does not pay it: the reading is
+    done once, when the Cell Gating tab is next shown — by which time the
+    channels, ratios and gates are final — or when a gating pass that was
+    running at that moment ends (:func:`cell_gating_read_owed_cell_areas`).
     """
     from review.core import plot_hold
     return plot_hold.held_for(ctx) == plot_hold.HOLD_LOADING
@@ -366,18 +375,38 @@ def cell_gating_load_cell_areas(ctx) -> None:
     _show_cell_areas(ctx, labels)
 
 
+def _gating_pass_writing(ctx) -> bool:
+    """Whether a gating pass is still rewriting the cached frames on its thread.
+
+    ``GatingWorker`` adds and rewrites ``Included`` / ``Gate_Pass`` / ``Gate_On``
+    on the row cache's frames — the same objects ``_read_first_frames`` filters
+    — and pandas does not make that safe to do from two threads at once.
+    """
+    worker = getattr(getattr(getattr(ctx, "runtime", None), "cell_gating", None), "worker", None)
+    try:
+        return bool(worker is not None and worker.isRunning() and not getattr(worker, "ended", False))
+    except RuntimeError:          # the C++ thread object is already gone
+        return False
+
+
 def cell_gating_read_owed_cell_areas(ctx) -> None:
     """Do the reading a load's calls to :func:`cell_gating_load_cell_areas` owed.
 
-    Called once by the load (``load_controller._load_directory_held``) after
-    ``recalculate_threshold``, when the channels, ratios and gates are final and
-    before the gating pass starts. The controls were rebuilt by the owing calls
-    and the saved gates mirrored onto them since, so only the reading is done
-    here — the CDFs, the optimizer's timepoint and baseline lists and its
-    Min/Max fit — and the edits are left alone. A no-op when nothing is owed.
+    Called when the Cell Gating tab is shown (``home.controller.
+    pay_cell_gating_if_shown``, from Home's activation and its sub-tab change)
+    and when a gating pass ends (``_cell_gating_on_finished`` /
+    ``_cell_gating_on_failed``, through the same predicate). The controls were
+    rebuilt by the owing calls and the saved gates mirrored onto them since, so
+    only the reading is done here — the CDFs, the optimizer's timepoint and
+    baseline lists and its Min/Max fit — and the edits are left alone. A no-op
+    when nothing is owed, and deferred (still owed) while a gating pass is
+    writing the frames it would read: the pass's end pays it.
     """
     rt = getattr(getattr(ctx, "runtime", None), "cell_gating", None)
     if rt is None or not rt.areas_owed or rt.fluor_gate_edits is None:
+        return
+    if _gating_pass_writing(ctx):
+        rt.status_label.setText("Reading cells once cell gating has finished…")
         return
     rt.areas_owed = False
     labels = _read_first_frames(ctx)
@@ -385,6 +414,14 @@ def cell_gating_read_owed_cell_areas(ctx) -> None:
     _cell_gating_refresh_opt_fc_controls(ctx)
     _cell_gating_autofill_opt_range(ctx)
     _show_cell_areas(ctx, labels)
+
+
+def _pay_owed_reading_if_shown(ctx) -> None:
+    """After a pass: the reading the tab deferred while the pass ran, if it is in front."""
+    try:
+        ctx.features.call("home.pay_cell_gating_if_shown", ctx)
+    except Exception:
+        swallowed("cell gating: paying the owed reading after a pass")
 
 
 def _read_first_frames(ctx) -> list[str]:
@@ -1907,6 +1944,7 @@ def _cell_gating_on_finished(ctx) -> None:
     from review.core.plot_hold import release_after_gating
     if not release_after_gating(ctx):
         redraw_app(ctx)
+    _pay_owed_reading_if_shown(ctx)
 
 
 def _cell_gating_on_failed(ctx, msg: str) -> None:
@@ -1922,6 +1960,7 @@ def _cell_gating_on_failed(ctx, msg: str) -> None:
     # gates were never applied.
     from review.core.plot_hold import release_after_gating
     release_after_gating(ctx)
+    _pay_owed_reading_if_shown(ctx)
     # Mark the counts as describing settings that were never applied, rather
     # than leaving a confident-looking number behind a failed pass.
     cell_gating_refresh_included_count(ctx, failed=True)

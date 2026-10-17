@@ -588,6 +588,11 @@ def _svc_home_refresh():
     return refresh_home
 
 
+def _svc_home_pay_cell_gating():
+    from review.features.home.controller import pay_cell_gating_if_shown
+    return pay_cell_gating_if_shown
+
+
 def _svc_variables_refresh():
     from review.features.home.variables.controller import refresh_variables
     return refresh_variables
@@ -1038,7 +1043,8 @@ def _features() -> list[FeatureDescriptor]:
             # completeness record that Home reports and nothing else reads
             # (``core/tab_controller._resync_record_on_return``).
             services={"home.sync_sidebar": _svc_home_sync_sidebar,
-                      "home.refresh": _svc_home_refresh},
+                      "home.refresh": _svc_home_refresh,
+                      "home.pay_cell_gating_if_shown": _svc_home_pay_cell_gating},
             on_activate=_activate_home,
             on_dataset_loaded=_loaded_home,
             on_selection_changed=_sel_home,

@@ -75,15 +75,12 @@ _SCRATCH_DIR_ALLOWLIST = frozenset({
     # what this task extracted and the montages it wrote. The archive it writes (``<well>_out.zip``) is
     # built from the staging montages, and the user's inputs are the zip it reads and never removes.
     ("pipeline/nanowell_task.py", "run_zip_task"),
-    # Both of these became visible only when the closure started following a
-    # writer across a first-party import, and both remove a directory
-    # ``_new_transit_dir`` made moments earlier for this one well: the CSV
-    # transit dir in ``_fetch_one`` (which reaches a writer through
-    # ``_materialize``) and the extraction dir in ``_materialize_incremental``
-    # (through ``pipeline.io.merge_images_into_zip``). Neither ever holds a
+    # This became visible only when the closure started following a writer
+    # across a first-party import: it removes the extraction dir
+    # ``_new_transit_dir`` made moments earlier for this one well, reaching a
+    # writer through ``pipeline.io.merge_images_into_zip``. It never holds a
     # file of the user's — the inputs are the remote copy and the archive
     # beside it, and neither is removed here.
-    ("services/remote_fetch.py", "_fetch_one"),
     ("services/remote_fetch.py", "_materialize_incremental"),
     # `stage_local_zips`' planning closure. What it removes is the upload
     # staging dir `_open_staging_if_needed` opened a moment earlier (a

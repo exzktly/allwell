@@ -164,10 +164,13 @@ def test_an_incremental_well_csv_is_merged_into_the_local_one(host, tmp_path, mo
     monkeypatch.setattr(remote_fetch, "compress_remote_csvs", lambda *a: None)
     try:
         fetcher._fetch_one("A01")
+        # An incremental well is merged on the Placer's thread (remote_fetch_place); the app drains it before the
+        # run is reported done, and so does this.
+        fetcher.flush_and_join(timeout=10)
     finally:
         fetcher.cancel()
 
-    # The merged well CSV is recompressed, like every finished well's.
+    # The merged well CSV is gzipped — and was never written plain.
     from util.csv_gz import open_csv_text
     assert not (out / "plate_A01.csv").exists()
     with open_csv_text(out / "plate_A01.csv.gz") as fh:

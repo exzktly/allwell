@@ -223,6 +223,7 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     found = find_leftovers(runner._cache, own_run_dir=remote_run_dir(runner.host, proc._run_id),
                            own_output_dir=own_output, earlier=earlier, log=proc._log)
     proc._leftovers = found
+    _say_what_the_journal_expected(proc, zips, found)
     if force:
         return list(zips), []
     wanted = [w for w in (canonical_well_label(z.stem) for z in zips) if w and w in found.finished]
@@ -237,6 +238,49 @@ def nothing_left_to_run(adopted: list[str]) -> str:
         return ("[remote] batched mode: every well already complete locally or on the remote — downloading the "
                 f"{len(adopted)} finished there, nothing to run.\n")
     return "[remote] batched mode: every well already complete locally — nothing to do.\n"
+
+
+def journal_discrepancies(states: dict[str, str], wells: list[str], found: Leftovers) -> dict[str, list[str]]:
+    """Wells whose earlier journal record promises something the remote no longer has, by what was promised.
+
+    The per-well journal says where each well got to in the attempts before this one
+    (``run_journal.previous_well_states``). It cannot say whether a file is still there — the remote listing
+    decides that — but it is what turns "this well is being sent again" into a reason.
+    """
+    names = {w for w in wells}
+    on_remote_inputs = {canonical_well_label(PurePosixPath(n).stem) for n in found.inputs}
+    out: dict[str, list[str]] = {"finished": [], "uploaded": [], "fetched": []}
+    for well in sorted(names):
+        state = states.get(well, "")
+        if state in ("analysed", "not-fetched") and well not in found.finished:
+            out["finished"].append(well)
+        elif state == "uploaded" and well not in on_remote_inputs and well not in found.finished:
+            out["uploaded"].append(well)
+        elif state == "fetched":
+            out["fetched"].append(well)
+    return {k: v for k, v in out.items() if v}
+
+
+_DISCREPANCY_TEXT = {
+    "finished": "the journal recorded as finished on the remote, but their output is no longer there — running "
+                "them again",
+    "uploaded": "the journal recorded as uploaded, but their archives are no longer on the remote — sending them "
+                "again",
+    "fetched": "the journal recorded as downloaded, but they have no complete CSV here — processing them again",
+}
+
+
+def _say_what_the_journal_expected(proc, zips: list, found: Leftovers) -> None:
+    from services import run_journal
+
+    try:
+        states = run_journal.previous_well_states(proc._local_output_dir)
+    except OSError:
+        return
+    wells = [w for w in (canonical_well_label(z.stem) for z in zips) if w]
+    for kind, listed in journal_discrepancies(states, wells, found).items():
+        proc._log(f"[remote] {len(listed)} well(s) {_DISCREPANCY_TEXT[kind]}: {', '.join(listed[:12])}"
+                  + (" …" if len(listed) > 12 else "") + "\n")
 
 
 def announce_adopted(proc, adopted: list[str]) -> None:

@@ -23,6 +23,7 @@ Depends only on numpy + tifffile/imageio/scikit-image + stdlib — no
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import io
 import logging
@@ -646,10 +647,114 @@ def write_well_csv(records: list[dict], csv_path: Path) -> Path:
 
 
 def merge_well_records(csv_path: Path | str, records: list[dict]) -> int:
-    """:func:`merge_records_into_csv`, then gzip the result. Returns rows added."""
-    added = merge_records_into_csv(csv_path, records)
-    compress_well_csv(csv_path)
-    return added
+    """Merge *records* into a finished well's CSV, leaving it gzipped. Returns rows added."""
+    return merge_records_into_gz_csv(csv_path, records)
+
+
+_MERGE_KEY_FIELDS = ("well", "fov", "timepoint", "nucleus_id")
+
+
+def merge_records_into_gz_csv(
+    csv_path: Path | str,
+    new_records: list[dict],
+    *,
+    key_fields: tuple[str, ...] = _MERGE_KEY_FIELDS,
+) -> int:
+    """:func:`merge_records_into_csv`'s rows and dedup, written straight to ``<well>.csv.gz``.
+
+    A finished well's CSV is gzipped and runs to gigabytes, and this is what a remote incremental run does for
+    every well it downloads. Rewriting it — every row parsed into a dict, written out plain beside the archive, then
+    compressed again — took long enough on a large well that the download sat at 99% with the plain temp file
+    in the output folder, and the Fetcher, which does one well at a time, held every later well's download (and its
+    remote copy) behind it. So:
+
+    * the existing file is scanned once with ``csv.reader`` for its header and the key columns only — no dicts,
+      memory the key set;
+    * when the new rows bring no new column, the existing ``.csv.gz`` is **copied byte for byte** and the new rows
+      are appended as one more gzip member. A gzip stream may hold several members and every reader here
+      (``gzip``, ``util.csv_gz``, pandas) reads them as one file, so nothing is decompressed or recompressed;
+    * otherwise (a new column, or a plain existing file) the file is rewritten — streamed, straight into gzip.
+
+    Atomic either way: written to a hidden sibling, fsynced, renamed over ``.csv.gz``; a plain copy is removed only
+    after. Never plain on disk. Raises on an unreadable existing file, as :func:`merge_records_into_csv` does —
+    an unreadable target is not an empty one.
+    """
+    import csv
+    import gzip
+
+    from util.csv_gz import existing_csv, gz_path, open_csv_text, plain_path
+
+    path = plain_path(csv_path)
+    gz = gz_path(path)
+    existing = existing_csv(path)
+    if not new_records:
+        return 0
+
+    header: list[str] = []
+    seen: set[tuple] = set()
+    if existing is not None:
+        with open_csv_text(existing) as fh:
+            reader = csv.reader(fh)
+            header = next(reader, [])
+            # DictReader's own answers, kept so the dedup cannot drift from merge_records_into_csv's: a column the
+            # header lacks reads "" (``row.get(f, "")``), a short row's missing cell reads "None" (its restval).
+            index = [header.index(f) if f in header else None for f in key_fields]
+            for row in reader:
+                if not row:
+                    continue
+                seen.add(tuple("" if i is None else (row[i] if i < len(row) else "None") for i in index))
+
+    def _key(rec: dict) -> tuple:
+        return tuple(str(rec.get(f, "")) for f in key_fields)
+
+    to_add: list[dict] = []
+    for rec in new_records:
+        k = _key(rec)
+        if k not in seen:
+            seen.add(k)
+            to_add.append(rec)
+    if not to_add and existing is not None:
+        if existing != gz:
+            compress_well_csv(existing)
+        return 0
+
+    fieldnames = list(header) or list(new_records[0].keys())
+    for rec in to_add:
+        for col in rec:
+            if col not in fieldnames:
+                fieldnames.append(col)
+    append_only = existing == gz and fieldnames == header
+    tmp = gz.with_name(f".{gz.name}.merge{os.getpid()}")
+
+    def _write() -> None:
+        try:
+            with open(tmp, "wb") as raw:
+                if append_only:
+                    with open(gz, "rb") as src:
+                        shutil.copyfileobj(src, raw, 1 << 22)
+                with gzip.GzipFile(filename=path.name, mode="wb", fileobj=raw, compresslevel=6) as zf:
+                    text = io.TextIOWrapper(zf, encoding="utf-8", newline="")
+                    writer = csv.DictWriter(text, fieldnames=fieldnames, restval="", extrasaction="ignore")
+                    if not append_only:
+                        writer.writeheader()
+                        if existing is not None:
+                            with open_csv_text(existing) as src_text:
+                                writer.writerows(csv.DictReader(src_text))
+                    writer.writerows(to_add)
+                    text.flush()
+                    text.detach()
+                raw.flush()
+                os.fsync(raw.fileno())
+            os.replace(tmp, gz)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+            raise
+
+    retry_write(_write, what=gz.name, path=gz)
+    if path.is_file():
+        path.unlink()                    # the plain copy the merged archive now replaces
+    return len(to_add)
 
 
 def write_csvs_per_well(
@@ -961,7 +1066,7 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
     """
     import csv as _csv
 
-    from util.csv_gz import GZ_READ_ERRORS, glob_csvs, gzip_csv, open_csv_text, plain_name
+    from util.csv_gz import GZ_READ_ERRORS, glob_csvs, open_csv_text, plain_name
 
     tmp_csv_dir, target_dir = Path(tmp_csv_dir), Path(target_dir)
     total = 0
@@ -981,7 +1086,7 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
         if not rows:
             continue
         try:
-            added = merge_records_into_csv(target, rows)
+            added = merge_records_into_gz_csv(target, rows)
         except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError, _csv.Error) as exc:
             if log_fn:
                 log_fn(f"[remote] warn: merging into {partial.name} failed "
@@ -989,13 +1094,6 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
                        f"well's new rows were not added\n")
             continue
         total += added
-        try:
-            if target.is_file():
-                gzip_csv(target)
-        except OSError as exc:
-            if log_fn:
-                log_fn(f"[remote] warn: could not compress {target.name}: "
-                       f"{exc}; it stays uncompressed\n")
         if log_fn:
             log_fn(f"[remote] merge: {partial.name} \u2192 +{added} new row(s) "
                    f"into {target_dir.name}/\n")

@@ -232,3 +232,40 @@ def test_a_plate_with_nothing_left_to_run_still_downloads_what_finished_on_the_r
     assert p._returncode == 0 and sent == []
     assert [line.split()[1] for line in observed] == ["A01"]
     assert any("downloading the 1 finished there" in m for m in p._logged)
+
+
+def test_the_previous_attempt_s_well_states_survive_the_next_run_opening(tmp_path, monkeypatch):
+    """``open_run`` clears the per-well records, which describe the current run; the restart needs the last
+    attempt's, so they are carried. Driven in the app's order: run one records, run two opens, run two reads."""
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "out"
+    out.mkdir()
+    J.open_run(out, spec={}, mode="remote-batched", input_dir=str(tmp_path / "in"), argv=["--x"])
+    J.record_well(out, "A01", "fetched")
+    J.record_well(out, "A02", "analysed")
+    J.record_well(out, "A03", "uploaded")
+    J.open_run(out, spec={}, mode="remote-batched", input_dir=str(tmp_path / "in"), argv=["--x"])   # the restart
+    J.record_well(out, "A04", "uploaded")
+    J.open_run(out, spec={}, mode="remote-batched", input_dir=str(tmp_path / "in"), argv=["--x"])   # a second restart
+
+    assert J.read_journal(out).wells == {}, "the current run's own record must start empty"
+    assert J.previous_well_states(out) == {"A01": "fetched", "A02": "analysed", "A03": "uploaded",
+                                           "A04": "uploaded"}
+
+
+def test_the_restart_says_why_a_well_the_journal_expected_is_redone(tmp_path, monkeypatch):
+    p, plate, run_dir, sent, observed, _ = _harness(tmp_path, monkeypatch)
+    _finished_on(run_dir / "out", "A02")
+    monkeypatch.setattr(run_journal, "previous_well_states",
+                        lambda _d: {"A02": "analysed", "A03": "analysed", "A04": "uploaded", "A05": "fetched"})
+
+    _run(p, monkeypatch)
+
+    log = "".join(p._logged)
+    assert "1 well(s) the journal recorded as finished on the remote, but their output is no longer there" in log
+    assert ": A03" in log
+    assert "recorded as uploaded, but their archives are no longer on the remote — sending them again: A04" in log
+    assert "recorded as downloaded, but they have no complete CSV here — processing them again: A05" in log
+    assert "A02" not in log.split("finished on the remote, but")[1].split("\n")[0], "A02's output IS there"

@@ -1541,8 +1541,13 @@ and by `remote_fetch_report.txt` in the output folder.
   the same settings. A well that finished there but had not been downloaded
   yet is downloaded rather than uploaded and run again, and an input archive
   that was already uploaded is reused rather than sent again (one that differs
-  from your copy is still re-sent). The log lists both. With Force, finished
-  wells are recomputed, but uploaded inputs are still reused.
+  from your copy is still re-sent). The log lists both, and names any well the
+  earlier attempt's record says was finished, uploaded or downloaded that is
+  nonetheless being redone, with the reason. With Force, finished wells are
+  recomputed, but uploaded inputs are still reused. On an incremental remote
+  run, merging a downloaded well into your local results happens alongside the
+  next downloads rather than holding them, and the merged CSV is written
+  straight to its `.csv.gz`.
 - **Stop** signals the entire pipeline process group (sub-workers included) and
   discards whatever is in flight. Press it a second time during a Suspend if you
   do not want to wait for the in-flight fields.

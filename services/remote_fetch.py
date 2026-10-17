@@ -19,6 +19,7 @@ verification's verdict and on nothing else.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import queue
@@ -84,6 +85,7 @@ from services.remote_run_state import (
 )
 from services.remote_log_adapter import LogFnLogger as _LogFnLogger
 from services.remote_staging import input_well_containers
+from services.remote_fetch_place import Placer, merge_fetched_csv_dir
 from services.remote_fetch_nanowells import (
     fetch_nanowell_tables, missing_nanowell_tables, pull_nanowell_results, well_files_to_delete)
 from services.remote_wire import (
@@ -460,6 +462,7 @@ class Fetcher:
         self._pending: queue.Queue = queue.Queue()  # well labels, after_queued tasks, None
         # (well, step, since) for the drain heartbeat; replaced whole, never mutated.
         self._activity: tuple[str, str, float] | None = None
+        self._placer = Placer(self._log)       # incremental wells are merged here, off the transfer thread
         self._worker = threading.Thread(target=self._loop, daemon=True)
         self._worker.start()
         # Ends the sidecar poll on its own, without stopping the well fetches:
@@ -510,6 +513,7 @@ class Fetcher:
 
     def cancel(self) -> None:
         self._stop.set()
+        self._placer.cancel()
         self._sidecar_done.set()
         self._pending.put(None)
 
@@ -555,6 +559,7 @@ class Fetcher:
             self._worker.join(timeout=timeout)
             if self._worker.is_alive():
                 self._log(self._drain_heartbeat_line())
+        self._placer.drain(timeout, heartbeat=self._drain_heartbeat_line)
         # v5.2.18: surface the end-of-stream summary so the user
         # sees a clear "all downloads complete" marker rather than
         # the run silently going quiet.
@@ -1001,28 +1006,14 @@ class Fetcher:
                 bytes_so_far=lambda: _csv_bytes_landed(dest_dir),
                 base_bytes=int(expected_bytes or 0))
 
+        pending_csvs: Path | None = None
         if self.run.incremental:
-            # Partial CSV (new FOV rows only) — merge into the local full CSV
-            # rather than overwriting it.
-            tmp_csv_dir = _new_transit_dir(
-                self.run.local_output_dir, f"allwell-csv-{well}-",
-                log_fn=self._log)
-            try:
-                with _csv_dir_heartbeat(tmp_csv_dir):
-                    csv_count = self._pull_listed(csv_host, csv_files, tmp_csv_dir)
-                if csv_count:
-                    self._merge_fetched_csvs(tmp_csv_dir)
-            finally:
-                # `_new_transit_dir` made this directory for this one well a
-                # few lines above and nothing of the user's is ever in it, so
-                # removing the whole thing is safe. Exempted by name in
-                # tests/test_no_unarchived_delete.py::_SCRATCH_DIR_ALLOWLIST,
-                # which otherwise catches this function for reaching an
-                # archive writer through `_materialize`.
-                shutil.rmtree(tmp_csv_dir, ignore_errors=True)
-            # The temp dir is gone by now; name the volume it lived on, which is
-            # what the user would have to look at.
-            csv_dest = tmp_csv_dir.parent
+            # Partial CSV (new FOV rows only), merged into the local full CSV by `_place` — on the Placer's thread,
+            # so a long merge does not hold the next well's download (`remote_fetch_place`).
+            pending_csvs = _new_transit_dir(self.run.local_output_dir, f"allwell-csv-{well}-", log_fn=self._log)
+            with _csv_dir_heartbeat(pending_csvs):
+                csv_count = self._pull_listed(csv_host, csv_files, pending_csvs)
+            csv_dest = pending_csvs.parent
         else:
             csv_dest = self.run.local_output_dir
             with _csv_dir_heartbeat(csv_dest):
@@ -1053,6 +1044,14 @@ class Fetcher:
                 f"{self.run.remote_output_dir}/*_{well}.csv\n"
             )
 
+        finish = functools.partial(self._place, well, tmp_zip, pending_csvs, csv_line, csv_count, t0, total)
+        self._placer.submit(finish) if self.run.incremental else finish()
+
+    def _place(self, well: str, tmp_zip: Path, pending_csvs: Path | None, csv_line: str | None, csv_count: int,
+               t0: float, total: int) -> None:
+        """Put a downloaded well into the output, mark it fetched, free its remote copy."""
+        if pending_csvs is not None:
+            merge_fetched_csv_dir(self, pending_csvs)
         # Now materialize the well's output in the user's output_dir
         # according to local input mode.
         self._set_activity(well, f"placing the output in {self.run.local_output_dir}")

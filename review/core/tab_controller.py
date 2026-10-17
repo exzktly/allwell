@@ -629,15 +629,17 @@ def apply_sidebar_visibility(ctx) -> None:
 
 
 def _apply_phone_columns(ctx, mode: str, collapsed: bool) -> None:
-    """In phone layout, a left panel and its content never share the screen.
+    """In phone layout, a pane's left panel opens *above* its content.
 
-    Phone layout is one column: the pane shows either its content (the
-    plots, the run dashboard) or its left panel (the well plate, the run form)
-    across the full width — the left panel being what this module already
-    calls "not collapsed". So when the active mode's panel is showing, its
-    splitter siblings are hidden and the panel's fixed rail width is lifted;
-    when it is not, everything goes back. Outside phone layout every panel is
-    put back exactly as it was, which is also what leaving phone layout runs.
+    Phone layout is one column, so each pane's splitter turns vertical: the
+    left panel — Review's rail with its sections and well plate, the Analyze
+    form, the Datasets tool list — spans the window's full width at the top
+    when it is open (the band's ☰), and the content it sits beside at the desk
+    is pushed down beneath it rather than replaced, so a plot keeps redrawing
+    in view while wells are tapped above it. "Open" is what this module already
+    calls "not collapsed"; the visibility itself is set above. Outside phone
+    layout every splitter is put back exactly as it was, which is also what
+    leaving phone layout runs.
 
     Works on each pane's splitter from outside, so Analyze and Datasets need
     no code of their own for it: their left panels sit beside their content in
@@ -652,39 +654,64 @@ def _apply_phone_columns(ctx, mode: str, collapsed: bool) -> None:
         panels[m] = getattr(getattr(app, attr, None), "_left_sidebar", None)
     for m, panel in panels.items():
         if panel is not None:
-            _show_panel_alone(panel, phone and m == mode and not collapsed)
+            _stack_panel_above(panel, phone, opened=phone and m == mode and not collapsed)
 
 
-def _show_panel_alone(panel, alone: bool) -> None:
-    """Give *panel* its splitter to itself, or hand the space back.
+#: The most of its splitter's height an open panel takes, so the content under
+#: it stays in view however long the panel is (the Analyze form is several
+#: screens): the panel scrolls inside its share instead.
+PHONE_PANEL_MAX_SHARE = 0.65
 
-    Remembers which siblings it hid and the width pin it lifted, and undoes
-    exactly those — a sibling that was already hidden (a closed dock) stays
-    hidden, and the pin comes back at the value it had, not a guess.
+
+def _stack_panel_above(panel, stacked: bool, *, opened: bool = False) -> None:
+    """Turn *panel*'s splitter vertical with the panel on top, or put it back.
+
+    Remembers the splitter's orientation and sizes and the panel's width pin,
+    and restores exactly those. While stacked, an open panel is given its own
+    height — the height of what it holds, not of the scroll area holding it —
+    up to ``PHONE_PANEL_MAX_SHARE`` of the splitter.
     """
-    from PySide6.QtWidgets import QSplitter
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QScrollArea, QSplitter
     splitter = panel.parentWidget()
     if not isinstance(splitter, QSplitter):
         return
-    hidden = getattr(panel, "_aw_phone_hidden", None)
-    if alone and hidden is None:
-        hidden = []
-        for i in range(splitter.count()):
-            w = splitter.widget(i)
-            if w is not panel and not w.isHidden():
-                w.hide()
-                hidden.append(w)
-        panel._aw_phone_hidden = hidden
-        panel._aw_phone_pin = (panel.minimumWidth(), panel.maximumWidth())
+    saved = getattr(panel, "_aw_phone_saved", None)
+    if stacked and saved is None:
+        panel._aw_phone_saved = (splitter.orientation(), splitter.sizes(),
+                                 panel.minimumWidth(), panel.maximumWidth())
+        splitter.setOrientation(Qt.Vertical)
         panel.setMinimumWidth(0)
         panel.setMaximumWidth(16_777_215)   # Qt's QWIDGETSIZE_MAX
-    elif not alone and hidden is not None:
-        for w in hidden:
-            w.show()
-        panel._aw_phone_hidden = None
-        lo, hi = panel._aw_phone_pin
+    elif not stacked and saved is not None:
+        orientation, sizes, lo, hi = saved
+        panel._aw_phone_saved = None
+        splitter.setOrientation(orientation)
         panel.setMinimumWidth(lo)
         panel.setMaximumWidth(hi)
+        splitter.setSizes(sizes)
+        return
+    if stacked and opened:
+        scroll = panel if isinstance(panel, QScrollArea) else panel.findChild(QScrollArea)
+        inner = scroll.widget() if scroll is not None else None
+        held = inner or panel
+        # Measured at the width it will have — the splitter's — not from
+        # ``sizeHint``, which knows nothing about the well plate's height
+        # following its width: sized from the hint, the drawer cut the plate
+        # off at row G on a 1080-wide screen.
+        lay = held.layout()
+        width = splitter.width()
+        want = (lay.totalHeightForWidth(width) if lay is not None and lay.hasHeightForWidth()
+                else held.sizeHint().height()) + 2 * splitter.handleWidth()
+        total = sum(splitter.sizes()) or splitter.height()
+        top = min(want, int(total * PHONE_PANEL_MAX_SHARE))
+        idx = splitter.indexOf(panel)
+        sizes = [0] * splitter.count()
+        sizes[idx] = top
+        rest = [i for i in range(splitter.count()) if i != idx]
+        for i in rest:
+            sizes[i] = max(0, total - top) // max(1, len(rest))
+        splitter.setSizes(sizes)
 
 
 def set_sidebar_collapsed(ctx, collapsed: bool) -> None:

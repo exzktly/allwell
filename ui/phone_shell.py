@@ -13,13 +13,14 @@ What phone layout does, and where:
   layouts. RealVNC resizes the Windows desktop to the phone's shape; a window
   whose minimum is wider than that desktop hangs off its edge, taking every
   control there with it, including the one that would fix it.
-* **One column.** A pane shows its content or its left panel, never both —
-  ``review.core.tab_controller._apply_phone_columns`` does the swap; this
-  module's navigator button (``Wells · 3`` / ``Run form`` / ``Tools``) and ☰
-  menu drive it.
+* **One column.** Each pane's splitter turns vertical: the band's ☰ opens the
+  pane's whole left panel (Review's sections and well plate, the Analyze form)
+  across the top of the window and pushes the page down beneath it —
+  ``review.core.tab_controller._apply_phone_columns`` does the stacking.
 * **Chrome that suits a thumb**: the header row goes, the mode bar drops its
   glyphs, the page sub-tab strip becomes one "Bar Plots ▾" menu, desk-only
-  and destructive buttons go, the keyboard hints go.
+  and destructive buttons go, the keyboard hints go; text size and the way
+  back to the desktop layout sit behind the band's "Aa" button.
 * **Larger text** (:meth:`PhoneShell.set_text_size`): the size tokens are
   scaled and the stylesheet re-applied — about 6 s on a loaded app, under an
   overlay that swallows the taps made meanwhile — then one explicit pass
@@ -38,7 +39,7 @@ from PySide6.QtCore import QEvent, QObject, QRect, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QDialog, QLabel,
-    QLineEdit, QMenu, QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QLineEdit, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from core import phone_layout
@@ -76,18 +77,11 @@ class PhoneHandles:
     #: The page sub-tab strip host (hidden in phone layout, mirrored by a menu).
     page_tabs_host: QWidget | None = None
     current_page_bar: Callable[[], object] | None = None
-    #: The Review rail, to carry the "Show plots" bar along its foot.
-    rail: QWidget | None = None
-    #: Review's sections: keys in order, label for a key, offered?, current, go.
-    sections: Callable[[], list[tuple[str, str]]] | None = None
-    current_section: Callable[[], str | None] | None = None
-    go_section: Callable[[str], None] | None = None
     mode: Callable[[], str] = lambda: "review"
     navigator_open: Callable[[], bool] = lambda: False
     set_navigator: Callable[[bool], None] = lambda _open: None
     #: Re-run every mode-dependent sync after a layout change.
     relayout: Callable[[], None] = lambda: None
-    selected_count: Callable[[], int] = lambda: 0
     dashboards: Callable[[], list] = lambda: []
 
 
@@ -468,19 +462,14 @@ class PhoneShell(QObject):
             "using All-Well from a phone over remote desktop.")
         self.desk_button.clicked.connect(lambda: self.set_on(True))
 
-        # Phone: ☰ menu, the navigator button and the page menu, in the band.
+        # Phone: ☰ opens the pane's whole left panel — Review's sections and
+        # well plate, the Analyze form — across the top of the window, pushing
+        # the page down beneath it rather than covering it.
         self.menu_button = QToolButton()
         self.menu_button.setObjectName("PhoneMenuButton")
         self.menu_button.setText("☰")
-        self.menu_button.setPopupMode(QToolButton.InstantPopup)
-        self._menu = QMenu(self.menu_button)
-        self._menu.aboutToShow.connect(self._fill_menu)
-        self._size_menu = QMenu("Text size", self._menu)
-        self.menu_button.setMenu(self._menu)
-
-        self.nav_button = QPushButton()
-        self.nav_button.setObjectName("PhoneNavButton")
-        self.nav_button.clicked.connect(self._on_nav_clicked)
+        self.menu_button.setCheckable(True)
+        self.menu_button.clicked.connect(self._on_menu_clicked)
 
         self.page_button = QToolButton()
         self.page_button.setObjectName("PhonePageButton")
@@ -492,31 +481,33 @@ class PhoneShell(QObject):
         self._band_spacer = QWidget()
         self._band_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        # A full-width bar at the rail's foot: the way back to the plots that
-        # sits under the thumb, after a run of taps on the plate above it.
-        self.show_plots_button = QPushButton("Show plots")
-        self.show_plots_button.setObjectName("PhoneShowPlots")
-        self.show_plots_button.setProperty("variant", "primary")
-        self.show_plots_button.clicked.connect(lambda: self._h.set_navigator(False))
+        # Phone layout's own settings — text size, and the way back to the
+        # desktop layout — behind the same phone glyph the desk button wears.
+        self.options_button = QToolButton()
+        self.options_button.setObjectName("PhoneOptionsButton")
+        self.options_button.setText("Aa")
+        self.options_button.setPopupMode(QToolButton.InstantPopup)
+        self._menu = QMenu(self.options_button)
+        self._menu.aboutToShow.connect(self._fill_menu)
+        self._size_menu = QMenu("Text size", self._menu)
+        self.options_button.setMenu(self._menu)
 
         band = self._h.band
         layout = band.layout() if band is not None else None
         if layout is not None:
             at = self._h.band_insert_at
             layout.insertWidget(at, self.menu_button)
-            layout.insertWidget(at + 1, self.nav_button)
-            bar_at = layout.indexOf(self._h.mode_bar) if self._h.mode_bar else at + 1
+            bar_at = layout.indexOf(self._h.mode_bar) if self._h.mode_bar else at
             layout.insertWidget(bar_at + 1, self.page_button)
             layout.insertWidget(bar_at + 2, self._band_spacer)
-        rail = self._h.rail
-        if rail is not None and rail.layout() is not None:
-            rail.layout().addWidget(self.show_plots_button)
+            # Before the band's last widget, Help, which keeps the rightmost slot.
+            layout.insertWidget(max(0, layout.count() - 1), self.options_button)
         for w in self._phone_only():
             w.hide()
 
     def _phone_only(self) -> list[QWidget]:
-        return [self.menu_button, self.nav_button, self.page_button,
-                self._band_spacer, self.show_plots_button]
+        return [self.menu_button, self.page_button, self._band_spacer,
+                self.options_button]
 
     # ── the switch ────────────────────────────────────────────────────────
     def is_on(self) -> bool:
@@ -756,27 +747,14 @@ class PhoneShell(QObject):
         self._banner_dismissed_for = bool(getattr(self._banner, "_aw_to_phone", True))
         self._hide_banner()
 
-    # ── menus and the navigator ───────────────────────────────────────────
-    _NAV_TEXT = {  # mode → (panel closed, panel open)
-        "analyze": ("Run form", "Progress"),
-        "datasets": ("Tools", "Back"),
-    }
-
+    # ── menus and the drawer ──────────────────────────────────────────────
     def refresh(self) -> None:
-        """Re-label the band's phone controls for the current mode and state."""
+        """Sync the band's phone controls with the current mode and drawer."""
         if not phone_layout.is_on():
             return
-        mode = self._h.mode()
-        open_ = self._h.navigator_open()
-        if mode == "review":
-            n = self._h.selected_count()
-            self.nav_button.setText("Done" if open_ else f"Wells · {n}")
-        else:
-            closed, opened = self._NAV_TEXT.get(mode, ("Panel", "Back"))
-            self.nav_button.setText(opened if open_ else closed)
-        self.show_plots_button.setVisible(mode == "review" and open_)
+        self.menu_button.setChecked(self._h.navigator_open())
         bar = self._current_page_bar()
-        self.page_button.setVisible(bar is not None and mode == "review" and not open_)
+        self.page_button.setVisible(bar is not None and self._h.mode() == "review")
         if bar is not None:
             self.page_button.setText(f"{bar.tabText(bar.currentIndex())} ▾")
 
@@ -785,9 +763,15 @@ class PhoneShell(QObject):
         bar = fn() if fn is not None else None
         return bar if bar is not None and bar.count() > 0 else None
 
-    def _on_nav_clicked(self) -> None:
+    def _on_menu_clicked(self) -> None:
         self._h.set_navigator(not self._h.navigator_open())
         self.refresh()
+
+    def close_drawer(self) -> None:
+        """Close the left panel — after a section is picked in it, say."""
+        if phone_layout.is_on() and self._h.navigator_open():
+            self._h.set_navigator(False)
+            self.refresh()
 
     def _fill_page_menu(self) -> None:
         self._page_menu.clear()
@@ -810,17 +794,6 @@ class PhoneShell(QObject):
     def _fill_menu(self) -> None:
         m = self._menu
         m.clear()
-        mode = self._h.mode()
-        if mode == "review" and self._h.sections is not None:
-            current = self._h.current_section() if self._h.current_section else None
-            group = QActionGroup(m)
-            for key, label in self._h.sections():
-                act = QAction(label, m, checkable=True)
-                act.setChecked(key == current)
-                act.triggered.connect(lambda _c=False, k=key: self._pick_section(k))
-                group.addAction(act)
-                m.addAction(act)
-            m.addSeparator()
         # One submenu for the life of the shell, emptied and refilled here:
         # ``clear()`` on the parent drops only the actions it owns, so the
         # submenu survives it, and a submenu made afresh on every open left
@@ -843,9 +816,3 @@ class PhoneShell(QObject):
         m.addSeparator()
         desk = m.addAction("Desktop layout")
         desk.triggered.connect(lambda: self.set_on(False))
-
-    def _pick_section(self, key: str) -> None:
-        if self._h.go_section is not None:
-            self._h.go_section(key)
-        self._h.set_navigator(False)
-        self.refresh()

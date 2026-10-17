@@ -609,10 +609,6 @@ class AllWellApp(QMainWindow):
             getattr(self, "_copy_analysis_btn", None), getattr(self, "_open_btn", None),
             getattr(self, "_reset_view_btn", None),
         ) if w is not None] + list(getattr(self, "_status_hints", []))
-        if nav is not None:
-            # Sections move to the ☰ menu, so the rail opens straight onto the
-            # well plate rather than a screenful of section names above it.
-            desk_only.append(nav)
 
         handles = PhoneHandles(
             header=getattr(self, "_header", None),
@@ -622,16 +618,10 @@ class AllWellApp(QMainWindow):
             desk_only=desk_only,
             page_tabs_host=getattr(review, "_page_tabs_host", None),
             current_page_bar=_current_page_bar,
-            rail=getattr(review, "_sidebar_root", None),
-            sections=(lambda: [(k, nav.itemLabel(k)) for k in nav.items()
-                               if nav.isItemOffered(k)]) if nav is not None else None,
-            current_section=nav.currentKey if nav is not None else None,
-            go_section=nav.setCurrentKey if nav is not None else None,
             mode=_mode,
             navigator_open=lambda: not getattr(review, "_sidebar_collapsed", False),
             set_navigator=_set_navigator,
             relayout=_relayout,
-            selected_count=lambda: len(review._app_state.selection.selected_wells),
             dashboards=_dashboards,
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
@@ -640,6 +630,12 @@ class AllWellApp(QMainWindow):
         notebook = getattr(review, "_notebook", None)
         if notebook is not None and hasattr(notebook, "currentChanged"):
             notebook.currentChanged.connect(lambda *_a: self._phone.refresh())
+        if nav is not None:
+            # A section tapped in the open drawer is a request to see it: the
+            # drawer closes. Wells tapped on the plate below the sections keep
+            # it open, since picking several is normal and the plot under the
+            # drawer already redraws in view.
+            nav.itemClicked.connect(lambda _key: self._phone.close_drawer())
 
     def showEvent(self, event) -> None:  # Qt naming
         super().showEvent(event)

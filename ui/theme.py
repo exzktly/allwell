@@ -1697,10 +1697,12 @@ QProgressBar::chunk {{
 
 /* ── Phone layout's band controls (ui/phone_shell.py) ─────────────────────
    Built from the scaled tokens like everything else, so they grow with the
-   text size. The menu buttons carry no drop-down arrow: the ☰ glyph and the
-   "Bar Plots ▾" label already say a menu opens, and the arrow Qt draws in
-   the corner is a second, smaller target beside the real one. */
-QToolButton#PhoneMenuButton, QToolButton#PhonePageButton {{
+   text size. ☰ is lit while the drawer it opens is open. The menu buttons
+   carry no drop-down arrow: the "Bar Plots ▾" label already says a menu
+   opens, and the arrow Qt draws in the corner is a second, smaller target
+   beside the real one. */
+QToolButton#PhoneMenuButton, QToolButton#PhonePageButton,
+QToolButton#PhoneOptionsButton {{
     background-color: transparent;
     border: 1px solid {c.control_border};
     border-radius: {r.sm}px;
@@ -1708,18 +1710,19 @@ QToolButton#PhoneMenuButton, QToolButton#PhonePageButton {{
     font-weight: {t.semibold};
 }}
 QToolButton#PhoneMenuButton {{ font-size: {t.h2_size}px; }}
-QToolButton#PhoneMenuButton:hover, QToolButton#PhonePageButton:hover {{
+QToolButton#PhoneMenuButton:checked {{
+    background-color: {c.accent};
+    color: {c.accent_fg};
+    border-color: {c.accent};
+}}
+QToolButton#PhoneMenuButton:hover, QToolButton#PhonePageButton:hover,
+QToolButton#PhoneOptionsButton:hover {{
     background-color: {c.hover};
 }}
-QToolButton#PhoneMenuButton::menu-indicator,
-QToolButton#PhonePageButton::menu-indicator {{
+QToolButton#PhonePageButton::menu-indicator,
+QToolButton#PhoneOptionsButton::menu-indicator {{
     image: none;
     width: 0px;
-}}
-QPushButton#PhoneShowPlots {{
-    border-radius: 0px;
-    padding: {s.md}px;
-    font-size: {t.h3_size}px;
 }}
 QToolButton#PhoneLayoutButton {{
     border: 1px solid {c.control_border};

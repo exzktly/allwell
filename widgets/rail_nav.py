@@ -124,9 +124,6 @@ class _RailNavRow(QFrame):
     def key(self) -> str:
         return self._key
 
-    def label(self) -> str:
-        return self._label.text()
-
     def setActive(self, on: bool) -> None:
         self.setProperty("active", bool(on))
         # Mirror the property onto the body widget so QSS rules targeting
@@ -179,6 +176,10 @@ class _RailNavRow(QFrame):
 
 class RailNav(QFrame):
     currentChanged = Signal(str)
+    #: A row the *user* clicked — including the current one. Unlike
+    #: ``currentChanged`` it does not fire for navigation done by code, which
+    #: is what lets a host react to a tap (phone layout closes its drawer).
+    itemClicked = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -248,30 +249,15 @@ class RailNav(QFrame):
     def items(self) -> list[str]:
         return list(self._order)
 
-    def itemLabel(self, key: str) -> str:
-        """The text the row shows for *key* (``""`` for an unknown key)."""
-        row = self._rows.get(key)
-        return row.label() if row is not None else ""
-
-    def isItemOffered(self, key: str) -> bool:
-        """Is *key*'s row one the user could click right now?
-
-        Enabled, and not hidden by its owner (a profile or a dataset that
-        leaves a section out) — so a list built from this, such as phone
-        layout's ☰ menu, offers what the rail offers and nothing more.
-        """
-        row = self._rows.get(key)
-        return row is not None and row.isEnabled() and not row.isHidden()
-
     # ── binding adapter ──────────────────────────────────────────────────
     def bindingAdapter(self):
         return (self.currentKey, self.setCurrentKey, self.currentChanged)
 
     # ── internals ────────────────────────────────────────────────────────
     def _on_row_clicked(self, key: str) -> None:
-        if key == self._current:
-            return
-        self._set_current_internal(key, emit=True)
+        if key != self._current:
+            self._set_current_internal(key, emit=True)
+        self.itemClicked.emit(key)
 
     def _set_current_internal(self, key: str, *, emit: bool) -> None:
         prev = self._current

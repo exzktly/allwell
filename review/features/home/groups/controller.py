@@ -192,7 +192,7 @@ def replace_groups(ctx, sets) -> None:
     """Make *sets* the plate's replicate groups, replacing whatever was there.
 
     The one writer for both generators on this page — Quick Replicates and
-    *Make groups from variable* — so a generated group is the same kind of
+    *Make replicates from variables* — so a generated group is the same kind of
     thing whichever button made it: same source tag, same colour sequence,
     same ``name_is_verbatim`` carried through, and editable afterwards exactly
     like a group drawn by hand.
@@ -215,130 +215,98 @@ def replace_groups(ctx, sets) -> None:
     ctx.coordinator.rebuild_all()
 
 
-# ── groups from a sample variable ───────────────────────────────────────────
+# ── replicates from the sample variables ────────────────────────────────────
 
-#: The *Make groups from* choice that crosses every variable, so a plate of two
-#: cell lines across a dose series gives ``HeLa · 10 µM`` rather than six doses
-#: of HeLa pooled into one group.
-ALL_VARIABLES = "__all_variables__"
+def replicates_from_variables(ctx):
+    """``(sets, wells left out)``: one group per distinct variable assignment.
 
-
-def variable_group_choices(ctx) -> list[tuple[str, str]]:
-    """``(label, data)`` for the *Make groups from* combo, in variable order."""
-    vset = getattr(ctx.state.selection, "variables", None)
-    variables = list(getattr(vset, "variables", ()) or ())
-    choices = [(v.name, v.id) for v in variables]
-    if len(variables) >= 2:
-        choices.append(("Every variable combined", ALL_VARIABLES))
-    return choices
-
-
-def groups_from_variable(ctx, choice: str):
-    """``(sets, wells left out)`` for turning *choice*'s values into groups.
-
-    One group per value — or, for :data:`ALL_VARIABLES`, per combination of
-    values a well actually holds — named by the values, through the same
-    ``crossed_replicate_sets`` the Response tab pools with, so the name a group
-    gets here is the name that member already carries on a grouped plot. A
-    loaded well with no value (for any of the variables, when combined) joins
-    no group and is returned in the second list, so the caller can say so:
-    a well silently missing from every group is a well missing from every plot.
+    Wells whose assignments are identical across every variable are replicates
+    of one condition, so they become one group — the rule is
+    :func:`sample_variables.replicate_groups`, and the names are
+    :func:`sample_variables.names_for_well_sets`', so a group reads
+    ``HeLa · 10 µM`` and two conditions can never share a name. Loaded wells
+    only, in plate order: a group can hold only what this load can plot.
     """
-    from review.domain.plot_members import crossed_replicate_sets
+    from review.domain.sample_variables import names_for_well_sets, replicate_groups
     from review.domain.viewer_state import parse_rc
 
     vset = getattr(ctx.state.selection, "variables", None)
-    if vset is None:
-        return [], []
-    if choice == ALL_VARIABLES:
-        ids = [v.id for v in vset.variables]
-    else:
-        ids = [choice] if vset.by_id(choice) is not None else []
-    if not ids:
-        return [], []
-    sets = crossed_replicate_sets(ctx, ids)
-    placed = {w for r in sets for w in r.wells}
-    left_out = sorted((w for w in (ctx.state.dataset.well_paths or {})
-                       if w not in placed), key=parse_rc)
+    wells = sorted(ctx.state.dataset.well_paths or {}, key=parse_rc)
+    if vset is None or not vset.variables:
+        return [], wells
+    groups, left_out = replicate_groups(vset, wells)
+    names = names_for_well_sets(vset, groups)
+    sets = [ReplicateSet(name or "/".join(g), list(g), name_is_verbatim=bool(name))
+            for g, name in zip(groups, names)]
     return sets, left_out
 
 
-def _choice_label(ctx, choice: str) -> str:
-    for label, data in variable_group_choices(ctx):
-        if data == choice:
-            return "every variable" if data == ALL_VARIABLES else label
-    return "that variable"
+def rep_replicates_from_variables(ctx) -> None:
+    """*Make replicates from variables*: replace the groups with one per condition.
 
-
-def rep_groups_from_variable(ctx, choice: str | None = None) -> None:
-    """*Make groups from variable*: replace the groups with one per value.
-
-    Says what it did, in the sentence the user reads next: how many groups,
-    which wells have no value and so are in none, and — when the plots are
-    grouped by a variable on the plotting band — that they still are, because
-    a variable grouping replaces the groups in every plot and the new groups
-    would otherwise appear to have changed nothing.
+    Says what it did in the sentence the user reads next — see
+    :func:`_made_replicates_sentence`.
     """
-    if choice is None:
-        combo = ctx.widgets.get_or_none("_rep_from_var_combo")
-        choice = combo.currentData() if combo is not None else None
-    if not choice:
-        return
-    label = _choice_label(ctx, choice)
-    sets, left_out = groups_from_variable(ctx, choice)
+    sets, left_out = replicates_from_variables(ctx)
     if not sets:
         ctx.notify.set_status(
-            f"No well has a value for {label} yet. Fill its values on the "
-            f"Variables tab first.")
+            "No well has a variable value yet. Fill values on the Variables "
+            "tab first.")
         return
     sel_state = ctx.state.selection
     if sel_state.selections and not _confirm_replace(ctx, len(sel_state.selections)):
         return
     replace_groups(ctx, sets)
-    ctx.notify.set_status(_made_groups_sentence(ctx, label, sets, left_out))
+    ctx.notify.set_status(_made_replicates_sentence(ctx, sets, left_out))
 
 
-def _made_groups_sentence(ctx, label: str, sets, left_out) -> str:
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _made_replicates_sentence(ctx, sets, left_out) -> str:
+    """How many groups, which are single wells, which wells are in none.
+
+    A group of one well is still a condition but has no replicates, so no
+    spread can be drawn for it; saying so here is cheaper than the user finding
+    a bar with no whisker. A well with no value at all is in no group, and a
+    well missing from every group is missing from every plot. And when the
+    plotting band is grouped by a variable the new groups appear on no plot
+    until it is set back, which would otherwise look like nothing happened.
+    """
     from review.domain.plot_members import variable_grouping_in_force
 
-    parts = [f"Made {len(sets)} group{'s' if len(sets) != 1 else ''} from {label}."]
+    parts = [f"Made {_plural(len(sets), 'replicate group')} from the variables."]
+    singles = [s.name for s in sets if len(s.wells) == 1]
+    if singles:
+        shown = ", ".join(singles[:3]) + ("…" if len(singles) > 3 else "")
+        parts.append(f"{_plural(len(singles), 'group')} "
+                     f"{'has' if len(singles) == 1 else 'have'} a single well ({shown}).")
     if left_out:
         shown = ", ".join(left_out[:4]) + ("…" if len(left_out) > 4 else "")
-        parts.append(f"{len(left_out)} well{'s' if len(left_out) != 1 else ''} "
-                     f"with no value {'are' if len(left_out) != 1 else 'is'} in "
-                     f"no group ({shown}).")
+        parts.append(f"{_plural(len(left_out), 'well')} with no values "
+                     f"{'is' if len(left_out) == 1 else 'are'} in no group ({shown}).")
     if variable_grouping_in_force(ctx):
         parts.append("The plots are still grouped by a variable — set Group by "
                      "to Wells / groups on the plotting band to plot these groups.")
     return " ".join(parts)
 
 
-def refresh_from_variable_row(ctx) -> None:
-    """Fill the *Make groups from* combo, keeping the choice where it survives.
+def refresh_replicates_button(ctx) -> None:
+    """Enable *Make replicates from variables* only once a variable exists.
 
-    Disabled with its reason rather than hidden when there is no variable: the
-    row says what it would do, and the tooltip says what it is waiting for.
+    Disabled with its reason rather than hidden: the button says what it would
+    do, and the tooltip says what it is waiting for.
     """
-    combo = ctx.widgets.get_or_none("_rep_from_var_combo")
     button = ctx.widgets.get_or_none("_rep_from_var_btn")
-    if combo is None:
+    if button is None:
         return
-    keep = combo.currentData()
-    choices = variable_group_choices(ctx)
-    combo.blockSignals(True)
-    combo.clear()
-    for label, data in choices:
-        combo.addItem(label, data)
-    index = combo.findData(keep) if keep else -1
-    combo.setCurrentIndex(index if index >= 0 else 0)
-    combo.blockSignals(False)
-    on = bool(choices)
-    reason = ("" if on else
-              "Define a variable on Home → Sample Map → Variables first.")
-    for widget in (combo, button):
-        if widget is not None:
-            widget.setEnabled(on)
-            widget.setToolTip(reason or widget.property("enabledTip") or "")
+    vset = getattr(ctx.state.selection, "variables", None)
+    on = bool(getattr(vset, "variables", ()))
+    button.setEnabled(on)
+    button.setToolTip(
+        (button.property("enabledTip") or "") if on else
+        "Define a variable on Home → Sample Map → Variables first.")
 
 
 def build_rep_add_dialog(ctx) -> RepAddDialog:
@@ -515,9 +483,9 @@ def rep_refresh_map(ctx) -> None:
     cur_wells = [w for w in (cur.get("wells") or []) if w in well_paths] if cur else []
     plate.setSelectedWellIds(cur_wells)
     # Variables are defined on a sibling tab and this is the refresh every
-    # definition edit already reaches, so the combo cannot list a variable that
-    # was deleted or miss one just created.
-    refresh_from_variable_row(ctx)
+    # definition edit already reaches, so the button's enabled state follows
+    # the variables being created or deleted.
+    refresh_replicates_button(ctx)
 
 
 def rep_quick_pairs_from_dropdowns(ctx) -> None:

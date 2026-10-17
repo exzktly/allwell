@@ -1975,9 +1975,13 @@ does not come here: it takes you to the tab that plot came from.
 The rest of Home's tabs are where you *declare* things, rather than read them:
 which cells count, which wells are replicates of each other, what you varied
 across the plate, what to call them, and what ratios to derive. **Import**, at
-the right end of the page's controls row, merges definitions from a JSON file
-into what is already there; it is hidden on Overview, where there is nothing to
-merge into. Everything on these tabs autosaves to the dataset folder as you
+the right end of the page's controls row, brings in groups from a JSON file —
+one saved with a group's **Export**, a `pipeline_info.json`, or an older
+group-definitions file. When the dataset already has groups it asks whether to
+**Add to current groups** (a name already in use gets a suffix, nothing is
+overwritten) or **Replace current groups**; with no groups yet they are simply
+added. It is the app's only groups import, and it is hidden on Overview and on
+the Variables layer, where there are no groups to import into. Everything on these tabs autosaves to the dataset folder as you
 edit, so there is no Save button to look for; to discard definitions, use
 **Reset analysis** in the title bar ([Starting over](#starting-over)), which
 lets you pick exactly which kinds to drop.
@@ -2378,19 +2382,22 @@ a well in no group puts that one well on the plots by itself, beside the
 groups and labelled with its own name; click it again to take it off. Both
 reach Bar Plots, Line Graphs, Scatter and Distribution alike.
 
-**Make groups from a variable.** If you have already recorded what you did to
-each well on the **Variables** tab, the row under Quick Replicates turns that
-into groups: pick a variable under **Make groups from** and press **Make groups
-from variable**, and every well holding the same value becomes one group, named
-by the value (`10 µM`). With two or more variables you can also pick **Every
-variable combined**, which makes one group per combination the plate actually
-holds (`HeLa · 10 µM`) rather than pooling every dose of a cell line together.
-The result replaces your current groups — you are asked first — and the groups
-it makes are ordinary groups: rename, recolour, or click wells in and out of
-them like any other. A well with no value for the variable joins no group, and
-the status line names it. If the plotting band's **Group by** is still set to a
-variable, the plots go on pooling by that variable and the status line says so;
-set Group by back to *Wells / groups* to plot the new groups.
+**Make replicates from variables.** If you have already recorded what you did
+to each well on the **Variables** tab, the button under Quick Replicates turns
+that into replicate groups: press **Make replicates from variables**, and wells
+whose values are identical for every variable become replicates of one group,
+named by those values (`HeLa · 10 µM`). Two wells with the same dose but
+different cell lines are different conditions and land in different groups. A
+well missing a value is grouped with the wells missing the same one, and the
+group's name lists its wells (`HeLa (C01/C02)`) so it cannot be mistaken for a
+fully described condition. The result replaces your current groups — you are
+asked first — and the groups it makes are ordinary groups: rename, recolour, or
+click wells in and out of them like any other. The status line says how many
+groups were made, which of them hold only one well (no error bar can be drawn
+for those), and which wells have no values at all and so are in no group. If the
+plotting band's **Group by** is still set to a variable, the plots go on pooling
+by that variable and the status line says so; set Group by back to *Wells /
+groups* to plot the new groups.
 
 **Once you have filled in Variables, new groups are named after them.** A group
 whose wells all hold `HeLa` and `10 µM` is created as `HeLa · 10 µM`, whether it

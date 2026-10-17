@@ -8,14 +8,12 @@ schedule-save by domain name, and the registry owns the one debounce path.
 
 ``ratios``, ``heatmap_layouts``, and ``line_order`` share a single
 ``persistence.json`` sidecar managed by ``_doc``; legacy per-domain JSON
-files are migrated on first read. ``cell_overrides`` and the bar-group
-file-picker stay separate.
+files are migrated on first read. ``cell_overrides`` stays separate.
 
 Modules:
     registry           ``PersistenceRegistry`` — name-keyed save/load dispatch
                        + the one shared debounced-save path.
     _doc               Shared ``persistence.json`` reader/writer + migration.
-    bar_groups         JSON file picker for the bar/replicate-group state.
     export_groups      ``persistence.json["export_groups"]`` — Batch Export
                        tab's per-panel (line/bar/scatter) export groups.
     ratios             ``persistence.json["ratios"]``.

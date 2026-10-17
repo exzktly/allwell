@@ -608,14 +608,46 @@ def on_sidebar_plate_well_dropped(ctx, well_id: str, token: str) -> None:
         logging.getLogger(__name__).exception("Heat map well drop handling failed")
 
 
-def merge_imported_selections(ctx, payload) -> int | None:
+def imported_selection_items(payload) -> list | None:
+    """The selection entries a groups file holds, or ``None`` when it holds none.
+
+    Three shapes are read, because three have been written: a v2 block
+    (``{"selections": [...]}``, what *Export* and ``pipeline_info.json`` hold),
+    the same block nested under ``sample_definitions``, and a bare list of
+    selection dicts. A legacy v1 file (``{"rep_sets": [...], "groups": [...]}``)
+    is migrated through ``domain.selections_format.from_block`` — the one
+    reader that knows how a v1 group's members resolve to wells — so a file
+    the removed *Load bar group definitions* button used to read still imports.
+    """
+    if isinstance(payload, list):
+        return payload or None
+    if not isinstance(payload, dict):
+        return None
+    block = payload.get("sample_definitions") if isinstance(
+        payload.get("sample_definitions"), dict) else payload
+    items = block.get("selections")
+    if isinstance(items, list):
+        return items or None
+    if block.get("rep_sets") or block.get("groups"):
+        from domain import selections_format as _sel
+        migrated = _sel.from_block(block)[0]
+        return migrated or None
+    return None
+
+
+def merge_imported_selections(ctx, payload, *, replace: bool = False) -> int | None:
     """Add every selection in *payload* to the plate; ``None`` if it holds none.
 
-    Accepts either a v2 ``sample_definitions`` block (with a ``selections`` key)
-    or a bare list of selection dicts. Returns how many were added, or ``None``
-    for a payload with nothing importable in it — a distinct answer rather than
-    ``0``, because "this file has no selections" is a sentence to show the user
-    and "every selection in it failed to add" is a different one.
+    With ``replace`` the plate's current groups are discarded first — but only
+    once the file is known to hold at least one usable entry, so a file that
+    parses and holds nothing can never empty the plate. Without it the file's
+    groups are added beside the current ones, and a name already in use gets a
+    suffix rather than overwriting anything.
+
+    Returns how many were added, or ``None`` for a payload with nothing
+    importable in it — a distinct answer rather than ``0``, because "this file
+    has no selections" is a sentence to show the user and "every selection in
+    it failed to add" is a different one.
 
     **Split from** :func:`import_selections_from_json` **so it can be driven.**
     That function opens a modal file dialog first, and a modal blocks for ever
@@ -626,18 +658,16 @@ def merge_imported_selections(ctx, payload) -> int | None:
     written for it called ``sel_add`` directly, one step past the thing that
     was in doubt.
     """
-    items = None
-    if isinstance(payload, dict):
-        items = payload.get("selections") or payload.get("sample_definitions", {}).get("selections")
-    elif isinstance(payload, list):
-        items = payload
+    items = imported_selection_items(payload)
     if not items:
         return None
+    usable = [sel for sel in items if isinstance(sel, dict)]
+    if replace and usable:
+        ctx.state.selection.selections = []
+        ctx.state.selection.current_selection_id = None
 
     added = 0
-    for sel in items:
-        if not isinstance(sel, dict):
-            continue
+    for sel in usable:
         name = sel.get("name") or "Imported"
         wells = sel.get("wells") or []
         replicates = sel.get("replicates")
@@ -649,7 +679,8 @@ def merge_imported_selections(ctx, payload) -> int | None:
             # wells on every axis in this dataset.
             sel_add(ctx, name=name, wells=list(wells),
                     replicates=replicates, source=source,
-                    name_is_verbatim=bool(sel.get("name_is_verbatim")))
+                    name_is_verbatim=bool(sel.get("name_is_verbatim")),
+                    color=sel.get("color"))
             added += 1
         except Exception:
             _logger = __import__("logging").getLogger("review.runtime_app")
@@ -657,36 +688,88 @@ def merge_imported_selections(ctx, payload) -> int | None:
     return added
 
 
+#: The two answers :func:`ask_import_mode` can give besides cancelling.
+IMPORT_ADD, IMPORT_REPLACE = "add", "replace"
+
+
+def ask_import_mode(ctx, existing: int, incoming: int) -> str | None:
+    """Ask whether a groups file adds to the current groups or replaces them.
+
+    Returns :data:`IMPORT_ADD`, :data:`IMPORT_REPLACE`, or ``None`` for Cancel.
+    Adding is the default button because it is the answer that cannot lose
+    anything. A module-level function so a test can answer it.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    box = QMessageBox(ctx.window)
+    box.setIcon(QMessageBox.Question)
+    box.setWindowTitle("Import groups")
+    g_in = "group" if incoming == 1 else "groups"
+    g_have = "group" if existing == 1 else "groups"
+    box.setText(f"This file holds {incoming} {g_in}. This dataset already "
+                f"has {existing} {g_have}.")
+    box.setInformativeText(
+        "Add them beside the current groups (a name already in use gets a "
+        "suffix), or replace the current groups with them?")
+    add_btn = box.addButton("Add to current groups", QMessageBox.AcceptRole)
+    replace_btn = box.addButton("Replace current groups", QMessageBox.DestructiveRole)
+    box.addButton(QMessageBox.Cancel)
+    box.setDefaultButton(add_btn)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is add_btn:
+        return IMPORT_ADD
+    if clicked is replace_btn:
+        return IMPORT_REPLACE
+    return None
+
+
 def import_selections_from_json(ctx) -> None:
-    """Import a selections JSON file (the same schema used by Save) and
-    merge it into ``ctx.state.selection.selections``. Existing names get a ``_v2``
-    suffix on collision so nothing already loaded is overwritten."""
+    """Import a groups JSON file into the plate — the app's one groups import.
+
+    Reads every shape :func:`imported_selection_items` does. When the dataset
+    already has groups the user chooses between adding the file's groups beside
+    them and replacing them (:func:`ask_import_mode`); with none there is
+    nothing to choose and they are simply added.
+    """
     import json
     from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+    data_dir = getattr(ctx.state.dataset, "data_dir", None)
     path, _ = QFileDialog.getOpenFileName(
-        ctx.window, "Import selections from JSON", "", "JSON (*.json);;All files (*)",
+        ctx.window, "Import groups", str(data_dir) if data_dir else "",
+        "JSON (*.json);;All files (*)",
     )
     if not path:
         return
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             payload = json.load(fh)
-    except Exception as exc:
-        QMessageBox.critical(ctx.window, "Import failed", f"Could not parse JSON:\n{exc}")
+    except (OSError, ValueError) as exc:
+        QMessageBox.critical(ctx.window, "Import failed", f"Could not read that file:\n{exc}")
         return
 
-    added = merge_imported_selections(ctx, payload)
-    if added is None:
-        QMessageBox.warning(ctx.window, "Import", "No selections found in that file.")
+    usable = [s for s in imported_selection_items(payload) or () if isinstance(s, dict)]
+    if not usable:
+        QMessageBox.warning(ctx.window, "Import", "No groups found in that file.")
         return
+    replace = False
+    existing = len(ctx.state.selection.selections)
+    if existing:
+        mode = ask_import_mode(ctx, existing, len(usable))
+        if mode is None:
+            return
+        replace = mode == IMPORT_REPLACE
 
+    added = merge_imported_selections(ctx, payload, replace=replace)
     try:
         groups_centre_refresh(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
-    ctx.notify.toast(f"Imported {added} selection(s) from {path}.", kind="success")
-
+    from pathlib import Path
+    verb = "Replaced the groups with" if replace else "Imported"
+    ctx.notify.toast(f"{verb} {added or 0} group(s) from {Path(path).name}.",
+                     kind="success")
 
 
 def labels_apply_affix(ctx, *, where: str) -> None:
@@ -1228,7 +1311,7 @@ def _schedule_sample_def_autosave(ctx) -> None:
 
 
 def sel_add(ctx, name=None, wells=None, replicates=None, source="user",
-             *, make_current=True, name_is_verbatim=False):
+             *, make_current=True, name_is_verbatim=False, color=None):
     """Append one new selection and make it current.
 
     ``name_is_verbatim`` says *name* was composed from the sample variables the
@@ -1243,7 +1326,7 @@ def sel_add(ctx, name=None, wells=None, replicates=None, source="user",
     used_ids = {s.get("id") for s in sel_state.selections}
     sel = make_selection(name=name, wells=wells, replicates=replicates,
                          source=source, used_names=used_names, used_ids=used_ids,
-                         name_is_verbatim=name_is_verbatim,
+                         name_is_verbatim=name_is_verbatim, color=color,
                          fallback_color_idx=len(sel_state.selections))
     sel_strip_wells(ctx, sel["wells"], keep_id=sel["id"])
     sel_state.selections.append(sel)

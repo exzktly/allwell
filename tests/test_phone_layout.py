@@ -666,3 +666,51 @@ def test_an_info_hint_answers_a_tap_with_its_text(qapp, monkeypatch):
     hint.setObjectName("Plain")
     assert filt.eventFilter(hint, tap) is False
     assert shown == ["What this number means"]
+
+
+# ── the Image Table in phone layout ─────────────────────────────────────────
+
+def test_image_table_cells_share_the_width_between_their_columns():
+    from review.features.image_browser.image_table._phone_fit import (
+        MIN_CELL_PX, fit_cell_px,
+    )
+    # 1000 px, less 100 of labels, 40 of group gaps and 3 × 10 of per-column
+    # spacing, leaves 830 for three columns.
+    assert fit_cell_px(1000, 3, label_w=100, per_col_px=10, spacer_w=40, zoom=1.0) == 276
+    # Zoom multiplies the fitted size: 150 % scrolls sideways, as on a phone.
+    assert fit_cell_px(1000, 3, label_w=100, per_col_px=10, spacer_w=40, zoom=1.5) == 415
+    # Never smaller than a field of view can be read at.
+    assert fit_cell_px(300, 12, label_w=100, per_col_px=10, spacer_w=0, zoom=1.0) == MIN_CELL_PX
+
+
+def test_image_table_labels_grow_with_the_ui_scale_on_screen_only():
+    from review.features.image_browser.image_table import facet_view
+    assert "font-size:11px" in facet_view._inner_qss(11)
+    theme.apply_ui_scale(2.0)
+    try:
+        assert "font-size:22px" in facet_view._inner_qss(11)
+        assert "font-size:22px" in facet_view._group_qss(11)
+        assert "font-size:20px" in facet_view._corner_qss(11)
+    finally:
+        theme.apply_ui_scale(1.0)
+
+
+def test_image_table_builder_stacks_into_one_column_and_back(qapp):
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QBoxLayout, QHBoxLayout
+
+    from review.features.image_browser.image_table.builder_view import (
+        builder_set_stacked,
+    )
+    host = QWidget()
+    header, axes = QHBoxLayout(), QHBoxLayout()
+    shape = QLabel("Well › [DAPI,GFP] ↓ · Timepoint →", host)
+    rt = SimpleNamespace(shelf_header=header, axes_row_layout=axes, shape_label=shape)
+    ctx = SimpleNamespace(runtime=SimpleNamespace(image_table=rt))
+    builder_set_stacked(ctx, True)
+    assert header.direction() == axes.direction() == QBoxLayout.TopToBottom
+    assert shape.wordWrap()
+    builder_set_stacked(ctx, False)
+    assert header.direction() == axes.direction() == QBoxLayout.LeftToRight
+    assert not shape.wordWrap()

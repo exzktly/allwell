@@ -40,6 +40,7 @@ from ui import theme
 from core.safe import swallow
 from widgets import menu_exec
 from review.core.ui_helpers import parse_float_edit
+from widgets.flow_layout import FlowLayout
 from widgets.stepper import Stepper
 from widgets.lut_cmaps import resolve_channel_tint
 from review.features.image_browser.image_table.state import (
@@ -677,6 +678,11 @@ def _text(text: str, obj: str) -> QLabel:
     return lbl
 
 
+def _wrapping(lbl: QLabel) -> QLabel:
+    lbl.setWordWrap(True)
+    return lbl
+
+
 def _x_btn(tip: str, on_click) -> QToolButton:
     b = QToolButton()
     b.setObjectName("ITBX")
@@ -820,6 +826,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     reg.register("_image_table_clear_builder_btn", clear_btn)
     header.addWidget(clear_btn)
     layout.addLayout(header)
+    _rt(ctx).shelf_header = header
 
     # Channels tray (drag source) at the top.
     tray = _DropZone(lambda tok: _on_tray_drop(ctx, tok), _accept_tray, parent)
@@ -829,7 +836,10 @@ def build_shelf(ctx, parent: QWidget) -> None:
     tl.setSpacing(6)
     tl.addWidget(_zone_head("Channels", "drag onto a root to nest it"))
     tbody = QWidget(tray)
-    tbl = QHBoxLayout(tbody)
+    # A flow, so the chips wrap to the next line when the shelf is narrower than
+    # all of them — in phone layout's Controls sheet they otherwise held it
+    # wider than the screen. With room for one line it lays out as a row did.
+    tbl = FlowLayout(tbody)
     tbl.setContentsMargins(0, 0, 0, 0)
     tbl.setSpacing(7)
     tl.addWidget(tbody)
@@ -864,6 +874,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
         setattr(_rt(ctx), f"{name}_zone_body", body)
         ar.addWidget(z, 1)
     layout.addWidget(axes_row)
+    _rt(ctx).axes_row_layout = ar
 
     # Fixed panel (derived) — a drop target for roots + its value pickers.
     fixed = _DropZone(lambda tok: _on_zone_drop(ctx, "fixed", tok), _accept_fixed, parent)
@@ -904,6 +915,25 @@ def build_shelf(ctx, parent: QWidget) -> None:
     # whatever a restore / the Advanced controls / a test sets up. The spec is
     # seeded from current state, so it already reflects reality; the first edit
     # renders.
+
+
+def builder_set_stacked(ctx, stacked: bool) -> None:
+    """One column for a phone's Controls sheet, side by side at the desk.
+
+    The header row (Build, the table's shape, Plate, Wrap cols, Clear builder)
+    and the Rows / Columns zones each need a monitor's width laid out in a row,
+    and held the phone layout's page wider than the screen. Stacked, each takes
+    a line of its own and the shape description wraps.
+    """
+    from PySide6.QtWidgets import QBoxLayout
+    direction = QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
+    for lay in (getattr(_rt(ctx), "shelf_header", None),
+                getattr(_rt(ctx), "axes_row_layout", None)):
+        if lay is not None:
+            lay.setDirection(direction)
+    shape = getattr(_rt(ctx), "shape_label", None)
+    if shape is not None:
+        shape.setWordWrap(stacked)
 
 
 def _zone_head(name: str, sub: str) -> QWidget:
@@ -1326,14 +1356,17 @@ def _build_lut_box(ctx, spec) -> None:
         return
     for token, specs in chans.items():
         lay.addWidget(_lut_row(ctx, token, specs))
+    # These two name channels, so they grow with the table; they wrap rather than
+    # widen the shelf (in phone layout's Controls sheet a long one held it wider
+    # than the screen). The panel is a column, so at the desk they keep its width.
     if inert:
-        lay.addWidget(_text(
+        lay.addWidget(_wrapping(_text(
             "no display range (unchanged by any LUT edit): " + ", ".join(inert),
-            "ITBHint"))
+            "ITBHint")))
     if hidden:
-        lay.addWidget(_text(
+        lay.addWidget(_wrapping(_text(
             "not shown in plate mode (one channel per plate): " + ", ".join(hidden),
-            "ITBHint"))
+            "ITBHint")))
 
 
 def _lut_row(ctx, token: str, specs: list) -> QFrame:

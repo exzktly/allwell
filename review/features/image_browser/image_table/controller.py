@@ -1071,6 +1071,11 @@ def image_table_generate(ctx) -> None:
     with swallow("image table: facet plan"):
         plan = _facet.plan_facets(ctx, cells)
 
+    # Phone layout: the columns share the screen's width (``_phone_fit``).
+    with swallow("image table: fit cells to the phone"):
+        from review.features.image_browser.image_table._phone_fit import phone_cell_px
+        sz = phone_cell_px(ctx, cells, plan, zoom, grid) or sz
+
     def _pos(r, c):
         if plan is None:
             return r, c

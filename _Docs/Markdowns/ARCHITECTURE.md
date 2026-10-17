@@ -229,7 +229,13 @@ showing it on every resize and mode switch, so the check is inside it.
 (channel, property, display, threshold, …) — are hidden in phone layout so the
 plot gets the screen, and **⚙ Controls** lends the current page's band to a sheet:
 a bottom `Drawer` upright, as tall as its content up to 60 % of the window, or a
-360 pt right-hand panel sideways. `ControlBand.setStacked(True)` flows the band's
+390 pt right-hand panel sideways — as wide as the phone held upright, so whatever
+fits the sheet upright fits the panel (`LANDSCAPE_SHEET_PT`; at 360 pt the Image
+Table's LUT rows overflowed it). A page whose controls are not a `ControlBand`
+marks the block that holds them with the `phoneControls` property and gives it a
+`setStacked`; `_current_band` takes a band with controls first and a marked block
+otherwise, and the same lend, stack and give-back apply to either.
+`ControlBand.setStacked(True)` flows the band's
 actions into its scope flow so it wraps to the sheet's width; the sheet's buttons,
 combos and fields are 48 pt (`QWidget#Drawer[phoneSheet="true"]` in the touch
 block) with 8 pt gaps. The sheet has no scrim, because the plot above it redraws
@@ -237,6 +243,29 @@ as its controls change and a dimmed plot cannot be judged by. Its button reads
 **Done ✕** while it is open. Closing it — that button, a mode switch, rotating the
 phone, leaving phone layout — gives the band back to its page at its index,
 unstacked.
+
+**The Image Table** authors its grid through the builder shelf and acts on it
+through the action strip, neither of which is a `ControlBand` (its band is empty),
+and at the desk both sit above the grid — on a phone, two screens of drag-and-drop
+before the first image. So the two share one host, `tab_view._TableControls`,
+marked `phoneControls`: in phone layout it is hidden from the page, which opens on
+the grid, and ⚙ Controls lends it to the sheet. Stacked, the action strip
+(Generate, crop, the ON threshold, Save, zoom) comes first, and
+`builder_view.builder_set_stacked` turns the shelf's header row and its Rows /
+Columns zones into one column; the Channels tray is a `FlowLayout` and the LUT
+panel's channel-naming hints wrap, at the desk as well, where with room for one
+line they lay out as before. The grid's cells share the page's width
+(`image_table/_phone_fit.py`): `fit_cell_px` divides what the row labels, the
+facet gaps and each column's spacing leave between the columns, and the zoom
+multiplies that, so 100 % fills the screen and zooming in scrolls sideways; the
+desk keeps its 240 px × zoom. The label width is measured with the fonts the
+labels are drawn in, corner text included, since the corner ("T:0h · FOV:F001")
+sits over the label columns and widened them past the screen when it was left
+out. The live grid's axis labels are drawn at the UI scale (`facet_view._on_screen`)
+while the export renderer keeps the Properties sidebar's own sizes. A drawn grid
+is drawn again — from the decode cache — when phone layout turns on or off and
+when the page's width changes by more than 5 % while it is on (the phone turned),
+debounced 250 ms (`install_refit`); the listener goes with the tab.
 
 **Long panels scroll by dragging** (`_grab_scrolling`): over VNC a touch-drag
 arrives as a left-button mouse drag, which a Qt scroll area ignores, so
@@ -262,7 +291,7 @@ turned, and VNC resized the desktop under the maximized window) closes the
 Controls sheet and restyles at the new unit.
 
 **Sideways.** One 44 pt bar carries everything; the rail is 360 pt; the Controls
-sheet is a right-hand panel; plots get at least 220 pt per row of axes
+sheet is a 390 pt right-hand panel; plots get at least 220 pt per row of axes
 (`size_canvas`, upright too) and the page scrolls rather than squashing a
 three-panel figure into the screen's height. Analyze turns two-column
 (`_apply_analyze_columns`): the run summary and plate on the left, 300 pt wide,
@@ -867,7 +896,9 @@ review/
 │   │   │                 picker_view.py, image_compose.py, facet_view.py,
 │   │   │                 renderer.py, build_layout.py, export.py,
 │   │   │                 _frames.py (the per-field frame plan the PowerPoint
-│   │   │                 export places, built in the export figure's own pass)
+│   │   │                 export places, built in the export figure's own pass),
+│   │   │                 _phone_fit.py (phone layout: cells sized to the
+│   │   │                 screen's width, redrawn when the layout changes)
 │   │   │                 (controller = orchestration; the compose/layout/export
 │   │   │                  layers are extracted to hold its line budget — see §5.5.
 │   │   │                  builder_view = the root+nested-channels drag-and-drop shelf,

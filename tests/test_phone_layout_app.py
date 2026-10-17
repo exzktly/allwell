@@ -15,6 +15,7 @@ so it is phone-shaped: the window must fit it in either layout. Its unit is
 from __future__ import annotations
 
 import pytest
+from PySide6.QtWidgets import QBoxLayout, QPushButton, QWidget
 
 pytestmark = pytest.mark.slow
 
@@ -312,3 +313,129 @@ def test_closing_in_phone_layout_mid_run_asks_first(qapp, win, monkeypatch):
         assert asked and not ev.isAccepted()
     finally:
         win._phone.set_on(False, restyle=False)
+
+
+def _image_plate(root):
+    """Two wells × DAPI/GFP, one field, real TIFFs in the pipeline's in/out
+    layout — enough for the Image Table to draw a grid."""
+    import csv
+    import io
+    import json
+    import zipfile
+
+    import numpy as np
+    tifffile = pytest.importorskip("tifffile")
+
+    def tif(a):
+        b = io.BytesIO()
+        tifffile.imwrite(b, a)
+        return b.getvalue()
+
+    (root / "in").mkdir(parents=True)
+    (root / "out").mkdir()
+    info = {"schema": "experiment:channel:well:fov:timepoint", "separator": "_",
+            "schema_fields": ["experiment", "channel", "well", "fov", "timepoint"],
+            "well_index": 2, "channel_index": 1, "fov_index": 3, "tp_index": 4,
+            "nuclear_token": "dapi", "fluor_tokens": ["dapi", "gfp"],
+            "available_timepoints": ["0h"], "available_fovs": ["F001"]}
+    (root / "out" / "pipeline_info.json").write_text(json.dumps(info))
+    lab = np.zeros((64, 64), np.int32)
+    lab[10:24, 10:24] = 1
+    lab[36:54, 30:50] = 2
+    for well in ("A01", "A02"):
+        rows = []
+        with zipfile.ZipFile(root / "in" / f"{well}.zip", "w") as zin, \
+                zipfile.ZipFile(root / "out" / f"{well}_out.zip", "w") as zout:
+            for ch, peak in (("DAPI", 3000), ("GFP", 900)):
+                img = np.where(lab > 0, peak, 100).astype(np.uint16)
+                stem = f"exp_{ch}_{well}_F001_0h"
+                zin.writestr(stem + ".tif", tif(img))
+                zout.writestr(stem + "_tophat.tif", tif(img))
+            zout.writestr(f"exp_DAPI_{well}_F001_0h_labels.tif", tif(lab))
+        for i in (1, 2):
+            rows.append({"filename": f"exp_DAPI_{well}_F001_0h.tif", "experiment": "exp",
+                         "channel": "dapi", "well": well, "fov": "F001",
+                         "timepoint": "0h", "timepoint_hours": 0.0, "nucleus_id": i,
+                         "area_px": int((lab == i).sum()), "gfp_mean_intensity": 900.0,
+                         "dapi_mean_intensity": 3000.0})
+        with (root / "out" / f"measurements_{well}.csv").open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+            w.writeheader()
+            w.writerows(rows)
+    return root
+
+
+def _image_cell_widths(grid) -> list[int]:
+    from PySide6.QtWidgets import QLabel
+    host = grid.parentWidget()
+    return sorted({lbl.pixmap().width() for lbl in host.findChildren(QLabel)
+                   if lbl.pixmap() is not None and not lbl.pixmap().isNull()})
+
+
+def test_the_image_table_opens_on_its_grid_in_phone_layout(qapp, win, tmp_path):
+    """The Image Table's builder and action strip go behind ⚙ Controls, and its
+    grid is fitted to the screen and drawn again when the layout changes."""
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QScrollArea
+
+    from core import phone_layout
+    from review.features.image_browser.controller import show_image_browser_subtab
+    from review.features.image_browser.image_table import controller as C
+
+    review, shell = win._review, win._phone
+    if win._mode_seg.currentIndex() != 0:
+        win._on_titlebar_mode_seg(0)
+    review._load_path(_image_plate(tmp_path / "plate"))
+    _pump(qapp)
+    review._set_selected_wells({"A01", "A02"}, commit=True)
+    ctx = review._ctx
+    show_image_browser_subtab(ctx, "Image Table")
+    review._drain_pending_centre_builders()
+    _pump(qapp)
+    C.image_table_repopulate_dropdowns(ctx)
+    review._app_state.image_table.active_channels = {"DAPI", "GFP"}
+    C.image_table_apply_dims_preset(ctx, ["well"], ["channel"])
+    C.image_table_generate(ctx)
+    _pump(qapp)
+    grid = ctx.runtime.image_table.render_grid
+    desk = _image_cell_widths(grid)
+    assert desk and max(desk) <= 240                      # the desk's own rule
+    controls = review.findChild(QWidget, "ImageTableControls")
+    assert controls is not None and _visible(controls)
+
+    shell.set_on(True)
+    QTest.qWait(600)                                      # past the refit debounce
+    _pump(qapp)
+    try:
+        # The page opens on the images; the builder is behind ⚙ Controls.
+        assert not _visible(controls)
+        assert _visible(shell.controls_button)
+        # Two columns share the width: wider than the desk's cells, and the grid
+        # inside the page's width — no sideways scroll.
+        scroll = grid.parentWidget()
+        while not isinstance(scroll, QScrollArea):
+            scroll = scroll.parentWidget()
+        phone = _image_cell_widths(grid)
+        assert phone and min(phone) > max(desk)
+        assert grid.parentWidget().sizeHint().width() <= scroll.viewport().width()
+        assert scroll.horizontalScrollBar().maximum() == 0
+        # ⚙ Controls lends the builder and the action strip to the sheet,
+        # action strip first, in one column.
+        shell.controls_button.click()
+        _pump(qapp)
+        assert shell._sheet_band is controls and controls.isStacked()
+        first = controls.layout().itemAt(0).widget()
+        assert any(b.text() == "Generate" for b in first.findChildren(QPushButton))
+        assert ctx.runtime.image_table.axes_row_layout.direction() == QBoxLayout.TopToBottom
+        shell.controls_button.click()
+        _pump(qapp)
+        assert shell._sheet_band is None and not controls.isStacked()
+        assert not _visible(controls)
+    finally:
+        shell.set_on(False)
+        QTest.qWait(600)
+        _pump(qapp)
+    assert not phone_layout.is_on()
+    assert _visible(controls)
+    assert controls.layout().itemAt(0).widget().objectName() == "ITBShelf"
+    assert _image_cell_widths(grid) == desk               # back to the desk's size

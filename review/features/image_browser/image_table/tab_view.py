@@ -56,7 +56,7 @@ from review.features.image_browser.image_table.build_layout import (
 )
 from review.features.image_browser.image_table.builder_view import (
     build_shelf, builder_mark_inclusion_stale, builder_notify_rendered,
-    builder_flush_pending,
+    builder_flush_pending, builder_set_stacked,
 )
 from review.features.image_browser.image_table.export import (
     GALLERY_QUALITY_LABELS,
@@ -93,6 +93,45 @@ def _menu_button(parent, text, *, tooltip="") -> QToolButton:
     btn.setProperty("variant", "secondary")
     btn.setProperty("hasMenu", True)  # reserve caret space (see theme.qss)
     return btn
+
+
+class _TableControls(QWidget):
+    """The builder shelf and the action strip, as one lendable block.
+
+    Phone layout finds a page's controls by the ``phoneControls`` property
+    (``ui.phone_shell``) and lends them to its Controls sheet, calling
+    :meth:`setStacked` on the way in and out. Stacked, the action strip —
+    Generate, zoom, the ON threshold — comes first, since it is what a phone
+    reaches for, and the builder lays out in one column
+    (``builder_view.builder_set_stacked``).
+    """
+
+    def __init__(self, ctx, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("ImageTableControls")
+        self.setProperty("phoneControls", True)
+        self._ctx = ctx
+        self._actions: QWidget | None = None
+        self._stacked = False
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        # The page's own spacing, so the three rows sit as they did in it.
+        lay.setSpacing(6)
+
+    def set_actions(self, actions: QWidget) -> None:
+        self._actions = actions
+        self.layout().addWidget(actions)
+
+    def isStacked(self) -> bool:
+        return self._stacked
+
+    def setStacked(self, stacked: bool) -> None:
+        self._stacked = bool(stacked)
+        lay = self.layout()
+        if self._actions is not None:
+            lay.removeWidget(self._actions)
+            lay.insertWidget(0 if self._stacked else lay.count(), self._actions)
+        builder_set_stacked(self._ctx, self._stacked)
 
 
 def _toggle_props_dock(ctx) -> None:
@@ -338,11 +377,17 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Drag a root (Well/Timepoint/FOV) onto Rows/Columns, nest channels under it,
     # set each channel's ⚙ options, then Generate. Per-cell tweaks come from a
     # right-click override popover on a rendered cell.
-    shelf_host = QWidget(inner)
+    # The builder and the action strip share one host: the page's controls,
+    # which phone layout lends to its Controls sheet so the page opens on the
+    # images (``_TableControls``). At the desk it lays out exactly as the
+    # three widgets did on their own.
+    controls = _TableControls(ctx, inner)
+    il.addWidget(controls)
+    shelf_host = QWidget(controls)
     build_shelf(ctx, shelf_host)
-    il.addWidget(shelf_host)
+    controls.layout().addWidget(shelf_host)
 
-    il.addWidget(build_hline_separator(inner, thickness=2))
+    controls.layout().addWidget(build_hline_separator(controls, thickness=2))
 
 
     # ── Action strip — Generate · Crop▾ · crop status … Export▾ · Zoom ──
@@ -535,7 +580,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Properties (spacing + label fonts) live in the right-side dock; the
     # sliders button toggles it, pinned to the action strip's right edge.
     from review.core.ui_helpers import wrap_ctrl_row_with_properties
-    il.addWidget(wrap_ctrl_row_with_properties(
+    controls.set_actions(wrap_ctrl_row_with_properties(
         action_row, lambda: _toggle_props_dock(ctx),
         tooltip="Show / hide the table Properties (spacing & label fonts)"))
 
@@ -574,6 +619,10 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # setAlignment is ignored when it's installed directly on a widget — the
     # alignment must be applied to the host *item* here to take effect.
     il.addWidget(render_host, 0, Qt.AlignTop | Qt.AlignLeft)
+    # In phone layout the grid is fitted to the screen, and drawn again when the
+    # layout or the screen changes (``_phone_fit``).
+    from review.features.image_browser.image_table._phone_fit import install_refit
+    install_refit(ctx, scroll, render_host)
 
     il.addStretch(1)
 

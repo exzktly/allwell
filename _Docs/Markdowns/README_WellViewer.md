@@ -7310,6 +7310,12 @@ In Review a second row under it holds:
 | **Bar Plots ▾** | Picks the page's view (Bar Plots, Line Graphs, Heat Map, …). |
 | **⚙ Controls** | Slides the page's own controls — channel, property, display, threshold and the rest — up from the bottom, with the plot still in view above them so you can watch it change. **Done ✕** puts them away. |
 
+**The Image Table** opens on its images in phone layout, sized so the columns
+fill the screen; **−** and **+** zoom from there, and past 100 % the table
+scrolls sideways. The table builder and the Generate, Crop, ON threshold, Save and
+zoom controls are under **⚙ Controls**, with Generate first. The table is redrawn
+to fit when you turn the phone or switch layouts.
+
 Holding the phone sideways, both rows become one slimmer bar, the sidebar is a
 narrower panel, and **⚙ Controls** opens as a panel on the right. Plots keep a
 readable height and the page scrolls, rather than squashing several plots into

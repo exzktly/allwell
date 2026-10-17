@@ -351,6 +351,13 @@ def scale_canvases(factor: float) -> int:
     return len(canvases)
 
 
+def _is_phone_controls(w: QWidget) -> bool:
+    """A page's block of controls that is not a ``ControlBand`` but goes to the
+    Controls sheet like one: marked with the ``phoneControls`` property, and
+    carrying ``setStacked`` for its one-column form."""
+    return bool(w.property("phoneControls")) and hasattr(w, "setStacked")
+
+
 class _PhoneEventFilter(QObject):
     """While phone layout is on, the things built or shown later get it too:
     a plot its DPI, a dialog a place on the screen, a page's control band a
@@ -443,6 +450,10 @@ LANDSCAPE_BAR_PT = 44
 #: fixed width, since half a landscape screen of sections would be mostly air.
 RAIL_GAP_PT = 56
 LANDSCAPE_PANEL_PT = 360
+#: The Controls panel sideways: as wide as the phone held upright, so whatever a
+#: page's controls fit into upright they fit into here. At 360 pt the Image
+#: Table's LUT rows held it 45 px wider than itself.
+LANDSCAPE_SHEET_PT = phone_layout.PHONE_REFERENCE_WIDTH_PT
 #: The Controls sheet's share of an upright screen: the plot above it stays in
 #: view and redraws as its controls change.
 SHEET_HEIGHT_SHARE = 0.6
@@ -795,7 +806,7 @@ class PhoneShell(QObject):
         phone layout for those that exist, and on Show for those built later."""
         on = phone_layout.is_on()
         name = type(w).__name__
-        if name == "ControlBand":
+        if name == "ControlBand" or _is_phone_controls(w):
             if on and w is not self._sheet_band and self._band_managed(w):
                 self._hide(w)
         elif name == "MplToolbar":
@@ -1108,15 +1119,22 @@ class PhoneShell(QObject):
 
     # ── the Controls sheet ────────────────────────────────────────────────
     def _current_band(self) -> QWidget | None:
-        """The control band of the Review page on screen, if it has controls."""
+        """The controls of the Review page on screen: its control band, if that
+        has controls, or else a block the page marked ``phoneControls`` (the
+        Image Table's builder and action strip, whose band is empty)."""
+        marked = None
         for w in QApplication.allWidgets():
-            if type(w).__name__ != "ControlBand" or not self._band_managed(w):
+            band = type(w).__name__ == "ControlBand"
+            if not (band or _is_phone_controls(w)) or not self._band_managed(w):
                 continue
             parent = w.parentWidget()
-            if w is self._sheet_band or (parent is not None and parent.isVisible()):
-                if (w.scope_count() + w.action_count()) > 0:
-                    return w
-        return None
+            if w is not self._sheet_band and (parent is None or not parent.isVisible()):
+                continue
+            if not band:
+                marked = w
+            elif (w.scope_count() + w.action_count()) > 0:
+                return w
+        return marked
 
     def _ensure_sheet(self):
         land = self.is_landscape()
@@ -1145,7 +1163,7 @@ class PhoneShell(QObject):
         # No scrim: the plot above the sheet redraws as its controls change,
         # and a dimmed plot is one the user cannot judge the change by.
         if land:
-            sheet = Drawer(self._win, edge="right", width_hint=lambda: self.pt(LANDSCAPE_PANEL_PT),
+            sheet = Drawer(self._win, edge="right", width_hint=lambda: self.pt(LANDSCAPE_SHEET_PT),
                            margin=0, top_inset=_below_band, scrim=0.0)
         else:
             sheet = Drawer(self._win, edge="bottom", height_hint=_content_height,
@@ -1187,7 +1205,9 @@ class PhoneShell(QObject):
         holder.layout().insertWidget(0, band)
         band.setStacked(True)
         band.show()
-        band._scope.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
+        scope = getattr(band, "_scope", None)       # a ControlBand's flow
+        if scope is not None:
+            scope.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
         self._grab_scrolling(True)
         sheet.open()
         self.controls_button.setText("Done ✕")
@@ -1207,7 +1227,9 @@ class PhoneShell(QObject):
             return
         try:
             band.setStacked(False)
-            band._scope.setSpacing(-1)
+            scope = getattr(band, "_scope", None)
+            if scope is not None:
+                scope.setSpacing(-1)
             home = getattr(self, "_sheet_home", None)
             index = band.property("_awHome")
             if home is not None and home.layout() is not None:

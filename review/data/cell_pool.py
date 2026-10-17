@@ -23,8 +23,20 @@ DuckDB table under a memory limit (:data:`DEFAULT_MEMORY_MB`, overridden by
 so the pool stays inside that limit however many cells are selected: rows past
 it are compressed into that file rather than evicted raw to DuckDB's temp
 directory, whose cap of 90% of the free disk a large selection once exhausted.
-A pool that runs out of disk as well raises :class:`CellPoolFullError`, naming
-the directory and its free space. Without it, the same interface holds
+The file has a cap of its own in that cap's place: :meth:`CellPool.add` refuses
+a well whose rows would take the volume below :data:`DISK_RESERVE` (a tenth) of
+what was free when the pool opened, so a large selection never drives the disk
+to zero under every other writer on it. A pool that runs out of room — that cap,
+or the disk filling anyway (DuckDB then raises ``TransactionException`` at a
+commit or ``FatalException`` at a checkpoint, the second invalidating the
+database) — raises :class:`CellPoolFullError`, naming the directory and its free
+space. A failure inside DuckDB also closes the pool: it then answers as an empty
+one, keeps the error on :attr:`CellPool.failure`, and refuses every later add
+with it, rather than raising "database has been invalidated" from each question
+a figure asks. Each spill directory carries its owner's pid
+(:data:`OWNER_FILE`), and the first pool a process opens removes the
+directories of processes that no longer exist — what a crash or a force-quit
+mid-load leaves behind. Without DuckDB, the same interface holds
 numpy arrays — what the views held before, so a missing engine costs memory
 and nothing else. :func:`backend_name` says which is in use;
 ``ALLWELL_CELL_POOL=numpy`` forces the second.
@@ -54,10 +66,12 @@ it value for value:
 
 from __future__ import annotations
 
+import glob
 import logging
 import os
 import shutil
 import tempfile
+import time
 import weakref
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
@@ -76,7 +90,19 @@ DEFAULT_MEMORY_MB = 512
 #: Rows handed back per chunk by :meth:`CellPool.scan`.
 SCAN_CHUNK_ROWS = 1 << 20
 
+#: The share of the free disk (measured when a pool opens) a pool leaves free: the cap DuckDB's own temp directory
+#: had (``max_temp_directory_size``, 90% of the free space), applied to the database file that replaced it.
+DISK_RESERVE = 0.10
+
+#: The spill directories' prefix under the system temp directory, and the file in each naming its owner's pid.
+SPILL_PREFIX = "allwell-cellpool-"
+OWNER_FILE = "owner.pid"
+#: A spill directory with no owner file is swept only once it is this old (seconds): a pool marks its directory
+#: just after creating it, and one caught between the two must not be swept from under it.
+UNMARKED_STALE_S = 24 * 3600
+
 _engine_warned = False
+_swept = False
 
 
 def _duckdb() -> ModuleType | None:
@@ -182,8 +208,15 @@ class CellPool:
         self._spill: str | None = None
         self._parts: list[dict[str, np.ndarray]] = []
         self._finalizer = None
+        #: Why the pool stopped holding cells, when a DuckDB failure closed it; ``None`` otherwise.
+        self.failure: CellPoolError | None = None
+        self._reserve = 0
         if duckdb is not None:
-            self._spill = tempfile.mkdtemp(prefix="allwell-cellpool-")
+            sweep_stale_spills()
+            self._spill = tempfile.mkdtemp(prefix=SPILL_PREFIX)
+            with open(os.path.join(self._spill, OWNER_FILE), "w", encoding="ascii") as handle:
+                handle.write(f"{os.getpid()}\n")
+            self._reserve = int(DISK_RESERVE * _free_bytes(self._spill))
             mb = int(os.environ.get("ALLWELL_CELL_POOL_MB") or DEFAULT_MEMORY_MB)
             # A database *file* in the spill directory, not ``:memory:``. An
             # in-memory table that outgrows the memory limit is evicted to the
@@ -256,36 +289,60 @@ class CellPool:
             if not np.isfinite(arr).all():
                 raise ValueError(f"{name}: non-finite values reached the pool")
             cols.append(arr)
-        if group not in self._sizes:
-            self._groups.append(group)
-            self._sizes[group] = 0
-        if well not in self._wells:
-            self._wells.append(well)
-        grp = self._groups.index(group)
-        wid = self._wells.index(well)
+        if self.failure is not None:
+            raise self.failure
+        # The group and well are listed only once their rows are in
+        # (``_counted``), so a refused first well leaves no empty group behind;
+        # their numbers here are the positions they will take.
+        grp = self._groups.index(group) if group in self._sizes else len(self._groups)
+        wid = self._wells.index(well) if well in self._wells else len(self._wells)
         seq = np.arange(self._seq, self._seq + n, dtype=np.int64)
         tp = np.asarray(tp, dtype=float)
         if self._con is None:
             self._parts.append({"seq": seq, "grp": np.full(n, grp, dtype=np.int32),
                                 "well": np.full(n, wid, dtype=np.int32), "rn": rows, "tp": tp,
                                 **{f"c{i}": c for i, c in enumerate(cols)}})
-            self._seq += n
-            self._sizes[group] += n
+            self._counted(group, well, n)
             return
+        # The rows' raw size, which the WAL holds before a checkpoint compresses them.
+        need = n * 8 * (5 + len(cols))
+        if _free_bytes(self._spill) - need < self._reserve:
+            raise CellPoolFullError(self._spill, self.count(), None, reason=(
+                f"{need / 2**20:.1f} MB more would leave less than a tenth of the free space it started with "
+                f"({self._reserve * 10 / 2**30:.1f} GiB)"))
         import pyarrow as pa
 
         table = pa.table({"seq": seq, "grp": np.full(n, grp, dtype=np.int32),
                           "well": np.full(n, wid, dtype=np.int32), "rn": rows, "tp": tp,
                           **{f"c{i}": c for i, c in enumerate(cols)}})
+        duckdb = duckdb_errors()
         self._con.register("__aw_part", table)
         try:
             self._con.execute("INSERT INTO cells SELECT * FROM __aw_part")
-        except (duckdb_errors().OutOfMemoryException, duckdb_errors().IOException) as exc:
-            raise CellPoolFullError(self._spill, self.count(), exc) from exc
+        except duckdb.Error as exc:
+            # Any DuckDB failure here: a full disk is a TransactionException at
+            # the commit or a FatalException at the checkpoint, and the second
+            # invalidates the database for every later query. So the pool closes
+            # and answers as empty from now on, keeping the reason.
+            held = self.count()
+            failure = (CellPoolFullError(self._spill, held, exc) if _out_of_room(exc, self._spill, self._reserve)
+                       else CellPoolError(f"the cell pool's database failed after {held:,} cells: {exc}"))
+            self.close()
+            self.failure = failure
+            raise failure from exc
         finally:
-            self._con.unregister("__aw_part")
-        # Counted only once the rows are in, so a failed insert leaves the
-        # counts describing the rows the table actually holds.
+            if self._con is not None:
+                self._con.unregister("__aw_part")
+        self._counted(group, well, n)
+
+    def _counted(self, group: str, well: str, n: int) -> None:
+        """List *group* and *well* and count *n* rows — only once the rows are in, so the names and the counts
+        describe the rows the pool actually holds."""
+        if group not in self._sizes:
+            self._groups.append(group)
+            self._sizes[group] = 0
+        if well not in self._wells:
+            self._wells.append(well)
         self._seq += n
         self._sizes[group] += n
 
@@ -494,20 +551,25 @@ def duckdb_errors() -> ModuleType:
     return duckdb
 
 
-class CellPoolFullError(RuntimeError):
-    """The pool ran out of room: memory at its limit and no disk left to spill to.
+class CellPoolError(RuntimeError):
+    """The pool's database failed while cells were being added; the pool is closed and answers as empty."""
+
+
+class CellPoolFullError(CellPoolError):
+    """The pool ran out of room: its disk cap reached, or the disk itself full.
 
     Raised from :meth:`CellPool.add` in place of DuckDB's own error, whose
-    "Out of Memory" wording points at RAM when what has run out is almost
-    always disk space under the system temp directory. The message names
-    that directory, its free space, and how many cells were held.
+    wording ("Out of Memory", "Failed to commit", "Failed to create
+    checkpoint") points anywhere but at the disk under the system temp
+    directory. The message names that directory, its free space, and how many
+    cells were held.
     """
 
-    def __init__(self, spill: str | None, held: int, cause: BaseException):
+    def __init__(self, spill: str | None, held: int, cause: BaseException | None, *, reason: str = ""):
         free = "unknown"
         if spill:
             try:
-                free = f"{shutil.disk_usage(spill).free / 2**30:.1f} GiB"
+                free = f"{_free_bytes(spill) / 2**30:.1f} GiB"
             except OSError as exc:
                 _logger.debug("cell pool free-space probe failed (%s)", exc)
         super().__init__(
@@ -515,7 +577,30 @@ class CellPoolFullError(RuntimeError):
             f"{os.environ.get('ALLWELL_CELL_POOL_MB') or DEFAULT_MEMORY_MB} MB in memory and "
             f"spills the rest to {os.path.dirname(spill or '') or 'the temp directory'}, "
             f"which has {free} free. Free disk space there, point TMPDIR at a larger "
-            f"disk, or select fewer wells. ({cause})")
+            f"disk, or select fewer wells. ({reason or cause})")
+
+
+def _free_bytes(path: str) -> int:
+    """Free bytes on the volume holding *path*."""
+    return int(shutil.disk_usage(path).free)
+
+
+#: What DuckDB says when a write found no room: the disk full, or a file at its size limit.
+_NO_ROOM = ("no space left", "file too large", "disk quota", "out of memory", "failed to offload")
+
+
+def _out_of_room(exc: BaseException, spill: str | None, reserve: int) -> bool:
+    """Whether a DuckDB failure during an add was the pool running out of room rather than anything else."""
+    duckdb = duckdb_errors()
+    if isinstance(exc, (duckdb.OutOfMemoryException, duckdb.IOException)):
+        return True
+    if any(phrase in str(exc).lower() for phrase in _NO_ROOM):
+        return True
+    try:
+        return spill is not None and _free_bytes(spill) <= reserve
+    except OSError as probe:
+        _logger.debug("cell pool free-space probe failed (%s)", probe)
+        return False
 
 
 def _release(con, spill: str | None) -> None:
@@ -526,6 +611,71 @@ def _release(con, spill: str | None) -> None:
         _logger.debug("cell pool connection close failed (%s)", exc)
     if spill:
         shutil.rmtree(spill, ignore_errors=True)
+        if os.path.exists(spill):
+            # A file still open elsewhere (on Windows, a scan nobody finished) keeps it; the next
+            # process's sweep removes it once this one has exited.
+            _logger.info("cell pool spill directory %s could not be removed yet", spill)
+
+
+def _pid_alive(pid: int) -> bool:
+    """Whether a process *pid* exists. Errs towards ``True``: a directory is swept only when its owner is gone."""
+    if pid <= 0:
+        return True
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)          # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.GetLastError() != 87                      # ERROR_INVALID_PARAMETER: no such process
+        try:
+            code = ctypes.c_ulong()
+            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return not ok or code.value == 259                      # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True                                                 # it exists, owned by someone else
+    return True
+
+
+def sweep_stale_spills() -> list[str]:
+    """Remove the spill directories of pools whose process no longer exists; the paths removed.
+
+    A pool closed or collected removes its own directory; one killed with its process (a crash, a force-quit
+    mid-load) leaves it, with the compressed table inside, and nothing else would ever remove it. A directory is
+    swept only when its :data:`OWNER_FILE` names a process that is gone, or, with no owner file, once it is
+    older than :data:`UNMARKED_STALE_S`. Runs once per process, from the first pool it opens.
+    """
+    global _swept
+    if _swept:
+        return []
+    _swept = True
+    removed = []
+    for path in glob.glob(os.path.join(tempfile.gettempdir(), SPILL_PREFIX + "*")):
+        try:
+            if not os.path.isdir(path) or os.path.islink(path):
+                continue
+            owner = os.path.join(path, OWNER_FILE)
+            if os.path.exists(owner):
+                with open(owner, encoding="ascii") as handle:
+                    text = handle.read().strip()
+                if not text.isdigit() or _pid_alive(int(text)):
+                    continue
+            elif time.time() - os.path.getmtime(path) < UNMARKED_STALE_S:
+                continue
+            shutil.rmtree(path)
+            removed.append(path)
+        except OSError as exc:
+            _logger.debug("cell pool sweep skipped %s (%s)", path, exc)
+    if removed:
+        _logger.info("removed %d cell pool spill director%s left by processes that have exited",
+                     len(removed), "y" if len(removed) == 1 else "ies")
+    return removed
 
 
 def cells_upper_bound(ctx, wells) -> int:

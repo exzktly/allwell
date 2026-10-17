@@ -1829,6 +1829,14 @@ What this means in use:
   column with more cells draws a sample of 5,000, and the figure says which
   columns did; the fraction, the mean line and the median line still use every
   cell.
+- **Where the cells behind those samples are kept.** The Scatter, Distribution
+  and bar-chart views keep a large selection's cells in a compressed file in a
+  folder under the system temp directory (`allwell-cellpool-…`), removed when the
+  view is redrawn or the app closes. A load stops before it would leave less than
+  a tenth of the disk's free space, and a disk that fills anyway stops it too;
+  either way the message names the folder and its free space — free some space
+  there, point `TMPDIR` at a larger disk, or select fewer wells. Folders left by
+  an app that crashed are removed the next time a large selection is loaded.
 - **Cell Gating's distribution curves** are drawn through 2,000 of their points
   when a curve has more cells than that; every point drawn is on the full curve,
   and the figure says so.

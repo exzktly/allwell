@@ -241,3 +241,170 @@ def test_a_running_cell_export_notices_the_selection_change(tmp_path, monkeypatc
     before = _dataset_signature(ctx)
     ctx.state.cell_gating.fov_selection = {"1"}
     assert _dataset_signature(ctx) != before
+
+
+# ── review findings on the first version ────────────────────────────────────
+
+def test_labels_carrying_two_numbers_are_never_merged(tmp_path):
+    """``parse_fov`` reads a label's trailing digits for sorting, which made
+    ``r1c1`` / ``r2c1`` (and ``s1_1`` / ``s2_1``, ``A-1`` / ``B-1``) one field:
+    ticking ``r1c1`` alone kept ``r2c1`` too, and was even stored as "all"."""
+    ctx = _ctx(tmp_path, selection={"r1c1"})
+    ctx.state.dataset.cache["A01"] = _frame(["r1c1", "r2c1", "s1_1", "s2_1", "A-1", "B-1"])
+    fs.apply_fov_selection_to_cache(ctx)
+    assert ctx.state.dataset.cache["A01"][fs.FOV_PASS_COLUMN].tolist() == [1, 0, 0, 0, 0, 0]
+    assert fs.normalise_selection({"r1c1"}, ["r1c1", "r2c1"]) == {"r1c1"}
+    # A single number behind a letter prefix still matches by number.
+    assert fs.fov_match_key("f01") == fs.fov_match_key("1") == fs.fov_match_key(1.0)
+    assert fs.fov_match_key("fov3") == 3.0
+    # This decides identity, so a digit from another alphabet is not a 1.
+    assert fs.fov_match_key("\u0661") != fs.fov_match_key("1")
+
+
+def test_the_verdict_decides_each_label_once_not_each_row(tmp_path, monkeypatch):
+    """A well holds a few dozen labels and up to millions of cells; the label
+    parse ran once per row, on the UI thread, at every load and re-projection."""
+    calls = []
+    real = fs.fov_match_key
+    monkeypatch.setattr(fs, "fov_match_key", lambda v: calls.append(v) or real(v))
+    ctx = _ctx(tmp_path, selection={"2"})
+    ctx.state.dataset.cache["A01"] = _frame(["1", "2", "3"] * 2000)
+    calls.clear()
+    fs.apply_fov_selection_to_cache(ctx)
+    assert ctx.state.dataset.cache["A01"][fs.FOV_PASS_COLUMN].sum() == 2000
+    # One for the selected label, one per distinct row label.
+    assert len(calls) <= 4, len(calls)
+
+
+def test_the_fov_list_is_read_once_per_dataset(tmp_path, monkeypatch):
+    """The status line asks on every inclusion-count repaint; without a list in
+    ``pipeline_info.json`` each ask was a walk of every well's summary."""
+    from review.core.app_runtime import AppRuntime
+    from review.data import dataset_dims
+
+    reads = []
+    monkeypatch.setattr(dataset_dims, "fov_options",
+                        lambda _ctx: reads.append(1) or ["2", "10", "1"])
+    ctx = _ctx(tmp_path)
+    ctx.runtime = AppRuntime(store={})
+    ctx.state.dataset.well_paths["A01"] = tmp_path / "A01.csv"
+    assert fs.available_fovs(ctx) == ["1", "2", "10"]
+    assert fs.available_fovs(ctx) == ["1", "2", "10"]
+    assert len(reads) == 1
+    ctx.state.dataset.well_paths["B02"] = tmp_path / "B02.csv"
+    fs.available_fovs(ctx)
+    assert len(reads) == 2, "a dataset with different wells must be read again"
+
+
+def _restore_ctx(tmp_path, monkeypatch, selection):
+    """A context for the persistence restore path, with the tab-building step
+    stubbed (it needs a built Cell Gating tab) and every feature call recorded."""
+    from review.persistence import cell_gating as pcg
+
+    monkeypatch.setattr(pcg, "_mirror_gating_to_widgets", lambda *_a, **_k: True)
+    ctx = _ctx(tmp_path, selection=selection)
+    calls = []
+    ctx.features = SimpleNamespace(call=lambda name, *_a: calls.append(name))
+    ctx.state.dataset.cache["A01"] = _frame(["1", "2", "3"])
+    return ctx, calls
+
+
+def test_restoring_a_different_selection_re_reads_the_cdfs(tmp_path, monkeypatch):
+    """The CDFs are drawn from the first kept field. A saved-plot restore that
+    changed the selection left them showing the previous one's field."""
+    from review.persistence.cell_gating import restore_gating_block
+
+    ctx, calls = _restore_ctx(tmp_path, monkeypatch, {"3"})
+    restore_gating_block(ctx, {})
+    assert ctx.state.cell_gating.fov_selection is None
+    assert fs.FOV_PASS_COLUMN not in ctx.state.dataset.cache["A01"].columns
+    assert calls == ["cell_gating.load_cell_areas"]
+
+
+def test_restoring_the_same_selection_re_projects_nothing(tmp_path, monkeypatch):
+    """A block whose selection is the live one — which is every dataset load
+    without a selection — threw away every memoised statistic for nothing."""
+    from review.core import selection_controller
+    from review.persistence.cell_gating import apply_gating_block, restore_gating_block
+
+    invalidated = []
+    monkeypatch.setattr(selection_controller, "invalidate_stats_cache",
+                        lambda *_a, **_k: invalidated.append(1))
+    ctx, calls = _restore_ctx(tmp_path, monkeypatch, {"3"})
+    ctx.state.stats_cache = SimpleNamespace()
+    restore_gating_block(ctx, {"fov_selection": ["3"]})
+    ctx.state.cell_gating.fov_selection = None
+    apply_gating_block(ctx, {"fluor_gates": {"gfp": 5.0}})
+    assert invalidated == [] and calls == []
+    # …and a real change still does both.
+    apply_gating_block(ctx, {"fov_selection": ["2"]})
+    assert invalidated == [1] and calls == ["cell_gating.load_cell_areas"]
+
+
+def test_the_write_path_lives_in_the_controller_and_the_view_builds_only():
+    """CLAUDE.md §3: ``*_view.py`` holds Qt builders, ``controller.py`` the
+    orchestration. The save / re-project / redraw path sat in the view."""
+    import ast
+
+    from review.features.home.cell_gating import controller
+    from tests._repo_scan import REPO_ROOT, parse_source
+
+    assert callable(controller.set_fov_selection)
+    tree = parse_source(REPO_ROOT / "review/features/home/cell_gating/fov_view.py")
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    assert not {"set_fov_selection", "save_to_pipeline_info", "redraw_app"} & (names | attrs)
+    assert "features" not in attrs, "the view reaches a feature service"
+    # And it writes no pixel literal into a layout call (CLAUDE.md §5).
+    for call in ast.walk(tree):
+        if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr in ("setContentsMargins", "setSpacing")):
+            literals = [a.value for a in call.args if isinstance(a, ast.Constant)]
+            assert all(v == 0 for v in literals), (call.func.attr, literals)
+
+
+@pytest.mark.qt
+def test_closing_the_picker_unchanged_writes_nothing_and_keeps_absent_fields(
+        qtbot, tmp_path, monkeypatch):
+    """Opening the picker to look and closing it rewrote the saved selection
+    from the boxes alone, deleting a selected field the dataset does not have,
+    and re-projected every well. Only an edit applies, and an edit keeps it."""
+    from PySide6.QtWidgets import QCheckBox, QWidget
+
+    from review.features.home.cell_gating.tab_view import build_cell_gating_tab
+    from tests._minimal_shell import load_dataset, minimal_shell
+    from tests.fixtures.mini_dataset import build_mini_dataset
+    from widgets import menu_exec
+
+    dataset = build_mini_dataset(tmp_path / "multifov", n_fovs=3)
+    ctx, _window = minimal_shell(qtbot)
+    load_dataset(ctx, dataset)
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    build_cell_gating_tab(ctx, parent)
+    # "01" is field 1 spelled as an older run wrote it: a close that rebuilds
+    # the selection from the boxes would respell it, so it measures the no-op.
+    ctx.state.cell_gating.fov_selection = {"01", "2", "9"}
+    info = dataset / "pipeline_info.json"
+    before = info.read_text()
+    recomputes = []
+    real_call = ctx.features.call
+    monkeypatch.setattr(ctx.features, "call", lambda name, *a, **k: (
+        recomputes.append(name) if name == "qc.recompute_all" else None) or real_call(name, *a, **k))
+
+    monkeypatch.setattr(menu_exec, "exec_menu", lambda _menu, _pos: None)
+    ctx.widgets.get("_cell_gating_fov_btn").click()
+    assert ctx.state.cell_gating.fov_selection == {"01", "2", "9"}
+    assert info.read_text() == before and recomputes == []
+
+    def _untick_2(menu, _pos):
+        for box in menu.findChildren(QCheckBox):
+            if box.text() == "FOV 2":
+                box.setChecked(False)
+        return None
+
+    monkeypatch.setattr(menu_exec, "exec_menu", _untick_2)
+    ctx.widgets.get("_cell_gating_fov_btn").click()
+    assert ctx.state.cell_gating.fov_selection == {"1", "9"}
+    assert json.loads(info.read_text())["cell_gating"]["fov_selection"] == ["1", "9"]
+    assert recomputes == ["qc.recompute_all"]

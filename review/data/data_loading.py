@@ -560,7 +560,7 @@ def _warn_no_area_column(where: str) -> None:
 #: for a different reason (no curation has happened) and whose blanks mean
 #: dropped rather than kept.
 VERDICT_LAYERS = ("QC_Pass", "Crop_Pass", "Gate_Pass", "Field_Pass", "Focus_Pass",
-                  "Border_Pass", "Excluded_Field_Pass")
+                  "Border_Pass", "Excluded_Field_Pass", "FOV_Pass")
 
 
 def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
@@ -592,6 +592,9 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
       by hand) is written only for wells holding such an exclusion, from QC
       triage — see :mod:`review.data.field_exclusions`. It refuses the same
       untrusted wells ``Field_Pass`` does, for the same reason.
+    * ``FOV_Pass`` (1 = this row's field is one of the FOV numbers the user
+      chose on the Cell Gating tab) is written only while a selection is set —
+      see :mod:`review.data.fov_selection`. It refuses untrusted wells too.
 
     Neither subsumes the other: a field whose median is fine can still have a
     soft third, and a uniformly soft field is invisible to any per-cell cut
@@ -599,7 +602,7 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
 
     Every verdict column — ``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass`` /
     ``Field_Pass`` / ``Focus_Pass`` / ``Border_Pass`` / ``Excluded_Field_Pass``
-    — is optional:
+    / ``FOV_Pass`` — is optional:
     when absent (no such layer / older data / the exclusion switched off /
     nothing excluded in that well) each is treated as all-pass.
 

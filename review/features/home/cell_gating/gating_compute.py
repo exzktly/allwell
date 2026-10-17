@@ -92,6 +92,7 @@ _FUNNEL_LAYERS: tuple[tuple[str, str], ...] = (
     ("Crop region", "Crop_Pass"),
     ("Scatter gates", "Gate_Pass"),
     ("Touching image border", "Border_Pass"),
+    ("FOV selection", "FOV_Pass"),
 )
 
 
@@ -409,7 +410,8 @@ def scan_fc_fractions(
 
 
 def _cell_gating_valid_mask(frame_df):
-    """Boolean mask: rows that pass crop AND QC (absent columns ⇒ all-pass).
+    """Boolean mask: rows that pass crop AND QC AND the FOV selection (absent
+    columns ⇒ all-pass).
 
     The per-channel fluorescence gate (``Included``) is deliberately NOT applied:
     the CDFs and the threshold optimizer are what the user reads to SET that
@@ -417,10 +419,12 @@ def _cell_gating_valid_mask(frame_df):
     shrink the very curve being read, and the optimizer would only see cells
     that already pass its own (asynchronously-rewritten) cut. Crop + QC are
     independent of the fluorescence gate, so they show the valid population
-    without that feedback loop.
+    without that feedback loop. The FOV selection (``FOV_Pass``) is independent
+    of it too, and a field the user excluded from every calculation must not
+    set the threshold the remaining fields are read against.
     """
     mask = pd.Series(True, index=frame_df.index)
-    for col in ("QC_Pass", "Crop_Pass"):
+    for col in ("QC_Pass", "Crop_Pass", "FOV_Pass"):
         if col in frame_df.columns:
             vals = pd.to_numeric(frame_df[col], errors="coerce").fillna(1)
             mask = mask & vals.eq(1)
@@ -668,13 +672,24 @@ def format_optimizer_result(result, well_a: str, well_b: str) -> str:
 
 
 def _cell_gating_first_frame_rows(df) -> tuple:
-    """Return ``(sub_df, description)`` for the first FOV's first timepoint."""
+    """Return ``(sub_df, description)`` for the first FOV's first timepoint.
+
+    "First" among the fields the FOV selection keeps (``FOV_Pass``), when one
+    is set: the first field overall may be one the user excluded, and the CDFs
+    would then show either nothing or cells no calculation uses.
+    """
     if df is None or df.empty:
         return df, ""
 
     fov_series = fov_text(df)
+    candidates = fov_series
+    if "FOV_Pass" in df.columns:
+        kept = pd.to_numeric(df["FOV_Pass"], errors="coerce").fillna(1).eq(1)
+        candidates = fov_series[kept]
+        if candidates.empty:
+            return df.iloc[0:0], ""
 
-    unique_fovs = sorted(fov_series.unique(), key=fov_sort_key)
+    unique_fovs = sorted(candidates.unique(), key=fov_sort_key)
     first_fov = unique_fovs[0] if unique_fovs else "1"
     same_fov = df.loc[fov_series == first_fov]
     if same_fov.empty:

@@ -13,6 +13,7 @@ Schema written under the ``cell_gating`` key:
         "thresh_frac_on":   {"gfp": 60.0, "mcherry": 50.0},
         "thresh_count_on":  {"w3cy5": 4.0},
         "use_scatter_gates": true,
+        "fov_selection":    ["1", "2", "3"],
         "scatter_gates":    [{"x0": .., "y0": .., "x1": .., "y1": ..,
                               "x_col": "gfp_mean_intensity",
                               "y_col": "mcherry_mean_intensity"}],
@@ -23,6 +24,10 @@ Schema written under the ``cell_gating`` key:
 spot tallies). They are different rows because they are answers to questions on
 different scales — "how bright before a cell is ON" against "how many spots
 before a cell is ON" — and a single value cannot serve both.
+
+``fov_selection`` restricts every calculation to the listed fields of view
+(``review.data.fov_selection``); it is written only while a selection is set,
+so its absence means every field counts.
 
 Only non-default values are persisted; channels at default are omitted. The
 ``scatter_gates`` / ``use_scatter_gates`` pair is written only when the
@@ -135,6 +140,7 @@ def build_gating_block(
     use_scatter_thresh: bool = False,
     seg_channel_token: str = "",
     thresh_count_on: dict[str, float] | None = None,
+    fov_selection: list | None = None,
 ) -> dict[str, Any]:
     """Snapshot non-default gating values as a JSON-friendly dict.
 
@@ -157,6 +163,10 @@ def build_gating_block(
     ``thresh_count_on`` carries the same shape for the *count* metrics, and needs
     no such channel knowledge: :func:`default_thresh_count_on` answers the same
     for every channel.
+
+    ``fov_selection`` is the FOV labels every calculation is restricted to, or
+    ``None`` for every field. ``None`` writes nothing; any list — an empty one
+    included, which keeps no field at all — is written as given, sorted.
     """
     block: dict[str, Any] = {}
     fg_out: dict[str, float] = {}
@@ -179,6 +189,10 @@ def build_gating_block(
             tco_out[str(ch)] = float(val)
     if tco_out:
         block["thresh_count_on"] = tco_out
+
+    if fov_selection is not None:
+        from util.fov import sort_key as fov_sort_key
+        block["fov_selection"] = sorted({str(f) for f in fov_selection}, key=fov_sort_key)
 
     # Persist the gates when EITHER scatter-gate layer (inclusion / fraction-on
     # thresholding) is on — both consume the same selected gate(s).

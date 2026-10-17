@@ -57,7 +57,7 @@ SUMMARY_COLUMNS = ("timepoint_hours", "timepoint", "fov", "filename", "nucleus_i
 #: so a summary taken from a projected frame leaves them out.
 PROJECTED_COLUMNS = frozenset({
     "QC_Pass", "Crop_Pass", "Gate_Pass", "Gate_On", "Field_Pass", "Focus_Pass", "Border_Pass",
-    "Excluded_Field_Pass",
+    "Excluded_Field_Pass", "FOV_Pass",
 })
 
 

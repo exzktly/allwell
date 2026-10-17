@@ -1482,6 +1482,11 @@ def _register_cache_projectors() -> None:
     register_cache_projector(_lazy_projector(
         "review.data.field_exclusions", "apply_field_exclusions_to_cache"),
         columns=_lazy_projector("review.data.field_exclusions", "field_exclusions_input_columns"))
+    # The fields of view chosen on the Cell Gating tab. Unconditional for the
+    # same reason: a selection saved with the dataset restricts every build.
+    register_cache_projector(_lazy_projector(
+        "review.data.fov_selection", "apply_fov_selection_to_cache"),
+        columns=_lazy_projector("review.data.fov_selection", "fov_selection_input_columns"))
 
 
 def attach_feature_state(state, registry: FeatureRegistry | None = None) -> None:

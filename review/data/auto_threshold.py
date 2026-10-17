@@ -487,6 +487,10 @@ def apply_auto_thresholds_to_pipeline_info(
     # is dropped on write. The count cutoffs are nothing to do with an intensity
     # sweep — carry them through untouched.
     existing_tco = dict(existing.get("thresh_count_on") or {})
+    # The FOV selection likewise has nothing to do with the sweep.
+    existing_fovs = existing.get("fov_selection")
+    if not isinstance(existing_fovs, list):
+        existing_fovs = None
     # Preserve any persisted scatter-gate inclusion state — this rebuild only
     # touches ThreshFracOn, so it must not drop the gates the user drew.
     existing_scatter = existing.get("scatter_gates")
@@ -525,6 +529,7 @@ def apply_auto_thresholds_to_pipeline_info(
         # one of the three sites that must pass the token.
         seg_channel_token=read_nuclear_token(out_dir),
         thresh_count_on=existing_tco,
+        fov_selection=existing_fovs,
     )
     save_gating_to_pipeline_info(out_dir, block)
     return written

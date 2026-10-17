@@ -308,7 +308,7 @@ def _first_frame_values(df, channels, ratios) -> tuple | None:
 #: The verdict columns ``_cell_gating_valid_mask`` reads. The projectors write
 #: them onto a narrow read when their layer is on; asked for by name too, so a
 #: file that carries them itself keeps them in the narrow frame.
-_VALIDITY_COLUMNS = frozenset({"QC_Pass", "Crop_Pass"})
+_VALIDITY_COLUMNS = frozenset({"QC_Pass", "Crop_Pass", "FOV_Pass"})
 
 
 def _first_frame_columns(channels, ratios) -> set[str]:
@@ -497,6 +497,8 @@ def cell_gating_apply_persisted_state(ctx) -> None:
     _cell_gating_refresh_gate_filter(ctx)
     _cell_gating_apply_scatter_gate_mode(ctx)
     _cell_gating_refresh_gate_summary(ctx)
+    from review.features.home.cell_gating.fov_view import refresh_fov_selection_widgets
+    refresh_fov_selection_widgets(ctx)
 
 
 def _cell_gating_sync_gate_state(ctx) -> None:
@@ -769,6 +771,10 @@ def cell_gating_refresh_included_count(ctx, *, pending: bool = False,
     funnel = ctx.runtime.cell_gating.funnel_label
     if funnel is not None:
         funnel.setText(format_inclusion_funnel(inclusion_funnel(frames)))
+    # The FOV picker's status names the wells its selection could not reach,
+    # which changes as wells load — and this runs on every load and re-gate.
+    from review.features.home.cell_gating.fov_view import refresh_fov_selection_widgets
+    refresh_fov_selection_widgets(ctx)
 
 
 def _cell_gating_scatter_mode_on(ctx) -> bool:

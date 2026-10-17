@@ -134,6 +134,10 @@ class Colors:
     # not green — and green is the app's "good" colour, while every outline the
     # overlay draws marks a removed cell. Measured ΔE ≥ 42 to all six.
     exclusion_border  = "#E879F9"
+    # Segmentation overlay: a cell in a field the Cell Gating FOV selection
+    # leaves out (FOV_Pass). Yellow, not green, for the reason above; measured
+    # ΔE ≥ 33 to the overlay's other seven inks.
+    exclusion_fov     = "#FDE047"
     spatial_observed  = "#4AA3FF"   # observed curve on the Spatial tab
     spatial_reference = "#FF9C4A"   # its random-reference curve
     gate_curve_a      = "#4FC3F7"   # Cell Gating optimizer, control well A

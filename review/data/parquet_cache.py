@@ -27,12 +27,28 @@ The gain scales with the well, so a small plate sees less of it: the same
 measurement at 40,000 rows is 13x and at 5,000 rows 7x. Nothing here is worse
 than the CSV path at any size.
 
-**The memory figure is deliberately not quoted.** ``tracemalloc`` reports the
-CSV parse at 148.9 MB of Python allocations and the cached read at under 1 MB,
-but Arrow allocates its buffers outside the Python allocator, so that second
-number measures the instrument rather than the read. What is honest to say is
-that the CSV path's allocations are gone; what the Arrow path costs instead has
-not been measured here.
+**What a read costs.** ``tracemalloc`` cannot answer this — Arrow allocates
+outside the Python allocator, so it reports a cached read at under 1 MB — so it
+is measured as resident memory, sampled from ``/proc/self/statm`` every 2 ms in a
+fresh process per read, on a 1.5M-row well of 38 columns whose frame is 399 MiB
+(435 MB of ``.csv.gz``). Figures are over the process's size before the read:
+
+=====================  =========  =================  ========
+read                   peak       resident after     time
+=====================  =========  =================  ========
+cache hit              587 MiB    437 MiB            0.5 s
+CSV parse (a miss)     892 MiB    509 MiB            7.8 s
+=====================  =========  =================  ========
+
+They were 1,169 / 1,169 MiB and 2,788 / 2,380 MiB before three changes, each
+of which leaves the frame identical: :func:`read_cached` reads without
+``pre_buffer`` (which held the whole compressed file beside the table it
+decoded to), every Arrow table becomes a frame through :func:`table_to_frame`,
+and the CSV is read block by block (``data_loading._streamed_csv_read``).
+A miss also writes the cache, which converts the frame back to Arrow; with that
+the read measured 995 MiB at its peak.
+``tests/test_a_read_costs_about_one_frame.py`` holds both the identity and the
+cost.
 
 **The cache is written from the frame the CSV parsed to, never from a projected
 one.** ``load_and_project`` writes ``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass``
@@ -141,6 +157,91 @@ def _pyarrow() -> ModuleType | None:
         return None
 
 
+def release_arrow_memory() -> None:
+    """Return the memory Arrow's allocator holds but no longer uses to the system.
+
+    Arrow allocates through its own pool (mimalloc in the pinned wheel), which
+    keeps freed pages for reuse rather than returning them, and pandas and numpy
+    allocate through the C library and cannot use them. So the transient of an
+    Arrow read — the CSV reader's retained blocks, a Parquet read's buffers, the
+    table a frame was converted from — stays resident after the read and sits
+    underneath everything that follows. Measured on a 1.5M-row, 399 MiB well: a
+    CSV read left 1,865 MiB resident and 629 MiB after this call; a Parquet read
+    left 1,172 MiB and 418 MiB.
+
+    pyarrow documents the call as possibly expensive, since the pages it returns
+    must be faulted in again by the next allocation. Once or twice per well read,
+    against a read of a second or more, it is not measurable. A no-op without
+    pyarrow.
+    """
+    try:
+        import pyarrow as pa
+    except ImportError:
+        return
+    pa.default_memory_pool().release_unused()
+
+
+def table_to_frame(table) -> pd.DataFrame:
+    """Convert a well's Arrow *table* to pandas at about one frame's cost, consuming it.
+
+    **The table must not be used after this call.** ``self_destruct=True`` frees
+    each column's Arrow buffers as soon as that column is converted, and pyarrow
+    states that touching the table afterwards crashes the process. Every caller
+    passes a table it built for this call and holds no other reference to.
+
+    The default conversion consolidates — one 2-D block per dtype, allocated
+    whole while the whole table is still alive — so its peak is the table plus
+    the frame. ``split_blocks=True`` makes one block per column instead, which is
+    what lets ``self_destruct`` free a column before the next is allocated; either
+    option alone measured no lower than the default (1,172 MiB and 858 MiB over
+    the process's starting size on a 399 MiB frame read from Parquet), both
+    together 585 MiB. The frame's values, dtypes, categories and their order,
+    column order and index are the same as the default conversion's
+    (``tests/test_a_read_costs_about_one_frame.py``); only its internal block
+    layout differs, and that has two costs, both measured on pandas 2.2.3:
+
+    * pandas never consolidates a held frame in place, but a **deep copy** of a
+      split frame consolidates the copy, and peaks at about three times what it
+      copies (348 MiB for a 119 MiB frame, against 119 MiB consolidated); so does
+      ``assign``. Taking many columns at once with ``to_numpy`` costs twice. The
+      one deep copy of a well's rows in the app, the cell-scope export's slice,
+      is shallow for that reason (``export/cell_scope_compute.build_chunk``).
+      Column reads, boolean ``.loc`` selection, ``groupby`` and ``concat`` cost
+      the same either way.
+    * adding a column to a frame holding more than 100 numpy blocks raises
+      pandas' ``PerformanceWarning`` ("highly fragmented"). A well with over a
+      hundred numeric columns would show it once per adding site; it is a
+      warning about speed, and the per-block overhead it describes is
+      microseconds against a million-row column.
+
+    **Every column comes back writable.** With one block per column pyarrow hands
+    a single-chunk numeric column without nulls, and a category column's codes,
+    to pandas without copying — as a *read-only* view of the Arrow buffer — and
+    the app writes into its frames in place (curation's
+    ``df.loc[mask, "Included"] = …`` raised ``assignment destination is
+    read-only``). Those columns are copied one at a time here, which costs what
+    the default conversion spent on them anyway, one column at a time instead of
+    all at once.
+
+    The pool is released before and after: before, so the transient that built
+    the table (the CSV reader's or the Parquet decoder's) is not resident under
+    the frame being allocated; after, so the table's buffers are not resident
+    under everything that follows.
+    """
+    release_arrow_memory()
+    frame = table.to_pandas(self_destruct=True, split_blocks=True)
+    del table
+    for position in range(frame.shape[1]):
+        column = frame.iloc[:, position]
+        # ``_ndarray`` is the backing array of both a plain numpy column and a
+        # Categorical (its codes); a numpy-backed column has no other form.
+        backing = getattr(column.array, "_ndarray", None)
+        if backing is not None and not backing.flags.writeable:
+            frame.isetitem(position, column.copy())
+    release_arrow_memory()
+    return frame
+
+
 def cache_path(csv_path: Path) -> Path:
     """The cached frame's path for *csv_path*."""
     csv_path = Path(csv_path)
@@ -229,10 +330,15 @@ def read_cached(csv_path: Path, columns: list[str] | None = None) -> pd.DataFram
         meta = pq.read_schema(path).metadata or {}
         if meta.get(_FINGERPRINT_KEY, b"").decode() != want:
             return None  # the CSV was rewritten; the cache describes the old one
+        subset = None
         if columns is not None:
             present = set(pq.read_schema(path).names)
-            return pq.read_table(path, columns=[c for c in columns if c in present]).to_pandas()
-        return pq.read_table(path).to_pandas()
+            subset = [c for c in columns if c in present]
+        # ``pre_buffer=False``: the default coalesces and reads every column
+        # chunk's compressed bytes into memory ahead of decoding them, which on
+        # a single local file buys nothing and holds the whole file beside the
+        # table it decodes to. See "What a read costs" in the module docstring.
+        return table_to_frame(pq.read_table(path, columns=subset, pre_buffer=False))
     except Exception as exc:  # noqa: BLE001 - any unreadable cache is just a miss
         _logger.debug("parquet cache unreadable for %s (%s); parsing the CSV",
                       csv_path.name, exc)

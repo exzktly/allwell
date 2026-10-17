@@ -174,8 +174,13 @@ def test_without_pyarrow_the_pandas_parse_is_used(tmp_path, monkeypatch):
     pd.testing.assert_frame_equal(dl.load_well_csv(path), _pandas_frame(path, monkeypatch), check_exact=True)
 
 
-def test_running_out_of_memory_is_raised_not_fallen_back_from(tmp_path, monkeypatch):
-    """A pandas parse needs more memory, not less; the caller's retry must see it."""
+@pytest.mark.parametrize("reader", ["open_csv", "read_csv"])
+def test_running_out_of_memory_is_raised_not_fallen_back_from(tmp_path, monkeypatch, reader):
+    """A pandas parse needs more memory, not less; the caller's retry must see it.
+
+    Both of pyarrow's readers: the streamed read is tried first and the
+    whole-file read only when it declines, so each can be the one that runs out.
+    """
     import pyarrow as pa
     import pyarrow.csv as pcsv
 
@@ -184,7 +189,10 @@ def test_running_out_of_memory_is_raised_not_fallen_back_from(tmp_path, monkeypa
     def out_of_memory(*_a, **_k):
         raise pa.ArrowMemoryError("malloc of size 512 failed")
 
-    monkeypatch.setattr(pcsv, "read_csv", out_of_memory)
+    if reader == "read_csv":
+        # Reached only once the streamed read has declined.
+        monkeypatch.setattr(dl, "_streamed_csv_read", lambda *_a, **_k: None)
+    monkeypatch.setattr(pcsv, reader, out_of_memory)
     with pytest.raises(MemoryError):
         dl.load_well_csv(path)
 

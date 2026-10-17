@@ -273,7 +273,11 @@ def build_chunk(df: pd.DataFrame, scope: CellScope, *,
     mask = population_mask(df, scope)
     if not mask.any():
         return df.iloc[:0].copy()
-    out = df.loc[mask].copy()
+    # Shallow: the boolean ``.loc`` has already copied every column, and a deep
+    # copy of a frame held one block per column (``parquet_cache.table_to_frame``)
+    # also consolidates it. Selecting half of a 119 MiB frame peaked at 235 MiB
+    # with the deep copy and 63 MiB — the slice itself — with this one.
+    out = df.loc[mask].copy(deep=False)
 
     # Identity columns are built fresh as plain object. Reusing the frame's own
     # ``well`` would inherit its categorical dtype (and its unused categories),

@@ -471,3 +471,39 @@ def test_a_resume_does_not_send_the_empty_well_blank_again(tmp_path, monkeypatch
     assert not any(s.endswith("H12.zip") for s in sent), f"the blank was uploaded again: {sent}"
     assert (run_dir / "bg" / "H12.zip").exists()
     assert (old / "bg" / "H12.zip").exists(), "an earlier attempt's directory is linked from, never emptied"
+
+
+def test_the_node_is_requested_before_the_empty_well_blank_uploads(tmp_path, monkeypatch):
+    """The blank is a whole well. Uploaded before the driver was launched, it held the node request behind its
+    transfer, so a slow link left the run with no job asked for at all; the driver reads it only when batch 1 is
+    handed over, which is after it lands."""
+    import tests.test_a_batched_restart_reuses_the_remote as here
+
+    monkeypatch.setattr(here, "WELLS", ["A01", "A02", "H12"])
+    p, plate, run_dir, sent, _, _ = _harness(tmp_path, monkeypatch)
+    p._pipeline_argv = ["--background", "empty_well", "--background_well", "H12"]
+    order: list[str] = []
+    upload = p._runner._cache.upload_subset
+
+    def recording_upload(zips, dest, **kw):
+        order.append(f"upload {Path(dest).name}")
+        return upload(zips, dest, **kw)
+
+    p._runner._cache.upload_subset = recording_upload
+    proc = __import__("tests.test_batch_driver", fromlist=["_FakeProc"])._FakeProc()
+
+    def launch(argv, **kw):
+        order.append("node requested")
+        return proc
+
+    monkeypatch.setattr("subprocess.Popen", launch)
+    worker = threading.Thread(target=p._run_batches, daemon=True)
+    worker.start()
+    for i in range(1, 4):
+        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+    proc.finish()
+    worker.join(timeout=30)
+
+    assert p._returncode == 0, p._logged
+    assert order[0] == "node requested" and "upload bg" in order, order
+    assert order.index("node requested") < order.index("upload bg") < order.index("upload b1"), order

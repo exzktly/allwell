@@ -46,7 +46,7 @@ from review.core.channel_state_controller import (
 )
 from review.core.plot_orchestrator import redraw_app
 from core.safe import swallowed
-from review.core.selection_controller import invalidate_stats_cache
+from review.core.selection_controller import invalidate_stats_cache, invalidate_threshold_results
 from review.data.curation import apply_curation_to_cache
 from review.data.data_loading import get_rows, held_wells_note
 from review.data.plate_scan import per_well
@@ -879,7 +879,9 @@ def cell_gating_on_threshold_frac_on_change(ctx) -> None:
             float(edit.text())
         _cell_gating_sync_gate_state(ctx)
         _cell_gating_persist_params(ctx)
-        invalidate_stats_cache(ctx)
+        # The cutoff changes which counted cells are "on", never which cells
+        # count: every well's population is kept, so the redraw reads nothing.
+        invalidate_threshold_results(ctx)
         # Redraw this tab's own CDFs too. They carry the ON-cutoff line now,
         # and ``cell_gating_on_gating_change`` — the FluorGating sibling ten
         # lines of code away — has always redrawn them for its own line. Without
@@ -914,7 +916,7 @@ def cell_gating_on_threshold_count_on_change(ctx) -> None:
             float(edit.text())
         _cell_gating_sync_gate_state(ctx)
         _cell_gating_persist_params(ctx)
-        invalidate_stats_cache(ctx)
+        invalidate_threshold_results(ctx)  # see the ThreshFracOn handler above
         redraw_app(ctx)
         ctx.bus.plot_options_changed.emit(ctx.state.plot)
         refresh_thresh_frac_quick_edit(ctx)

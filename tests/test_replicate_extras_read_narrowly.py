@@ -136,7 +136,9 @@ def test_a_well_is_read_once_narrowly_for_every_timepoint_and_producer(ctx, monk
         for t in TIMES:
             assert group_replicate_stats(ctx, [WELL], t, **kw)
     assert WELL not in ctx.state.dataset.cache, "a whole frame was read into the row cache"
-    assert len(calls) == 2, f"expected the aggregate's read and the extras' read, got {len(calls)}"
+    # One read: the aggregate and the extras are both answered from the well's
+    # threshold-free population (``review/domain/well_population.py``).
+    assert len(calls) == 1, f"expected one read shared by the aggregate and the extras, got {len(calls)}"
     assert all(cols is not None and "m0" not in cols for cols in calls), "a read was not narrow"
 
 

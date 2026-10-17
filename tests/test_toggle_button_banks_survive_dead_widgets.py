@@ -104,7 +104,7 @@ def no_side_effects(monkeypatch):
     the failure this file exists for is a dead widget aborting the toggle
     part-way, which shows up as the repaint never happening.
     """
-    monkeypatch.setattr(plot_toggles, "invalidate_stats_cache", lambda _c: None)
+    monkeypatch.setattr(plot_toggles, "invalidate_threshold_results", lambda _c: None)
     monkeypatch.setattr(plot_toggles, "redraw_every_scope",
                         lambda _c: _c._calls.append("redraw"))
 

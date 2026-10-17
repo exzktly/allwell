@@ -198,7 +198,12 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         # preference needs a node with room now (`FREE_STATES`).
         f"if printf '%s\\n' \"$_aw_all\" | awk '$2 ~ /^({free})$/ {{f=1}} END {{exit !f}}'; then ",
         f"_aw_asleep=$(printf '%s\\n' \"$_aw_all\" | awk 'NF==2 && $2 !~ /^({awake})$/ {{print $1}}' | {merge}); ",
-        f'else echo "[remote] scheduler: no free powered-on node in {where} — Slurm will boot one"; fi; ',
+        # Said by what the listing shows: only a powered-down node (`~`, or one already powering up or down) is
+        # something Slurm will boot. With none — a cluster without power saving — the job waits for one to free.
+        f"elif printf '%s\\n' \"$_aw_all\" | awk '$2 ~ /[~#%!]/ {{f=1}} END {{exit !f}}'; then "
+        f'echo "[remote] scheduler: no free powered-on node in {where} — Slurm will boot one"; ',
+        f'else echo "[remote] scheduler: every powered-on node in {where} is busy and none is powered down to boot '
+        '— the job waits in the queue for one to free"; fi; ',
         "fi; ",
         f"_aw_ex=$(printf '%s,%s' \"$_aw_x\" \"$_aw_asleep\" | {merge}); ",
         # 1b. Ask Slurm, without queuing anything, whether a powered-on node

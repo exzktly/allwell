@@ -146,11 +146,14 @@ times the chosen text size — Small, Medium or Large, 0.87 / 1 / 1.13
 `theme.set_touch_unit(u)` appends the touch floors to the application stylesheet
 (`theme._touch_qss`), so a control built later is touch-sized too.
 
-**Switching.** A labelled `Phone layout` button sits at the header's *left*,
-beside the version pill — the left edge is the part of an oversized window still
-on a narrow screen, and the label says what it does without a tooltip, which a
-touch screen never shows. In phone layout the header row is hidden and the way
-back is the ⋯ menu's *Desktop layout*. `PhoneShell.set_on(on)`:
+**Switching.** The way in is a phone icon (`PhoneShell.desk_button`, an
+`IconButton`) among the small icon buttons at the right end of the mode band,
+just before help — outside Review's own action cluster, like help, so it is there
+in every mode (Analyze, watching a run, is the commonest reason to be on a
+phone). The right end is in reach on a narrow screen because the window always
+fits its screen (below), and a phone-shaped screen also gets the banner, whose
+*Switch* says in words what the glyph does. In phone layout the button and the
+header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `PhoneShell.set_on(on)`:
 
 1. hides the header and the desk-only buttons (`desk_only`: the publication
    look, both resets, copy analysis, reveal folder — three of them destructive, a
@@ -1178,8 +1181,9 @@ allwell.main()
     ├── AllWellApp().__init__
     │       ├── _build_ui()
     │       │    ├── title bar (logo + version pill; the mode seg, the Review
-    │       │    │            action cluster and the help button after it are
-    │       │    │            re-parented into the Review pane's mode band below)
+    │       │    │            action cluster, the phone-layout button and the
+    │       │    │            help button after it are re-parented into the
+    │       │    │            Review pane's mode band below)
     │       │    └── central stack:
     │       │         ├── page 0  ←  ReviewApp() (Review)
     │       │         │       ├── _build_ui()

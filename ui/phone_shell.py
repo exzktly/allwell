@@ -569,14 +569,17 @@ class PhoneShell(QObject):
     def _build_controls(self) -> None:
         from widgets.icon_button import IconButton
 
-        # Desktop: a labelled button at the header's *left*, beside the
-        # version pill — the left edge is the one part of a too-wide window
-        # still on a narrow screen, and the label says what it does without a
-        # tooltip, which a touch screen never shows.
-        self.desk_button = IconButton("smartphone", text="Phone layout")
-        self.desk_button.setObjectName("PhoneLayoutButton")
+        # Desktop: one of the small icon buttons at the band's right end, just
+        # before help, in every mode (allwell mounts it). The right end is in
+        # reach on a narrow screen because the window always fits its screen
+        # (fit_window), and a phone-shaped screen also gets the banner, whose
+        # Switch says in words what this glyph does.
+        # Keeps IconButton's own object name: the shared icon-button style is
+        # keyed on it, and a name of its own drew it as a filled tile among the
+        # flat icons beside it.
+        self.desk_button = IconButton("smartphone")
         self.desk_button.setToolTip(
-            "Switch to phone layout: touch-sized controls, larger text and "
+            "Phone layout: touch-sized controls, larger text and "
             "plots, for using All-Well from a phone over remote desktop.")
         self.desk_button.clicked.connect(lambda: self.set_on(True))
 
@@ -766,6 +769,8 @@ class PhoneShell(QObject):
     def _apply_chrome(self, on: bool) -> None:
         if on:
             self._hide(self._h.header)
+            # The way back is ⋯ › Desktop layout; this one only goes in.
+            self._hide(self.desk_button)
             for w in self._h.desk_only:
                 self._hide(w)
             self._hide(self._h.page_tabs_host)

@@ -56,6 +56,12 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert win.minimumWidth() <= avail.width()
     assert shell._banner is not None and _visible(shell._banner)
     assert not phone_layout.is_on()
+    # The way in is one of the small icon buttons at the top right, just
+    # before help, styled as they are, in every mode.
+    band_lay = review._top_bar.layout()
+    assert band_lay.indexOf(shell.desk_button) == band_lay.indexOf(win._help_btn) - 1
+    assert shell.desk_button.objectName() == win._help_btn.objectName() == "IconButton"
+    assert not shell.desk_button.text() and _visible(shell.desk_button)
 
     shell.desk_button.click()
     _pump(qapp)
@@ -67,7 +73,7 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert not _visible(shell._banner)
     for w in (win._present_btn, win._reset_saves_btn, win._copy_analysis_btn,
               win._open_btn, win._reset_view_btn, win._refresh_btn,
-              win._help_btn, win._statusbar):
+              win._help_btn, win._statusbar, shell.desk_button):
         assert not _visible(w), w
     assert _visible(win._mode_seg) and _visible(shell.options_button)
     # Thumb-sized: 48 pt square ☰ and ⋯, a 52 pt bar, 44 pt everything else.
@@ -173,8 +179,15 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
               shell.controls_button, shell._strip):
         assert not _visible(w), w
     assert theme.touch_unit() is None
-    for w in (win._refresh_btn, win._help_btn, win._statusbar):
+    for w in (win._refresh_btn, win._help_btn, win._statusbar, shell.desk_button):
         assert _visible(w), w
+    # Outside Review's own cluster, so Analyze — watching a run, the commonest
+    # reason to be on a phone — has it too.
+    win._on_titlebar_mode_seg(1)
+    _pump(qapp)
+    assert _visible(shell.desk_button) and not _visible(win._present_btn)
+    win._on_titlebar_mode_seg(0)
+    _pump(qapp)
     # Every left panel is back in its own splitter, rail first.
     assert review._h_pane.indexOf(review._sidebar_root) == 0
     assert analyze._left_sidebar.parentWidget() is not drawer.contentWidget()

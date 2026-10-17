@@ -297,6 +297,74 @@ def exclusion_phrase(ctx, nid: int) -> str:
     return "  removed by: " + ", ".join(layers)
 
 
+def _frame_rows(ctx, well: str, fov: str, tp: str, want):
+    """``(rows, keys)`` for frame ``(fov, tp)`` of *well*: the rows that name a cell, and their keys.
+
+    ``rows`` is ``None`` when the well has no rows at all; ``keys`` (the
+    ``(fov, tp, nid)`` tuples of :func:`review_row_keys_series`, aligned with
+    ``rows``) is ``None`` alongside it. An empty ``rows`` means the well has
+    rows but none for this frame.
+
+    The frame is selected on its tokens first and keys are built only for its
+    rows. Both callers used to build a key tuple — and a ``CellKey`` — for every
+    cell of the well and then keep one frame's worth: 8–9 s per frame on a
+    1.5M-cell well, on the UI thread, for every cell an Image Table drew in its
+    threshold view and every Segmentation overlay. The frame tokens are the same
+    ``frame_token_series`` the keys are built from, so the rows selected are the
+    same rows.
+
+    *want* is the caller's columns for :func:`narrow_rows` (``None``: the whole
+    frame); a context without a repository reads through ``get_rows``.
+    """
+    store = getattr(getattr(ctx.state, "stats_cache", None), "populations", None)
+    memo_key = None
+    if store is not None and want is not None and getattr(ctx.state, "repo", None) is not None:
+        # Remembered per frame: an Image Table draws each field once per channel
+        # and again on every LUT, zoom or crop change. The store is cleared by
+        # every edit that can change a verdict (``invalidate_stats_cache``), and
+        # the key carries the two counters such edits move.
+        review = ctx.state.feature_slice("review_image") if hasattr(ctx.state, "feature_slice") else None
+        memo_key = ("frame_rows", well, fov, tp, frozenset(want),
+                    getattr(ctx.state.dataset, "rows_version", None),
+                    getattr(review, "override_version", None))
+        hit = store.get(memo_key)
+        if hit is not None:
+            return hit.rows, hit.keys
+    rows, keys = _read_frame_rows(ctx, well, fov, tp, want)
+    if memo_key is not None and rows is not None:
+        store[memo_key] = _FrameRows(rows, keys)
+    return rows, keys
+
+
+class _FrameRows:
+    """One frame's rows and keys, as the population store holds them."""
+
+    def __init__(self, rows, keys) -> None:
+        self.rows = rows
+        self.keys = keys
+        self.nbytes = int(rows.memory_usage(deep=False, index=True).sum()) + 100 * len(rows) + 512
+
+
+def _read_frame_rows(ctx, well: str, fov: str, tp: str, want):
+    """:func:`_frame_rows` without the memo."""
+    from domain.image_identity import frame_token_series
+
+    if want is None or getattr(ctx.state, "repo", None) is None:
+        df = get_rows(ctx, well)
+    else:
+        from review.data.narrow_rows import narrow_rows
+        df = narrow_rows(ctx, well, want)
+    if df is None or df.empty:
+        return None, None
+    fov_n, tp_n = frame_token_series(df)
+    in_frame = df.loc[((fov_n == fov) & (tp_n == tp)).to_numpy()]
+    keys = review_row_keys_series(ctx, in_frame)
+    if keys is None:
+        return in_frame, pd.Series([], dtype=object)
+    named = (keys.map(lambda k: k[2] != "")).to_numpy(dtype=bool)
+    return in_frame.loc[named], keys.loc[named]
+
+
 def review_build_exclusion_reasons(
     ctx, mask_arr, well: str, fov: str, tp: str,
 ) -> dict[int, tuple[str, ...]]:
@@ -317,17 +385,11 @@ def review_build_exclusion_reasons(
     reasons: dict[int, tuple[str, ...]] = {
         int(nid): () for nid in _np.unique(center) if int(nid) > 0
     }
-    df = get_rows(ctx, well)
-    if df is None or df.empty:
+    # The verdict columns come with every narrow read (each layer declares its
+    # inputs and is projected onto it), so the caller asks for nothing more.
+    sub, sub_keys = _frame_rows(ctx, well, fov, tp, ())
+    if sub is None or sub.empty:
         return reasons
-    keys = review_row_keys_series(ctx, df)
-    if keys is None:
-        return reasons
-    fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
-    sub = df.loc[fov_eq.fillna(False).to_numpy()]
-    if sub.empty:
-        return reasons
-    sub_keys = keys.loc[sub.index]
     nids = list(sub_keys.map(lambda k: k[2]).map(_safe_int_or_none))
     columns = {col: list(_verdict(sub, col)) for col, _label in EXCLUSION_LAYERS}
     overrides = ctx.runtime.review.included_overrides or {}
@@ -571,27 +633,22 @@ def review_build_threshold_map(
     above_by_nid: dict[int, bool] = {
         int(nid): False for nid in _np.unique(center) if int(nid) > 0
     }
-    df = get_rows(ctx, well)
-    if df is None or df.empty:
+    from review.data.narrow_rows import value_inputs
+    inputs = value_inputs(val_col, ratios)
+    want = None if inputs is None else inputs | {"area_px"} | {
+        f"{chan}_mean_intensity" for chan in active_fluor_gates(fluor_gates)}
+    sub, sub_keys = _frame_rows(ctx, well, fov, tp, want)
+    if sub is None:
         _logger.info(
             "[binary-mask] well=%s fov=%s tp=%s | no rows for this well — the "
             "threshold cannot be evaluated, reporting unmeasured", well, fov, tp,
         )
         return None
-    keys = review_row_keys_series(ctx, df)
-    if keys is None:
-        _logger.info(
-            "[binary-mask] well=%s fov=%s tp=%s | row keys unresolvable — the "
-            "threshold cannot be evaluated, reporting unmeasured", well, fov, tp,
-        )
-        return None
-    sel = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "").fillna(False).to_numpy()
-    sub = df.loc[sel]
     if sub.empty:
         _logger.info(
-            "[binary-mask] well=%s fov=%s tp=%s | %d row(s) for the well, none "
+            "[binary-mask] well=%s fov=%s tp=%s | the well has rows, none "
             "covering this field — the threshold cannot be evaluated, reporting "
-            "unmeasured", well, fov, tp, len(df),
+            "unmeasured", well, fov, tp,
         )
         return None
 
@@ -616,7 +673,6 @@ def review_build_threshold_map(
     mask &= np.isfinite(val) & (val > threshold)
     n_above = int(mask.sum())
 
-    sub_keys = keys.loc[sub.index]
     for k, ok in zip(sub_keys, mask):
         nid = _safe_int_or_none(k[2])
         if nid is not None and nid in above_by_nid:

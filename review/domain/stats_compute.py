@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 
 import numpy as np
 import pandas as pd
@@ -340,6 +341,7 @@ def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
     on_col = _thresh_on_col(ctx)
     reps: list[ReplicateStat] = []
     if unit == "well":
+        prefetch_populations(ctx, loaded, val_col=val_col, fluor_gates=fluor_gates)
         for lbl in loaded:
             # Memoized: three separately-keyed producers (compute_rep_stats,
             # compute_rep_n_above_stats, compute_rep_n_above_total) each call
@@ -669,6 +671,83 @@ def aggregate_well_cached(
     return result
 
 
+def _population_store(ctx):
+    """The byte-bounded population store, or ``None`` for a context without one."""
+    store = getattr(getattr(ctx.state, "stats_cache", None), "populations", None)
+    if store is None or getattr(ctx.state, "repo", None) is None:
+        return None
+    return store
+
+
+def _population_key(ctx, label: str, *, val_col: str, tp_col: str, fluor_gates,
+                    version, on_col: str | None) -> tuple:
+    """The key :func:`_population` files a well's population under (see its docstring)."""
+    return ("population", label, val_col, tp_col,
+            tuple(sorted((fluor_gates or {}).items())), on_col,
+            _gate_cache_sig(ctx), _ratio_sig_for(ctx, val_col), version)
+
+
+#: Wells whose populations :func:`prefetch_populations` builds at once. Each
+#: holds one narrow frame while it is built, so this bounds the transient too.
+PREFETCH_WORKERS = 4
+
+
+def prefetch_populations(ctx, labels, *, val_col: str, fluor_gates,
+                         tp_col: str = "timepoint_hours") -> int:
+    """Build the missing populations of *labels* on a few threads; return how many.
+
+    A redraw over many wells the row cache does not hold spends most of its
+    first draw reading them, one after another. The read (Parquet decode) and
+    most of the build (NumPy) release the GIL, so building several wells at once
+    cuts that wait by about the number of cores. The redraw that follows then
+    finds every population in the store and reads nothing.
+
+    Best-effort and conservative: nothing is done during a dataset load (its
+    status line counts reads from the GUI thread), for fewer than two missing
+    wells, or once the store is near its budget (building past it would evict
+    the populations this redraw is about to use). A well that fails here is
+    simply left to the redraw's own sequential path, which reports the failure
+    where it always has. The gating pass reads wells off the GUI thread through
+    the same ``narrow_rows`` this uses.
+    """
+    store = _population_store(ctx)
+    if store is None or getattr(ctx.state.dataset, "read_listener", None) is not None:
+        return 0
+    if callable(ctx.runtime.aggregate.well):
+        return 0
+    version = ctx.state.dataset.rows_version
+    on_col = _thresh_on_col(ctx)
+    paths = ctx.state.dataset.well_paths
+    missing = []
+    for label in dict.fromkeys(labels):
+        if label not in paths:
+            continue
+        key = _population_key(ctx, label, val_col=val_col, tp_col=tp_col,
+                              fluor_gates=fluor_gates, version=version, on_col=on_col)
+        if key not in store:
+            missing.append(label)
+    if len(missing) < 2:
+        return 0
+
+    def build(label: str) -> bool:
+        if store.held_bytes > 0.8 * store.budget_bytes:
+            return False
+        try:
+            _population(ctx, label, val_col=val_col, tp_col=tp_col, fluor_gates=fluor_gates,
+                        per_fov=False, version=version, on_col=on_col)
+        except Exception:
+            _logger.debug("population prefetch of %s failed; the redraw builds it itself",
+                          label, exc_info=True)
+            return False
+        return True
+
+    from concurrent.futures import ThreadPoolExecutor
+    workers = max(1, min(PREFETCH_WORKERS, os.cpu_count() or 1, len(missing)))
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="aw-population") as pool:
+        built = sum(pool.map(build, missing))
+    return built
+
+
 def _population(ctx, label: str, *, val_col: str, tp_col: str, fluor_gates,
                 per_fov: bool, version, on_col: str | None):
     """Well *label*'s threshold-free population (``review/domain/well_population.py``), remembered.
@@ -693,13 +772,11 @@ def _population(ctx, label: str, *, val_col: str, tp_col: str, fluor_gates,
     The per-field data is built only when a per-field aggregate asks for it; a
     population built without it is rebuilt once when one does.
     """
-    stats = getattr(ctx.state, "stats_cache", None)
-    store = getattr(stats, "populations", None)
-    if store is None or getattr(ctx.state, "repo", None) is None:
+    store = _population_store(ctx)
+    if store is None:
         return None
-    key = ("population", label, val_col, tp_col,
-           tuple(sorted((fluor_gates or {}).items())), on_col,
-           _gate_cache_sig(ctx), _ratio_sig_for(ctx, val_col), version)
+    key = _population_key(ctx, label, val_col=val_col, tp_col=tp_col,
+                          fluor_gates=fluor_gates, version=version, on_col=on_col)
     pop = store.get(key)
     if pop is not None and (pop.has_fov or not per_fov):
         return pop

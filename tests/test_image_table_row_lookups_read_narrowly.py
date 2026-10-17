@@ -66,3 +66,68 @@ def test_an_inclusion_edit_reads_again(ctx, monkeypatch):
     ctx.state.dataset.note_rows_changed()   # a gating pass
     excluded_nids_by_frame(ctx, WELL)
     assert len(calls) == 2
+
+
+def _old_frame_rows(ctx, fov, tp):
+    """The selection both per-frame lookups made before: every row's key, then one frame."""
+    from review.features.image_browser.review_image.collect import review_row_keys_series
+
+    ctx.state.dataset.cache.clear()
+    df = dl.get_rows(ctx, WELL)
+    ctx.state.dataset.cache.clear()
+    keys = review_row_keys_series(ctx, df)
+    sel = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "").to_numpy(dtype=bool)
+    return df.loc[sel], keys.loc[sel]
+
+
+@pytest.mark.parametrize("fov, tp", [("1", "0"), ("2", "24"), ("3", "0")])
+def test_the_frame_s_rows_are_the_old_selection_read_narrowly(ctx, monkeypatch, fov, tp):
+    from review.features.image_browser.review_image.collect import _frame_rows
+
+    want_rows, want_keys = _old_frame_rows(ctx, fov, tp)
+    assert len(want_rows), "the frame is empty; this measures nothing"
+    calls = _count_reads(monkeypatch)
+    rows, keys = _frame_rows(ctx, WELL, fov, tp, ())
+    assert list(keys) == list(want_keys)
+    assert list(rows.index) == list(want_rows.index)
+    for col in ("Included", "QC_Pass", "Crop_Pass", "Gate_Pass"):
+        if col in want_rows.columns:
+            assert rows[col].tolist() == want_rows[col].tolist(), col
+    assert len(calls) == 1 and "m0" not in calls[0], "the frame lookup read the whole well"
+
+
+@pytest.mark.parametrize("fov", ["2", "3", "4"])   # one excluding layer each: debris, crop, focus
+def test_the_exclusion_reasons_and_threshold_map_match_the_whole_well_answer(ctx, monkeypatch, fov):
+    import numpy as np
+
+    from review.features.image_browser.review_image import collect
+
+    mask = np.array([[0, 1, 2], [3, 4, 0]], dtype=np.int32)
+    got_reasons = collect.review_build_exclusion_reasons(ctx, mask, WELL, fov, "0")
+    got_thresh = collect.review_build_threshold_map(ctx, mask, WELL, fov, "0", channel="gfp")
+    # The same two calls with the old whole-well selection patched back in.
+    monkeypatch.setattr(collect, "_frame_rows",
+                        lambda c, w, f, t, want: _old_frame_rows(c, f, t))
+    want_reasons = collect.review_build_exclusion_reasons(ctx, mask, WELL, fov, "0")
+    want_thresh = collect.review_build_threshold_map(ctx, mask, WELL, fov, "0", channel="gfp")
+    assert got_reasons == want_reasons
+    assert any(want_reasons.values()) and not all(want_reasons.values()), \
+        "every or no cell is excluded; this measures nothing"
+    assert got_thresh == want_thresh
+    assert set(want_thresh.values()) == {True, False}, "the threshold splits nothing"
+
+
+def test_a_frame_drawn_again_reads_nothing_until_an_edit(ctx, monkeypatch):
+    import numpy as np
+
+    from review.core.selection_controller import invalidate_stats_cache
+    from review.features.image_browser.review_image import collect
+
+    mask = np.array([[1, 2], [3, 4]], dtype=np.int32)
+    first = collect.review_build_exclusion_reasons(ctx, mask, WELL, "2", "0")
+    calls = _count_reads(monkeypatch)
+    assert collect.review_build_exclusion_reasons(ctx, mask, WELL, "2", "0") == first
+    assert calls == [], "the same frame, drawn again, was read again"
+    invalidate_stats_cache(ctx)
+    collect.review_build_exclusion_reasons(ctx, mask, WELL, "2", "0")
+    assert len(calls) == 1, "an edit that can change a verdict was served the remembered rows"

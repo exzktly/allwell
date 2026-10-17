@@ -53,6 +53,7 @@ from review.domain.time_rescale import rescale_for as _time_rescale_for
 from review.domain.stats_compute import (
     aggregate_group,
     aggregate_well_cached,
+    prefetch_populations,
     compute_rep_n_above_stats,
     compute_rep_n_above_total,
     compute_rep_per_fov_stats,
@@ -664,9 +665,13 @@ class _BarCollector:
                     continue
                 out.append(self._rset_item(key, rset, target_t, tp_str))
             return out
+        specs = [spec for spec in self._well_specs(tp_str) if spec[0] not in self.hidden_members]
+        # Read the wells the row cache does not hold several at a time, before
+        # the loop asks for them one by one (a no-op once they are remembered).
+        prefetch_populations(self.ctx, [spec[0] for spec in specs],
+                             val_col=self.req.val_col, fluor_gates=self.req.fluor_gates)
         return [self._well_item(label, color, display, gk, target_t)
-                for label, color, display, gk in self._well_specs(tp_str)
-                if label not in self.hidden_members]
+                for label, color, display, gk in specs]
 
     # ── grouped: one bar per replicate set ─────────────────────────────────
 

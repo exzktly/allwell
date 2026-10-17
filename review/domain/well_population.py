@@ -159,10 +159,20 @@ def _split_by_value(values: np.ndarray) -> tuple[np.ndarray, list[np.ndarray]]:
     ``np.unique`` treats them as one value. *values* must hold no NaN.
     """
     folded = values + 0.0
-    codes, uniq = pd.factorize(folded, sort=True)
-    order = np.argsort(codes, kind="stable")
+    uniq = np.sort(pd.unique(folded))
+    if len(uniq) <= _SCAN_MAX_GROUPS:
+        # A hash for the distinct values and one scan per value: cheaper than
+        # sorting a million values (``np.unique``) or a million codes when
+        # there are a dozen of them.
+        return uniq, [np.flatnonzero(folded == u) for u in uniq]
+    codes = np.searchsorted(uniq, folded)
+    order = np.argsort(_small_codes(codes), kind="stable")
     bounds = np.cumsum(np.bincount(codes, minlength=len(uniq)))[:-1]
     return np.asarray(uniq), np.split(order, bounds)
+
+
+#: Up to this many distinct values, :func:`_split_by_value` scans once per value.
+_SCAN_MAX_GROUPS = 64
 
 
 def _build_extras(inputs: tuple | None, groups: list[_Group]) -> tuple[dict | None, bool]:

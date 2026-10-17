@@ -53,6 +53,11 @@ class Leftovers:
     finished: dict[str, str] = field(default_factory=dict)
 
 
+def run_dir_of(output_dir: str) -> str:
+    """A run's directory from its output directory (``…/runs/<id>/out`` → ``…/runs/<id>``)."""
+    return str(PurePosixPath(output_dir).parent)
+
+
 @dataclass(frozen=True)
 class _Root:
     path: str
@@ -63,6 +68,10 @@ class _Root:
 
 def _roots(own_run_dir: str, own_output_dir: str, earlier: Iterable[dict]) -> list[_Root]:
     roots = [_Root(own_run_dir, True, PurePosixPath(own_output_dir).name, own=True)]
+    if run_dir_of(own_output_dir) != own_run_dir:
+        # Re-attached (`reattach_output_dir`): the output directory is an earlier attempt's, and so is the run
+        # directory around it — its staged batches and `in/` are this run's to take.
+        roots.append(_Root(run_dir_of(own_output_dir), True, PurePosixPath(own_output_dir).name, own=True))
     for addr in earlier:
         out = str(addr.get("remote_output_dir") or "")
         inp = str(addr.get("remote_input_dir") or "")
@@ -161,7 +170,7 @@ def adopt_finished(cache, wells: Iterable[str], found: Leftovers, *, own_output_
 
 
 def stage_from_leftovers(cache, batches: list[list], found: Leftovers, *, own_run_dir: str,
-                         log: Callable[[str], None]) -> int:
+                         log: Callable[[str], None], also_own: tuple[str, ...] = ()) -> int:
     """Put every archive the remote already holds into the batch directory its well now belongs to.
 
     Returns how many were placed. A copy in this run's own directory is moved; one in an earlier attempt's is
@@ -179,7 +188,8 @@ def stage_from_leftovers(cache, batches: list[list], found: Leftovers, *, own_ru
             if src == f"{dest}/{zip_path.name}":
                 continue                 # already where this batch is uploaded
             q_src, q_dest = _remote_quote(src), _remote_quote(dest)
-            move = (f"mv -f {q_src} {q_dest}/" if src.startswith(own_run_dir + "/") else
+            mine = any(src.startswith(d + "/") for d in (own_run_dir, *also_own))
+            move = (f"mv -f {q_src} {q_dest}/" if mine else
                     f"{{ ln -f {q_src} {q_dest}/ 2>/dev/null || cp -p {q_src} {q_dest}/; }}")
             lines.append(f"mkdir -p {q_dest} && {move} || true")
     if lines:
@@ -307,4 +317,40 @@ def stage_leftovers(proc, run_dir: str) -> None:
     found, batches = getattr(proc, "_leftovers", None), getattr(proc, "_batches", None)
     if found is None or not found.inputs or not batches:
         return
-    stage_from_leftovers(proc._runner._cache, batches, found, own_run_dir=run_dir, log=proc._log)
+    out = proc._runner._run.remote_output_dir
+    stage_from_leftovers(proc._runner._cache, batches, found, own_run_dir=run_dir, log=proc._log,
+                         also_own=(run_dir_of(out),) if run_dir_of(out) != run_dir else ())
+
+
+def reattach_output_dir(runner, local_output_dir, keys: dict, legacy_digests, *, fresh: str, forced: bool,
+                        log: Callable[[str], None]) -> str:
+    """The remote output directory a batched run writes into: the earlier attempt's, when it can be resumed.
+
+    The pipeline keys a well's part-way checkpoints on its output directory (``pipeline.fov_checkpoint``), so a
+    resume that writes anywhere else starts every half-finished well again — and every resume would, because its
+    staged archives, and so its run id and directory, differ from the attempt it resumes. So the newest address the
+    journal recorded under the same settings, source images and host (the current and the earlier builds' digests,
+    ``remote_run_id.legacy_argv_digests``) is used when the remote still has it — the same rule the single-shot
+    path re-attaches by. Never for a forced run, which asked for everything to be computed again. Returns *fresh*
+    whenever anything is in doubt: a lookup or a probe that fails costs a recomputed well, never a wrong one.
+    """
+    from services import run_journal
+
+    if forced:
+        return fresh
+    try:
+        earlier = run_journal.stored_remote_addresses(
+            local_output_dir, argv_digests=[keys["argv_digest"], *legacy_digests],
+            source_key=keys["source_key"], host_alias=keys["host_alias"])
+    except OSError:
+        return fresh
+    for addr in earlier:
+        out = str(addr.get("remote_output_dir") or "")
+        if not out or out == fresh:
+            return fresh                  # the newest match is this run's own directory
+        probe = runner._cache._ssh_run(["test", "-d", out], check=False)
+        if probe is not None and getattr(probe, "returncode", 1) == 0:
+            log(f"[remote] resuming in the earlier attempt's output directory {out}: its finished wells, and the "
+                f"checkpoints of any well it left part-way, carry over.\n")
+            return out
+    return fresh

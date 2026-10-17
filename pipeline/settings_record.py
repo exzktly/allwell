@@ -17,7 +17,7 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.json_write import write_json_atomic
-from util.settings_digest import settings_match
+from util.settings_digest import primary_settings_key, settings_match
 
 #: Beside `.aw_run_report/` and `.aw_journal/`, dot-prefixed for the same
 #: reason: every dataset scan in the app skips a name starting with a dot, so
@@ -50,6 +50,9 @@ def record_well_settings(output_dir: Path | str, well_label: str,
     output is on disk, and the next run simply treats it as unknown — which
     grandfathers it, exactly as a well written before this existed.
     """
+    # Only the current digest is recorded; the earlier builds' ones a settings key also carries are accepted
+    # when read back, never written (`util.settings_digest.settings_key_for`).
+    digest = primary_settings_key(digest)
     if not digest:
         return None
     path = None

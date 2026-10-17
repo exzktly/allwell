@@ -183,7 +183,7 @@ from pipeline.settings_record import (
     record_well_settings,
     well_settings_allow_reuse,
 )
-from util.settings_digest import settings_digest
+from util.settings_digest import settings_key_for
 from pipeline.well_skip import (
     _canonical_force_wells, scope_to_only_wells,
     incremental_for_well as _incremental_for_well,
@@ -3447,7 +3447,7 @@ def main() -> None:
     # under, so the *next* run can tell whether its own settings differ.
     # Derived from the parsed arguments rather than from the raw argv, so the
     # same plate computed locally and on a worker host produces the same key.
-    settings_key = settings_digest(vars(args))
+    settings_key = settings_key_for(vars(args))
 
     failed_wells: list[str] = []
     if well_zips:

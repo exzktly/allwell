@@ -74,7 +74,7 @@ from services.remote_run_id import (
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import release_batch
 from services.remote_batch_resume import (
-    announce_adopted, nothing_left_to_run, stage_leftovers, take_from_remote)
+    announce_adopted, nothing_left_to_run, reattach_output_dir, stage_leftovers, take_from_remote)
 from util.well_token import canonical_well_label
 from services.remote_scratch import (
     source_fingerprint,
@@ -508,14 +508,24 @@ class _BatchedRemoteProcess:
         # either way.
         own = remote_run_paths(runner.host, run_id)
         remote_input = f"{own.run_dir}/in"
-        remote_output = own.out
         remote_pidfile = own.pidfile
+        self._journal_keys = dict(
+            argv_digest=pipeline_argv_digest(pipeline_argv, extras=runner._host_argv_extras(output_filter)),
+            source_key=source_fingerprint(_local_input_dir_from_argv(pipeline_argv)),
+            host_alias=runner.host.ssh_alias)
+        # What an earlier build recorded for this configuration, for finding its leftovers only.
+        self._legacy_digests = legacy_argv_digests(pipeline_argv, extras=runner._host_argv_extras(output_filter))
+        _force, _forced_wells = _forced_from_argv(pipeline_argv)
+        # The earlier attempt's output directory, when there is one to resume: the pipeline keys a well's
+        # part-way checkpoints on its output directory, so only there does a half-finished well continue.
+        remote_output = reattach_output_dir(
+            runner, local_output_dir, self._journal_keys, self._legacy_digests, fresh=own.out,
+            forced=bool(_force or _forced_wells), log=self._log)
         runner._cache._ssh_run(
             ["mkdir", "-p", remote_input, remote_output],
             check=True,
         )
 
-        _force, _forced_wells = _forced_from_argv(pipeline_argv)
         runner._run = _RemoteRun(
             run_id=run_id,
             cache_key=key,
@@ -529,6 +539,7 @@ class _BatchedRemoteProcess:
             incremental=zipped.incremental,
             force=_force, force_wells=_forced_wells, nanowell="--nanowell_format" in pipeline_argv,
             pre_run_artifacts=_snapshot_local_artifacts(local_output_dir),
+            reattached=remote_output != own.out,
         )
         # Batched runs record their address too. Without this a plate run in
         # batches journalled a ``remote-batched`` mode beside an empty remote
@@ -541,13 +552,7 @@ class _BatchedRemoteProcess:
         # complete, and had output with no tophat images fetched back as its
         # own — and in the other direction, after a batched run on a host with
         # overrides, the two never matched and re-attach silently never fired.
-        self._journal_keys = dict(
-            argv_digest=pipeline_argv_digest(pipeline_argv, extras=runner._host_argv_extras(output_filter)),
-            source_key=source_fingerprint(_local_input_dir_from_argv(pipeline_argv)),
-            host_alias=runner.host.ssh_alias)
         _record_remote_in_journal(local_output_dir, run=runner._run, **self._journal_keys)
-        # What an earlier build recorded for this configuration, for finding its leftovers only.
-        self._legacy_digests = legacy_argv_digests(pipeline_argv, extras=runner._host_argv_extras(output_filter))
 
         # One Fetcher persisting across batches. Pre-set the total well
         # count: each batch's pipeline banner reports just THAT

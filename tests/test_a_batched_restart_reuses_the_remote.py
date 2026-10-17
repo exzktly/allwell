@@ -303,3 +303,73 @@ def test_an_attempt_recorded_by_an_earlier_build_is_found(tmp_path, monkeypatch)
     assert p._returncode == 0, p._logged
     assert "b1/A01.zip" not in sent and "b2/A03.zip" not in sent, (
         f"an upload recorded by the earlier build was sent again: {sent}")
+
+
+# ── re-attaching the earlier attempt's output directory, where its half-finished wells' checkpoints are keyed ──
+
+def _journal_with(tmp_path, monkeypatch, *addresses):
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "local-out"
+    out.mkdir(exist_ok=True)
+    J.open_run(out, spec={}, mode="remote-batched", input_dir="/in", argv=["--x"])
+    for run_id, digest in addresses:
+        J.record_remote(out, run_id=run_id, cache_key="k", host_alias="h", remote_input_dir=f"/r/runs/{run_id}/in",
+                        remote_output_dir=f"/r/runs/{run_id}/out", argv_digest=digest, source_key="s")
+    return out
+
+
+def _probe_runner(existing: set[str], calls: list):
+    def ssh_run(argv, *, check, **kw):
+        calls.append(argv)
+        return types.SimpleNamespace(returncode=0 if argv[-1] in existing else 1, stdout="")
+    return types.SimpleNamespace(_cache=types.SimpleNamespace(_ssh_run=ssh_run))
+
+
+KEYS = dict(argv_digest="d-new", source_key="s", host_alias="h")
+
+
+def test_a_resume_writes_into_the_earlier_attempt_s_output_directory(tmp_path, monkeypatch):
+    from services.remote_batch_resume import reattach_output_dir
+
+    out = _journal_with(tmp_path, monkeypatch, ("run-first", "d-old"))
+    calls: list = []
+    chosen = reattach_output_dir(_probe_runner({"/r/runs/run-first/out"}, calls), out, KEYS, ("d-old",),
+                                 fresh="/r/runs/run-now/out", forced=False, log=lambda _m: None)
+    assert chosen == "/r/runs/run-first/out"
+
+
+def test_the_fresh_directory_is_kept_when_resuming_is_not_safe(tmp_path, monkeypatch):
+    from services.remote_batch_resume import reattach_output_dir
+
+    out = _journal_with(tmp_path, monkeypatch, ("run-first", "d-old"))
+    gone = reattach_output_dir(_probe_runner(set(), []), out, KEYS, ("d-old",), fresh="/f", forced=False,
+                               log=lambda _m: None)
+    forced_calls: list = []
+    forced = reattach_output_dir(_probe_runner({"/r/runs/run-first/out"}, forced_calls), out, KEYS, ("d-old",),
+                                 fresh="/f", forced=True, log=lambda _m: None)
+    other = reattach_output_dir(_probe_runner({"/r/runs/run-first/out"}, []), out,
+                                dict(KEYS, source_key="other-images"), ("d-old",), fresh="/f", forced=False,
+                                log=lambda _m: None)
+    assert gone == "/f", "a directory the remote no longer has is not written into"
+    assert forced == "/f" and forced_calls == [], "a forced run computes everything again"
+    assert other == "/f", "changed images are not this plate's run"
+
+
+def test_staging_from_a_re_attached_directory_moves_rather_than_links(tmp_path, monkeypatch):
+    """Re-attached, the earlier run directory is this run's: its archives are moved, so nothing is left behind."""
+    old = tmp_path / "remote" / "runs" / "run-old"
+    p, plate, run_dir, sent, observed, _ = _harness(tmp_path, monkeypatch)
+    p._runner._run.remote_output_dir = str(old / "out")
+    _finished_on(old / "out", "A02")
+    _uploaded_copy(plate, old / "in", "A03")
+
+    _run(p, monkeypatch)
+
+    assert p._returncode == 0, p._logged
+    assert "b2/A03.zip" not in sent and "b1/A03.zip" not in sent, sent
+    assert not (old / "in" / "A03.zip").exists(), "a re-attached directory's archive was copied, not moved"
+    assert [line.split()[1] for line in observed] == ["A02"]
+    assert not (run_dir / "out").exists() or not any((run_dir / "out").iterdir()), (
+        "finished output in the re-attached directory was linked somewhere else")

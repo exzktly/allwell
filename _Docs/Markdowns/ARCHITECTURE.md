@@ -252,7 +252,11 @@ marked `phoneControls`: in phone layout it is hidden from the page, which opens 
 the grid, and ⚙ Controls lends it to the sheet. Stacked, the action strip
 (Generate, crop, the ON threshold, Save, zoom) comes first, and
 `builder_view.builder_set_stacked` turns the shelf's header row and its Rows /
-Columns zones into one column; the Channels tray is a `FlowLayout` and the LUT
+Columns zones into one column — each zone as tall as its content, without the
+equal stretch and the explicit floor that suit them side by side (stacked, the
+two together let the layout squeeze the Rows zone's channel rows below their
+48 pt touch minimum) — and hides the shape line, which restates the zones and
+is wider than a phone; the Channels tray is a `FlowLayout` and the LUT
 panel's channel-naming hints wrap, at the desk as well, where with room for one
 line they lay out as before. The grid's cells share the page's width
 (`image_table/_phone_fit.py`): `fit_cell_px` divides what the row labels, the

@@ -427,6 +427,13 @@ def test_the_image_table_opens_on_its_grid_in_phone_layout(qapp, win, tmp_path):
         first = controls.layout().itemAt(0).widget()
         assert any(b.text() == "Generate" for b in first.findChildren(QPushButton))
         assert ctx.runtime.image_table.axes_row_layout.direction() == QBoxLayout.TopToBottom
+        # No control squeezed below its own minimum: the touch floor made the
+        # channel rows' ⚙ buttons 48 pt, and an evenly shared, floored zone
+        # once laid those rows out at a third of that, with blank buttons.
+        from PySide6.QtWidgets import QFrame
+        pills = [p for p in controls.findChildren(QFrame, "ITBChan") if _visible(p)]
+        assert pills and all(p.height() >= p.minimumSizeHint().height() for p in pills), [
+            (p.height(), p.minimumSizeHint().height()) for p in pills]
         shell.controls_button.click()
         _pump(qapp)
         assert shell._sheet_band is None and not controls.isStacked()

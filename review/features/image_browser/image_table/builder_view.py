@@ -923,7 +923,8 @@ def builder_set_stacked(ctx, stacked: bool) -> None:
     The header row (Build, the table's shape, Plate, Wrap cols, Clear builder)
     and the Rows / Columns zones each need a monitor's width laid out in a row,
     and held the phone layout's page wider than the screen. Stacked, each takes
-    a line of its own and the shape description wraps.
+    a line of its own, and the shape description — which the zones restate —
+    is hidden.
     """
     from PySide6.QtWidgets import QBoxLayout
     direction = QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
@@ -931,9 +932,27 @@ def builder_set_stacked(ctx, stacked: bool) -> None:
                 getattr(_rt(ctx), "axes_row_layout", None)):
         if lay is not None:
             lay.setDirection(direction)
+    axes = getattr(_rt(ctx), "axes_row_layout", None)
+    if axes is not None:
+        # Side by side the zones share the width equally (stretch 1 each) and
+        # are floored at _Z_MIN_H so an empty one still reads as a target. One
+        # above the other, an equal share of the *height* split a Rows zone of
+        # four channels and a one-root Columns zone evenly, and the explicit
+        # floor let the layout squeeze the Rows zone's channel rows below their
+        # own minimum — 51 px rows holding 141 px ⚙ buttons. Stacked, each zone
+        # is as tall as its content says.
+        for i in range(axes.count()):
+            zone = axes.itemAt(i).widget()
+            axes.setStretch(i, 0 if stacked else 1)
+            if zone is not None:
+                zone.setMinimumHeight(0 if stacked else _Z_MIN_H)
+    # The shape line ("Well › [DAPI,GFP] ↓ · Timepoint →") restates the zones
+    # beneath it, and on one line it is wider than a phone. Wrapped, it measured
+    # one height for the shelf and laid out at another, which short-changed the
+    # zones; stacked, it is left out instead.
     shape = getattr(_rt(ctx), "shape_label", None)
     if shape is not None:
-        shape.setWordWrap(stacked)
+        shape.setVisible(not stacked)
 
 
 def _zone_head(name: str, sub: str) -> QWidget:

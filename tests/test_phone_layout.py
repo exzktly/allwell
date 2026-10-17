@@ -701,16 +701,28 @@ def test_image_table_builder_stacks_into_one_column_and_back(qapp):
     from PySide6.QtWidgets import QBoxLayout, QHBoxLayout
 
     from review.features.image_browser.image_table.builder_view import (
-        builder_set_stacked,
+        _Z_MIN_H, builder_set_stacked,
     )
     host = QWidget()
-    header, axes = QHBoxLayout(), QHBoxLayout()
+    header = QHBoxLayout()
+    axes_host = QWidget(host)
+    axes = QHBoxLayout(axes_host)
+    zones = [QWidget(axes_host), QWidget(axes_host)]
+    for z in zones:
+        z.setMinimumHeight(_Z_MIN_H)
+        axes.addWidget(z, 1)
     shape = QLabel("Well › [DAPI,GFP] ↓ · Timepoint →", host)
     rt = SimpleNamespace(shelf_header=header, axes_row_layout=axes, shape_label=shape)
     ctx = SimpleNamespace(runtime=SimpleNamespace(image_table=rt))
     builder_set_stacked(ctx, True)
     assert header.direction() == axes.direction() == QBoxLayout.TopToBottom
-    assert shape.wordWrap()
+    assert shape.isHidden()
+    # One above the other, each zone is as tall as its content: no equal share
+    # of the height, no floor that lets the layout squeeze its rows.
+    assert [axes.stretch(i) for i in range(2)] == [0, 0]
+    assert [z.minimumHeight() for z in zones] == [0, 0]
     builder_set_stacked(ctx, False)
     assert header.direction() == axes.direction() == QBoxLayout.LeftToRight
-    assert not shape.wordWrap()
+    assert not shape.isHidden()
+    assert [axes.stretch(i) for i in range(2)] == [1, 1]
+    assert [z.minimumHeight() for z in zones] == [_Z_MIN_H, _Z_MIN_H]

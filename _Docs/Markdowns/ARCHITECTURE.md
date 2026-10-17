@@ -4445,6 +4445,12 @@ laid out as the two questions it answers, in the order the app applies them:
    six independently-labelled fields it was. A quantity that admits only one
    bound (solidity has no upper, region area no lower) renders an em-dash in the
    other column: a bound that does not exist must not look like one left blank.
+   A typed bound (and the focus cut) applies on `editingFinished` — Enter or
+   leaving the box — never per keystroke, and `_apply` returns without touching
+   anything when the boxes describe the `QCParams` already in force. Each apply
+   is `set_qc_params`: the verdict recomputed over every held cell, a save and a
+   redraw of every plot, so a per-keystroke path applied each prefix of a typed
+   number (`tests/test_qc_bounds_apply_once.py`).
 2. **Fraction-on**, glossed as *which of the included cells count as ON*. The
    same radio pair shape: per-channel cutoffs, or a scatter gate. Then
    Auto-threshold and the button that opens the optimizer.

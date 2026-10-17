@@ -72,6 +72,8 @@ from services.remote_run_id import (
 )
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import release_batch
+from services.remote_batch_resume import (
+    announce_adopted, nothing_left_to_run, stage_leftovers, take_from_remote)
 from util.well_token import canonical_well_label
 from services.remote_scratch import (
     source_fingerprint,
@@ -538,14 +540,11 @@ class _BatchedRemoteProcess:
         # complete, and had output with no tophat images fetched back as its
         # own — and in the other direction, after a batched run on a host with
         # overrides, the two never matched and re-attach silently never fired.
-        _record_remote_in_journal(
-            local_output_dir, run=runner._run, host_alias=runner.host.ssh_alias,
-            argv_digest=pipeline_argv_digest(
-                pipeline_argv,
-                extras=runner._host_argv_extras(output_filter)),
-            source_key=source_fingerprint(
-                _local_input_dir_from_argv(pipeline_argv)),
-        )
+        self._journal_keys = dict(
+            argv_digest=pipeline_argv_digest(pipeline_argv, extras=runner._host_argv_extras(output_filter)),
+            source_key=source_fingerprint(_local_input_dir_from_argv(pipeline_argv)),
+            host_alias=runner.host.ssh_alias)
+        _record_remote_in_journal(local_output_dir, run=runner._run, **self._journal_keys)
 
         # One Fetcher persisting across batches. Pre-set the total well
         # count: each batch's pipeline banner reports just THAT
@@ -702,8 +701,10 @@ class _BatchedRemoteProcess:
                for t in (BATCH_READY, BATCH_DONE)],
             check=False,
         )
-        # An aborted run's half-processed `in/` is cleared; its staged batches
-        # and `bg/` are kept for the retry (`remote_batch_staging`).
+        # Whatever input archives the remote already holds — in `in/`, in a staged batch, or in an earlier
+        # attempt's directory — go into the batch they now belong to first; then the half-processed `in/` is
+        # cleared, its staged batches and `bg/` kept for the retry (`remote_batch_staging`).
+        stage_leftovers(self, run_dir)
         self._runner._cache._ssh_run(["rm", "-rf", f"{run_dir}/in"], check=False)
 
         # The empty-well blank(s), uploaded once for the whole run. They sit
@@ -1035,6 +1036,9 @@ class _BatchedRemoteProcess:
                             + "\n"
                         )
                     all_zips = kept
+            # Before anything is sent: what the remote already holds — finished wells to download instead, and
+            # uploaded archives to put into this run's batches (`remote_batch_resume`).
+            all_zips, adopted = take_from_remote(self, all_zips, force=force)
 
             # Inject a synthetic "Zip mode: <total> wells" banner BEFORE
             # batch 1's stdout. The GUI's ``ProgressTracker`` locks on the
@@ -1058,17 +1062,15 @@ class _BatchedRemoteProcess:
                     f"SKIP well {p.stem.upper()} — output already exists "
                     f"locally; not uploaded. Use --force to reprocess.\n"
                 )
+            announce_adopted(self, adopted)
 
             if not all_zips:
-                self._log(
-                    "[remote] batched mode: every well already complete "
-                    "locally — nothing to do.\n"
-                )
-                self._fetcher.run.well_count_total = 0
+                self._log(nothing_left_to_run(adopted))
+                self._fetcher.run.well_count_total = len(adopted)
                 self._returncode = 0
                 return
 
-            self._fetcher.run.well_count_total = len(all_zips)
+            self._fetcher.run.well_count_total = len(all_zips) + len(adopted)
 
             # Empty-well correction reads the blank from the input directory at
             # model-build time, and batched mode stages one batch at a time — so
@@ -1136,6 +1138,7 @@ class _BatchedRemoteProcess:
                 self._returncode = 130
                 return
 
+            self._batches = batches
             if not self._start_driver(n_batches):
                 return
             failed: dict[int, int] = {}

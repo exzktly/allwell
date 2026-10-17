@@ -25,8 +25,10 @@ slicing between attempts — and the driver's ``mv`` hands the pipeline the whol
 directory, so such a well would be processed twice. :func:`prune_staged` removes
 everything not in the batch immediately before its upload.
 
-The half-processed ``in/`` is not kept: nothing records which of its wells
-finished, and ``_start_driver`` clears it.
+The half-processed ``in/`` is cleared by ``_start_driver`` — but only after
+``services.remote_batch_resume`` has moved its archives into the batches they
+now belong to and adopted its wells that finished (a finished well's
+``<well>_out.zip`` is what records that), so clearing it discards nothing.
 """
 
 from __future__ import annotations

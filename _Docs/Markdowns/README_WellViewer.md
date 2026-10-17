@@ -1536,6 +1536,13 @@ and by `remote_fetch_report.txt` in the output folder.
   incrementally on its own, and the log says so. **Force reprocess all wells**
   overrides that: every well is recomputed from scratch, and on a remote run
   every well is uploaded whole, even one that is already complete locally.
+  A remote run in batches that is restarted — after Stop, Suspend, or a lost
+  node — first checks what the host still holds from the earlier attempt with
+  the same settings. A well that finished there but had not been downloaded
+  yet is downloaded rather than uploaded and run again, and an input archive
+  that was already uploaded is reused rather than sent again (one that differs
+  from your copy is still re-sent). The log lists both. With Force, finished
+  wells are recomputed, but uploaded inputs are still reused.
 - **Stop** signals the entire pipeline process group (sub-workers included) and
   discards whatever is in flight. Press it a second time during a Suspend if you
   do not want to wait for the in-flight fields.

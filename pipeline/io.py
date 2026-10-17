@@ -874,8 +874,13 @@ def merge_records_into_csv(
     def _key(row: dict) -> tuple:
         return tuple(str(row.get(f, "")) for f in key_fields)
 
-    existing_rows: list[dict] = []
+    # Streamed, never held. The existing CSV is read twice — once for its header and keys, once while it is
+    # copied into the merged file — rather than loaded whole: a finished well's CSV runs to gigabytes, and holding
+    # every row as a dict took many times that in memory, so on a large well the merge after a remote download
+    # spent its time swapping while the download sat at 99% and the temp file did not grow. The bytes written
+    # are the same as before (the rows go through the same DictReader → DictWriter); only peak memory changes.
     fieldnames: list[str] = []
+    seen: set[tuple] = set()
     if existing_path is not None:
         # A target that exists and cannot be read is **not** the same as no
         # target. Treating the two alike meant one transient OSError — an EIO
@@ -892,9 +897,9 @@ def merge_records_into_csv(
         with open_csv_text(existing_path) as fh:
             reader = csv.DictReader(fh)
             fieldnames = list(reader.fieldnames or [])
-            existing_rows = list(reader)
+            for row in reader:
+                seen.add(_key(row))
 
-    seen = {_key(r) for r in existing_rows}
     to_add: list[dict] = []
     for rec in new_records:
         k = _key(rec)
@@ -919,7 +924,9 @@ def merge_records_into_csv(
             writer = csv.DictWriter(fh, fieldnames=fieldnames, restval="",
                                     extrasaction="ignore")
             writer.writeheader()
-            writer.writerows(existing_rows)
+            if existing_path is not None:
+                with open_csv_text(existing_path) as src:
+                    writer.writerows(csv.DictReader(src))
             writer.writerows(to_add)
 
     retry_write(_write, what=path.name, path=path)

@@ -65,3 +65,31 @@ def test_the_retry_s_line_for_a_folder_mode_well_paints_it_downloaded(tmp_path):
     events = tracker.parse(f"[remote] ↓ B03: {mb:.1f} MB zip in 1s (end-of-run retry)\n")
     events += tracker.parse("[remote] ↓ B03: 1 CSV file(s) in 1s (end-of-run retry)\n")
     assert ("well_stage", ("B03", "download")) in events
+
+
+def test_a_csv_only_well_the_retry_rescues_is_painted_downloaded(monkeypatch, tmp_path):
+    """The retry itself, not a line written by hand: a CSV-only well whose in-stream fetch failed reaches the
+    retry having reported neither half. The retry pulls its CSV — and reported only that half, because its zip
+    line was emitted only for a run that keeps zips, so the well stayed uncoloured with its data on disk."""
+    from services import remote_config, remote_fetch
+    from tests.test_remote_fetch_freshness import _run
+
+    run = _run(tmp_path, output_filter=OutputFilter.CSV_ONLY)
+
+    def _pull(argv, **kw):                     # rsync landing the rescued CSV in the output folder
+        (tmp_path / "measurements_C08.csv.gz").write_bytes(b"")
+        __import__("gzip").open(tmp_path / "measurements_C08.csv.gz", "wt").write("well,fov\nC08,f1\n")
+
+    monkeypatch.setattr(remote_fetch, "_rsync_with_retry", _pull)
+    monkeypatch.setattr(remote_fetch, "pull_small_file", lambda *a, **k: False)
+    monkeypatch.setattr(remote_fetch, "list_remote_csvs", lambda *a, **k: ["/r/out/measurements_C08.csv.gz"])
+    host = remote_config.RemoteHost(
+        name="t", ssh_alias="test-host", remote_project_dir="~/a", remote_staging_dir="~/.s", remote_python="/p",
+        cpu_only=False, extra_args=(), cache_budget_gb=1, measured_bandwidth_mbps=1.0)
+    lines: list[str] = []
+    remote_fetch.FetchedOutputVerifier(host, run, None, threading.Event())._retry_missing_wells(
+        ["missing CSV for C08"], log=lines.append)
+
+    tracker = pr.ProgressTracker()
+    events = [e for line in lines for e in tracker.parse(line)]
+    assert ("well_stage", ("C08", "download")) in events, f"the rescued well was never painted: {lines}"

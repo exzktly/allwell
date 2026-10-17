@@ -14650,10 +14650,12 @@ already on disk: a well the remote skipped as already current
 (`[remote] ✓ W: up to date`), and one rescued by the end-of-run backstop. The
 backstop reports in the **same two lines** the in-stream fetch uses, tagged
 `(end-of-run retry)` — `RemoteRunner._retry_missing_wells` emits both halves for
-every well it finishes with, including a half it did not have to re-pull,
-because by the time it runs the well has usually registered *neither*: the
-in-stream fetcher returns early when the zip pull fails, before it reaches the
-CSVs. Reusing the fetch vocabulary rather than inventing a form of its own means
+every well it finishes with, including a half it did not have to re-pull —
+and under CSV-only, which keeps no zip, the zip half is still emitted
+(`remote_fetch_place.local_output_mb` answers 0 MB), as the in-stream fetch
+emits it — because by the time it runs the well has usually registered
+*neither*: the in-stream fetcher returns early when the zip pull fails, before
+it reaches the CSVs. Reusing the fetch vocabulary rather than inventing a form of its own means
 a rescued well reaches green by the same route, with nothing extra for the
 tracker to learn. The drain's own chatter (`draining fetcher: N well(s)`,
 `fetcher still working… (5/8 wells fetched) — B03: placing the output in …, 2m 10s

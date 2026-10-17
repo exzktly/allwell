@@ -55,7 +55,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from review.data.data_loading import get_rows
-from review.data.plate_scan import every_well
 from review.data.cache_projectors import (
     drop_verdict_column, project_verdict_column,
 )
@@ -184,12 +183,38 @@ def focus_counts(df, params) -> tuple[int, int, int]:
     return (soft, unmeasurable, int(len(df)))
 
 
+def _every_well_narrow(ctx, kind: str, params, compute) -> dict:
+    """``{label: compute(rows)}`` over every well, each read narrowly and remembered.
+
+    The plate-wide passes here want one column of each well — the focus column
+    — and the inclusion verdicts :func:`candidate_rows` composes. Read whole,
+    that was the frame from disk for every well the bounded row cache does not
+    hold. Home asks for the tallies on every paint, and a gating pass bumps
+    ``rows_version`` (a dataset-wide counter) once per well, so after every
+    gating change each well was read whole again — 8 full reads and 8.0 s on an
+    8-well plate of 1.5M-cell wells (``REREAD_TRACKER.md``, E5 and R5).
+
+    So the read is ``plate_scan.every_well`` with the focus column as the
+    caller's own (``columns=``): ``narrow_rows`` adds every verdict layer's
+    declared inputs and runs the projectors, so ``candidate_rows`` sees the
+    inclusion the whole frame would have, and the frame is not put in the row
+    cache. The memo is ``plate_scan``'s, invalidated by ``rows_version``.
+    ``tests/test_focus_tallies_read_narrowly.py`` holds the answers to the whole
+    frame's with every verdict layer on.
+    """
+    from pipeline.field_quality_record import FOCUS_COLUMN
+    from review.data.plate_scan import every_well
+
+    return every_well(ctx, kind, params, compute, columns=(FOCUS_COLUMN,))
+
+
 def plate_focus_counts(ctx) -> tuple[int, int, int]:
     """``(soft, unmeasurable, total)`` summed over every well of the plate.
 
     Every well, not every held one — the panel says "across the plate", and the
-    row cache is bounded — read one at a time and remembered per well
-    (``plate_scan``) until the rows, the verdicts or *params* change.
+    row cache is bounded — read one at a time, narrowly, and remembered per
+    well (:func:`_every_well_narrow`) until the rows, the verdicts or *params*
+    change.
 
     Counted against the **current** cut whether or not the gate is switched
     on, because the panel reports what a cut would do before it is applied —
@@ -198,8 +223,8 @@ def plate_focus_counts(ctx) -> tuple[int, int, int]:
     """
     params = focus_params(ctx)
     soft = unmeasurable = total = 0
-    for s_, u, t in every_well(ctx, "focus_counts", params,
-                               lambda df: focus_counts(df, params)).values():
+    for s_, u, t in _every_well_narrow(ctx, "focus_counts", params,
+                                       lambda df: focus_counts(df, params)).values():
         soft += s_
         unmeasurable += u
         total += t
@@ -438,7 +463,8 @@ def per_well_focus_tallies(ctx, cut: float | None) -> dict:
     A tally — four numbers — rather than the well's focus values: holding every
     well's per-cell column at once to score the plate is what the bounded row
     cache exists to prevent, and the composite reads nothing else. Each well is
-    read through ``get_rows`` and its tally remembered (``plate_scan``).
+    read narrowly — the focus column and the verdicts' inputs — and its tally
+    remembered (:func:`_every_well_narrow`).
 
     The composite's shares are shares **of the cells being analysed**; see
     :func:`candidate_rows` for why counting every row marked every well of a
@@ -454,7 +480,7 @@ def per_well_focus_tallies(ctx, cut: float | None) -> dict:
             return tally_focus((), cut)
         return tally_focus([None if v != v else float(v) for v in vals], cut)
 
-    return every_well(ctx, "focus_tally", cut, _tally)
+    return _every_well_narrow(ctx, "focus_tally", cut, _tally)
 
 
 def wells_needing_review(ctx) -> dict[str, str]:

@@ -669,11 +669,16 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
     x-range reads — and one that did would corrupt every other caller's curve.
     If a mutating consumer ever appears, give it ``.copy()`` at that call site
     rather than making this one copy for everybody.
+
+    **The well is read narrowly** (:func:`_cdf_rows`): the filter needs the
+    value column, the area column, the gated channels and the verdicts, and a
+    read of the whole frame for those was 16 of the 165 full reads one open of
+    an 8-well plate of 1.5M-cell wells made (``REREAD_TRACKER.md``, R4).
     """
     store = getattr(ctx.state, "stats_cache", None)
     if store is None:
-        return compute(get_rows(ctx, label), val_col=val_col, fluor_gates=fluor_gates,
-                       ratios=ctx.state.channel.ratio_index)
+        return compute(_cdf_rows(ctx, label, val_col, fluor_gates, compute), val_col=val_col,
+                       fluor_gates=fluor_gates, ratios=ctx.state.channel.ratio_index)
     key = (
         "well_cdf", label, val_col,
         tuple(sorted((fluor_gates or {}).items())),
@@ -693,11 +698,39 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
         return hit
     # Read only on a miss: the row cache is bounded, and reading a well first
     # loaded an evicted one from disk only to return the remembered array.
-    result = compute(get_rows(ctx, label), val_col=val_col, fluor_gates=fluor_gates,
-                     ratios=ctx.state.channel.ratio_index)
+    result = compute(_cdf_rows(ctx, label, val_col, fluor_gates, compute), val_col=val_col,
+                     fluor_gates=fluor_gates, ratios=ctx.state.channel.ratio_index)
     _make_room_for_cdf(ctx, store.cache, int(getattr(result, "nbytes", 0)))
     store.cache[key] = result
     return result
+
+
+def _cdf_rows(ctx, label: str, val_col: str, fluor_gates, compute) -> pd.DataFrame:
+    """Well *label*'s rows for the CDF filter *compute*, read narrowly when it can be.
+
+    Only a filter whose inputs are known can be handed a narrow frame. The one
+    the line plot passes is ``data_loading._all_fluor_values_filtered``, called
+    here without a ``tp_filter``: it reads the inclusion verdicts, ``area_px``,
+    each gated channel's ``<channel>_mean_intensity`` and the value column (a
+    ratio's numerator and denominator). Those go to ``narrow_rows``, which adds
+    every verdict layer's declared inputs and projects them, so the values are
+    the whole frame's. Any other filter — and a ratio whose definition is not in
+    the index — reads the whole frame, because a column it reads and nobody
+    named would be absent from a narrow frame and fail open.
+    ``tests/test_cdf_values_read_narrowly.py`` holds the narrow values to the
+    whole frame's with every verdict layer on.
+    """
+    from review.data.data_loading import _all_fluor_values_filtered
+    from review.data.narrow_rows import narrow_rows, value_inputs
+
+    if compute is not _all_fluor_values_filtered:
+        return get_rows(ctx, label)
+    inputs = value_inputs(val_col, ctx.state.channel.ratio_index)
+    if inputs is None:
+        return get_rows(ctx, label)
+    want = inputs | {"area_px"} | {
+        f"{channel}_mean_intensity" for channel in active_fluor_gates(fluor_gates or {})}
+    return narrow_rows(ctx, label, want)
 
 
 #: Share of the row-cache budget the remembered CDF arrays may hold together.

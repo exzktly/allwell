@@ -1396,7 +1396,7 @@ def note_group_visibility_changed(ctx) -> None:
     refresh_fov_btn_state(ctx)
 
 
-def invalidate_stats_cache(ctx, *, keep_populations: bool = False) -> None:
+def invalidate_stats_cache(ctx) -> None:
     """Discard cached group statistics. Call whenever group definitions change.
 
     For a change in group *visibility* rather than definition, call
@@ -1404,10 +1404,7 @@ def invalidate_stats_cache(ctx, *, keep_populations: bool = False) -> None:
     plate's statistics. For an edit that moves only the threshold or how a
     spread is reported, call :func:`invalidate_threshold_results`.
     """
-    if keep_populations:
-        ctx.state.stats_cache.invalidate(keep_populations=True)
-    else:
-        ctx.state.stats_cache.invalidate()
+    ctx.state.stats_cache.invalidate()
     # The per-FOV toggle's label and variant are synced from plot state here so
     # every path that disturbs the groups leaves the button bank consistent.
     note_group_visibility_changed(ctx)
@@ -1443,13 +1440,30 @@ def invalidate_threshold_results(ctx) -> None:
     The fraction-on and count-on thresholds, the SEM/SD toggle and the
     FOV-replicate toggle change what is computed *from* each well's counted
     cells, never which cells count or what their values are. So every result is
-    dropped as usual, but the threshold-free populations
-    (``review/domain/well_population.py``) are kept, and the redraw that follows
-    answers from memory instead of reading every well from disk again — on a
-    plate larger than the row cache, the difference between about 50 s and under
-    a second for one threshold edit.
+    dropped as usual, but every threshold-free memo in the population store is
+    kept — the per-well populations (``review/domain/well_population.py``), the
+    per-cell arrays behind a CDF curve, and the Image Table / Review Image
+    per-frame excluded-cell maps and frame rows — and the redraw that follows
+    answers from memory instead of reading every well from disk again: on a
+    plate larger than the row cache, the difference between about 50 s and
+    under a second for one threshold edit.
+
+    Kept *and reachable*: the image-side memos are keyed on the Review Image
+    ``override_version``, which says "inclusion changed", so this does not bump
+    it — a bump would strand them as orphans in the store and every frame the
+    Image Table draws would read its well again. Nothing it keys moves with a
+    threshold: the Review Image threshold map carries the cutoff in its own key.
+    The Image Table's "press Generate" cue is still raised, because a grid drawn
+    in its threshold view did change.
     """
-    invalidate_stats_cache(ctx, keep_populations=True)
+    ctx.state.stats_cache.invalidate(keep_populations=True)
+    note_group_visibility_changed(ctx)
+    _mark_stale = ctx.runtime.image_table.inclusion_changed_cb
+    if _mark_stale is not None:
+        try:
+            _mark_stale()
+        except Exception:
+            swallowed()  # a failed cue must not abort the edit that caused it
 
 
 def sel_clear_all(ctx) -> None:

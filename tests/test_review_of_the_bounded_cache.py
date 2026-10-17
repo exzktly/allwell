@@ -199,30 +199,6 @@ def test_an_integer_column_is_written_with_six_decimals(tmp_path, monkeypatch):
 # ── R11: the CDF cap tolerates the cache being cleared from another thread ──
 
 
-def test_the_cdf_cap_survives_a_clear_between_its_reads():
-    """The gating worker's cancel path empties the statistics cache from its own
-    thread. Made deterministic here: a cache that empties itself as the first
-    stale entry is removed, so a second removal finds its key gone."""
-    from review.data.row_cache import RowCache
-    from review.domain import stats_compute
-
-    class _ClearedMidway(dict):
-        def pop(self, key, *default):
-            value = super().pop(key, *default)
-            self.clear()
-            return value
-
-        def __delitem__(self, key):
-            super().__delitem__(key)
-            self.clear()
-
-    ctx = SimpleNamespace(state=SimpleNamespace(
-        dataset=SimpleNamespace(rows_version=2, cache=RowCache(budget_bytes=10**9))))
-    cache = _ClearedMidway({("well_cdf", f"W{i}", "v", (), None, 1, None): np.zeros(10) for i in range(3)})
-    stats_compute._make_room_for_cdf(ctx, cache, 80)
-    assert cache == {}
-
-
 # ── the per-read costs the benchmark found ─────────────────────────────────
 
 

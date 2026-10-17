@@ -700,22 +700,32 @@ def stored_remote_addresses(
     *argv_digests* may match the first. For finding output to download, not for
     choosing where a new run writes, which stays the latest address alone.
     """
+    found: list[dict] = []
+    for remote in recorded_remote_attempts(output_dir, argv_digests=argv_digests,
+                                           source_key=source_key, host_alias=host_alias):
+        if all(f["remote_output_dir"] != remote["remote_output_dir"] for f in found):
+            found.append(remote)
+    return found
+
+
+def recorded_remote_attempts(
+    output_dir: Path | str, *, argv_digests, source_key: str, host_alias: str,
+) -> list[dict]:
+    """Every recorded remote attempt that matches, newest first — two that wrote into one output directory kept apart.
+
+    :func:`stored_remote_addresses` folds those together, which is right for finding output; a resumed batched run
+    also needs each attempt's own run directory (its ``remote_input_dir``), where that attempt kept its blank.
+    """
     payload = _read_run_payload(output_dir)
     if payload is None:
         return []
     entries = [payload.get("remote"), *reversed(payload.get("remote_history") or [])]
     wanted = {str(d) for d in argv_digests if d}
-    found: list[dict] = []
-    for remote in entries:
-        if not isinstance(remote, dict) or not remote.get("remote_output_dir"):
-            continue
-        if (str(remote.get("argv_digest") or "") in wanted
-                and source_key and remote.get("source_key") == source_key
-                and host_alias and remote.get("host_alias") == host_alias
-                and all(f["remote_output_dir"] != remote["remote_output_dir"]
-                        for f in found)):
-            found.append(dict(remote))
-    return found
+    return [dict(remote) for remote in entries
+            if isinstance(remote, dict) and remote.get("remote_output_dir")
+            and str(remote.get("argv_digest") or "") in wanted
+            and source_key and remote.get("source_key") == source_key
+            and host_alias and remote.get("host_alias") == host_alias]
 
 
 def stored_remote_address(

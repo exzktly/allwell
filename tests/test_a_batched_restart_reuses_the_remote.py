@@ -507,3 +507,32 @@ def test_the_node_is_requested_before_the_empty_well_blank_uploads(tmp_path, mon
     assert p._returncode == 0, p._logged
     assert order[0] == "node requested" and "upload bg" in order, order
     assert order.index("node requested") < order.index("upload bg") < order.index("upload b1"), order
+
+
+def test_the_driver_is_told_where_earlier_attempts_kept_the_blank(tmp_path, monkeypatch):
+    """The blank's path is part of the settings digest, and it moves with the run directory. Unless the pipeline
+    is told the earlier attempts' paths it reads their part-way checkpoints as another configuration's and prunes
+    them — the reported restart that began a 25%-done well again."""
+    import tests.test_a_batched_restart_reuses_the_remote as here
+    from services.remote_commands import unpack_login_shell_command
+
+    monkeypatch.setattr(here, "WELLS", ["A01", "A02", "H12"])
+    p, plate, run_dir, sent, _, _ = _harness(tmp_path, monkeypatch)
+    p._pipeline_argv = ["--background", "empty_well", "--background_well", "H12"]
+    old = tmp_path / "remote" / "runs" / "run-old"
+    monkeypatch.setattr(run_journal, "recorded_remote_attempts", lambda *a, **k: [
+        {"remote_input_dir": str(old / "in"), "remote_output_dir": str(run_dir / "out")}])
+    proc = _FakeProc()
+    launched: list = []
+    monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: launched.append(argv) or proc)
+    worker = threading.Thread(target=p._run_batches, daemon=True)
+    worker.start()
+    for i in range(1, 4):
+        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+    proc.finish()
+    worker.join(timeout=30)
+
+    assert p._returncode == 0, p._logged
+    script = unpack_login_shell_command(launched[0][-1])
+    assert f"--background_dir_alias={old}/bg" in script, "the earlier attempt's blank path was not passed"
+    assert f"--background_dir_alias={run_dir}/bg" not in script, "this run's own path is not an alias"

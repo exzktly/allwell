@@ -1561,7 +1561,7 @@ and by `remote_fetch_report.txt` in the output folder.
   earlier attempt's record says was finished, uploaded or downloaded that is
   nonetheless being redone, with the reason. A well the earlier attempt left
   part-way continues from its last finished field rather than starting again —
-  provided the host's scratch folder survives between runs (the default
+  including on a plate corrected against an empty-well blank — provided the host's scratch folder survives between runs (the default
   `~/.allwell/scratch` does; a per-job `$SLURM_TMPDIR` does not). The run log
   names the folder on each batch's `Scratch  :` line, and the host's
   **Remote scratch dir** field (*Advanced (remote paths)* in the host dialog) is empty when

@@ -48,6 +48,7 @@ from core.safe import swallowed
 
 SIDEBAR_LAYOUT_NAME = "Sidebar"
 from review.core.dnd import WELL_MIME  # shared drag/drop token
+from ui import theme
 from widgets.separator import build_hline_separator
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -350,20 +351,18 @@ def refresh_heatmap_layout_sidebar(ctx) -> None:
     # column width — keeps wells like ``H12`` legible at 12+ cols. Sizes
     # were knocked down ~2 pt across the board so cell text stays inside
     # the cell at narrow sidebar widths.
+    # The sizes are the desk's, times the UI scale (1.0 at the desk): phone
+    # layout scales a font a widget set on itself, and reads one set while its
+    # larger text is on as already scaled — an unscaled 8 pt set there would be
+    # divided down to about 3 pt on the way back to the desk.
+    cell_pt = 8 if layout.cols <= 8 else 7 if layout.cols <= 12 else (
+        6 if layout.cols <= 16 else 5)
+    scale = theme.ui_scale()
     cell_font = table.font()
-    if layout.cols <= 8:
-        cell_font.setPointSize(8)
-    elif layout.cols <= 12:
-        cell_font.setPointSize(7)
-    elif layout.cols <= 16:
-        cell_font.setPointSize(6)
-    elif layout.cols <= 24:
-        cell_font.setPointSize(5)
-    else:
-        cell_font.setPointSize(5)
+    cell_font.setPointSizeF(cell_pt * scale)
     table.setFont(cell_font)
     hdr_font = table.horizontalHeader().font()
-    hdr_font.setPointSize(max(6, cell_font.pointSize() - 1))
+    hdr_font.setPointSizeF(max(6, cell_pt - 1) * scale)
     table.horizontalHeader().setFont(hdr_font)
     table.verticalHeader().setFont(hdr_font)
 

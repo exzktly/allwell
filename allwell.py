@@ -648,6 +648,7 @@ class AllWellApp(QMainWindow):
             analyze_rule=getattr(self._analyze, "_log_sep", None),
             logs=lambda: [w for w in (getattr(self._analyze, "_log", None),) if w is not None],
             status_text=lambda: self._status_lbl_app.text() if self._status_lbl_app else "",
+            pages=getattr(review, "_notebook", None),
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
         # Among the small icon buttons at the band's right end, just before
@@ -659,9 +660,6 @@ class AllWellApp(QMainWindow):
             at = band_lay.indexOf(help_btn) if help_btn is not None else -1
             band_lay.insertWidget(at if at >= 0 else band_lay.count(),
                                   self._phone.desk_button)
-        notebook = getattr(review, "_notebook", None)
-        if notebook is not None and hasattr(notebook, "currentChanged"):
-            notebook.currentChanged.connect(lambda *_a: self._phone.refresh())
         if nav is not None:
             # A section tapped in the open drawer is a request to see it: the
             # drawer closes. Wells tapped on the plate below the sections keep

@@ -84,6 +84,15 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert all(not _visible(s._icon_lbl) for s in win._mode_seg._segments)
     assert not _visible(review._page_tabs_host)
     assert (win.minimumWidth(), win.minimumHeight()) <= (320, 400)
+    # A page change sweeps for what the new page built at once, through the
+    # notebook the window hands the shell — not only at the next 300 ms tick.
+    swept = []
+    shell.page_changed = lambda: swept.append(review._notebook.currentIndex())
+    try:
+        review._notebook.currentChanged.emit(review._notebook.currentIndex())
+    finally:
+        del shell.page_changed
+    assert swept == [review._notebook.currentIndex()]
     drawer = review._ctx.widgets.get("_phone_drawer")
     # Content first: the plots, and the rail tucked away in the drawer.
     assert not drawer.isVisible()

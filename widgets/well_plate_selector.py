@@ -1588,6 +1588,17 @@ class WellPlateSelector(QWidget):
     wellPaintDragged = Signal(str)
     paintDragFinished = Signal()
 
+    def _aw_rescale(self) -> None:
+        """Re-apply the size caps of the plate's role after a UI scale (phone
+        layout's rescale pass). The caps are read off the scale when they are
+        set, so a plate built while phone layout was on kept its phone-sized
+        caps after leaving it — 781×497 instead of 330×210 — and one built at
+        the desk kept the desk's in phone layout, where its labels grow."""
+        from widgets.plate_geometry import apply_plate_caps, plate_role
+        role = plate_role(self)
+        if role is not None:
+            apply_plate_caps(self, role)
+
     #: Chrome around the grid — the layout's own margins, its spacing, and the
     #: action row when one is shown. Measured rather than assumed so the aspect
     #: lock below tracks the real button metrics at the current font and DPI.

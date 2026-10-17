@@ -123,8 +123,6 @@ def refresh_fov_btn_state(ctx) -> None:
         "With replicate sets active, FOVs are pooled across all wells in each set;\n"
         "otherwise FOVs are pooled within each well. Pairs with the SEM/SD toggle."
     )
-    from PySide6.QtGui import QFontMetrics
-
     def _apply_fov(btn) -> None:
         btn.setEnabled(True)
         btn.setText(text)
@@ -133,9 +131,11 @@ def refresh_fov_btn_state(ctx) -> None:
         # Reserve room for the wider checked-state label ("FOV ✓") so the ✓ glyph
         # never clips — the button can live inside a QMenu-backed "Display ▾"
         # popover whose size is fixed at first show and won't re-expand when the
-        # text grows. Size for the widest label + QSS padding/border slack.
-        fm = QFontMetrics(btn.font())
-        btn.setMinimumWidth(fm.horizontalAdvance("FOV ✓") + _FOV_BTN_SLACK_PX)
+        # text grows. Size for the widest label + QSS padding/border slack; the
+        # button re-measures it whenever the type size changes
+        # (``widgets.reserved_width_button``).
+        if hasattr(btn, "reserve"):
+            btn.reserve(("FOV", "FOV ✓"), _FOV_BTN_SLACK_PX)
         btn.style().unpolish(btn)
         btn.style().polish(btn)
 

@@ -2053,6 +2053,7 @@ class BatchExportPanel(QWidget):
         from review.core.plot_toggles import (
             refresh_fov_btn_state, toggle_fov_replicates, toggle_sem,
         )
+        from widgets.reserved_width_button import ReservedWidthButton
         ctx = self._ctx
 
         eb_row = QHBoxLayout()
@@ -2078,7 +2079,7 @@ class BatchExportPanel(QWidget):
         fov_row = QHBoxLayout()
         fov_row.setContentsMargins(12, 2, 12, 6)
         self._add_bold_label(fov_row, "Per-FOV points:", min_width=_FIELD_LABEL_W)
-        fov_btn = QPushButton("FOV")
+        fov_btn = ReservedWidthButton("FOV")
         fov_btn.setProperty("variant", "toggle")
         fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
         fov_row.addWidget(fov_btn)

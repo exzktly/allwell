@@ -112,6 +112,9 @@ class PhoneHandles:
     #: The status line's text ("4 well(s) | 72 nuclei"), shown at the top of
     #: the side rail since the status bar is gone on a phone.
     status_text: Callable[[], str] | None = None
+    #: The stack of pages whose ``currentChanged`` is a page change (Review's
+    #: notebook): phone layout sweeps for what the new page built at once.
+    pages: QWidget | None = None
 
 
 # ── the rescale pass ──────────────────────────────────────────────────────
@@ -133,6 +136,17 @@ _TEXT_CLASSES = (QLabel, QLineEdit, QAbstractSpinBox, QComboBox, QAbstractButton
 _P_SHEET_BASE, _P_SHEET_WRITTEN = "_awSheetBase", "_awSheetWritten"
 _P_FIXED_BASE, _P_FIXED_WRITTEN = "_awFixedBase", "_awFixedWritten"
 _P_FONT_BASE, _P_FONT_WRITTEN = "_awFontBase", "_awFontWritten"
+#: A minimum height the widget's own code set, kept while the touch floors'
+#: ``min-height`` rules own the minimum (see :func:`code_min_heights`).
+_P_CODE_MIN_H = "_awCodeMinH"
+#: Qt's own marker for a minimum height a stylesheet rule set. Qt resets the
+#: minimum to 0 when the rule goes, whatever the code had set before it.
+_QSS_MIN_H = "_q_stylesheet_minh"
+
+#: The posted events the rescale pass delivers before the widgets that size
+#: themselves re-measure: the re-polish the restyle queued, and the layouts it
+#: invalidated. Nothing else — no queued call, no timer (see rescale_widgets).
+_PASS_EVENTS = (QEvent.PolishRequest, QEvent.Polish, QEvent.LayoutRequest)
 
 
 def scale_sheet(sheet: str, ratio: float, *, step: float = 1.0) -> str:
@@ -190,9 +204,16 @@ def _rescale_axis(w: QWidget, axis: str, prev: float, new: float) -> None:
     base, written = w.property(p_base), w.property(p_written)
     if base is None or written != cur:
         if prev != 1.0 or not cur:
-            # Not fixed, or fixed by code while a scale was in force — literal
-            # (unscaled) or measured off the scaled font, no way to tell which,
-            # so it is left as its code made it rather than guessed at.
+            # Not fixed, or fixed by code while a scale was in force. Such a
+            # size is nearly always the desk's: a widget measures itself in
+            # its constructor, before the stylesheet has polished it, so off
+            # the application font, which no scale touches — or it is a
+            # literal. Measured on a window launched in phone layout, dividing
+            # every such size by the scale shrank about 300 widgets below
+            # their desk size (Analyze's form fields 40 px → 17); leaving
+            # them is exact for all of them. The sizes that *are* read off
+            # the scale — a glyph measured once shown, a plate's caps — are
+            # re-derived by the widget's own ``_aw_rescale``.
             w.setProperty(p_base, None)
             w.setProperty(p_written, None)
             return
@@ -228,6 +249,46 @@ def explicit_fonts() -> dict:
     return out
 
 
+def remember_code_min_heights() -> None:
+    """Record every minimum height a widget's own code set, before a restyle.
+
+    The touch floors (``theme._touch_qss``) put a ``min-height`` on buttons,
+    fields, combos and check boxes. Qt writes a stylesheet's ``min-height``
+    into the widget's minimum and, when the rule goes, resets the minimum to
+    0 — not to what the code had set: all 96 Home › Labels cells, pinned at
+    26 px, came back from one round trip with no minimum at all. A minimum the
+    stylesheet owns (Qt's ``_q_stylesheet_minh``) is not the code's, so an
+    earlier record of the code's survives a restyle made inside phone layout
+    (a text-size change). :func:`restore_code_min_heights` puts them back.
+    """
+    for w in QApplication.allWidgets():
+        try:
+            if w.property(_QSS_MIN_H):
+                continue
+            h = w.minimumHeight()
+            if h > 0:
+                w.setProperty(_P_CODE_MIN_H, h)
+            elif w.property(_P_CODE_MIN_H) is not None:
+                w.setProperty(_P_CODE_MIN_H, None)
+        except RuntimeError:
+            swallowed()  # deleted C++ widget still listed by allWidgets
+
+
+def restore_code_min_heights() -> None:
+    """After a restyle: give back the minimum heights a stylesheet rule took
+    and has now let go of (see :func:`remember_code_min_heights`)."""
+    for w in QApplication.allWidgets():
+        try:
+            h = w.property(_P_CODE_MIN_H)
+            if h is None or w.property(_QSS_MIN_H):
+                continue
+            if w.minimumHeight() == 0:
+                w.setMinimumHeight(int(h))
+            w.setProperty(_P_CODE_MIN_H, None)
+        except RuntimeError:
+            swallowed()  # deleted C++ widget still listed by allWidgets
+
+
 def _font_size(f: QFont) -> tuple[str, float]:
     return ("pt", f.pointSizeF()) if f.pointSizeF() > 0 else ("px", float(f.pixelSize()))
 
@@ -237,10 +298,19 @@ def _rescale_font(w: QWidget, font: QFont, prev: float, new: float) -> None:
     size = _font_size(font)
     base, written = w.property(_P_FONT_BASE), w.property(_P_FONT_WRITTEN)
     if base is None or tuple(written or ()) != size:
-        # Set by the widget's code: at the desk that is its desk size; under a
-        # scale it is a literal size or one measured off a token — taken as
-        # the literal, the commoner case, so it is not shrunk on the way out.
-        base = size
+        # Set by the widget's code (or by the stylesheet's re-polish, which
+        # marks the font as set too), at the scale in force when it ran: its
+        # desk size is that divided by the scale, to the half point or whole
+        # pixel. The stylesheet's ``*`` rule gives every widget a size at its
+        # polish, so a font that is still there to be read is the
+        # stylesheet's or one set later from a token (the one literal site,
+        # the heat map's layout grid, scales its sizes). A run log built in
+        # phone layout carries the stylesheet's 31 px; read as a literal, it
+        # stayed 31 px at the desk.
+        kind, value = size
+        value = (round(value / prev * 2) / 2 if kind == "pt"
+                 else float(round(value / prev)))
+        base = (kind, value)
     kind, value = base
     f = QFont(font)
     if kind == "pt":
@@ -263,11 +333,18 @@ def rescale_widgets(prev: float, new: float, widgets=None, fonts=None) -> int:
       encodes state (a mode segment's active fill, a headline's tone) keeps
       it, which a rebuilt-from-scratch sheet would not;
     * a fixed width or height on a widget that holds text, scaled from the
-      size it had at the desk;
+      size it had at the desk — one fixed while a scale was in force is left
+      as it is, since it was almost always measured before the stylesheet
+      polished the widget, or is a literal (:func:`_rescale_axis`);
     * a font the widget set on itself (*fonts*, from :func:`explicit_fonts`
-      taken before the restyle, which wiped them);
+      taken before the restyle, which wiped them) — one set while a scale was
+      in force is read as scaled, since the stylesheet re-polishes every font
+      and only a stylesheet's or a token's survives to be read
+      (:func:`_rescale_font`);
+    * the polish and layout events the restyle queued, and nothing else;
     * and last, ``_aw_rescale()`` for widgets with sizes of their own to
-      re-derive — an icon's glyph, a dashboard's stage columns.
+      re-derive — an icon's glyph, a dashboard's stage columns, an empty
+      state's glyph and floors, a plate's caps, a plot card's figure pin.
 
     One explicit pass rather than an event filter per widget: a filter that
     re-sets a sheet on ``StyleChange`` re-fires ``StyleChange`` (why PlotCard
@@ -288,20 +365,44 @@ def rescale_widgets(prev: float, new: float, widgets=None, fonts=None) -> int:
             _rescale_font(w, font, prev, new)
         except RuntimeError:
             swallowed()  # deleted since the fonts were read
-    # Let the font and style changes the restyle queued land first: an owner
-    # re-measures off its own font, which is stale until they have. Posted
-    # events only — never processEvents. That runs timers too, and on Windows
-    # it keeps going until the message queue is empty, so a zero-delay timer
-    # that re-armed itself held it there for good: the restyle never returned
-    # and its busy overlay stayed up (reported: "Resizing for your screen…"
-    # for over two minutes). Nothing a timer does belongs inside the pass.
-    QApplication.sendPostedEvents()
-    for w in owners:
+    # Let the polish and layout work the restyle queued land first: an owner
+    # re-measures off its own font and its children's sizes, which are stale
+    # until they have. Those two event types only — never processEvents, and
+    # never every posted event. processEvents runs timers, and on Windows it
+    # keeps going until the message queue is empty, so a zero-delay timer that
+    # re-armed itself held it there for good: the restyle never returned and
+    # its busy overlay stayed up (reported: "Resizing for your screen…" for
+    # over two minutes). A bare sendPostedEvents() is not safe either: it
+    # delivers every queued call — QTimer.singleShot(0, …) callbacks, queued
+    # and cross-thread signals, Windows' zero-interval timer events — about
+    # 9,400 of them in one switch on a loaded app, each running in the middle
+    # of the pass. Nothing queued belongs inside it.
+    for kind in _PASS_EVENTS:
+        QApplication.sendPostedEvents(None, kind)
+    # Innermost first: an owner that measures its children (a plot card's
+    # chrome, the mode bar's segments) must see them already re-derived. In
+    # the order allWidgets() happens to give, a card measured its header with
+    # the phone's icons still in it and kept 21 px too much at the desk.
+    for w in sorted(owners, key=_depth, reverse=True):
         try:
             w._aw_rescale()
         except RuntimeError:
             swallowed()  # deleted while the pass ran
     return len(owners)
+
+
+def _depth(w: QWidget) -> int:
+    """How many ancestors *w* has (0 for a window); -1 once it is deleted."""
+    n = 0
+    try:
+        p = w.parentWidget()
+        while p is not None:
+            n += 1
+            p = p.parentWidget()
+    except RuntimeError:
+        swallowed()  # deleted while the pass ran
+        return -1
+    return n
 
 
 # ── plots ─────────────────────────────────────────────────────────────────
@@ -497,12 +598,14 @@ _RAIL_STATUS_MS = 400
 PLOT_ROW_PT = 220
 
 #: How often, in ms, phone layout checks for widgets built since its last
-#: sweep. A sweep that finds the count unchanged costs one ``allWidgets()``
-#: (about 2 ms with 4,100 widgets); a full one about 25 ms.
+#: sweep. A sweep that finds nothing new reads one mark per widget (about 6 ms
+#: with 4,300 widgets); a forced one, which looks at every widget, about 25 ms.
 _SWEEP_MS = 300
 
 #: Dynamic property marking a widget the phone filter is installed on.
 _P_WATCHED = "_awPhoneWatched"
+#: Dynamic property marking a widget a sweep has already looked at.
+_P_SEEN = "_awPhoneSeen"
 
 
 class PhoneShell(QObject):
@@ -595,10 +698,23 @@ class PhoneShell(QObject):
         self._text_size = phone_layout.parse_text_size(size)
         self._save(phone_layout.KEY_TEXT_SIZE, self._text_size)
         if phone_layout.is_on():
-            self._restyle(self.text_scale(), self.unit())
+            self._restyle_in_place()
             scale_canvases(self.plot_factor())
             self._apply_sizes()
             self.refresh()
+
+    def _restyle_in_place(self) -> None:
+        """Restyle while phone layout stays on (a text-size change, the phone
+        turning). Like the switch itself, the widgets with a phone *form* give
+        it up for the restyle and take it back after, so the rescale pass only
+        ever sees desk-shaped widgets: a touch-mode Stepper's width is its
+        own, and a pass that scaled it lost the caller's pin — a band's
+        stepper came back to the desk 227 px wide instead of 96."""
+        self._adapt_all(False)
+        try:
+            self._restyle(self.text_scale(), self.unit())
+        finally:
+            self._adapt_all(True)
 
     # ── controls ──────────────────────────────────────────────────────────
     def _build_controls(self) -> None:
@@ -698,13 +814,12 @@ class PhoneShell(QObject):
         self._refresh_soon.timeout.connect(self._refresh_when_settled)
         # Widgets built while phone layout is on are found by a sweep rather
         # than an application-wide event filter (see _PhoneEventFilter): every
-        # _SWEEP_MS it checks the widget count and, when it changed, adapts and
-        # watches the new ones; a window gaining focus (a dialog opening) and a
-        # page change sweep at once.
+        # _SWEEP_MS it looks for widgets no sweep has seen and adapts and
+        # watches them; a window gaining focus (a dialog opening) and a page
+        # change (page_changed) sweep at once.
         self._sweep_timer = QTimer(self)
         self._sweep_timer.setInterval(_SWEEP_MS)
         self._sweep_timer.timeout.connect(lambda: self._sweep(force=False))
-        self._sweep_count = -1
         self._focus_hooked = False
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(_RAIL_STATUS_MS)
@@ -717,6 +832,9 @@ class PhoneShell(QObject):
             drawer.closed.connect(self._status_timer.stop)
         for w in self._phone_only():
             w.hide()
+        changed = getattr(self._h.pages, "currentChanged", None)
+        if changed is not None:
+            changed.connect(lambda *_a: self.page_changed())
 
     def _on_rail_opened(self) -> None:
         self._sync_rail_status()
@@ -789,6 +907,10 @@ class PhoneShell(QObject):
             self._restyle(self.text_scale() if on else 1.0, self.unit() if on else None)
         elif on:
             theme.set_touch_unit(self.unit())
+            # Launched in phone layout: the window is built but not yet shown,
+            # so not yet polished, and the minimum heights its code set are
+            # still readable — the touch floors take them at the first show.
+            remember_code_min_heights()
         if on:
             self._adapt_all(True)
         self._apply_sizes()
@@ -855,10 +977,12 @@ class PhoneShell(QObject):
             p = p.parentWidget()
         return False
 
-    def adapt(self, w: QWidget) -> None:
+    def adapt(self, w: QWidget, on: bool | None = None) -> None:
         """Give one widget its phone (or desk) form — on entering and leaving
-        phone layout for those that exist, and on Show for those built later."""
-        on = phone_layout.is_on()
+        phone layout for those that exist, and on Show for those built later.
+        *on* defaults to whether phone layout is on; a restyle made inside
+        phone layout passes False to take the form off for its duration."""
+        on = phone_layout.is_on() if on is None else bool(on)
         name = type(w).__name__
         if name == "ControlBand" or _is_phone_controls(w):
             if on and w is not self._sheet_band and self._band_managed(w):
@@ -879,7 +1003,6 @@ class PhoneShell(QObject):
         """Start or stop finding and watching the widgets phone layout adapts."""
         app = QApplication.instance()
         if on:
-            self._sweep_count = -1
             self._sweep(force=True)
             self._sweep_timer.start()
             if app is not None and not self._focus_hooked:
@@ -895,8 +1018,22 @@ class PhoneShell(QObject):
                 if w.property(_P_WATCHED):
                     w.removeEventFilter(self._filter)
                     w.setProperty(_P_WATCHED, None)
+                if w.property(_P_SEEN):
+                    w.setProperty(_P_SEEN, None)
             except RuntimeError:
                 swallowed()  # deleted while the list was walked
+
+    def page_changed(self) -> None:
+        """The page on screen changed: watch and adapt what it built at once,
+        rather than at the next tick of the sweep — a page built lazily showed
+        its desk control band, toolbar and plot for up to 300 ms — and once
+        more on the next turn of the loop, for a page that builds its body
+        only once it is shown. Then sync the band to the new page."""
+        if not phone_layout.is_on():
+            return
+        self._sweep(force=False)
+        self._refresh_soon.start()
+        self.refresh()
 
     def _on_focus_window(self, *_a) -> None:
         if phone_layout.is_on():
@@ -904,18 +1041,34 @@ class PhoneShell(QObject):
 
     def _sweep(self, *, force: bool) -> None:
         """Watch and adapt every widget phone layout cares about that is not
-        watched yet. Skipped when the widget count has not changed, unless
-        *force*: a re-shown widget is already watched, so only new widgets need
-        finding, and they change the count."""
+        watched yet. Only widgets no sweep has looked at before are looked at,
+        unless *force*: a re-shown widget is already watched, so only new
+        widgets need finding.
+
+        New is a mark on the widget itself (``_awPhoneSeen``), not the widget
+        count and not its address. A canvas deleted and another built between
+        two ticks leaves the count unchanged, and a count-only check never
+        watched the new one; the allocator hands the new widget the old one's
+        address as often as not, so an address set misses it the same way.
+        Reading the marks costs about 6 ms at 4,300 widgets."""
         if not phone_layout.is_on():
             return
         widgets = QApplication.allWidgets()
-        if not force and len(widgets) == self._sweep_count:
-            return
-        self._sweep_count = len(widgets)
+        if not force:
+            fresh = []
+            for w in widgets:
+                try:
+                    if not w.property(_P_SEEN):
+                        fresh.append(w)
+                except RuntimeError:
+                    swallowed()  # deleted while the list was walked
+            if not fresh:
+                return
+            widgets = fresh
         factor = self.plot_factor()
         for w in widgets:
             try:
+                w.setProperty(_P_SEEN, True)
                 if w.property(_P_WATCHED) or not _phone_relevant(w):
                     continue
                 w.installEventFilter(self._filter)
@@ -935,7 +1088,7 @@ class PhoneShell(QObject):
     def _adapt_all(self, on: bool) -> None:
         for w in list(QApplication.allWidgets()):
             try:
-                self.adapt(w)
+                self.adapt(w, on)
             except RuntimeError:
                 swallowed()  # deleted while the list was walked
         self._grab_scrolling(on)
@@ -1011,6 +1164,7 @@ class PhoneShell(QObject):
             with phone_layout.switching():
                 prev = theme.ui_scale()
                 fonts = explicit_fonts()
+                remember_code_min_heights()
                 theme.apply_ui_scale(factor)
                 theme.set_touch_unit(unit)
                 if app is not None:
@@ -1019,6 +1173,9 @@ class PhoneShell(QObject):
                                                if w is not overlay
                                                and w.parentWidget() is not overlay],
                                 fonts)
+                # Once the pass is done, so it saw every widget as the new
+                # stylesheet left it.
+                restore_code_min_heights()
         finally:
             self._applying = False
             QTimer.singleShot(_OVERLAY_LINGER_MS, overlay.deleteLater)
@@ -1181,7 +1338,7 @@ class PhoneShell(QObject):
         # The phone turned (VNC resized the desktop under a maximized window),
         # or a new resolution changed what a phone point is.
         self.close_controls(now=True)
-        self._restyle(self.text_scale(), self.unit())
+        self._restyle_in_place()
         scale_canvases(self.plot_factor())
         self._apply_sizes()
         self.refresh()
@@ -1418,7 +1575,7 @@ class PhoneShell(QObject):
     def _pick_page(self, bar, idx: int) -> None:
         bar.setCurrentIndex(idx)
         self.close_controls(now=True)
-        self.refresh()
+        self.page_changed()
 
     def _text_size_row(self):
         """The ⋯ menu's first item: Text size, as three buttons in one row."""

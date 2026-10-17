@@ -307,7 +307,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # The canvas' pin plus the card's own chrome, measured rather than a
     # literal: this used to add a hardcoded 110 counting "header / controls /
     # toolbar rows", and the card no longer builds a header.
-    card.setMinimumHeight(int(_FIG_H * _DPI) + card.chromeHeight())
+    card.pinFigureHeight(int(_FIG_H * _DPI))
 
     # Error band now lives in the "Display ▾" popover above (C1); no card row.
     card.plotThemeChanged.connect(lambda _m: redraw_bars(ctx))

@@ -962,6 +962,7 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
         toggle_fov_replicates,
         toggle_sem,
     )
+    from widgets.reserved_width_button import ReservedWidthButton
     w = QWidget(parent)
     h = QHBoxLayout(w)
     h.setContentsMargins(0, 0, 0, 0)
@@ -985,7 +986,7 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
         sp_lbl = QLabel("Spread", w)
         sp_lbl.setObjectName("Muted")
         h.addWidget(sp_lbl)
-        fov_btn = QPushButton("FOV", w)
+        fov_btn = ReservedWidthButton("FOV", w)
         fov_btn.setProperty("variant", "toggle")
         fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
         h.addWidget(fov_btn)

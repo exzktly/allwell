@@ -171,19 +171,29 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    so the cost scales with the widget count, not with the sheet. Widgets
    that take a different *form* on a phone — a stepper's − / +, an Analyze form
    row's stacked label — take it after the restyle on the way in and give it up
-   before the restyle on the way out, so the rescale pass only ever sees
-   desk-shaped widgets. The restyle is a *switch* (`phone_layout.switching()`,
-   read by `is_switching()`), and no timer runs inside it: its rescale pass
-   delivers posted events only (`QApplication.sendPostedEvents`), never
+   before the restyle on the way out, and give it up for the length of the two
+   restyles made *inside* phone layout too, a text-size change and the phone
+   turning (`PhoneShell._restyle_in_place`) — so the rescale pass only ever
+   sees desk-shaped widgets. A touch-mode stepper's width is its own, and a
+   pass that scaled it lost the caller's pin: a band's stepper came back to the
+   desk 227 px wide instead of 96. The restyle is a *switch*
+   (`phone_layout.switching()`, read by `is_switching()`), and nothing queued
+   runs inside it: its rescale pass delivers the polish and layout events the
+   restyle posted (`QApplication.sendPostedEvents(None, type)` for
+   `PolishRequest`, `Polish` and `LayoutRequest`) and no other kind. Not
    `processEvents`, which runs due timers and on Windows keeps going until the
-   message queue is empty — so a zero-delay timer that re-armed itself held the
-   restyle, and its busy overlay, up for good. Work that meets a switch anyway
-   never re-arms its own timer: it queues itself with
-   `phone_layout.after_switch(fn)`, which runs it once when the outermost
-   switch ends (the Image Table's refit), or drops it when the switch's end
-   already does it (the shell's queued `refresh()`). The Image Table's refit,
-   run inside the restyle, once deleted and rebuilt its grid while the pass was
-   walking the window's widgets;
+   message queue is empty — a zero-delay timer that re-armed itself held the
+   restyle, and its busy overlay, up for good — and not a bare
+   `sendPostedEvents()` either, which delivers every queued call:
+   `QTimer.singleShot(0, …)` callbacks, queued and cross-thread signals,
+   Windows' zero-interval timer events — about 9,400 of them in one switch on
+   a loaded app, each running in the middle of the pass. The Image Table's
+   refit, run inside the restyle, once deleted and rebuilt its grid while the
+   pass was walking the window's widgets; it runs from a timer, so it no longer
+   can. `tests/test_phone_layout.py::test_nothing_queued_runs_inside_the_rescale_pass`
+   queues a `singleShot(0)`, a queued signal and a queued `invokeMethod` and
+   requires that none runs inside the pass. Leaving it also gives back the
+   minimum heights the touch floors took (below, *The UI scale*);
 4. pins the touch sizes (`_apply_sizes`), scales the plots, and, while phone
    layout is on, watches the widgets it adapts so that anything shown later gets
    the same treatment: a plot its DPI and height, a dialog a place inside the
@@ -196,11 +206,19 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    Python, and on Windows it died with a native access violation on the filter's
    first line, called from `app.exec()` with an event for an object being torn
    down. `PhoneShell._sweep` finds widgets built after the switch — every
-   `_SWEEP_MS` (300 ms) when the widget count has changed (an unchanged count
-   costs one `allWidgets()`, about 2 ms at 4,100 widgets; a full sweep about
-   25 ms), at once when a window gains focus (a dialog opening), and after a page
-   change — installs the filter, marks the widget `_awPhoneWatched`, and adapts
-   it if it is already showing. Leaving phone layout removes every one of them;
+   `_SWEEP_MS` (300 ms), at once when a window gains focus (a dialog opening),
+   and at once on a page change (`PhoneShell.page_changed`, wired to the
+   `currentChanged` of the stack the window hands it as `PhoneHandles.pages`,
+   Review's notebook, and called by the page menu), with one more sweep on the
+   next turn of the loop for a page that builds its body only once shown. It
+   looks only at widgets no sweep has seen, by a mark on each one
+   (`_awPhoneSeen`) — not by the widget count, which a canvas deleted and
+   another built between two ticks leaves unchanged, and not by address, which
+   the allocator hands straight to the replacement. Reading the marks costs
+   about 6 ms at 4,300 widgets; a forced sweep that looks at everything about
+   25 ms. For each relevant widget it installs the filter, marks the widget
+   `_awPhoneWatched`, and adapts it if it is already showing. Leaving phone
+   layout removes every filter and mark;
 5. maximizes the window (phone) or restores the desk geometry it remembered —
    only one remembered on a desk-shaped screen.
 
@@ -358,8 +376,17 @@ row H.
 `core.app_settings`. `allwell._phone_layout_at_startup` re-enters phone layout
 only when it was left on *and* the screen is still phone-shaped — a choice made on
 the phone must not open the next desk launch as a phone — and then scales the
-tokens and sets the touch unit before the window is built, so the restyle costs
-nothing. `_save_window_state` saves no geometry or splitter sizes while phone
+tokens and sets the touch unit before the window is built, so no restyle runs on
+the way in (`set_on(True, restyle=False)`). Everything is built at the phone's
+size instead, which the way *out* has to undo with no desk value on record:
+the rescale pass reads a font set under a scale as scaled and divides it back
+(the run log came back at 31 px instead of 13 when it did not), leaves a fixed
+size set under a scale as it is (it was measured before the stylesheet polished
+the widget, or is a literal), and the widgets whose sizes really are read off
+the scale re-derive them in `_aw_rescale` (*The UI scale*, §8). The minimum
+heights the window's code set are recorded before its first show, because the
+touch floors take them then. `tests/test_phone_layout.py::test_a_window_launched_in_phone_layout_leaves_it_like_one_built_at_the_desk`
+drives that sequence against a desk-built twin. `_save_window_state` saves no geometry or splitter sizes while phone
 layout is on or the screen is phone-shaped.
 
 **The run dashboard** is the Analyze page in phone layout
@@ -14535,6 +14562,7 @@ Notable members worth knowing about by name:
 | `LabeledComboBox` (`widgets/labeled_combo.py`) | A `QComboBox` that paints its own scope label as a fixed prefix inside the closed box ("Channel: RFP", "Timepoint: 4.0h") rather than sitting beside a separate `QLabel`. `currentText()` / `currentIndex()` / every Qt signal still report the plain item value — only `paintEvent` changes, drawing `opt.currentText` set to the prefixed string. `sizeHint()` measures *only what's actually painted* (the current item's text plus the prefix, via `self.style().sizeFromContents(QStyle.CT_ComboBox, opt, content, self)`), not plain `QComboBox`'s default — which measures every item in the list up front (`AdjustToContentsOnFirstShow`) and sizes the closed box to the widest one, so a metric combo showing "N" sat as wide as its longest possible entry ("Property: Fraction Threshold On") the whole time. Callers must not layer `setFixedWidth` / `setMinimumContentsLength` / a QSS `min-width` on top — every one of those re-floors the box wider than its current content needs, which is exactly the waste this widget exists to cut; centre_view.py's Channel/Property combos and `review_csv/tab_view.py`'s Timepoint and FOV combos carried exactly that stale floor from before the box was made self-sizing, until removed. Before a caller populates the combo (or an empty dataset leaves it with no items), `currentText()` is `""` — `_painted_text()` falls back to the bare label ("Timepoint") rather than painting nothing, since a blank sliver reads as broken once the box tracks content width; `paintEvent` calls the same `_painted_text()` rather than duplicating the fallback, so painting and sizing can't drift apart. A repaint recomputes `sizeHint()` and calls `updateGeometry()` when it changed, which is what catches a text change made under `blockSignals(True)` (a common "seed without re-triggering the handler" pattern that suppresses `currentIndexChanged` but not Qt's own repaint scheduling). `ControlBand.add_scope("", combo)` is called with an empty label for one of these — the combo describes itself, so it's added alone rather than paired with a caption. Used for Plotting's page-level Channel and Property combos, every single-select Timepoint combo across Review (Stats, Spatial, Multivariate, Distribution, Heat Map, smFISH, Review CSV, Segmentation preview) — Heat Map's was a `StyledSlider` until unified onto the same combo every sibling tab uses — and every FOV combo (smFISH, Review CSV, Segmentation preview). Not every folded scope control is a `LabeledComboBox`: the checkbox-menu multi-select buttons (Bar Plots' and Scatter Cells/Agg's Timepoints pickers) fold the same way but by a different means, since there's no per-item combo box to paint a prefix on — `core.ui_helpers.multiselect_button_text` builds the readout string and the button's own `setText` carries it. The `ControlBand.add_scope(label, widget)` pairing is still what every other scope control uses — Heat Map's own Aggregation combo included, since there's no per-tab convention for what its prefix would read. |
 | `multiselect_button_text` (`core/ui_helpers.py`) | The button-text counterpart to `LabeledComboBox` for a checkbox-menu multi-select control (the "Select Timepoints" pattern Bar Plots and both Scatter sub-tabs use): folds a prefix and a `{token: bool}` selection dict into one string — `"Timepoints: 2/5 selected"`, `"Timepoints: All 5 selected"`, `"Timepoints: 0 selected"` — for the picker button's own text, in place of a separate count `QLabel` beside it. The three call sites (`barplot/controller.py::update_bar_tp_selection_display`, `scatter/controller.py::update_scatter_tp_selection_display` / `update_tp_selection_display`) call it on every selection change; `persistence/view_state.py`'s bar-tab restore path calls it directly too, since it predates and is Qt-free like the rest of `core`. |
 | `ControlBand` (`widgets/control_band.py`) | The one control row a Review tab uses, so that switching tabs does not also switch control layouts. Two zones and no third: **scope** on the left (what data is shown — channel, property, timepoint, threshold) and **actions** flush right (how it is shown and what to do with it — `Display ▾`, `Save ▾`, Properties). Which view is being shown is the tab bar's job, not the band's, so nothing is centred. The scope zone is a `FlowLayout` rather than a `QHBoxLayout`: a box layout has no wrap, so at narrow widths Qt compresses the children until a label is drawn over the combo beside it. `add_scope(label, *widgets)` bundles the label and its control through `flow_group` as **one** flow item, so a wrap can never strand a label from what it names, and returns that group so a caller can show or hide the pair. Three details are load-bearing and each cost a render to find: the action zone is `Qt.AlignTop`, or it centres itself against a wrapped scope zone and the buttons drift half a row down; the band's height floors at the action zone's, since `FlowLayout.heightForWidth` returns ~0 for an empty scope zone and the band would collapse behind its own buttons; and the band answers `heightForWidth` from the flow at the width the scope zone will actually get, because a tab built inside a stacked page is first realised at a narrow transient width where `sync_flow_height` pins the fully-wrapped height as the host's minimum — inheriting `QWidget`'s cached hint there left a 45px band 151px tall for good. `ROW_H` (28px; `band_height()` == 44 with the band's own padding) is what one row measures, whatever it holds — set as a real `setMinimumHeight`, because a parent layout asks the band's `QWidgetItem`, which delegates to `wid->layout()->heightForWidth()` and never reaches an override on the class. Its object name is `ControlBand`, which is data-gated (§5.2). A page whose body is a stack of leaf views still gets **one** band: each leaf claims a `ControlBandSlot` through `band.slot(name)`, adds its controls through the slot's mirror of `add_scope` / `add_action`, and `show_slot` shows one leaf's while hiding the rest. A slot is a real widget — a child of the band that is never laid out, so it is never painted — because leaves parent popover contents to what they think is their band. Items claimed by a slot that is not current arrive hidden, since `QLayout.addWidget` shows what it is handed and leaves build lazily. Both `add_scope` and `add_action` pass any `QCheckBox` they are handed through `widgets/checkbox_fit.fit_checkbox_width`, for the same reason `trailing=True` lives on the band rather than in each builder: the rule belongs with the control row, not in a builder's memory. |
+| `ReservedWidthButton` (`widgets/reserved_width_button.py`) | A `QPushButton` whose minimum width fits the widest of the labels it may show (`reserve(labels, slack)`), for a toggle whose label changes with its state inside a popover that is sized once, at its first show — the FOV toggle's "FOV" / "FOV ✓" (`review/core/plot_toggles.refresh_fov_btn_state`, built by `ui_helpers.make_band_controls` and the batch-export panel). The width is the button's own rather than a number its caller measured once, because it is read off the font: it is measured off the polished font and again after a UI scale (`_aw_rescale`), so a button built while phone layout's larger text was on does not keep the phone's width at the desk (115 px against 64). |
 | `ButtonRow` (`widgets/button_row.py`) | **A row of buttons that wraps rather than forcing its host wider.** A `QHBoxLayout` of buttons reports the sum of their widths as its minimum, and that minimum propagates: the Statistics comparison-group editor's three actions made the column they sit in about 370px at its narrowest, enough to push the well map out of the row beside it at a pane width where the two still fitted. Wrapping, the row's minimum is its widest single button. It is a widget rather than a `FlowLayout` built at the feature site for a second reason: `ControlBand` owns the one wrapping row of *controls* a page has, `tests/test_control_band_adoption.py` is the guard that stops a tab growing a second one beside it, and a bare `FlowLayout` in an adopted module is indistinguishable from the thing that guard exists to catch. A ButtonRow takes buttons acting on the section around them; anything that selects what a page *shows* is a scope control and belongs in the band. It calls `sync_flow_height` on itself, because a wrapped second line inside a `QStackedWidget` page is otherwise drawn behind whatever sits below it. |
 | `ResponsiveScroll` (`widgets/responsive_row.py`) | The vertically-scrolling host a `ResponsiveRow` belongs in when the page it is on can run out of height. Horizontal scrolling is **on demand**, not off: the rows flip on the viewport's width, which a horizontal bar does not change, so the bar costs the decision nothing — and below the floor, where a stacked row cannot be narrower than its widest panel, it is the difference between a shortfall the user can reach and one drawn behind the page's edge. That is also why the scroll area has to push its viewport width into the rows on resize rather than leaving each row to read its own — with horizontal scrolling off, the area sizes its inner widget to at least that widget's minimum, so once a row is too wide the whole page is too wide and every width up the chain repeats the same inflated number; and a row already pinned at its minimum need not receive a resize of its own to react to. `ResponsiveRow` walks up for an enclosing scroll area and reads the viewport itself for the same reason. |
 | `ResponsiveRow` (`widgets/responsive_row.py`) | **Panels side by side while the width holds them, a column when it does not.** A `QBoxLayout` handed less width than its children's minimums does not decline to lay them out — it places them in order at the widths they demand and runs the tail off its own right edge — which is how the Statistics comparison-group editor came to show a section title reading "COMP GROU" and a load button cut off mid-word on a 350px pane (an 1100×800 window with the rail open and the pane split). The panels do not overlap and no arrangement of them does; a short box layout clips, so a test asserting they never overlap cannot fail for that reason and the clipping is what has to be measured. The flip point is not a chosen number: it is the panels' own effective minimum widths plus the spacing between them, so the row stacks exactly when one line would start clipping and nobody has to keep a threshold in step with what the panels contain. *Effective* is both halves and neither alone — `minimumSizeHint` is what a widget derives from its own contents and ignores a floor set on it from outside, `minimumWidth` is that floor and is 0 on a widget that never had one, and Qt takes the larger; a first cut reading only the hint missed the map's `setMinimumWidth(PLATE_MIN_WIDTH)` and would have gone on clipping in the place it was written to fix. `add_panel` rather than `addWidget`, because each panel carries the stretch it takes on one line — dropped when stacked, or the panel that grabbed the horizontal slack would grab the vertical and the page below would lose the room the row was meant to leave — and an alignment per orientation, so the map is top-aligned beside the cards and centred above them. Hysteresis on the way back, since the two orientations have different heights and therefore different scrollbar states, and a width sitting on the flip point would oscillate. `features/batch_export/base_panel.py` grew this behaviour first, wired into that panel's class and reading its scroll viewport's width rather than its own; it is not converted here because its version also drives a separator's orientation and its own width caps. |
@@ -14971,7 +14999,10 @@ width itself, and gutters are space between things, not the size of one.
 theme applied under a scale keeps it. `ui_scale()` reads it; `IconButton`,
 `plate_geometry` (the plate caps) and `plate_progress.scaled_px` (the run
 dashboard's fixed columns) read it at construction, so a widget built under a
-scale is built at it.
+scale is built at it — and each of them re-reads it in `_aw_rescale`, so it
+follows a later change of scale too (a plate's caps through
+`WellPlateSelector._aw_rescale`, which re-applies `apply_plate_caps` for the
+role `apply_plate_geometry` recorded on it).
 
 At startup that is the whole story — phone layout scales the tokens before the
 window exists. Live, it is not, because the scale has to reach widgets built
@@ -14999,25 +15030,53 @@ at the desk. `ui/phone_shell.PhoneShell._restyle(factor, unit)` does it in order
    - a fixed width or height on a widget that holds text (`QLabel`, `QLineEdit`,
      `QAbstractSpinBox`, `QComboBox`, `QAbstractButton`, or a composite that sets
      `_aw_fits_text`) is scaled from its desk value, per axis. One fixed while a
-     scale was already in force is left alone: it may be a literal or measured
-     off the scaled font, and halving a literal on the way out would be worse;
-   - the recorded fonts are put back, scaled;
-   - the posted font, style and layout events are delivered
-     (`sendPostedEvents` — no timers, no input; see §2, *Switching*), then
-     every widget defining `_aw_rescale()` re-derives its own sizes: the
-     IconButton glyph, the ModeBar's pinned height and its compact segments'
-     shared width, the RailNav row glyphs, the NoticeBadge pip, PlateProgress's
-     columns and rail rows, the Stepper's width and row height. A widget that sets
-     `_aw_owns_sizes` keeps the pass out of its subtree.
+     scale was already in force is left as it is. That is measured, not
+     assumed: a widget measures itself in its constructor, before the
+     stylesheet polishes it, so off the application font, which no scale
+     touches — or it is a literal. On a window launched in phone layout,
+     dividing every such size by the scale shrank about 300 widgets below
+     their desk size (Analyze's form fields 40 px → 17); leaving them is exact
+     for all of them;
+   - the recorded fonts are put back, scaled. A font recorded under a scale
+     with no desk value on record is read as scaled and divided back, to the
+     half point or whole pixel: the stylesheet's `*` rule gives every widget
+     a size when it is polished, so a font still there to be read is the
+     stylesheet's or one set later from a token (the one literal site, the
+     heat map's layout grid, multiplies its point sizes by `ui_scale()`);
+   - the posted polish and layout events are delivered, and no other kind
+     (§2, *Switching*), then every widget defining `_aw_rescale()` re-derives
+     its own sizes: the IconButton glyph, the ModeBar's pinned height and its
+     compact segments' shared width, the RailNav row glyphs, the NoticeBadge
+     pip, PlateProgress's columns and rail rows, the Stepper's width and row
+     height, an EmptyState's glyph and two-line floors, a plate's caps, a
+     PlotCard's figure pin (`pinFigureHeight`, figure plus the card's
+     measured chrome), and a `ReservedWidthButton`'s room for its widest label
+     (the FOV toggle's "FOV ✓"). A widget that sets `_aw_owns_sizes` keeps the
+     pass out of its subtree. These measure off the *polished* font in their
+     constructors too (`ensurePolished` first), or a widget built at the desk
+     and one brought back from phone layout disagree by a pixel or two — every
+     rail glyph came back 16 px against 15;
+   - `remember_code_min_heights()` (run before the stylesheet goes on) and
+     `restore_code_min_heights()` (after the pass) keep the minimum heights the
+     widgets' own code set. The touch floors put a `min-height` on buttons,
+     fields, combos and check boxes, and Qt resets a stylesheet-set minimum to
+     0 when the rule goes, not to what the code had — all 96 Home › Labels
+     cells, pinned 26 px tall, came back with no minimum. A minimum the
+     stylesheet owns (Qt's `_q_stylesheet_minh`) is never taken for the
+     code's.
 
-The round trip desk → phone → desk was measured on the loaded app by
-snapshotting every widget's stylesheet, size limits and font before and after:
-everything returns except a few layout minimums (the plate's aspect floor, a
-control band's) that are recomputed on the next resize, and visibility flips that
-a control run of the same mode switches without phone layout shows too. Known
-gaps, all only for widgets first *built* while phone layout is on: a literal fixed
-size stays desk-sized there, and a size measured off the scaled font keeps it after
-leaving.
+The round trip was measured on the real window by snapshotting every widget's
+stylesheet, size limits and font against a desk-built twin — desk → phone →
+desk, with a text-size change or a turn of the phone in between, and a launch in
+phone layout followed by a switch back. Everything returns except the phone-only
+controls (☰, ⋯, the page strip), which keep their touch sizes while hidden at
+the desk. Known gaps, all only for widgets first *built* while phone layout is
+on: a literal fixed size stays desk-sized there; a size measured off the
+polished, scaled font in code that has no `_aw_rescale` keeps it after leaving;
+and a minimum height set in code is lost on the way out when the touch floors
+had already taken it before the shell first read it — on a launch in phone
+layout, the 96 Home › Labels cells come back with no minimum, as every widget
+built after that first read would.
 
 `widgets/_support.set_variant(widget, variant)` is the smaller, everyday
 sibling of the same repolish problem: it changes a `QPushButton`'s

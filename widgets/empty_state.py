@@ -119,13 +119,27 @@ class EmptyState(QWidget):
         # two-line minimum for each wrap label, sized to that label's OWN font
         # (the title renders at the larger h3 size, so the widget's default
         # font metrics would under-reserve it).
+        self.setStyleSheet(self._build_qss())
+        # Measured off the polished fonts — the stylesheet's — so a floor set
+        # here and one re-derived after a UI scale (``_aw_rescale``) agree;
+        # measured before the polish, the hint's came back 32 px against 30.
+        self.ensurePolished()
+        self._pin_text_heights()
+        self._refresh_glyph()
+
+    def _pin_text_heights(self) -> None:
         from PySide6.QtGui import QFont, QFontMetrics
         _title_f = QFont(self.font())
         _title_f.setPixelSize(theme.Typography.h3_size)
         self._text.setMinimumHeight(QFontMetrics(_title_f).height() * 2)
         self._hint.setMinimumHeight(self.fontMetrics().height() * 2)
 
-        self.setStyleSheet(self._build_qss())
+    def _aw_rescale(self) -> None:
+        """Re-measure after a UI scale (phone layout's rescale pass): the
+        two-line floors and the glyph are read off the type size. An empty
+        state built while phone layout was on kept a 111 px glyph and an
+        88 px floor at the desk, where a desk-built one has 48 and 38."""
+        self._pin_text_heights()
         self._refresh_glyph()
 
     # ── API ──────────────────────────────────────────────────────────────

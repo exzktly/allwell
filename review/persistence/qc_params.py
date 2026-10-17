@@ -19,7 +19,7 @@ import json
 import logging
 from pathlib import Path
 
-from review.domain.qc_params import QCParams
+from review.domain.qc_params import QCParams, default_exclude_border_cells
 from review.persistence import _doc
 
 _logger = logging.getLogger("review")
@@ -94,6 +94,12 @@ def load_from_data_dir(ctx) -> None:
         # Not overridden (see ``save_to_data_dir``) -- so the run's own
         # recorded cut is the answer, including when a later run changed it.
         params = params.with_updates(focus_min=run_recorded_cut(ctx))
+    if "exclude_border_cells" not in data:
+        # A section saved before the border switch existed. ``from_dict`` reads
+        # the absent key as off, which would silently keep this dataset out of
+        # the default every freshly-opened dataset gets (on, except nanowell).
+        params = params.with_updates(exclude_border_cells=default_exclude_border_cells(
+            ctx.state.dataset.pipeline_info))
     app._app_state.qc.params = params
 
 

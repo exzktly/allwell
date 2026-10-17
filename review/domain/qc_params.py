@@ -57,6 +57,20 @@ def _pos(v: Any) -> float | None:
     return f if f > 0 else None
 
 
+def is_nanowell_run(info: dict[str, Any] | None) -> bool:
+    """Whether ``pipeline_info.json`` describes a nanowell-mode run.
+
+    The pipeline writes a ``nanowell`` block for every nanowell run
+    (``pipeline.nanowell_task.record_nanowell_info``) and never otherwise.
+    """
+    return isinstance(info, dict) and isinstance(info.get("nanowell"), dict)
+
+
+def default_exclude_border_cells(info: dict[str, Any] | None) -> bool:
+    """The border switch's default for a dataset: on, except for nanowell runs."""
+    return not is_nanowell_run(info)
+
+
 @dataclass(frozen=True)
 class QCParams:
     """Editable debris-gating thresholds. ``enabled`` mirrors the Analyze
@@ -87,6 +101,24 @@ class QCParams:
     #: a coverslip tilt, neither of which is a whole-field fact and neither of
     #: which is a rectangle.
     exclude_soft_cells: bool = False
+    #: Whether cells the field of view cuts are excluded (MATLAB's
+    #: ``imclearborder`` rule, read from the pipeline's ``qc_touches_border``
+    #: flag — see :mod:`review.data.border_gate`).
+    #:
+    #: **On by default for a dataset, off for a nanowell one** — but the
+    #: dataclass default is ``False`` and the dataset default is decided in
+    #: :meth:`from_pipeline_info` (:func:`default_exclude_border_cells`),
+    #: because only the sidecar can say which kind of run it was. A partial
+    #: cell's area and totals describe a fragment, so for an ordinary plate the
+    #: honest default is to drop it. A nanowell run is different: its image is
+    #: tiled across a lattice of wells, the tile edge is not a well edge, and
+    #: its cells are assigned to wells by the nanowell measurement itself, so
+    #: dropping everything a tile edge touches would remove cells for a reason
+    #: that has nothing to do with them.
+    #:
+    #: Independent of ``enabled``: it is not a debris bound and writes its own
+    #: ``Border_Pass`` column, so it needs no debris bound set to take effect.
+    exclude_border_cells: bool = False
     #: The per-cell focus value below which a cell counts as out of focus.
     #:
     #: **Absolute, never relative to the frame.** A score relative to its own
@@ -116,6 +148,7 @@ class QCParams:
             "enabled": bool(self.enabled),
             "exclude_flagged_fields": bool(self.exclude_flagged_fields),
             "exclude_soft_cells": bool(self.exclude_soft_cells),
+            "exclude_border_cells": bool(self.exclude_border_cells),
             "focus_min": self.focus_min,
             "min_area": self.min_area,
             "max_area": self.max_area,
@@ -132,6 +165,7 @@ class QCParams:
             enabled=bool(d.get("enabled", False)),
             exclude_flagged_fields=bool(d.get("exclude_flagged_fields", False)),
             exclude_soft_cells=bool(d.get("exclude_soft_cells", False)),
+            exclude_border_cells=bool(d.get("exclude_border_cells", False)),
             focus_min=_pos(d.get("focus_min")),
             min_area=_pos(d.get("min_area")),
             max_area=_pos(d.get("max_area")),
@@ -166,6 +200,7 @@ class QCParams:
             # is my microscope's number", not "drop those cells from every
             # plot without telling me".
             focus_min=_pos(qc.get("focus_min")),
+            exclude_border_cells=default_exclude_border_cells(info),
             min_area=min_area,
             max_area=_pos(qc.get("max_area")),
             min_solidity=_pos(qc.get("min_solidity")),

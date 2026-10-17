@@ -157,3 +157,32 @@ def regionprops_properties(selected_keys) -> tuple[str, ...]:
             seen.add(p)
             ordered.append(p)
     return tuple(ordered)
+
+
+#: Per-cell flag: 1 when the cell's mask reaches the image's outermost row or
+#: column, else 0. Emitted unconditionally, like ``qc_region_area``, so the
+#: Review QC gate can drop partial cells post-hoc without re-segmenting. Not a
+#: ``shape_`` column: it is a fact about where the cell sits in the frame, not
+#: about its morphology, and it has no business in the shape-metric dropdowns.
+BORDER_COLUMN = "qc_touches_border"
+
+
+def labels_touching_border(labels) -> set[int]:
+    """Label ids with at least one pixel on the image's outermost row/column.
+
+    The same rule as MATLAB's ``imclearborder`` (and skimage's
+    ``clear_border`` with ``buffer_size=0``) applied to a label image: a cell
+    cut by the field of view is partial, so its area, intensity totals and
+    shape describe the visible fragment rather than the cell. Only the four
+    edge strips are read, so the cost is O(perimeter), not O(image).
+
+    Returns an empty set for an empty or degenerate (< 1 px on an axis)
+    image. Background (label 0) is never reported.
+    """
+    import numpy as np
+
+    lab = np.asarray(labels)
+    if lab.ndim != 2 or lab.size == 0:
+        return set()
+    edges = np.concatenate((lab[0, :], lab[-1, :], lab[:, 0], lab[:, -1]))
+    return {int(v) for v in np.unique(edges) if v != 0}

@@ -50,6 +50,9 @@ _HELD_ONLY_READERS: dict[str, str] = {
         "Whether the dataset carries the focus column: every well's summary answers it; without summaries any "
         "held frame does, since the column is written for every row of a run or for none, and an empty cache "
         "answers None (unknown), never 'no'."),
+    "review/data/border_gate.py::dataset_has_border_column": (
+        "Whether the dataset carries the border-contact column, the same question and the same answer as "
+        "dataset_has_focus_column: summaries first, else any held frame, and an empty cache answers None."),
     "review/features/image_browser/playground/controller.py::_focus_caveats": (
         "The same question as dataset_has_focus_column, asked of any held frame; nothing held says nothing."),
     "review/features/spatial/collect.py::_sample_loaded_df": (

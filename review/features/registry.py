@@ -1428,6 +1428,11 @@ def _register_cache_projectors() -> None:
     register_cache_projector(_lazy_projector(
         "review.data.focus_gate", "apply_focus_gate_to_cache"),
         columns=_lazy_projector("review.data.focus_gate", "focus_input_columns"))
+    # Cells the image border cuts (imclearborder). Its own column rather than a
+    # debris bound, so every surface that explains an exclusion names it right.
+    register_cache_projector(_lazy_projector(
+        "review.data.border_gate", "apply_border_gate_to_cache"),
+        columns=_lazy_projector("review.data.border_gate", "border_input_columns"))
     # Fields excluded by hand from QC triage. Unconditional like the rest:
     # a build that strips the triage tab must still honour exclusions a
     # previous session wrote, or the same plate would count different cells

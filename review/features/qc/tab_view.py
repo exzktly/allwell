@@ -29,6 +29,7 @@ from review.data.field_quality_cache import (
 from review.data.focus_gate import (
     focus_effect_text, focus_gate_can_apply, focus_status, recorded_cut_note,
 )
+from review.data.border_gate import border_status
 from review.data.data_loading import held_wells_note
 
 from .controller import get_qc_params, qc_excluded_count, set_qc_params
@@ -56,6 +57,15 @@ _FOCUS_TOOLTIP = (
     "own frame cannot see a frame that is uniformly soft, because every cell "
     "in it deviates from its neighbours by nothing.\n"
     "Off by default — turning it on changes every number in the app.")
+
+_BORDER_TOOLTIP = (
+    "Drop every cell whose outline reaches the edge of the image — the same "
+    "rule as MATLAB's imclearborder.\n"
+    "A cell the field of view cuts is partial: its area, intensity totals and "
+    "shape describe the visible fragment rather than the cell.\n"
+    "Independent of the debris gate above. On by default, except for a "
+    "nanowell run, where a tile's edge is not a well's edge and the nanowell "
+    "measurement assigns cells to wells itself.")
 
 _GRID_INDENT = 18
 _QUANTITY_LBL_W = 92
@@ -330,6 +340,28 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         _lbl.setIndent(_FQ_TEXT_INDENT)
     outer.addWidget(foc)
 
+    # ── cells the image border cuts (imclearborder) ──────────────────────────
+    #
+    # A fourth switch, and its own verdict column (``Border_Pass``) rather than
+    # a debris bound: a partial cell is not debris, and every surface that
+    # explains an exclusion names the column that made it. Independent of the
+    # debris gate's enable box for the same reason.
+    brd = QWidget(row)
+    brd_layout = QVBoxLayout(brd)
+    brd_layout.setContentsMargins(0, 6, 0, 0)
+    brd_layout.setSpacing(2)
+    brd_cb = QCheckBox("Exclude cells touching the image border", brd)
+    brd_cb.setChecked(bool(params.exclude_border_cells))
+    brd_cb.setToolTip(_BORDER_TOOLTIP)
+    brd_layout.addWidget(brd_cb)
+    brd_status = QLabel("", brd)
+    brd_status.setObjectName("Muted")
+    brd_status.setWordWrap(True)
+    brd_status.setMaximumWidth(_FQ_TEXT_W)
+    brd_status.setIndent(_FQ_TEXT_INDENT)
+    brd_layout.addWidget(brd_status)
+    outer.addWidget(brd)
+
     # stash refs so persistence / external recomputes can refresh the row.
     # ``ctx.widgets.register`` also stamps ``app._qc_gate_widgets`` so the legacy
     # ``qc_gate_refresh_widgets`` reader resolves it unchanged.
@@ -343,6 +375,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         "field_quality_effect": fq_effect,
         "exclude_soft_cells": foc_cb, "focus_min": foc_edit,
         "focus_status": foc_status, "focus_effect": foc_effect,
+        "exclude_border_cells": brd_cb, "border_status": brd_status,
     })
 
     def _fields_params() -> QCParams:
@@ -364,6 +397,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
             enabled=enable_cb.isChecked(),
             exclude_flagged_fields=fq_cb.isChecked(),
             exclude_soft_cells=foc_cb.isChecked(),
+            exclude_border_cells=brd_cb.isChecked(),
         ).with_updates(
             focus_min=foc_edit.text(),
             min_area=min_area_edit.text(),
@@ -396,6 +430,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         _refresh_focus_status(
             ctx, {"focus_status": foc_status, "focus_effect": foc_effect,
                   "exclude_soft_cells": foc_cb})
+        _refresh_border_status(ctx, {"border_status": brd_status})
 
     def _apply() -> None:
         _sync_enabled()
@@ -422,6 +457,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     enable_cb.toggled.connect(lambda _=None: _apply())
     fq_cb.toggled.connect(lambda _=None: _apply())
     foc_cb.toggled.connect(lambda _=None: _apply())
+    brd_cb.toggled.connect(lambda _=None: _apply())
     # The cut gets the same live-while-typing treatment as the debris bounds,
     # including the ``hasFocus`` guard that keeps the programmatic refill in
     # ``qc_gate_refresh_widgets`` from firing it.
@@ -629,6 +665,23 @@ def _refresh_focus_status(ctx, w) -> None:
                    "excluding again when the cut moves.")
 
 
+def _refresh_border_status(ctx, w) -> None:
+    """Re-read the dataset's border flag into the border row's sentence.
+
+    Amber (``Notice``) only when the box is ticked on a dataset that predates
+    the column — the user has asked for an exclusion that is not happening,
+    and a ticked box over unchanged numbers must not look like it worked.
+    """
+    label = w.get("border_status")
+    if label is None:
+        return
+    text, is_problem = border_status(ctx)
+    label.setText(text)
+    label.setObjectName("Notice" if is_problem else "Muted")
+    label.style().unpolish(label)
+    label.style().polish(label)
+
+
 def qc_gate_refresh_widgets(win) -> None:
     """Re-fill the embedded gate row from the current params (after a load /
     external change). No-op when the Cell Gating tab hasn't been built.
@@ -647,13 +700,15 @@ def qc_gate_refresh_widgets(win) -> None:
     edit_keys = ("min_area", "max_area", "min_solidity", "max_region_area",
                  "min_circularity", "max_circularity")
     fields = [w["enable"], w["exclude_flagged_fields"],
-              w["exclude_soft_cells"], w["focus_min"]] + [
+              w["exclude_soft_cells"], w["exclude_border_cells"],
+              w["focus_min"]] + [
         w[k] for k in edit_keys]
     blocked = [f.blockSignals(True) for f in fields]
     try:
         w["enable"].setChecked(bool(p.enabled))
         w["exclude_flagged_fields"].setChecked(bool(p.exclude_flagged_fields))
         w["exclude_soft_cells"].setChecked(bool(p.exclude_soft_cells))
+        w["exclude_border_cells"].setChecked(bool(p.exclude_border_cells))
         w["focus_min"].setText(_fmt(p.focus_min))
         w["min_area"].setText(_fmt(p.min_area))
         w["max_area"].setText(_fmt(p.max_area))
@@ -677,3 +732,4 @@ def qc_gate_refresh_widgets(win) -> None:
     _refresh_field_quality_status(win._ctx, w)
     # And the focus row, which is a fact about the dataset in the same way.
     _refresh_focus_status(win._ctx, w)
+    _refresh_border_status(win._ctx, w)

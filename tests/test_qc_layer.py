@@ -92,7 +92,10 @@ def test_from_pipeline_info_seeds_from_qc_options():
 
 
 def test_from_pipeline_info_empty():
-    assert QCParams.from_pipeline_info(None) == QCParams()
+    """A sidecar that states nothing seeds no debris gate and no focus cut —
+    and the border switch on, which is that switch's dataset default (see
+    tests/test_border_gate.py for the nanowell exception)."""
+    assert QCParams.from_pipeline_info(None) == QCParams(exclude_border_cells=True)
 
 
 # ── chokepoint composition: manual-keep AND passes-QC ─────────────────────────

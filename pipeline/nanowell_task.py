@@ -545,7 +545,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
     """
     from pipeline.fov_checkpoint import _staging_dir_for
     from pipeline.io import extract_zip, remove_directory, scratch_base_for, write_well_csv
-    from pipeline.run_report import write_well_report
+    from pipeline.run_report import seal_well_complete, write_well_report
     from pipeline.settings_record import record_well_settings
 
     output_dir = Path(output_dir)
@@ -572,6 +572,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
                           groups_covered=sum(1 for b in grid["timepoints"].values() if b.get("status") == nr.OK),
                           failed=failed)
         record_well_settings(output_dir, well_label, settings_key)
+        seal_well_complete(output_dir, well_label)       # after the montage archive and the tables
         # "— done." exactly as a field-mode well says it: the remote Fetcher and Analyze's progress count a well
         # finished by that marker (``services/remote_wire._RE_WELL_DONE``), and a variant fetched nothing in-stream.
         # A re-anchoring re-run says something else: the well finished once already, and a second "done" read as a

@@ -1550,7 +1550,13 @@ and by `remote_fetch_report.txt` in the output folder.
   A remote run in batches that is restarted — after Stop, Suspend, or a lost
   node — first checks what the host still holds from the earlier attempt with
   the same settings. A well that finished there but had not been downloaded
-  yet is downloaded rather than uploaded and run again. The plate shows every
+  yet is downloaded rather than uploaded and run again. A well the earlier
+  attempt left part way — a Suspend, or All-Well closing or crashing while its
+  batch ran — is not taken for a finished one: the log names it as *left part
+  way on the remote*, and it is run again, continuing from the fields it had
+  finished. (Wells left on the host by a version of All-Well from before this
+  check are run again too, since nothing there says whether they were whole.)
+  The plate shows every
   well's state at once — downloaded, finished on the host, already uploaded —
   then the job is started and handed its first batch, and only then are the
   finished wells downloaded, filling the queue wait and the compute rather

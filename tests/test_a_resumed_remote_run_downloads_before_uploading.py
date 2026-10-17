@@ -145,6 +145,9 @@ def _run_one_finished_on_the_server(plate, host, remote, stop_fetchers, *,
         marker = seeded / ".aw_settings" / f"{well}.json"
         marker.parent.mkdir(exist_ok=True)
         marker.write_text(f'{{"well": "{well}", "digest": "d-{well}"}}')
+        seal = seeded / ".aw_complete" / f"{well}.json"      # each covered its whole input
+        seal.parent.mkdir(exist_ok=True)
+        seal.write_text(f'{{"well": "{well}"}}')
     r._suspend_requested.set()
     r._close_journal()
     assert not list(out.glob("*_out.zip")) + list(out.glob("measurements_*")), (

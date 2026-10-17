@@ -11,11 +11,18 @@ So before the plate is sliced into batches, the run lists what is already on the
 and in every earlier attempt's that the run journal recorded under the **same settings, the same source images and
 the same host** (``run_journal.stored_remote_addresses`` — the keys that make reusing an output safe):
 
-* **Finished wells** — a ``<well>_out.zip`` in an output directory. The pipeline writes that archive last and
-  atomically (``pipeline.io.compress_images_to_zip``), after the well's CSV, so its presence is the same "this well
-  completed" the verifier uses (``FetchedOutputVerifier._list_completed_wells_in``). Such a well is not uploaded or
-  run; its output files are brought into this run's output directory on the remote and the Fetcher downloads them
-  like any other well's. Never for a forced run, which asked for the wells to be computed again.
+* **Finished wells** — a ``<well>_out.zip`` in an output directory **and** the well's completion seal beside it
+  (``<out>/.aw_complete/<well>.json``, ``pipeline.run_report.seal_well_complete``). The archive alone proves
+  nothing: a well suspended part way — by the user, or by the mid-batch watchdog once the app had gone
+  (``remote_commands._batch_driver_snippet``) — or one that failed some of its groups writes its CSV and out.zip
+  from the groups it finished, and says "— done." like a whole one. The pipeline seals a well only when its output
+  covers every FOV-group its input holds, and withdraws the seal before it rewrites the well. A sealed well is not
+  uploaded or run; its output files are brought into this run's output directory on the remote and the Fetcher
+  downloads them like any other well's. Never for a forced run, which asked for the wells to be computed again.
+* **Wells left part way** — an out.zip with no seal. Not adopted: the well is uploaded and run again, and in a
+  re-attached output directory the checkpoints its suspended attempt kept (``pipeline.fov_checkpoint.
+  release_staging``) carry its finished groups over; its new output replaces the partial one. An output directory
+  written by a build that sealed nothing reads the same way, which costs a recomputed well, never a stale one.
 * **Input archives** — any other ``<well>.zip`` under a staged batch (``b<i>``), the swapped-in ``in/``, or an
   earlier attempt's input directory. Each is put into the batch directory this run assigns its well to before
   that batch's upload, so rsync's quick check (name, size, mtime) skips it when it is the same archive and sends
@@ -33,6 +40,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
+from pipeline.run_report import COMPLETE_DIRNAME
 from services.remote_transport import _remote_quote
 from util.well_token import canonical_well_label
 
@@ -49,8 +57,11 @@ class Leftovers:
 
     #: archive file name (``A01.zip``) → every remote path holding a copy, this run's own directory first.
     inputs: dict[str, list[str]] = field(default_factory=dict)
-    #: canonical well → the remote output directory holding its finished output, this run's own first.
+    #: canonical well → the remote output directory holding its finished output, this run's own first. Finished
+    #: means an out.zip *and* its completion seal.
     finished: dict[str, str] = field(default_factory=dict)
+    #: canonical well → an output directory holding its out.zip with no seal: what a well left part way leaves.
+    part_way: dict[str, str] = field(default_factory=dict)
 
 
 def run_dir_of(output_dir: str) -> str:
@@ -93,13 +104,18 @@ def find_leftovers(cache, *, own_run_dir: str, own_output_dir: str, earlier: Ite
     here has to match a ``~``-expanded path against an unexpanded one. A failed listing is "nothing found".
     """
     roots = _roots(own_run_dir, own_output_dir, earlier)
+    # A run directory's root also lists its output directory's completion seals (`./out/.aw_complete/A01.json`).
+    seals = [f"find ./{_remote_quote(f'{r.out_name}/{COMPLETE_DIRNAME}')} -maxdepth 1 -type f -name '*.json' "
+             f"2>/dev/null; " if r.run_dir else "" for r in roots]
     script = "".join(
-        f"if cd {_remote_quote(r.path)} 2>/dev/null; then find . -maxdepth 2 -type f -name '*.zip' "
+        f"if cd {_remote_quote(r.path)} 2>/dev/null; then {{ find . -maxdepth 2 -type f -name '*.zip'; {seals[i]}}} "
         f"| sed 's|^|{i}\t|'; fi\n" for i, r in enumerate(roots)) + "true\n"
     result = cache._ssh_script(script, check=False)
     found = Leftovers()
     if result is None or getattr(result, "returncode", 1) != 0:
         return found
+    archives: list[tuple[str, str]] = []           # (well, output directory), in listing order: own first
+    sealed: set[tuple[str, str]] = set()
     for line in (result.stdout or "").splitlines():
         index, _, rel = line.partition("\t")
         if not index.isdigit() or int(index) >= len(roots):
@@ -109,21 +125,38 @@ def find_leftovers(cache, *, own_run_dir: str, own_output_dir: str, earlier: Ite
         if not parts:
             continue
         name = parts[-1]
+        if root.run_dir and len(parts) == 3 and parts[:2] == (root.out_name, COMPLETE_DIRNAME):
+            well = canonical_well_label(name[: -len(".json")]) if name.endswith(".json") else ""
+            if well:
+                sealed.add((well, f"{root.path}/{root.out_name}"))
+            continue
         sub = parts[0] if len(parts) == 2 else ""
         if root.run_dir and sub == root.out_name:
             if name.endswith("_out.zip"):
                 well = canonical_well_label(name[: -len("_out.zip")])
                 if well:
-                    found.finished.setdefault(well, f"{root.path}/{sub}")
+                    archives.append((well, f"{root.path}/{sub}"))
             continue
         if root.run_dir and not (sub in ("in", "bg") or _BATCH_DIR.fullmatch(sub)):
             continue             # in/, a staged batch, or bg/ (the empty-well reference); nothing else is input
         if not root.run_dir and sub:
             continue
         found.inputs.setdefault(name, []).append(f"{root.path}/{PurePosixPath(*parts)}")
+    for well, where in archives:
+        if (well, where) in sealed:
+            found.finished.setdefault(well, where)
+        else:
+            found.part_way.setdefault(well, where)
+    for well in found.finished:
+        found.part_way.pop(well, None)                # a whole copy anywhere wins over a part-way one
     if found.inputs or found.finished:
         log(f"[remote] already on the remote: {len(found.finished)} finished well(s) and {len(found.inputs)} "
             f"uploaded input archive(s), from this run or an earlier attempt of it with the same settings.\n")
+    if found.part_way:
+        names = sorted(found.part_way)
+        log(f"[remote] {len(names)} well(s) were left part way on the remote — their output does not cover the whole "
+            f"well, so they are run again, continuing from any checkpoints they kept: {', '.join(names[:12])}"
+            + (" …" if len(names) > 12 else "") + "\n")
     return found
 
 
@@ -136,7 +169,7 @@ def adopt_finished(cache, wells: Iterable[str], found: Leftovers, *, own_output_
     well this run computed. A well whose files could not all be brought over is left out, and is then uploaded and
     run like any other.
     """
-    lines = [f"mkdir -p {_remote_quote(own_output_dir)}"
+    lines = [f"mkdir -p {_remote_quote(own_output_dir)} {_remote_quote(f'{own_output_dir}/{COMPLETE_DIRNAME}')}"
              + (f" {_remote_quote(own_output_dir + '/nanowells')}" if nanowell else "")]
     adoptable = []
     for well in wells:
@@ -147,6 +180,8 @@ def adopt_finished(cache, wells: Iterable[str], found: Leftovers, *, own_output_
         if src == own_output_dir:
             continue
         pairs = [(src, g.format(w=well), own_output_dir) for g in _OUTPUT_GLOBS]
+        # The seal travels with the output, so a later resume of *this* directory can adopt the well in turn.
+        pairs.append((f"{src}/{COMPLETE_DIRNAME}", f"{well}.json", f"{own_output_dir}/{COMPLETE_DIRNAME}"))
         if nanowell:
             pairs += [(f"{src}/nanowells", g.format(w=well), f"{own_output_dir}/nanowells") for g in _NANOWELL_FILES]
         for folder, glob, dest in pairs:
@@ -279,7 +314,8 @@ def journal_discrepancies(states: dict[str, str], wells: list[str], found: Lefto
     out: dict[str, list[str]] = {"finished": [], "uploaded": [], "fetched": []}
     for well in sorted(names):
         state = states.get(well, "")
-        if state in ("analysed", "not-fetched") and well not in found.finished:
+        if state in ("analysed", "not-fetched") and well not in found.finished and well not in found.part_way:
+            # (A part-way well's output IS there; `find_leftovers` has already said why it is run again.)
             out["finished"].append(well)
         elif state == "uploaded" and well not in on_remote_inputs and well not in found.finished:
             out["uploaded"].append(well)

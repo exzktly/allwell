@@ -103,9 +103,15 @@ def _run(p, monkeypatch):
 
 
 def _finished_on(out_dir: Path, well: str) -> None:
+    """What a well that covered its whole input leaves: its output and the pipeline's completion seal
+    (``pipeline.run_report.seal_well_complete``)."""
+    from pipeline.run_report import complete_seal_path
+
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{well}_out.zip").write_bytes(b"finished output")
     (out_dir / f"measurements_{well}.csv.gz").write_bytes(b"rows")
+    complete_seal_path(out_dir, well).parent.mkdir(exist_ok=True)
+    complete_seal_path(out_dir, well).write_text(f'{{"well": "{well}"}}')
 
 
 def _uploaded_copy(plate: Path, dest: Path, well: str) -> None:
@@ -147,8 +153,10 @@ def test_a_resume_in_a_new_run_directory_takes_from_the_earlier_attempt(tmp_path
     # A03..A06 remain, in batches [A03, A04] and [A05, A06]; A03 and A05 are already on the remote.
     assert sent == ["b1/A04.zip", "b2/A06.zip"], sent
     assert sorted(f.name for f in (run_dir / "out").iterdir()) == [
-        "A01_out.zip", "A02_out.zip", "measurements_A01.csv.gz", "measurements_A02.csv.gz"], (
+        ".aw_complete", "A01_out.zip", "A02_out.zip", "measurements_A01.csv.gz", "measurements_A02.csv.gz"], (
         "the finished wells were not brought into this run's directory for the Fetcher")
+    assert sorted(f.name for f in (run_dir / "out" / ".aw_complete").iterdir()) == ["A01.json", "A02.json"], (
+        "the seals did not travel with the output, so a resume of this directory would run them again")
     assert {line.split()[1] for line in observed} == {"A01", "A02"}
     assert (old / "in" / "A03.zip").exists() and (old / "out" / "A01_out.zip").exists(), (
         "an earlier attempt's directory is linked from, never emptied")
@@ -536,3 +544,36 @@ def test_the_driver_is_told_where_earlier_attempts_kept_the_blank(tmp_path, monk
     script = unpack_login_shell_command(launched[0][-1])
     assert f"--background_dir_alias={old}/bg" in script, "the earlier attempt's blank path was not passed"
     assert f"--background_dir_alias={run_dir}/bg" not in script, "this run's own path is not an alias"
+
+
+# ── a well the remote left part way is not a finished well ──────────────────────────────────────────────────────
+
+def _left_part_way_on(out_dir: Path, well: str) -> None:
+    """What a well suspended part way leaves: the CSV and ``<well>_out.zip`` of the groups it finished, and no
+    completion seal (``tests/test_a_part_way_well_is_not_sealed.py`` pins that the pipeline leaves exactly this)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{well}_out.zip").write_bytes(b"the groups it reached")
+    (out_dir / f"measurements_{well}.csv.gz").write_bytes(b"some rows")
+
+
+@pytest.mark.parametrize("where", ["re-attached", "earlier attempt"])
+def test_a_well_the_remote_left_part_way_is_run_again_not_adopted(tmp_path, monkeypatch, where):
+    """The reviewed case: the app dies, the mid-batch watchdog suspends the pipeline, and the wells in flight write
+    their CSV and out.zip from the groups they finished. A Resume must not take that output as the well's whole —
+    it must send the well and run it, so its missing groups are computed."""
+    old = tmp_path / "remote" / "runs" / "run-old"
+    earlier = [{"remote_output_dir": str(old / "out"), "remote_input_dir": str(old / "in")}]
+    p, plate, run_dir, sent, observed, _ = _harness(
+        tmp_path, monkeypatch, earlier=earlier if where == "earlier attempt" else ())
+    if where == "re-attached":
+        p._runner._run.remote_output_dir = str(old / "out")
+    _finished_on(old / "out", "A01")
+    _left_part_way_on(old / "out", "A02")
+
+    _run(p, monkeypatch)
+
+    assert p._returncode == 0, p._logged
+    assert [line.split()[1] for line in observed] == ["A01"], (
+        f"a well left part way on the remote was adopted as finished: {observed}")
+    assert "b1/A02.zip" in sent, f"the part-way well was not sent to be run again: {sent}"
+    assert any("A02" in m and "part way" in m for m in p._logged), "nothing says why A02 is run again"

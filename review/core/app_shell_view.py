@@ -225,6 +225,14 @@ def position_rail_toggle(win) -> None:
     pane = getattr(win, "_h_pane", None)
     if btn is None or pane is None:
         return
+    # Phone layout has its own way to the left panel (the band's Wells and ☰
+    # buttons), and an overlay straddling a panel edge that is now the window's
+    # own edge is a button half off the screen. Every other path into this
+    # function ends by showing the toggle, which is why the check lives here.
+    from core import phone_layout
+    if phone_layout.is_on():
+        btn.hide()
+        return
     panel = visible_left_panel(win)
     # Watch whatever panel is current. A mode switch re-parks the toggle before
     # the incoming pane's splitter has laid out, so the width read here is the

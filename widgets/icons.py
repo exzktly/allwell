@@ -201,6 +201,14 @@ _GLYPHS: dict[str, str] = {
                       '<circle cx="12" cy="8.5" r="1.6"/>'
                       '<circle cx="8.9" cy="14" r="1.6"/>'
                       '<circle cx="15.1" cy="14" r="1.6"/>'),
+    # Lucide "smartphone" — the mode band's phone-layout toggle.
+    "smartphone":    ('<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>'
+                      '<line x1="12" y1="18" x2="12.01" y2="18"/>'),
+    # Lucide "menu" — phone layout's navigator button: shows the pane's left
+    # panel (sections, well plate, run form) in place of its content.
+    "menu":          ('<line x1="4" y1="6" x2="20" y2="6"/>'
+                      '<line x1="4" y1="12" x2="20" y2="12"/>'
+                      '<line x1="4" y1="18" x2="20" y2="18"/>'),
 }
 
 AVAILABLE = tuple(sorted(_GLYPHS))

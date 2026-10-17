@@ -1699,7 +1699,62 @@ QProgressBar::chunk {{
     background-color: {c.accent};
     border-radius: {r.sm}px;
 }}
-"""
+
+/* ── Phone layout's band controls (ui/phone_shell.py) ─────────────────────
+   Built from the scaled tokens like everything else, so they grow with the
+   text size. ☰ is lit while the drawer it opens is open. The menu buttons
+   carry no drop-down arrow: the "Bar Plots ▾" label already says a menu
+   opens, and the arrow Qt draws in the corner is a second, smaller target
+   beside the real one. */
+QWidget#PhoneStrip {{
+    background-color: {c.rail};
+    border-bottom: 1px solid {c.border_subtle};
+}}
+QToolButton#PhoneMenuButton, QToolButton#PhonePageButton,
+QToolButton#PhoneOptionsButton, QToolButton#PhoneControlsButton {{
+    background-color: transparent;
+    border: 1px solid {c.control_border};
+    border-radius: {r.sm}px;
+    padding: {m.btn_pad_v}px {m.btn_pad_h}px;
+    font-weight: {t.semibold};
+}}
+QToolButton#PhoneMenuButton, QToolButton#PhoneOptionsButton {{ font-size: {t.h2_size}px; }}
+QPushButton#PhoneTextSizeButton:checked {{
+    background-color: {c.accent};
+    color: {c.accent_fg};
+    border-color: {c.accent};
+}}
+QToolButton#PhoneMenuButton:checked {{
+    background-color: {c.accent};
+    color: {c.accent_fg};
+    border-color: {c.accent};
+}}
+QToolButton#PhoneMenuButton:hover, QToolButton#PhonePageButton:hover,
+QToolButton#PhoneOptionsButton:hover, QToolButton#PhoneControlsButton:hover {{
+    background-color: {c.hover};
+}}
+QToolButton#PhonePageButton::menu-indicator,
+QToolButton#PhoneOptionsButton::menu-indicator {{
+    image: none;
+    width: 0px;
+}}
+QLabel#PlateHeadline[phone="true"] {{
+    font-size: {t.h3_size}px;
+    font-weight: {t.semibold};
+}}
+QLabel#PhoneRailStatus {{
+    color: {c.text_secondary};
+    padding: {s.sm}px {s.md}px;
+}}
+QLabel#PlateWellDetail {{
+    color: {c.text_secondary};
+    padding: {s.xs}px 0px;
+}}
+QToolButton#PhoneLayoutButton {{
+    border: 1px solid {c.control_border};
+    border-radius: {r.sm}px;
+}}
+""" + (_touch_qss(_TOUCH_UNIT[0]) if _TOUCH_UNIT[0] else "")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1822,6 +1877,121 @@ def register_theme_hook(fn):
     return fn
 
 
+#: Size tokens a UI scale multiplies: every type size, and the padding inside
+#: controls (which is what makes a button bigger to touch, not just its text).
+#: Layout widths — ``Metrics.rail_w`` / ``dock_w`` — are deliberately absent:
+#: a scaled rail would be wider than a phone-shaped screen, and phone layout
+#: lifts those widths anyway. ``Spacing`` (gutters) stays put for the same
+#: reason — it is space between things, not the size of a thing.
+_SCALED_TOKENS = (
+    (Typography, ("caption_size", "small_size", "body_size", "emph_size",
+                  "h3_size", "h2_size")),
+    (Metrics, ("btn_pad_v", "btn_pad_h", "toolbtn_pad_h", "input_pad_v",
+               "input_pad_h", "spin_min_w", "spin_buttons_w")),
+)
+# The values the scale multiplies, captured when a scale is first applied and
+# dropped when it returns to 1, so scales never compound: 1.5 then 2.0 is 2.0
+# of the original, never 3.0.
+_SCALE_BASE: dict = {}
+_UI_SCALE = [1.0]
+
+
+def ui_scale() -> float:
+    """The UI scale currently applied to the size tokens (1.0 = none)."""
+    return _UI_SCALE[0]
+
+
+def desk_body_size() -> int:
+    """The body type size before any UI scale."""
+    return _SCALE_BASE.get((Typography, "body_size"), Typography.body_size)
+
+
+# Phone layout's touch unit — logical pixels per phone point — or None at the
+# desk. Set, it adds :func:`_touch_qss` to the application stylesheet.
+_TOUCH_UNIT: list = [None]
+
+
+def touch_unit() -> float | None:
+    """Logical px per phone point while phone layout's touch sizing is on."""
+    return _TOUCH_UNIT[0]
+
+
+def set_touch_unit(unit: float | None) -> None:
+    """Turn touch sizing on at *unit* px per phone point, or off with None.
+
+    Tokens only, like :func:`apply_ui_scale`: the caller re-applies
+    :func:`qss`.
+    """
+    _TOUCH_UNIT[0] = float(unit) if unit else None
+
+
+def _touch_qss(u: float) -> str:
+    """Minimum sizes for anything a thumb taps, in phone points × *u*.
+
+    44 pt for controls, 48 for menu and list rows — the floors Apple and
+    Material set — so a control is never smaller than a thumb whatever its
+    text size. Appended last, so it wins over the desk rules above it.
+    """
+    def pt(n: float) -> int:
+        return round(n * u)
+    c = Colors
+    return f"""
+/* ── Phone layout: touch sizes (theme.set_touch_unit) ─────────────────── */
+QPushButton, QToolButton, QComboBox, QLineEdit, QAbstractSpinBox {{
+    min-height: {pt(44)}px;
+}}
+QPushButton, QComboBox {{ padding-left: {pt(12)}px; padding-right: {pt(12)}px; }}
+QComboBox QAbstractItemView::item, QListView::item, QListWidget::item,
+QTreeView::item {{
+    min-height: {pt(48)}px;
+}}
+QMenu::item {{
+    padding: {pt(14)}px {pt(20)}px {pt(14)}px {pt(16)}px;
+}}
+QFrame#RailNavRow {{ min-height: {pt(48)}px; }}
+QWidget#Drawer[phoneSheet="true"] QPushButton,
+QWidget#Drawer[phoneSheet="true"] QToolButton,
+QWidget#Drawer[phoneSheet="true"] QComboBox,
+QWidget#Drawer[phoneSheet="true"] QLineEdit {{
+    min-height: {pt(48)}px;
+}}
+QMenu::separator {{ height: 1px; margin: {pt(4)}px 0px; }}
+QCheckBox::indicator, QRadioButton::indicator {{
+    width: {pt(24)}px; height: {pt(24)}px;
+}}
+QCheckBox, QRadioButton {{ spacing: {pt(10)}px; min-height: {pt(44)}px; }}
+QScrollBar:vertical {{ width: {pt(10)}px; }}
+QScrollBar:horizontal {{ height: {pt(10)}px; }}
+QScrollBar::handle {{ background-color: {c.border_strong}; border-radius: {pt(5)}px; }}
+"""
+
+
+def apply_ui_scale(factor: float) -> float:
+    """Multiply the type sizes and control paddings by *factor*.
+
+    Measured from the unscaled values every time, so calls never compound,
+    and ``apply_ui_scale(1.0)`` restores exactly what was there before the
+    first scale. Changes the tokens only: the caller re-runs :func:`qss` and
+    rebuilds whatever froze a size at construction (phone layout's rescale
+    pass, ``ui/phone_shell.py``). Returns the factor applied.
+    """
+    factor = float(factor) if factor and factor > 0 else 1.0
+    if not _SCALE_BASE:
+        for cls, names in _SCALED_TOKENS:
+            for name in names:
+                _SCALE_BASE[(cls, name)] = getattr(cls, name)
+    for (cls, name), base in _SCALE_BASE.items():
+        setattr(cls, name, max(1, round(base * factor)) if base else 0)
+    t = Typography
+    t.title, t.heading = (t.h2_size, t.semibold), (t.h3_size, t.semibold)
+    t.body, t.label = (t.body_size, t.regular), (t.small_size, t.medium)
+    t.caption, t.mono = (t.caption_size, t.medium), (t.small_size, t.regular)
+    _UI_SCALE[0] = factor
+    if factor == 1.0:
+        _SCALE_BASE.clear()
+    return factor
+
+
 def apply_theme(name: str) -> str:
     """Apply the named theme's token overrides onto the token classes.
 
@@ -1831,6 +2001,10 @@ def apply_theme(name: str) -> str:
     """
     if name not in THEMES:
         raise KeyError(f"unknown theme {name!r}; choose from {available_themes()}")
+    # 0) take any UI scale off first, so the reset below restores unscaled
+    # values and the scale is re-applied on top of the new theme's (step 3).
+    scale = ui_scale()
+    apply_ui_scale(1.0)
     # 1) restore defaults for anything any theme might have changed
     for _cname, _defaults in _THEME_DEFAULTS.items():
         _cls = _THEMEABLE_CLASSES[_cname]
@@ -1841,6 +2015,8 @@ def apply_theme(name: str) -> str:
         _cls = _THEMEABLE_CLASSES[_cname]
         for _attr, _val in _attrs.items():
             setattr(_cls, _attr, _val)
+    # 3) put the UI scale back, measured from this theme's values.
+    apply_ui_scale(scale)
     for _hook in list(_THEME_HOOKS):
         try:
             _hook(name)

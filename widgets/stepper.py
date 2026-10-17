@@ -143,7 +143,26 @@ class Stepper(QFrame):
         self._up.clicked.connect(lambda: self.stepBy(+1))
         self._down.clicked.connect(lambda: self.stepBy(-1))
 
+        # Touch mode's pair: a full-height − and + either side of the value,
+        # in place of the two half-height arrows a thumb cannot tell apart.
+        self._touch = False
+        self._minus = QToolButton(self)
+        self._minus.setObjectName("StepperMinus")
+        self._minus.setText("−")
+        self._plus = QToolButton(self)
+        self._plus.setObjectName("StepperPlus")
+        self._plus.setText("+")
+        for b, step in ((self._minus, -1), (self._plus, +1)):
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setAutoRepeat(True)
+            b.setAutoRepeatInterval(90)
+            b.setAutoRepeatDelay(400)
+            b.clicked.connect(lambda _c=False, k=step: self.stepBy(k))
+            b.hide()
+
+        lay.addWidget(self._minus)
         lay.addWidget(self._edit, 1)
+        lay.addWidget(self._plus)
         lay.addLayout(btn_col)
 
         # Match the combos beside us. The two step buttons split the row
@@ -202,6 +221,36 @@ class Stepper(QFrame):
         self._edit.setText(self._format(self._value))
         self._update_size()
 
+    def setTouchMode(self, on: bool) -> None:
+        """Swap the ▴/▾ column for a full-height − and + either side.
+
+        For phone layout: the arrows split one row between them, which on a
+        phone is two targets a few points tall stacked on top of each other.
+        """
+        self._touch = bool(on)
+        for b in (self._up, self._down):
+            b.setVisible(not self._touch)
+        for b in (self._minus, self._plus):
+            b.setVisible(self._touch)
+        self._edit.setAlignment((Qt.AlignHCenter if self._touch else Qt.AlignLeft)
+                                | Qt.AlignVCenter)
+        self._apply_row_height()
+        pinned = self.minimumWidth() == self.maximumWidth()
+        if not pinned:
+            self._update_size()
+        elif self._touch:
+            # A width the caller pinned was sized for a value plus a narrow
+            # arrow column; the two square buttons need more, so widen it —
+            # and give the pin back as it was when touch mode ends.
+            self._pre_touch_w = self.minimumWidth()
+            self.setFixedWidth(max(self._pre_touch_w, self._full_width()))
+        elif getattr(self, "_pre_touch_w", None):
+            self.setFixedWidth(self._pre_touch_w)
+            self._pre_touch_w = None
+
+    def isTouchMode(self) -> bool:
+        return self._touch
+
     def bindingAdapter(self):
         """``(getter, setter, change_signal)`` for binding-driven panels."""
         return (self.value, self.setValue, self.valueChanged)
@@ -217,16 +266,22 @@ class Stepper(QFrame):
         value length fixes both. Clamped to a sane [4, 11]-digit range so a huge
         ``maximum`` (e.g. 1e9) doesn't blow it back up, and a tiny one still shows
         the arrows. Recomputed whenever the range / decimals / affixes change."""
+        full = self._full_width()
+        self.setMaximumWidth(full)
+        self.setMinimumWidth(min(full, 58))
+
+    def _full_width(self) -> int:
+        """The width that shows the widest value its range can hold, plus the
+        arrow column — or, in touch mode, the two square − / + buttons."""
         fm: QFontMetrics = self._edit.fontMetrics()
         samples = [self._format(self._min), self._format(self._max),
                    self._format(self._value)]
         text_w = max((fm.horizontalAdvance(s) for s in samples), default=0)
         text_w = max(fm.horizontalAdvance("0000"),
                      min(text_w, fm.horizontalAdvance("0" * 11)))
-        # edit padding (8+8) + the arrow column + frame.
-        full = int(text_w) + 16 + 26
-        self.setMaximumWidth(full)
-        self.setMinimumWidth(min(full, 58))
+        # edit padding (8+8) + the buttons + frame.
+        buttons = 2 * self._minus.width() if getattr(self, "_touch", False) else 26
+        return int(text_w) + 16 + buttons
 
     def _clamp(self, v: float) -> float:
         return max(self._min, min(self._max, v))
@@ -305,6 +360,27 @@ class Stepper(QFrame):
         self._edit.setFixedHeight(inner)
         for b in (self._up, self._down):
             b.setFixedHeight(inner // 2)
+        for b in (getattr(self, "_minus", None), getattr(self, "_plus", None)):
+            if b is not None:
+                b.setFixedSize(inner, inner)
+
+    #: Phone layout's rescale pass leaves the inner edit and buttons alone:
+    #: this frame measures them itself (below), and a second, outside scaling
+    #: of the edit's pinned height would apply the factor twice. The frame's
+    #: own fixed width, when a caller pinned one, it does scale.
+    _aw_owns_sizes = True
+    _aw_fits_text = True
+
+    def _aw_rescale(self) -> None:
+        """Re-measure after a UI scale: the digits are a new size.
+
+        The width is re-derived only when it is this widget's own (a range
+        between a floor and the widest value); a width its caller pinned has
+        already been scaled by the pass, and re-deriving would discard it.
+        """
+        if self.minimumWidth() != self.maximumWidth():
+            self._update_size()
+        self._apply_row_height()
 
     def changeEvent(self, event) -> None:  # Qt naming
         """Re-measure when the stylesheet or font moves under us.
@@ -348,6 +424,21 @@ class Stepper(QFrame):
             font-size: {t.caption_size}px;
         }}
         #Stepper QToolButton#StepperUp {{ border-bottom: 1px solid {c.border_subtle}; }}
+        #Stepper QToolButton#StepperMinus, #Stepper QToolButton#StepperPlus {{
+            background-color: {c.panel_elevated};
+            border: none;
+            color: {c.text_primary};
+            font-size: {t.h2_size}px;
+            font-weight: {t.semibold};
+        }}
+        #Stepper QToolButton#StepperMinus {{ border-right: 1px solid {c.border_subtle}; }}
+        #Stepper QToolButton#StepperPlus {{ border-left: 1px solid {c.border_subtle}; }}
+        #Stepper QToolButton#StepperMinus:hover, #Stepper QToolButton#StepperPlus:hover {{
+            background-color: {c.hover};
+        }}
+        #Stepper QToolButton#StepperMinus:disabled, #Stepper QToolButton#StepperPlus:disabled {{
+            color: {c.text_faint};
+        }}
         #Stepper QToolButton#StepperUp:hover, #Stepper QToolButton#StepperDown:hover {{
             background-color: {c.hover};
             color: {c.text_primary};

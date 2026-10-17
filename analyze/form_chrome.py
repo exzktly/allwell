@@ -222,6 +222,9 @@ class AnalyzeFormChromeMixin:
         box is one most people never see.
         """
         row = QWidget(parent)
+        # Named so phone layout can find the form's label+field rows and stack
+        # each label above its field (``ui/phone_shell.py``).
+        row.setObjectName("AnalyzeFormRow")
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 1, 0, 1)
         rl.setSpacing(4)

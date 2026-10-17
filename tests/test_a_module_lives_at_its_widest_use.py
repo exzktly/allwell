@@ -62,6 +62,14 @@ ALLOWED: dict[str, str] = {
         "fold-change scopes and the persistence layer among them, so it cannot "
         "travel; the roster of panes that used to sit beside it did, to "
         "`core/panes.py`.",
+    "review/core/phone_drawer.py":
+        "Phone layout's side drawer lends Review's rail and the other two "
+        "panes' left panels to one overlay and gives them back; the title bar "
+        "builds it with the rest of phone layout (`_build_phone_shell`) to "
+        "light its ☰ button when the drawer opens or closes from inside. It "
+        "moves Review's own widgets in and out of Review's splitters and is "
+        "driven from `tab_controller.apply_sidebar_visibility`, so it cannot "
+        "travel without them.",
     "review/core/reset_scopes_view.py":
         "The title bar's two reset actions (`prompt_reset_view`, "
         "`prompt_reset_analysis`) live here because the scopes they reset are "

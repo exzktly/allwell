@@ -234,7 +234,13 @@ fits the sheet upright fits the panel (`LANDSCAPE_SHEET_PT`; at 360 pt the Image
 Table's LUT rows overflowed it). A page whose controls are not a `ControlBand`
 marks the block that holds them with the `phoneControls` property and gives it a
 `setStacked`; `_current_band` takes a band with controls first and a marked block
-otherwise, and the same lend, stack and give-back apply to either.
+otherwise, and the same lend, stack and give-back apply to either. Whether
+⚙ Controls shows is decided in `refresh()`, which follows the notebook's page
+changes — but a lazily built page (Image Browser) has no controls yet at that
+signal, since it builds on being shown. So `adapt()`, which hides a page's
+controls as they appear, also queues one more `refresh()` on a zero-delay
+single-shot timer; without it the button stayed hidden on a page's first visit
+in phone layout, and with it every control the page has.
 `ControlBand.setStacked(True)` flows the band's
 actions into its scope flow so it wraps to the sheet's width; the sheet's buttons,
 combos and fields are 48 pt (`QWidget#Drawer[phoneSheet="true"]` in the touch
@@ -261,7 +267,9 @@ panel's channel-naming hints wrap, at the desk as well, where with room for one
 line they lay out as before. The grid's cells share the page's width
 (`image_table/_phone_fit.py`): `fit_cell_px` divides what the row labels, the
 facet gaps and each column's spacing leave between the columns, and the zoom
-multiplies that, so 100 % fills the screen and zooming in scrolls sideways; the
+multiplies that, so 100 % fills the screen and zooming in scrolls sideways (the
+page's vertical scrollbar is reserved while it is not shown, since the grid being
+sized is what usually brings it on); the
 desk keeps its 240 px × zoom. The label width is measured with the fonts the
 labels are drawn in, corner text included, since the corner ("T:0h · FOV:F001")
 sits over the label columns and widened them past the screen when it was left

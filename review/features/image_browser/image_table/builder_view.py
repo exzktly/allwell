@@ -20,7 +20,7 @@ the render seam are downstream of it.
 
 ctx-native — reads ``ctx.state`` / ``ctx.runtime`` / ``ctx.widgets`` only, never the
 unwrapped app god-object (the tab-unwrap guardrail is 0). Styling: a scoped QSS
-block (``_QSS``) on the shelf root reproduces the design mockup with the app's
+block (``_qss_for_shelf``) on the shelf root reproduces the design mockup with the app's
 theme tokens (mirrors ``ui/theme.py``).
 """
 
@@ -98,8 +98,8 @@ _STANDARD_CMAP = (
 # from leaking onto the rest of the app. Colours mirror ``ui/theme.py`` tokens.
 _QSS_TEMPLATE = Template("""
 QWidget#ITBShelf { background: transparent; }
-QLabel#ITBTitle { color: $text_primary; font-weight: 640; font-size: 12.5px; }
-QLabel#ITBShape { color: $text_secondary; font-size: 11px; }
+QLabel#ITBTitle { color: $text_primary; font-weight: 640; font-size: ${fs_title}px; }
+QLabel#ITBShape { color: $text_secondary; font-size: ${fs_caption}px; }
 QLabel#ITBShape b { color: $text_primary; }
 
 QFrame#ITBZone {
@@ -109,14 +109,14 @@ QFrame#ITBZone[dropActive="true"] { border: 1px dashed $accent; background: $acc
 QFrame#ITBFixed { border: 1px solid $border; border-radius: 9px; background: $panel; }
 QFrame#ITBTray { border: 1px solid $border_subtle; border-radius: 9px; background: $rail; }
 
-QLabel#ITBHead { color: $text_primary; font-weight: 620; font-size: 12px; }
-QLabel#ITBSub  { color: $text_muted; font-size: 10px; }
-QLabel#ITBHint { color: $text_muted; font-style: italic; font-size: 11px; }
+QLabel#ITBHead { color: $text_primary; font-weight: 620; font-size: ${fs_small}px; }
+QLabel#ITBSub  { color: $text_muted; font-size: ${fs_xs}px; }
+QLabel#ITBHint { color: $text_muted; font-style: italic; font-size: ${fs_caption}px; }
 
 QFrame#ITBRoot {
     background: $accent_dim; border: 1px solid $accent; border-radius: 7px;
 }
-QLabel#ITBRootLbl { color: $text_primary; font-weight: 640; font-size: 12px; }
+QLabel#ITBRootLbl { color: $text_primary; font-weight: 640; font-size: ${fs_small}px; }
 
 QWidget#ITBNest { border-left: 2px solid $accent_dim; background: transparent; }
 
@@ -130,27 +130,27 @@ QFrame#ITBChan:hover, QFrame#ITBChip:hover { border-color: $accent; }
    which side the drop lands on. */
 QFrame#ITBChan[dropEdge="above"] { border-top: 2px solid $accent; }
 QFrame#ITBChan[dropEdge="below"] { border-bottom: 2px solid $accent; }
-QLabel#ITBChanLbl { color: $text_primary; font-size: 12px; font-weight: 560; }
-QLabel#ITBVar { color: $text_secondary; font-size: 10.5px; }
-QLabel#ITBGrip { color: $text_muted; font-size: 11px; }
-QLabel#ITBNote { color: $text_muted; font-size: 10px; }
+QLabel#ITBChanLbl { color: $text_primary; font-size: ${fs_small}px; font-weight: 560; }
+QLabel#ITBVar { color: $text_secondary; font-size: ${fs_var}px; }
+QLabel#ITBGrip { color: $text_muted; font-size: ${fs_caption}px; }
+QLabel#ITBNote { color: $text_muted; font-size: ${fs_xs}px; }
 
 QToolButton#ITBOpt {
     color: $text_secondary; background: $panel; border: 1px solid $border;
-    border-radius: 5px; padding: 3px 8px; font-size: 12px;
+    border-radius: 5px; padding: 3px 8px; font-size: ${fs_small}px;
 }
 QToolButton#ITBOpt:hover { color: $text_primary; border-color: $accent; }
 QToolButton#ITBOpt::menu-indicator { image: none; width: 0px; }
 
 QToolButton#ITBX {
     color: $text_muted; background: transparent; border: none;
-    font-size: 15px; padding: 0px 4px;
+    font-size: ${fs_h3}px; padding: 0px 4px;
 }
 QToolButton#ITBX:hover { color: $danger; }
 
 QToolButton#ITBSeg {
     background: $panel; color: $text_secondary; border: 1px solid $border;
-    padding: 3px 11px; font-size: 11px;
+    padding: 3px 11px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBSeg:hover { color: $text_primary; }
 QToolButton#ITBSeg[on="true"] { background: $accent_dim; color: $accent_fg; }
@@ -161,13 +161,13 @@ QComboBox#ITBCombo {
     border-radius: 6px; padding: 2px 6px; min-height: 20px;
 }
 QComboBox#ITBCombo:hover { border-color: $border_strong; }
-QLabel#ITBFixLbl { color: $text_primary; font-size: 12px; }
-QLabel#ITBEq { color: $text_muted; font-size: 12px; }
+QLabel#ITBFixLbl { color: $text_primary; font-size: ${fs_small}px; }
+QLabel#ITBEq { color: $text_muted; font-size: ${fs_small}px; }
 
 QFrame#ITBLut { border: 1px solid $border; border-radius: 9px; background: $panel; }
 QFrame#ITBLutRow { background: transparent; border: none; }
-QLabel#ITBLutChan { color: $text_primary; font-size: 12px; font-weight: 560; }
-QLabel#ITBLutTag { color: $text_muted; font-size: 11px; }
+QLabel#ITBLutChan { color: $text_primary; font-size: ${fs_small}px; font-weight: 560; }
+QLabel#ITBLutTag { color: $text_muted; font-size: ${fs_caption}px; }
 QLineEdit#ITBLutEdit {
     background: $panel_elevated; color: $text_primary; border: 1px solid $border;
     border-radius: 6px; padding: 2px 6px; min-height: 18px; max-width: 66px;
@@ -175,17 +175,33 @@ QLineEdit#ITBLutEdit {
 QLineEdit#ITBLutEdit:focus { border-color: $accent; }
 QToolButton#ITBLutFit {
     color: $text_secondary; background: $panel; border: 1px solid $border;
-    border-radius: 5px; padding: 2px 9px; font-size: 11px;
+    border-radius: 5px; padding: 2px 9px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBLutFit:hover { color: $text_primary; border-color: $accent; }
 
 QToolButton#ITBClear {
     color: $text_secondary; background: $panel; border: 1px solid $border;
-    border-radius: 6px; padding: 3px 10px; font-size: 11px;
+    border-radius: 6px; padding: 3px 10px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBClear:hover { color: $danger; border-color: $danger; }
 """)
-_QSS = _QSS_TEMPLATE.substitute(vars(theme.Colors))
+
+
+def _qss_for_shelf() -> str:
+    """The shelf's stylesheet at the tokens in force *now*.
+
+    Built when the shelf is, not at import: a sheet frozen at import carries
+    whatever type sizes were current then, so a shelf first opened in phone
+    layout would get desktop-sized text. The sizes are the theme's type
+    scale — ``fs_xs`` is one step under the caption size, which is where the
+    shelf's two smallest labels sit, and the half steps keep the two
+    sizes the shelf was drawn with between the scale's own steps.
+    """
+    t = theme.Typography
+    return _QSS_TEMPLATE.substitute(
+        vars(theme.Colors), fs_xs=t.caption_size - 1, fs_var=t.caption_size - 0.5,
+        fs_caption=t.caption_size, fs_small=t.small_size,
+        fs_title=t.small_size + 0.5, fs_h3=t.h3_size)
 
 
 # ── spec accessors ──────────────────────────────────────────────────────────
@@ -740,7 +756,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     # importing this view module (matching the row/col_dims_refresh callback hooks).
     _rt(ctx).selection_rebuild_cb = lambda: schedule_selection_rebuild(ctx)
     parent.setObjectName("ITBShelf")
-    parent.setStyleSheet(_QSS)
+    parent.setStyleSheet(_qss_for_shelf())
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)

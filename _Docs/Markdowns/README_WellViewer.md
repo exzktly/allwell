@@ -2018,9 +2018,18 @@ across the plate, what to call them, and what ratios to derive. **Import**, at
 the right end of the page's controls row, brings in groups from a JSON file —
 one saved with a group's **Export**, a `pipeline_info.json`, or an older
 group-definitions file. When the dataset already has groups it asks whether to
-**Add to current groups** (a name already in use gets a suffix, nothing is
-overwritten) or **Replace current groups**; with no groups yet they are simply
-added. It is the app's only groups import, and it is hidden on Overview and on
+**Add to current groups** (a name already in use gets a suffix) or **Replace
+current groups**; with no groups yet they are simply added. A well can be in
+only one group, so when adding would bring in wells that are already in a group
+here — the usual case when the file came from a plate with the same layout —
+a second question lists those wells and the group each is in, and offers
+**Skip** (they stay in their current groups and the imported groups get only
+the wells in no group; an imported group left with none is not added) or
+**Move** (they go to the imported groups; a current group left with no wells is
+removed). Cancel on either question leaves everything as it was. Each imported
+group keeps its colour, whether it was hidden, and (unless a group here already
+uses it) its identity, so plots saved
+with that group hidden keep it hidden. It is the app's only groups import, and it is hidden on Overview and on
 the Variables layer, where there are no groups to import into. Everything on these tabs autosaves to the dataset folder as you
 edit, so there is no Save button to look for; to discard definitions, use
 **Reset analysis** in the title bar ([Starting over](#starting-over)), which

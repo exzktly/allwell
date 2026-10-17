@@ -322,12 +322,12 @@ class PlateProgress(QWidget):
 
         root.addWidget(self._body)
         # One line under the plate for a tapped well's detail (stacked only).
-        self._detail = QLabel("", self)
-        self._detail.setObjectName("PlateWellDetail")
-        self._detail.setWordWrap(True)
-        self._detail.setTextFormat(Qt.PlainText)
-        self._detail.hide()
-        root.addWidget(self._detail)
+        self._well_detail = QLabel("", self)
+        self._well_detail.setObjectName("PlateWellDetail")
+        self._well_detail.setWordWrap(True)
+        self._well_detail.setTextFormat(Qt.PlainText)
+        self._well_detail.hide()
+        root.addWidget(self._well_detail)
         self._build_rail()
         if show_legend:
             self._build_legend()
@@ -559,7 +559,7 @@ class PlateProgress(QWidget):
                 plate.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
             else:
                 apply_plate_geometry(plate, role="status")
-        self._detail.setVisible(self._stacked and bool(self._detail.text()))
+        self._well_detail.setVisible(self._stacked and bool(self._well_detail.text()))
         self._pin_rail_width()
 
     def _show_well_detail(self, well_id: str) -> None:
@@ -567,8 +567,8 @@ class PlateProgress(QWidget):
         on a touch screen, and on a phone the tap is how to ask."""
         if not self._stacked:
             return
-        self._detail.setText(self._well_tooltip(well_id))
-        self._detail.setVisible(True)
+        self._well_detail.setText(self._well_tooltip(well_id))
+        self._well_detail.setVisible(True)
 
     def isStacked(self) -> bool:
         return self._stacked

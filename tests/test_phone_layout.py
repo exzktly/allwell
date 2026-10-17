@@ -545,10 +545,16 @@ def test_a_stacked_dashboard_is_the_page_and_says_what_a_tapped_well_is(qapp):
     assert d._title_label.isHidden() and d._toggle.isHidden()
     assert d._plate.maximumWidth() > cap        # the desk cap is lifted
     d._plate.wellActivated.emit("C05")
-    assert d._detail.text() == "C05: failed" and not d._detail.isHidden()
+    assert d._well_detail.text() == "C05: failed" and not d._well_detail.isHidden()
+    # A well still running goes through the dashboard's per-stage detail —
+    # the path a label named ``_detail`` once shadowed, raising TypeError for
+    # every well that had not failed.
+    d.set_well_stage("A01", "group")
+    d._plate.wellActivated.emit("A01")
+    assert d._well_detail.text() == "A01: grouped"
     d.setStacked(False)
     assert d._plate.maximumWidth() == cap
-    assert not d._title_label.isHidden() and d._detail.isHidden()
+    assert not d._title_label.isHidden() and d._well_detail.isHidden()
     d.hide()
 
 

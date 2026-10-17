@@ -1298,16 +1298,18 @@ class PhoneShell(QObject):
         return act
 
     def _fill_menu(self) -> None:
+        from widgets.owned_action import owned_action
         m = self._menu
         m.clear()
         m.addAction(self._text_size_row())
         m.addSeparator()
         if self._h.reload is not None and self._h.mode() == "review":
-            m.addAction("Reload dataset").triggered.connect(self._h.reload)
+            owned_action(m, "Reload dataset").triggered.connect(self._h.reload)
         if self._h.show_help is not None:
-            m.addAction("Help").triggered.connect(self._h.show_help)
+            owned_action(m, "Help").triggered.connect(self._h.show_help)
         if self._h.show_log is not None:
             lit = self._h.log_badge is not None and self._h.log_badge.tone() is not None
-            m.addAction("App log  •" if lit else "App log").triggered.connect(self._h.show_log)
+            owned_action(m, "App log  •" if lit else "App log").triggered.connect(
+                self._h.show_log)
         m.addSeparator()
-        m.addAction("Desktop layout").triggered.connect(lambda: self.set_on(False))
+        owned_action(m, "Desktop layout").triggered.connect(lambda: self.set_on(False))

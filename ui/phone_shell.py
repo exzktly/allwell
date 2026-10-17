@@ -475,6 +475,7 @@ class PhoneShell(QObject):
         self.menu_button.setPopupMode(QToolButton.InstantPopup)
         self._menu = QMenu(self.menu_button)
         self._menu.aboutToShow.connect(self._fill_menu)
+        self._size_menu = QMenu("Text size", self._menu)
         self.menu_button.setMenu(self._menu)
 
         self.nav_button = QPushButton()
@@ -820,7 +821,13 @@ class PhoneShell(QObject):
                 group.addAction(act)
                 m.addAction(act)
             m.addSeparator()
-        sizes = m.addMenu("Text size")
+        # One submenu for the life of the shell, emptied and refilled here:
+        # ``clear()`` on the parent drops only the actions it owns, so the
+        # submenu survives it, and a submenu made afresh on every open left
+        # callers holding a wrapper onto one already deleted.
+        sizes = self._size_menu
+        sizes.clear()
+        m.addMenu(sizes)
         group = QActionGroup(sizes)
         avail = self._avail()
         auto_pick = phone_layout.auto_text_size(avail.width(), avail.height())

@@ -419,113 +419,13 @@ def image_table_set_thresh_frac(ctx, value, channel=None) -> None:
 
 
 
-#: Sentinel :func:`_cell_mfi` returns while the cell's mask and MFI index are
-#: still being read in the background, so the readout can say so rather than
-#: look like a cell with no MFI.
-MFI_PENDING = object()
-
-_MFI_POOL = None
-
-
-def _submit_mfi(job) -> None:
-    """Run *job* on the one background thread that serves hover MFI lookups.
-
-    One worker, so the per-well index memo is only ever written from one thread,
-    and a cursor sweeping across a grid queues its cells rather than racing them.
-    A seam: the tests run *job* inline.
-    """
-    global _MFI_POOL
-    if _MFI_POOL is None:
-        from concurrent.futures import ThreadPoolExecutor
-        _MFI_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="image-table-mfi")
-    _MFI_POOL.submit(job)
-
-
-def _cell_mfi(ctx, label, chan: str, well: str, tp: str, fov: str,
-              img_x: int, img_y: int) -> float | object | None:
-    """MFI of the segmented cell under full-image ``(img_x, img_y)``.
-
-    Returns the value, ``None`` for background / overlay / ratio / nuc-seg tiles
-    (no intensity column) or any decode/lookup failure, or :data:`MFI_PENDING`
-    while the lookup's inputs are still being read.
-
-    This runs inside a mouse-move handler on the UI thread, so it never touches
-    the disk itself. The first hover over a cell hands two reads to a background
-    thread — the cell's segmentation mask, and the well's
-    ``{(fov, tp): {nid: MFI}}`` index (:func:`_mfi_frame`, built once per
-    ``(well, channel)`` and memoized) — and every later move is a dict lookup.
-    Both used to run here, synchronously: a full mask decode per cell plus a read
-    of the well's whole frame and a key tuple per row, which on a network drive
-    froze the window for seconds each time the cursor (or a scroll) brought a new
-    cell under it. The worker writes only plain Python state on the label's
-    record, never a Qt object, so no signal is needed; the next mouse move reads
-    the result. Module-level (not nested in ``_install_cell_events``) to keep that
-    builder under the cyclomatic-complexity ratchet."""
-    rec = getattr(label, "_mfi_rec", None)
-    if rec is None:
-        rec = {"done": False, "mask": None, "frame": None}
-        label._mfi_rec = rec  # type: ignore[attr-defined]
-
-        def _job() -> None:
-            try:
-                import numpy as _np
-                cache = ctx.state.image_table.image_cache
-                if not isinstance(cache, dict):
-                    cache = {}
-                mask = _load_mask_array(ctx, cache, well, tp, fov)
-                if mask is not None:
-                    rec["mask"] = _np.asarray(mask)
-                    rec["frame"] = _mfi_frame(ctx, well, chan, tp, fov)
-            except Exception:
-                swallowed()  # best-effort; the tooltip drops MFI on failure
-            finally:
-                rec["done"] = True
-
-        try:
-            _submit_mfi(_job)
-        except Exception:
-            swallowed()  # pool unavailable (interpreter shutting down): no MFI
-            rec["done"] = True
-    if not rec["done"]:
-        return MFI_PENDING
-    mask = rec["mask"]
-    if mask is None:
-        return None
-    try:
-        nid = int(mask[int(img_y), int(img_x)])
-    except Exception:
-        swallowed()  # out-of-bounds / non-numeric mask cell → no MFI
-        return None
-    if nid <= 0:
-        return None
-    frame = rec["frame"]
-    return frame.get(nid) if frame else None
-
-
-def _mfi_frame(ctx, well: str, chan: str, tp: str, fov: str) -> dict:
-    """``{nid: MFI}`` for one frame of *well*, from the memoized per-well index.
-
-    The index (``{(fov, tp): {nid: MFI}}`` for *chan*'s base channel, any
-    " (binary)" variant suffix stripped) is built on first use, held on
-    ``ctx.state.image_table.mfi_index`` and dropped with the other caches on a
-    dataset swap; a ctx without that slot (a stub) builds it every call. The CSV
-    row keys are normalised and the cell carries the raw image-filename tokens,
-    so both are normalised before the lookup, as the binary-mask render does.
-    """
-    from review.features.image_browser.review_image.collect import (
-        review_mfi_index,
-        review_norm_fov,
-    )
-    from review.core.ui_helpers import norm_timepoint
-    base = _binary_base(chan)
-    st = getattr(getattr(ctx, "state", None), "image_table", None)
-    memo = getattr(st, "mfi_index", None)
-    if not isinstance(memo, dict):
-        memo = {}
-    key = (well, str(base).strip().lower())
-    if key not in memo:
-        memo[key] = review_mfi_index(ctx, well, channel=base)
-    return memo[key].get((review_norm_fov(fov), norm_timepoint(ctx, tp))) or {}
+# The hover readout's MFI suffix — background lookups, latest wins, stamped
+# with the dataset generation — lives in ``_hover_mfi``. Re-exported under the
+# names the readout below (and the tests) use.
+from review.features.image_browser.image_table._hover_mfi import (  # noqa: E402
+    MFI_PENDING,
+    cell_mfi as _cell_mfi,
+)
 
 
 # Rendered cells carry their source image's shape, not the image — the same
@@ -534,7 +434,7 @@ from review.data.crop_tool import label_source_shape as _label_source_shape  # n
 
 
 # The one cell whose pixels the hover readout is currently holding:
-# ``((well, chan, tp, fov, row), array)``. One frame, replaced as the cursor
+# ``((generation, well, chan, tp, fov, row), array)``. One frame, replaced as the cursor
 # moves to the next cell — enough that dragging across a single cell decodes at
 # most once, without the grid holding every cell's frame open.
 _HOVER_ARRAY: tuple = ((), None)
@@ -548,7 +448,9 @@ def _hover_array(ctx, well: str, chan: str, tp: str, fov: str, r: int) -> np.nda
     was missing before).
     """
     global _HOVER_ARRAY
-    key = (well, chan, tp, fov, r)
+    # The dataset generation is part of the key: a reload keeps the same well /
+    # channel / tp / fov names for different pixels.
+    key = (getattr(ctx.state.image_table, "generation", 0), well, chan, tp, fov, r)
     cached_key, cached_arr = _HOVER_ARRAY
     if cached_key == key and cached_arr is not None:
         return cached_arr

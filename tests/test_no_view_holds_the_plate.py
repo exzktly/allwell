@@ -169,42 +169,33 @@ def test_a_pooled_group_is_not_held_twice(monkeypatch):
         assert reads.count() == 0, "the wells' frames are still alive beside the pooled copy"
 
 
-def test_the_remembered_cdfs_stay_within_their_share_of_the_budget():
-    from review.core.stats_cache_state import StatsCacheState
-    from review.domain import stats_compute
-    from review.data.row_cache import RowCache
-
-    ctx = SimpleNamespace(state=SimpleNamespace(
-        stats_cache=StatsCacheState(),
-        dataset=SimpleNamespace(rows_version=3, cache=RowCache(budget_bytes=4 * 8_000)),
-        channel=SimpleNamespace(ratio_index={})))
-    cache = ctx.state.stats_cache.cache
-    cache[("well_cdf", "OLD", "v", (), None, 2, None)] = np.zeros(10)       # a stale version
-    for i in range(5):
-        stats_compute._make_room_for_cdf(ctx, cache, 8_000)
-        cache[("well_cdf", f"W{i}", "v", (), None, 3, None)] = np.zeros(1_000)   # 8,000 bytes each
-    kept = [k[1] for k in cache if k[0] == "well_cdf"]
-    assert "OLD" not in kept, "an array from an older rows_version can never be read again"
-    assert kept == ["W4"], kept                                               # a quarter of 32,000 bytes
-    cache[("well_agg", "W0")] = (1, 2)
-    stats_compute._make_room_for_cdf(ctx, cache, 8_000)
-    assert ("well_agg", "W0") in cache, "only CDF arrays are the memo's to drop"
-
-
-def test_a_stale_cdf_goes_even_when_there_is_room():
-    from review.core.stats_cache_state import StatsCacheState
-    from review.data.row_cache import RowCache
+def test_the_remembered_cdfs_are_bounded_by_the_population_store(monkeypatch):
+    """A well's CDF array is its whole filtered population — tens of megabytes on
+    a large well — so the memo must not keep one per well ever drawn. They live
+    in the byte-bounded population store, least recently used out first, which
+    also retires an array keyed on a superseded ``rows_version``."""
+    from review.core.stats_cache_state import PopulationStore, StatsCacheState
     from review.domain import stats_compute
 
+    monkeypatch.setattr(stats_compute, "_cdf_rows", lambda *a: None)
+    monkeypatch.setattr(stats_compute, "_ratio_sig_for", lambda ctx, v: None)
     ctx = SimpleNamespace(state=SimpleNamespace(
-        stats_cache=StatsCacheState(),
-        dataset=SimpleNamespace(rows_version=3, cache=RowCache(budget_bytes=10**9)),
+        stats_cache=StatsCacheState(populations=PopulationStore(budget_bytes=2 * 8_000)),
+        dataset=SimpleNamespace(rows_version=2),
         channel=SimpleNamespace(ratio_index={})))
-    cache = ctx.state.stats_cache.cache
-    cache[("well_cdf", "OLD", "v", (), None, 2, None)] = np.zeros(10)
-    cache[("well_cdf", "NOW", "v", (), None, 3, None)] = np.zeros(10)
-    stats_compute._make_room_for_cdf(ctx, cache, 80)
-    assert [k[1] for k in cache] == ["NOW"]
+
+    def compute(_rows, **_kw):
+        return np.zeros(1_000)                        # 8,000 bytes
+
+    stats_compute.cdf_values_cached(ctx, "OLD", val_col="v", fluor_gates={}, compute=compute)
+    ctx.state.dataset.rows_version = 3
+    for i in range(3):
+        stats_compute.cdf_values_cached(ctx, f"W{i}", val_col="v", fluor_gates={}, compute=compute)
+    store = ctx.state.stats_cache.populations
+    kept = sorted(k[1] for k in store._items)
+    assert kept == ["W1", "W2"], kept
+    assert store.held_bytes <= 2 * 8_000
+    assert ctx.state.stats_cache.cache == {}, "a CDF array landed in the unbounded results cache"
 
 
 def test_the_distribution_export_writes_what_the_string_version_wrote(tmp_path, monkeypatch):

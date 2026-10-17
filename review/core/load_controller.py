@@ -543,19 +543,17 @@ def _load_directory_held(ctx, d: Path, label=None) -> None:
     app._app_state.plot.reset_for_new_dataset()
     app._app_state.export_prefs.reset_for_new_dataset()
     app._app_state.image_view.reset_for_new_dataset()
-    # Drop the Image Table's persistent decoded-image cache + last render — the
-    # new dataset's pixels differ, so the cross-Generate cache must not carry
-    # over (it is keyed only by well/channel/variant, not by data dir). Skipped
-    # when Image Browser is disabled (no image_table slice).
+    # Drop every Image Table cache that describes the previous dataset — decoded
+    # images, last render, prefetch markers, the hover readout's MFI index, the
+    # pooled Auto LUT — through the slice's own list, so a cache added to it
+    # cannot be left out here. They are keyed by well/channel/variant, not by
+    # data dir, and a reload keeps those names for different numbers. Bumps the
+    # slice's generation too, which is what stops a lookup queued before this
+    # swap from landing after it. Skipped when Image Browser is disabled (no
+    # image_table slice).
     _image_table = app._app_state.feature_slice("image_table")
     if _image_table is not None:
-        _image_table.image_cache = {}
-        _image_table.last_render = {}
-        _image_table.prefetched_cells = set()
-        _image_table.scan_misses = set()
-        _image_table.raw_fallbacks = set()
-        _image_table.partial_scans = set()
-        _image_table.scale_bar_refusals = set()
+        _image_table.clear_caches()
         # Cleared per load, set True by view_state_io.apply_image_table when it
         # restores a saved grid for this load — tells the on_dataset_loaded reset
         # hook below (registry._loaded_image_table) not to clobber a selection
@@ -770,7 +768,7 @@ def _load_directory_held(ctx, d: Path, label=None) -> None:
     recalculate_threshold(ctx)
     # Cell Gating's CDFs and optimizer lists are left owed: every call the load
     # made rebuilt the tab's controls without reading, and the reading is done
-    # when the Cell Gating tab is shown (``home.controller._pay_cell_gating_if_shown``)
+    # when the Cell Gating tab is shown (``home.controller.pay_cell_gating_if_shown``)
     # — a first-frame read of every well for figures only that tab draws.
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from

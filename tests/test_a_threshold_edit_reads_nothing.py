@@ -196,3 +196,90 @@ def test_the_threshold_only_edits_keep_the_populations():
                       if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
             assert "invalidate_threshold_results" in called, f"{rel}::{name} drops the populations"
             assert "invalidate_stats_cache" not in called, f"{rel}::{name} drops the populations"
+
+
+# ── what a threshold edit drops, and what it must keep ──────────────────────
+#
+# A no-op ``invalidate_threshold_results`` passes every test above: the results
+# are keyed on the threshold, so a redraw at a new threshold misses whether or
+# not anything was dropped. These hold the edit to its whole contract — every
+# result dropped, every threshold-free memo kept and reachable — across the
+# edit itself, by counting reads.
+
+
+def _image_side_memos(ctx):
+    """The Image Table / Review Image per-frame memos: the excluded-cell map
+    and one frame's rows, as a threshold-view render asks for them."""
+    from review.data.inclusion import excluded_nids_by_frame
+    from review.features.image_browser.review_image.collect import _frame_rows
+
+    excluded = excluded_nids_by_frame(ctx, WELL)
+    rows, keys = _frame_rows(ctx, WELL, "3", "0", [VAL])
+    return dict(excluded), (rows.index.tolist(), list(keys))
+
+
+def _cdf(ctx):
+    from review.domain.stats_compute import cdf_values_cached
+
+    return cdf_values_cached(ctx, WELL, val_col=VAL, fluor_gates=GATES,
+                             compute=dl._all_fluor_values_filtered)
+
+
+def test_a_threshold_edit_drops_every_result_and_keeps_every_population(ctx, monkeypatch):
+    from review.core.selection_controller import invalidate_threshold_results
+
+    ctx.state.dataset.cache.clear()
+    _agg(ctx, 250.0)
+    _cdf(ctx)
+    store = ctx.state.stats_cache
+    assert store.cache, "nothing was remembered; this measures nothing"
+    kept = len(store.populations)
+    assert kept >= 2, "the population and the CDF array should both be in the population store"
+
+    invalidate_threshold_results(ctx)
+
+    assert store.cache == {}, f"a threshold edit kept {len(store.cache)} result(s) computed at the old threshold"
+    assert len(store.populations) == kept, "a threshold edit dropped a threshold-free memo"
+
+
+def test_a_threshold_edit_keeps_the_image_side_memos_reachable(ctx, monkeypatch):
+    """ARCHITECTURE and the README say these survive a threshold edit. They are
+    kept in the population store, but keyed on the Review Image override
+    version — so bumping it on a threshold edit strands them as orphans and the
+    Image Table's threshold view re-reads the well for every frame it draws."""
+    from review.core.selection_controller import invalidate_stats_cache, invalidate_threshold_results
+
+    ctx.state.dataset.cache.clear()
+    calls = _count_reads(monkeypatch)
+    before = _image_side_memos(ctx)
+    assert calls, "the first draw read nothing; the count measures nothing"
+    calls.clear()
+
+    invalidate_threshold_results(ctx)
+    assert _image_side_memos(ctx) == before
+    assert calls == [], f"after a threshold edit the image-side memos read the well {len(calls)} time(s)"
+
+    invalidate_stats_cache(ctx)                     # an edit that can change inclusion
+    assert _image_side_memos(ctx) == before
+    assert calls, "a plain invalidation kept memos an inclusion edit may have changed"
+
+
+def test_a_threshold_edit_keeps_the_cdf_arrays(ctx, monkeypatch):
+    """The CDF draws the raw filtered population, which no threshold moves."""
+    import numpy as np
+
+    from review.core.selection_controller import invalidate_stats_cache, invalidate_threshold_results
+
+    ctx.state.dataset.cache.clear()
+    calls = _count_reads(monkeypatch)
+    before = np.asarray(_cdf(ctx)).copy()
+    assert calls and before.size, "the first draw read nothing; the count measures nothing"
+    calls.clear()
+
+    invalidate_threshold_results(ctx)
+    assert np.array_equal(np.asarray(_cdf(ctx)), before)
+    assert calls == [], f"after a threshold edit the CDF read the well {len(calls)} time(s)"
+
+    invalidate_stats_cache(ctx)
+    assert np.array_equal(np.asarray(_cdf(ctx)), before)
+    assert calls, "a plain invalidation kept a CDF an inclusion edit may have changed"

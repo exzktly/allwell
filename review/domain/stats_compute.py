@@ -699,7 +699,7 @@ PREFETCH_WORKERS = 4
 
 
 def prefetch_populations(ctx, labels, *, val_col: str, fluor_gates,
-                         tp_col: str = "timepoint_hours") -> int:
+                         tp_col: str = "timepoint_hours", per_fov: bool = False) -> int:
     """Build the missing populations of *labels* on a few threads; return how many.
 
     A redraw over many wells the row cache does not hold spends most of its
@@ -715,6 +715,11 @@ def prefetch_populations(ctx, labels, *, val_col: str, fluor_gates,
     simply left to the redraw's own sequential path, which reports the failure
     where it always has. The gating pass reads wells off the GUI thread through
     the same ``narrow_rows`` this uses.
+
+    *per_fov* must be what the redraw's aggregates will ask for
+    (``per_fov_spread``): a population built without field labels is rebuilt
+    by the first per-field aggregate, so prefetching the plain one for a
+    FOV-replicate draw read every well twice.
     """
     store = _population_store(ctx)
     if store is None or getattr(ctx.state.dataset, "read_listener", None) is not None:
@@ -730,7 +735,8 @@ def prefetch_populations(ctx, labels, *, val_col: str, fluor_gates,
             continue
         key = _population_key(ctx, label, val_col=val_col, tp_col=tp_col,
                               fluor_gates=fluor_gates, version=version, on_col=on_col)
-        if key not in store:
+        pop = store.get(key)
+        if pop is None or (per_fov and not pop.has_fov):
             missing.append(label)
     if len(missing) < 2:
         return 0
@@ -740,7 +746,7 @@ def prefetch_populations(ctx, labels, *, val_col: str, fluor_gates,
             return False
         try:
             _population(ctx, label, val_col=val_col, tp_col=tp_col, fluor_gates=fluor_gates,
-                        per_fov=False, version=version, on_col=on_col)
+                        per_fov=per_fov, version=version, on_col=on_col)
         except Exception:
             _logger.debug("population prefetch of %s failed; the redraw builds it itself",
                           label, exc_info=True)
@@ -823,6 +829,14 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
     everything about the frame, so a gating pass or a dataset swap declines
     here exactly as it does there.
 
+    Being threshold-free, the arrays live in ``StatsCacheState.populations``
+    beside the per-well populations rather than in the results cache: a
+    threshold edit (``invalidate_threshold_results``) keeps them, every other
+    invalidation drops them, and the store's byte budget bounds them — a well's
+    whole filtered population is tens of megabytes on a large well, and an
+    array keyed on a superseded ``rows_version`` is the least recently used and
+    goes first.
+
     **This hands every caller the same array**, where the aggregate memo goes to
     the trouble of returning a tuple. The asymmetry is deliberate but it is a
     hazard worth naming: an ndarray has no immutable counterpart to convert to
@@ -856,15 +870,15 @@ def cdf_values_cached(ctx, label: str, *, val_col: str,
         # mean anything.
         compute,
     )
-    hit = store.cache.get(key)
+    populations = store.populations
+    hit = populations.get(key)
     if hit is not None:
         return hit
     # Read only on a miss: the row cache is bounded, and reading a well first
     # loaded an evicted one from disk only to return the remembered array.
     result = compute(_cdf_rows(ctx, label, val_col, fluor_gates, compute), val_col=val_col,
                      fluor_gates=fluor_gates, ratios=ctx.state.channel.ratio_index)
-    _make_room_for_cdf(ctx, store.cache, int(getattr(result, "nbytes", 0)))
-    store.cache[key] = result
+    populations[key] = result
     return result
 
 
@@ -896,40 +910,6 @@ def _cdf_rows(ctx, label: str, val_col: str, fluor_gates, compute) -> pd.DataFra
     return narrow_rows(ctx, label, want)
 
 
-#: Share of the row-cache budget the remembered CDF arrays may hold together.
-CDF_MEMO_SHARE = 0.25
-
-
-def _make_room_for_cdf(ctx, cache: dict, incoming: int) -> None:
-    """Drop remembered CDF arrays — stale ones, then the oldest — to fit *incoming*.
-
-    These are the one per-cell thing the statistics cache keeps: a well's whole
-    filtered population, tens of megabytes on a large well. Without a bound the
-    dict kept one for every well ever drawn with the CDF on, and one more per
-    ``rows_version`` tick (each gating pass), none of which was ever read again —
-    a second unbounded row cache. Entries from an older ``rows_version`` can never
-    be hit and go first; then the oldest, until the arrays fit within
-    :data:`CDF_MEMO_SHARE` of the row-cache budget.
-    """
-    version = ctx.state.dataset.rows_version
-    budget = getattr(ctx.state.dataset.cache, "budget_bytes", None)
-    # A snapshot of the keys, and ``pop`` with a default: the gating worker's
-    # cancel path clears this dict from its own thread.
-    entries = [k for k in list(cache) if isinstance(k, tuple) and k and k[0] == "well_cdf"]
-    for key in entries:
-        if key[5] != version:
-            cache.pop(key, None)
-    if budget is None:
-        return
-    cap = int(budget * CDF_MEMO_SHARE)
-    live = [(k, cache.get(k)) for k in entries]
-    live = [(k, v) for k, v in live if v is not None]
-    held = sum(int(getattr(v, "nbytes", 0)) for _k, v in live)
-    for key, value in live:
-        if held + incoming <= cap:
-            break
-        cache.pop(key, None)
-        held -= int(getattr(value, "nbytes", 0))
 
 
 def _gate_cache_sig(ctx) -> tuple | None:

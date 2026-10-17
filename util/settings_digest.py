@@ -155,6 +155,8 @@ NOT_KEYED_ON: dict[str, str] = {
     "incremental_prior_dir": "where reuse looks, not what is computed",
     "suspend_file":          "where a request to stop early may appear; what "
                              "is computed for the groups that run is unchanged",
+    "background_dir_alias":  "earlier paths of the same blank; it only widens "
+                             "which recorded digests count as these settings",
     # Execution and machine. The digest must be identical for the same plate
     # computed locally and on a worker host.
     "workers":               "how many wells run at once",
@@ -224,14 +226,31 @@ KEY_ALIAS_SEP = "~"
 
 
 def legacy_settings_digests(opts) -> tuple[str, ...]:
-    """The digests earlier builds would have recorded for *opts*, distinct and without the current one."""
+    """The digests earlier builds — or earlier attempts — would have recorded for *opts*, distinct and without the
+    current one.
+
+    An earlier attempt counts when it differed only in where the blank was read from (``background_dir_alias``):
+    a batched remote run's blank lives in its run directory, which is new on every attempt, so without this the
+    digest changed on every resume and the pipeline pruned the half-finished wells' checkpoints as another
+    configuration's.
+    """
     current = settings_digest(opts)
+    variants = [opts]
+    try:
+        aliases = [a for a in (opts.get("background_dir_alias") or ()) if a]
+    except AttributeError:
+        aliases = []
+    if aliases and opts.get("background_dir"):
+        variants += [{**opts, "background_dir": alias} for alias in aliases]
     found = []
-    for definition in _EARLIER_DEFINITIONS:
-        digest = _digest(opts, KEYED_ON.keys() - definition["without"],
-                         skip_nanowell_outside_mode=definition["skip_nanowell_outside_mode"])
-        if digest and digest != current and digest not in found:
-            found.append(digest)
+    for variant in variants:
+        digests = [] if variant is opts else [settings_digest(variant)]
+        digests += [_digest(variant, KEYED_ON.keys() - definition["without"],
+                            skip_nanowell_outside_mode=definition["skip_nanowell_outside_mode"])
+                    for definition in _EARLIER_DEFINITIONS]
+        for digest in digests:
+            if digest and digest != current and digest not in found:
+                found.append(digest)
     return tuple(found)
 
 

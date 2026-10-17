@@ -254,7 +254,7 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     if getattr(run, "reattached", False):
         report_resumable_checkpoints(runner, run, [canonical_well_label(z.stem) or z.stem for z in remaining],
                                      scratch=_recorded_scratch(earlier, own_output),
-                                     settings_stamps=_settings_stamps(_remote_argv(proc)),
+                                     settings_stamps=_settings_stamps(_remote_argv(proc) + _blank_argv(proc)),
                                      log=proc._log)
     return remaining, sorted(adopted)
 
@@ -417,6 +417,35 @@ def _recorded_scratch(earlier: list[dict], output_dir: str) -> str:
     return ""
 
 
+def background_aliases(proc, run_dir: str, has_blank: bool) -> list[str]:
+    """``--background_dir_alias`` for every ``bg/`` an earlier attempt of this run read its blank from.
+
+    The blank's path is part of the pipeline's settings digest, and a batched run keeps it in its own run directory,
+    which is new on every attempt — so a resume's digest differed from the attempt it resumed, and the pipeline
+    pruned that attempt's part-way checkpoints as another configuration's and started those wells again. The
+    journal records each attempt's run directory (its input directory's parent), and the re-attached output
+    directory names the first; the pipeline accepts a digest computed with any of these in place of its own.
+    """
+    from services import run_journal
+
+    keys, run = getattr(proc, "_journal_keys", None), proc._runner._run
+    if not has_blank or keys is None:
+        return []
+    try:
+        attempts = run_journal.recorded_remote_attempts(
+            proc._local_output_dir, argv_digests=[keys["argv_digest"], *getattr(proc, "_legacy_digests", ())],
+            source_key=keys["source_key"], host_alias=keys["host_alias"])
+    except OSError:
+        attempts = []
+    roots = [run_dir_of(run.remote_output_dir)] + [
+        run_dir_of(str(a[k])) for a in attempts for k in ("remote_input_dir", "remote_output_dir") if a.get(k)]
+    own, dirs = f"{run_dir}/bg", []
+    for root in roots:
+        if f"{root}/bg" != own and f"{root}/bg" not in dirs:
+            dirs.append(f"{root}/bg")
+    return [f"--background_dir_alias={d}" for d in dirs]
+
+
 def _remote_argv(proc) -> list[str]:
     """The pipeline arguments as the host receives them: the local argv plus the flags the host adds."""
     argv = list(getattr(proc, "_pipeline_argv", []) or [])
@@ -427,6 +456,17 @@ def _remote_argv(proc) -> list[str]:
         except (AttributeError, TypeError, ValueError):
             pass
     return argv
+
+
+def _blank_argv(proc) -> list[str]:
+    """The blank's ``--background_dir`` and its earlier paths, as ``_start_driver`` will pass them — part of the
+    settings the checkpoints were stamped with."""
+    from services.remote_run_id import remote_run_dir
+
+    if not getattr(proc, "_blank_stems", ()):
+        return []
+    run_dir = remote_run_dir(proc._runner.host, proc._run_id)
+    return [f"--background_dir={run_dir}/bg", *background_aliases(proc, run_dir, True)]
 
 
 def _settings_stamps(pipeline_argv: list[str]) -> tuple[str, ...]:

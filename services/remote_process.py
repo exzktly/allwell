@@ -74,8 +74,8 @@ from services.remote_run_id import (
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import release_batch
 from services.remote_batch_resume import (
-    announce_adopted, download_adopted, note_remote_scratch, nothing_left_to_run, reattach_output_dir, stage_leftovers,
-    take_from_remote)
+    announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
+    reattach_output_dir, stage_leftovers, take_from_remote)
 from util.well_token import canonical_well_label
 from services.remote_scratch import (
     source_fingerprint,
@@ -740,7 +740,8 @@ class _BatchedRemoteProcess:
         # — it is suppressed here and re-run once locally over everything.
         if "--no_auto_threshold" not in remote_argv:
             remote_argv = list(remote_argv) + ["--no_auto_threshold"]
-        remote_argv = list(remote_argv) + ["--suspend_file", paths.suspend_request]
+        remote_argv = (list(remote_argv) + ["--suspend_file", paths.suspend_request]
+                       + background_aliases(self, run_dir, bool(blanks)))     # the blank's earlier paths
         run.suspend_request = paths.suspend_request
 
         # The budget for one batch is what the operator wrote before this

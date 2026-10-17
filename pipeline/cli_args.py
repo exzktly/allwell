@@ -226,6 +226,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "directory and named here, which is what lets every "
                         "batch build the same correction from it. Defaults to "
                         "--input_dir.")
+    p.add_argument("--background_dir_alias", action="append", default=None,
+                   help="An earlier path the same blank was read from (repeatable). "
+                        "Not part of the settings: a well's part-way checkpoints "
+                        "recorded with --background_dir at one of these paths are "
+                        "this run's to resume. A resumed batched remote run passes "
+                        "them, because its blank lives in a new run directory on "
+                        "every attempt.")
     # `default=None`, not `""`, and that is load-bearing rather than a style
     # choice. `settings_digest` skips a `None` value and includes a `""` one, so
     # a `""` default on an option in KEYED_ON would change the recorded digest

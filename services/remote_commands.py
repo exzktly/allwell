@@ -191,8 +191,7 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     ) if suspend_request else ""
     watch_init, watch = _heartbeat_stale_snippet(
         heartbeat,
-        "[remote] ERROR the app stopped responding mid-batch — suspending the "
-        "batch so the node is handed back",
+        "[remote] ERROR the app stopped responding mid-batch — giving the node back",
         stale_s=MID_BATCH_HEARTBEAT_STALE_S, poll_s=MID_BATCH_WATCH_POLL_S,
         on_stale=f"touch {_remote_quote(suspend_request)}; exit 0",
     ) if suspend_request else ("", "")
@@ -200,7 +199,7 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     # `exit` ends only itself, never the driver.
     watch_on = (f'( {watch_init}while sleep {MID_BATCH_WATCH_POLL_S}; do '
                 f'{watch}done ) & _aw_wd=$!; ') if watch else ""
-    watch_off = ('kill "$_aw_wd" 2>/dev/null; wait "$_aw_wd" 2>/dev/null; '
+    watch_off = ('kill "$_aw_wd" 2>/dev/null; '
                  if watch else "")
     return (
         f'_aw_i=1; '

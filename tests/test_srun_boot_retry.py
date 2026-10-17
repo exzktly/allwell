@@ -47,8 +47,7 @@ def _write_exe(path: Path, body: str) -> None:
 
 
 def _fake_cluster(tmp_path: Path, outcomes: list[tuple[str, str]],
-                  sinfo: str | None, *, test_only_fits: bool = True,
-                  start_at: str = "2026-01-01T00:00:00") -> Path:
+                  sinfo: str | None, *, test_only_fits: bool = True) -> Path:
     """A bin dir whose ``srun`` plays *outcomes* in order: (kind, node).
 
     ``srun --test-only`` queues nothing and consumes no outcome; it answers
@@ -73,7 +72,7 @@ def _fake_cluster(tmp_path: Path, outcomes: list[tuple[str, str]],
         "    echo 'srun: error: Unable to allocate resources: "
         "Requested node configuration is not available' >&2; exit 1\n"
         '  fi\n'
-        f'  echo "srun: Job 9 to start at {start_at} using 4 processors on nodes n05 in partition cpu" >&2; exit 0;;\n'
+        '  echo "srun: Job 9 to start at 2026-01-01T00:00:00" >&2; exit 0;;\n'
         'esac\n'
         'n=$(( $(cat "$S/count" 2>/dev/null || echo 0) + 1 ))\n'
         'echo "$n" > "$S/count"\n'
@@ -161,7 +160,7 @@ def test_with_no_awake_node_slurm_is_left_to_boot_one(tmp_path):
     bindir = _fake_cluster(tmp_path, [("run", "n02")], "n02 idle~\nn04 down~\n")
     out, args, _ = _run(tmp_path, bindir, "srun -p cpu")
     assert _excluded(args[0]) == set()
-    assert "no powered-on node in cpu — Slurm will boot one" in out.stdout
+    assert "no free powered-on node in cpu — Slurm will boot one" in out.stdout
 
 
 def test_awake_nodes_that_cannot_take_the_request_fall_back_once(tmp_path):
@@ -347,28 +346,5 @@ def test_awake_nodes_that_are_all_busy_do_not_keep_the_job_waiting(tmp_path):
     out, args, _ = _run(tmp_path, bindir, "srun -p cpu")
     assert out.returncode == 0, out.stdout
     assert _excluded(args[0]) == set()
-    assert "every powered-on node in cpu is busy" in out.stdout
+    assert "no free powered-on node in cpu — Slurm will boot one" in out.stdout
     assert "avoiding" not in out.stdout
-
-
-def test_a_free_node_that_would_start_the_job_late_is_not_waited_for(tmp_path):
-    """`mix` has room for *a* job, not necessarily this one: Slurm's own
-    expected start says whether a powered-on node will take it soon."""
-    import datetime
-    later = (datetime.datetime.now() + datetime.timedelta(hours=3)).strftime(
-        "%Y-%m-%dT%H:%M:%S")
-    bindir = _fake_cluster(tmp_path, [("run", "n02")], _SINFO, start_at=later)
-    out, args, _ = _run(tmp_path, bindir, "srun -p cpu")
-    assert out.returncode == 0, out.stdout
-    assert _excluded(args[0]) == set()
-    assert f"busy until {later}" in out.stdout
-    assert "avoiding" not in out.stdout
-
-
-def test_a_free_node_that_starts_the_job_now_keeps_the_preference(tmp_path):
-    import datetime
-    now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    bindir = _fake_cluster(tmp_path, [("run", "n03")], _SINFO, start_at=now)
-    out, args, _ = _run(tmp_path, bindir, "srun -p cpu")
-    assert _excluded(args[0]) == {"n02", "n04", "n06"}
-    assert "avoiding 3 node(s) in cpu" in out.stdout

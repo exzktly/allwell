@@ -30,8 +30,8 @@ transitively, the same hole `test_services_do_not_import_review` plugs for
 
 `persistence/` is deliberately **not** listed. ARCHITECTURE claims Qt-freeness
 for `pipeline`, `util`, `services` and `domain` only, and
-`persistence/bar_groups.py`, `registry.py` and `sample_definitions.py`
-legitimately use `QFileDialog` / `QMessageBox` / `QTimer`.
+`registry.py` and `sample_definitions.py` legitimately use `QFileDialog` /
+`QMessageBox` / `QTimer`.
 """
 
 from __future__ import annotations

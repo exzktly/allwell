@@ -33,7 +33,7 @@ API
   ``entryRecoloured(str, str)``, ``entryVisibilityToggled(str, bool)``,
   ``entryDuplicated(str, str)``, ``entryDeleted(str)``,
   ``entryExportRequested(str)``, ``orderChanged(list)``,
-  ``addFromSelectionRequested()``, ``importRequested()``,
+  ``addFromSelectionRequested()``,
   ``wellsChanged(str, list)``, ``replicatesChanged(str, list)``,
   ``selectionsChanged(list)``
 """
@@ -603,7 +603,6 @@ class SavedSelectionsList(QWidget):
     entryExportRequested = Signal(str)
     orderChanged = Signal(list)                    # [id, …] in stored order
     addFromSelectionRequested = Signal()
-    importRequested = Signal()
     wellsChanged = Signal(str, list)               # (id, wells)
     replicatesChanged = Signal(str, list)          # (id, replicates) — [] for "no structure"
     selectionsChanged = Signal(list)
@@ -646,10 +645,7 @@ class SavedSelectionsList(QWidget):
         footer.setSpacing(theme.Spacing.sm)
         self._from_btn = QPushButton("From selection")
         self._from_btn.clicked.connect(self.addFromSelectionRequested.emit)
-        self._import_btn = QPushButton("Import…")
-        self._import_btn.clicked.connect(self.importRequested.emit)
         footer.addWidget(self._from_btn)
-        footer.addWidget(self._import_btn)
         footer.addStretch(1)
         v.addLayout(footer)
 
@@ -722,12 +718,10 @@ class SavedSelectionsList(QWidget):
             self._composable = False
         for row in self._rows.values():
             row.setCompact(on)
-        # The "From selection" / "Import…" footer buttons exist to manage
-        # the editable list on Home → Groups; in the left rail's
-        # read-only mirror they're noise.
+        # The "From selection" footer button exists to manage the editable
+        # list on Home → Groups; in the left rail's read-only mirror it's noise.
         try:
             self._from_btn.setVisible(not on)
-            self._import_btn.setVisible(not on)
         except Exception:
             swallowed()
 
@@ -1095,7 +1089,6 @@ if __name__ == "__main__":
     lst.wellsChanged.connect(lambda i, w: echo.setText(f"wells[{i}] → {w}"))
     lst.replicatesChanged.connect(lambda i, r: echo.setText(f"replicates[{i}] → {r}"))
     lst.addFromSelectionRequested.connect(lambda: echo.setText("from-selection requested"))
-    lst.importRequested.connect(lambda: echo.setText("import requested"))
 
     root.resize(480, 480)
     root.show()

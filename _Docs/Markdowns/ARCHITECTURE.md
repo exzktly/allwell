@@ -244,6 +244,20 @@ as its controls change and a dimmed plot cannot be judged by. Its button reads
 phone, leaving phone layout — gives the band back to its page at its index,
 unstacked.
 
+**The Properties sheet.** A plot's right-hand panel — the Properties
+(export-style) sidebar, or the Scatter cell viewer that shares its slot — opens
+at the desk in the plot's right dock, a layout sibling of the figure
+(`ui_helpers.make_plot_with_right_dock`). In phone layout that dock would be
+`Metrics.dock_w` wide on a screen barely wider, and it is opened from the
+Controls sheet, which is drawn over the page. So `ui_helpers.mount_widget_in_plot_dock`
+(and the Image Table's own Properties toggle) end with
+`review/core/phone_panel_sheet.present(dock)`: in phone layout it closes the
+Controls sheet, lends the dock to a right-edge `Drawer` covering the window's
+whole width with the panel's fixed width lifted, and gives the dock back — at
+its index, with its width limits, hidden — when the panel's own ✕ hides it
+(an event filter on the dock), the sheet is dismissed, or phone layout ends. At
+the desk it returns `False` and changes nothing.
+
 **The Image Table** authors its grid through the builder shelf and acts on it
 through the action strip, neither of which is a `ControlBand` (its band is empty),
 and at the desk both sit above the grid — on a phone, two screens of drag-and-drop
@@ -829,6 +843,8 @@ review/
 │   ├── split_view.py                 ← optional side-by-side double-pane view (one-line removable; §5.10)
 │   ├── phone_drawer.py               ← phone layout's side rail: lends each pane's left panel to one
 │   │                                    left-edge Drawer over the page and gives it back (§2)
+│   ├── phone_panel_sheet.py          ← phone layout's Properties sheet: lends a plot's right dock to a
+│   │                                    full-width Drawer over the page and gives it back (§2)
 │   ├── feature_registry.py           ← FeatureDescriptor + build_feature_registry (§5.3)
 │   ├── lazy.py                       ← call-time proxy so core never imports a feature
 │   ├── frame_render.py               ← build_frame_rgb: one frame + label mask → RGB

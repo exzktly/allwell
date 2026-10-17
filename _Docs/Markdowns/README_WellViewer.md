@@ -7383,6 +7383,10 @@ In Review a second row under it holds:
 | **Bar Plots ▾** | Picks the page's view (Bar Plots, Line Graphs, Heat Map, …). |
 | **⚙ Controls** | Slides the page's own controls — channel, property, display, threshold and the rest — up from the bottom, with the plot still in view above them so you can watch it change. **Done ✕** puts them away. |
 
+The **Properties** button among those controls (the sliders icon) puts the
+controls away and opens the figure's Properties panel across the whole screen.
+Its **✕** closes it and returns you to the plot.
+
 **The Image Table** opens on its images in phone layout, sized so the columns
 fill the screen; **−** and **+** zoom from there, and past 100 % the table
 scrolls sideways. The table builder and the Generate, Crop, ON threshold, Save and

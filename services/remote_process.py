@@ -66,6 +66,7 @@ from services.remote_run_id import (
     _forced_from_argv,
     _local_input_dir_from_argv,
     _parse_argv_flags,
+    legacy_argv_digests,
     pipeline_argv_digest,
     remote_run_dir,
     remote_run_paths,
@@ -545,6 +546,8 @@ class _BatchedRemoteProcess:
             source_key=source_fingerprint(_local_input_dir_from_argv(pipeline_argv)),
             host_alias=runner.host.ssh_alias)
         _record_remote_in_journal(local_output_dir, run=runner._run, **self._journal_keys)
+        # What an earlier build recorded for this configuration, for finding its leftovers only.
+        self._legacy_digests = legacy_argv_digests(pipeline_argv, extras=runner._host_argv_extras(output_filter))
 
         # One Fetcher persisting across batches. Pre-set the total well
         # count: each batch's pipeline banner reports just THAT

@@ -269,3 +269,37 @@ def test_the_restart_says_why_a_well_the_journal_expected_is_redone(tmp_path, mo
     assert "recorded as uploaded, but their archives are no longer on the remote — sending them again: A04" in log
     assert "recorded as downloaded, but they have no complete CSV here — processing them again: A05" in log
     assert "A02" not in log.split("finished on the remote, but")[1].split("\n")[0], "A02's output IS there"
+
+
+def test_an_attempt_recorded_by_an_earlier_build_is_found(tmp_path, monkeypatch):
+    """9.12.5 recorded its address under the older argv digest, which also hashed execution knobs such as
+    ``--workers``. A restart on the current build must still find that attempt's uploads — through the real
+    journal, not a stubbed lookup."""
+    from services import run_journal as J
+    from services.remote_run_id import legacy_argv_digests, pipeline_argv_digest
+
+    argv = ["python", "process_microscopy.py", "--input_dir", "/in", "--output_dir", "/out", "--workers", "6",
+            "--nuclear_token", "DAPI"]
+    new, legacy = pipeline_argv_digest(argv), legacy_argv_digests(argv)
+    assert new not in legacy, "the fixture must reproduce the digest change, or it tests nothing"
+
+    old = tmp_path / "remote" / "runs" / "run-old"
+    p, plate, run_dir, sent, _, _ = _harness(tmp_path, monkeypatch)
+    monkeypatch.undo()                                  # the real stored_remote_addresses, not the stub
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = p._local_output_dir
+    J.open_run(out, spec={}, mode="remote-batched", input_dir=str(plate), argv=argv)
+    J.record_remote(out, run_id="run-old", cache_key="k-old", host_alias="h",
+                    remote_input_dir=str(old / "in"), remote_output_dir=str(old / "out"),
+                    argv_digest=legacy[0], source_key="s")
+    J.open_run(out, spec={}, mode="remote-batched", input_dir=str(plate), argv=argv)   # the restart
+    p._journal_keys = dict(argv_digest=new, source_key="s", host_alias="h")
+    p._legacy_digests = legacy
+    _uploaded_copy(plate, old / "b1", "A01")
+    _uploaded_copy(plate, old / "in", "A03")
+
+    _run(p, monkeypatch)
+
+    assert p._returncode == 0, p._logged
+    assert "b1/A01.zip" not in sent and "b2/A03.zip" not in sent, (
+        f"an upload recorded by the earlier build was sent again: {sent}")

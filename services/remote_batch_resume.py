@@ -216,7 +216,8 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     own_output = run.remote_output_dir
     try:
         earlier = [a for a in run_journal.stored_remote_addresses(
-            proc._local_output_dir, argv_digests=[keys["argv_digest"]], source_key=keys["source_key"],
+            proc._local_output_dir, argv_digests=[keys["argv_digest"], *getattr(proc, "_legacy_digests", ())],
+            source_key=keys["source_key"],
             host_alias=keys["host_alias"]) if a.get("remote_output_dir") != own_output]
     except OSError:
         earlier = []

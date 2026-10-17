@@ -179,12 +179,22 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    ran inside the restyle before it did, deleting and rebuilding its grid while
    the pass was walking the window's widgets;
 4. pins the touch sizes (`_apply_sizes`), scales the plots, and, while phone
-   layout is on, installs an app event filter (`_PhoneEventFilter`) that gives
-   anything shown later the same treatment: a plot its DPI and height, a dialog a
-   place inside the screen, a control band its place in the Controls sheet, a
-   matplotlib toolbar its absence (pan and zoom are modes a VNC drag fights
-   with), a stepper its − / +, a form row its stacking — and makes an ⓘ answer a
-   tap with its text, since nothing hovers on a phone;
+   layout is on, watches the widgets it adapts so that anything shown later gets
+   the same treatment: a plot its DPI and height, a dialog a place inside the
+   screen, a control band its place in the Controls sheet, a matplotlib toolbar
+   its absence (pan and zoom are modes a VNC drag fights with), a stepper its
+   − / +, a form row its stacking — and makes an ⓘ answer a tap with its text,
+   since nothing hovers on a phone. `_PhoneEventFilter` is installed **on those
+   widgets only** (`_phone_relevant` names them), never on the application: an
+   application-wide filter handed every event of every object in the process to
+   Python, and on Windows it died with a native access violation on the filter's
+   first line, called from `app.exec()` with an event for an object being torn
+   down. `PhoneShell._sweep` finds widgets built after the switch — every
+   `_SWEEP_MS` (300 ms) when the widget count has changed (an unchanged count
+   costs one `allWidgets()`, about 2 ms at 4,100 widgets; a full sweep about
+   25 ms), at once when a window gains focus (a dialog opening), and after a page
+   change — installs the filter, marks the widget `_awPhoneWatched`, and adapts
+   it if it is already showing. Leaving phone layout removes every one of them;
 5. maximizes the window (phone) or restores the desk geometry it remembered —
    only one remembered on a desk-shaped screen.
 

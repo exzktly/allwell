@@ -518,3 +518,43 @@ def test_properties_from_the_controls_sheet_opens_a_full_width_sheet(qapp, win, 
         shell.set_on(False)
         QTest.qWait(600)
         _pump(qapp)
+
+
+def test_phone_layout_never_filters_every_event_in_the_application(qapp, win, monkeypatch):
+    """Reported: a Windows access violation on ``_PhoneEventFilter.eventFilter``'s
+    first line, called straight from ``app.exec()``. The filter was installed on
+    the application, so every event of every object went through Python. It is
+    now installed only on the widgets phone layout adapts, found by a sweep —
+    including ones built after the switch, which must still be found."""
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QDialog
+
+    from ui.phone_shell import _P_WATCHED
+
+    shell = win._phone
+    on_app = []
+    real = QApplication.installEventFilter
+
+    def _spy(self, obj):
+        if self is QApplication.instance():
+            on_app.append(obj)
+        return real(self, obj)
+
+    monkeypatch.setattr(QApplication, "installEventFilter", _spy)
+    shell.set_on(True)
+    QTest.qWait(600)
+    _pump(qapp)
+    try:
+        assert shell._filter not in on_app, "phone layout filtered the whole application"
+        late = QDialog(win)
+        late.show()
+        QTest.qWait(500)                                  # past one sweep
+        _pump(qapp)
+        assert late.property(_P_WATCHED), "a dialog opened in phone layout was never adapted"
+        late.close()
+        late.deleteLater()
+    finally:
+        shell.set_on(False)
+        QTest.qWait(600)
+        _pump(qapp)
+    assert not any(w.property(_P_WATCHED) for w in QApplication.allWidgets())

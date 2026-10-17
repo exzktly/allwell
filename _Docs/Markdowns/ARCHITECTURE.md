@@ -11105,7 +11105,9 @@ wells from the remote and runs the ones the suspend left part way again, from
 their kept checkpoints — those carry no completion seal, so they are never
 adopted as finished. It is more patient than the 120 s between-batch check
 because a false positive costs a working batch, not an idle node. It is killed
-as soon as its batch returns. `tests/test_a_vanished_app_suspends_the_batch_in_flight.py`. A suspended batched run skips the
+as soon as its batch returns; the `sleep` it polls with has no stdout, because
+killing the subshell does not kill that `sleep`, which then held the driver's
+output open for up to a poll after the driver ended. `tests/test_a_vanished_app_suspends_the_batch_in_flight.py`. A suspended batched run skips the
 end-of-run auto-threshold pass, which is for a finished plate; the resumed run
 that finishes it writes the thresholds.
 

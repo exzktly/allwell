@@ -868,6 +868,11 @@ def _channel_scatter(ctx) -> None:
                 update_scatter_menus,
             )
             update_scatter_menus(ctx)
+            from review.domain.fold_change_scopes import plots_held
+            if plots_held(ctx):
+                # A load holds every plot (``core/plot_hold.py``) and draws the
+                # visible tab once at its end; the menus above are still current.
+                return
             redraw_scatter_orchestrate(ctx)
             redraw_scatter_agg_orchestrate(ctx)
         except Exception:

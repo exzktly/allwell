@@ -57,6 +57,13 @@ def redraw(
         ctx.state.channel.active_metric, "Mean Intensity"
     )
 
+    # Held (``core/plot_hold.py``): a load, or the gating pass a load started,
+    # will draw the plate once at its end. Everything is owed until then.
+    from review.domain.fold_change_scopes import defer_every_scope, plots_held
+    if plots_held(ctx):
+        defer_every_scope(ctx.window)
+        return
+
     # 1. Line plot — always present (eager-built); the entry point that
     # established the orchestrator's name.
     lineplot_redraw(

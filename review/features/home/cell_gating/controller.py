@@ -1675,9 +1675,17 @@ def _cell_gating_on_progress(ctx, current: int, total: int) -> None:
     bar = ctx.widgets.get_or_none("_progress_bar")
     if bar is None:
         return
+    # The bar alone does not say what it is counting, and after a load it is the
+    # only thing moving for as long as the pass takes. While the load that started
+    # the pass is still running, its own status line (``core/load_progress.py``)
+    # owns the bar and the text; the pass speaks once that has finished.
+    if getattr(ctx.state.dataset, "read_listener", None) is not None:
+        return
     if bar.maximum() != total:
         bar.setRange(0, total)
     bar.setValue(current)
+    bar.setVisible(True)
+    ctx.notify.set_status(f"Applying cell gating — well {current} of {total}")
 
 
 def cell_gating_recompute_now(ctx) -> bool:
@@ -1731,7 +1739,13 @@ def _cell_gating_on_finished(ctx) -> None:
     # — the plot simply redraws the old numbers.
     invalidate_stats_cache(ctx)
     cell_gating_refresh_included_count(ctx)
-    redraw_app(ctx)
+    if getattr(ctx.state.dataset, "read_listener", None) is None:   # not mid-load
+        ctx.notify.set_status("Cell gating applied.")
+    # A pass the load started holds every plot (``core/plot_hold.py``): lifting
+    # that hold draws the whole plate once. Any other pass redraws as before.
+    from review.core.plot_hold import release_after_gating
+    if not release_after_gating(ctx):
+        redraw_app(ctx)
 
 
 def _cell_gating_on_failed(ctx, msg: str) -> None:
@@ -1742,6 +1756,11 @@ def _cell_gating_on_failed(ctx, msg: str) -> None:
         bar.setValue(0)
         bar.hide()
     logger.error("Cell gating failed: %s", msg)
+    # A failed pass still ends the load's hold, or the plots would wait for ever.
+    # They draw the rows as they stand, and the included count below says the
+    # gates were never applied.
+    from review.core.plot_hold import release_after_gating
+    release_after_gating(ctx)
     # Mark the counts as describing settings that were never applied, rather
     # than leaving a confident-looking number behind a failed pass.
     cell_gating_refresh_included_count(ctx, failed=True)

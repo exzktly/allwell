@@ -7,6 +7,7 @@ the matplotlib axes to draw into.
 
 from __future__ import annotations
 
+from review.domain.fold_change_scopes import plots_held
 from review.data.metric_labels import spread_label, timepoint_title
 
 from review.features.barplot.controller import refresh_bar_layout_btn_state
@@ -1141,6 +1142,8 @@ def draw_grouped_bar_mode(
 
 def redraw_bars(ctx) -> None:
     """Top-level bar plot redraw (drives the Bar Plots tab)."""
+    if plots_held(ctx):  # a load draws the visible tab once, at its end (core/plot_hold.py)
+        return
     if not ctx.widgets.has("_ax_bar_mean"):
         return
     ax_mean = ctx.widgets.get_or_none("_ax_bar_mean")

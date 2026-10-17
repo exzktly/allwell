@@ -53,7 +53,7 @@ def test_opting_out_excludes_user_input(monkeypatch):
 
 def test_the_load_loop_opts_out_on_every_progress_call():
     """The guard: a future edit that drops the keyword re-opens the window."""
-    src = textwrap.dedent(inspect.getsource(load_controller.load_directory))
+    src = textwrap.dedent(inspect.getsource(load_controller._load_directory_held))
     fn = ast.parse(src).body[0]
 
     progress_calls = [

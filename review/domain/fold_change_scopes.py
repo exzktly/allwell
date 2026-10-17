@@ -68,6 +68,21 @@ def _dirty_set(app) -> set[str]:
     return app._app_state.plot.fc_dirty_scopes
 
 
+def plots_held(owner) -> bool:
+    """True while every plot is held (``PlotState.held_for``; see ``core/plot_hold.py``).
+
+    *owner* is the window (``app._app_state``) or a context (``ctx.state``);
+    anything with neither — a test's stub — is never held.
+    """
+    state = getattr(owner, "_app_state", None) or getattr(owner, "state", None)
+    return bool(getattr(getattr(state, "plot", None), "held_for", ""))
+
+
+def defer_every_scope(app) -> None:
+    """Mark every registered scope dirty without drawing any of them."""
+    _dirty_set(app).update(scope.name for scope in registered_scopes())
+
+
 def _visible_tab_names(app) -> frozenset[str]:
     """Leaf tab names currently on screen.
 
@@ -172,6 +187,10 @@ def redraw_scopes_or_defer(app, *, skip=None) -> None:
     Compared by identity on the callable, which is why that one is a module
     function rather than a closure made per registration.
     """
+    if plots_held(app):
+        # Held (``core/plot_hold.py``): nothing draws, everything is owed.
+        defer_every_scope(app)
+        return
     visible = visible_scope_names(app)
     dirty = _dirty_set(app)
     for scope in registered_scopes():
@@ -199,6 +218,10 @@ def redraw_scopes_after_load(app, *, default_redraw=None) -> None:
     * Every other scope is marked dirty, so it flushes the moment its tab is
       next viewed — the same defer-until-viewed contract as any other action.
     """
+    if plots_held(app):
+        # Held (``core/plot_hold.py``): nothing draws, everything is owed.
+        defer_every_scope(app)
+        return
     visible = visible_scope_names(app)
     dirty = _dirty_set(app)
     # Identity on the *scope*, not on its redraw callable. ``line``,
@@ -228,6 +251,10 @@ def flush_dirty_scopes(app) -> None:
     currently-visible leaf, and runs their redraw method if they're
     marked dirty.
     """
+    if plots_held(app):
+        # Held (``core/plot_hold.py``): nothing draws, everything is owed.
+        defer_every_scope(app)
+        return
     visible = visible_scope_names(app)
     if not visible:
         return

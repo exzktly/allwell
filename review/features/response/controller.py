@@ -8,6 +8,7 @@ tests.
 
 from __future__ import annotations
 
+from review.domain.fold_change_scopes import plots_held
 import logging
 
 from review.core.channel_state_controller import col_for_scatter_axis
@@ -606,6 +607,8 @@ def redraw_response(ctx) -> None:
     it is right for — reporting an action the user just took, where there is no
     figure to write on.
     """
+    if plots_held(ctx):  # a load draws the visible tab once, at its end (core/plot_hold.py)
+        return
     ax = _widget(ctx, "_response_ax")
     canvas = _widget(ctx, "_response_canvas")
     if ax is None or canvas is None:

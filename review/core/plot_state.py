@@ -288,6 +288,12 @@ class PlotState:
     # the control normalisation is applied).
     fc_order: str = "ctrl_first"  # one of {"ctrl_first", "t0_first"}
     fc_dirty_scopes: set[str] = field(default_factory=set)
+    # Non-empty while every plot is held: drawn by nobody and marked dirty
+    # instead (``review/core/plot_hold.py``). ``"loading"`` for the length of a
+    # dataset load, whose own end draws the plate; ``"gating"`` from the end of a
+    # load that started a Cell Gating pass until that pass ends, so the plate is
+    # drawn once, with its gates applied, rather than once before and once after.
+    held_for: str = ""
     # True only while a figure is being captured for a file, the clipboard or
     # the Saved-Plots gallery. The Line tab draws its CDF from a sample of each
     # well's cells and names only the first few traces in the legend, because a

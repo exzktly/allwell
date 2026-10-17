@@ -215,6 +215,13 @@ class EmptyReason:
 #: site gets when it names no reason of its own.
 NO_DATASET = EmptyReason(NO_DATASET_TITLE, NO_DATASET_HINT)
 
+#: Every plot's placeholder while a load's Cell Gating pass runs (``core/plot_hold.py``).
+#: The plate is drawn once the pass ends; until then a figure would show either
+#: the previous dataset or this one's ungated numbers, and neither says so.
+GATING_IN_PROGRESS = EmptyReason(
+    "Applying cell gating…",
+    "The plots are drawn once every well has been gated. The progress bar at the bottom shows how far it has got.")
+
 
 def wrap_with_empty_state(
     win: Any,
@@ -333,6 +340,9 @@ def refresh_empty_state_pages(win: Any) -> None:
                 # to pick wells on a plate that is not loaded is a worse message
                 # than the one it would replace.
                 _apply_reason(stack, NO_DATASET)
+                continue
+            if getattr(win._app_state.plot, "held_for", "") == "gating":
+                _apply_reason(stack, GATING_IN_PROGRESS)
                 continue
             reason_fn = getattr(stack, "_empty_reason", None)
             # The reason call is guarded on its own. Letting it share the outer

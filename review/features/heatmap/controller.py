@@ -9,6 +9,7 @@ selection.
 
 from __future__ import annotations
 
+from review.domain.fold_change_scopes import plots_held
 # Names used only in annotations. Under ``from __future__ import
 # annotations`` these are never evaluated, so importing them for real would
 # add startup cost and, for several of these, an import cycle.
@@ -634,6 +635,13 @@ def _compute_global_range(
 
 
 def redraw_heatmap(ctx) -> None:
+    """Draw the Heat Map, unless a dataset load is holding every plot (``core/plot_hold.py``)."""
+    if plots_held(ctx):  # the load draws the visible tab once, at its end
+        return
+    _draw_heatmap(ctx)
+
+
+def _draw_heatmap(ctx) -> None:
     ax = ctx.widgets.get_or_none("_heatmap_ax")
     canvas = ctx.widgets.get_or_none("_heatmap_canvas")
     fig = ctx.widgets.get_or_none("_heatmap_fig")

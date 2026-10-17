@@ -1963,6 +1963,20 @@ reprocess — and limited, through **Only these wells**, to the wells that need
 work, so nothing already complete is touched. You do not have to remember what the original run was told to do; the
 handoff carries it, and Analyze says on its dashboard what it just set up.
 
+**While a dataset opens, the status bar says what it is doing.** It counts the
+CSV files first. On a plate too large to hold in memory that count races ahead,
+because only the first wells are read then; the work after it is named phase by
+phase — restoring the saved analysis, measuring channel ranges and restoring
+gates, preparing tabs, drawing plots — together with the well being read from
+disk and how many reads the phase has made so far, so a slow open is visibly
+moving rather than stuck. *Loaded N well(s)* appears only when it has finished.
+
+**If the dataset has saved Cell Gating gates, the plots wait for them.** Opening
+it starts a gating pass over every well; until that pass ends each plot shows
+*Applying cell gating…* instead of a figure, and the status bar counts the wells
+as they are gated. The plot you are looking at is then drawn once, with the gates
+applied, rather than once before them and again after.
+
 **Opening a dataset always brings you here first**, whichever page you were on
 when you last quit. Everything else about that session is restored as before —
 it is only arriving with a new dataset that starts on Home, since that is the

@@ -698,6 +698,13 @@ def run_projectors(ctx, label: str) -> None:
                 "cache projector %r failed for well %r", _project, label)
 
 
+def _announce_read(dataset, label: str) -> None:
+    """Tell ``dataset.read_listener`` (the load's status line) that *label* is being read."""
+    listener = getattr(dataset, "read_listener", None)
+    if listener is not None:
+        listener(label)
+
+
 def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     """Read well *label* from disk into the row cache, projected and recorded.
 
@@ -724,6 +731,7 @@ def load_and_project(ctx, label: str, path: Path | None = None) -> pd.DataFrame:
     dataset = ctx.state.dataset
     if path is not None:
         dataset.well_paths[label] = path
+    _announce_read(dataset, label)
     frame = _read_making_room(dataset, label, dataset.well_paths[label])
     pinned = getattr(dataset.cache, "pinned", None)
     # Pinned while the projectors run: they find the frame by label, and one that

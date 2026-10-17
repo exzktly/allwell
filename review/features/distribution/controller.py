@@ -7,6 +7,7 @@ ratio-aware (handled transparently by ``data_loading.resolve_value_series``).
 
 from __future__ import annotations
 
+from review.domain.fold_change_scopes import plots_held
 
 import math
 from collections.abc import Iterable, Sequence
@@ -331,6 +332,8 @@ def redraw_distribution(ctx) -> None:
     ``ctx.widgets``, state via ``ctx.state``, and every shared render leaf
     (get_all_fluor_gates / iter_plot_groups / the label + threshold + export-style
     leaves) is now ctx-native, so the renderer names no god-object."""
+    if plots_held(ctx):  # a load draws the visible tab once, at its end (core/plot_hold.py)
+        return
     canvas = ctx.widgets.get_or_none("_distribution_canvas")
     fig = ctx.widgets.get_or_none("_distribution_fig")
     if canvas is None or fig is None:

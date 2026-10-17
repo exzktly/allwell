@@ -146,6 +146,13 @@ def read_pipeline_info(
             if str(s).strip()
         ],
         "qc_options": dict(data.get("qc_options", {}) or {}),
+        # The nanowell run's block (scheme, settings, conventions), or None for
+        # an ordinary run. ``review.domain.qc_params.is_nanowell_run`` decides
+        # the image-border switch's default from it; without it here that
+        # default read every dataset as ordinary, because this dict — not the
+        # file — is what the app holds as ``dataset.pipeline_info``.
+        "nanowell": (dict(data["nanowell"])
+                     if isinstance(data.get("nanowell"), dict) else None),
     }
 
     if fov_idx >= 0 and tp_idx >= 0 and fov_idx == tp_idx:

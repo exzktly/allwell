@@ -1539,7 +1539,9 @@ and by `remote_fetch_report.txt` in the output folder.
   which plate and when (*Plate_07 · suspended 24 Aug 14:32*), what resuming will
   do, and what the run recorded. **Resume**, at the bottom right, continues it,
   computing only the field/timepoint groups still missing, and fills the
-  sidebar with that run's settings so the form shows what is actually running. **Discard** beside it
+  sidebar with that run's settings so the form shows what is actually running.
+  If the run cannot start — the earlier run is still going, say — the message
+  says why and the form is left as you had it. **Discard** beside it
   forgets the offer and deletes nothing — the results already written stay
   exactly as they are, and you can still finish the plate later by re-running
   that input with **incremental** ticked.
@@ -1550,7 +1552,13 @@ and by `remote_fetch_report.txt` in the output folder.
   A remote run in batches that is restarted — after Stop, Suspend, or a lost
   node — first checks what the host still holds from the earlier attempt with
   the same settings. A well that finished there but had not been downloaded
-  yet is downloaded rather than uploaded and run again. The plate shows every
+  yet is downloaded rather than uploaded and run again. A well the earlier
+  attempt left part way — a Suspend, or All-Well closing or crashing while its
+  batch ran — is not taken for a finished one: the log names it as *left part
+  way on the remote*, and it is run again, continuing from the fields it had
+  finished. (Wells left on the host by a version of All-Well from before this
+  check are run again too, since nothing there says whether they were whole.)
+  The plate shows every
   well's state at once — downloaded, finished on the host, already uploaded —
   then the job is started and handed its first batch, and only then are the
   finished wells downloaded, filling the queue wait and the compute rather
@@ -2027,9 +2035,18 @@ across the plate, what to call them, and what ratios to derive. **Import**, at
 the right end of the page's controls row, brings in groups from a JSON file —
 one saved with a group's **Export**, a `pipeline_info.json`, or an older
 group-definitions file. When the dataset already has groups it asks whether to
-**Add to current groups** (a name already in use gets a suffix, nothing is
-overwritten) or **Replace current groups**; with no groups yet they are simply
-added. It is the app's only groups import, and it is hidden on Overview and on
+**Add to current groups** (a name already in use gets a suffix) or **Replace
+current groups**; with no groups yet they are simply added. A well can be in
+only one group, so when adding would bring in wells that are already in a group
+here — the usual case when the file came from a plate with the same layout —
+a second question lists those wells and the group each is in, and offers
+**Skip** (they stay in their current groups and the imported groups get only
+the wells in no group; an imported group left with none is not added) or
+**Move** (they go to the imported groups; a current group left with no wells is
+removed). Cancel on either question leaves everything as it was. Each imported
+group keeps its colour, whether it was hidden, and (unless a group here already
+uses it) its identity, so plots saved
+with that group hidden keep it hidden. It is the app's only groups import, and it is hidden on Overview and on
 the Variables layer, where there are no groups to import into. Everything on these tabs autosaves to the dataset folder as you
 edit, so there is no Save button to look for; to discard definitions, use
 **Reset analysis** in the title bar ([Starting over](#starting-over)), which
@@ -2080,8 +2097,9 @@ buttons — you pick one or the other, because choosing the scatter option
   with its lower and upper bound in the `min` and `max` columns. Solidity has no
   upper bound and Region area no lower one, so those cells show an em-dash
   rather than an empty box you might think you were meant to fill in. A bound
-  you type takes effect when you press Enter or click out of the box, not as
-  you type each digit. Then
+  you type takes effect when you press Enter, click out of the box, or stop
+  typing for a second — not as you type each digit — and one typed just before
+  you close the window is saved with the dataset. Then
   choose the source of the inclusion decision —
   the per-channel **intensity minimum** (the `Include ≥` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
@@ -2201,7 +2219,10 @@ buttons — you pick one or the other, because choosing the scatter option
   except for datasets analysed in nanowell mode, where it starts off: there an
   image is a tile of a lattice of wells, a tile's edge is not a well's edge,
   and the nanowell measurement already decides which well each cell belongs
-  to. Unticking or ticking it is remembered with the dataset like the rest of
+  to. A plate made with **Merge Plates** from a nanowell dataset and an
+  ordinary one starts with it on, because the ordinary plate's edge cells
+  really are cut; untick it if you want the nanowell wells' tile-edge cells
+  kept. Unticking or ticking it is remembered with the dataset like the rest of
   the panel, and a Gating reset returns it to that default. The
   line beneath it says how many of the cells being analysed touch the border,
   across the whole plate, and whether they are currently kept or excluded.
@@ -2210,7 +2231,13 @@ buttons — you pick one or the other, because choosing the scatter option
   (`qc_touches_border` in the per-cell CSV: 1 = touches, 0 = whole). A dataset
   analysed before that column existed has nothing to filter on; the line says
   so — in amber if the box is ticked, because then nothing you asked for is
-  happening — and re-running the analysis records it. In the Segmentation
+  happening. A plate only partly analysed since then (a run continued with
+  **Incremental**, or some wells re-run) is checked only for the cells analysed
+  after it: the line then says how many cells were checked out of how many,
+  and that the rest are kept unjudged, again in amber when the box is ticked.
+  Only a **Force** re-run records the column for the older cells — an ordinary
+  re-run skips every well whose results already exist, and an incremental one
+  with the same settings finds them up to date. In the Segmentation
   view's **Why removed** overlay these cells are outlined in magenta and
   labelled *touches the image border*, not as debris.
 
@@ -6163,7 +6190,7 @@ records the unit of its coordinates the converter recovers from that by itself;
 when it does not, enter the grid and FOVs per well and the plate map follows what
 you typed.
 
-**A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, plus one batch's worth again for the transfers that happen while the node is held, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those. **A node that fails to boot is retried automatically.** On a cluster that powers idle nodes down, Slurm can give a run a sleeping node; if that node does not start within the cluster's own limit, `srun` reports `srun: error: Nodes … are still not ready` and then `Something is wrong with the boot of the nodes`. All-Well then asks for another node with the failed one excluded, up to 3 more times, and says so in the log (`node(s) n01 failed to boot — requesting another node (retry 1 of 3)`); after the third it names every node that failed, which is the list to send your cluster's admins. Before each attempt it also checks which nodes are powered on (`idle`, `mix`, or busy but running) and steers the job away from the ones that are asleep, booting or out of service; when none of the powered-on nodes can take the request — they are a different instance type from the one the command asks for, say — it finds that out first, without queuing anything, says `no powered-on node matches this request — Slurm will start one`, and lets Slurm boot one. Starting a node can take several minutes. It also stops avoiding them when every powered-on node is already running a job: the log then says `no free powered-on node in … — Slurm will boot one`, and Slurm starts a powered-down node instead of keeping the job queued behind other people's jobs. A run that does end before its node starts keeps the wells it had already uploaded, so retrying the same plate with the same settings does not send them again. This applies when the host's launcher is an `srun` command. **A word left on its own in that command is refused**, both when you save the host and when a run starts: `srun` would take it for the program to run and the job would fail with `execve(): … No such file or directory` only after a node had started. An instance or node type belongs in a constraint, for example `--constraint=g4dn.12xlarge`.
+**A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, plus one batch's worth again for the transfers that happen while the node is held, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those. **A node that fails to boot is retried automatically.** On a cluster that powers idle nodes down, Slurm can give a run a sleeping node; if that node does not start within the cluster's own limit, `srun` reports `srun: error: Nodes … are still not ready` and then `Something is wrong with the boot of the nodes`. All-Well then asks for another node with the failed one excluded, up to 3 more times, and says so in the log (`node(s) n01 failed to boot — requesting another node (retry 1 of 3)`); after the third it names every node that failed, which is the list to send your cluster's admins. Before each attempt it also checks which nodes are powered on (`idle`, `mix`, or busy but running) and steers the job away from the ones that are asleep, booting or out of service; when none of the powered-on nodes can take the request — they are a different instance type from the one the command asks for, say — it finds that out first, without queuing anything, says `no powered-on node matches this request — Slurm will start one`, and lets Slurm boot one. Starting a node can take several minutes. It also stops avoiding them when every powered-on node is already running a job: the log then says `no free powered-on node in … — Slurm will boot one`, and Slurm starts a powered-down node instead of keeping the job queued behind other people's jobs. On a cluster that does not power nodes down there is nothing to start, and the log says so instead: `every powered-on node in … is busy and none is powered down to boot — the job waits in the queue for one to free`. A run that does end before its node starts keeps the wells it had already uploaded, so retrying the same plate with the same settings does not send them again. This applies when the host's launcher is an `srun` command. **A word left on its own in that command is refused**, both when you save the host and when a run starts: `srun` would take it for the program to run and the job would fail with `execve(): … No such file or directory` only after a node had started. An instance or node type belongs in a constraint, for example `--constraint=g4dn.12xlarge`.
 
 If you start the same plate with the same settings from a second window while the first is still running, the second one stops and says so rather than starting: both would use the same folder on the cluster, and the second would clear the first's input out from under it. Wait for the first to finish, or change something about the run.
 

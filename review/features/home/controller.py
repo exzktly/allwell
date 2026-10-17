@@ -197,9 +197,10 @@ def sync_home_sidebar(ctx) -> None:
     manage: it stays hidden, and the fields that decided between three states
     have no reader.
 
-    All that is left here is the **Import** button, which merges a
-    sample-definitions JSON — so it names nothing on Overview, and nothing on
-    the Variables layer either. The Sample Map tab reaches this through
+    All that is left here is the **Import** button, which brings in the
+    *groups* a JSON file holds (``selection_controller.import_selections_from_json``)
+    — so it names nothing on Overview, and nothing on the Variables layer
+    either. The Sample Map tab reaches this through
     ``ctx.runtime.home.sync_sidebar`` rather than importing it: this module
     imports that one, so the call has to travel by attribute lookup, which is
     the indirection ``plot_members`` already uses for the bar tab's drag order.
@@ -210,11 +211,12 @@ def sync_home_sidebar(ctx) -> None:
         frame.setVisible(False)
     btn = ctx.widgets.get_or_none(IMPORT_KEY)
     if btn is not None:
-        # Import brings in replicate *selections* and well labels, which is not
-        # the thing a user on a page of variables would expect a button called
-        # Import to take. That used to be a per-tab rule; the merge makes it a
-        # per-**layer** one, since Variables is a layer of a tab whose other two
-        # layers are exactly what Import writes.
+        # Import brings in replicate groups and nothing else: a file's well
+        # labels, notes and plot groups are not read
+        # (``imported_selection_items`` returns only its selections). Groups
+        # are not the thing a user on a page of variables would expect a button
+        # called Import to take, so the rule is per **layer**: hidden on the
+        # Variables layer of Sample Map, shown on its other layers.
         btn.setVisible(name in definition_subtabs(ctx)
                        and current_layer(ctx) != "Variables")
 

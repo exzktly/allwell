@@ -348,3 +348,16 @@ def test_awake_nodes_that_are_all_busy_do_not_keep_the_job_waiting(tmp_path):
     assert _excluded(args[0]) == set()
     assert "no free powered-on node in cpu — Slurm will boot one" in out.stdout
     assert "avoiding" not in out.stdout
+
+
+def test_with_every_node_busy_and_none_asleep_nothing_is_said_to_boot(tmp_path):
+    """A cluster without power saving: every node is awake, every one is full, and none is powered down. Nothing will
+    boot — the job waits in the queue for one to free — so saying "Slurm will boot one" told the user to expect a
+    node in minutes that was never coming."""
+    sinfo = "n01 alloc\nn02 comp\nn03 alloc\nn04 drain\n"
+    bindir = _fake_cluster(tmp_path, [("run", "n01")], sinfo)
+    out, args, _ = _run(tmp_path, bindir, "srun -p cpu")
+    assert out.returncode == 0, out.stdout
+    assert "will boot" not in out.stdout, out.stdout
+    assert ("[remote] scheduler: every powered-on node in cpu is busy and none is powered down to boot — "
+            "the job waits in the queue for one to free") in out.stdout, out.stdout

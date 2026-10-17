@@ -94,11 +94,16 @@ def test_a_truncated_local_csv_is_set_aside_and_replaced_by_the_download(tmp_pat
     _cut(out / "measurements_C08.csv.gz")
     assert not csv_is_whole(out / "measurements_C08.csv.gz")
     _gz_rows(transit / "measurements_C08.csv.gz", rows)
-    whole = (transit / "measurements_C08.csv.gz").read_bytes()
+    import gzip
+
+    with gzip.open(transit / "measurements_C08.csv.gz", "rt") as fh:
+        whole = sorted(fh.read().splitlines())
 
     merge_fetched_csvs(transit, out, log_fn=lambda _m: None)
 
-    assert (out / "measurements_C08.csv.gz").read_bytes() == whole
+    with gzip.open(out / "measurements_C08.csv.gz", "rt") as fh:
+        assert sorted(fh.read().splitlines()) == whole, "the well's CSV is not the downloaded rows, exactly"
+    assert not (out / "errors").exists(), "the download restored the cut group, so nothing was lost to report"
     assert (out / ".measurements_C08.csv.gz.truncated").exists(), "the cut-off copy is kept, never deleted"
 
 
@@ -127,3 +132,37 @@ def test_the_retry_never_leaves_a_partial_under_the_real_name(monkeypatch, tmp_p
     remote_fetch.FetchedOutputVerifier(host, run, None, __import__("threading").Event())._retry_missing_wells(
         ["C08_out.zip missing"], log=lambda _m: None)
     assert seen and all("--partial" not in a and any(x.startswith("--partial-dir=") for x in a) for a in seen)
+
+
+def test_an_incremental_download_keeps_the_readable_rows_of_a_truncated_local_csv(tmp_path):
+    """The incremental case the set-aside rule did not consider: the download holds only the *new* field groups,
+    so replacing the cut-off local CSV with it threw away every earlier group's rows — readable rows — and the
+    well's done-set (which also reads its out.zip) never brought them back. The readable whole groups are kept, the
+    group the cut fell in is dropped rather than kept short, and the loss is written where the run's own failure
+    records go, not only to the log."""
+    import gzip
+
+    from pipeline.completeness import error_file_type
+    from pipeline.io import merge_fetched_csvs
+    from pipeline.incremental_keys import read_done_fov_keys
+
+    out, transit = tmp_path / "out", tmp_path / "transit"
+    out.mkdir(), transit.mkdir()
+    _gz_rows(out / "measurements_C08.csv.gz", [(f"f{i}", n) for i in (1, 2, 3) for n in range(2000)])
+    data = (out / "measurements_C08.csv.gz").read_bytes()
+    (out / "measurements_C08.csv.gz").write_bytes(data[: len(data) - 40])      # cut inside f3's rows
+    _gz_rows(transit / "measurements_C08.csv.gz", [("f4", 1)])
+    log: list[str] = []
+
+    merge_fetched_csvs(transit, out, log_fn=log.append)
+
+    with gzip.open(out / "measurements_C08.csv.gz", "rt") as fh:
+        rows = fh.read().splitlines()[1:]
+    by_fov = {f: sum(1 for r in rows if r.split(",")[1] == f) for f in ("f1", "f2", "f3", "f4")}
+    assert by_fov == {"f1": 2000, "f2": 2000, "f3": 0, "f4": 1}, by_fov
+    assert read_done_fov_keys(out / "measurements_C08.csv.gz") == {("f1", "t0"), ("f2", "t0"), ("f4", "t0")}
+    assert (out / ".measurements_C08.csv.gz.truncated").exists(), "the cut-off copy is kept, never deleted"
+    (note,) = (out / "errors").glob("C08_*.txt")
+    assert error_file_type(note) == "EOFError"
+    assert "f3" in note.read_text() and "--force" in note.read_text()
+    assert not any("no local CSV to merge with" in line for line in log), log

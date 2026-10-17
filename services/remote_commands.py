@@ -196,8 +196,12 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         on_stale=f"touch {_remote_quote(suspend_request)}; exit 0",
     ) if suspend_request else ("", "")
     # A subshell in the background, killed as soon as the batch returns: its
-    # `exit` ends only itself, never the driver.
-    watch_on = (f'( {watch_init}while sleep {MID_BATCH_WATCH_POLL_S}; do '
+    # `exit` ends only itself, never the driver. Killing it does not kill the
+    # `sleep` it is waiting on, which then lived out its poll still holding the
+    # driver's stdout — so whoever reads that stream (the app's ssh) saw it end
+    # up to a whole poll after the driver had. The sleep writes nothing, so it
+    # is given no stdout to hold.
+    watch_on = (f'( {watch_init}while sleep {MID_BATCH_WATCH_POLL_S} >/dev/null 2>&1; do '
                 f'{watch}done ) & _aw_wd=$!; ') if watch else ""
     watch_off = ('kill "$_aw_wd" 2>/dev/null; '
                  if watch else "")

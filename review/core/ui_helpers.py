@@ -1418,6 +1418,21 @@ def commit_focused_notes(ctx) -> None:
         _commit_notes_text(ctx, divergent[0])
 
 
+def commit_pending_qc_bounds(ctx) -> None:
+    """Fold a Cell Gating QC bound still being typed into state, and queue it.
+
+    The notes editors' problem, on the QC panel's boxes: a bound applies on
+    ``editingFinished`` or a typing pause, and closing a window does neither
+    before the close has drained the save queue. The panel's builder stamps
+    the commit on ``ctx.runtime.qc.commit_pending_cb`` (it is a no-op when the
+    panel was never built), so this module names no feature.
+    """
+    runtime = getattr(ctx, "runtime", None)
+    commit = getattr(getattr(runtime, "qc", None), "commit_pending_cb", None)
+    if callable(commit):
+        commit()
+
+
 def _commit_notes_text(ctx, text: str) -> None:
     """Write *text* into the slice and queue a save if it is new.
 

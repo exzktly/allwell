@@ -93,7 +93,8 @@ def dialogs(monkeypatch):
     """Install answers for the picker and the add/replace question; record the
     rest. Returns a namespace the test reads back."""
     rec = SimpleNamespace(path="", mode=None, asked=[], picker_dirs=[],
-                          critical=[], warning=[], refreshed=0)
+                          critical=[], warning=[], refreshed=0,
+                          overlap=None, overlap_asked=[])
 
     def pick(_parent, _title, start_dir, _filter):
         rec.picker_dirs.append(start_dir)
@@ -102,6 +103,10 @@ def dialogs(monkeypatch):
     def ask(_ctx, existing, incoming):
         rec.asked.append((existing, incoming))
         return rec.mode
+
+    def ask_overlap(_ctx, overlap):
+        rec.overlap_asked.append(overlap)
+        return rec.overlap
 
     def refresh(_ctx):
         rec.refreshed += 1
@@ -112,6 +117,7 @@ def dialogs(monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning",
                         staticmethod(lambda *a, **_k: rec.warning.append(a)))
     monkeypatch.setattr(sc, "ask_import_mode", ask)
+    monkeypatch.setattr(sc, "ask_import_overlap", ask_overlap)
     monkeypatch.setattr(sc, "groups_centre_refresh", refresh)
     return rec
 
@@ -195,6 +201,143 @@ def test_add_keeps_the_current_groups_and_suffixes_a_clashing_name(ctx, dialogs,
     assert len(names) == 3 and names[1] != "Treated" and names[1].startswith("Treated"), (
         f"a clashing name is suffixed, never overwritten: {names}")
     assert names[2] == "Control"
+    assert dialogs.overlap_asked == [], "disjoint wells: nothing to ask about"
+
+
+# ── Add, when the file's wells are already in a group ────────────────────────
+#
+# The realistic Add: groups exported from one plate and imported into a sister
+# plate with the same layout, or a re-import of the plate's own export. The
+# file's wells are then already grouped here. ``sel_add`` strips a new group's
+# wells out of every other group, so an Add that went through it emptied the
+# existing groups and parked their wells under suffixed names — while the dialog
+# said Add "cannot lose anything". The user is now asked, naming the wells.
+
+def _seed_overlapping(ctx):
+    """``Treated`` shares A01 with the file; ``Old`` holds only B01, which the
+    file's ``Control`` also claims; ``Spare`` shares nothing."""
+    sc.sel_add(ctx, name="Treated", wells=["A01", "H01"])
+    sc.sel_add(ctx, name="Old", wells=["B01"])
+    sc.sel_add(ctx, name="Spare", wells=["G01"])
+    ctx.coordinator.seen.clear()
+    return _plate(ctx)
+
+
+def test_add_over_grouped_wells_asks_naming_the_wells_and_their_groups(ctx, dialogs, tmp_path):
+    _seed_overlapping(ctx)
+    dialogs.path, dialogs.mode = _file(tmp_path, V2), sc.IMPORT_ADD
+    dialogs.overlap = None
+
+    sc.import_selections_from_json(ctx)
+
+    assert dialogs.overlap_asked == [{"A01": "Treated", "B01": "Old"}], (
+        "the second question must name exactly the wells already grouped here, "
+        "with the group each one is in now")
+
+
+def test_cancelling_the_overlap_question_changes_nothing(ctx, dialogs, tmp_path):
+    before = _seed_overlapping(ctx)
+    dialogs.path, dialogs.mode = _file(tmp_path, V2), sc.IMPORT_ADD
+    dialogs.overlap = None
+
+    sc.import_selections_from_json(ctx)
+
+    assert _plate(ctx) == before
+    assert ctx.coordinator.seen == [] and dialogs.refreshed == 0 and ctx.toasts == []
+
+
+def test_skip_leaves_every_existing_group_whole(ctx, dialogs, tmp_path):
+    """Skip: the grouped wells stay where they are, and the imported groups get
+    only the wells nobody had. ``Control`` holds nothing but B01, which ``Old``
+    keeps, so it is not added at all rather than added as an empty husk."""
+    before = _seed_overlapping(ctx)
+    dialogs.path, dialogs.mode = _file(tmp_path, V2), "add"
+    dialogs.overlap = "skip"
+
+    sc.import_selections_from_json(ctx)
+
+    assert _plate(ctx)[:3] == before, "Skip must not take a single well from an existing group"
+    assert _plate(ctx)[3:] == [("Treated_v2", ["A02"])]
+    assert ctx.toasts == ["Imported 1 group(s) from groups.json; 1 left out, "
+                          "every well of it already in a group."]
+
+
+def test_move_hands_the_wells_to_the_imported_groups(ctx, dialogs, tmp_path):
+    """Move: the file's groups get all their wells. ``Treated`` keeps H01;
+    ``Old``, left with nothing, is removed rather than kept as an empty group,
+    so the file's ``Control`` is not renamed around a husk."""
+    _seed_overlapping(ctx)
+    dialogs.path, dialogs.mode = _file(tmp_path, V2), "add"
+    dialogs.overlap = "move"
+
+    sc.import_selections_from_json(ctx)
+
+    assert _plate(ctx) == [("Treated", ["H01"]), ("Spare", ["G01"]),
+                           ("Treated_v2", ["A01", "A02"]), ("Control", ["B01"])]
+
+
+def test_an_import_redraws_once_not_once_per_group(ctx, dialogs, tmp_path):
+    """Every ``sel_add`` asks for a full ``rebuild_all``; an import of a
+    96-group Quick Replicates file must not redraw 96 times against plates
+    holding 1..95 of its groups."""
+    _seed_overlapping(ctx)
+    dialogs.path, dialogs.mode = _file(tmp_path, V2), "add"
+    dialogs.overlap = "move"
+
+    sc.import_selections_from_json(ctx)
+
+    assert ctx.coordinator.seen == [["Treated", "Spare", "Treated_v2", "Control"]]
+
+
+def test_add_keeps_the_file_ids_unless_they_collide(ctx, dialogs, tmp_path):
+    """Saved plots hide groups by id, so an id is worth keeping — but never at
+    the cost of two groups sharing one."""
+    dialogs.path = _file(tmp_path, V2)
+    sc.import_selections_from_json(ctx)
+    assert [s["id"] for s in ctx.state.selection.selections] == ["g1", "g2"]
+
+    dialogs.mode, dialogs.overlap = "add", "skip"
+    sc.import_selections_from_json(ctx)
+    assert [s["id"] for s in ctx.state.selection.selections] == ["g1", "g2"], (
+        "Skip over a file whose every well is already grouped adds nothing")
+
+    sc.sel_set_composition(ctx, "g1", wells=["H01"])
+    sc.import_selections_from_json(ctx)
+    ids = [s["id"] for s in ctx.state.selection.selections]
+    assert len(ids) == 3 and ids[:2] == ["g1", "g2"] and ids[2] not in ("g1", "g2"), (
+        f"the re-imported Treated's id collides with the existing g1, so it is "
+        f"reminted rather than shared: {ids}")
+
+
+# ── Replace keeps what the file says about each group ────────────────────────
+
+HIDDEN = {
+    "schema_version": 2,
+    "selections": [
+        {"id": "g1", "name": "Treated", "wells": ["A01", "A02"], "hidden": False},
+        {"id": "g2", "name": "Control", "wells": ["B01"], "hidden": True},
+        {"id": "g3", "name": "Vehicle", "wells": ["C01"], "hidden": False},
+    ],
+    # Neither the first nor the last group, so "first added" and "last added"
+    # both answer differently from "the file's own current group".
+    "current_id": "g2",
+}
+
+
+def test_replace_keeps_each_group_s_hidden_flag_and_id_and_the_current_group(
+        ctx, dialogs, tmp_path):
+    """What the removed *Load bar group definitions* loader restored, and what a
+    saved plot's ``selection_visibility.hidden_ids`` is keyed on."""
+    _seed(ctx)
+    dialogs.path, dialogs.mode = _file(tmp_path, HIDDEN), sc.IMPORT_REPLACE
+
+    sc.import_selections_from_json(ctx)
+
+    sels = ctx.state.selection.selections
+    assert [(s["id"], s["name"], s["hidden"]) for s in sels] == [
+        ("g1", "Treated", False), ("g2", "Control", True), ("g3", "Vehicle", False)]
+    assert ctx.state.selection.current_selection_id == "g2"
+    assert len(ctx.coordinator.seen) == 1, "one redraw for the whole file"
 
 
 def test_replace_discards_the_current_groups(ctx, dialogs, tmp_path):

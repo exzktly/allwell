@@ -72,3 +72,25 @@ def test_a_beating_app_leaves_the_batch_alone(tmp_path, monkeypatch):
     assert "stopped responding" not in text
     assert not (tmp_path / "run" / "pipeline_saw_the_request").exists()
     assert "waiting for batch 2" in text
+
+
+def test_the_watchdog_does_not_hold_the_driver_s_output_open(tmp_path):
+    """Killing the watchdog subshell left its ``sleep`` running, still holding the driver's stdout, so a reader of
+    that stream saw it end up to a whole poll (30 s) after the driver did. Measured on the real driver with its
+    real poll and stdout on a pipe, as the app's ssh reads it."""
+    run_dir = tmp_path / "run"
+    (run_dir / "b1").mkdir(parents=True)
+    (run_dir / rc.BATCH_READY.format(i=1)).touch()
+    heartbeat = run_dir / "heartbeat"
+    heartbeat.touch()
+    ahead = time.time() + 120                      # fresh for the whole test: the watchdog never fires
+    os.utime(heartbeat, (ahead, ahead))
+    snippet = rc._batch_driver_snippet(str(run_dir), 1, ["sleep", "1"], heartbeat=str(heartbeat),
+                                       suspend_request=str(run_dir / "suspend"))
+    assert rc.MID_BATCH_WATCH_POLL_S >= 20, "the measurement needs the real, long poll"
+    t0 = time.monotonic()
+    out = subprocess.run(["bash", "-c", snippet], capture_output=True, text=True, timeout=90)
+    elapsed = time.monotonic() - t0
+    assert "all 1 batch(es) done" in out.stdout, out.stdout + out.stderr
+    assert elapsed < 10, (f"the driver's output stayed open {elapsed:.1f} s after a one-second batch — the "
+                          f"watchdog's sleep outlived it")

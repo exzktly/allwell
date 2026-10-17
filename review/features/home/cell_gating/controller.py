@@ -292,39 +292,118 @@ def _first_frame_values(df, channels, ratios) -> tuple | None:
     return areas, fluor, ratio_vals
 
 
+#: The verdict columns ``_cell_gating_valid_mask`` reads. The projectors write
+#: them onto a narrow read when their layer is on; asked for by name too, so a
+#: file that carries them itself keeps them in the narrow frame.
+_VALIDITY_COLUMNS = frozenset({"QC_Pass", "Crop_Pass"})
+
+
+def _first_frame_columns(channels, ratios) -> set[str]:
+    """The columns :func:`_first_frame_values` reads, besides the identity and verdict ones."""
+    cols = {"area_px", *(f"{channel}_mean_intensity" for channel in channels), *_VALIDITY_COLUMNS}
+    for rm in ratios:
+        cols.update((rm.numerator_col(), rm.denominator_col()))
+    return cols
+
+
+def _owed_to_the_load(ctx) -> bool:
+    """Whether a dataset is loading, so the reading is left to the load's end.
+
+    A load calls :func:`cell_gating_load_cell_areas` before its inputs are final:
+    from ``set_ratio_metrics`` once with no ratios and again with the loaded
+    ones, from the channel switch that second call can make
+    (``update_channel_selector`` → ``set_active_channel`` →
+    ``recalculate_threshold``), from the tab's first build, and from the load's
+    own ``recalculate_threshold``. Each call's values were superseded by the
+    next, and ``set_ratio_metrics`` clears the statistics cache the per-well
+    memo lives in, so each read the plate again (tracker R2). So while the plots
+    are held for a load (``plot_hold.HOLD_LOADING``) a call rebuilds the
+    controls and owes the reading, and the load pays it once, after the
+    channels, ratios and gates are final (:func:`cell_gating_read_owed_cell_areas`).
+    """
+    from review.core import plot_hold
+    return plot_hold.held_for(ctx) == plot_hold.HOLD_LOADING
+
+
 def cell_gating_load_cell_areas(ctx) -> None:
-    """Repopulate cell-area + per-channel fluorescence CDFs from selected wells."""
+    """Repopulate cell-area + per-channel fluorescence CDFs from selected wells.
+
+    During a load only the controls are rebuilt and the reading is owed (see
+    :func:`_owed_to_the_load`). Each well is read narrowly — the first frame's
+    columns and the verdicts' inputs — and its first-frame values remembered
+    (``plate_scan``), so a repeat with the same rows, verdicts, channels and
+    ratios reads nothing.
+    """
     if not ctx.runtime.cell_gating.fluor_gate_edits is not None:
         return  # tab not built yet
-    ctx.runtime.cell_gating.cell_areas = []
-    ctx.runtime.cell_gating.fluor_data = {}
-    ctx.runtime.cell_gating.ratio_data = {}
+    if _owed_to_the_load(ctx):
+        ctx.runtime.cell_gating.cell_areas = []
+        ctx.runtime.cell_gating.fluor_data = {}
+        ctx.runtime.cell_gating.ratio_data = {}
+        ctx.runtime.cell_gating.areas_owed = True
+        _cell_gating_build_channel_controls(ctx)
+        _cell_gating_refresh_optimizer_controls(ctx, read=False)
+        ctx.runtime.cell_gating.status_label.setText("Reading cells once the dataset has loaded…")
+        return
+    ctx.runtime.cell_gating.areas_owed = False
+    labels = _read_first_frames(ctx)
+    _cell_gating_build_channel_controls(ctx)
+    _cell_gating_refresh_optimizer_controls(ctx)
+    _show_cell_areas(ctx, labels)
+
+
+def cell_gating_read_owed_cell_areas(ctx) -> None:
+    """Do the reading a load's calls to :func:`cell_gating_load_cell_areas` owed.
+
+    Called once by the load (``load_controller._load_directory_held``) after
+    ``recalculate_threshold``, when the channels, ratios and gates are final and
+    before the gating pass starts. The controls were rebuilt by the owing calls
+    and the saved gates mirrored onto them since, so only the reading is done
+    here — the CDFs, the optimizer's timepoint and baseline lists and its
+    Min/Max fit — and the edits are left alone. A no-op when nothing is owed.
+    """
+    rt = getattr(getattr(ctx, "runtime", None), "cell_gating", None)
+    if rt is None or not rt.areas_owed or rt.fluor_gate_edits is None:
+        return
+    rt.areas_owed = False
+    labels = _read_first_frames(ctx)
+    _cell_gating_refresh_opt_timepoints(ctx)
+    _cell_gating_refresh_opt_fc_controls(ctx)
+    _cell_gating_autofill_opt_range(ctx)
+    _show_cell_areas(ctx, labels)
+
+
+def _read_first_frames(ctx) -> list[str]:
+    """Fill the CDF arrays from each source well's first frame; return the wells."""
+    rt = ctx.runtime.cell_gating
+    rt.cell_areas = []
+    rt.fluor_data = {}
+    rt.ratio_data = {}
     labels = _cell_gating_source_wells(ctx)
     ratios = list(ctx.state.channel.ratio_metrics or [])
-
     channels = tuple(ctx.state.channel.fluor_channels)
     params = (channels, tuple((rm.display_label(), rm.numerator_col(), rm.denominator_col(),
                                float(rm.epsilon or 0.0)) for rm in ratios))
+    columns = _first_frame_columns(channels, ratios)
     for label in labels:
-        # Remembered per well (``plate_scan``) until its rows or verdicts change:
-        # this runs several times while a dataset opens and on every visit to the
-        # tab, and with the row cache bounded each run would read every evicted
-        # source well from disk again. What is kept is one frame's values per
-        # well — the first frame's cells — never the rows.
+        # Remembered per well (``plate_scan``) until its rows or verdicts change,
+        # and read narrowly: what is kept is one frame's values per well — the
+        # first frame's cells — never the rows.
         found = per_well(ctx, "cell_gating_first_frame", label, params,
-                         lambda df: _first_frame_values(df, channels, ratios))
+                         lambda df: _first_frame_values(df, channels, ratios), columns=columns)
         if found is None:
             continue
         areas, fluor, ratio_vals = found
-        ctx.runtime.cell_gating.cell_areas.extend(float(a) for a in areas)
+        rt.cell_areas.extend(float(a) for a in areas)
         for channel, values in fluor.items():
-            ctx.runtime.cell_gating.fluor_data.setdefault(channel, []).extend(float(x) for x in values)
+            rt.fluor_data.setdefault(channel, []).extend(float(x) for x in values)
         for name, values in ratio_vals.items():
-            ctx.runtime.cell_gating.ratio_data.setdefault(name, []).extend(float(x) for x in values)
+            rt.ratio_data.setdefault(name, []).extend(float(x) for x in values)
+    return labels
 
-    _cell_gating_build_channel_controls(ctx)
-    _cell_gating_refresh_optimizer_controls(ctx)
 
+def _show_cell_areas(ctx, labels: list[str]) -> None:
+    """Draw the CDFs just read and say where they came from."""
     if ctx.runtime.cell_gating.cell_areas:
         ctx.runtime.cell_gating.axes_stack = []
         _cell_gating_plot_cdf(ctx)
@@ -1460,8 +1539,13 @@ def _cell_gating_optimizer_channel_specs(ctx) -> list[tuple[str, str]]:
     return specs
 
 
-def _cell_gating_refresh_optimizer_controls(ctx) -> None:
-    """Refresh optimizer channel/well dropdowns after data or ratios change."""
+def _cell_gating_refresh_optimizer_controls(ctx, *, read: bool = True) -> None:
+    """Refresh optimizer channel/well dropdowns after data or ratios change.
+
+    ``read=False`` lists the channels and wells only, leaving the timepoint and
+    baseline lists and the Min/Max fit — the parts that read wells — to a later
+    call (a refresh during a load, :func:`_owed_to_the_load`).
+    """
     channel_combo = ctx.runtime.cell_gating.opt_channel_combo
     well_a_combo = ctx.runtime.cell_gating.opt_well_a_combo
     well_b_combo = ctx.runtime.cell_gating.opt_well_b_combo
@@ -1497,6 +1581,8 @@ def _cell_gating_refresh_optimizer_controls(ctx) -> None:
     if btn is not None:
         btn.setEnabled(bool(channel_combo.count() and len(wells) >= 2))
 
+    if not read:
+        return
     _cell_gating_refresh_opt_timepoints(ctx)
     _cell_gating_refresh_opt_fc_controls(ctx)
     _cell_gating_autofill_opt_range(ctx)
@@ -1550,7 +1636,7 @@ def _cell_gating_refresh_opt_fc_controls(ctx) -> None:
             label = str(combo_w.currentText()).strip()
             if not label or label not in (ctx.state.dataset.well_paths or {}):
                 continue
-            for tp in _distinct_timepoints(get_rows(ctx, label)):
+            for tp in _well_timepoints(ctx, label):
                 if tp not in seen:
                     seen.add(tp)
                     tps.append(tp)
@@ -1569,6 +1655,44 @@ def _cell_gating_refresh_opt_fc_controls(ctx) -> None:
             base.blockSignals(blocked)
 
 
+def _well_timepoints(ctx, label: str) -> list:
+    """*label*'s distinct timepoints, from a narrow read, remembered per well (``plate_scan``).
+
+    The identity columns every narrow read carries hold both timepoint spellings
+    ``_distinct_timepoints`` reads, so nothing else is asked for.
+    """
+    return per_well(ctx, "cell_gating_timepoints", label, (), _distinct_timepoints,
+                    columns=_VALIDITY_COLUMNS) or []
+
+
+def _well_value_extent(ctx, label: str, channel_key: str, ratios, timepoint) -> tuple | None:
+    """``(min, max)`` of *label*'s valid values for *channel_key*, or ``None`` when it has none.
+
+    The optimizer's Min/Max fit pools two wells and takes two numbers from the
+    pool, which the two wells' own extents answer exactly. Read narrowly — the
+    value's inputs, the identity columns and the verdicts' — and remembered per
+    well until its rows change; a ratio the index does not know reads the whole
+    frame, as ``value_inputs`` asks.
+    """
+    from review.data.narrow_rows import value_inputs
+    from review.domain.ratio_models import is_ratio_key
+
+    val_col = channel_key if is_ratio_key(channel_key) else f"{channel_key}_mean_intensity"
+    want = value_inputs(val_col, ratios)
+    ratio = (ratios or {}).get(channel_key) if is_ratio_key(channel_key) else None
+    params = (channel_key, timepoint,
+              tuple(sorted(ratio.to_dict().items())) if ratio is not None else None)
+
+    def _extent(df) -> tuple[float, float] | None:
+        values = _valid_values_for_channel(df, channel_key, ratios, timepoint)
+        if values.size == 0:
+            return None
+        return float(np.nanmin(values)), float(np.nanmax(values))
+
+    return per_well(ctx, "cell_gating_value_extent", label, params, _extent,
+                    columns=None if want is None else want | _VALIDITY_COLUMNS)
+
+
 def _cell_gating_refresh_opt_timepoints(ctx) -> None:
     """Populate the optimizer timepoint dropdown from the two selected wells."""
     combo = ctx.runtime.cell_gating.opt_timepoint_combo
@@ -1582,7 +1706,7 @@ def _cell_gating_refresh_opt_timepoints(ctx) -> None:
         label = str(combo_w.currentText()).strip()
         if not label or label not in (ctx.state.dataset.well_paths or {}):
             continue
-        for tp in _distinct_timepoints(get_rows(ctx, label)):
+        for tp in _well_timepoints(ctx, label):
             if tp not in seen:
                 seen.add(tp)
                 tps.append(tp)
@@ -1628,16 +1752,15 @@ def _cell_gating_autofill_opt_range(ctx) -> None:
     timepoint = tp_combo.currentData() if tp_combo is not None else None
     ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
     try:
-        va = _valid_values_for_channel(get_rows(ctx, well_a), channel_key, ratios, timepoint)
-        vb = _valid_values_for_channel(get_rows(ctx, well_b), channel_key, ratios, timepoint)
+        extents = [e for e in (_well_value_extent(ctx, well, channel_key, ratios, timepoint)
+                               for well in (well_a, well_b)) if e is not None]
     except Exception:
         swallowed("cell gating: optimizer range autofill failed")
         return
-    pooled = np.concatenate([va, vb]) if (va.size or vb.size) else np.array([], dtype=float)
-    if pooled.size == 0:
+    if not extents:
         return
-    lo = float(np.nanmin(pooled))
-    hi = float(np.nanmax(pooled))
+    lo = min(e[0] for e in extents)
+    hi = max(e[1] for e in extents)
     if not (np.isfinite(lo) and np.isfinite(hi)):
         return
     if hi <= lo:

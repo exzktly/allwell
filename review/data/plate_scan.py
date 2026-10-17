@@ -18,17 +18,31 @@ into the key before computing, never after, for the reason that function gives.
 
 A *compute* must return something small and must not keep the frame: a result
 holding the rows would put the plate back in memory through the side door.
+
+A caller that can name the columns its *compute* reads passes them as
+``columns``: the well is then read through ``narrow_rows.narrow_rows``, which
+adds every verdict layer's declared inputs and runs the projectors on the
+narrow frame, and never puts it in the row cache. Without ``columns`` (or with
+``None``, "I cannot say") the whole frame is read through ``get_rows`` as
+before. The columns are not part of the key: they must follow from *params*,
+which is what decides the answer.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Hashable, Iterable
 
 from review.data.data_loading import get_rows
+from review.data.narrow_rows import narrow_rows
 
 
-def per_well(ctx, kind: str, label: str, params: Hashable, compute: Callable):
-    """``compute(rows of label)``, memoized for as long as the rows and *params* hold."""
+def per_well(ctx, kind: str, label: str, params: Hashable, compute: Callable,
+             *, columns: Iterable[str] | None = None):
+    """``compute(rows of label)``, memoized for as long as the rows and *params* hold.
+
+    With *columns*, the rows are a narrow read of those columns plus what the
+    verdicts need (see the module docstring); without, the whole frame.
+    """
     store = getattr(ctx.state, "stats_cache", None)
     version = getattr(ctx.state.dataset, "rows_version", None)
     if version is None:
@@ -39,7 +53,11 @@ def per_well(ctx, kind: str, label: str, params: Hashable, compute: Callable):
         hit = store.cache.get(key, _MISSING)
         if hit is not _MISSING:
             return None if hit is _NONE else hit
-    result = compute(get_rows(ctx, label))
+    if columns is None:
+        rows = get_rows(ctx, label)
+    else:
+        rows = narrow_rows(ctx, label, columns)
+    result = compute(rows)
     if store is not None:
         # ``None`` is remembered too: it is the answer for a well with nothing
         # to contribute (no values of the column, no rows), and not remembering

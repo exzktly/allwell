@@ -19,6 +19,11 @@ import numpy as np
 import pandas as pd
 
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from review.core.stats_cache_state import PopulationStore
+    from review.domain.well_population import ExtraTable, WellPopulation
 
 from review.data.data_loading import (
     aggregate_with_threshold_df,
@@ -253,7 +258,8 @@ def _well_extra(ctx, lbl, target_t, threshold, val_col, fluor_gates, ratios,
     return hit
 
 
-def _extra_table_from_population(ctx, lbl, threshold, val_col, fluor_gates, version, on_col):
+def _extra_table_from_population(ctx, lbl, threshold, val_col, fluor_gates, version,
+                                 on_col) -> ExtraTable | dict | None:
     """:func:`_well_extra`'s per-timepoint table, from the well's remembered population.
 
     ``None`` when the population cannot supply it — no store, or a well with too
@@ -671,7 +677,7 @@ def aggregate_well_cached(
     return result
 
 
-def _population_store(ctx):
+def _population_store(ctx) -> PopulationStore | None:
     """The byte-bounded population store, or ``None`` for a context without one."""
     store = getattr(getattr(ctx.state, "stats_cache", None), "populations", None)
     if store is None or getattr(ctx.state, "repo", None) is None:
@@ -749,7 +755,7 @@ def prefetch_populations(ctx, labels, *, val_col: str, fluor_gates,
 
 
 def _population(ctx, label: str, *, val_col: str, tp_col: str, fluor_gates,
-                per_fov: bool, version, on_col: str | None):
+                per_fov: bool, version, on_col: str | None) -> WellPopulation | None:
     """Well *label*'s threshold-free population (``review/domain/well_population.py``), remembered.
 
     ``None`` when the context has no population store (a thin test context),

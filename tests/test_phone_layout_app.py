@@ -191,6 +191,7 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
 
 def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
     """The UX review's second round, each checked on the widget a thumb meets."""
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QComboBox, QPushButton, QTextEdit, QToolButton
     from core import phone_layout
 
@@ -238,10 +239,23 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         assert _visible(shell._rail_status)
         shell.menu_button.click()
         _pump(qapp)
-        # The Controls sheet: 48 pt controls, and a "Done ✕" to close it.
+        # The Controls sheet: 48 pt controls, and a "Done ✕" to close it —
+        # on Plotting, whose band has controls with no dataset loaded (Home's
+        # holds nothing tappable until one is).
+        nav._rows["Plotting"].clicked.emit("Plotting")
+        _pump(qapp)
         shell.controls_button.click()
         _pump(qapp)
         assert shell.controls_button.text() == "Done ✕"
+        # At most 60 % of the window (Plotting's controls fill that on this
+        # small screen), and no scrim: the plot above it is what the controls
+        # are judged by.
+        sheet = shell._sheet
+        assert 0 < sheet.height() <= int(win.height() * 0.6)
+        assert sheet._backdrop._alpha == 0
+        # A drag scrolls the sheet and the log, as a thumb expects.
+        from PySide6.QtWidgets import QScroller
+        assert QScroller.hasScroller(logs[0].viewport())
         band = shell._sheet_band
         ctrls = [w for t in (QPushButton, QToolButton, QComboBox)
                  for w in band.findChildren(t) if _visible(w)]
@@ -261,6 +275,9 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         _pump(qapp)
         from PySide6.QtWidgets import QBoxLayout
         assert shell.page_button.parentWidget() is review._top_bar
+        bar_lay = review._top_bar.layout()
+        for b in (shell.page_button, shell.controls_button):
+            assert bar_lay.itemAt(bar_lay.indexOf(b)).alignment() == Qt.AlignVCenter
         assert shell._h.analyze_body.direction() == QBoxLayout.LeftToRight
         assert dash.maximumWidth() == round(300 * u)
         assert dash._plate.maximumHeight() == round(160 * u)

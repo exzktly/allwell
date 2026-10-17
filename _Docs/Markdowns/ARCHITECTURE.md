@@ -116,53 +116,91 @@ they're shell-wide:
 All-Well runs on a Windows PC that its user often reaches from a phone over
 RealVNC, which resizes the Windows desktop to the phone's shape (upright or
 sideways) and then scales that desktop down to the phone's screen. Phone layout
-is the arrangement for that: one column, larger text and plots, chrome a thumb
-can hit. It is a layout of the same window, not a second interface — every pane,
-plot and control is the one the desk uses — so a running pipeline is untouched
-by switching, which is the reason it is live rather than a restart with a
-`QT_SCALE_FACTOR` (closing the window stops a local run, `_stop_analyze_runner`).
+is the arrangement for that: one column, touch-sized controls, text and plots
+sized for the phone's screen. It is a layout of the same window, not a second
+interface — every pane, plot and control is the one the desk uses — so a running
+pipeline is untouched by switching, which is the reason it is live rather than a
+restart with a `QT_SCALE_FACTOR` (closing the window stops a local run,
+`_stop_analyze_runner`).
 
 **Where it lives.** `core/phone_layout.py` holds the process-wide flag
-(`is_on`, `set_on`, listeners) and the Qt-free rules; any pane may read the flag
-without importing the shell. `ui/phone_shell.py` is the Qt half — `PhoneShell`,
-owned by `AllWellApp` — and imports no pane: `AllWellApp._build_phone_shell` hands
-it a `PhoneHandles` naming every widget it rearranges and the callables it drives
-(the mode, the navigator, the sections, a relayout), so a pane that moves a widget
-changes one line there.
+(`is_on`, `set_on`, listeners) and the Qt-free rules — the phone point, the type
+scale, the screen-shape test; any pane may read the flag without importing the
+shell. `ui/phone_shell.py` is the Qt half — `PhoneShell`, owned by `AllWellApp` —
+and imports no pane: `AllWellApp._build_phone_shell` hands it a `PhoneHandles`
+naming every widget it rearranges and the callables it drives (the mode, the
+navigator, the band, the run dashboards, the logs, the status text, a relayout),
+so a pane that moves a widget changes one line there.
+
+**The phone point.** Every size in phone layout is written in phone points
+(`u`): the short side of the screen's geometry divided by 390, the width in
+points of a typical phone held upright (`phone_layout.phone_unit`). RealVNC
+shrinks the remote desktop to the phone's screen, so a widget `n·u` pixels wide
+on the desktop is `n` points wide under the thumb, whatever resolution the
+desktop was given. The rules are the platform's: a control is at least 44 pt
+tall (`TOUCH_MIN_PT`), a row a thumb picks from — a menu item, a rail section, a
+control in the Controls sheet — 48 pt (`TOUCH_ROW_PT`), gaps 8 pt, the top bar
+52 pt (44 pt sideways, where height is what the plots lack). Body text is 15 pt
+times the chosen text size — Small, Medium or Large, 0.87 / 1 / 1.13
+(`phone_layout.type_scale`) — and becomes the UI scale (§8, *The UI scale*).
+`theme.set_touch_unit(u)` appends the touch floors to the application stylesheet
+(`theme._touch_qss`), so a control built later is touch-sized too.
 
 **Switching.** A labelled `Phone layout` button sits at the header's *left*,
-beside the version pill — the left edge is the part of an oversized window still on
-a narrow screen, and the label says what it does without a tooltip, which a touch
-screen never shows. In phone layout the header row is hidden and the way back is
-the band's *Aa* menu (*Text size* ▸, *Desktop layout*). `PhoneShell.set_on(on)`:
+beside the version pill — the left edge is the part of an oversized window still
+on a narrow screen, and the label says what it does without a tooltip, which a
+touch screen never shows. In phone layout the header row is hidden and the way
+back is the ⋯ menu's *Desktop layout*. `PhoneShell.set_on(on)`:
 
-1. hides the header, the desk-only buttons (`desk_only`: the publication look,
-   both resets, copy analysis, reveal folder — three of them destructive, a
-   fat-finger target, none for reading results; Refresh and Help stay) and the
-   status bar's keyboard hints; turns the mode bar to labels only
-   (`ModeBar.setCompact`) and the page tab strip into one *Bar Plots ▾* menu
-   button mirroring it; shows the band's ☰ button and *Aa* menu;
-2. closes the side rail (the page first) — or, on the way out, restores the
-   left panel's desk state;
-3. applies the text scale (below) — the only slow step, ~6 s, and skipped when
-   the scale does not change;
-4. re-announces the mode (`review.modeChanged`), whose two listeners are exactly
-   the syncs a layout change needs: Split View closes and hides its toggle
-   (`split_view._set_toggle_visible_for_mode`), and the window re-syncs the mode
-   bar (`_sync_mode_bar` gives it its natural width in phone layout rather than
-   the left panel's, and keeps it visible though the panel is closed) and the
-   action cluster;
+1. hides the header and the desk-only buttons (`desk_only`: the publication
+   look, both resets, copy analysis, reveal folder — three of them destructive, a
+   fat-finger target, none for reading results — plus Refresh, Help and the
+   status bar, whose jobs move to the ⋯ menu and the side rail), turns the mode
+   bar to labels only (`ModeBar.setCompact`), stacks the run dashboards, wraps
+   the analysis log, and hides Review CSV and Batch Export from the rail's
+   sections (`phone_hidden_sections`) — both are desk work;
+2. closes the side rail — or, on the way out, restores the left panel's desk
+   state;
+3. restyles at the phone's type scale and touch unit (§8) — the only slow step,
+   about 6 s, under a busy overlay, and skipped when neither changes. Widgets
+   that take a different *form* on a phone — a stepper's − / +, an Analyze form
+   row's stacked label — take it after the restyle on the way in and give it up
+   before the restyle on the way out, so the rescale pass only ever sees
+   desk-shaped widgets;
+4. pins the touch sizes (`_apply_sizes`), scales the plots, and, while phone
+   layout is on, installs an app event filter (`_PhoneEventFilter`) that gives
+   anything shown later the same treatment: a plot its DPI and height, a dialog a
+   place inside the screen, a control band its place in the Controls sheet, a
+   matplotlib toolbar its absence (pan and zoom are modes a VNC drag fights
+   with), a stepper its − / +, a form row its stacking — and makes an ⓘ answer a
+   tap with its text, since nothing hovers on a phone;
 5. maximizes the window (phone) or restores the desk geometry it remembered —
    only one remembered on a desk-shaped screen.
+
+**The top bar.** Upright: ☰ (48 pt, ✕ while the rail is out), the mode switch
+(Review · Analyze · Datasets, labels only, one shared segment width that
+`ModeBar._equalise_widths` re-measures after every UI scale — measured before the
+restyle it clipped "Datasets"), and ⋯ (48 pt). Under it, in Review only, a 52 pt
+strip holds the page menu (*Bar Plots ▾*, mirroring the page's tab strip, which
+is hidden) and **⚙ Controls**. Sideways the strip's two buttons join the bar
+(`_place_page_controls`), vertically centred. ⋯ is one flat menu, no submenus: the
+text size as a row of three buttons (S / M / L), *Reload dataset*, *Help*, *App
+log* and *Desktop layout*. The status bar's log "!" is mirrored onto ⋯
+(`_sync_log_badge`), driven by `NoticeBadge.changed`; the badge's Show and Hide
+events cannot drive it, because they never arrive while the status bar is hidden.
 
 **The side rail slides out over the page.** A phone held upright has no room for
 a column beside the page, so in phone layout `review/core/phone_drawer.py` lends
 every pane's left panel — Review's rail (dataset, sections, well plate, the page's
 own rail frames, saved selections), the Analyze form, the Datasets tool list — to
-one left-edge `widgets.drawer.Drawer`, and the band's ☰ slides the current mode's
-panel out *over* the page, 86 % of the window wide, with the strip of page left
-showing dimmed. The page underneath is not moved or resized, so it is exactly
-where it was when the rail closes.
+one left-edge `widgets.drawer.Drawer`, and ☰ slides the current mode's panel out
+*over* the page: the window's width less 56 pt upright (360 pt sideways), with the
+page left showing behind a 50 % scrim. Review's sections become a two-wide grid of
+48 pt tiles (`RailNav.setColumns(2)`), and the top of the rail carries the status
+bar's line ("4 well(s) | 72 nuclei", `PhoneRailStatus`), refreshed every 400 ms
+while the rail is out — the status bar is hidden, and the rail is where the wells
+it counts are picked. The page underneath is not moved or resized, so it is
+exactly where it was when the rail closes.
 
 The drawer is the left panel's *expanded* state: it is driven by the same flag the
 desk's collapse toggle drives (`_sidebar_collapsed`), through
@@ -170,21 +208,42 @@ desk's collapse toggle drives (`_sidebar_collapsed`), through
 it has the final word in phone layout — only the current mode's panel shows, and
 only in the drawer. `set_sidebar_collapsed(ctx, …)` sets the flag to a value;
 `toggle_sidebar` is that with the value flipped. The drawer closes when the
-dimmed strip is tapped or Esc pressed (its `closed` signal sets the flag, so ☰ and
-the flag never disagree), when ☰ is tapped again, when a section is tapped
+scrim is tapped or Esc pressed (its `closed` signal sets the flag, so ☰ and the
+flag never disagree), when ☰ is tapped again, when a section is tapped
 (`RailNav.itemClicked`, which fires for a user's click and not for navigation done
 by code), and when a mode is picked on the mode bar. Tapping wells on the plate
 keeps it open — picking several in a row is normal.
 
 The drawer is hosted on the Review widget, which holds the band, not on a
-splitter (a `QSplitter` adopts any child widget as a pane), and sits below the band
-(`Drawer(top_inset=…)`, re-measured when the band's height changes with the text
-size) so ☰ and the mode bar stay in reach while it is open. Each panel is lent
+splitter (a `QSplitter` adopts any child widget as a pane). It starts right under
+the top bar (`Drawer(top_inset=…)`, re-measured as the bar's height changes), so
+☰ and the mode switch stay in reach while it is open, and it covers the strip,
+whose page menu and Controls belong to the page it hides. Each panel is lent
 once, on entering phone layout, and given back on leaving it — to its splitter, at
 its index, with its width pin and the splitter's sizes — after which the desk's own
 visibility rule is re-applied, since a reparent can show a hidden widget. The
 floating rail toggle is hidden in phone layout — `position_rail_toggle` ends by
 showing it on every resize and mode switch, so the check is inside it.
+
+**The Controls sheet.** A Review page's own controls — its `ControlBand`
+(channel, property, display, threshold, …) — are hidden in phone layout so the
+plot gets the screen, and **⚙ Controls** lends the current page's band to a sheet:
+a bottom `Drawer` upright, as tall as its content up to 60 % of the window, or a
+360 pt right-hand panel sideways. `ControlBand.setStacked(True)` flows the band's
+actions into its scope flow so it wraps to the sheet's width; the sheet's buttons,
+combos and fields are 48 pt (`QWidget#Drawer[phoneSheet="true"]` in the touch
+block) with 8 pt gaps. The sheet has no scrim, because the plot above it redraws
+as its controls change and a dimmed plot cannot be judged by. Its button reads
+**Done ✕** while it is open. Closing it — that button, a mode switch, rotating the
+phone, leaving phone layout — gives the band back to its page at its index,
+unstacked.
+
+**Long panels scroll by dragging** (`_grab_scrolling`): over VNC a touch-drag
+arrives as a left-button mouse drag, which a Qt scroll area ignores, so
+`QScroller` grabs the left-button gesture on the side rail, the Controls sheet and
+the read-only logs — never on the plate or a plot, whose drags mean something
+else. Whether RealVNC's touch mode delivers drags that way is not verified on a
+device.
 
 **The window fits its screen — in both layouts.** `PhoneShell.fit_window` runs at
 startup and on every `screenChanged` / `availableGeometryChanged`: the minimum is
@@ -193,43 +252,65 @@ size, and a window that is not maximized is moved — shrunk only if it must be 
 inside it (`fitted_rect`). Without it the desk minimum held the window wider than
 a portrait desktop and every control on its right ran off the screen, including
 whatever would have fixed it. The same call compares the screen's shape with the
-layout (`phone_layout.is_phone_shaped`: upright, or too small for the desk
-window) and, when they disagree, shows a banner (`ContextBanner`, *Switch* / *Not
-now*) offering the other layout. It never switches by itself. A phone held sideways
-at its full resolution is the size of a wide monitor and reads as desk-shaped; the
-button is how to say otherwise.
+layout and, when they disagree, shows a banner (`ContextBanner`, *Switch* / *Not
+now*) offering the other layout. It never switches by itself.
+`phone_layout.is_phone_shaped` calls a screen a phone when it is upright, too
+small for the desk window, or sideways at a phone's proportions — at least 1.95:1
+with a short side under 1,300 px; phones are 19.5:9 (2.17) or longer, monitors
+16:9 (1.78) or 16:10. A geometry change while phone layout is on (the phone
+turned, and VNC resized the desktop under the maximized window) closes the
+Controls sheet and restyles at the new unit.
+
+**Sideways.** One 44 pt bar carries everything; the rail is 360 pt; the Controls
+sheet is a right-hand panel; plots get at least 220 pt per row of axes
+(`size_canvas`, upright too) and the page scrolls rather than squashing a
+three-panel figure into the screen's height. Analyze turns two-column
+(`_apply_analyze_columns`): the run summary and plate on the left, 300 pt wide,
+the log on the right. The plate is capped at 160 pt tall there: sideways the
+screen is always 390 pt tall, so the plate's share is fixed — the bar and the
+summary rows above it take the rest at the largest text size, and 200 pt cut off
+row H.
 
 **Startup and persistence.** The choice (`ui/phone_layout`) and the text size
-(`ui/phone_text_size`, a preset or 0 for Auto) live in `core.app_settings`.
-`allwell._phone_layout_at_startup` re-enters phone layout only when it was left on
-*and* the screen is still phone-shaped — a choice made on the phone must not open
-the next desk launch as a phone — and then scales the tokens before the window is
-built, so the restyle costs nothing. `_save_window_state` saves no geometry or
-splitter sizes while phone layout is on or the screen is phone-shaped.
+(`ui/phone_text_size`: `S`, `M` or `L`, Medium when unset or unreadable) live in
+`core.app_settings`. `allwell._phone_layout_at_startup` re-enters phone layout
+only when it was left on *and* the screen is still phone-shaped — a choice made on
+the phone must not open the next desk launch as a phone — and then scales the
+tokens and sets the touch unit before the window is built, so the restyle costs
+nothing. `_save_window_state` saves no geometry or splitter sizes while phone
+layout is on or the screen is phone-shaped.
 
-**The run dashboard** stacks its stage rail above the plate in phone layout
-(`PlateProgress.setStacked`): the body row turns to a column, the column dividers
-and the legend go (the stage rail names the same states), and the rail's fixed
-width is lifted. The raw log keeps `NoWrap`: wrapping would make the trim
-fix-up's `blocks_trimmed × lineSpacing` (§6.1) wrong whenever a trimmed block
-spanned several lines, and the drain's cost was measured only without wrapping.
+**The run dashboard** is the Analyze page in phone layout
+(`PlateProgress.setStacked`): the body row turns to a column, the column dividers,
+legend, title, collapse toggle, status word and "Stages" heading go (the headline
+says the state, the stage rows name themselves), the headline is set larger
+(`PlateHeadline[phone]`), and the plate fills the column's width, centred.
+Tapping a well writes what it is doing to a line under the plate
+(`PlateWellDetail`), since there is no hover. The analysis log wraps in phone
+layout — reading the end of an error line on a phone is worth the cost that a
+trimmed log re-anchors a scrolled-up reader slightly off, because the trim fix-up
+counts a block as one line (§6.1). At the desk it keeps `NoWrap`.
 
 **Closing mid-run asks first** in phone layout (`_confirm_close_in_phone_layout`):
 there the window's close button is a corner of a maximized window under the
 thumb, and watching a run is what the phone is for. The desk keeps its behaviour.
 
-**Plots** draw at `phone_layout.plot_factor(scale)` — the square root of the text
-scale — times their DPI (`phone_shell.scale_canvas`, applied to every live canvas
-and, through an app event filter that exists only while phone layout is on, to a
-canvas shown later). The square root because a plot in one column already has the
-screen's full width and the renderers lay out axes with fixed margins: the full
-1.75 pushed titles off the figure and y-labels into the tick numbers on a
-1080-wide portrait desktop. The figure keeps its pixel size and loses inches, so a
-figure saved *from the screen* while phone layout is on is laid out as the phone
-shows it; the raster exports pass `dpi=300` and keep their resolution. The scale
-also sets matplotlib's private `Figure._original_dpi`, which its Qt canvas
-multiplies by the device-pixel ratio on a screen change — without it, rotating the
-phone dropped the scale.
+**Plots** draw at `phone_layout.plot_dpi_factor(u)` times their DPI — enough that
+a matplotlib point is a phone point, `72·u / 100` at the canvases' 100 DPI
+(`phone_shell.scale_canvas`, applied to every live canvas and, through the event
+filter, to a canvas shown later). Text sized in points then reads at its intended
+size on the phone. The renderers lay out axes with fixed margins, which clip a
+title at that size, so in phone layout `plot_style._apply_layout_engine` switches
+every figure to constrained layout — first putting back `in_layout` on the grid's
+axes, which `set_position` turns off, without which the engine moves nothing — and
+`_fit_labels_to_phone` breaks a title too wide for its axes: at " — " first (so
+"— t = 0 h" stays together), then into lines as full as the axes' width allows; a
+y-label too tall for its axes is broken the same way. The figure keeps its pixel
+size and loses inches, so a figure saved *from the screen* while phone layout is
+on is laid out as the phone shows it; the raster exports pass `dpi=300` and keep
+their resolution. The scale also sets matplotlib's private
+`Figure._original_dpi`, which its Qt canvas multiplies by the device-pixel ratio
+on a screen change — without it, rotating the phone dropped the scale.
 
 ---
 
@@ -587,8 +668,9 @@ allwell/
 │   ├── panes.py                ← PANE_MODES and the index/name lookups either way —
 │   │                              the roster of the application's three panes
 │   └── phone_layout.py         ← whether phone layout is on (one process-wide flag every
-│                                  pane may read) and its Qt-free rules: phone-shaped
-│                                  screen, Auto text size, plot factor, settings keys (§2)
+│                                  pane may read) and its Qt-free rules: the phone point,
+│                                  touch sizes, type scale, phone-shaped screen, plot DPI
+│                                  factor, settings keys (§2)
 ├── domain/                      ← Qt-free models and pure logic that more than ONE pane
 │   │                              depends on: the application's shared subject matter, as
 │   │                              distinct from core/'s plumbing. Bottom of the stack —
@@ -621,9 +703,9 @@ allwell/
 │   │                              alongside domain/well_palette.py, whose 96 rank colours
 │   │                              this module re-exports)
 │   ├── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
-│   └── phone_shell.py          ← phone layout's Qt half: its band controls, the switch both ways,
-│                                  the window fitting its screen, the live restyle and the
-│                                  rescale pass (§2, §8). Handed every pane widget it moves
+│   └── phone_shell.py          ← phone layout's Qt half: the top bar, strip and ⋯ menu, the
+│                                  Controls sheet, the switch both ways, the window fitting its
+│                                  screen, the live restyle and the rescale pass (§2, §8). Handed every pane widget it moves
 │                                  by allwell.py, so it imports no pane
 ├── widgets/                     ← reusable Qt widgets (no app coupling) — including
 │                                  separator.py (the two divider builders every pane
@@ -14711,7 +14793,7 @@ scale is built at it.
 
 At startup that is the whole story — phone layout scales the tokens before the
 window exists. Live, it is not, because the scale has to reach widgets built
-at the desk. `ui/phone_shell.PhoneShell._apply_text_scale` does it in order:
+at the desk. `ui/phone_shell.PhoneShell._restyle(factor, unit)` does it in order:
 
 1. a busy overlay is painted over the window; it swallows taps, and outlives
    the restyle by 400 ms so taps queued during it land on the overlay rather
@@ -14719,7 +14801,9 @@ at the desk. `ui/phone_shell.PhoneShell._apply_text_scale` does it in order:
 2. `explicit_fonts()` records every font a widget set in code — **any**
    `QApplication.setStyleSheet` re-polish replaces those with the stylesheet's
    (a heat map legend set to 7 pt comes back at the body size), measured;
-3. the tokens are scaled and `app.setStyleSheet(theme.qss())` re-applied —
+3. the tokens are scaled, the touch unit set (`theme.set_touch_unit`, which
+   adds the 44 / 48 pt floors to the sheet), and `app.setStyleSheet(theme.qss())`
+   re-applied —
    about 6 s on a loaded app (4,092 widgets), whatever the sheet says: the cost
    is the re-polish, and re-setting the identical string costs the same;
 4. `rescale_widgets(prev, new, …)` makes **one explicit pass**, no event filters:
@@ -14738,8 +14822,9 @@ at the desk. `ui/phone_shell.PhoneShell._apply_text_scale` does it in order:
    - the recorded fonts are put back, scaled;
    - pending font and style events are processed (user input held back), then
      every widget defining `_aw_rescale()` re-derives its own sizes: the
-     IconButton glyph, the ModeBar's pinned height, PlateProgress's columns and
-     rail rows, the Stepper's width and row height. A widget that sets
+     IconButton glyph, the ModeBar's pinned height and its compact segments'
+     shared width, the RailNav row glyphs, the NoticeBadge pip, PlateProgress's
+     columns and rail rows, the Stepper's width and row height. A widget that sets
      `_aw_owns_sizes` keeps the pass out of its subtree.
 
 The round trip desk → phone → desk was measured on the loaded app by

@@ -580,3 +580,80 @@ def test_a_title_too_wide_for_a_phone_is_broken_into_full_lines():
     assert all(len(line) <= len(text) * 1000 / 1500 for line in out.split("\n"))
     assert _break_to_fit(text, 900, 1000) == text           # fits: untouched
     assert _break_to_fit("a\nb", 5000, 10) == "a\nb"        # already broken
+
+
+def test_a_title_breaks_at_its_dash_clause_first():
+    # The timepoint after " — " is the natural second line: broken anywhere
+    # else, "— t = 0 h" split across lines on a phone.
+    from matplotlib.figure import Figure
+
+    from review.core.plot_style import _fit_labels_to_phone
+    fig = Figure(figsize=(3, 3), dpi=100)
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(111)
+    ax.set_title("Fraction of Cells Above Threshold — t = 0 h", fontsize=12)
+    _fit_labels_to_phone(fig)
+    lines = ax.get_title().split("\n")
+    assert lines[-1] == "— t = 0 h"
+    assert " ".join(lines[:-1]) == "Fraction of Cells Above Threshold"
+
+
+def test_plots_get_220_points_per_row_of_axes_and_their_own_height_back(qapp):
+    from types import SimpleNamespace
+
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    from ui.phone_shell import PhoneShell
+    fig = Figure()
+    for i in range(3):
+        fig.add_subplot(3, 1, i + 1)
+    canvas = FigureCanvasQTAgg(fig)
+    canvas.setMinimumHeight(150)
+    shell = SimpleNamespace(pt=lambda p: int(p * 2))
+    PhoneShell.size_canvas(shell, canvas, True)
+    assert canvas.minimumHeight() == 3 * 440
+    PhoneShell.size_canvas(shell, canvas, False)
+    assert canvas.minimumHeight() == 150
+
+
+def test_a_matplotlib_toolbar_shown_in_phone_layout_is_hidden(qapp):
+    from types import SimpleNamespace
+
+    from ui.phone_shell import PhoneShell
+
+    class MplToolbar(QWidget):      # matched by class name, as the app's is
+        pass
+
+    bar = MplToolbar()
+    bar.show()
+    shell = SimpleNamespace(_hide=lambda w: w.hide(), _sheet_band=None)
+    phone_layout.set_on(True)
+    try:
+        PhoneShell.adapt(shell, bar)
+    finally:
+        phone_layout.set_on(False)
+    assert bar.isHidden()
+
+
+def test_an_info_hint_answers_a_tap_with_its_text(qapp, monkeypatch):
+    # Nothing hovers on a phone, so an ⓘ's tooltip would never show.
+    from PySide6.QtCore import QEvent, QObject, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QLabel, QToolTip
+
+    from ui.phone_shell import _PhoneEventFilter
+    shown = []
+    monkeypatch.setattr(QToolTip, "showText", lambda *a: shown.append(a[1]))
+    hint = QLabel("ⓘ")
+    hint.setObjectName("InfoHint")
+    hint.setToolTip("What this number means")
+    filt = _PhoneEventFilter(QObject())
+    tap = QMouseEvent(QEvent.MouseButtonRelease, QPointF(2, 2), QPointF(2, 2),
+                      Qt.LeftButton, Qt.NoButton, Qt.NoModifier)
+    assert filt.eventFilter(hint, tap) is True
+    assert shown == ["What this number means"]
+    hint.setObjectName("Plain")
+    assert filt.eventFilter(hint, tap) is False
+    assert shown == ["What this number means"]

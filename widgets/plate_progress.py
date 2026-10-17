@@ -552,15 +552,13 @@ class PlateProgress(QWidget):
         self._headline.style().polish(self._headline)
         plate = getattr(self, "_plate", None)
         if plate is not None:
-            center = self._center_host.layout()
             if self._stacked:
                 # As wide as the column: the status plate's desk cap leaves a
-                # phone's wells a third of the width they could have.
+                # phone's wells a third of the width they could have. It stays
+                # centred (PLATE_ALIGNMENT) when a cap narrows it again.
                 plate.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
-                center.setAlignment(plate, Qt.AlignHCenter)
             else:
                 apply_plate_geometry(plate, role="status")
-                center.setAlignment(plate, PLATE_ALIGNMENT)
         self._detail.setVisible(self._stacked and bool(self._detail.text()))
         self._pin_rail_width()
 

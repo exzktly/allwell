@@ -48,17 +48,27 @@ _LABEL_PT = 11           # default per-value axis-label font size (px)
 _GROUP_PT = 11           # default facet-group band-label font size (px)
 
 
+def _on_screen(px: int) -> int:
+    """A label size from the Properties sidebar, as drawn on screen: times the UI
+    scale, like every other font in the window. At the desk that is 1, so the
+    number is the user's own; in phone layout the labels grow with the rest of
+    the text instead of staying desk-sized among it. The export renderer reads
+    the plan's unscaled sizes, so a saved figure is unaffected."""
+    return max(1, round(px * theme.ui_scale()))
+
+
 def _inner_qss(pt: int) -> str:
-    return f"color:{theme.Colors.text_secondary}; font-size:{pt}px;"
+    return f"color:{theme.Colors.text_secondary}; font-size:{_on_screen(pt)}px;"
 
 
 def _group_qss(pt: int) -> str:
-    return (f"color:{theme.Colors.text_primary}; font-size:{pt}px; font-weight:600;"
-            f" background:{theme.Colors.panel_elevated}; border-radius:5px; padding:2px 6px;")
+    return (f"color:{theme.Colors.text_primary}; font-size:{_on_screen(pt)}px;"
+            f" font-weight:600; background:{theme.Colors.panel_elevated};"
+            " border-radius:5px; padding:2px 6px;")
 
 
 def _corner_qss(pt: int) -> str:
-    return f"color:{theme.Colors.text_muted}; font-size:{max(8, pt - 1)}px;"
+    return f"color:{theme.Colors.text_muted}; font-size:{_on_screen(max(8, pt - 1))}px;"
 
 
 def _cv(cell, dim: str) -> str:

@@ -625,6 +625,26 @@ def apply_sidebar_visibility(ctx) -> None:
         pane_sb = getattr(pane, "_left_sidebar", None)
         if pane_sb is not None:
             pane_sb.setVisible(not collapsed)
+    # Phone layout lends the left panels to a slide-out drawer over the page;
+    # it has the last word on what shows, and gives them back on the desk.
+    from review.core.phone_drawer import apply_phone_drawer
+    apply_phone_drawer(ctx, mode, collapsed)
+
+
+def set_sidebar_collapsed(ctx, collapsed: bool) -> None:
+    """Collapse or expand the left rail to *collapsed*, and sync its toggle."""
+    app = ctx.window  # transitional bridge (A3)
+    app._sidebar_collapsed = bool(collapsed)
+    apply_sidebar_visibility(ctx)
+    btn = getattr(app, "_sidebar_toggle_btn", None)
+    if btn is not None:
+        blocked = btn.blockSignals(True)
+        try:
+            btn.setChecked(app._sidebar_collapsed)
+        finally:
+            btn.blockSignals(blocked)
+        btn.setIconName("panel-right-open" if collapsed else "panel-right-close")
+        btn.setToolTip("Show sidebar" if collapsed else "Hide sidebar")
 
 
 def toggle_sidebar(ctx) -> None:
@@ -634,18 +654,7 @@ def toggle_sidebar(ctx) -> None:
     Flips the persistent collapse flag, re-applies the effective visibility,
     and syncs the floating toggle button's checked state / glyph.
     """
-    app._sidebar_collapsed = not getattr(app, "_sidebar_collapsed", False)
-    apply_sidebar_visibility(ctx)
-    btn = getattr(app, "_sidebar_toggle_btn", None)
-    if btn is not None:
-        collapsed = app._sidebar_collapsed
-        blocked = btn.blockSignals(True)
-        try:
-            btn.setChecked(collapsed)
-        finally:
-            btn.blockSignals(blocked)
-        btn.setIconName("panel-right-open" if collapsed else "panel-right-close")
-        btn.setToolTip("Show sidebar" if collapsed else "Hide sidebar")
+    set_sidebar_collapsed(ctx, not getattr(app, "_sidebar_collapsed", False))
 
 
 def on_central_pane_changed(ctx, idx: int) -> None:

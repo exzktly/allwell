@@ -356,7 +356,7 @@ class LabelGrid(QWidget):
         QLabel#LabelGridHeader {{
             color: {c.text_muted};
             font-family: {t.family_mono};
-            font-size: 11px;
+            font-size: {t.caption_size}px;
             font-weight: 600;
             background: transparent;
             border-radius: {r.xs}px;
@@ -375,7 +375,7 @@ class LabelGrid(QWidget):
             border-radius: {r.xs}px;
             color: {c.text_primary};
             padding: 2px 4px;
-            font-size: 11px;
+            font-size: {t.caption_size}px;
         }}
         QLineEdit#LabelCell:focus {{
             border-color: {c.accent};

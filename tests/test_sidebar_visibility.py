@@ -37,8 +37,13 @@ def _make(mode: str, collapsed: bool):
         def currentMode(self):
             return mode
 
+    from review.core.widget_registry import WidgetRegistry
+
     app = _App()
     app.window = app
+    # The real context's registry: phone layout's drawer is looked up in it
+    # (``phone_drawer.apply_phone_drawer``, which this chokepoint calls last).
+    app.widgets = WidgetRegistry(app)
     app._sidebar_root = review_rail
     app._sidebar_collapsed = collapsed
     az = _Analyze()

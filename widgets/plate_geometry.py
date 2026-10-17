@@ -80,6 +80,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSizePolicy
 
+from ui import theme
+
 #: Widest a plate card may render — a shade over the Review rail's own width
 #: (``theme.Metrics.rail_w``, which a sidebar plate spans
 #: edge to edge), so the rail plate is effectively the reference size and every
@@ -225,9 +227,13 @@ def apply_plate_geometry(plate, *, role: str = "rail") -> None:
         plate.setMaximumWidth(_UNCAPPED)
         plate.setMaximumHeight(_UNCAPPED)
         return
+    # The caps are at the desk's text size. Phone layout's larger text grows
+    # the plate's labels, so the plate grows with them or its header numbers
+    # overlap (``theme.ui_scale``, 1.0 at the desk).
+    k = theme.ui_scale()
     if role == "canvas":
-        plate.setMaximumWidth(PLATE_CANVAS_WIDTH)
-        plate.setMaximumHeight(PLATE_CANVAS_HEIGHT + _action_row_allowance(plate))
+        plate.setMaximumWidth(round(PLATE_CANVAS_WIDTH * k))
+        plate.setMaximumHeight(round(PLATE_CANVAS_HEIGHT * k) + _action_row_allowance(plate))
         return
-    plate.setMaximumWidth(PLATE_MAX_WIDTH)
-    plate.setMaximumHeight(PLATE_MAX_HEIGHT + _action_row_allowance(plate))
+    plate.setMaximumWidth(round(PLATE_MAX_WIDTH * k))
+    plate.setMaximumHeight(round(PLATE_MAX_HEIGHT * k) + _action_row_allowance(plate))

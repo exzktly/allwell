@@ -20,7 +20,7 @@ the render seam are downstream of it.
 
 ctx-native — reads ``ctx.state`` / ``ctx.runtime`` / ``ctx.widgets`` only, never the
 unwrapped app god-object (the tab-unwrap guardrail is 0). Styling: a scoped QSS
-block (``_QSS``) on the shelf root reproduces the design mockup with the app's
+block (``_qss_for_shelf``) on the shelf root reproduces the design mockup with the app's
 theme tokens (mirrors ``ui/theme.py``).
 """
 
@@ -40,6 +40,7 @@ from ui import theme
 from core.safe import swallow
 from widgets import menu_exec
 from review.core.ui_helpers import parse_float_edit
+from widgets.flow_layout import FlowLayout
 from widgets.stepper import Stepper
 from widgets.lut_cmaps import resolve_channel_tint
 from review.features.image_browser.image_table.state import (
@@ -98,8 +99,8 @@ _STANDARD_CMAP = (
 # from leaking onto the rest of the app. Colours mirror ``ui/theme.py`` tokens.
 _QSS_TEMPLATE = Template("""
 QWidget#ITBShelf { background: transparent; }
-QLabel#ITBTitle { color: $text_primary; font-weight: 640; font-size: 12.5px; }
-QLabel#ITBShape { color: $text_secondary; font-size: 11px; }
+QLabel#ITBTitle { color: $text_primary; font-weight: 640; font-size: ${fs_title}px; }
+QLabel#ITBShape { color: $text_secondary; font-size: ${fs_caption}px; }
 QLabel#ITBShape b { color: $text_primary; }
 
 QFrame#ITBZone {
@@ -109,14 +110,14 @@ QFrame#ITBZone[dropActive="true"] { border: 1px dashed $accent; background: $acc
 QFrame#ITBFixed { border: 1px solid $border; border-radius: 9px; background: $panel; }
 QFrame#ITBTray { border: 1px solid $border_subtle; border-radius: 9px; background: $rail; }
 
-QLabel#ITBHead { color: $text_primary; font-weight: 620; font-size: 12px; }
-QLabel#ITBSub  { color: $text_muted; font-size: 10px; }
-QLabel#ITBHint { color: $text_muted; font-style: italic; font-size: 11px; }
+QLabel#ITBHead { color: $text_primary; font-weight: 620; font-size: ${fs_small}px; }
+QLabel#ITBSub  { color: $text_muted; font-size: ${fs_xs}px; }
+QLabel#ITBHint { color: $text_muted; font-style: italic; font-size: ${fs_caption}px; }
 
 QFrame#ITBRoot {
     background: $accent_dim; border: 1px solid $accent; border-radius: 7px;
 }
-QLabel#ITBRootLbl { color: $text_primary; font-weight: 640; font-size: 12px; }
+QLabel#ITBRootLbl { color: $text_primary; font-weight: 640; font-size: ${fs_small}px; }
 
 QWidget#ITBNest { border-left: 2px solid $accent_dim; background: transparent; }
 
@@ -130,27 +131,27 @@ QFrame#ITBChan:hover, QFrame#ITBChip:hover { border-color: $accent; }
    which side the drop lands on. */
 QFrame#ITBChan[dropEdge="above"] { border-top: 2px solid $accent; }
 QFrame#ITBChan[dropEdge="below"] { border-bottom: 2px solid $accent; }
-QLabel#ITBChanLbl { color: $text_primary; font-size: 12px; font-weight: 560; }
-QLabel#ITBVar { color: $text_secondary; font-size: 10.5px; }
-QLabel#ITBGrip { color: $text_muted; font-size: 11px; }
-QLabel#ITBNote { color: $text_muted; font-size: 10px; }
+QLabel#ITBChanLbl { color: $text_primary; font-size: ${fs_small}px; font-weight: 560; }
+QLabel#ITBVar { color: $text_secondary; font-size: ${fs_var}px; }
+QLabel#ITBGrip { color: $text_muted; font-size: ${fs_caption}px; }
+QLabel#ITBNote { color: $text_muted; font-size: ${fs_xs}px; }
 
 QToolButton#ITBOpt {
     color: $text_secondary; background: $panel; border: 1px solid $border;
-    border-radius: 5px; padding: 3px 8px; font-size: 12px;
+    border-radius: 5px; padding: 3px 8px; font-size: ${fs_small}px;
 }
 QToolButton#ITBOpt:hover { color: $text_primary; border-color: $accent; }
 QToolButton#ITBOpt::menu-indicator { image: none; width: 0px; }
 
 QToolButton#ITBX {
     color: $text_muted; background: transparent; border: none;
-    font-size: 15px; padding: 0px 4px;
+    font-size: ${fs_h3}px; padding: 0px 4px;
 }
 QToolButton#ITBX:hover { color: $danger; }
 
 QToolButton#ITBSeg {
     background: $panel; color: $text_secondary; border: 1px solid $border;
-    padding: 3px 11px; font-size: 11px;
+    padding: 3px 11px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBSeg:hover { color: $text_primary; }
 QToolButton#ITBSeg[on="true"] { background: $accent_dim; color: $accent_fg; }
@@ -161,13 +162,13 @@ QComboBox#ITBCombo {
     border-radius: 6px; padding: 2px 6px; min-height: 20px;
 }
 QComboBox#ITBCombo:hover { border-color: $border_strong; }
-QLabel#ITBFixLbl { color: $text_primary; font-size: 12px; }
-QLabel#ITBEq { color: $text_muted; font-size: 12px; }
+QLabel#ITBFixLbl { color: $text_primary; font-size: ${fs_small}px; }
+QLabel#ITBEq { color: $text_muted; font-size: ${fs_small}px; }
 
 QFrame#ITBLut { border: 1px solid $border; border-radius: 9px; background: $panel; }
 QFrame#ITBLutRow { background: transparent; border: none; }
-QLabel#ITBLutChan { color: $text_primary; font-size: 12px; font-weight: 560; }
-QLabel#ITBLutTag { color: $text_muted; font-size: 11px; }
+QLabel#ITBLutChan { color: $text_primary; font-size: ${fs_small}px; font-weight: 560; }
+QLabel#ITBLutTag { color: $text_muted; font-size: ${fs_caption}px; }
 QLineEdit#ITBLutEdit {
     background: $panel_elevated; color: $text_primary; border: 1px solid $border;
     border-radius: 6px; padding: 2px 6px; min-height: 18px; max-width: 66px;
@@ -175,17 +176,33 @@ QLineEdit#ITBLutEdit {
 QLineEdit#ITBLutEdit:focus { border-color: $accent; }
 QToolButton#ITBLutFit {
     color: $text_secondary; background: $panel; border: 1px solid $border;
-    border-radius: 5px; padding: 2px 9px; font-size: 11px;
+    border-radius: 5px; padding: 2px 9px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBLutFit:hover { color: $text_primary; border-color: $accent; }
 
 QToolButton#ITBClear {
     color: $text_secondary; background: $panel; border: 1px solid $border;
-    border-radius: 6px; padding: 3px 10px; font-size: 11px;
+    border-radius: 6px; padding: 3px 10px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBClear:hover { color: $danger; border-color: $danger; }
 """)
-_QSS = _QSS_TEMPLATE.substitute(vars(theme.Colors))
+
+
+def _qss_for_shelf() -> str:
+    """The shelf's stylesheet at the tokens in force *now*.
+
+    Built when the shelf is, not at import: a sheet frozen at import carries
+    whatever type sizes were current then, so a shelf first opened in phone
+    layout would get desktop-sized text. The sizes are the theme's type
+    scale — ``fs_xs`` is one step under the caption size, which is where the
+    shelf's two smallest labels sit, and the half steps keep the two
+    sizes the shelf was drawn with between the scale's own steps.
+    """
+    t = theme.Typography
+    return _QSS_TEMPLATE.substitute(
+        vars(theme.Colors), fs_xs=t.caption_size - 1, fs_var=t.caption_size - 0.5,
+        fs_caption=t.caption_size, fs_small=t.small_size,
+        fs_title=t.small_size + 0.5, fs_h3=t.h3_size)
 
 
 # ── spec accessors ──────────────────────────────────────────────────────────
@@ -661,6 +678,11 @@ def _text(text: str, obj: str) -> QLabel:
     return lbl
 
 
+def _wrapping(lbl: QLabel) -> QLabel:
+    lbl.setWordWrap(True)
+    return lbl
+
+
 def _x_btn(tip: str, on_click) -> QToolButton:
     b = QToolButton()
     b.setObjectName("ITBX")
@@ -740,7 +762,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     # importing this view module (matching the row/col_dims_refresh callback hooks).
     _rt(ctx).selection_rebuild_cb = lambda: schedule_selection_rebuild(ctx)
     parent.setObjectName("ITBShelf")
-    parent.setStyleSheet(_QSS)
+    parent.setStyleSheet(_qss_for_shelf())
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -804,6 +826,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     reg.register("_image_table_clear_builder_btn", clear_btn)
     header.addWidget(clear_btn)
     layout.addLayout(header)
+    _rt(ctx).shelf_header = header
 
     # Channels tray (drag source) at the top.
     tray = _DropZone(lambda tok: _on_tray_drop(ctx, tok), _accept_tray, parent)
@@ -813,7 +836,10 @@ def build_shelf(ctx, parent: QWidget) -> None:
     tl.setSpacing(6)
     tl.addWidget(_zone_head("Channels", "drag onto a root to nest it"))
     tbody = QWidget(tray)
-    tbl = QHBoxLayout(tbody)
+    # A flow, so the chips wrap to the next line when the shelf is narrower than
+    # all of them — in phone layout's Controls sheet they otherwise held it
+    # wider than the screen. With room for one line it lays out as a row did.
+    tbl = FlowLayout(tbody)
     tbl.setContentsMargins(0, 0, 0, 0)
     tbl.setSpacing(7)
     tl.addWidget(tbody)
@@ -848,6 +874,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
         setattr(_rt(ctx), f"{name}_zone_body", body)
         ar.addWidget(z, 1)
     layout.addWidget(axes_row)
+    _rt(ctx).axes_row_layout = ar
 
     # Fixed panel (derived) — a drop target for roots + its value pickers.
     fixed = _DropZone(lambda tok: _on_zone_drop(ctx, "fixed", tok), _accept_fixed, parent)
@@ -888,6 +915,44 @@ def build_shelf(ctx, parent: QWidget) -> None:
     # whatever a restore / the Advanced controls / a test sets up. The spec is
     # seeded from current state, so it already reflects reality; the first edit
     # renders.
+
+
+def builder_set_stacked(ctx, stacked: bool) -> None:
+    """One column for a phone's Controls sheet, side by side at the desk.
+
+    The header row (Build, the table's shape, Plate, Wrap cols, Clear builder)
+    and the Rows / Columns zones each need a monitor's width laid out in a row,
+    and held the phone layout's page wider than the screen. Stacked, each takes
+    a line of its own, and the shape description — which the zones restate —
+    is hidden.
+    """
+    from PySide6.QtWidgets import QBoxLayout
+    direction = QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
+    for lay in (getattr(_rt(ctx), "shelf_header", None),
+                getattr(_rt(ctx), "axes_row_layout", None)):
+        if lay is not None:
+            lay.setDirection(direction)
+    axes = getattr(_rt(ctx), "axes_row_layout", None)
+    if axes is not None:
+        # Side by side the zones share the width equally (stretch 1 each) and
+        # are floored at _Z_MIN_H so an empty one still reads as a target. One
+        # above the other, an equal share of the *height* split a Rows zone of
+        # four channels and a one-root Columns zone evenly, and the explicit
+        # floor let the layout squeeze the Rows zone's channel rows below their
+        # own minimum — 51 px rows holding 141 px ⚙ buttons. Stacked, each zone
+        # is as tall as its content says.
+        for i in range(axes.count()):
+            zone = axes.itemAt(i).widget()
+            axes.setStretch(i, 0 if stacked else 1)
+            if zone is not None:
+                zone.setMinimumHeight(0 if stacked else _Z_MIN_H)
+    # The shape line ("Well › [DAPI,GFP] ↓ · Timepoint →") restates the zones
+    # beneath it, and on one line it is wider than a phone. Wrapped, it measured
+    # one height for the shelf and laid out at another, which short-changed the
+    # zones; stacked, it is left out instead.
+    shape = getattr(_rt(ctx), "shape_label", None)
+    if shape is not None:
+        shape.setVisible(not stacked)
 
 
 def _zone_head(name: str, sub: str) -> QWidget:
@@ -1310,14 +1375,17 @@ def _build_lut_box(ctx, spec) -> None:
         return
     for token, specs in chans.items():
         lay.addWidget(_lut_row(ctx, token, specs))
+    # These two name channels, so they grow with the table; they wrap rather than
+    # widen the shelf (in phone layout's Controls sheet a long one held it wider
+    # than the screen). The panel is a column, so at the desk they keep its width.
     if inert:
-        lay.addWidget(_text(
+        lay.addWidget(_wrapping(_text(
             "no display range (unchanged by any LUT edit): " + ", ".join(inert),
-            "ITBHint"))
+            "ITBHint")))
     if hidden:
-        lay.addWidget(_text(
+        lay.addWidget(_wrapping(_text(
             "not shown in plate mode (one channel per plate): " + ", ".join(hidden),
-            "ITBHint"))
+            "ITBHint")))
 
 
 def _lut_row(ctx, token: str, specs: list) -> QFrame:

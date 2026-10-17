@@ -58,6 +58,7 @@ to add features, how to debug, and build / environment troubleshooting), see
      [Zip Loose Folder](#zip-loose-folder) ·
      [Merge Plates](#merge-plates) ·
      [Job Queue](#job-queue)
+7. [Using All-Well from a phone](#using-all-well-from-a-phone)
 7. [Filename schema](#filename-schema)
 7. [CSV output format](#csv-output-format)
 8. [Performance and GPU usage](#performance-and-gpu-usage)
@@ -7273,6 +7274,79 @@ answer it, so queuing a job is an implicit "yes, go ahead" for whatever that
 step would have asked.
 
 ---
+
+## Using All-Well from a phone
+
+If you reach the PC that runs All-Well from your phone — RealVNC, Microsoft
+Remote Desktop and similar viewers resize the Windows desktop to your phone's
+shape and shrink it to fit the screen — switch to **phone layout**. It is the same
+window with the same data: one column instead of a sidebar beside the page, text
+and plots sized for the phone, and buttons big enough for a thumb, whatever
+resolution the remote desktop has. Switching never touches a run in progress.
+
+**Turning it on.** Tap **Phone layout** at the top left of the window, beside the
+version number. If All-Well notices the screen has turned phone-shaped (upright,
+too small for the desktop window, or sideways at a phone's long proportions), a
+strip across the top offers the switch — tap **Switch**, or **Not now**. It never
+switches on its own.
+
+The switch takes a few seconds while every control is redrawn at the new size; a
+*Resizing for your screen…* sheet covers the window meanwhile, and taps made then
+are ignored rather than landing on whatever is underneath. Turning the phone does
+the same, once, for the new shape.
+
+**Getting around.** The top bar holds:
+
+| Control | What it does |
+|---|---|
+| **☰** | Slides the sidebar out over the page from the left: the dataset, every section (Home, Plotting, Statistics, …) as a grid of tiles, and the well plate, just as at the desk. Its top line shows the well and nuclei counts the desktop's status bar shows. Tap wells as usual — the sidebar stays out while you pick several; a row or column label selects the whole row or column (except on the smFISH page, which picks one well at a time). Tap a section, **✕**, or the dimmed page at the right to slide it away. In Analyze it holds the run form, in Datasets the tools. |
+| **Review · Analyze · Datasets** | Switches mode, as on the desktop. |
+| **⋯** | **Text size** (S, M, L), **Reload dataset**, **Help**, **App log**, and **Desktop layout** — the way back. A **!** on it means the app log has something new. |
+
+In Review a second row under it holds:
+
+| Control | What it does |
+|---|---|
+| **Bar Plots ▾** | Picks the page's view (Bar Plots, Line Graphs, Heat Map, …). |
+| **⚙ Controls** | Slides the page's own controls — channel, property, display, threshold and the rest — up from the bottom, with the plot still in view above them so you can watch it change. **Done ✕** puts them away. |
+
+**The Image Table** opens on its images in phone layout, sized so the columns
+fill the screen; **−** and **+** zoom from there, and past 100 % the table
+scrolls sideways. The table builder and the Generate, Crop, ON threshold, Save and
+zoom controls are under **⚙ Controls**, with Generate first. The table is redrawn
+to fit when you turn the phone or switch layouts.
+
+Holding the phone sideways, both rows become one slimmer bar, the sidebar is a
+narrower panel, and **⚙ Controls** opens as a panel on the right. Plots keep a
+readable height and the page scrolls, rather than squashing several plots into
+the screen's height.
+
+Long panels — the sidebar, the controls, the logs — scroll by dragging. The
+plot toolbar's pan and zoom are hidden in phone layout; switch back to the
+desktop layout for them. An **ⓘ** shows its explanation when tapped.
+
+The buttons that change or discard work — Reset view, Reset analysis, Copy
+analysis, the publication look and Reveal folder — are hidden in phone layout so a
+stray tap cannot reach them, as are the Review CSV and Batch Export sections;
+switch back to the desktop layout to use them.
+
+**Watching a run.** Analyze opens on the run progress: the headline (*Running · 52
+of 96 wells · 1 failed*), the overall bar, the stages, and the plate map coloured
+by each well's progress, one above the other. Tap a well to see what it is doing
+on the line under the plate. The log is below, with long lines wrapped. Sideways,
+the progress sits on the left and the log on the right. The run form — including
+**Stop** and **Suspend** — slides out from **☰**. Closing the window while a run is
+in progress asks first in phone layout, because closing stops the run.
+
+**Text size.** **⋯** → **Text size**: **S**, **M** or **L**. Medium sets body text at
+15 points, a phone's usual reading size; the others are a step either side. Plots follow the
+screen, so their text reads at its intended size on the phone.
+
+**Back at the desk.** **⋯** → **Desktop layout**, or tap **Switch** on the strip that
+appears when the screen is desktop-shaped again. If you close All-Well in phone
+layout, it reopens in phone layout only when the screen is still phone-shaped;
+on a desktop-sized screen it opens as usual. The desktop window's size and
+position are never overwritten by the phone's.
 
 ## Filename schema
 

@@ -1680,9 +1680,8 @@ header accessors (`setFigureTitle`, `setStatsChipVisible`, `setLeftHeaderWidget`
 …) are no-ops on a headerless card rather than raising, so a caller need not
 branch on how the card was built; `hasHeader()` answers if one needs to.
 
-`make_plot_view_switcher` is gone with them — it built a five-segment
-Line/Bar/Scatter/Dist/Heat control into each card's header, directly beneath the
-tab bar offering the same five choices.
+A card carries no view switcher of its own: the tab bar directly above it is
+the one place that offers the five plot views.
 
 A tab that pins a minimum height for its figure calls `card.pinFigureHeight(px)`
 (Bar Plots, Line Graphs and Response Curves do), and the card holds itself at

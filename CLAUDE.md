@@ -157,7 +157,8 @@ theorising, and compare against the base branch on the same machine rather
 than against a different runner's log.
 
 Re-count rather than trusting these when it matters: `python -m pytest tests -m
-"not slow" -q --collect-only | tail -1` prints the split in about two seconds.
+"not slow and not nanowell_e2e" -q --collect-only | tail -1` prints the fast
+lane's split in about two seconds (that is the marker `scripts/test.sh` runs).
 
 Rules: never run a bare `pytest tests/` or `-m slow` across everything here. Run
 full-app tests a file or two per process (budget ≲15–20 app constructions per

@@ -619,8 +619,21 @@ def _redraw_bar_plots():
 
 
 def _redraw_line_graphs():
-    from review.features.lineplot.controller import redraw_line_plots
-    return redraw_line_plots
+    """The Line Graphs hook, callable both ways the app calls it.
+
+    ``FeatureRegistry.redraw`` calls every hook as ``hook(ctx)`` (a saved
+    plot's restore, a view-state restore). The line plot's figure inputs come
+    from the app's fan-out, so a bare call goes through ``redraw_app``, which
+    resolves this same hook and calls it back with those inputs as keywords.
+    """
+    def _line_graphs(ctx, **inputs):
+        if not inputs:
+            from review.core.plot_orchestrator import redraw_app
+            redraw_app(ctx)
+            return
+        from review.features.lineplot.controller import redraw_line_plots
+        redraw_line_plots(ctx, **inputs)
+    return _line_graphs
 
 
 def _redraw_distribution():

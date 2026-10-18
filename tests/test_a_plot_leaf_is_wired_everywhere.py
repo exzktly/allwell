@@ -153,9 +153,10 @@ def test_the_exemptions_still_describe_real_leaves(leaves):
 #: Leaves whose registered redraw does not check the plot hold itself, and why.
 _HOLD_CHECKED_UPSTREAM = {
     "Line Graphs": (
-        "lineplot.controller.redraw_line_plots takes the orchestrator's styling "
-        "arguments and is called only by plot_orchestrator.redraw, which returns "
-        "before reaching it while the plots are held."
+        "its hook draws only through plot_orchestrator: a bare hook(ctx) goes to "
+        "redraw_app, and the keyword form is called only by "
+        "plot_orchestrator.redraw — which returns before reaching the line plot "
+        "while the plots are held."
     ),
 }
 

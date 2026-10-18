@@ -404,6 +404,32 @@ def test_a_file_with_no_groups_is_reported_before_anything_is_asked(ctx, dialogs
     assert _plate(ctx) == before
 
 
+@pytest.mark.parametrize("mode, overlap", [(sc.IMPORT_REPLACE, None), (sc.IMPORT_ADD, sc.IMPORT_MOVE)],
+                         ids=["replace", "add-move"])
+def test_an_import_whose_every_group_fails_takes_nothing_away(ctx, dialogs, tmp_path, monkeypatch,
+                                                              mode, overlap):
+    """Replace cleared the plate, and Move stripped the existing groups, before any of the file's groups was
+    built. Each build is caught and logged on its own, so when every one failed the plate was left emptied (or
+    stripped) with no redraw, and the toast still read "Replaced the groups with 0 group(s)" as a success."""
+    import domain.selections_format as fmt
+
+    sc.sel_add(ctx, name="Mine", wells=["A01", "H01"])     # A01 is also in the file, so Move has work to do
+    ctx.coordinator.seen.clear()
+    before = _plate(ctx)
+    dialogs.path, dialogs.mode, dialogs.overlap = _file(tmp_path, V2), mode, overlap
+
+    def _broken(**_kw):
+        raise ValueError("a malformed entry")
+
+    monkeypatch.setattr(fmt, "make_selection", _broken)
+    sc.import_selections_from_json(ctx)
+
+    assert _plate(ctx) == before, f"an import that built no group changed the plate to {_plate(ctx)}"
+    assert not any(t.startswith(("Replaced", "Imported 0")) for t in ctx.toasts), (
+        f"a failed import was reported as a success: {ctx.toasts}")
+    assert ctx.toasts and "unchanged" in ctx.toasts[-1]
+
+
 def test_replace_never_empties_the_plate_for_a_file_with_nothing_usable(ctx):
     """The guard inside the loop, for a caller that skips the dialog's check."""
     before = _seed(ctx)

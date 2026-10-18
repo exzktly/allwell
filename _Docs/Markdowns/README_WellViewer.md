@@ -2046,7 +2046,9 @@ a second question lists those wells and the group each is in, and offers
 **Skip** (they stay in their current groups and the imported groups get only
 the wells in no group; an imported group left with none is not added) or
 **Move** (they go to the imported groups; a current group left with no wells is
-removed). Cancel on either question leaves everything as it was. Each imported
+removed). Cancel on either question leaves everything as it was, and so does an
+import that brings in no group at all — every one left out by Skip, or none
+readable: a warning says so and the current groups are untouched. Each imported
 group keeps its colour, whether it was hidden, and (unless a group here already
 uses it) its identity, so plots saved
 with that group hidden keep it hidden. It is the app's only groups import, and it is hidden on Overview and on

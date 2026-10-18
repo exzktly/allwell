@@ -139,12 +139,20 @@ shrinks the remote desktop to the phone's screen, so a widget `n·u` pixels wide
 on the desktop is `n` points wide under the thumb, whatever resolution the
 desktop was given. The rules are the platform's: a control is at least 44 pt
 tall (`TOUCH_MIN_PT`), a row a thumb picks from — a menu item, a rail section, a
-control in the Controls sheet — 48 pt (`TOUCH_ROW_PT`), gaps 8 pt, the top bar
-52 pt (44 pt sideways, where height is what the plots lack). Body text is 15 pt
+control in the Controls sheet — 48 pt (`TOUCH_ROW_PT`), gaps 8 pt
+(`TOUCH_GAP_PT`), the top bar 52 pt (`TOP_BAR_PT`; 44 pt sideways,
+`phone_shell.LANDSCAPE_BAR_PT`, where height is what the plots lack). Sideways
+the ☰ and ⋯ are 40 pt squares inside that slim bar
+(`phone_shell.LANDSCAPE_BAR_BUTTON_PT`), the one target deliberately below the
+floor. Body text is 15 pt
 times the chosen text size — Small, Medium or Large, 0.87 / 1 / 1.13
 (`phone_layout.type_scale`) — and becomes the UI scale (§8, *The UI scale*).
 `theme.set_touch_unit(u)` appends the touch floors to the application stylesheet
-(`theme._touch_qss`), so a control built later is touch-sized too.
+(`theme._touch_qss`), so a control built later is touch-sized too. The sheet
+reads `TOUCH_MIN_PT` and `TOUCH_ROW_PT` on every build, as the sizes the shell
+pins in code read all four constants, so changing one moves the stylesheet floor
+and the pinned buttons together
+(`tests/test_phone_layout.py::test_the_stylesheet_touch_floors_follow_the_named_constants`).
 
 **Switching.** The way in is a phone icon (`PhoneShell.desk_button`, an
 `IconButton`) among the small icon buttons at the right end of the mode band,
@@ -165,7 +173,8 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
 2. closes the side rail — or, on the way out, restores the left panel's desk
    state;
 3. restyles at the phone's type scale and touch unit (§8) — the only slow step,
-   7–9 s on a 4,000-widget window, under a busy overlay, and skipped when
+   about 6 s on a loaded app of about 4,100 widgets (§8, *The UI scale*), under
+   a busy overlay, and skipped when
    neither changes. Nearly all of it is `QApplication.setStyleSheet`
    re-polishing every widget: a near-empty stylesheet still costs most of it,
    so the cost scales with the widget count, not with the sheet. Widgets
@@ -188,9 +197,9 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    `QTimer.singleShot(0, …)` callbacks, queued and cross-thread signals,
    Windows' zero-interval timer events — about 9,400 of them in one switch on
    a loaded app, each running in the middle of the pass. The Image Table's
-   refit, run inside the restyle, once deleted and rebuilt its grid while the
-   pass was walking the window's widgets; it runs from a timer, so it no longer
-   can. `tests/test_phone_layout.py::test_nothing_queued_runs_inside_the_rescale_pass`
+   refit runs from a timer for this reason: run inside the restyle, it would
+   delete and rebuild its grid while the pass walks the window's widgets.
+   `tests/test_phone_layout.py::test_nothing_queued_runs_inside_the_rescale_pass`
    queues a `singleShot(0)`, a queued signal and a queued `invokeMethod` and
    requires that none runs inside the pass. Leaving it also gives back the
    minimum heights the touch floors took (below, *The UI scale*);
@@ -235,7 +244,7 @@ log* and *Desktop layout*. The status bar's log "!" is mirrored onto ⋯
 events cannot drive it, because they never arrive while the status bar is hidden.
 
 **The side rail slides out over the page.** A phone held upright has no room for
-a column beside the page, so in phone layout `review/core/phone_drawer.py` lends
+a column beside the page, so in phone layout `ui/phone_drawer.py` (`RailDrawer`) lends
 every pane's left panel — Review's rail (dataset, sections, well plate, the page's
 own rail frames, saved selections), the Analyze form, the Datasets tool list — to
 one left-edge `widgets.drawer.Drawer`, and ☰ slides the current mode's panel out
@@ -249,7 +258,7 @@ exactly where it was when the rail closes.
 
 The drawer is the left panel's *expanded* state: it is driven by the same flag the
 desk's collapse toggle drives (`_sidebar_collapsed`), through
-`tab_controller.apply_sidebar_visibility`, which calls `apply_phone_drawer` last so
+`tab_controller.apply_sidebar_visibility`, which calls `RailDrawer.apply` last so
 it has the final word in phone layout — only the current mode's panel shows, and
 only in the drawer. `set_sidebar_collapsed(ctx, …)` sets the flag to a value;
 `toggle_sidebar` is that with the value flipped. The drawer closes when the
@@ -259,8 +268,15 @@ flag never disagree), when ☰ is tapped again, when a section is tapped
 by code), and when a mode is picked on the mode bar. Tapping wells on the plate
 keeps it open — picking several in a row is normal.
 
-The drawer is hosted on the Review widget, which holds the band, not on a
-splitter (a `QSplitter` adopts any child widget as a pane). It starts right under
+The drawer serves all three panes, so it lives in `ui/` and imports none of
+them (§3, Rule 1). `AllWellApp._build_rail_drawer` builds it and hands it what
+only the window knows — `panels`, the left panel of each mode, asked for each
+time; `top_inset`, where the top bar ends; `on_closed_inside`, what a close from
+inside means for the flag — and registers it in Review's widget registry under
+`ui.phone_drawer.DRAWER_KEY`, where `apply_sidebar_visibility` finds it. Each
+lent panel's desk place is kept on the drawer itself (`RailDrawer._homes`), not
+stamped on the panel. The drawer is hosted on the Review widget, which holds
+the band, not on a splitter (a `QSplitter` adopts any child widget as a pane). It starts right under
 the top bar (`Drawer(top_inset=…)`, re-measured as the bar's height changes), so
 ☰ and the mode switch stay in reach while it is open, and it covers the strip,
 whose page menu and Controls belong to the page it hides. Each panel is lent
@@ -329,10 +345,16 @@ facet gaps and each column's spacing leave between the columns, and the zoom
 multiplies that, so 100 % fills the screen and zooming in scrolls sideways (the
 page's vertical scrollbar is reserved while it is not shown, since the grid being
 sized is what usually brings it on); the
-desk keeps its 240 px × zoom. The label width is measured with the fonts the
-labels are drawn in, corner text included, since the corner ("T:0h · FOV:F001")
-sits over the label columns and widened them past the screen when it was left
-out. The live grid's axis labels are drawn at the UI scale (`facet_view._on_screen`)
+desk keeps its 240 px × zoom. The label width is measured off the labels
+themselves — `facet_view.label_columns_width` builds them with the same
+factories `render_facet_chrome` places, and sums their size hints — so the fit
+follows their fonts, padding and rotation with no numbers of its own; the
+corner ("T:0h · FOV:F001") sits over the label columns, so they are at least
+as wide as it is. Each column also spends the grid's spacing and the cell
+host's margin on either side (`facet_view.CELL_MARGIN_PX`, which the controller
+builds the host with), and at 100 % the columns fill the page to within the
+last column's spacing and a pixel of rounding per column
+(`tests/test_phone_layout.py::test_image_table_fitted_columns_fill_the_page_exactly`). The live grid's axis labels are drawn at the UI scale (`facet_view._on_screen`)
 while the export renderer keeps the Properties sidebar's own sizes. A drawn grid
 is drawn again — from the decode cache — when phone layout turns on or off and
 when the page's width changes by more than 5 % while it is on (the phone turned),
@@ -821,6 +843,10 @@ allwell/
 │   ├── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
 │   ├── local_storage_view.py   ← StorageDialog, behind the title bar's hard-drive button: the
 │   │                              view over core/local_storage.py, split as phone layout is
+│   ├── phone_drawer.py         ← phone layout's side rail (RailDrawer): lends each pane's left
+│   │                              panel to one left-edge Drawer over the page and gives it back
+│   │                              (§2). Serves all three panes, so it is shared, not Review's;
+│   │                              allwell.py tells it where each panel lives, and it imports no pane
 │   └── phone_shell.py          ← phone layout's Qt half: the top bar, strip and ⋯ menu, the
 │                                  Controls sheet, the switch both ways, the window fitting its
 │                                  screen, the live restyle and the rescale pass (§2, §8). Handed every pane widget it moves
@@ -914,8 +940,6 @@ review/
 │   │   qc_state.py, stats_cache_state.py   ← cross-cutting typed state slices
 │   ├── app_shell_view.py, centre_view.py, sidebar_view.py, status_view.py
 │   ├── split_view.py                 ← optional side-by-side double-pane view (one-line removable; §5.10)
-│   ├── phone_drawer.py               ← phone layout's side rail: lends each pane's left panel to one
-│   │                                    left-edge Drawer over the page and gives it back (§2)
 │   ├── phone_panel_sheet.py          ← phone layout's Properties sheet: lends a plot's right dock to a
 │   │                                    full-width Drawer over the page and gives it back (§2)
 │   ├── feature_registry.py           ← FeatureDescriptor + build_feature_registry (§5.3)
@@ -15247,7 +15271,7 @@ at the desk. `ui/phone_shell.PhoneShell._restyle(factor, unit)` does it in order
    `QApplication.setStyleSheet` re-polish replaces those with the stylesheet's
    (a heat map legend set to 7 pt comes back at the body size), measured;
 3. the tokens are scaled, the touch unit set (`theme.set_touch_unit`, which
-   adds the 44 / 48 pt floors to the sheet), and `app.setStyleSheet(theme.qss())`
+   adds the `TOUCH_MIN_PT` / `TOUCH_ROW_PT` floors, 44 / 48 pt, to the sheet), and `app.setStyleSheet(theme.qss())`
    re-applied —
    about 6 s on a loaded app (4,092 widgets), whatever the sheet says: the cost
    is the re-polish, and re-setting the identical string costs the same;

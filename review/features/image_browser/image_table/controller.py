@@ -1103,7 +1103,7 @@ def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
 
             cell_widget = QWidget()
             cl = QVBoxLayout(cell_widget)
-            cl.setContentsMargins(2, 2, 2, 2)
+            cl.setContentsMargins(*[_facet.CELL_MARGIN_PX] * 4)
             cl.setSpacing(2)
 
             img_label = QLabel(cell_widget)

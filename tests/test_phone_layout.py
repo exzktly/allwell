@@ -388,8 +388,13 @@ def test_compact_mode_bar_widths_follow_labels_enlarged_by_a_restyle(qapp):
     assert [s.minimumWidth() for s in bar._segments] == [0] * 3
 
 
+def _rail_drawer(host, panels, closed=None):
+    from ui.phone_drawer import RailDrawer
+    return RailDrawer(host, panels=lambda: panels, top_inset=lambda: 0,
+                      on_closed_inside=closed or (lambda: None))
+
+
 def test_a_lent_panel_goes_back_to_its_place_pin_and_sizes(qapp):
-    from review.core.phone_drawer import _give_back, _lend
     split = QSplitter(Qt.Horizontal)
     panel, content = QWidget(), QWidget()
     split.addWidget(panel)
@@ -398,13 +403,14 @@ def test_a_lent_panel_goes_back_to_its_place_pin_and_sizes(qapp):
     panel.setFixedWidth(329)
     split.setSizes([329, 671])
     sizes = split.sizes()
-    holder = QWidget()
-    QVBoxLayout(holder)
-    _lend(panel, holder)
+    host = QWidget()
+    drawer = _rail_drawer(host, {"review": panel})
+    holder = drawer.contentWidget()
+    drawer.lend(panel)
     assert panel.parentWidget() is holder and split.count() == 1
     assert panel.maximumWidth() > 329            # fills the drawer
-    _lend(panel, holder)                         # idempotent: remembers once
-    _give_back(panel)
+    drawer.lend(panel)                           # idempotent: remembers once
+    drawer.give_back(panel)
     # Back at index 0 — not appended after the content, which a plain
     # addWidget would do — with its pin and the splitter's sizes.
     assert split.indexOf(panel) == 0 and split.count() == 2
@@ -679,20 +685,19 @@ def test_plots_get_220_points_per_row_of_axes_and_their_own_height_back(qapp):
     assert canvas.minimumHeight() == 150
 
 
-def test_a_matplotlib_toolbar_shown_in_phone_layout_is_hidden(qapp):
-    from types import SimpleNamespace
-
-    from ui.phone_shell import PhoneShell
-
+def test_a_matplotlib_toolbar_shown_in_phone_layout_is_hidden(qapp, app_sheet):
     class MplToolbar(QWidget):      # matched by class name, as the app's is
         pass
 
-    bar = MplToolbar()
+    win = _window()
+    QVBoxLayout(win)
+    shell = _shell(win)
+    bar = MplToolbar(win)
+    win.layout().addWidget(bar)
     bar.show()
-    shell = SimpleNamespace(_hide=lambda w: w.hide(), _sheet_band=None)
     phone_layout.set_on(True)
     try:
-        PhoneShell.adapt(shell, bar)
+        shell.adapt(bar)
     finally:
         phone_layout.set_on(False)
     assert bar.isHidden()
@@ -733,6 +738,76 @@ def test_image_table_cells_share_the_width_between_their_columns():
     assert fit_cell_px(1000, 3, label_w=100, per_col_px=10, spacer_w=40, zoom=1.5) == 415
     # Never smaller than a field of view can be read at.
     assert fit_cell_px(300, 12, label_w=100, per_col_px=10, spacer_w=0, zoom=1.0) == MIN_CELL_PX
+
+
+def _fit_and_lay_out(qapp, group_qss=None):
+    """Fit a 3-column grid with two row-label columns (a vertical group band
+    and per-value labels) into a 500 px page in phone layout, then lay the grid
+    out the way the controller does — ``facet_view``'s chrome plus one cell
+    host per column — and return (available width, width the grid needs,
+    columns, grid spacing)."""
+    from PySide6.QtWidgets import QGridLayout, QScrollArea
+
+    from review.features.image_browser.image_table import facet_view
+    from review.features.image_browser.image_table._phone_fit import phone_cell_px
+    phone_layout.set_on(True)
+    scroll = QScrollArea()
+    _WINDOWS.append(scroll)
+    scroll.setWidgetResizable(True)
+    inner = QWidget()
+    QVBoxLayout(inner).setContentsMargins(0, 0, 0, 0)
+    host = QWidget(inner)
+    grid = QGridLayout(host)
+    grid.setContentsMargins(0, 0, 0, 0)
+    inner.layout().addWidget(host)
+    scroll.setWidget(inner)
+    scroll.resize(500, 400)
+    scroll.show()
+    _pump(qapp)
+    plan = facet_view.FacetPlan()
+    plan.left = [("Well B05", 1, 0, 2, 1, True), ("GFP", 1, 1, 1, 1, False),
+                 ("DAPI overlay", 2, 1, 1, 1, False)]
+    plan.corner = "T:0h  ·  FOV:F001"
+    plan.first_row, plan.first_col = 1, 2
+    n = 3
+    sz = phone_cell_px(None, [[{}] * n], plan, 1.0, grid)
+    facet_view.render_facet_chrome(grid, plan)
+    margin = getattr(facet_view, "CELL_MARGIN_PX", 2)
+    for r in (1, 2):
+        for c in range(n):
+            cell = QWidget(host)
+            cell.setFixedWidth(sz + 2 * margin)
+            grid.addWidget(cell, r, 2 + c)
+    _pump(qapp)
+    avail = scroll.viewport().width()
+    bar = scroll.verticalScrollBar()
+    if not bar.isVisible():
+        avail -= bar.sizeHint().width()
+    return avail, grid.minimumSize().width(), n, max(0, grid.horizontalSpacing())
+
+
+@pytest.mark.parametrize("group_padding", [None, "padding:24px 6px;"])
+def test_image_table_fitted_columns_fill_the_page_exactly(
+        qapp, app_sheet, monkeypatch, group_padding):
+    """Phone layout's fit measures the row labels ``facet_view`` draws, rather
+    than restating their padding as numbers of its own: at 100 % the columns
+    fill the page — no sideways scroll, and no more slack than the spacing
+    after the last column plus the rounding of one pixel per column. The
+    wrong implementation this rejects is the copied estimate (a group band's
+    line height + 16, a label's text + 8, per column spacing + 4), which left
+    a strip unused at the desk's styling and scrolled sideways once the band's
+    padding grew — the second case widens it by 44 px."""
+    from review.features.image_browser.image_table import facet_view
+    qapp.setStyleSheet(theme.qss())
+    if group_padding:
+        base = facet_view._group_qss
+        monkeypatch.setattr(
+            facet_view, "_group_qss",
+            lambda pt: base(pt).replace("padding:2px 6px;", group_padding))
+    avail, need, n, spacing = _fit_and_lay_out(qapp)
+    assert need <= avail, f"the fitted grid scrolls sideways by {need - avail} px"
+    assert avail - need <= spacing + n, (
+        f"the fitted grid leaves {avail - need} px of the page unused")
 
 
 def test_image_table_labels_grow_with_the_ui_scale_on_screen_only():
@@ -1229,3 +1304,162 @@ def test_a_rail_section_glyph_is_measured_off_the_font_it_is_drawn_in(
     row._aw_rescale()
     assert row._glyph_px == built
     assert row._glyph.maximumWidth() == built
+
+
+def test_a_close_confirmation_that_could_not_be_asked_keeps_the_window_open(
+        monkeypatch):
+    """ARCHITECTURE §15: a confirmation that could not be obtained is not
+    consent. Offscreen, the autouse ``_no_modal_dialogs`` makes
+    ``QMessageBox.question`` raise — the dialog-unavailable case. The close
+    must be refused (event ignored, no exception out of ``closeEvent``) and
+    nothing that a close tears down may run: the run keeps going and the
+    window stays whole, rather than leaving a closed window with the run
+    stopped by nobody and Review never torn down.
+
+    The wrong implementation this rejects is the bare ask: the exception
+    escapes ``closeEvent`` with the event still accepted, so Qt closes the
+    window having skipped every teardown step below the question.
+    """
+    import types
+
+    import allwell
+    from PySide6.QtGui import QCloseEvent
+
+    phone_layout.set_on(True)
+    monkeypatch.setattr(allwell, "_analyze_run_busy", lambda _a: True)
+    torn = []
+    monkeypatch.setattr(allwell, "_stop_analyze_runner",
+                        lambda _a: torn.append("stop_analyze_runner"))
+    monkeypatch.setattr(allwell, "_save_review_before_close",
+                        lambda _r: torn.append("save_review"))
+    win = types.SimpleNamespace(_analyze=object(), _review=None,
+                                _datasets=None)
+    win._confirm_close_in_phone_layout = (
+        lambda: allwell.AllWellApp._confirm_close_in_phone_layout(win))
+    win._save_window_state = lambda: torn.append("save_window_state")
+
+    ev = QCloseEvent()
+    ev.accept()
+    try:
+        allwell.AllWellApp.closeEvent(win, ev)
+    except AssertionError as e:   # ModalDialogInTest is an AssertionError
+        raise AssertionError(
+            "a close confirmation that raised escaped closeEvent with the "
+            f"event accepted, so the window closes without consent: {e}") from e
+    assert not ev.isAccepted(), "an unanswerable close question closed the window"
+    assert torn == [], f"a refused close still ran teardown: {torn}"
+    # And the answer the user does give still decides it.
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: QMessageBox.Close)
+    assert allwell.AllWellApp._confirm_close_in_phone_layout(win) is True
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: QMessageBox.Cancel)
+    assert allwell.AllWellApp._confirm_close_in_phone_layout(win) is False
+
+
+def _qss_rule(sheet: str, selector_start: str) -> str:
+    """The body of the first rule in *sheet* whose selector list starts with
+    *selector_start*."""
+    import re
+    m = re.search(re.escape(selector_start) + r"[^{]*\{([^}]*)\}", sheet)
+    assert m, f"no rule starting {selector_start!r} in the touch stylesheet"
+    return m.group(1)
+
+
+def test_the_stylesheet_touch_floors_follow_the_named_constants(monkeypatch):
+    """``core.phone_layout`` names the floors; the touch stylesheet must read
+    them. Values chosen so nothing else in the sheet can produce them, and so
+    the literal 44 / 48 the sheet once restated would leave the old floors in
+    place — the wrong implementation this rejects."""
+    monkeypatch.setattr(phone_layout, "TOUCH_MIN_PT", 50)
+    monkeypatch.setattr(phone_layout, "TOUCH_ROW_PT", 61)
+    sheet = theme._touch_qss(1.0)
+    assert "min-height: 50px" in _qss_rule(sheet, "QPushButton, QToolButton")
+    assert "min-height: 61px" in _qss_rule(sheet, "QComboBox QAbstractItemView")
+    assert "min-height: 61px" in _qss_rule(sheet, "QFrame#RailNavRow")
+    assert "min-height: 61px" in _qss_rule(sheet, 'QWidget#Drawer[phoneSheet="true"]')
+    assert "min-height: 50px" in _qss_rule(sheet, "QCheckBox, QRadioButton")
+    assert "44px" not in sheet and "48px" not in sheet, (
+        "a touch floor in the stylesheet is a literal beside the named constant")
+
+
+def test_the_text_size_buttons_follow_the_named_touch_sizes(
+        qapp, app_sheet, monkeypatch):
+    """The ⋯ menu's Text size buttons are TOUCH_ROW_PT × TOUCH_MIN_PT, spaced
+    TOUCH_GAP_PT apart — read from the constants, not restated beside them."""
+    from PySide6.QtWidgets import QPushButton
+    monkeypatch.setattr(phone_layout, "TOUCH_MIN_PT", 50)
+    monkeypatch.setattr(phone_layout, "TOUCH_ROW_PT", 61)
+    monkeypatch.setattr(phone_layout, "TOUCH_GAP_PT", 11)
+    win = _window()
+    QVBoxLayout(win)
+    shell = _shell(win)
+    row = shell._text_size_row().defaultWidget()
+    buttons = row.findChildren(QPushButton, "PhoneTextSizeButton")
+    assert len(buttons) == len(phone_layout.TEXT_SIZES)
+    for b in buttons:
+        assert (b.minimumWidth(), b.minimumHeight()) == (shell.pt(61), shell.pt(50))
+    assert row.layout().spacing() == shell.pt(11)
+
+
+def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
+    """``PhoneShell.adapt`` and ``_phone_relevant`` read one roster: every
+    kind ``_adapt_kind`` can name has an adapter, every adapter's kind can be
+    named, and a widget of each kind — the real classes, named the way the app
+    names them — is watched. The drift this rejects: a type taught to
+    ``adapt`` but not to the watch list is never watched, so a widget built
+    after the switch never gets its phone form, and nothing fails."""
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    from ui import phone_shell as ps
+    from widgets.control_band import ControlBand
+    from widgets.mpl_toolbar import MplToolbar
+    from widgets.stepper import Stepper
+
+    assert set(ps.PhoneShell._ADAPTERS) == set(ps.ADAPTED_KINDS)
+    for meth in ps.PhoneShell._ADAPTERS.values():
+        assert callable(getattr(ps.PhoneShell, meth, None)), meth
+    host = QWidget()
+    canvas = FigureCanvasQTAgg(Figure())
+    canvas.setParent(host)
+    row = QWidget(host)
+    row.setObjectName("AnalyzeFormRow")
+    block = QWidget(host)
+    block.setProperty("phoneControls", True)
+    block.setStacked = lambda _on: None
+    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), row, block]
+    named = {ps._adapt_kind(w) for w in widgets}
+    assert named == set(ps.ADAPTED_KINDS), named
+    assert all(ps._phone_relevant(w) for w in widgets)
+    assert ps._adapt_kind(QLabel("plain", host)) is None
+    host.deleteLater()
+
+
+def test_the_rail_drawer_lends_the_current_mode_s_panel_and_gives_all_back(qapp):
+    """As Review's chokepoint drives it: in phone layout only
+    the current mode's panel shows, in the drawer; at the desk every panel is
+    back in its splitter under the desk's visibility rule (the rail in Review
+    only, the others whenever expanded)."""
+    host = QWidget()
+    host.resize(800, 600)
+    panels = {}
+    for mode in ("review", "analyze", "datasets"):
+        split = QSplitter(Qt.Horizontal, host)
+        panels[mode] = QWidget()
+        split.addWidget(panels[mode])
+        split.addWidget(QWidget())
+    drawer = _rail_drawer(host, panels)
+    host.show()
+    phone_layout.set_on(True)
+    drawer.apply("analyze", False)
+    assert all(p.parentWidget() is drawer.contentWidget() for p in panels.values())
+    assert {m for m, p in panels.items() if not p.isHidden()} == {"analyze"}
+    assert drawer.isOpen()
+    phone_layout.set_on(False)
+    drawer.apply("analyze", False)
+    assert all(isinstance(p.parentWidget(), QSplitter) for p in panels.values())
+    assert {m for m, p in panels.items() if not p.isHidden()} == {"analyze", "datasets"}
+    assert not any(drawer.is_lent(p) for p in panels.values())
+    host.deleteLater()

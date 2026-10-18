@@ -332,6 +332,28 @@ def test_closing_in_phone_layout_mid_run_asks_first(qapp, win, monkeypatch):
         win._phone.set_on(False, restyle=False)
 
 
+def test_a_close_question_that_could_not_be_asked_keeps_the_real_window_open(
+        qapp, win, monkeypatch):
+    """The real window, with the autouse ``_no_modal_dialogs`` making the
+    question raise: the close is refused, nothing escapes ``closeEvent``, and
+    the run is not stopped (ARCHITECTURE §15)."""
+    import allwell
+    from PySide6.QtGui import QCloseEvent
+
+    stopped = []
+    monkeypatch.setattr(allwell, "_analyze_run_busy", lambda _a: True)
+    monkeypatch.setattr(allwell, "_stop_analyze_runner",
+                        lambda a: stopped.append(a))
+    win._phone.set_on(True, restyle=False)
+    try:
+        ev = QCloseEvent()
+        win.closeEvent(ev)
+        assert not ev.isAccepted() and stopped == []
+        assert win.isVisible()
+    finally:
+        win._phone.set_on(False, restyle=False)
+
+
 def _image_plate(root):
     """Two wells × DAPI/GFP, one field, real TIFFs in the pipeline's in/out
     layout — enough for the Image Table to draw a grid."""

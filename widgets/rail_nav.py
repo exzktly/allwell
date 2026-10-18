@@ -103,6 +103,11 @@ class _RailNavRow(QFrame):
         # at 150% font scaling the box grows and the glyph does not. The sweep
         # that made this box font-derived converted the reservation and left
         # the ink behind.
+        # Measured off the font the row is drawn in — the stylesheet's, so the
+        # row is polished first. Measured before the polish, the box was a
+        # pixel smaller than ``_aw_rescale`` makes it off the same font, and a
+        # round trip through phone layout changed it (15 px → 16).
+        self.ensurePolished()
         _gs = max(12, round(self.fontMetrics().height() * 1.0))
         self._glyph_px = _gs
         self._glyph.setFixedSize(_gs, _gs)

@@ -1000,6 +1000,30 @@ if _HAVE_MPL:
             total += lay.spacing() * len(parts)
             return total
 
+        def pinFigureHeight(self, px: int) -> None:
+            """Keep the card at least *px* of figure plus its chrome tall.
+
+            The chrome is measured off the card's fonts, so the pin is
+            re-derived after a UI scale (:meth:`_aw_rescale`) rather than kept
+            as a number: a card built while phone layout was on held its
+            phone-sized chrome — 75 px of minimum height — at the desk. The
+            chrome is measured once the card is polished, off the
+            stylesheet's fonts, so the pin set here and the one re-derived
+            later are measured the same way.
+            """
+            self._figure_min_h = int(px)
+            self._apply_figure_pin()
+
+        def _apply_figure_pin(self) -> None:
+            px = getattr(self, "_figure_min_h", None)
+            if px is not None:
+                self.ensurePolished()
+                self.setMinimumHeight(px + self.chromeHeight())
+
+        def _aw_rescale(self) -> None:
+            """Re-derive a figure pin's chrome at the new UI scale."""
+            self._apply_figure_pin()
+
         def _build_qss(self) -> str:
             c, t, r = theme.Colors, theme.Typography, theme.Radii
             return f"""

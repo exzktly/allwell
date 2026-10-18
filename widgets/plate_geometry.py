@@ -168,6 +168,16 @@ def _action_row_allowance(plate) -> int:
     return total
 
 
+#: Dynamic property holding the role :func:`apply_plate_geometry` gave a plate.
+_P_ROLE = "_awPlateRole"
+
+
+def plate_role(plate) -> str | None:
+    """The role :func:`apply_plate_geometry` gave *plate*, or ``None``."""
+    role = plate.property(_P_ROLE)
+    return role if role in _ROLES else None
+
+
 def apply_plate_geometry(plate, *, role: str = "rail") -> None:
     """Give *plate* the app-wide plate-map geometry for *role*.
 
@@ -215,6 +225,15 @@ def apply_plate_geometry(plate, *, role: str = "rail") -> None:
     policy.setHeightForWidth(True)
     plate.setSizePolicy(policy)
 
+    # Kept on the plate so phone layout's rescale pass can re-apply the caps
+    # at a new UI scale (``WellPlateSelector._aw_rescale``) without touching
+    # the selection mode, which a caller may have changed since.
+    plate.setProperty(_P_ROLE, role)
+    apply_plate_caps(plate, role)
+
+
+def apply_plate_caps(plate, role: str) -> None:
+    """The size caps of *role*, at the UI scale in force now."""
     if role == "rail":
         # Review's left-rail well picker is EXEMPT from the caps. It is the
         # app's primary interaction surface, not a status readout, and it has
@@ -222,8 +241,8 @@ def apply_plate_geometry(plate, *, role: str = "rail") -> None:
         # and keeps its aspect, with no ceiling. Capping it to the dashboards'
         # budget shrank its cells from 23.7px to 20.8px — unifying the two by
         # making the one people actually click on smaller, which is the wrong
-        # direction. The size policy above is shared because that part IS the
-        # same rule; only the ceiling differs.
+        # direction. The size policy apply_plate_geometry sets is shared,
+        # because that part IS the same rule; only the ceiling differs.
         plate.setMaximumWidth(_UNCAPPED)
         plate.setMaximumHeight(_UNCAPPED)
         return

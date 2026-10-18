@@ -145,13 +145,10 @@ def install_refit(ctx, scroll, render_host, regenerate: Callable[[object], None]
     fitted = {"width": None}
 
     def _refit() -> None:
-        # Never inside a switch: its restyle lets timers fire, and a redraw
-        # there deleted and rebuilt the grid while the restyle was walking the
-        # window's widgets. Asked again once, when the switch ends — never by
-        # re-arming the timer from inside it, which can hold an event loop.
-        if phone_layout.is_switching():
-            phone_layout.after_switch(timer.start)
-            return
+        # Never inside a switch, and without a guard of its own: this runs from
+        # a timer, and the restyle delivers no timer and no queued call
+        # (``ui.phone_shell.rescale_widgets``) — a redraw there once deleted and
+        # rebuilt the grid while the pass was walking the window's widgets.
         # Only a grid that has been drawn is redrawn: an empty tab stays empty
         # until its user presses Generate.
         if not getattr(ctx.state.image_table, "last_render", None):

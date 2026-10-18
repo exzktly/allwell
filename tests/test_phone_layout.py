@@ -172,15 +172,45 @@ def test_fixed_text_sizes_scale_and_come_back(qapp):
     assert (edit.minimumWidth(), edit.maximumWidth()) == (60, 60)
 
 
-def test_a_fixed_size_set_under_a_scale_is_left_alone(qapp):
-    """Built in phone layout: literal or font-measured, the pass cannot tell
-    which, and halving a literal on the way out would be worse than leaving
-    it."""
+def test_a_font_set_under_a_scale_comes_back_at_its_desk_size(qapp):
+    """A font set while a scale is in force is the desk's times that scale: the
+    application stylesheet re-polishes every widget's font (its ``*`` rule
+    sets a size on all of them), so a font that survives to be read was put
+    there by the stylesheet or by code reading a scaled token. This replaces
+    ``test_a_fixed_size_set_under_a_scale_is_left_alone``, which pinned the
+    font half of the reported defect: taken as a literal, the run log of a
+    window launched in phone layout stayed 31 px at the desk instead of 13."""
+    from ui.phone_shell import explicit_fonts, rescale_widgets
+    host = QWidget()
+    QVBoxLayout(host)
+    lbl = QLabel("legend", host)
+    host.layout().addWidget(lbl)
+    f = QFont(lbl.font())
+    f.setPixelSize(round(13 * 1.75))
+    lbl.setFont(f)
+    rescale_widgets(1.75, 1.0, [lbl], explicit_fonts())
+    assert lbl.font().pixelSize() == 13            # a literal reading keeps 23
+    # From there it makes the same round trip as a desk-built font.
+    rescale_widgets(1.0, 1.75, [lbl], explicit_fonts())
+    assert lbl.font().pixelSize() == 23
+    rescale_widgets(1.75, 1.0, [lbl], explicit_fonts())
+    assert lbl.font().pixelSize() == 13
+
+
+def test_a_fixed_size_set_under_a_scale_is_left_as_built(qapp):
+    """A fixed size set under a scale is nearly always the desk's: a widget
+    measures itself in its constructor, before the stylesheet polishes it, so
+    off the application font that no scale touches — or it is a literal.
+    Measured on the real window launched in phone layout, dividing every such
+    size by the scale on the way out shrank about 300 widgets below their desk
+    size (Analyze's form fields 40 px → 17). The sizes that really are read off
+    the scale re-derive themselves in ``_aw_rescale`` (the empty state's glyph,
+    a plate's caps, a plot card's chrome)."""
     from ui.phone_shell import rescale_widgets
     edit = QLineEdit()
     edit.setFixedWidth(60)
     rescale_widgets(1.75, 1.0, [edit])
-    assert edit.minimumWidth() == 60
+    assert (edit.minimumWidth(), edit.maximumWidth()) == (60, 60)
 
 
 def test_a_widget_that_owns_its_sizes_is_rescaled_by_its_own_hook(qapp):
@@ -201,6 +231,28 @@ def test_a_widget_that_owns_its_sizes_is_rescaled_by_its_own_hook(qapp):
     # that scaled the child too would hand the hook 80 and the owner would
     # scale it again.
     assert calls == [40]
+
+
+def test_widgets_rescale_themselves_innermost_first(qapp):
+    """An owner that measures its children — a plot card's chrome holds the
+    header's icon buttons — must run after them. In the order the widget list
+    happened to give, a card measured its header with the phone's icons still
+    in it and kept 21 px too much minimum height at the desk."""
+    from ui.phone_shell import rescale_widgets
+    order = []
+
+    class Owner(QWidget):
+        def _aw_rescale(self):
+            order.append(self.objectName())
+
+    outer = Owner()
+    outer.setObjectName("outer")
+    middle = Owner(outer)
+    middle.setObjectName("middle")
+    inner = Owner(middle)
+    inner.setObjectName("inner")
+    rescale_widgets(1.0, 2.0, [outer, middle, inner])
+    assert order == ["inner", "middle", "outer"]
 
 
 def test_a_font_set_in_code_survives_the_restyle(qapp):
@@ -756,7 +808,7 @@ def test_the_restyle_is_a_switch_and_its_notice_breaks_its_line(qapp, monkeypatc
     assert during == [True] and not phone_layout.is_switching()
 
 
-def test_an_image_table_redraw_waits_out_a_switch(qapp):
+def test_an_image_table_redraw_runs_when_its_timer_fires(qapp):
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QScrollArea
     from types import SimpleNamespace
@@ -770,48 +822,49 @@ def test_an_image_table_redraw_waits_out_a_switch(qapp):
     calls = []
     install_refit(ctx, scroll, host, calls.append)
     timer = host.findChild(QTimer)
-    with phone_layout.switching():
-        timer.timeout.emit()
-        # Not inside the switch, and not by re-arming its timer there either:
-        # a timer restarting itself is what can hold an event loop.
-        assert calls == [] and not timer.isActive()
-    assert timer.isActive()                    # asked again once, at the end
-    timer.stop()
+    # It has no guard against a switch: it runs from a timer, and the restyle
+    # delivers none (test_nothing_queued_runs_inside_the_rescale_pass).
     timer.timeout.emit()
     assert calls == [ctx]
 
 
-def test_work_queued_for_after_a_switch_runs_once_at_its_end():
-    ran = []
-    phone_layout.after_switch(lambda: ran.append("now"))
-    assert ran == ["now"]                       # no switch: at once
-    def later():
-        ran.append("later")
-    with phone_layout.switching():
-        with phone_layout.switching():          # nested: still the one switch
-            phone_layout.after_switch(later)
-            phone_layout.after_switch(later)    # queued once
-        assert ran == ["now"]
-    assert ran == ["now", "later"]
-
-
-def test_no_timer_runs_inside_the_rescale_pass(qapp):
-    # The pass used to call processEvents, which runs due timers. On Windows it
-    # loops until the queue is empty, so a zero-delay timer that re-armed
-    # itself held the restyle — and its busy overlay — up for good.
-    from PySide6.QtCore import QTimer
+def test_nothing_queued_runs_inside_the_rescale_pass(qapp):
+    """The pass delivers polish and layout events only. It used to call
+    processEvents, which runs due timers — on Windows until the queue is
+    empty, so a zero-delay timer that re-armed itself held the restyle, and
+    its busy overlay, up for good. Then it called a bare sendPostedEvents(),
+    which still ran every queued call: about 9,400 in one switch on a loaded
+    app. An interval-0 QTimer *object* is no test of either — sendPostedEvents
+    never fires one on Linux — so the calls here are the queued kinds that
+    really ran inside it: a singleShot(0), a queued signal, a queued
+    invokeMethod."""
+    from PySide6.QtCore import QMetaObject, QObject, Qt, QTimer, Signal, Slot
 
     from ui.phone_shell import rescale_widgets
-    fired = []
-    timer = QTimer()
-    timer.setSingleShot(True)
-    timer.setInterval(0)
-    timer.timeout.connect(lambda: fired.append(phone_layout.is_switching()))
-    timer.start()
+    ran = []
+
+    class _Target(QObject):
+        poke = Signal()
+
+        @Slot()
+        def invoked(self):
+            ran.append("invokeMethod")
+
+    target = _Target()
+    target.poke.connect(lambda: ran.append("queued signal"), Qt.QueuedConnection)
+    QTimer.singleShot(0, lambda: ran.append("singleShot"))
+    target.poke.emit()
+    QMetaObject.invokeMethod(target, "invoked", Qt.QueuedConnection)
+    host = QWidget()
+    QVBoxLayout(host).addWidget(QLabel("x", host))
+    host.show()
     with phone_layout.switching():
         rescale_widgets(1.0, 1.0, [], {})
-    assert fired == []
-    timer.stop()
+        assert ran == []
+    # Delivered later, by the event loop, as they would have been anyway.
+    for _ in range(5):
+        qapp.processEvents()
+    assert sorted(ran) == ["invokeMethod", "queued signal", "singleShot"]
 
 
 def test_the_queued_refresh_does_not_re_arm_inside_a_switch(qapp):
@@ -831,3 +884,348 @@ def test_the_queued_refresh_does_not_re_arm_inside_a_switch(qapp):
         assert refreshed == [] and not shell._refresh_soon.isActive()
     PhoneShell._refresh_when_settled(shell)
     assert refreshed == [1]
+
+
+# ── the switch, driven through the shell ────────────────────────────────────
+# These go through PhoneShell itself — set_on, set_text_size, the turn — in the
+# order the window calls it, on widgets the app builds, because each defect
+# here lived in the *sequence* (what ran before the restyle, what was built
+# under a scale), which a test of one helper cannot see.
+
+#: Windows a shell test built, deleted by ``app_sheet`` in a fixed order.
+_WINDOWS: list = []
+
+
+@pytest.fixture
+def app_sheet(qapp):
+    """The shell re-applies the application stylesheet; give the old one back.
+
+    It also takes down what the test built, deliberately rather than by luck.
+    Each window goes first, deleted outright, which takes its shell, its plot
+    card and its popups with it in Qt's own order. Then what was handed to
+    ``deleteLater`` meanwhile: a Stepper measures its row height off a
+    throwaway combo it deletes that way, and without an event loop the combo
+    outlives the test as a top-level window, which the widget reaper then
+    deleted after its own popup container — a segfault in teardown, on
+    ``origin/main`` too. Left to the garbage collector or to the reaper's
+    order, these tests crashed a worker one run in three.
+    """
+    import shiboken6
+    from PySide6.QtCore import QEvent
+    before = qapp.styleSheet()
+    yield
+    while _WINDOWS:
+        w = _WINDOWS.pop()
+        if shiboken6.isValid(w):
+            w.hide()
+            shiboken6.delete(w)
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    qapp.setStyleSheet(before)
+
+
+def _window():
+    """A window the ``app_sheet`` fixture will take down."""
+    win = QWidget()
+    _WINDOWS.append(win)
+    return win
+
+
+def _shell(win, *, show=True, **handles):
+    """A shell on *win*, mounted the way ``allwell`` mounts it: its controls in
+    a band at the top of the window, the desk button among them."""
+    from PySide6.QtWidgets import QHBoxLayout
+
+    from ui.phone_shell import PhoneHandles, PhoneShell
+    if win not in _WINDOWS:
+        _WINDOWS.append(win)
+    band = QWidget(win)
+    QHBoxLayout(band)
+    win.layout().insertWidget(0, band)
+    win.resize(400, 700)
+    if show:
+        win.show()
+    shell = PhoneShell(win, PhoneHandles(band=band, **handles))
+    band.layout().addWidget(shell.desk_button)
+    shell._rail_status.setParent(win)
+    return shell
+
+
+def _pump(qapp, n=5):
+    for _ in range(n):
+        qapp.processEvents()
+
+
+def _app_widgets(host):
+    """Widgets the way the app builds them, each one a kind the report named:
+    the run log (a 9 pt font the stylesheet replaces — ``analyze/log_pane``),
+    an empty state (a glyph and a two-line floor measured off the font), a
+    picker plate (caps read off the UI scale), a band stepper pinned to its
+    token (``review/core/centre_view``), a label pinned to its text, the FOV
+    toggle (room reserved for "FOV ✓", measured once polished) and a plot card
+    pinned to its figure plus its chrome (``review/features/barplot``)."""
+    from PySide6.QtWidgets import QTextEdit
+
+    from widgets.empty_state import EmptyState
+    from widgets.plate_geometry import apply_plate_geometry
+    from widgets.plot_card import PlotCard
+    from widgets.reserved_width_button import ReservedWidthButton
+    from widgets.stepper import Stepper
+    from widgets.well_plate_selector import WellPlateSelector
+    lay = QVBoxLayout(host)
+    log = QTextEdit(host)
+    f = log.font()
+    f.setPointSize(9)
+    log.setFont(f)
+    empty = EmptyState("Nothing to show", parent=host)
+    plate = WellPlateSelector(host)
+    apply_plate_geometry(plate, role="picker")
+    stepper = Stepper(host, value=50.0, minimum=0.0, maximum=1e9, decimals=1)
+    stepper.setFixedWidth(theme.Metrics.stepper_w)
+    label = QLabel("Threshold", host)
+    label.setFixedHeight(label.fontMetrics().height() + theme.Spacing.sm)
+    cell = QLineEdit(host)              # a Home › Labels cell
+    cell.setFixedHeight(26)
+    fov = ReservedWidthButton("FOV", host)
+    fov.reserve(("FOV", "FOV ✓"), theme.Spacing.md)
+    card = PlotCard(host, figsize=(4, 3))
+    card.pinFigureHeight(300)
+    for w in (log, empty, plate, stepper, label, cell, fov, card):
+        lay.addWidget(w)
+    return dict(log=log, empty=empty, plate=plate, stepper=stepper, label=label,
+                cell=cell, fov=fov, card=card)
+
+
+def _sizes(ws):
+    f = ws["log"].font()
+    glyph = ws["empty"]._glyph
+    return {
+        "log font": (f.pointSizeF(), f.pixelSize()),
+        "empty glyph": (glyph.minimumWidth(), glyph.maximumWidth()),
+        "empty floor": ws["empty"]._text.minimumHeight(),
+        "plate caps": (ws["plate"].maximumWidth(), ws["plate"].maximumHeight()),
+        "stepper": (ws["stepper"].minimumWidth(), ws["stepper"].maximumWidth()),
+        "label": (ws["label"].minimumHeight(), ws["label"].maximumHeight()),
+        "cell": (ws["cell"].minimumHeight(), ws["cell"].maximumHeight()),
+        "fov": ws["fov"].minimumWidth(),
+        "card": ws["card"].minimumHeight(),
+    }
+
+
+# The widgets live only inside these helpers, which hand back plain numbers: a
+# failing assertion keeps its frame's locals alive, and a frame holding the
+# window and its shell crashed the interpreter while pytest wrote the report.
+
+def _desk_sizes(qapp) -> dict:
+    qapp.setStyleSheet(theme.qss())
+    host = _window()
+    desk = _app_widgets(host)
+    host.show()
+    _pump(qapp)
+    return _sizes(desk)
+
+
+def _launched_in_phone_layout_then_left(qapp) -> tuple[dict, dict]:
+    """``main``'s sequence: ``_phone_layout_at_startup`` scales the tokens, the
+    stylesheet goes on, the window is built and enters phone layout with
+    ``set_on(True, restyle=False)``; then the user switches back."""
+    import allwell
+    _store(True)
+    assert allwell._phone_layout_at_startup(_App(1080, 2000)) is True
+    qapp.setStyleSheet(theme.qss())
+    win = _window()
+    built = _app_widgets(win)
+    # AllWellApp.__init__ enters before the window is first shown.
+    shell = _shell(win, show=False)
+    shell.set_on(True, restyle=False)
+    win.show()
+    _pump(qapp)
+    at_phone = _sizes(built)
+    shell.set_on(False)
+    _pump(qapp)
+    assert theme.ui_scale() == 1.0
+    return at_phone, _sizes(built)
+
+
+def _round_trip(qapp) -> tuple[dict, dict, dict]:
+    qapp.setStyleSheet(theme.qss())
+    win = _window()
+    built = _app_widgets(win)
+    shell = _shell(win)
+    _pump(qapp)
+    before = _sizes(built)
+    shell.set_on(True)
+    _pump(qapp)
+    at_phone = _sizes(built)
+    shell.set_on(False)
+    _pump(qapp)
+    return before, at_phone, _sizes(built)
+
+
+def test_a_window_launched_in_phone_layout_leaves_it_like_one_built_at_the_desk(
+        qapp, app_sheet):
+    """Reported: launched on the phone, then switched back at the desk, the
+    run log stayed at 31 px against 13, eleven empty-state glyphs at 111 px
+    against 48, and the plate caps at 781×497 against 330×210 — everything
+    built under the scale kept it, because the pass took a size it had no
+    desk record of as a literal."""
+    want = _desk_sizes(qapp)
+    at_phone, after = _launched_in_phone_layout_then_left(qapp)
+    # Built at the phone's size: the defect is only in the way back.
+    assert at_phone["empty glyph"][0] > want["empty glyph"][0] * 2
+    assert after == want
+
+
+def test_a_round_trip_gives_back_a_fixed_size_and_font_set_at_the_desk(
+        qapp, app_sheet):
+    before, at_phone, after = _round_trip(qapp)
+    assert at_phone["label"] != before["label"]          # it did scale
+    assert after == before
+
+
+@pytest.mark.parametrize("change", ["text size", "the phone turning"])
+def test_a_restyle_inside_phone_layout_gives_a_pinned_stepper_back(
+        qapp, app_sheet, monkeypatch, change):
+    """Reported: desk → phone → text size L → desk left a band's stepper
+    227 px wide instead of 96. The restyle ran with the stepper still in its
+    touch form, whose width is its own, so the pass lost the caller's pin.
+    Both restyles made inside phone layout — a text-size change, and the
+    phone turning (a new screen geometry) — take the touch form off first."""
+    from ui.phone_shell import PhoneShell
+    from widgets.stepper import Stepper
+    qapp.setStyleSheet(theme.qss())
+    win = _window()
+    QVBoxLayout(win)
+    st = Stepper(win, value=50.0, minimum=0.0, maximum=1e9, decimals=1)
+    st.setFixedWidth(theme.Metrics.stepper_w)
+    win.layout().addWidget(st)
+    shell = _shell(win)
+    _pump(qapp)
+    shell.set_on(True)
+    _pump(qapp)
+    assert st.isTouchMode()
+    if change == "text size":
+        shell.set_text_size("L")
+    else:
+        unit = shell.unit() * 1.3
+        monkeypatch.setattr(PhoneShell, "unit", lambda self: unit)
+        shell._on_geometry_changed(None)
+    _pump(qapp)
+    assert st.isTouchMode()          # its phone form is back after the restyle
+    shell.set_on(False)
+    _pump(qapp)
+    assert not st.isTouchMode()
+    assert (st.minimumWidth(), st.maximumWidth()) == (96, 96)
+
+
+def test_a_round_trip_gives_back_minimum_heights_the_touch_floors_took(
+        qapp, app_sheet):
+    """Reported: all 96 Home › Labels cells (a QLineEdit pinned 26 px tall)
+    came back from one round trip with a minimum height of 0. Qt resets a
+    minimum to 0 when the stylesheet rule that set it goes; the touch floors
+    put a ``min-height`` on fields and buttons."""
+    from PySide6.QtWidgets import QPushButton
+    qapp.setStyleSheet(theme.qss())
+    win = _window()
+    QVBoxLayout(win)
+    cell = QLineEdit(win)
+    cell.setFixedHeight(26)
+    button = QPushButton("Go", win)
+    button.setMinimumHeight(20)
+    label = QLabel("not floored", win)
+    label.setMinimumHeight(17)
+    for w in (cell, button, label):
+        win.layout().addWidget(w)
+    shell = _shell(win)
+    _pump(qapp)
+    shell.set_on(True)
+    _pump(qapp)
+    assert cell.minimumHeight() > 26          # the touch floor owns it now
+    shell.set_on(False)
+    _pump(qapp)
+    assert (cell.minimumHeight(), cell.maximumHeight()) == (26, 26)
+    assert button.minimumHeight() == 20
+    assert label.minimumHeight() == 17
+
+
+def test_a_widget_replaced_in_place_between_sweeps_is_watched(qapp, app_sheet):
+    """A stepper deleted and another built between two ticks leaves the widget
+    count unchanged — and the allocator often hands the new one the old one's
+    address — so a sweep that compared counts never watched it."""
+    from PySide6.QtCore import QEvent
+
+    from ui.phone_shell import _P_WATCHED
+    from widgets.stepper import Stepper
+    qapp.setStyleSheet(theme.qss())
+    win = _window()
+    QVBoxLayout(win)
+    old = Stepper(win, value=1.0)
+    win.layout().addWidget(old)
+    shell = _shell(win)
+    shell.set_on(True)
+    _pump(qapp)
+    shell._sweep_timer.stop()            # the test ticks the sweep itself
+    assert old.property(_P_WATCHED)
+    # A Stepper deletes a throwaway combo with deleteLater; flush those so the
+    # count below is the widgets', then take the sweep's baseline.
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    shell._sweep(force=True)
+    count = len(QApplication.allWidgets())
+    old.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    new = Stepper(win, value=2.0)
+    win.layout().addWidget(new)
+    new.show()
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert len(QApplication.allWidgets()) == count
+    shell._sweep(force=False)
+    assert new.property(_P_WATCHED)
+    assert new.isTouchMode()             # and adapted, since it is showing
+
+
+def test_a_page_change_watches_what_the_new_page_built_at_once(qapp, app_sheet):
+    """ARCHITECTURE said a page change sweeps at once; it only refreshed the
+    band, so a lazily built page showed its desk controls until the next
+    300 ms tick. The pages handle's ``currentChanged`` now sweeps."""
+    from PySide6.QtWidgets import QStackedWidget
+
+    from ui.phone_shell import _P_WATCHED
+    from widgets.stepper import Stepper
+    qapp.setStyleSheet(theme.qss())
+    win = _window()
+    QVBoxLayout(win)
+    pages = QStackedWidget(win)
+    pages.addWidget(QWidget())
+    win.layout().addWidget(pages)
+    shell = _shell(win, pages=pages)
+    shell.set_on(True)
+    _pump(qapp)
+    shell._sweep_timer.stop()            # no tick may do it instead
+    page = QWidget()
+    QVBoxLayout(page)
+    st = Stepper(page, value=3.0)
+    page.layout().addWidget(st)
+    pages.addWidget(page)
+    pages.setCurrentWidget(page)         # built, then shown: a lazy page
+    assert st.property(_P_WATCHED)
+    assert st.isTouchMode()
+
+
+def test_a_rail_section_glyph_is_measured_off_the_font_it_is_drawn_in(
+        qapp, app_sheet):
+    """A rail row measured its glyph box off the font before the stylesheet
+    polished it, and ``_aw_rescale`` off the polished one, so every glyph
+    came back from a round trip a pixel larger (15 → 16)."""
+    from widgets.rail_nav import RailNav
+    qapp.setStyleSheet(theme.qss())
+    host = _window()
+    QVBoxLayout(host)
+    nav = RailNav(host)
+    nav.addItem("Home", icon="home", key="home")
+    host.layout().addWidget(nav)
+    host.show()
+    _pump(qapp)
+    row = nav._rows["home"]
+    built = row._glyph_px
+    row._aw_rescale()
+    assert row._glyph_px == built
+    assert row._glyph.maximumWidth() == built

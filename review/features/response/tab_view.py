@@ -157,7 +157,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     fig.subplots_adjust(top=0.94, bottom=0.28, left=0.13, right=0.97)
     canvas = reg.register("_response_canvas", card.canvas)
     canvas.setMinimumHeight(int(_FIG_H * _DPI))
-    card.setMinimumHeight(int(_FIG_H * _DPI) + card.chromeHeight())
+    card.pinFigureHeight(int(_FIG_H * _DPI))
     card.setStatsChipVisible(False)
 
     scroll = reg.register("_response_scroll", QScrollArea(parent))

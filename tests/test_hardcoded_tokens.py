@@ -91,6 +91,12 @@ FREE_VALUES = frozenset({0, 16777215})
 #     value) and the rest are a sweep in their own right, not a ratchet that
 #     can be closed alongside unrelated work. Adding the names here without
 #     doing that sweep would only add an allowlist the size of the violation.
+#     (Re-measured later: 138 calls with a non-zero literal argument.)
+#   * ``resize`` — a window's opening size, 39 calls with literal arguments
+#     across the app, most of them dialogs (``popup.resize(820, 460)`` and its
+#     siblings). The same reasoning applies: it is a sweep, not a ratchet to
+#     close beside other work. New modules name their size instead, as the
+#     Playground's nanowell window does (``_POPUP_W`` / ``_POPUP_H``).
 #   * ``font-size`` inside QSS strings — the guard reads the AST, so a size
 #     written into a stylesheet f-string is invisible to it. ``selection_chip``
 #     had one and it was found by reading, not by this.

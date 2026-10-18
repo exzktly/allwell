@@ -590,6 +590,11 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     zl.addStretch(1)
     cl.addWidget(zoom_row)
 
+    # The nanowell array search: its controls and handlers live with its window.
+    _section("Nanowell array")
+    build_nanowell_section(ctx, controls, cl, _row, archive_dir=playground_nanowell_archive_dir,
+                           from_archive=playground_nanowell_from_archive, from_frame=playground_nanowell_from_frame)
+
     # The read-out. Everything this tab can be ambiguous about is stated here in
     # words, because none of it is visible in the picture: which mask the
     # outlines came from and whether it even fits the frame, how many labels the
@@ -597,11 +602,6 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # screen, and the data range (the LUT auto-scales, so a correction can move
     # the data without moving the image). Selectable so a line can be pasted
     # into a bug report.
-    # The nanowell array search: its controls and handlers live with its window.
-    _section("Nanowell array")
-    build_nanowell_section(ctx, controls, cl, _row, archive_dir=playground_nanowell_archive_dir,
-                           from_archive=playground_nanowell_from_archive, from_frame=playground_nanowell_from_frame)
-
     _section("What you're looking at")
     status = QLabel("Select a frame to begin.", controls)
     status.setObjectName("Muted")

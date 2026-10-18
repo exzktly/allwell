@@ -34,6 +34,20 @@ MARK_COLOURS = {"found": Colors.success, "dark": Colors.warn, "outline": Colors.
 #: The longest side the image is drawn at in the window.
 DRAW_SIDE = 640
 
+# Pixel geometry for this module's window and marks. Named rather than written
+# inline so each number is stated once beside what it sizes (ARCHITECTURE §8:
+# never hardcode a pixel size at a call site).
+#: The array window's opening size: the drawn image beside the settings table.
+_POPUP_W, _POPUP_H = 1180, 720
+#: The array window's outer margin.
+_POPUP_MARGIN = 8
+#: Vertical padding above and below the tab's row of array buttons.
+_BUTTON_ROW_PAD_V = 2
+#: Pen widths: the marks addressing hangs on (the square, the origin, the array
+#: outline) are drawn heavier than the per-site found / dark marks.
+_PEN_KEY_MARK = 2.0
+_PEN_SITE_MARK = 1.2
+
 
 @dataclass(frozen=True)
 class Mark:
@@ -85,7 +99,7 @@ def render_overlay(suggestion, side: int = DRAW_SIDE) -> QPixmap:
     painter.setRenderHint(QPainter.Antialiasing)
     for mark in overlay_marks(suggestion):
         pen = QPen(QColor(MARK_COLOURS[mark.kind]))
-        pen.setWidthF(2.0 if mark.kind in ("square", "origin", "outline") else 1.2)
+        pen.setWidthF(_PEN_KEY_MARK if mark.kind in ("square", "origin", "outline") else _PEN_SITE_MARK)
         if mark.kind == "outline":
             pen.setStyle(Qt.DashLine)
         painter.setPen(pen)
@@ -122,9 +136,9 @@ def _fill_table(table: QTableWidget, suggestion) -> None:
 def _build_popup(ctx) -> QDialog:
     popup = QDialog(ctx.window)
     popup.setWindowTitle("Nanowell array")
-    popup.resize(1180, 720)
+    popup.resize(_POPUP_W, _POPUP_H)
     outer = QVBoxLayout(popup)
-    outer.setContentsMargins(8, 8, 8, 8)
+    outer.setContentsMargins(_POPUP_MARGIN, _POPUP_MARGIN, _POPUP_MARGIN, _POPUP_MARGIN)
     popup._status = QLabel("", popup)
     popup._status.setWordWrap(True)
     popup._status.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -225,7 +239,7 @@ def build_nanowell_section(ctx, controls: QWidget, layout, row, *, archive_dir, 
     layout.addWidget(note)
     buttons = QWidget(controls)
     bl = QHBoxLayout(buttons)
-    bl.setContentsMargins(0, 2, 0, 2)
+    bl.setContentsMargins(0, _BUTTON_ROW_PAD_V, 0, _BUTTON_ROW_PAD_V)
     archive_btn = QPushButton("Well archive…", buttons)
     archive_btn.setToolTip(
         "Choose a raw well archive (<well>.zip, with the dataset's acquisition.json beside it, as in a dataset's in/ "

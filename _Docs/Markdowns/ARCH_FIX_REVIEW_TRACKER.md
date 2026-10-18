@@ -6,7 +6,7 @@ closes the last row.
 
 | ID | Rule | State | Evidence / test |
 |----|------|-------|-----------------|
-| R1 | Hover MFI thread reads held row-cache frames while gating / curation / progress jobs rewrite them; failure reads as "no MFI" | todo | |
+| R1 | Hover MFI thread reads held row-cache frames while gating / curation / progress jobs rewrite them; failure reads as "no MFI" | done | `tests/test_image_table_hover_mfi_reads_no_frame_being_written.py` — 5 tests red on origin/main with AssertionErrors naming the torn read, the shared-cache write, the lookup started under a panel job and under a load's gating pass, and the failure read as background; the verdict-copy case red under a mutation that drops `VERDICT_LAYERS` from the copy; the gating-pass case red under a mutation removing the blocker registration |
 | R2 | `review/core/stats_cache_state.py` holds logic against the `_state.py` "fields + defaults only" rule | todo | |
 | R3 | `held_for == "gating"` literal outside `core/plot_hold` | todo | |
 | R4 | `phone_panel_sheet` sets a loose `_aw_phone_panel_sheet` attribute on the main window | todo | |

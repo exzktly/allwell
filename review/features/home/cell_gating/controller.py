@@ -1072,6 +1072,12 @@ def cell_gating_start_gating_worker(ctx, *, before_start=None) -> GatingWorker:
     cell_gating_refresh_included_count(ctx, pending=True)
     if before_start is not None:
         before_start(worker)
+    # Every pass registers the "outside pass is writing" blocker before its
+    # thread starts, not only once the panel has been built: it is how the
+    # panel's jobs wait for this pass, and how ``progress_jobs.frames_busy``
+    # tells the Image Table's hover lookup not to copy a frame mid-rewrite.
+    if getattr(getattr(ctx, "runtime", None), "jobs", None) is not None:
+        _hold_jobs_for_outside_passes(ctx)
     worker.start()
     return worker
 

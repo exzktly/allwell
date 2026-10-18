@@ -423,8 +423,9 @@ def image_table_set_thresh_frac(ctx, value, channel=None) -> None:
 # with the dataset generation — lives in ``_hover_mfi``. Re-exported under the
 # names the readout below (and the tests) use.
 from review.features.image_browser.image_table._hover_mfi import (  # noqa: E402
-    MFI_PENDING,
+    MFI_PENDING as MFI_PENDING,
     cell_mfi as _cell_mfi,
+    mfi_suffix as _mfi_suffix,
 )
 
 
@@ -632,11 +633,7 @@ def _install_cell_events(
         if fov:
             prefix += f" FOV:{fov}"
         mfi = _cell_mfi(ctx, _lbl, readout, well, tp, fov, x, y)
-        if mfi is MFI_PENDING:
-            suffix = "  MFI: loading…"
-        else:
-            suffix = f"  MFI:{mfi:.1f}" if mfi is not None else ""
-        return f"{prefix}  ({x}, {y}) = {intensity}{suffix}"
+        return f"{prefix}  ({x}, {y}) = {intensity}{_mfi_suffix(mfi)}"
 
     def _update_hover(_lbl, ev) -> None:
         try:

@@ -29,6 +29,32 @@ Three properties hold the feature together, and each one was once missing:
 When a lookup lands while the cursor rests on its cell, the tooltip is
 refreshed on the UI thread through a queued signal, so ``loading…`` does not
 stay up until the mouse next moves.
+
+**The lookup never reads a frame someone else is writing.** The row cache's
+held frames are rewritten in place — ``Included`` / ``Gate_Pass`` / ``Gate_On``
+by the cell gating pass on its ``QThread``, the verdict columns by the Cell
+Gating panel's jobs on theirs (``review.core.progress_jobs``), ``Included`` by
+manual curation on the GUI thread — and pandas does not make reading a frame
+safe while another thread writes it. So the background thread is never handed
+a held frame, nor the shared image cache:
+
+* on the GUI thread, at the first hover, the well's held frame (when the row
+  cache holds it) is copied — only the intensity column, the identity columns
+  and every verdict (``narrow_rows.verdict_copy``) — and the image cache is
+  copied shallowly; the lookup runs against a scratch context
+  (``narrow_rows.scratch_context``) whose row cache holds that copy alone, so a
+  well it does not hold is read from disk into the scratch cache and the real
+  row cache, the shared image cache and the shared population store are never
+  touched from the thread. GUI-thread writers (curation, a synchronous re-gate)
+  cannot run while the GUI thread copies, and a background writer that starts
+  after the copy rewrites frames the lookup does not hold;
+* while a background writer is at work (``progress_jobs.frames_busy``) the copy
+  is not taken at all: the readout says ``MFI: waiting for the cell update…``
+  and the next hover after the writer ends asks again.
+
+A lookup that fails says ``MFI: unavailable`` rather than dropping the suffix,
+which is what background reads as: a value that could not be had is not a cell
+with no value.
 """
 
 from __future__ import annotations
@@ -50,6 +76,23 @@ _logger = logging.getLogger(__name__)
 #: still being read in the background, so the readout can say so rather than
 #: look like a cell with no MFI.
 MFI_PENDING = object()
+#: Sentinel :func:`cell_mfi` returns while a background writer is rewriting the
+#: cached frames, so no lookup was started: the next hover asks again.
+MFI_WAITING = object()
+#: Sentinel :func:`cell_mfi` returns when the lookup failed — the value could
+#: not be had, which is not the same as a cell (or background) with none.
+MFI_UNAVAILABLE = object()
+
+
+def mfi_suffix(mfi) -> str:
+    """The readout's MFI suffix for what :func:`cell_mfi` returned."""
+    if mfi is MFI_PENDING:
+        return "  MFI: loading…"
+    if mfi is MFI_WAITING:
+        return "  MFI: waiting for the cell update…"
+    if mfi is MFI_UNAVAILABLE:
+        return "  MFI: unavailable"
+    return f"  MFI:{mfi:.1f}" if mfi is not None else ""
 
 
 class LatestOnlyRunner:
@@ -202,38 +245,87 @@ def _register_stopper(ctx) -> None:
             swallowed("image table: registering the hover MFI stopper")
 
 
+def _frames_busy(ctx) -> bool:
+    """Whether a background writer may be rewriting the cached frames now."""
+    if getattr(getattr(ctx, "runtime", None), "jobs", None) is None:
+        return False
+    from review.core import progress_jobs
+    return progress_jobs.frames_busy(ctx)
+
+
+def _lookup_context(ctx, well: str, chan: str):
+    """The context the background lookup reads through (built on the UI thread).
+
+    A scratch context whose row cache holds a private copy of *well*'s held
+    frame (or nothing, when the row cache does not hold it), and whose
+    population store is its own, so the thread reads no frame another thread
+    may be rewriting and stores nothing under a key read after an edit it did
+    not see. A context with no dataset (a stub) is returned as given.
+    """
+    state = getattr(ctx, "state", None)
+    dataset = getattr(state, "dataset", None)
+    if dataset is None:
+        return ctx
+    from review.data.narrow_rows import scratch_context, verdict_copy
+    from review.features.image_browser.review_image.collect import mfi_column
+    from review.core.stats_cache_state import PopulationStore
+
+    rows = getattr(dataset, "cache", None)
+    held = rows.get(well) if rows is not None else None
+    private: dict = {}
+    if held is not None:
+        col = mfi_column(ctx, _binary_base(chan))
+        private[well] = verdict_copy(held, {col} if col else set())
+    return scratch_context(ctx, private, populations=PopulationStore())
+
+
 def cell_mfi(ctx, label, chan: str, well: str, tp: str, fov: str,
              img_x: int, img_y: int) -> float | object | None:
     """MFI of the segmented cell under full-image ``(img_x, img_y)``.
 
-    Returns the value, ``None`` for background / overlay / ratio / nuc-seg tiles
-    (no intensity column), any decode/lookup failure, or a cell rendered for a
-    previous dataset; or :data:`MFI_PENDING` while the lookup is in flight.
-    Runs in the mouse handler on the UI thread, so it never touches the disk.
+    Returns the value; ``None`` for background / overlay / ratio / nuc-seg
+    tiles (no intensity column), a frame with no mask, or a cell rendered for a
+    previous dataset; :data:`MFI_PENDING` while the lookup is in flight;
+    :data:`MFI_WAITING` while a background writer is rewriting the frames (no
+    lookup started); :data:`MFI_UNAVAILABLE` when the lookup failed. Runs in
+    the mouse handler on the UI thread, so it never touches the disk.
     """
     st = getattr(getattr(ctx, "state", None), "image_table", None)
     gen = _generation(ctx)
     rec = getattr(label, "_mfi_rec", None)
     if rec is None:
-        rec = {"done": False, "mask": None, "frame": None, "gen": gen}
+        if _frames_busy(ctx):
+            return MFI_WAITING
+        rec = {"done": False, "mask": None, "frame": None, "gen": gen,
+               "failed": False}
         label._mfi_rec = rec  # type: ignore[attr-defined]
         # Captured here, on the UI thread: a swap replaces both containers, so
         # a lookup that lands after it writes only into the orphaned old ones.
+        # The image cache is copied: the thread's mask scan writes into it, and
+        # the shared one is the UI-thread Generate's.
         cache = getattr(st, "image_cache", None)
-        cache = cache if isinstance(cache, dict) else {}
+        cache = dict(cache) if isinstance(cache, dict) else {}
         memo = getattr(st, "mfi_index", None)
         memo = memo if isinstance(memo, dict) else {}
         notifier = _notifier()
+        try:
+            lookup_ctx = _lookup_context(ctx, well, chan)
+        except Exception:
+            swallowed("image table: copying the hovered well's rows")
+            rec["done"] = rec["failed"] = True
+            lookup_ctx = None
 
         def _job() -> None:
             try:
                 import numpy as _np
-                mask = _load_mask_array(ctx, cache, well, tp, fov)
+                mask = _load_mask_array(lookup_ctx, cache, well, tp, fov)
                 if mask is not None:
                     rec["mask"] = _np.asarray(mask)
-                    rec["frame"] = mfi_frame(ctx, well, chan, tp, fov, memo=memo)
+                    rec["frame"] = mfi_frame(lookup_ctx, well, chan, tp, fov, memo=memo)
             except Exception:
-                swallowed()  # best-effort; the tooltip drops MFI on failure
+                # Said on the readout ("MFI: unavailable"), not only here.
+                swallowed("image table: hover MFI lookup")
+                rec["failed"] = True
             finally:
                 rec["done"] = True
                 if notifier is not None:
@@ -245,16 +337,19 @@ def cell_mfi(ctx, label, chan: str, well: str, tp: str, fov: str,
             if getattr(label, "_mfi_rec", None) is rec:
                 label._mfi_rec = None  # type: ignore[attr-defined]
 
-        try:
-            _submit_mfi(_job, on_dropped=_dropped)
-            _register_stopper(ctx)
-        except Exception:
-            swallowed()  # runner shut down (window closing): no MFI
-            rec["done"] = True
+        if lookup_ctx is not None:
+            try:
+                _submit_mfi(_job, on_dropped=_dropped)
+                _register_stopper(ctx)
+            except Exception:
+                swallowed()  # runner shut down (window closing): no MFI
+                rec["done"] = True
     if rec.get("gen", gen) != gen:
         return None        # this cell was drawn for a dataset no longer open
     if not rec["done"]:
         return MFI_PENDING
+    if rec.get("failed"):
+        return MFI_UNAVAILABLE
     mask = rec["mask"]
     if mask is None:
         return None

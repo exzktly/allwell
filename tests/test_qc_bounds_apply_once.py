@@ -8,7 +8,9 @@ elsewhere afterwards applied the same value once more. A bound now applies on
 ``editingFinished`` only, and a value already in force applies nothing.
 
 Driven through the shipped ``build_qc_gate_controls`` (``test_focus_gate._stub_row``)
-with real key presses, counting the calls that reach ``set_qc_params``.
+with real key presses, counting the calls that reach
+``set_qc_params_with_progress`` — the route a panel edit takes, which runs the
+recompute behind a progress popup.
 """
 
 from __future__ import annotations
@@ -24,13 +26,13 @@ from tests.test_focus_gate import _frame, _params, _stub_row
 @pytest.fixture
 def applied(monkeypatch):
     calls = []
-    real = tab_view.set_qc_params
+    real = tab_view.set_qc_params_with_progress
 
-    def _count(ctx, params):
+    def _count(ctx, params, **kwargs):
         calls.append(params)
-        return real(ctx, params)
+        return real(ctx, params, **kwargs)
 
-    monkeypatch.setattr(tab_view, "set_qc_params", _count)
+    monkeypatch.setattr(tab_view, "set_qc_params_with_progress", _count)
     return calls
 
 

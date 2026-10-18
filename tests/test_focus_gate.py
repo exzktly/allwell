@@ -380,6 +380,9 @@ def test_ticking_the_box_reaches_the_params(qtbot):
     w["exclude_soft_cells"].setChecked(True)
     assert app._app_state.qc.params.exclude_soft_cells is True
     assert app._app_state.qc.params.focus_min == pytest.approx(0.10)
+    # The re-projection runs behind the panel's progress popup.
+    from tests._panel_jobs import wait_for_panel_jobs
+    wait_for_panel_jobs(qtbot, app._ctx)
     # And the column the tick is *for*, written by the projector the handler
     # drives. Asserting the params alone would pass against a gate registered
     # nowhere -- §7.4 #1, put the assertion at the boundary.

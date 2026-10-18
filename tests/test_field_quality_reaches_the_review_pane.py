@@ -402,10 +402,11 @@ def test_the_panel_offers_the_control_and_pressing_it_filters(qtbot, monkeypatch
     from review.features.qc.tab_view import build_qc_gate_controls
 
     app = _panel_ctx(_block(bad_well="A02"))
-    # ``set_qc_params`` redraws the whole app; here only the projection matters.
+    # The real apply runs behind a progress popup and redraws the whole app;
+    # here only the projection matters.
     import review.features.qc.tab_view as tv
     applied: list = []
-    monkeypatch.setattr(tv, "set_qc_params", lambda ctx, p: (
+    monkeypatch.setattr(tv, "set_qc_params_with_progress", lambda ctx, p, on_done=None: (
         applied.append(p),
         setattr(ctx.state.qc, "params", p),
         fq.apply_field_quality_to_cache(ctx)))

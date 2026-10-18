@@ -241,6 +241,7 @@ def test_pressing_optimize_writes_the_cutoff_the_scan_chose(loaded_app, qtbot,
     import pandas as pd
 
     from review.features.home.cell_gating import controller as ctl
+    from tests._panel_jobs import wait_for_panel_jobs
 
     ctx = loaded_app._ctx
     _build(ctx, qtbot)
@@ -280,6 +281,8 @@ def test_pressing_optimize_writes_the_cutoff_the_scan_chose(loaded_app, qtbot,
     edit = rt.thresh_frac_edits[channel]
     edit.setText("0")
     ctx.widgets.get("_cell_gating_opt_btn").click()
+    # The scan runs on a thread behind a progress popup.
+    wait_for_panel_jobs(qtbot, ctx)
 
     applied = float(edit.text())
     assert 400.0 < applied < 1200.0, (
@@ -304,6 +307,7 @@ def test_the_specificity_weight_field_reaches_the_scan(loaded_app, qtbot,
     import pandas as pd
 
     from review.features.home.cell_gating import controller as ctl
+    from tests._panel_jobs import wait_for_panel_jobs
 
     ctx = loaded_app._ctx
     _build(ctx, qtbot)
@@ -341,10 +345,12 @@ def test_the_specificity_weight_field_reaches_the_scan(loaded_app, qtbot,
 
     rt.opt_weight_edit.setText("1")
     ctx.widgets.get("_cell_gating_opt_btn").click()
+    wait_for_panel_jobs(qtbot, ctx)   # the scan runs behind a progress popup
     plain = float(edit.text())
 
     rt.opt_weight_edit.setText("10")
     ctx.widgets.get("_cell_gating_opt_btn").click()
+    wait_for_panel_jobs(qtbot, ctx)
     strict = float(edit.text())
 
     assert strict > plain, (
@@ -367,6 +373,7 @@ def test_the_optimizer_curve_popup_draws_without_raising(loaded_app, qtbot,
     import pandas as pd
 
     from review.features.home.cell_gating import controller as ctl
+    from tests._panel_jobs import wait_for_panel_jobs
 
     ctx = loaded_app._ctx
     _build(ctx, qtbot)
@@ -398,6 +405,7 @@ def test_the_optimizer_curve_popup_draws_without_raising(loaded_app, qtbot,
 
     with caplog.at_level(logging.ERROR):
         ctx.widgets.get("_cell_gating_opt_btn").click()
+        wait_for_panel_jobs(qtbot, ctx)   # the scan runs behind a progress popup
 
     failures = [r.getMessage() for r in caplog.records
                 if "optimizer curve popup failed" in r.getMessage()]

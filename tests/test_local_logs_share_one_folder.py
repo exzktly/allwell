@@ -4,8 +4,10 @@ Reported: "only bootstrap-XXX.log files get written there" — the user was sent
 ``~/.cache/allwell`` for the crash log and found only bootstrap logs. The two
 writers chose their folder by different rules (the boot log preferred
 ``%LOCALAPPDATA%\\allwell`` on Windows; the bootstrap hardcoded
-``~/.cache/allwell``). Both now ask ``util.state_dir.user_state_dir``, and so
-does the CZI scan cache, so they cannot drift apart again.
+``~/.cache/allwell``). Both now ask ``util.state_dir.gui_state_dir`` — the
+desktop app's one folder — so they cannot drift apart again. The CZI scan cache
+is the analysis pipeline's and keeps its own folder,
+``util.state_dir.user_state_dir``; the app's folder moving must not move it.
 
 The bootstrap log also records where the launching app's boot log is and
 whether it exists (``ALLWELL_BOOT_LOG``), so a missing crash log can be traced
@@ -26,31 +28,36 @@ from util import state_dir
 
 @pytest.fixture
 def shared(tmp_path, monkeypatch):
-    """Point the one shared folder function somewhere private."""
+    """Point the app's folder and the pipeline's somewhere private, apart."""
     target = tmp_path / "state"
     target.mkdir()
-    monkeypatch.setattr(state_dir, "user_state_dir", lambda: target)
-    monkeypatch.setattr(state_dir, "candidate_dirs", lambda: [target])
+    pipeline_dir = tmp_path / "pipeline-state"
+    pipeline_dir.mkdir()
+    monkeypatch.setattr(state_dir, "gui_state_dir", lambda: target)
+    monkeypatch.setattr(state_dir, "candidate_dirs", lambda: [pipeline_dir])
     monkeypatch.setattr(boot_diag, "_LOG_PATH", None)
     monkeypatch.delenv("ALLWELL_SCAN_CACHE", raising=False)
-    return target
+    return target, pipeline_dir
 
 
-def test_every_local_log_and_cache_uses_the_shared_folder(shared, monkeypatch):
-    assert boot_diag.log_path() == shared / "allwell-boot.log"
+def test_every_app_log_uses_the_app_folder_and_the_scan_cache_does_not(shared):
+    target, pipeline_dir = shared
+    assert boot_diag.log_path() == target / "allwell-boot.log"
 
     path, fh = remote_bootstrap._open_log_file()
     try:
-        assert path is not None and path.parent == shared
+        assert path is not None and path.parent == target
         assert path.name.startswith("bootstrap-")
     finally:
         if fh is not None:
             fh.close()
 
-    assert scan_cache.cache_dir() == shared / "czi-scans"
+    assert scan_cache.cache_dir() == pipeline_dir / "czi-scans"
 
 
-def test_the_home_cache_folder_comes_first_even_when_localappdata_is_set(tmp_path, monkeypatch):
+def test_the_pipeline_s_folder_keeps_its_own_rule(tmp_path, monkeypatch):
+    """The CZI scan cache's folder is the pipeline's and did not move with the
+    app's: ``~/.cache/allwell`` first, even where ``%LOCALAPPDATA%`` is set."""
     home, local = tmp_path / "home", tmp_path / "local"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("LOCALAPPDATA", str(local))

@@ -48,6 +48,7 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Saved Plots](#saved-plots) · [Batch export](#batch-export)
    - [Starting over](#starting-over)
+   - [Freeing disk space](#freeing-disk-space)
    - [Copying analysis from another dataset](#copying-analysis-from-another-dataset)
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
    - [Convert OME-TIFF](#convert-ome-tiff) · [Convert CZI](#convert-czi) ·
@@ -1840,12 +1841,14 @@ What this means in use:
   cell.
 - **Where the cells behind those samples are kept.** The Scatter, Distribution
   and bar-chart views keep a large selection's cells in a compressed file in a
-  folder under the system temp directory (`allwell-cellpool-…`), removed when the
+  folder in the app's own folder (`tmp/allwell-cellpool-…`; see
+  [Freeing disk space](#freeing-disk-space) for where that is), removed when the
   view is redrawn or the app closes. A load stops before it would leave less than
   a tenth of the disk's free space, and a disk that fills anyway stops it too;
   either way the message names the folder and its free space — free some space
-  there, point `TMPDIR` at a larger disk, or select fewer wells. Folders left by
-  an app that crashed are removed the next time a large selection is loaded.
+  on that disk (the storage button clears the app's own files) or select fewer
+  wells. Folders left by an app that crashed are removed the next time a large
+  selection is loaded, or from the storage button.
 - **Cell Gating's distribution curves** are drawn through 2,000 of their points
   when a curve has more cells than that; every point drawn is on the full curve,
   and the figure says so.
@@ -2886,8 +2889,10 @@ offered yet.
   Screen ↔ Publication), **Reset analysis**, reveal the dataset folder, and
   **Reset view**. Those five act on the loaded dataset or on the plots drawn
   from it, so they appear in Review only; the two resets are described under
-  [Starting over](#starting-over). The **`i`** Help drawer button sits to their
-  right and stays in that same spot in all three modes, because the manual it
+  [Starting over](#starting-over). The **storage** button (a hard drive) and the
+  **`i`** Help drawer button sit to their right in all three modes — storage is
+  described under [Freeing disk space](#freeing-disk-space). Help stays in that
+  same spot in every mode, because the manual it
   opens documents all three; `Ctrl+/` opens it too. Opening it from a Datasets
   tool lands on that tool's section of the manual, and from Analyze on the form
   section you have scrolled to. A build that ships a reduced feature set trims
@@ -3820,16 +3825,16 @@ still exported (see below).
 - **If the app dies, the error dialog holds the whole traceback** — open
   *Show Details* and copy it; that text names the exact line that failed and is
   the single most useful thing to put in a bug report. It is also written to a
-  log file, whose path the dialog gives you: `~/.cache/allwell/allwell-boot.log`
-  on every platform (on Windows `~` is your user folder, `C:\Users\<you>`).
-  Only if that folder cannot be written does it fall back to
-  `%LOCALAPPDATA%\allwell` on Windows, then to the system temp folder. That
+  log file, whose path the dialog gives you: `allwell-boot.log` in the app's
+  own folder — `%LOCALAPPDATA%\allwell` on Windows, `~/.allwell` on macOS and
+  Linux. Only if that folder cannot be written does it fall back (on Windows to
+  `~/.allwell`), then to the system temp folder. That
   file is normally rewritten each time the app starts, **but a copy carrying a
   crash is kept** — as `allwell-boot.log.1`, `.2`, `.3`, newest first — so
   relaunching to try again no longer throws away the record of what went wrong.
-  The folder is hidden (it starts with a dot): in Finder use **Go → Go to
-  Folder…** and type `~/.cache/allwell`, or press ⌘⇧. to show hidden files. It
-  is *not* `~/Library/Caches`. The application log drawer (⌘L, or the terminal
+  On a Mac the folder is hidden (it starts with a dot): in Finder use **Go → Go
+  to Folder…** and type `~/.allwell`, or press ⌘⇧. to show hidden files. It is
+  *not* `~/Library/Caches`, nor the `~/.cache/allwell` earlier versions used. The application log drawer (⌘L, or the terminal
   icon at the right of the status bar) names the exact path at its top. The
   files called `bootstrap-….log` beside it are from setting up remote hosts,
   not from the app crashing; they always land in the same folder as the crash
@@ -5863,6 +5868,45 @@ Smaller resets stay next to the thing they affect: **Clear all groups** on
 Home → Sample Map → Replicates, and **Reset crop + curation** in the Segmentation
 tab's Edit menu, which is the same action as the Curation checkbox above.
 
+### Freeing disk space
+
+The **storage** button (the hard-drive icon, to the left of Help, in every mode)
+shows how much room the app's own files take and clears them. Everything the
+app keeps on this computer outside your dataset folders is in one folder:
+
+- **Windows:** `%LOCALAPPDATA%\allwell` — usually
+  `C:\Users\<you>\AppData\Local\allwell`.
+- **macOS and Linux:** `~/.allwell`. It is hidden (it starts with a dot); in
+  Finder use **Go → Go to Folder…** and type `~/.allwell`, or press ⌘⇧. to show
+  hidden files. **Open folder** in the dialog takes you there either way.
+
+The dialog lists what can go, each with its size, and clears what you tick:
+
+- **Font cache** — the list of the app's fonts, rebuilt the next time it starts.
+- **Temporary working files** — folders the app makes while it works (the cells
+  behind a large Scatter or Distribution view, a Batch Export that writes no
+  files) that a crash or a forced quit left behind. Any still in use is skipped.
+- **Old logs** — the crash logs kept from earlier launches and the logs of
+  setting up remote hosts. This launch's own log is kept.
+- **Files left by earlier versions** — earlier versions kept their logs and
+  font cache in `~/.cache/allwell` and their temporary files in the system temp
+  folder. Nothing reads them any more.
+- **Row cache of the open dataset** — unticked to begin with. Fast copies of the
+  dataset's CSVs, kept in `.aw_parquet` folders beside them. Clearing it frees
+  that space but makes the next open of the dataset slower while the copies are
+  rebuilt.
+
+A file something is still holding open (on Windows, often an antivirus scan)
+is left in place, and the dialog says how many and which; close what holds it,
+or restart the app, and clear again. The total it reports counts only what was
+actually removed.
+
+The dialog never touches your images, CSVs or analysis, and never an Analyze
+run's own files: a run's scratch folder (`~/.allwell/scratch`, or the *Scratch
+disk* you set) and the CZI scan cache (`~/.cache/allwell/czi-scans`) belong to
+runs — a suspended run resumes from what is in its scratch — and are not
+offered.
+
 ### Copying analysis from another dataset
 
 The **copy** button beside the trash can copies what you decided about one
@@ -6511,7 +6555,7 @@ It is remembered per file and keyed on the file's size and modification time,
 so a plate you re-export is read again and only the files that changed cost
 anything. Nothing is written into the folder holding your images — a plate is
 often on a read-only archive or a share you do not administer — it goes with
-All-Well's other working files, in `~/.cache/allwell/czi-scans`, one small file per
+the analysis pipeline's other working files, in `~/.cache/allwell/czi-scans`, one small file per
 folder you have opened. Deleting them costs one slow scan and nothing else. Set
 `ALLWELL_SCAN_CACHE` to a folder to keep them somewhere else, or to `off` to
 turn it off.
@@ -7490,7 +7534,7 @@ plot toolbar's pan and zoom are hidden in phone layout; switch back to the
 desktop layout for them. An **ⓘ** shows its explanation when tapped.
 
 The buttons that change or discard work — Reset view, Reset analysis, Copy
-analysis, the publication look and Reveal folder — are hidden in phone layout so a
+analysis, the publication look, Reveal folder and Storage — are hidden in phone layout so a
 stray tap cannot reach them, as are the Review CSV and Batch Export sections;
 switch back to the desktop layout to use them.
 

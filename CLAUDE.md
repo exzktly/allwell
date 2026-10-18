@@ -1339,16 +1339,17 @@ the answer is "none of the ones I ran", that is the work, not a formality.
   from a terminal.
 - Native crash with no traceback: `startup.boot_diag.arm_faulthandler()` runs at import
   and writes the C stack to the **boot log**, so it survives a crash that left
-  nothing in the terminal. `~/.cache/allwell/allwell-boot.log` on every
-  platform (`util/state_dir.py`; `%LOCALAPPDATA%\allwell`, then the temp dir,
-  only when that is not writable), beside the `bootstrap-*.log` files, each of
+  nothing in the terminal. `allwell-boot.log` in the app's one local folder,
+  `%LOCALAPPDATA%\allwell` on Windows and `~/.allwell` on macOS and Linux
+  (`util/state_dir.gui_state_dir`; the temp dir only when that is not
+  writable), beside the `bootstrap-*.log` files, each of
   which records the boot log's path and whether it existed (`app boot log:`).
   The log drawer names the path at its top; have the user read it from there
   rather than naming a folder from memory. The log is truncated per launch with
   the last three crashes kept beside it as `.1` / `.2` / `.3`. **The reporter on
-  macOS has repeatedly found no boot log in `~/.cache/allwell`, only bootstrap
-  logs, and the cause is not established** (`REREAD_TRACKER.md` G3) — do not
-  send them to that folder again; ask for the drawer's path line and the
+  macOS has repeatedly found no boot log in `~/.cache/allwell` (where it lived
+  before it moved), only bootstrap logs, and the cause is not established**
+  (`REREAD_TRACKER.md` G3) — do not send them to a folder from memory; ask for the drawer's path line and the
   `app boot log:` line of their newest bootstrap log, which say where the file
   went or that it was never created. Ask for that file before theorising: the cause is usually a widget
   touched mid-event-dispatch or after C++ deletion, and no amount of reading

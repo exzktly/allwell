@@ -79,6 +79,10 @@ from types import ModuleType
 
 import numpy as np
 
+from core.process import OWNER_FILE as PROCESS_OWNER_FILE
+from core.process import pid_alive as _pid_alive
+from util.state_dir import gui_temp_dir
+
 _logger = logging.getLogger("review")
 
 #: The DuckDB memory limit a pool runs under, in MiB, unless
@@ -94,9 +98,10 @@ SCAN_CHUNK_ROWS = 1 << 20
 #: had (``max_temp_directory_size``, 90% of the free space), applied to the database file that replaced it.
 DISK_RESERVE = 0.10
 
-#: The spill directories' prefix under the system temp directory, and the file in each naming its owner's pid.
+#: The spill directories' prefix under the app's temp folder (``util.state_dir.gui_temp_dir``; earlier versions
+#: used the system temp directory, which the sweep still reads), and the file in each naming its owner's pid.
 SPILL_PREFIX = "allwell-cellpool-"
-OWNER_FILE = "owner.pid"
+OWNER_FILE = PROCESS_OWNER_FILE
 #: A spill directory with no owner file is swept only once it is this old (seconds): a pool marks its directory
 #: just after creating it, and one caught between the two must not be swept from under it.
 UNMARKED_STALE_S = 24 * 3600
@@ -213,7 +218,7 @@ class CellPool:
         self._reserve = 0
         if duckdb is not None:
             sweep_stale_spills()
-            self._spill = tempfile.mkdtemp(prefix=SPILL_PREFIX)
+            self._spill = tempfile.mkdtemp(prefix=SPILL_PREFIX, dir=str(gui_temp_dir()))
             with open(os.path.join(self._spill, OWNER_FILE), "w", encoding="ascii") as handle:
                 handle.write(f"{os.getpid()}\n")
             self._reserve = int(DISK_RESERVE * _free_bytes(self._spill))
@@ -560,9 +565,9 @@ class CellPoolFullError(CellPoolError):
 
     Raised from :meth:`CellPool.add` in place of DuckDB's own error, whose
     wording ("Out of Memory", "Failed to commit", "Failed to create
-    checkpoint") points anywhere but at the disk under the system temp
-    directory. The message names that directory, its free space, and how many
-    cells were held.
+    checkpoint") points anywhere but at the disk under the app's temp folder
+    (``util.state_dir.gui_temp_dir``). The message names that folder, its free
+    space, and how many cells were held.
     """
 
     def __init__(self, spill: str | None, held: int, cause: BaseException | None, *, reason: str = ""):
@@ -576,8 +581,8 @@ class CellPoolFullError(CellPoolError):
             f"the cell pool ran out of room after {held:,} cells: it keeps "
             f"{os.environ.get('ALLWELL_CELL_POOL_MB') or DEFAULT_MEMORY_MB} MB in memory and "
             f"spills the rest to {os.path.dirname(spill or '') or 'the temp directory'}, "
-            f"which has {free} free. Free disk space there, point TMPDIR at a larger "
-            f"disk, or select fewer wells. ({reason or cause})")
+            f"which has {free} free. Free disk space there (the title bar's storage "
+            f"button clears the app's own files), or select fewer wells. ({reason or cause})")
 
 
 def _free_bytes(path: str) -> int:
@@ -617,32 +622,6 @@ def _release(con, spill: str | None) -> None:
             _logger.info("cell pool spill directory %s could not be removed yet", spill)
 
 
-def _pid_alive(pid: int) -> bool:
-    """Whether a process *pid* exists. Errs towards ``True``: a directory is swept only when its owner is gone."""
-    if pid <= 0:
-        return True
-    if os.name == "nt":
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(0x1000, False, pid)          # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
-            return ctypes.GetLastError() != 87                      # ERROR_INVALID_PARAMETER: no such process
-        try:
-            code = ctypes.c_ulong()
-            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
-            return not ok or code.value == 259                      # STILL_ACTIVE
-        finally:
-            kernel32.CloseHandle(handle)
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True                                                 # it exists, owned by someone else
-    return True
-
-
 def sweep_stale_spills() -> list[str]:
     """Remove the spill directories of pools whose process no longer exists; the paths removed.
 
@@ -656,7 +635,9 @@ def sweep_stale_spills() -> list[str]:
         return []
     _swept = True
     removed = []
-    for path in glob.glob(os.path.join(tempfile.gettempdir(), SPILL_PREFIX + "*")):
+    # The app's own temp folder, and the system one earlier versions spilled to.
+    roots = dict.fromkeys((str(gui_temp_dir()), tempfile.gettempdir()))
+    for path in (p for root in roots for p in glob.glob(os.path.join(root, SPILL_PREFIX + "*"))):
         try:
             if not os.path.isdir(path) or os.path.islink(path):
                 continue

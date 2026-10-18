@@ -32,9 +32,9 @@ module's code object, not its source, because a frozen build carries no ``.py``
 files; if it cannot be read, no placeholder is used and the import scans as
 matplotlib would on its own.
 
-The cache lives in the repo's ``.mplcache`` when running from source, and in the
-per-user state directory in a frozen build — ``sys._MEIPASS`` is a fresh temp
-tree per launch and cannot hold a cache.
+The cache lives in ``mplcache`` in the app's one local folder
+(``util.state_dir.gui_state_dir``), from source and in a frozen build alike —
+``sys._MEIPASS`` is a fresh temp tree per launch and cannot hold a cache.
 """
 
 from __future__ import annotations
@@ -49,9 +49,9 @@ import tempfile
 import types
 from contextlib import contextmanager, nullcontext
 
-# Both paths below are resolved against the *repository root* (the bundle root
-# in a frozen build), not against this file's own directory: `assets/fonts` and
-# `.mplcache` are repository-level, and this module lives one level down in
+# The font path below is resolved against the *repository root* (the bundle root
+# in a frozen build), not against this file's own directory: `assets/fonts` is
+# repository-level, and this module lives one level down in
 # `startup/`. Deriving them from `__file__` alone would put the font directory
 # at `startup/assets/fonts` — which does not exist, so `_bundled_fonts()` would
 # return nothing and `configure()` would silently leave matplotlib unrestricted,
@@ -70,19 +70,17 @@ def _bundled_fonts() -> list[str]:
 def _cache_root() -> str:
     """Where the pinned font cache lives — and it has to survive the launch.
 
-    From source that is ``.mplcache`` at the repository root, which is stable
-    across launches and easy to pre-warm during provisioning. In a **frozen**
-    build it cannot be: PyInstaller unpacks the bundle into ``sys._MEIPASS``, a
-    fresh temp tree per launch, and ``_ROOT`` points inside it — so the
-    "stable" cache was thrown away and rebuilt every single time the app
-    started, which is exactly the cost this module exists to remove. A frozen
-    build uses the per-user state directory instead, the same one the boot log
-    goes to.
+    ``mplcache`` in the app's one local folder, the same one the boot log goes
+    to, whether the app runs from source or frozen. Not beside the code: in a
+    **frozen** build PyInstaller unpacks the bundle into ``sys._MEIPASS``, a
+    fresh temp tree per launch, so a cache there was thrown away and rebuilt
+    every single time the app started — the cost this module exists to remove —
+    and a cache inside a source checkout is one more folder of the app's files
+    that the storage button cannot see.
     """
-    if _frozen():
-        from startup.boot_diag import user_state_dir
-        return os.path.join(str(user_state_dir()), "mplcache")
-    return os.path.join(_ROOT, ".mplcache")
+    from startup.boot_diag import user_state_dir
+    from util.state_dir import FONT_CACHE_SUBDIR
+    return os.path.join(str(user_state_dir()), FONT_CACHE_SUBDIR)
 
 
 def _frozen() -> bool:

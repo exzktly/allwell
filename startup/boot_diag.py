@@ -55,24 +55,26 @@ _LOG_PATH: Path | None = None
 def user_state_dir() -> Path:
     """Per-user directory for anything this app keeps between launches.
 
-    :func:`util.state_dir.user_state_dir`, the one folder every local log and
-    cache shares (``~/.cache/allwell`` first, on every platform), so the boot log
-    always sits beside the remote-bootstrap logs. Kept under this name because
+    :func:`util.state_dir.gui_state_dir`, the desktop app's one local folder
+    (``%LOCALAPPDATA%\\allwell`` on Windows, ``~/.allwell`` on macOS and
+    Linux), so the boot log always sits beside the remote-bootstrap logs and the
+    app's caches. Kept under this name because
     ``startup.mpl_bootstrap`` and the tests reach it here. matplotlib's font
     cache lives in it in a frozen build — ``startup.mpl_bootstrap`` used the
     directory holding its own source file, which under PyInstaller is inside
     ``sys._MEIPASS``, a fresh temp tree unpacked per launch, so the cache was
     rebuilt every launch.
     """
-    from util.state_dir import user_state_dir as _shared
-    return _shared()
+    from util.state_dir import gui_state_dir
+    return gui_state_dir()
 
 
 def log_path() -> Path:
     """Absolute path to the boot log (stable for the process lifetime)."""
     global _LOG_PATH
     if _LOG_PATH is None:
-        _LOG_PATH = user_state_dir() / "allwell-boot.log"
+        from util.state_dir import BOOT_LOG_NAME
+        _LOG_PATH = user_state_dir() / BOOT_LOG_NAME
     return _LOG_PATH
 
 

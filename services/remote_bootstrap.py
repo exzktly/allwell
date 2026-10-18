@@ -179,7 +179,7 @@ def _prune_bootstrap_logs(log_dir: Path, keep: int = _BOOTSTRAP_LOG_RETENTION) -
     """Delete the oldest ``bootstrap-*.log`` files, keeping the newest *keep*.
 
     A fresh log is written on every bootstrap invocation and they were never
-    reaped, so ``~/.cache/allwell`` grew without bound (audit X15). Called
+    reaped, so the log folder grew without bound (audit X15). Called
     before opening the new log, with ``keep`` counting the survivors *before*
     today's file is added (so the directory settles at ``keep + 1``). Pure /
     best-effort — a delete failure is ignored, never blocks bootstrap. Returns
@@ -222,8 +222,8 @@ def _boot_log_line() -> str:
 
 def _open_log_file() -> tuple[Path, object] | tuple[None, None]:
     """Open a per-invocation bootstrap log file,
-    ``bootstrap-<timestamp>.log``, in :func:`util.state_dir.user_state_dir`
-    (``~/.cache/allwell``) on the LOCAL machine. Returns ``(path, file_handle)`` or ``(None, None)`` on
+    ``bootstrap-<timestamp>.log``, in :func:`util.state_dir.gui_state_dir`
+    (``%LOCALAPPDATA%\\allwell`` / ``~/.allwell``) on the LOCAL machine. Returns ``(path, file_handle)`` or ``(None, None)`` on
     failure (logging should never block bootstrap).
 
     Local-only by design: the user asked for a debug log they can
@@ -237,8 +237,8 @@ def _open_log_file() -> tuple[Path, object] | tuple[None, None]:
         # were not).
         if str(REPO_ROOT) not in sys.path:
             sys.path.insert(0, str(REPO_ROOT))
-        from util.state_dir import user_state_dir
-        log_dir = user_state_dir()
+        from util.state_dir import gui_state_dir
+        log_dir = gui_state_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         _prune_bootstrap_logs(log_dir)
         stamp = time.strftime("%Y%m%dT%H%M%S")
@@ -1173,8 +1173,9 @@ def main(argv: list[str] | None = None) -> int:
     # the user sees on screen. Logs are never auto-deleted — the user
     # asked for a debug log they can read after the fact, and they're
     # on a shared remote where they explicitly don't want automatic
-    # deletions. The log directory `~/.cache/allwell` is on the user's
-    # LOCAL machine, so cleanup is their decision.
+    # deletions. The log directory (util.state_dir.gui_state_dir) is on the
+    # user's LOCAL machine, so cleanup is their decision — the title bar's
+    # storage button offers it.
     global _LOG_FILE
     log_path, _LOG_FILE = _open_log_file()
     if _LOG_FILE is not None:

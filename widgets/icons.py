@@ -52,6 +52,12 @@ _GLYPHS: dict[str, str] = {
                       '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'
                       '<line x1="10" y1="11" x2="10" y2="17"/>'
                       '<line x1="14" y1="11" x2="14" y2="17"/>'),
+    # Lucide "hard-drive" — the title bar's storage dialog (clear caches).
+    "hard-drive":    ('<line x1="22" y1="12" x2="2" y2="12"/>'
+                      '<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6'
+                      'l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>'
+                      '<line x1="6" y1="16" x2="6.01" y2="16"/>'
+                      '<line x1="10" y1="16" x2="10.01" y2="16"/>'),
     "plus":          '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
     "search":        '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
     "sliders":       ('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>'

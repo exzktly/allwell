@@ -6,6 +6,7 @@ from review.data.metric_labels import spread_label
 
 import csv
 import re
+import os
 import tempfile
 
 from ui import theme
@@ -78,6 +79,8 @@ from review.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
     on_cutoff_for_column as _on_cutoff_for_column,
 )
+from core.process import OWNER_FILE
+from util.state_dir import gui_temp_dir
 from util.well_token import canonical_well_label
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -2822,7 +2825,11 @@ class BatchExportPanel(QWidget):
         if self._wants_disk_output():
             staging = new_staging_dir(out_dir)
         else:
-            staging = Path(tempfile.mkdtemp(prefix="allwell_batch_nodisk_"))
+            staging = Path(tempfile.mkdtemp(prefix="allwell_batch_nodisk_",
+                                            dir=str(gui_temp_dir())))
+            # Name the owner, so the storage button's cache clear leaves a
+            # running export's staging alone (``core.local_storage``).
+            (staging / OWNER_FILE).write_text(f"{os.getpid()}\n", encoding="ascii")
         # The extra destinations, read once before the first job (see
         # ``_new_destination_spool``) and cleared in the ``finally`` — so a
         # figure written outside a run, or by the next run, cannot reach this

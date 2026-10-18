@@ -479,6 +479,18 @@ class AllWellApp(QMainWindow):
         self._help_btn = IconButton("info")
         self._help_btn.setToolTip("Open the help drawer")
         self._help_btn.clicked.connect(self._toggle_help_drawer)
+
+        # The app's own files on this machine — logs, the font cache, temporary
+        # working folders, the open dataset's row cache — measured and cleared
+        # from one dialog (core/local_storage_view.py). Outside the Review
+        # cluster for the help button's reason: none of it is about the loaded
+        # dataset alone, and a disk filling up is not a Review-only problem.
+        self._storage_btn = IconButton("hard-drive")
+        self._storage_btn.setToolTip(
+            "Storage — see how much space the app's logs, caches and temporary "
+            "files take, and clear them. Your data and analysis are not touched.")
+        self._storage_btn.clicked.connect(self._open_storage_dialog)
+        self._storage_dialog = None
         self._help_drawer = None  # built lazily on first open
         self._help_content = None
         self._help_manual_view = None  # None in trimmed builds without the manual
@@ -662,6 +674,7 @@ class AllWellApp(QMainWindow):
             getattr(self, "_copy_analysis_btn", None), getattr(self, "_open_btn", None),
             getattr(self, "_reset_view_btn", None), getattr(self, "_refresh_btn", None),
             getattr(self, "_help_btn", None), getattr(self, "_statusbar", None),
+            getattr(self, "_storage_btn", None),
         ) if w is not None]
 
         from review.core.phone_drawer import ensure_drawer
@@ -1356,11 +1369,14 @@ class AllWellApp(QMainWindow):
         """
         layout = band.layout()
         box = getattr(self, "_review_actions", None)
+        storage_btn = getattr(self, "_storage_btn", None)
         help_btn = getattr(self, "_help_btn", None)
         if layout is None:
             return
         if box is not None:
             layout.addWidget(box)
+        if storage_btn is not None:
+            layout.addWidget(storage_btn)
         if help_btn is not None:
             layout.addWidget(help_btn)
         # The band is pinned to a tab bar's height — a row of text. The icon
@@ -1496,6 +1512,23 @@ class AllWellApp(QMainWindow):
 
         from review.core.reset_scopes_view import prompt_reset_analysis
         prompt_reset_analysis(review._ctx, reload_after=self._reload_current_dataset)
+
+    def _open_storage_dialog(self) -> None:
+        """Show the storage dialog, offering the open dataset's row cache too.
+
+        Non-modal, and one at a time: a second click raises the open one rather
+        than measuring everything again behind it.
+        """
+        from core.local_storage_view import StorageDialog
+
+        dialog = self._storage_dialog
+        if dialog is not None and dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        self._storage_dialog = StorageDialog(
+            self, dataset_dir=self._current_dataset_root())
+        self._storage_dialog.show()
 
     def _reload_current_dataset(self) -> None:
         """Reopen the dataset Review has loaded, so live state is re-read from

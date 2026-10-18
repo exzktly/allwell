@@ -6449,13 +6449,20 @@ ends the dashboard's scheduler clock at once, since the wait it counts is over.
 **Closing the app is a Stop that is waited for.** `AnalyzeTab` is a child
 widget, so its own `closeEvent` never fires; `allwell._stop_analyze_runner`,
 called from `AllWellApp.closeEvent`, stops the runner instead. It keys on
-`is_busy` (the run thread is alive), not `is_running` (the subprocess is), since
-no subprocess exists while the input uploads and a close there used to stop
-nothing. It then calls `PipelineRunner.wait_for_teardown` — a bounded join (25 s)
-of `_cancel_thread` and the run thread — because both are daemon threads that
-the interpreter ends at exit: without the join, the `scancel` was cut off before
-its ssh reached the host and the SLURM job outlived the app. A run winding down
-after Suspend is left alone, as before. `tests/test_close_stops_analyze_runner.py`.
+`is_busy` (the run thread is alive), not `is_running` (the subprocess is),
+because no subprocess exists while the input uploads and a close keyed on the
+subprocess would stop nothing there. It then calls
+`PipelineRunner.wait_for_teardown` — a bounded join (25 s) of `_cancel_thread`
+and the run thread — because both are daemon threads that the interpreter ends
+at exit: without the join the `scancel` is cut off before its ssh reaches the
+host and the SLURM job outlives the app. That join blocks the GUI thread, so the
+close first puts `CLOSE_WAIT_NOTICE` on screen through
+`AllWellApp._show_close_notice` — a toast held fully opaque, since its fade-in
+cannot run while the thread is blocked, plus the wait cursor, painted by one
+event pass — and takes both down when the join returns. The notice is a
+callable passed into `_stop_analyze_runner`, so the bracket is tested without a
+window or a modal. A run winding down after Suspend is left alone: the pipeline
+suspends itself when the app goes. `tests/test_close_stops_analyze_runner.py`.
 
 A **Stop or Suspend is not a failure**, and neither is a completion. A Stop
 sends SIGTERM, which the pipeline answers by winding down (`pipeline.suspend`),

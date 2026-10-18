@@ -114,7 +114,12 @@ def _save_review_before_close(review) -> None:
         swallowed()
 
 
-def _stop_analyze_runner(analyze) -> None:
+#: What the window says while a close waits for a stopped run to let go of what it holds.
+CLOSE_WAIT_NOTICE = ("Stopping the Analyze run before closing — waiting for it to release "
+                     "its remote job and files (up to 25 s).")
+
+
+def _stop_analyze_runner(analyze, notice=None) -> None:
     """Stop an in-flight pipeline run on the Analyze pane at app close.
 
     ``AnalyzeTab`` is mounted as a *child* widget, so in Qt its own
@@ -124,6 +129,13 @@ def _stop_analyze_runner(analyze) -> None:
     job / remove the remote staging + local scratch (audit L1). The app root's
     ``closeEvent`` calls this so the runner is stopped from a live top-level
     window instead.
+
+    The bounded wait that follows the stop blocks the GUI thread, so before it
+    starts *notice* (when given) is called with :data:`CLOSE_WAIT_NOTICE` and
+    may return a callable that takes the notice down again once the wait ends.
+    The close passes :meth:`AllWellApp._show_close_notice`; without one the
+    window simply sat unresponsive for up to the wait's 25 s with nothing on
+    screen saying why.
     """
     if analyze is None:
         return
@@ -153,9 +165,27 @@ def _stop_analyze_runner(analyze) -> None:
             runner.stop()
             wait = getattr(runner, "wait_for_teardown", None)
             if callable(wait):
-                wait()
+                _wait_with_notice(wait, notice)
     except Exception:
         swallowed()
+
+
+def _wait_with_notice(wait, notice) -> None:
+    """Run the blocking *wait* with *notice* shown for its duration (see :func:`_stop_analyze_runner`)."""
+    dismiss = None
+    if notice is not None:
+        try:
+            dismiss = notice(CLOSE_WAIT_NOTICE)
+        except Exception:
+            swallowed()
+    try:
+        wait()
+    finally:
+        if callable(dismiss):
+            try:
+                dismiss()
+            except Exception:
+                swallowed()
 
 
 def _gh_slug(text: str) -> str:
@@ -2039,6 +2069,29 @@ class AllWellApp(QMainWindow):
         except Exception:
             swallowed()  # was: pass (silent except)
 
+    def _show_close_notice(self, text: str):
+        """Put *text* on screen before the close blocks the GUI thread; returns its dismisser.
+
+        A toast held fully opaque (its fade-in would not run while the thread
+        is blocked) plus the wait cursor, painted at once by a single event
+        pass, because nothing else will be until the wait is over.
+        """
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+        from widgets.toast import Toast
+
+        toast = Toast.show_message(self, text, kind="warn", msec=60_000)
+        toast._fade.stop()
+        toast.setWindowOpacity(1.0)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+
+        def dismiss() -> None:
+            QApplication.restoreOverrideCursor()
+            toast.close()
+
+        return dismiss
+
     def closeEvent(self, event) -> None:
         if not self._confirm_close_in_phone_layout():
             event.ignore()
@@ -2054,7 +2107,7 @@ class AllWellApp(QMainWindow):
         # fires (it's a child widget), so without this a mid-run quit leaks the
         # local subprocess / remote SLURM allocation + scratch (audit L1). Also
         # stops the log poller re-arming (L2).
-        _stop_analyze_runner(self._analyze)
+        _stop_analyze_runner(self._analyze, notice=self._show_close_notice)
         # Datasets pane is also a child widget: stop any in-flight concatenate
         # worker before teardown so a mid-run quit doesn't leave a live thread.
         datasets = getattr(self, "_datasets", None)

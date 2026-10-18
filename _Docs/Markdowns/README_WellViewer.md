@@ -1520,7 +1520,8 @@ and by `remote_fetch_report.txt` in the output folder.
   racing it for the same files. Closing All-Well during a remote run stops it
   the way **Stop** does, and the window waits (up to about 25 seconds) until
   the job on the cluster has been cancelled, so no Slurm allocation is left
-  running behind it. If All-Well crashes or is force-quit instead, a batched
+  running behind it; a notice in the corner and the busy cursor say so while
+  it waits. If All-Well crashes or is force-quit instead, a batched
   run notices within about ten minutes that the app has gone, finishes the
   fields in flight, and gives the node back; Resume then picks up the wells it
   finished. On a remote run, Suspend leaves the connection open: the host

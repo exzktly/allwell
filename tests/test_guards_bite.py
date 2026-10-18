@@ -5304,3 +5304,35 @@ def test_state_module_guard_clears_dataclasses_enums_and_other_modules(tmp_path,
     assert _run_scan(monkeypatch, "tests.test_state_modules_hold_no_machinery",
                      "test_state_modules_hold_only_dataclasses_and_no_machinery",
                      [good, store]) is None
+
+
+# ── the plot hold's reasons go through plot_hold's constants ────────────────
+
+HOLD_LITERAL_VIOLATIONS = {
+    # The two shapes that shipped (home/controller.py, core/ui_helpers.py).
+    "getattr": ('def f(ctx):\n    return getattr(getattr(ctx.state, "plot", None), '
+                '"held_for", "") == "gating"\n'),
+    "attribute": 'def f(win):\n    return win._app_state.plot.held_for == "gating"\n',
+    "accessor_reversed": 'def f(ctx, plot_hold):\n    return "loading" != plot_hold.held_for(ctx)\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(HOLD_LITERAL_VIOLATIONS))
+def test_hold_literal_guard_catches_a_bare_reason(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_hold_{shape}.py", HOLD_LITERAL_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_plot_hold_reasons_are_named",
+                    "test_no_reader_compares_the_hold_to_a_bare_reason_string", [bad])
+    assert exc is not None and f"bad_hold_{shape}.py" in str(exc), shape
+
+
+def test_hold_literal_guard_clears_the_constant_and_the_empty_default(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_hold.py",
+                  "from review.core import plot_hold\n\n\n"
+                  "def f(ctx, plot):\n"
+                  "    a = plot_hold.held_for(ctx) == plot_hold.HOLD_GATING\n"
+                  "    b = getattr(plot, 'held_for', '') == ''\n"
+                  "    c = plot.mode == 'gating'\n"
+                  "    return a, b, c\n")
+    assert _run_scan(monkeypatch, "tests.test_plot_hold_reasons_are_named",
+                     "test_no_reader_compares_the_hold_to_a_bare_reason_string",
+                     [good]) is None

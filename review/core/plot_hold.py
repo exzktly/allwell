@@ -27,6 +27,10 @@ marks every scope dirty and draws nothing. At the end of the load:
 The feature redraw entry points that do not pass through those chokepoints —
 Bar, Scatter, Scatter Aggregate, Response, Distribution and the Heat Map's own
 ``redraw_*`` — return early while held, for the same reason.
+``tests/test_a_plot_leaf_is_wired_everywhere.py`` holds every Plotting leaf's
+registered redraw to that, so a new leaf is covered by being declared. Readers
+compare ``held_for`` through :data:`HOLD_LOADING` / :data:`HOLD_GATING`, never a
+bare string (``tests/test_plot_hold_reasons_are_named.py``).
 
 A pass the user restarts by editing a gate is cancelled without a signal and
 replaced, so the replacement's end lifts the hold. A pass cancelled by

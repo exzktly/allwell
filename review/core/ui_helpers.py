@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 from ui import theme
 from review.core import empty_state_copy
+from review.core.plot_hold import HOLD_GATING
 from core.safe import swallow
 from domain.image_identity import normalize_tp
 from core.safe import swallowed
@@ -341,7 +342,7 @@ def refresh_empty_state_pages(win: Any) -> None:
                 # than the one it would replace.
                 _apply_reason(stack, NO_DATASET)
                 continue
-            if getattr(win._app_state.plot, "held_for", "") == "gating":
+            if getattr(win._app_state.plot, "held_for", "") == HOLD_GATING:
                 _apply_reason(stack, GATING_IN_PROGRESS)
                 continue
             reason_fn = getattr(stack, "_empty_reason", None)

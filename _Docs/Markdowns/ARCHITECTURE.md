@@ -139,12 +139,20 @@ shrinks the remote desktop to the phone's screen, so a widget `n·u` pixels wide
 on the desktop is `n` points wide under the thumb, whatever resolution the
 desktop was given. The rules are the platform's: a control is at least 44 pt
 tall (`TOUCH_MIN_PT`), a row a thumb picks from — a menu item, a rail section, a
-control in the Controls sheet — 48 pt (`TOUCH_ROW_PT`), gaps 8 pt, the top bar
-52 pt (44 pt sideways, where height is what the plots lack). Body text is 15 pt
+control in the Controls sheet — 48 pt (`TOUCH_ROW_PT`), gaps 8 pt
+(`TOUCH_GAP_PT`), the top bar 52 pt (`TOP_BAR_PT`; 44 pt sideways,
+`phone_shell.LANDSCAPE_BAR_PT`, where height is what the plots lack). Sideways
+the ☰ and ⋯ are 40 pt squares inside that slim bar
+(`phone_shell.LANDSCAPE_BAR_BUTTON_PT`), the one target deliberately below the
+floor. Body text is 15 pt
 times the chosen text size — Small, Medium or Large, 0.87 / 1 / 1.13
 (`phone_layout.type_scale`) — and becomes the UI scale (§8, *The UI scale*).
 `theme.set_touch_unit(u)` appends the touch floors to the application stylesheet
-(`theme._touch_qss`), so a control built later is touch-sized too.
+(`theme._touch_qss`), so a control built later is touch-sized too. The sheet
+reads `TOUCH_MIN_PT` and `TOUCH_ROW_PT` on every build, as the sizes the shell
+pins in code read all four constants, so changing one moves the stylesheet floor
+and the pinned buttons together
+(`tests/test_phone_layout.py::test_the_stylesheet_touch_floors_follow_the_named_constants`).
 
 **Switching.** The way in is a phone icon (`PhoneShell.desk_button`, an
 `IconButton`) among the small icon buttons at the right end of the mode band,
@@ -15233,7 +15241,7 @@ at the desk. `ui/phone_shell.PhoneShell._restyle(factor, unit)` does it in order
    `QApplication.setStyleSheet` re-polish replaces those with the stylesheet's
    (a heat map legend set to 7 pt comes back at the body size), measured;
 3. the tokens are scaled, the touch unit set (`theme.set_touch_unit`, which
-   adds the 44 / 48 pt floors to the sheet), and `app.setStyleSheet(theme.qss())`
+   adds the `TOUCH_MIN_PT` / `TOUCH_ROW_PT` floors, 44 / 48 pt, to the sheet), and `app.setStyleSheet(theme.qss())`
    re-applied —
    about 6 s on a loaded app (4,092 widgets), whatever the sheet says: the cost
    is the re-polish, and re-setting the identical string costs the same;

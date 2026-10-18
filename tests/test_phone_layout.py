@@ -1281,3 +1281,48 @@ def test_a_close_confirmation_that_could_not_be_asked_keeps_the_window_open(
     monkeypatch.setattr(QMessageBox, "question",
                         lambda *a, **k: QMessageBox.Cancel)
     assert allwell.AllWellApp._confirm_close_in_phone_layout(win) is False
+
+
+def _qss_rule(sheet: str, selector_start: str) -> str:
+    """The body of the first rule in *sheet* whose selector list starts with
+    *selector_start*."""
+    import re
+    m = re.search(re.escape(selector_start) + r"[^{]*\{([^}]*)\}", sheet)
+    assert m, f"no rule starting {selector_start!r} in the touch stylesheet"
+    return m.group(1)
+
+
+def test_the_stylesheet_touch_floors_follow_the_named_constants(monkeypatch):
+    """``core.phone_layout`` names the floors; the touch stylesheet must read
+    them. Values chosen so nothing else in the sheet can produce them, and so
+    the literal 44 / 48 the sheet once restated would leave the old floors in
+    place — the wrong implementation this rejects."""
+    monkeypatch.setattr(phone_layout, "TOUCH_MIN_PT", 50)
+    monkeypatch.setattr(phone_layout, "TOUCH_ROW_PT", 61)
+    sheet = theme._touch_qss(1.0)
+    assert "min-height: 50px" in _qss_rule(sheet, "QPushButton, QToolButton")
+    assert "min-height: 61px" in _qss_rule(sheet, "QComboBox QAbstractItemView")
+    assert "min-height: 61px" in _qss_rule(sheet, "QFrame#RailNavRow")
+    assert "min-height: 61px" in _qss_rule(sheet, 'QWidget#Drawer[phoneSheet="true"]')
+    assert "min-height: 50px" in _qss_rule(sheet, "QCheckBox, QRadioButton")
+    assert "44px" not in sheet and "48px" not in sheet, (
+        "a touch floor in the stylesheet is a literal beside the named constant")
+
+
+def test_the_text_size_buttons_follow_the_named_touch_sizes(
+        qapp, app_sheet, monkeypatch):
+    """The ⋯ menu's Text size buttons are TOUCH_ROW_PT × TOUCH_MIN_PT, spaced
+    TOUCH_GAP_PT apart — read from the constants, not restated beside them."""
+    from PySide6.QtWidgets import QPushButton
+    monkeypatch.setattr(phone_layout, "TOUCH_MIN_PT", 50)
+    monkeypatch.setattr(phone_layout, "TOUCH_ROW_PT", 61)
+    monkeypatch.setattr(phone_layout, "TOUCH_GAP_PT", 11)
+    win = _window()
+    QVBoxLayout(win)
+    shell = _shell(win)
+    row = shell._text_size_row().defaultWidget()
+    buttons = row.findChildren(QPushButton, "PhoneTextSizeButton")
+    assert len(buttons) == len(phone_layout.TEXT_SIZES)
+    for b in buttons:
+        assert (b.minimumWidth(), b.minimumHeight()) == (shell.pt(61), shell.pt(50))
+    assert row.layout().spacing() == shell.pt(11)

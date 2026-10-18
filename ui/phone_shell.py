@@ -573,6 +573,11 @@ class _BusyOverlay(QWidget):
 #: Mode-dependent sizes of the phone's top bar, in phone points: a full bar
 #: upright, a slimmer one sideways, where height is what the plots lack.
 LANDSCAPE_BAR_PT = 44
+#: The ☰ and ⋯ buttons sideways: square, inside the slim bar with 2 pt to spare
+#: above and below. The one touch target below ``TOUCH_MIN_PT``, deliberately —
+#: sideways the bar's height is taken from the plots. Upright they are
+#: ``TOUCH_ROW_PT`` squares.
+LANDSCAPE_BAR_BUTTON_PT = 40
 #: The side rail leaves this much of the page showing to its right when the
 #: phone is upright — the strip a thumb taps to close it; sideways it is a
 #: fixed width, since half a landscape screen of sections would be mostly air.
@@ -1198,7 +1203,7 @@ class PhoneShell(QObject):
         if band is not None and band.layout() is not None:
             if on:
                 bar = self.pt(LANDSCAPE_BAR_PT if land else phone_layout.TOP_BAR_PT)
-                side = self.pt(phone_layout.TOUCH_ROW_PT if not land else 40)
+                side = self.pt(LANDSCAPE_BAR_BUTTON_PT if land else phone_layout.TOUCH_ROW_PT)
                 for b in (self.menu_button, self.options_button):
                     b.setFixedSize(side, side)
                 band.setFixedHeight(bar)
@@ -1585,14 +1590,15 @@ class PhoneShell(QObject):
         row.setObjectName("PhoneTextSizeRow")
         lay = QHBoxLayout(row)
         lay.setContentsMargins(self.pt(16), self.pt(4), self.pt(12), self.pt(4))
-        lay.setSpacing(self.pt(8))
+        lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
         lay.addWidget(QLabel("Text size", row), 1)
         for size in phone_layout.TEXT_SIZES:
             b = QPushButton(phone_layout.TEXT_SIZE_LABEL[size][0], row)
             b.setObjectName("PhoneTextSizeButton")
             b.setCheckable(True)
             b.setChecked(size == self._text_size)
-            b.setFixedSize(self.pt(48), self.pt(44))
+            b.setFixedSize(self.pt(phone_layout.TOUCH_ROW_PT),
+                           self.pt(phone_layout.TOUCH_MIN_PT))
             b.clicked.connect(lambda _c=False, s=size: (self._menu.close(),
                                                         self.set_text_size(s)))
             lay.addWidget(b)

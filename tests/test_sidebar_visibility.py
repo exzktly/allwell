@@ -42,7 +42,7 @@ def _make(mode: str, collapsed: bool):
     app = _App()
     app.window = app
     # The real context's registry: phone layout's drawer is looked up in it
-    # (``phone_drawer.apply_phone_drawer``, which this chokepoint calls last).
+    # (``ui.phone_drawer.RailDrawer.apply``, which this chokepoint calls last).
     app.widgets = WidgetRegistry(app)
     app._sidebar_root = review_rail
     app._sidebar_collapsed = collapsed
@@ -71,3 +71,21 @@ def test_missing_analyze_pane_is_safe():
     app._analyze_pane = None
     apply_sidebar_visibility(app)  # must not raise
     assert review_rail.isVisibleTo(host) is True
+
+
+@pytest.mark.parametrize("mode,collapsed", [("analyze", False), ("review", True)])
+def test_the_chokepoint_hands_phone_layout_s_drawer_the_last_word(mode, collapsed):
+    """The window registers phone layout's rail drawer (``ui/phone_drawer``)
+    in Review's registry; the chokepoint finds it there and calls it last,
+    with the mode and the flag it applied."""
+    from ui.phone_drawer import DRAWER_KEY
+    app, _host, _r, _a = _make(mode, collapsed)
+    seen = []
+
+    class _Drawer:
+        def apply(self, m, c):
+            seen.append((m, c))
+
+    app.widgets.register(DRAWER_KEY, _Drawer())
+    apply_sidebar_visibility(app)
+    assert seen == [(mode, collapsed)]

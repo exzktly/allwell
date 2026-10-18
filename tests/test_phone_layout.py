@@ -388,8 +388,13 @@ def test_compact_mode_bar_widths_follow_labels_enlarged_by_a_restyle(qapp):
     assert [s.minimumWidth() for s in bar._segments] == [0] * 3
 
 
+def _rail_drawer(host, panels, closed=None):
+    from ui.phone_drawer import RailDrawer
+    return RailDrawer(host, panels=lambda: panels, top_inset=lambda: 0,
+                      on_closed_inside=closed or (lambda: None))
+
+
 def test_a_lent_panel_goes_back_to_its_place_pin_and_sizes(qapp):
-    from review.core.phone_drawer import _give_back, _lend
     split = QSplitter(Qt.Horizontal)
     panel, content = QWidget(), QWidget()
     split.addWidget(panel)
@@ -398,13 +403,14 @@ def test_a_lent_panel_goes_back_to_its_place_pin_and_sizes(qapp):
     panel.setFixedWidth(329)
     split.setSizes([329, 671])
     sizes = split.sizes()
-    holder = QWidget()
-    QVBoxLayout(holder)
-    _lend(panel, holder)
+    host = QWidget()
+    drawer = _rail_drawer(host, {"review": panel})
+    holder = drawer.contentWidget()
+    drawer.lend(panel)
     assert panel.parentWidget() is holder and split.count() == 1
     assert panel.maximumWidth() > 329            # fills the drawer
-    _lend(panel, holder)                         # idempotent: remembers once
-    _give_back(panel)
+    drawer.lend(panel)                           # idempotent: remembers once
+    drawer.give_back(panel)
     # Back at index 0 — not appended after the content, which a plain
     # addWidget would do — with its pin and the splitter's sizes.
     assert split.indexOf(panel) == 0 and split.count() == 2
@@ -1428,4 +1434,32 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     assert named == set(ps.ADAPTED_KINDS), named
     assert all(ps._phone_relevant(w) for w in widgets)
     assert ps._adapt_kind(QLabel("plain", host)) is None
+    host.deleteLater()
+
+
+def test_the_rail_drawer_lends_the_current_mode_s_panel_and_gives_all_back(qapp):
+    """As Review's chokepoint drives it: in phone layout only
+    the current mode's panel shows, in the drawer; at the desk every panel is
+    back in its splitter under the desk's visibility rule (the rail in Review
+    only, the others whenever expanded)."""
+    host = QWidget()
+    host.resize(800, 600)
+    panels = {}
+    for mode in ("review", "analyze", "datasets"):
+        split = QSplitter(Qt.Horizontal, host)
+        panels[mode] = QWidget()
+        split.addWidget(panels[mode])
+        split.addWidget(QWidget())
+    drawer = _rail_drawer(host, panels)
+    host.show()
+    phone_layout.set_on(True)
+    drawer.apply("analyze", False)
+    assert all(p.parentWidget() is drawer.contentWidget() for p in panels.values())
+    assert {m for m, p in panels.items() if not p.isHidden()} == {"analyze"}
+    assert drawer.isOpen()
+    phone_layout.set_on(False)
+    drawer.apply("analyze", False)
+    assert all(isinstance(p.parentWidget(), QSplitter) for p in panels.values())
+    assert {m for m, p in panels.items() if not p.isHidden()} == {"analyze", "datasets"}
+    assert not any(drawer.is_lent(p) for p in panels.values())
     host.deleteLater()

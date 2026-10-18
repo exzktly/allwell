@@ -243,7 +243,7 @@ log* and *Desktop layout*. The status bar's log "!" is mirrored onto ⋯
 events cannot drive it, because they never arrive while the status bar is hidden.
 
 **The side rail slides out over the page.** A phone held upright has no room for
-a column beside the page, so in phone layout `review/core/phone_drawer.py` lends
+a column beside the page, so in phone layout `ui/phone_drawer.py` (`RailDrawer`) lends
 every pane's left panel — Review's rail (dataset, sections, well plate, the page's
 own rail frames, saved selections), the Analyze form, the Datasets tool list — to
 one left-edge `widgets.drawer.Drawer`, and ☰ slides the current mode's panel out
@@ -257,7 +257,7 @@ exactly where it was when the rail closes.
 
 The drawer is the left panel's *expanded* state: it is driven by the same flag the
 desk's collapse toggle drives (`_sidebar_collapsed`), through
-`tab_controller.apply_sidebar_visibility`, which calls `apply_phone_drawer` last so
+`tab_controller.apply_sidebar_visibility`, which calls `RailDrawer.apply` last so
 it has the final word in phone layout — only the current mode's panel shows, and
 only in the drawer. `set_sidebar_collapsed(ctx, …)` sets the flag to a value;
 `toggle_sidebar` is that with the value flipped. The drawer closes when the
@@ -267,8 +267,15 @@ flag never disagree), when ☰ is tapped again, when a section is tapped
 by code), and when a mode is picked on the mode bar. Tapping wells on the plate
 keeps it open — picking several in a row is normal.
 
-The drawer is hosted on the Review widget, which holds the band, not on a
-splitter (a `QSplitter` adopts any child widget as a pane). It starts right under
+The drawer serves all three panes, so it lives in `ui/` and imports none of
+them (§3, Rule 1). `AllWellApp._build_rail_drawer` builds it and hands it what
+only the window knows — `panels`, the left panel of each mode, asked for each
+time; `top_inset`, where the top bar ends; `on_closed_inside`, what a close from
+inside means for the flag — and registers it in Review's widget registry under
+`ui.phone_drawer.DRAWER_KEY`, where `apply_sidebar_visibility` finds it. Each
+lent panel's desk place is kept on the drawer itself (`RailDrawer._homes`), not
+stamped on the panel. The drawer is hosted on the Review widget, which holds
+the band, not on a splitter (a `QSplitter` adopts any child widget as a pane). It starts right under
 the top bar (`Drawer(top_inset=…)`, re-measured as the bar's height changes), so
 ☰ and the mode switch stay in reach while it is open, and it covers the strip,
 whose page menu and Controls belong to the page it hides. Each panel is lent
@@ -833,6 +840,10 @@ allwell/
 │   │                              alongside domain/well_palette.py, whose 96 rank colours
 │   │                              this module re-exports)
 │   ├── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
+│   ├── phone_drawer.py         ← phone layout's side rail (RailDrawer): lends each pane's left
+│   │                              panel to one left-edge Drawer over the page and gives it back
+│   │                              (§2). Serves all three panes, so it is shared, not Review's;
+│   │                              allwell.py tells it where each panel lives, and it imports no pane
 │   └── phone_shell.py          ← phone layout's Qt half: the top bar, strip and ⋯ menu, the
 │                                  Controls sheet, the switch both ways, the window fitting its
 │                                  screen, the live restyle and the rescale pass (§2, §8). Handed every pane widget it moves
@@ -926,8 +937,6 @@ review/
 │   │   qc_state.py, stats_cache_state.py   ← cross-cutting typed state slices
 │   ├── app_shell_view.py, centre_view.py, sidebar_view.py, status_view.py
 │   ├── split_view.py                 ← optional side-by-side double-pane view (one-line removable; §5.10)
-│   ├── phone_drawer.py               ← phone layout's side rail: lends each pane's left panel to one
-│   │                                    left-edge Drawer over the page and gives it back (§2)
 │   ├── phone_panel_sheet.py          ← phone layout's Properties sheet: lends a plot's right dock to a
 │   │                                    full-width Drawer over the page and gives it back (§2)
 │   ├── feature_registry.py           ← FeatureDescriptor + build_feature_registry (§5.3)

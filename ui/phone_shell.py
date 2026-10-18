@@ -15,7 +15,7 @@ What phone layout does, and where:
   control there with it, including the one that would fix it.
 * **One column.** The band's ☰ slides the pane's whole left panel (Review's
   sections and well plate, the Analyze form) out over the page from the left
-  edge — ``review.core.phone_drawer`` lends the panels to that drawer and
+  edge — ``ui.phone_drawer.RailDrawer`` lends the panels to that drawer and
   gives them back.
 * **Chrome that suits a thumb**: the header row goes, the mode bar drops its
   glyphs, the page sub-tab strip becomes one "Bar Plots ▾" menu, desk-only

@@ -627,8 +627,11 @@ def apply_sidebar_visibility(ctx) -> None:
             pane_sb.setVisible(not collapsed)
     # Phone layout lends the left panels to a slide-out drawer over the page;
     # it has the last word on what shows, and gives them back on the desk.
-    from review.core.phone_drawer import apply_phone_drawer
-    apply_phone_drawer(ctx, mode, collapsed)
+    # The window builds the drawer and registers it here (``ui/phone_drawer``).
+    from ui.phone_drawer import DRAWER_KEY
+    drawer = ctx.widgets.get_or_none(DRAWER_KEY)
+    if drawer is not None:
+        drawer.apply(mode, collapsed)
 
 
 def set_sidebar_collapsed(ctx, collapsed: bool) -> None:

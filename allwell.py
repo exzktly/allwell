@@ -677,8 +677,7 @@ class AllWellApp(QMainWindow):
             getattr(self, "_storage_btn", None),
         ) if w is not None]
 
-        from review.core.phone_drawer import ensure_drawer
-        drawer = ensure_drawer(review._ctx)
+        drawer = self._build_rail_drawer(band)
         dash = getattr(self._analyze, "_dashboard", None)
         analyze_page = dash.parentWidget() if dash is not None else None
         handles = PhoneHandles(
@@ -727,6 +726,39 @@ class AllWellApp(QMainWindow):
         # whichever state it is in.
         drawer.opened.connect(self._phone.refresh)
         drawer.closed.connect(self._phone.refresh)
+
+    def _build_rail_drawer(self, band):
+        """Phone layout's side rail (``ui/phone_drawer.py``), told where each
+        pane's left panel lives, and registered with Review, whose
+        ``apply_sidebar_visibility`` drives it."""
+        from core import phone_layout
+        from review.core.tab_controller import set_sidebar_collapsed
+        from ui.phone_drawer import DRAWER_KEY, RailDrawer
+        review = self._review
+
+        def _panels() -> dict:
+            found = (("review", getattr(review, "_sidebar_root", None)),
+                     ("analyze", getattr(getattr(self, "_analyze", None), "_left_sidebar", None)),
+                     ("datasets", getattr(getattr(self, "_datasets", None), "_left_sidebar", None)))
+            return {m: p for m, p in found if p is not None}
+
+        def _below_band() -> int:
+            # Under the top bar itself, covering any strip below it: the strip's
+            # page menu and Controls belong to the page the rail hides.
+            if band is not None:
+                return band.geometry().bottom() + 1
+            pane = getattr(review, "_h_pane", None)
+            return pane.geometry().top() if pane is not None else 0
+
+        def _closed_inside() -> None:
+            if phone_layout.is_on() and not getattr(review, "_sidebar_collapsed", False):
+                set_sidebar_collapsed(review._ctx, True)
+
+        if review._ctx.widgets.has(DRAWER_KEY):
+            return review._ctx.widgets.get(DRAWER_KEY)
+        return review._ctx.widgets.register(DRAWER_KEY, RailDrawer(
+            review, panels=_panels, top_inset=_below_band,
+            on_closed_inside=_closed_inside))
 
     def showEvent(self, event) -> None:  # Qt naming
         super().showEvent(event)

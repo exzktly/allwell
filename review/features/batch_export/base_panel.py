@@ -2053,7 +2053,7 @@ class BatchExportPanel(QWidget):
         ``ctx.runtime.sem.btns`` / ``fov.btns`` banks so they stay in sync with
         the plot toolbars."""
         from review.core.plot_toggles import (
-            refresh_fov_btn_state, toggle_fov_replicates, toggle_sem,
+            register_fov_button, toggle_fov_replicates, toggle_sem,
         )
         from widgets.reserved_width_button import ReservedWidthButton
         ctx = self._ctx
@@ -2087,12 +2087,7 @@ class BatchExportPanel(QWidget):
         fov_row.addWidget(fov_btn)
         fov_row.addStretch(1)
         layout.addLayout(fov_row)
-        if ctx.runtime.fov.btns is None:
-            ctx.runtime.fov.btns = []
-        ctx.runtime.fov.btns.append(fov_btn)
-        if not ctx.runtime.fov.btn:
-            ctx.runtime.fov.btn = fov_btn
-        refresh_fov_btn_state(ctx)
+        register_fov_button(ctx, fov_btn)
 
     def _build_summary_label(self, layout: QVBoxLayout) -> None:
         """The derived "Each export group produces:" block, above Run."""

@@ -5325,6 +5325,25 @@ def test_hold_literal_guard_catches_a_bare_reason(tmp_path, monkeypatch, shape):
     assert exc is not None and f"bad_hold_{shape}.py" in str(exc), shape
 
 
+def test_fov_bank_guard_catches_a_direct_append(tmp_path, monkeypatch):
+    # The shape both registrants had: append straight onto the bank.
+    bad = _write(tmp_path, "bad_fov_bank.py",
+                 "def wire(ctx, btn):\n    ctx.runtime.fov.btns.append(btn)\n")
+    exc = _run_scan(monkeypatch, "tests.test_fov_button_bank_is_typed",
+                    "test_nothing_outside_plot_toggles_appends_to_the_fov_bank", [bad])
+    assert exc is not None and "bad_fov_bank.py" in str(exc)
+
+
+def test_fov_bank_guard_clears_the_register_call_and_other_banks(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_fov_bank.py",
+                  "def wire(ctx, btn, sem_btn):\n"
+                  "    register_fov_button(ctx, btn)\n"
+                  "    ctx.runtime.sem.btns.append(sem_btn)\n")
+    assert _run_scan(monkeypatch, "tests.test_fov_button_bank_is_typed",
+                     "test_nothing_outside_plot_toggles_appends_to_the_fov_bank",
+                     [good]) is None
+
+
 def test_hold_literal_guard_clears_the_constant_and_the_empty_default(tmp_path, monkeypatch):
     good = _write(tmp_path, "good_hold.py",
                   "from review.core import plot_hold\n\n\n"

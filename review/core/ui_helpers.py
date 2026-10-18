@@ -959,7 +959,7 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
     ``ctx.runtime.sem`` / ``ctx.runtime.fov`` banks (mirrors the batch-export
     controls row)."""
     from review.core.plot_toggles import (
-        refresh_fov_btn_state,
+        register_fov_button,
         toggle_fov_replicates,
         toggle_sem,
     )
@@ -991,12 +991,7 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
         fov_btn.setProperty("variant", "toggle")
         fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
         h.addWidget(fov_btn)
-        if ctx.runtime.fov.btns is None:
-            ctx.runtime.fov.btns = []
-        ctx.runtime.fov.btns.append(fov_btn)
-        if not ctx.runtime.fov.btn:
-            ctx.runtime.fov.btn = fov_btn
-        refresh_fov_btn_state(ctx)
+        register_fov_button(ctx, fov_btn)
 
     h.addStretch(1)
     return w

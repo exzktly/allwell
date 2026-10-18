@@ -113,6 +113,30 @@ def _notify_observers(bank, value) -> None:
         bank[:] = live
 
 
+def register_fov_button(ctx, btn) -> None:
+    """Put *btn* on the per-FOV toggle bank and bring it into the shared state.
+
+    The one way onto ``ctx.runtime.fov.btns``. *btn* must be a
+    :class:`widgets.reserved_width_button.ReservedWidthButton`: the bank's
+    restyle reserves room for the wider checked label ("FOV ✓"), and a plain
+    button has no reservation, so its ✓ clips inside a popover sized at first
+    show, with nothing to say so. Such a button is refused here, at the moment
+    it is wired, rather than restyled without its reservation.
+    """
+    from widgets.reserved_width_button import ReservedWidthButton
+
+    if not isinstance(btn, ReservedWidthButton):
+        raise TypeError(
+            f"a per-FOV toggle must be a ReservedWidthButton, not {type(btn).__name__}: "
+            "the bank reserves room for the 'FOV ✓' label on every restyle")
+    if ctx.runtime.fov.btns is None:
+        ctx.runtime.fov.btns = []
+    ctx.runtime.fov.btns.append(btn)
+    if not ctx.runtime.fov.btn:
+        ctx.runtime.fov.btn = btn
+    refresh_fov_btn_state(ctx)
+
+
 def refresh_fov_btn_state(ctx) -> None:
     """Sync every per-FOV toggle button's text/variant state."""
     is_on = bool(ctx.state.plot.use_fov_replicates)
@@ -134,8 +158,8 @@ def refresh_fov_btn_state(ctx) -> None:
         # text grows. Size for the widest label + QSS padding/border slack; the
         # button re-measures it whenever the type size changes
         # (``widgets.reserved_width_button``).
-        if hasattr(btn, "reserve"):
-            btn.reserve(("FOV", "FOV ✓"), _FOV_BTN_SLACK_PX)
+        # Every bank member is one: ``register_fov_button`` refuses anything else.
+        btn.reserve(("FOV", "FOV ✓"), _FOV_BTN_SLACK_PX)
         btn.style().unpolish(btn)
         btn.style().polish(btn)
 

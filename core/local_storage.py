@@ -352,9 +352,15 @@ def _remove(path: Path, result: ClearResult) -> None:
 
 
 def _retry_writable(func, target: str) -> bool:
-    """Clear a read-only flag on *target* and call *func* on it once more."""
+    """Clear a read-only flag on *target* and call *func* on it once more.
+
+    The write bit is *added* to the mode already there, never set in place of
+    it: replacing a folder's mode with read and write alone takes away its
+    execute bit, after which nothing inside it can be reached — not by the
+    retry, not by the measurement of what was left, and not by the user.
+    """
     try:
-        os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+        os.chmod(target, os.lstat(target).st_mode | stat.S_IWRITE)
         func(target)
         return True
     except OSError:

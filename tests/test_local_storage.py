@@ -214,6 +214,12 @@ def test_a_file_that_will_not_go_is_reported_and_not_counted(populated, home, mo
     assert result.freed == 500
     assert result.failed == [str(held)]
     assert held.exists() and not (held.parent / "B02.parquet").exists()
+    # The folder left behind must still be enterable. The read-only retry once
+    # set its mode to read+write outright, dropping the execute bit: nothing in
+    # it could be reached, and as a non-root user (CI) the leftover measured as
+    # empty, so the freed total counted the held file too.
+    import stat
+    assert os.stat(held.parent).st_mode & stat.S_IXUSR, "the leftover folder was made untraversable"
 
 
 def test_the_row_cache_folder_name_is_the_parquet_cache_s():

@@ -21,6 +21,7 @@ from PySide6.QtCore import QEvent, QObject, QTimer
 
 from core import phone_layout
 from core.safe import swallow
+from review.features.image_browser.image_table import facet_view
 
 #: The smallest a fitted cell may be, in pixels: below this a field of view is
 #: a smudge, and the grid should scroll rather than shrink further.
@@ -57,7 +58,6 @@ def phone_cell_px(ctx, cells, plan, zoom: float, grid) -> int | None:
         return None
     from PySide6.QtWidgets import QScrollArea
 
-    from review.features.image_browser.image_table import facet_view
     host = grid.parentWidget()
     scroll = host
     while scroll is not None and not isinstance(scroll, QScrollArea):

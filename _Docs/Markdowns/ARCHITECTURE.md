@@ -4567,7 +4567,14 @@ settings in force when it starts. A job offers Cancel only when cancelling
 disowns its result rather than leaving half of it applied: Auto-threshold and the
 optimizer (whose answers are applied at the end) do; a re-projection and a gating
 pass (which rewrite the wells one by one) do not. A cancelled job still holds the
-queue, behind a "Cancelling…" popup, until its thread has returned. The routes:
+queue, behind a "Cancelling…" popup, until its thread has returned. A gating
+pass the runner did not start — the one a load starts, or one a gate drawn on the
+Scatter Plot tab starts — also writes the frames, so the tab builder registers a
+blocker (`progress_jobs.add_blocker`, predicate
+`controller._outside_pass_writing`) and a job submitted while such a pass is
+writing waits behind a "Waiting for the cell gating pass…" popup until it ends. A
+QC apply that fails part-way still saves, redraws and repaints the panel from the
+frames as they stand, and the status line says it failed. The routes:
 
 | Control | Entry point | Off the GUI thread |
 |---|---|---|

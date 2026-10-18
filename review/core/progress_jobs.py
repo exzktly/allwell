@@ -187,6 +187,11 @@ class _Runner(QObject):
         #: Job threads not yet returned, kept alive until they have: a
         #: ``QThread`` collected while running aborts the process.
         self._threads: set = set()
+        #: ``() -> bool`` predicates registered by features (:func:`add_blocker`):
+        #: while any is true, no job starts — something outside the runner is
+        #: writing the frames a job would read or write.
+        self.blockers: list = []
+        self._waiting = False
 
     # ── the queue ────────────────────────────────────────────────────────
     def submit(self, job: _Job) -> None:
@@ -196,8 +201,34 @@ class _Runner(QObject):
         if self.current is None:
             self._start_next()
 
+    def _blocked(self) -> bool:
+        for blocker in self.blockers:
+            with swallow("asking a progress-job blocker"):
+                if blocker():
+                    return True
+        return False
+
     def _start_next(self) -> None:
-        if self.current is not None or not self._queue:
+        if self.current is not None or not self._queue or self._waiting:
+            return
+        if self._blocked():
+            # Something outside the runner — a load's gating pass, say — is
+            # rewriting the frames. Say so behind the same popup, and look again
+            # shortly: starting now would put two threads on one frame.
+            from PySide6.QtCore import QTimer
+            job = self._queue[0]
+            if self.popup is None:
+                self._open_popup(job.title, "Waiting for the cell gating pass in "
+                                 "progress to finish…", cancellable=False)
+            self._waiting = True
+
+            def _retry() -> None:
+                self._waiting = False
+                if self.current is None and self._queue and not self._blocked():
+                    self._close_popup()
+                self._start_next()
+
+            QTimer.singleShot(_BLOCKED_RETRY_MS, self, _retry)
             return
         job = self._queue.popleft()
         handle = JobHandle(self, job)
@@ -295,6 +326,10 @@ class _Runner(QObject):
             popup.set_text(text)
 
 
+#: How often a job held back by a blocker looks again.
+_BLOCKED_RETRY_MS = 100
+
+
 def _alive(obj) -> bool:
     """Whether *obj* is a Qt object whose C++ side still exists."""
     if obj is None:
@@ -390,6 +425,19 @@ class _InlineReport:
 
     def stage(self, text: str) -> None:
         return None
+
+
+def add_blocker(ctx, predicate: Callable[[], bool]) -> None:
+    """Hold every job back while *predicate()* is true.
+
+    For work that writes the frames without going through the runner: the gating
+    pass a load starts, or one a gate drawn on the Scatter Plot tab starts. A
+    job submitted meanwhile waits behind a "waiting" popup and starts once the
+    predicate turns false. Registered once per predicate, however often called.
+    """
+    blockers = _runner(ctx).blockers
+    if predicate not in blockers:
+        blockers.append(predicate)
 
 
 def busy(ctx) -> bool:

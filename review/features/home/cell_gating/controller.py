@@ -1076,6 +1076,28 @@ def cell_gating_start_gating_worker(ctx, *, before_start=None) -> GatingWorker:
     return worker
 
 
+def _outside_pass_writing(ctx) -> bool:
+    """A gating pass the runner did not start is still writing the frames."""
+    runner = ctx.runtime.jobs.runner
+    current = runner.current if runner is not None else None
+    if current is not None and current.job.key == "cell_gating.pass":
+        return False   # the runner's own pass
+    return _gating_pass_writing(ctx)
+
+
+def _hold_jobs_for_outside_passes(ctx) -> None:
+    """Make the panel's jobs wait for a load's or the Scatter tab's gating pass.
+
+    Those passes run on their own ``QThread`` outside the runner, and a panel job
+    started beside one would put a second thread on the same frames.
+    """
+    from review.core import progress_jobs
+    rt = ctx.runtime.cell_gating
+    if rt.jobs_blocker is None:
+        rt.jobs_blocker = lambda: _outside_pass_writing(ctx)
+    progress_jobs.add_blocker(ctx, rt.jobs_blocker)
+
+
 def cell_gating_regate_with_progress(ctx) -> None:
     """Re-run the gating pass for an edit on the panel, behind a progress popup.
 
@@ -1095,6 +1117,8 @@ def cell_gating_regate_with_progress(ctx) -> None:
     waiting collapse to one: each reads the settings in force when it starts.
     """
     from review.core import progress_jobs
+
+    _hold_jobs_for_outside_passes(ctx)
 
     def _start(handle) -> None:
         def _hook_up(worker) -> None:
@@ -1319,7 +1343,21 @@ def cell_gating_auto_threshold(ctx) -> None:
     # and a cancelled one puts the button back, since ``_on_done`` never runs.
     from review.core import progress_jobs
 
+    def _on_finish(handle) -> None:
+        # ``_on_done`` puts the button back on every end that reaches it; a
+        # cancelled pass, or one whose thread never started, does not.
+        if btn is not None and not btn.isEnabled():
+            btn.setEnabled(True)
+            btn.setText("Auto-threshold all channels")
+        if handle.cancelled:
+            with swallow("auto-threshold cancelled status"):
+                ctx.notify.set_status(
+                    "Auto-threshold cancelled — no thresholds were changed.")
+
+    _hold_jobs_for_outside_passes(ctx)
+
     def _start(handle) -> None:
+        handle.on_finish = lambda: _on_finish(handle)
         worker = _AutoThresholdWorker(
             ctx, out_dir, channels,
             well_labels=well_labels, in_dir=in_dir,
@@ -1330,18 +1368,6 @@ def cell_gating_auto_threshold(ctx) -> None:
         worker.failed.connect(_on_failed)
         worker.finished.connect(handle.finish)
         handle.on_cancel = worker.cancel
-
-        def _on_finish() -> None:
-            if not handle.cancelled:
-                return
-            if btn is not None:
-                btn.setEnabled(True)
-                btn.setText("Auto-threshold all channels")
-            with swallow("auto-threshold cancelled status"):
-                ctx.notify.set_status(
-                    "Auto-threshold cancelled — no thresholds were changed.")
-
-        handle.on_finish = _on_finish
         ctx.runtime.cell_gating.auto_worker = worker
         worker.start()
 

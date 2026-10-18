@@ -119,9 +119,13 @@ def test_typing_a_qc_bound(qtbot, panel, monkeypatch):
     assert shown == ["Applying QC"]
     wait_for_panel_jobs(qtbot, ctx)
     assert _off_gui(threads)
+    n_cells = 0
     for df in ctx.state.dataset.cache.values():
         assert (df["QC_Pass"] == 0).all(), "the bound never reached the frames"
-    assert w["status"].text().startswith("flagged"), "the count was not repainted"
+        n_cells += len(df)
+    # Every cell flagged, counted over the frames the job rewrote: a count
+    # taken before the re-projection would read "flagged 0 / N".
+    assert w["status"].text().startswith(f"flagged {n_cells:,} / {n_cells:,}"), w["status"].text()
 
 
 # ── fields of view ───────────────────────────────────────────────────────
@@ -132,9 +136,13 @@ def test_changing_the_fields_of_view(qtbot, panel, monkeypatch):
     from review.features.qc import controller as qc
     from widgets import menu_exec
 
+    from review.features.home.cell_gating import controller
+
     ctx, shown = panel
     threads: list = []
+    cdf_threads: list = []
     _record_thread(monkeypatch, qc, "reproject_verdicts", threads)
+    _record_thread(monkeypatch, controller, "_read_first_frames", cdf_threads)
 
     def _untick_2(menu, _pos):
         for box in menu.findChildren(QCheckBox):
@@ -146,6 +154,7 @@ def test_changing_the_fields_of_view(qtbot, panel, monkeypatch):
     assert shown == ["Applying the fields of view"]
     wait_for_panel_jobs(qtbot, ctx)
     assert _off_gui(threads)
+    assert _off_gui(cdf_threads), "the CDFs were re-read on the GUI thread (or not at all)"
     assert ctx.widgets.get("_cell_gating_fov_btn").text() == "FOVs 1, 3"
 
 
@@ -255,6 +264,8 @@ def test_editing_an_on_cutoff(qtbot, panel):
     edit.setText("123.5")
     edit.editingFinished.emit()
     assert shown == ["Applying the ON cutoff"]
+    # Applied as the popup's finish, not before it opened.
+    assert ctx.state.cell_gating.thresh_frac_on["gfp"] != 123.5
     wait_for_panel_jobs(qtbot, ctx)
     assert ctx.state.cell_gating.thresh_frac_on["gfp"] == 123.5
 
@@ -277,10 +288,33 @@ def test_auto_threshold(qtbot, panel, monkeypatch):
 def test_the_optimizer(qtbot, panel, monkeypatch):
     from review.features.home.cell_gating import controller
 
+    import numpy as np
+    import pandas as pd
+
     ctx, shown = panel
     threads: list = []
+    read_threads: list = []
     _record_thread(monkeypatch, controller, "_optimize_thresh_frac_on_between_wells", threads)
     rt = ctx.runtime.cell_gating
+    # Two wells built to be separable, so the scan finds a cut rather than
+    # refusing: a test accepting either outcome cannot tell applied from not.
+    wells = [rt.opt_well_a_combo.itemText(i) for i in range(2)]
+    channel = str(rt.opt_channel_combo.currentData())
+    rng = np.random.default_rng(2)
+    hot = np.concatenate([rng.lognormal(np.log(1500), 0.25, 700),
+                          rng.lognormal(np.log(200), 0.3, 300)])
+    cold = rng.lognormal(np.log(200), 0.3, 1000)
+
+    def _rows(_ctx, well):
+        read_threads.append(threading.get_ident())
+        values = hot if well == wells[0] else cold
+        return pd.DataFrame({"area_px": [100] * len(values), "Included": [1] * len(values),
+                             f"{channel}_mean_intensity": values})
+
+    monkeypatch.setattr(controller, "get_rows", _rows)
+    rt.opt_well_a_combo.setCurrentIndex(0)
+    rt.opt_min_edit.setText("0")
+    rt.opt_max_edit.setText("5000")
     rt.opt_well_b_combo.setCurrentIndex(1)
     assert rt.opt_well_a_combo.currentText() != rt.opt_well_b_combo.currentText()
     before = dict(ctx.state.cell_gating.thresh_frac_on)
@@ -288,11 +322,11 @@ def test_the_optimizer(qtbot, panel, monkeypatch):
     assert shown == ["Optimize ThreshFracOn"]
     wait_for_panel_jobs(qtbot, ctx)
     assert _off_gui(threads), "the threshold scan ran on the GUI thread"
-    key = str(rt.opt_channel_combo.currentData())
+    assert _off_gui(read_threads), "the optimizer read its wells on the GUI thread"
     text = rt.opt_result_label.text()
-    assert text.startswith(("Optimized", "Optimize ThreshFracOn (")), text
-    if text.startswith("Optimized"):
-        assert ctx.state.cell_gating.thresh_frac_on[key] != before.get(key)
+    assert text.startswith("Optimized"), text
+    assert 400.0 < ctx.state.cell_gating.thresh_frac_on[channel] < 1200.0
+    assert ctx.state.cell_gating.thresh_frac_on[channel] != before.get(channel)
 
 
 def test_a_pass_that_ends_before_start_returns_still_closes_its_popup(qtbot, panel, monkeypatch):
@@ -317,3 +351,77 @@ def test_a_pass_that_ends_before_start_returns_still_closes_its_popup(qtbot, pan
     assert shown == ["Applying cell gating"]
     wait_for_panel_jobs(qtbot, ctx, timeout=3000)
     assert ctx.state.cell_gating.applied_gating["fluor_gates"]["gfp"] == 3.5
+
+
+def test_a_failed_gating_pass_still_closes_its_popup(qtbot, panel, monkeypatch):
+    """The popup closes on ``QThread.finished``, which a failed pass emits too;
+    one closed on ``finished_ok`` would stay up for ever over a failure."""
+    from review.features.home.cell_gating import controller
+
+    def _boom(self):
+        raise RuntimeError("the frames could not be gated")
+
+    monkeypatch.setattr(controller.GatingWorker, "_run_inner", _boom)
+    ctx, shown = panel
+    edit = ctx.runtime.cell_gating.fluor_gate_edits["gfp"]
+    edit.setText("4.5")
+    edit.editingFinished.emit()
+    assert shown == ["Applying cell gating"]
+    wait_for_panel_jobs(qtbot, ctx, timeout=3000)
+    assert "last gating pass failed" in ctx.runtime.cell_gating.included_count.text()
+
+
+def test_a_panel_edit_waits_for_a_pass_the_load_started(qtbot, panel, monkeypatch):
+    """A load's gating pass runs outside the runner. A QC edit made while it is
+    still writing must wait for it, behind a popup saying so, rather than put a
+    second thread on the same frames."""
+    from review.core import progress_jobs
+    from review.features.home.cell_gating import controller
+    from review.features.qc import controller as qc
+
+    ctx, shown = panel
+    release = threading.Event()
+    real = controller.GatingWorker._run_inner
+
+    def _held(self):
+        release.wait(5)
+        return real(self)
+
+    monkeypatch.setattr(controller.GatingWorker, "_run_inner", _held)
+    controller.cell_gating_start_gating_worker(ctx)     # the load's route
+    reprojected: list = []
+    _record_thread(monkeypatch, qc, "reproject_verdicts", reprojected)
+    box = ctx.widgets.get("_qc_gate_widgets")["enable"]
+    box.setChecked(not box.isChecked())
+    qtbot.wait(400)
+    assert reprojected == [], "the QC job ran beside the load's gating pass"
+    popup = progress_jobs._runner(ctx).popup
+    assert popup is not None and popup.isVisible() and "Waiting" in popup.labelText()
+    release.set()
+    wait_for_panel_jobs(qtbot, ctx)
+    assert len(reprojected) == 1 and _off_gui(reprojected)
+
+
+def test_cancelling_auto_threshold_changes_nothing_and_frees_the_button(qtbot, panel, monkeypatch):
+    from review.core import progress_jobs
+    from review.data import auto_threshold
+
+    ctx, shown = panel
+    before = dict(ctx.state.cell_gating.thresh_frac_on)
+    started = threading.Event()
+
+    def _slow(*_a, should_cancel=None, **_k):
+        started.set()
+        while not should_cancel():
+            threading.Event().wait(0.01)
+        return {"gfp": 999.0}
+
+    monkeypatch.setattr(auto_threshold, "compute_auto_thresholds", _slow)
+    btn = ctx.runtime.cell_gating.auto_btn
+    btn.click()
+    assert started.wait(5)
+    assert not btn.isEnabled()
+    progress_jobs._runner(ctx).popup.canceled.emit()
+    wait_for_panel_jobs(qtbot, ctx)
+    assert ctx.state.cell_gating.thresh_frac_on == before, "a cancelled pass applied thresholds"
+    assert btn.isEnabled() and btn.text() == "Auto-threshold all channels"

@@ -229,10 +229,17 @@ def set_qc_params_with_progress(ctx, params: QCParams, *, on_done=None) -> None:
             on_done(counts)
 
     def _failed(message: str) -> None:
-        # The walk stopped part-way; nothing about which frames it reached can
-        # be trusted, so every memo of them is dropped and the user is told.
+        # The walk stopped part-way. The thresholds stay in state (they are what
+        # the boxes show) and are saved, every memo of the frames is dropped,
+        # the plots redraw from what the frames now hold, and the panel repaints
+        # — so the count on screen describes the frames rather than the last
+        # good apply — and the status line says the apply failed.
         _logger.error("QC thresholds could not be applied: %s", message)
         finish_qc_recompute(ctx, [])
+        _after_qc_params_applied(ctx)
+        if on_done is not None:
+            with swallow("QC apply failure: repaint the panel"):
+                on_done(qc_excluded_count(ctx))
         with swallow("QC apply failure status"):
             ctx.notify.set_status(f"QC thresholds could not be applied: {message}")
 

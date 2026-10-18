@@ -55,6 +55,7 @@ from review.features.home.cell_gating.controller import (
     _cell_gating_refresh_gate_summary,
     _cell_gating_refresh_optimizer_controls,
     _cell_gating_set_gate_choices,
+    _hold_jobs_for_outside_passes,
     cell_gating_auto_threshold,
     cell_gating_load_cell_areas,
     cell_gating_load_threshold_frac_on,
@@ -113,6 +114,9 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # The (many) non-widget state fields + optimizer choices stay on the app.
     reg = ctx.widgets
 
+    # Every edit on this tab — the QC rows included — runs as a progress job;
+    # none may start while a gating pass the runner did not start is writing.
+    _hold_jobs_for_outside_passes(ctx)
     reg.register("_cell_gating_frame", parent)
     ctx.runtime.cell_gating.cell_areas = []
     # {channel_key → QLineEdit} widget maps — containers of widget handles, so

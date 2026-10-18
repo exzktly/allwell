@@ -173,7 +173,8 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
 2. closes the side rail — or, on the way out, restores the left panel's desk
    state;
 3. restyles at the phone's type scale and touch unit (§8) — the only slow step,
-   7–9 s on a 4,000-widget window, under a busy overlay, and skipped when
+   about 6 s on a loaded app of about 4,100 widgets (§8, *The UI scale*), under
+   a busy overlay, and skipped when
    neither changes. Nearly all of it is `QApplication.setStyleSheet`
    re-polishing every widget: a near-empty stylesheet still costs most of it,
    so the cost scales with the widget count, not with the sheet. Widgets
@@ -196,9 +197,9 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    `QTimer.singleShot(0, …)` callbacks, queued and cross-thread signals,
    Windows' zero-interval timer events — about 9,400 of them in one switch on
    a loaded app, each running in the middle of the pass. The Image Table's
-   refit, run inside the restyle, once deleted and rebuilt its grid while the
-   pass was walking the window's widgets; it runs from a timer, so it no longer
-   can. `tests/test_phone_layout.py::test_nothing_queued_runs_inside_the_rescale_pass`
+   refit runs from a timer for this reason: run inside the restyle, it would
+   delete and rebuild its grid while the pass walks the window's widgets.
+   `tests/test_phone_layout.py::test_nothing_queued_runs_inside_the_rescale_pass`
    queues a `singleShot(0)`, a queued signal and a queued `invokeMethod` and
    requires that none runs inside the pass. Leaving it also gives back the
    minimum heights the touch floors took (below, *The UI scale*);

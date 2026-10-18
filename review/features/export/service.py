@@ -1247,6 +1247,11 @@ def _gating_busy(ctx) -> bool:
     slice would straddle two gating generations wide rather than theoretical.
     Refusing to start is cheaper than detecting it afterwards.
     """
+    from review.core.progress_jobs import busy as _panel_job_busy
+    # A Cell Gating panel edit re-projecting the verdict layers behind its
+    # progress popup rewrites the same frames, on its own thread.
+    if _panel_job_busy(ctx):
+        return True
     worker = getattr(ctx.runtime.cell_gating, "worker", None)
     try:
         return bool(worker is not None and worker.isRunning())

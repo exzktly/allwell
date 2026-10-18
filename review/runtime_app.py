@@ -207,6 +207,8 @@ def teardown_review_pane(app) -> None:
     # running against a pane being destroyed (the inclusion pass writes
     # ``Included`` flags onto the row cache as it goes).
     stop_runtime_workers(runtime, "cell_gating", ("worker", "auto_worker"))
+    # The progress-popup runner's job thread and queue (``core/progress_jobs``).
+    stop_runtime_callable(runtime, "jobs", "stop")
     # A per-cell export renames its temp file only at the end, so a writer
     # killed at exit leaves that temp hidden in the user's own folder.
     stop_runtime_callable(runtime, "export", "cell_stop")

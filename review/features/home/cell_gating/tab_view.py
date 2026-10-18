@@ -62,8 +62,8 @@ from review.features.home.cell_gating.controller import (
     cell_gating_on_use_scatter_thresh_change,
     cell_gating_refresh_included_count,
     cell_gating_sync_scatter_gates,
+    apply_fov_selection_with_progress,
     logger,
-    set_fov_selection,
 )
 from review.features.home.cell_gating.fov_view import build_fov_selection_row
 from review.features.home.cell_gating.optimizer_view import (
@@ -287,7 +287,7 @@ def _build_inclusion_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
     # The field-of-view restriction is always applied too: it composes with
     # whichever source the radio pair below chooses rather than replacing it.
     layout.addWidget(build_fov_selection_row(
-        ctx, frame, indent=_RADIO_INDENT, on_apply=set_fov_selection))
+        ctx, frame, indent=_RADIO_INDENT, on_apply=apply_fov_selection_with_progress))
 
     layout.addWidget(_lead_in(frame, "Then include cells by (choose one):"))
     per_channel = _source_radio(
@@ -523,8 +523,13 @@ def build_cell_gating_subtab(ctx) -> None:
 def _open_gate_filter_menu(ctx, mode: str) -> None:
     """Pop up a checkbox menu under *mode*'s Gates button (multi-select).
 
-    Mirrors the scatter timepoint picker: one checkbox per named gate plus
-    All / None actions. Checking several combines them (union)."""
+    One checkbox per named gate plus All / None actions. Checking several
+    combines them (union). The ticks are gathered while the menu is open and
+    applied once when it closes, as the FOV picker's are: each application
+    re-runs the gating pass behind a progress popup, which is not something to
+    do per click — and a popup opening on the first tick would close the menu
+    under the user's pointer. A menu closed with every box as it opened applies
+    nothing."""
     from PySide6.QtGui import QAction
     from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
 
@@ -534,36 +539,42 @@ def _open_gate_filter_menu(ctx, mode: str) -> None:
     names = _cell_gating_gate_names(ctx)
     choices = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
     selected = set(names) if choices is None else set(choices)
+    initial = set(selected)
+    chosen = set(selected)
 
     menu = QMenu(btn)
     if not names:
         empty = QAction("No gates drawn yet", menu)
         empty.setEnabled(False)
         menu.addAction(empty)
+    boxes: list = []
     for nm in names:
         cb = QCheckBox(nm, menu)
         cb.setChecked(nm in selected)
 
-        def _make(name=nm):
-            def _on(checked: bool) -> None:
-                cur = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
-                cur = set(names) if cur is None else set(cur)
-                cur.add(name) if checked else cur.discard(name)
-                _cell_gating_set_gate_choices(ctx, mode, cur)
-            return _on
+        def _on(checked: bool, _name=nm) -> None:
+            chosen.add(_name) if checked else chosen.discard(_name)
 
-        cb.toggled.connect(_make())
+        cb.toggled.connect(_on)
+        boxes.append(cb)
         wa = QWidgetAction(menu)
         wa.setDefaultWidget(cb)
         menu.addAction(wa)
     if names:
         menu.addSeparator()
+
+        def _tick_all(state: bool) -> None:
+            for box in boxes:
+                box.setChecked(state)
+
         all_a = QAction("All", menu)
-        all_a.triggered.connect(
-            lambda _=False: _cell_gating_set_gate_choices(ctx, mode, None))
+        all_a.triggered.connect(lambda _=False: _tick_all(True))
         menu.addAction(all_a)
         none_a = QAction("None", menu)
-        none_a.triggered.connect(
-            lambda _=False: _cell_gating_set_gate_choices(ctx, mode, set()))
+        none_a.triggered.connect(lambda _=False: _tick_all(False))
         menu.addAction(none_a)
     menu_exec.exec_transient_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
+    if names and chosen != initial:
+        # Every gate ticked is "all", which ``_cell_gating_set_gate_choices``
+        # stores as ``None`` so gates drawn later are included too.
+        _cell_gating_set_gate_choices(ctx, mode, chosen)

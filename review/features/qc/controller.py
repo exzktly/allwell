@@ -98,11 +98,31 @@ def recompute_qc_all(ctx) -> None:
     are the same callables ``load_and_project`` runs, so this cannot apply a
     different set of layers than a freshly opened dataset carries.
     """
-    from review.core.notifications import report_verdict_failures
-    from review.core.selection_controller import invalidate_stats_cache
+    finish_qc_recompute(ctx, reproject_verdicts(ctx))
+
+
+def reproject_verdicts(ctx, *, progress=None) -> list[str]:
+    """The data half of :func:`recompute_qc_all`: rewrite every verdict layer.
+
+    Touches no widget, so it may run off the GUI thread — the Cell Gating
+    panel's edits run it behind a progress popup
+    (:func:`set_qc_params_with_progress`) while nothing else writes the frames.
+    Each layer walks every cached well in turn, exactly as the synchronous path
+    does; *progress* (``(done, total)``) hears once per layer, because a layer
+    called with a label instead of ``None`` is not the same operation — the
+    gating projector re-gates a labelled well and skips the unlabelled walk, and
+    curation reads a labelled well from disk.
+
+    Returns the wells whose QC verdict could not be computed, for
+    :func:`finish_qc_recompute` to report.
+    """
     from review.data.cache_projectors import iter_cache_projectors
+    projectors = iter_cache_projectors()
+    total = 1 + len(projectors)
     failed = apply_qc_to_cache(ctx, None)
-    for projector in iter_cache_projectors():
+    if progress is not None:
+        progress(1, total)
+    for done, projector in enumerate(projectors, start=2):
         # QC's own is in this list and has just run; running it twice is a
         # pure recompute of the same verdict from the same params, and
         # skipping it would mean matching callables by identity through a
@@ -115,6 +135,15 @@ def recompute_qc_all(ctx) -> None:
             # ``project_verdict_column``. This catches only the case where a
             # projector raises outside that walk.
             _logger.exception("verdict re-projection failed for %r", projector)
+        if progress is not None:
+            progress(done, total)
+    return failed
+
+
+def finish_qc_recompute(ctx, failed: list[str]) -> None:
+    """The GUI half of :func:`recompute_qc_all`, after the frames are rewritten."""
+    from review.core.notifications import report_verdict_failures
+    from review.core.selection_controller import invalidate_stats_cache
     # Reported here, at the re-projection, rather than at the per-well load:
     # this is the pass that runs when the user moves a threshold, and it is the
     # only moment at which a well can silently stop being gated by the settings
@@ -145,6 +174,11 @@ def set_qc_params(ctx, params: QCParams) -> None:
     god-object."""
     ctx.state.qc.params = params
     recompute_qc_all(ctx)
+    _after_qc_params_applied(ctx)
+
+
+def _after_qc_params_applied(ctx) -> None:
+    """Repaint, save and redraw once new thresholds are on every frame."""
     _repaint_quality_markers(ctx)
     try:
         pers = ctx.persistence
@@ -157,6 +191,56 @@ def set_qc_params(ctx, params: QCParams) -> None:
         redraw_app(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
+
+
+def set_qc_params_with_progress(ctx, params: QCParams, *, on_done=None) -> None:
+    """:func:`set_qc_params` for an edit on the panel: the work off the GUI thread.
+
+    The thresholds go into state at once, so the panel and the saved file agree
+    with what the user typed; the re-projection of every verdict layer over every
+    held well, and the panel's flagged-cell count, run on a thread behind a
+    progress popup (``review.core.progress_jobs``); the save, the plate's
+    markers and the redraw follow on the GUI thread. *on_done(counts)* — the
+    ``(n_excluded, n_total)`` of :func:`qc_excluded_count`, measured on the same
+    thread over the frames just rewritten — then lets the panel repaint its own
+    sentences.
+
+    Not cancellable: the walk rewrites the wells one by one, and stopping it
+    part-way would leave some under the new thresholds and some under the old
+    while the boxes showed the new. Two edits queued behind a running one
+    collapse to the last (``key``), which reads the thresholds in force when it
+    starts and so already carries both.
+    """
+    from review.core import progress_jobs
+
+    ctx.state.qc.params = params
+
+    def _work(report):
+        report.stage("Re-applying the QC gate and the other inclusion layers…")
+        failed = reproject_verdicts(ctx, progress=report.progress)
+        report.stage("Counting the cells the gate flags…")
+        return failed, qc_excluded_count(ctx)
+
+    def _done(result) -> None:
+        failed, counts = result
+        finish_qc_recompute(ctx, failed)
+        _after_qc_params_applied(ctx)
+        if on_done is not None:
+            on_done(counts)
+
+    def _failed(message: str) -> None:
+        # The walk stopped part-way; nothing about which frames it reached can
+        # be trusted, so every memo of them is dropped and the user is told.
+        _logger.error("QC thresholds could not be applied: %s", message)
+        finish_qc_recompute(ctx, [])
+        with swallow("QC apply failure status"):
+            ctx.notify.set_status(f"QC thresholds could not be applied: {message}")
+
+    progress_jobs.run_in_background(
+        ctx, title="Applying QC",
+        text="Re-applying the QC gate to every loaded well…",
+        work=_work, on_done=_done, on_failed=_failed, key="qc.params",
+    )
 
 
 def _repaint_quality_markers(ctx) -> None:

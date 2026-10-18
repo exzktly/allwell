@@ -1346,6 +1346,12 @@ def build_feature_registry(profile=None) -> FeatureRegistry:
 _SUPPORT_SERVICES = {
     "qc.recompute_all": lambda: _import_attr(
         "review.features.qc.controller", "recompute_qc_all"),
+    # The two halves of ``qc.recompute_all``, for a caller that runs the first
+    # off the GUI thread behind a progress popup (the Cell Gating FOV picker).
+    "qc.reproject_verdicts": lambda: _import_attr(
+        "review.features.qc.controller", "reproject_verdicts"),
+    "qc.finish_recompute": lambda: _import_attr(
+        "review.features.qc.controller", "finish_qc_recompute"),
     "qc.refresh_gate_widgets": lambda: _import_attr(
         "review.features.qc.tab_view", "qc_gate_refresh_widgets"),
     "crop.project_cache": lambda: _import_attr(

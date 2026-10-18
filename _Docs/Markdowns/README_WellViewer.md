@@ -2091,6 +2091,22 @@ applied, and each question offers the same two sources as a pair of radio
 buttons — you pick one or the other, because choosing the scatter option
 *replaces* the per-channel numbers rather than adding to them.
 
+**Every change you make here shows a progress window.** Ticking a switch,
+committing a bound or a threshold, changing the fields of view, switching to the
+scatter gates or picking which gates to use, Auto-threshold and the optimizer each
+re-apply the change across every loaded well, and that work now runs in the
+background behind a small progress window: the bar moves as the wells are
+done, the window keeps repainting, and nothing else on screen can be changed
+until the window closes — so a second edit never starts against data the first is
+halfway through rewriting. The plots and the counts on the tab update the
+moment it closes. Auto-threshold and the optimizer offer **Cancel**, which stops
+them without changing anything; the other changes have no Cancel, because
+stopping one half-way would leave some wells under the new settings and the rest
+under the old while the boxes showed the new. Leaving a box without changing
+its value applies nothing and opens no window. The gate pickers work like the
+**Fields of view** picker: tick and untick as many gates as you like, and the
+choice applies once, when the menu closes.
+
 - **Cell inclusion** — which cells count at all. The **QC debris gate** leads and is
   marked *always applied*: it composes with everything else on the tab. It reads
   as one row per measured quantity — Area, Solidity, Region area, Circularity —

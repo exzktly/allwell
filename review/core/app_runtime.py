@@ -99,7 +99,7 @@ class AppRuntime:
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
                  "review_image", "review", "stats", "plot_groups", "export",
                  "centre", "view_state", "tab", "groups", "pipeline_info",
-                 "playground", "qc", "home", "triage")
+                 "playground", "qc", "home", "triage", "jobs")
 
     def __init__(self, app=None, store: dict | None = None) -> None:
         if store is None:
@@ -250,6 +250,11 @@ class AppRuntime:
         # closure (``ctx.runtime.triage.refresh``), stamped on build and called
         # by Home on entering the tab. ``None`` in a build without the tab.
         object.__setattr__(self, "triage", _FeatureRuntime(s, "_triage_"))
+        # The progress-popup job runner (prefix ``_jobs_``): the one live
+        # ``review.core.progress_jobs`` runner (``ctx.runtime.jobs.runner``) that
+        # serialises the Cell Gating panel's background jobs and owns the popup
+        # each shows. Created lazily on the first job, never persisted.
+        object.__setattr__(self, "jobs", _FeatureRuntime(s, "_jobs_"))
         # Playground testbed transient scratch (prefix ``_playground_``): the
         # current frame identity key (``ctx.runtime.playground.frame_key`` <->
         # ``app._playground_frame_key``), the reference-field worker bridge

@@ -93,7 +93,8 @@ def test_a_later_projector_still_runs(monkeypatch, one_well):
 def test_both_walkers_of_the_registry_agree(monkeypatch, one_well):
     """The contract itself, stated against both call sites.
 
-    `recompute_qc_all` has guarded each projector for a while; this asserts
+    The panel's re-projection (`reproject_verdicts`, the data half of
+    `recompute_qc_all`) has guarded each projector for a while; this asserts
     the loader now does too, so the two cannot drift apart again without a
     test noticing. The loader's loop is ``run_projectors``, which
     ``load_and_project`` and the narrow reads (``review/data/narrow_rows.py``)
@@ -104,7 +105,7 @@ def test_both_walkers_of_the_registry_agree(monkeypatch, one_well):
     from tests._repo_scan import parse_source, REPO_ROOT
 
     for rel, fn_name in (("review/data/data_loading.py", "run_projectors"),
-                         ("review/features/qc/controller.py", "recompute_qc_all")):
+                         ("review/features/qc/controller.py", "reproject_verdicts")):
         fn = next(n for n in ast.walk(parse_source(REPO_ROOT / rel))
                   if isinstance(n, ast.FunctionDef) and n.name == fn_name)
         loops = [n for n in ast.walk(fn) if isinstance(n, ast.For)]

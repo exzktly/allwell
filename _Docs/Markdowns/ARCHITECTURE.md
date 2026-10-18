@@ -823,6 +823,8 @@ allwell/
 │                                  uses) and page_stack.py (NamedPageStack, the
 │                                  name-keyed QStackedWidget all three panes build on)
 │                                  and notice_badge.py (the "!" unread pip on the log button)
+│                                  and progress_popup.py (ProgressPopup, the application-modal
+│                                  progress bar the Cell Gating panel's jobs run behind)
 ├── startup/                     ← what runs before the application exists (§4)
 │   ├── boot_diag.py            ← the per-launch boot log + faulthandler, so a native crash or a
 │   │                              hang names the step that never returned, and a killed
@@ -921,6 +923,8 @@ review/
 │   ├── plot_orchestrator.py, plot_style.py, plot_toggles.py,
 │   │   plot_card_actions.py, figure_saver.py
 │   ├── timepoint_sync.py             ← shared "focus timepoint" across plotting tabs
+│   ├── progress_jobs.py              ← run a panel edit's work on a QThread behind a
+│   │                                    ProgressPopup, one job at a time (§5.3, Cell Gating)
 │   ├── rail_plate.py                 ← the sidebar's one well-picker slot
 │   ├── section_icons.py              ← the glyph beside each rail entry
 │   └── ui_helpers.py, notifications.py, dnd.py
@@ -1143,7 +1147,8 @@ gating `QThread` (`home/cell_gating/gating_compute.apply_fluor_gating`) and by
 manual curation (`image_browser/review_image/collect`). The worker only ever
 sees a boolean-`.loc` slice, which pandas materialises as a copy; a positional
 `.iloc` slice would be a *view* and would reintroduce the race. The export
-refuses to start while the gating worker is running, and re-checks its
+refuses to start while the gating worker is running or a Cell Gating panel
+job (`review.core.progress_jobs.busy`) is, and re-checks its
 staleness signature both before and after each slice, because check-then-slice
 is not atomic. That signature is `rows_version` **plus** the QC params, the
 crop region, the dataset directory and the gate signature: `cache_projectors`
@@ -4499,9 +4504,10 @@ laid out as the two questions it answers, in the order the app applies them:
    leaving the box — or after a pause in typing of `_TYPING_PAUSE_MS` (1 s),
    never per keystroke, and `_apply` returns without touching anything when the
    boxes describe the `QCParams` already in force. Each apply is
-   `set_qc_params`: the verdict recomputed over every held cell, a save and a
-   redraw of every plot, so a short per-keystroke debounce applied each prefix
-   of a typed number. The pause cannot be dropped in favour of
+   `set_qc_params_with_progress`: the verdict recomputed over every held cell
+   (behind the panel's progress popup — see *Every edit runs behind a progress
+   popup* below), a save and a redraw of every plot, so a short per-keystroke
+   debounce applied each prefix of a typed number. The pause cannot be dropped in favour of
    `editingFinished` alone: clicking a control that takes no focus (a plot
    canvas, a tool button, a tab bar, a chip) emits none, and the box then shows
    a bound that is not in force. Closing the window has the notes editors'
@@ -4523,11 +4529,15 @@ laid out as the two questions it answers, in the order the app applies them:
    applied once when it closes — and only if a box changed, so opening the menu
    to look writes nothing. A selected FOV the dataset does not have has no box
    and is carried through an edit untouched. Applying goes through
-   `controller.set_fov_selection` — the one write path, handed to the view by
-   the tab builder as `on_apply` so the view names no controller — which
+   `controller.apply_fov_selection_with_progress` — handed to the view by the
+   tab builder as `on_apply` so the view names no controller — which
    normalises a selection of every field to `None` (so "all" stays all when the
-   dataset later gains a field), saves the `cell_gating` block, re-projects
-   every layer through `qc.recompute_all`, re-reads the tab's CDFs and redraws.
+   dataset later gains a field), saves the `cell_gating` block, then, behind
+   the progress popup, re-projects every layer (`qc.reproject_verdicts`) and
+   re-reads the tab's CDFs on the job's thread, and finishes
+   (`qc.finish_recompute`, the CDF figure, the redraw) on the GUI thread.
+   `controller.set_fov_selection` is the synchronous twin, for callers that
+   must read the result before they return.
    With no selection set, the status-line repaint reads nothing but the slice.
    The selection is
    `CellGatingState.fov_selection` and reaches the data as the `FOV_Pass`
@@ -4542,6 +4552,50 @@ laid out as the two questions it answers, in the order the app applies them:
 2. **Fraction-on**, glossed as *which of the included cells count as ON*. The
    same radio pair shape: per-channel cutoffs, or a scatter gate. Then
    Auto-threshold and the button that opens the optimizer.
+
+**Every edit runs behind a progress popup.** Each control on the tab ends in
+work over every held well — a verdict layer re-projected, the gating pass, the
+CDFs re-read, a threshold scan, Auto-threshold's image sampling — and each goes
+through `review/core/progress_jobs.py`, which runs that work on a `QThread`
+behind a `widgets/progress_popup.ProgressPopup` and delivers the finish (labels,
+the CDF figure, the redraw) back on the GUI thread through queued signals. The
+popup is application-modal so a second edit cannot start against frames the
+first is halfway through rewriting; the event loop keeps running, so the window
+repaints and the bar moves. Jobs run one at a time in submission order, and a
+waiting job is replaced by a newer one with the same `key`, since each reads the
+settings in force when it starts. A job offers Cancel only when cancelling
+disowns its result rather than leaving half of it applied: Auto-threshold and the
+optimizer (whose answers are applied at the end) do; a re-projection and a gating
+pass (which rewrite the wells one by one) do not. A cancelled job still holds the
+queue, behind a "Cancelling…" popup, until its thread has returned. The routes:
+
+| Control | Entry point | Off the GUI thread |
+|---|---|---|
+| QC switches, bounds, focus cut, border switch | `qc/tab_view._apply` → `qc.controller.set_qc_params_with_progress` | `reproject_verdicts` (every registered layer, once each over every held well) and `qc_excluded_count` |
+| Fields of view | `controller.apply_fov_selection_with_progress` | `qc.reproject_verdicts` and `_read_first_frames` |
+| Intensity floors, both scatter-gate radios, both gate pickers | `controller.cell_gating_regate_with_progress` | `GatingWorker` itself, which the job starts and whose `QThread.finished` ends it |
+| ThreshFracOn / ThreshCountOn | `controller._on_threshold_edit_finished` | nothing: an ON cutoff rewrites no frame, so the popup stands over the GUI-thread redraw alone |
+| Auto-threshold | `cell_gating_auto_threshold` | `_AutoThresholdWorker`, cancellable |
+| Optimize (its window) | `cell_gating_optimize_thresh_frac_on` | the well reads and the scan; cancellable |
+
+`qc.controller.recompute_qc_all` is the two halves run in a row on the calling
+thread — `reproject_verdicts` (data, no widget) then `finish_qc_recompute`
+(`report_verdict_failures`, the statistics cache, `ctx.runtime.qc.changed_cb`) —
+so a caller outside the panel keeps the synchronous behaviour, and so does every
+other route into the gating pass: a load's pass and one a gate drawn on the
+Scatter Plot tab starts still go through `cell_gating_start_gating_worker` and
+the status-bar bar. A threshold box left unchanged applies nothing
+(`_threshold_edits_changed`, on the widget's route only, because persistence
+re-fires the handlers after writing restored values into the slice and the boxes
+alike), and both gate pickers gather their ticks while the menu is open and apply
+once when it closes, as the FOV picker does — a popup opening on the first tick
+would close the menu under the pointer. `tests/test_cell_gating_edits_run_behind_a_progress_popup.py`
+presses each control on the shipped tab and asserts the popup was shown, the slow
+function was entered off the GUI thread, and the change took effect;
+`tests/test_progress_jobs.py` holds the runner to a GUI-thread timer that keeps
+firing during a slow job, no overlap, key replacement, and cancel applying
+nothing. Tests that press a control and then read its effect wait with
+`tests/_panel_jobs.wait_for_panel_jobs`.
 
 Each section title is a short noun phrase and the sentence explaining it lives
 in the header's hint, one line below. The gloss used to sit in the title itself

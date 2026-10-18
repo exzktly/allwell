@@ -35,7 +35,7 @@ from review.data.focus_gate import (
 from review.data.border_gate import border_status
 from review.data.data_loading import held_wells_note
 
-from .controller import get_qc_params, qc_excluded_count, set_qc_params
+from .controller import get_qc_params, qc_excluded_count, set_qc_params_with_progress
 from .params import QCParams
 from review.domain.qc_params import _pos
 from core.safe import swallowed
@@ -425,11 +425,12 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         for w in _edits:
             w.setEnabled(on)
 
-    def _update_status() -> None:
+    def _update_status(counts: tuple[int, int] | None = None) -> None:
+        """Repaint the flagged count — from *counts* when the apply measured it."""
         if not ctx.state.dataset.well_paths:
             status.setText("")
             return
-        n_excl, n_tot = qc_excluded_count(ctx)
+        n_excl, n_tot = counts if counts is not None else qc_excluded_count(ctx)
         # Blank when nothing is held to count (a reset just emptied the cache):
         # the previous count would otherwise stay on screen as if current.
         status.setText(f"flagged {n_excl:,} / {n_tot:,}{held_wells_note(ctx)}" if n_tot else "")
@@ -453,13 +454,18 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
             # nothing: the verdict over every held cell, the save and a redraw
             # of every plot are not free on a large plate.
             return
-        set_qc_params(ctx, params)  # recompute + persist + redraw
+        # The recompute runs behind a progress popup (off the GUI thread); the
+        # panel's own sentences repaint once it has finished, from the frames it
+        # rewrote — repainting them here would count the old verdicts.
+        set_qc_params_with_progress(ctx, params, on_done=_after_apply)
+
+    def _after_apply(counts: tuple[int, int]) -> None:
         try:
             from review.features.image_browser.review_image.renderer import refresh_review_image_ctx
             refresh_review_image_ctx(ctx)  # reflect QC in the segmentation overlay
         except Exception:
             swallowed()  # was: pass (silent except)
-        _update_status()
+        _update_status(counts)
         _update_field_quality_status()
 
     # A typed bound applies when the user is done with it: Enter or leaving

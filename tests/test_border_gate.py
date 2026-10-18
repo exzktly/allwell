@@ -276,6 +276,7 @@ def test_ticking_the_box_excludes_the_border_cells(qtbot):
     """The real ``build_qc_gate_controls`` on a real registry: tick the box and
     assert the column the projector writes, not only the params. Excludes a
     checkbox wired to nothing and a projector registered nowhere."""
+    from tests._panel_jobs import wait_for_panel_jobs
     from tests.test_focus_gate import _stub_row
     from review.data.data_loading import df_included_mask
     from review.features.qc.tab_view import qc_gate_refresh_widgets
@@ -285,12 +286,15 @@ def test_ticking_the_box_excludes_the_border_cells(qtbot):
     assert box.isChecked() is False
     box.setChecked(True)
     assert app._app_state.qc.params.exclude_border_cells is True
+    # The re-projection runs behind the panel's progress popup.
+    wait_for_panel_jobs(qtbot, app._ctx)
     df = app._app_state.dataset.cache["A01"]
     assert list(df[BORDER_PASS_COLUMN]) == [1, 0, 1]
     assert list(df_included_mask(df)) == [True, False, True]
     assert "currently excluded" in app._qc_gate_widgets["border_status"].text()
 
     box.setChecked(False)
+    wait_for_panel_jobs(qtbot, app._ctx)
     assert BORDER_PASS_COLUMN not in app._app_state.dataset.cache["A01"].columns
 
     app._app_state.qc.params = ON

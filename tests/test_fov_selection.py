@@ -180,6 +180,7 @@ def test_unticking_a_field_in_the_picker_removes_its_cells_everywhere(
     from review.data.data_loading import get_rows
     from review.features.home.cell_gating.tab_view import build_cell_gating_tab
     from tests._minimal_shell import load_dataset, minimal_shell
+    from tests._panel_jobs import wait_for_panel_jobs
     from tests.fixtures.mini_dataset import build_mini_dataset
     from widgets import menu_exec
 
@@ -203,6 +204,10 @@ def test_unticking_a_field_in_the_picker_removes_its_cells_everywhere(
 
     monkeypatch.setattr(menu_exec, "exec_menu", _untick_field_2)
     btn.click()
+    # The selection is saved at once; the re-projection and the CDF re-read run
+    # behind the panel's progress popup, and the button repaints after them.
+    assert ctx.state.cell_gating.fov_selection == {"1", "3"}
+    wait_for_panel_jobs(qtbot, ctx)
 
     assert offered == ["FOV 1", "FOV 2", "FOV 3"]
     assert ctx.state.cell_gating.fov_selection == {"1", "3"}
@@ -223,6 +228,7 @@ def test_unticking_a_field_in_the_picker_removes_its_cells_everywhere(
 
     monkeypatch.setattr(menu_exec, "exec_menu", _tick_all)
     btn.click()
+    wait_for_panel_jobs(qtbot, ctx)
     assert ctx.state.cell_gating.fov_selection is None
     assert fs.FOV_PASS_COLUMN not in get_rows(ctx, well).columns
     assert "cell_gating" not in json.loads((dataset / "pipeline_info.json").read_text())
@@ -373,6 +379,7 @@ def test_closing_the_picker_unchanged_writes_nothing_and_keeps_absent_fields(
 
     from review.features.home.cell_gating.tab_view import build_cell_gating_tab
     from tests._minimal_shell import load_dataset, minimal_shell
+    from tests._panel_jobs import wait_for_panel_jobs
     from tests.fixtures.mini_dataset import build_mini_dataset
     from widgets import menu_exec
 
@@ -387,10 +394,21 @@ def test_closing_the_picker_unchanged_writes_nothing_and_keeps_absent_fields(
     ctx.state.cell_gating.fov_selection = {"01", "2", "9"}
     info = dataset / "pipeline_info.json"
     before = info.read_text()
+    # The picker re-projects through ``qc.reproject_verdicts`` (a value-returning
+    # ``query``, run behind the progress popup); ``qc.recompute_all`` is the
+    # synchronous route. Either counts as a re-projection.
     recomputes = []
-    real_call = ctx.features.call
+    _REPROJECT = ("qc.recompute_all", "qc.reproject_verdicts")
+    real_call, real_query = ctx.features.call, ctx.features.query
     monkeypatch.setattr(ctx.features, "call", lambda name, *a, **k: (
-        recomputes.append(name) if name == "qc.recompute_all" else None) or real_call(name, *a, **k))
+        recomputes.append(name) if name in _REPROJECT else None) or real_call(name, *a, **k))
+
+    def _query(name, *a, **k):
+        if name in _REPROJECT:
+            recomputes.append(name)
+        return real_query(name, *a, **k)
+
+    monkeypatch.setattr(ctx.features, "query", _query)
 
     monkeypatch.setattr(menu_exec, "exec_menu", lambda _menu, _pos: None)
     ctx.widgets.get("_cell_gating_fov_btn").click()
@@ -405,6 +423,7 @@ def test_closing_the_picker_unchanged_writes_nothing_and_keeps_absent_fields(
 
     monkeypatch.setattr(menu_exec, "exec_menu", _untick_2)
     ctx.widgets.get("_cell_gating_fov_btn").click()
+    wait_for_panel_jobs(qtbot, ctx)
     assert ctx.state.cell_gating.fov_selection == {"1", "9"}
     assert json.loads(info.read_text())["cell_gating"]["fov_selection"] == ["1", "9"]
-    assert recomputes == ["qc.recompute_all"]
+    assert recomputes == ["qc.reproject_verdicts"]

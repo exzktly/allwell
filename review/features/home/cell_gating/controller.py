@@ -626,7 +626,7 @@ def cell_gating_on_gating_change(ctx) -> None:
     ctx.runtime.cell_gating.axes_stack = []
     _cell_gating_plot_cdf(ctx)
     _cell_gating_persist_params(ctx)
-    cell_gating_start_gating_worker(ctx)
+    cell_gating_regate_with_progress(ctx)
 
 
 def cell_gating_on_use_scatter_gates_change(ctx) -> None:
@@ -644,7 +644,7 @@ def cell_gating_on_use_scatter_gates_change(ctx) -> None:
     _cell_gating_refresh_gate_summary(ctx)
     _cell_gating_persist_params(ctx)
     ctx.runtime.cell_gating.last_gate_sig = _scatter_gate_signature(ctx)
-    cell_gating_start_gating_worker(ctx)
+    cell_gating_regate_with_progress(ctx)
 
 
 def cell_gating_on_use_scatter_thresh_change(ctx) -> None:
@@ -661,7 +661,7 @@ def cell_gating_on_use_scatter_thresh_change(ctx) -> None:
     _cell_gating_refresh_gate_summary(ctx)
     _cell_gating_persist_params(ctx)
     ctx.runtime.cell_gating.last_gate_sig = _scatter_gate_signature(ctx)
-    cell_gating_start_gating_worker(ctx)
+    cell_gating_regate_with_progress(ctx)
 
 
 # The gating (inclusion) and thresholding (fraction-on) layers each keep their
@@ -726,7 +726,7 @@ def _cell_gating_set_gate_choices(ctx, mode: str, choices) -> None:
     _cell_gating_persist_params(ctx)
     if _cell_gating_scatter_mode_on(ctx):
         ctx.runtime.cell_gating.last_gate_sig = _scatter_gate_signature(ctx)
-        cell_gating_start_gating_worker(ctx)
+        cell_gating_regate_with_progress(ctx)
 
 
 def _cell_gating_gate_button_text(ctx, mode: str) -> str:
@@ -967,7 +967,82 @@ def cell_gating_on_threshold_count_on_change(ctx) -> None:
         swallowed("cell gating: non-numeric ThreshCountOn edit ignored")
 
 
-def cell_gating_start_gating_worker(ctx) -> None:
+#: Each threshold column: its edits on the runtime, its values on the slice.
+_THRESHOLD_COLUMNS = {
+    "fluor": ("fluor_gate_edits", "fluor_gates"),
+    "frac": ("thresh_frac_edits", "thresh_frac_on"),
+    "count": ("thresh_count_edits", "thresh_count_on"),
+}
+
+
+def _threshold_edits_changed(ctx, kind: str) -> bool:
+    """Whether any box in *kind*'s column now says something the slice does not.
+
+    False too when a box is unparseable: each column's handler refuses to act on
+    text that is not a number, so there is nothing to apply.
+    """
+    edits_attr, values_attr = _THRESHOLD_COLUMNS[kind]
+    edits = getattr(ctx.runtime.cell_gating, edits_attr, None) or {}
+    values = getattr(ctx.state.cell_gating, values_attr)
+    changed = False
+    for channel, edit in edits.items():
+        try:
+            typed = float(edit.text())
+        except ValueError:
+            return False
+        stored = values.get(channel)
+        if stored is None or float(stored) != typed:
+            changed = True
+    return changed
+
+
+def _on_threshold_edit_finished(ctx, kind: str) -> None:
+    """A threshold box lost focus or took Enter: apply it, behind the popup.
+
+    ``editingFinished`` fires on every focus change, edited or not, and each
+    application now opens a progress popup — so a box left as it was applies
+    nothing, as the QC bounds beside it already do. The check lives here, on the
+    widget's route, and not in the handlers: persistence re-fires those after
+    writing restored values into the slice *and* the boxes, where the two agree
+    and the application must still run.
+
+    An intensity floor re-runs the gating pass, which reports per well
+    (:func:`cell_gating_on_gating_change` → :func:`cell_gating_regate_with_progress`).
+    An ON cutoff rewrites no frame — it changes which counted cells are ON, not
+    which cells count — so nothing of it can go to another thread; the popup
+    stands over the GUI-thread redraw it causes, so every edit on the panel
+    reads the same way, and two waiting cutoff edits collapse to one.
+    """
+    if not _threshold_edits_changed(ctx, kind):
+        return
+    if kind == "fluor":
+        cell_gating_on_gating_change(ctx)
+        return
+    from review.core import progress_jobs
+
+    handler = (cell_gating_on_threshold_frac_on_change if kind == "frac"
+               else cell_gating_on_threshold_count_on_change)
+    progress_jobs.run_in_background(
+        ctx, title="Applying the ON cutoff",
+        text="Redrawing the plots with the new cutoff…",
+        work=lambda _report: None, on_done=lambda _result: handler(ctx),
+        key=f"cell_gating.cutoff.{kind}",
+    )
+
+
+def cell_gating_start_gating_worker(ctx, *, before_start=None) -> GatingWorker:
+    """Start a gating pass on its ``QThread``; return the worker.
+
+    *before_start(worker)*, when given, is called once the worker is wired and
+    before its thread starts — the only safe moment to connect to it, because a
+    pass over a handful of held wells can emit everything it ever will before a
+    connection made after ``start()`` exists.
+
+    The pass's progress goes to the status-bar bar. This is the route for a pass
+    nobody on the Cell Gating panel asked for — the one a load starts, the one a
+    gate drawn on the Scatter Plot tab starts; an edit on the panel goes through
+    :func:`cell_gating_regate_with_progress`, which runs this behind a popup.
+    """
     # If a previous worker is still running, cancel it before starting
     # a new pass so threshold edits don't pile up.
     prev = ctx.runtime.cell_gating.worker
@@ -995,7 +1070,44 @@ def cell_gating_start_gating_worker(ctx) -> None:
     # every cancel above is immediately followed by this restart, so the marker
     # is always re-armed and never strands the label on a stale number.
     cell_gating_refresh_included_count(ctx, pending=True)
+    if before_start is not None:
+        before_start(worker)
     worker.start()
+    return worker
+
+
+def cell_gating_regate_with_progress(ctx) -> None:
+    """Re-run the gating pass for an edit on the panel, behind a progress popup.
+
+    The pass is :class:`GatingWorker`, unchanged — it already runs off the GUI
+    thread and reports per well — and its end is unchanged too:
+    ``_cell_gating_on_finished`` (queued before the thread's own ``finished``)
+    redraws and repaints the counts while the popup is still up, and the
+    thread's ``finished`` then closes it. ``finished`` rather than
+    ``finished_ok`` because it is the one signal every end of the thread emits —
+    a clean pass, a failed one, and a pass cancelled by a restart from outside
+    the panel — so the popup cannot outlive its pass.
+
+    Not cancellable: a pass stopped part-way leaves some wells gated by the new
+    settings and the rest by the old, under controls that show the new. Queued
+    behind any job already running (``review.core.progress_jobs``), so it never
+    rewrites the frames at the same time as a QC re-projection, and two passes
+    waiting collapse to one: each reads the settings in force when it starts.
+    """
+    from review.core import progress_jobs
+
+    def _start(handle) -> None:
+        def _hook_up(worker) -> None:
+            worker.progress.connect(handle.progress)
+            worker.finished.connect(handle.finish)
+
+        cell_gating_start_gating_worker(ctx, before_start=_hook_up)
+
+    progress_jobs.submit(
+        ctx, title="Applying cell gating",
+        text="Re-gating every loaded well with the new settings…",
+        start=_start, key="cell_gating.pass",
+    )
 
 
 class _AutoThresholdWorker(QThread):
@@ -1199,41 +1311,87 @@ def cell_gating_auto_threshold(ctx) -> None:
         "Auto-threshold: starting — data_dir=%s in_dir=%s wells=%d channels=%s",
         out_dir, in_dir, len(well_labels), ",".join(channels),
     )
-    worker = _AutoThresholdWorker(
-        ctx, out_dir, channels,
-        well_labels=well_labels, in_dir=in_dir,
+
+    # Behind a progress popup (``review.core.progress_jobs``), queued after any
+    # panel job still rewriting the frames. Cancellable, because a cancelled
+    # pass disowns its thresholds (``_AutoThresholdWorker.cancel``) and so
+    # changes nothing; the worker's ``finished`` closes the popup on every end,
+    # and a cancelled one puts the button back, since ``_on_done`` never runs.
+    from review.core import progress_jobs
+
+    def _start(handle) -> None:
+        worker = _AutoThresholdWorker(
+            ctx, out_dir, channels,
+            well_labels=well_labels, in_dir=in_dir,
+        )
+        worker.progress.connect(_on_progress)
+        worker.progress.connect(handle.stage)
+        worker.done.connect(_on_done)
+        worker.failed.connect(_on_failed)
+        worker.finished.connect(handle.finish)
+        handle.on_cancel = worker.cancel
+
+        def _on_finish() -> None:
+            if not handle.cancelled:
+                return
+            if btn is not None:
+                btn.setEnabled(True)
+                btn.setText("Auto-threshold all channels")
+            with swallow("auto-threshold cancelled status"):
+                ctx.notify.set_status(
+                    "Auto-threshold cancelled — no thresholds were changed.")
+
+        handle.on_finish = _on_finish
+        ctx.runtime.cell_gating.auto_worker = worker
+        worker.start()
+
+    progress_jobs.submit(
+        ctx, title="Auto-threshold",
+        text=f"Sampling cells and background in {len(well_labels)} well(s)…",
+        start=_start, cancellable=True, key="cell_gating.auto",
     )
-    worker.progress.connect(_on_progress)
-    worker.done.connect(_on_done)
-    worker.failed.connect(_on_failed)
-    ctx.runtime.cell_gating.auto_worker = worker
-    worker.start()
 
 
-def _cell_gating_opt_fc_inputs(ctx, *, channel_key, well_a, well_b, timepoint, ratios):
-    """Resolve the optimizer's fold-change config into optimizer kwargs + a note.
+def _cell_gating_opt_fc_settings(ctx) -> dict:
+    """Read the optimizer's fold-change combos — on the GUI thread, once.
 
-    Reads the optimizer-local FC combos (independent of the plot tabs), resolves
-    the chosen control label into a pooled control population at the scan
-    timepoint, and each well's baseline-timepoint population. Returns
-    ``(kwargs, note)`` where *kwargs* feeds ``_optimize_thresh_frac_on_between_wells``
-    / ``_scan_fc_fractions`` (empty ⇒ raw fraction-on) and *note* is a status
-    suffix describing the active normalisation.
+    Split from :func:`_cell_gating_opt_fc_inputs` so the part that reads wells
+    can run on the optimizer's thread without touching a widget.
     """
-    from review.domain.fold_change import resolve_control_wells
-
     ctrl_combo = ctx.runtime.cell_gating.opt_fc_control_combo
     base_combo = ctx.runtime.cell_gating.opt_fc_baseline_combo
-    ctrl_label = str(ctrl_combo.currentText()).strip() if ctrl_combo is not None else ""
-    baseline_data = base_combo.currentData() if base_combo is not None else None
-
-    kwargs: dict = {
+    return {
+        "ctrl_label": str(ctrl_combo.currentText()).strip() if ctrl_combo is not None else "",
+        "baseline": base_combo.currentData() if base_combo is not None else None,
         "op_ctrl": (ctx.runtime.cell_gating.opt_fc_ctrl_op_combo.currentData()
                     if ctx.runtime.cell_gating.opt_fc_ctrl_op_combo else "ratio") or "ratio",
         "op_t0": (ctx.runtime.cell_gating.opt_fc_t0_op_combo.currentData()
                   if ctx.runtime.cell_gating.opt_fc_t0_op_combo else "ratio") or "ratio",
         "order": (ctx.runtime.cell_gating.opt_fc_order_combo.currentData()
                   if ctx.runtime.cell_gating.opt_fc_order_combo else "ctrl_first") or "ctrl_first",
+    }
+
+
+def _cell_gating_opt_fc_inputs(ctx, settings, *, channel_key, well_a, well_b, timepoint, ratios):
+    """Resolve the optimizer's fold-change config into optimizer kwargs + a note.
+
+    *settings* is :func:`_cell_gating_opt_fc_settings` — the optimizer-local FC
+    combos (independent of the plot tabs), read on the GUI thread. This resolves
+    the chosen control label into a pooled control population at the scan
+    timepoint, and each well's baseline-timepoint population; it reads wells and
+    no widget, so it runs on the optimizer's thread. Returns ``(kwargs, note)``
+    where *kwargs* feeds ``_optimize_thresh_frac_on_between_wells`` /
+    ``_scan_fc_fractions`` (empty ⇒ raw fraction-on) and *note* is a status
+    suffix describing the active normalisation.
+    """
+    from review.domain.fold_change import resolve_control_wells
+
+    ctrl_label = settings["ctrl_label"]
+    baseline_data = settings["baseline"]
+    kwargs: dict = {
+        "op_ctrl": settings["op_ctrl"],
+        "op_t0": settings["op_t0"],
+        "order": settings["order"],
     }
     notes: list = []
 
@@ -1331,35 +1489,85 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
 
     ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
     try:
-        fc_kwargs, fc_note = _cell_gating_opt_fc_inputs(
-            ctx, channel_key=channel_key, well_a=well_a, well_b=well_b,
-            timepoint=timepoint, ratios=ratios,
-        )
+        fc_settings = _cell_gating_opt_fc_settings(ctx)
     except Exception as exc:
         _status(f"Optimize ThreshFracOn: fold-change inputs not ready ({exc}).")
         return
 
-    try:
-        result = _optimize_thresh_frac_on_between_wells(
-            get_rows(ctx, well_a),
-            get_rows(ctx, well_b),
-            channel_key=channel_key,
-            min_threshold=lo,
-            max_threshold=hi,
-            steps=steps,
-            ratios=ratios,
-            timepoint=timepoint,
-            weight=weight,
-            **fc_kwargs,
-        )
-    except ValueError as exc:
-        # The scan's own refusals already say what is wrong with the data; the
-        # range is added here because it is the part the user can change from
-        # this window, and the scan does not know it came from two fields.
-        _status(f"Optimize ThreshFracOn ({channel_key}, {well_a} vs {well_b} "
-                f"across [{lo:g}, {hi:g}]): {exc}")
-        return
+    # Reading the two wells (and any control wells) and scanning the candidate
+    # cuts is the slow part, and it touches no widget, so it runs on a thread
+    # behind a progress popup (``review.core.progress_jobs``). Cancellable: the
+    # threshold is applied only once the scan has returned, so a cancelled scan
+    # changes nothing. The scan itself is one call and cannot be interrupted; a
+    # cancel disowns its answer and the popup says it is stopping until it
+    # returns.
+    def _work(report) -> tuple | None:
+        report.stage(f"Reading {well_a} and {well_b}…")
+        try:
+            fc_kwargs, fc_note = _cell_gating_opt_fc_inputs(
+                ctx, fc_settings, channel_key=channel_key, well_a=well_a,
+                well_b=well_b, timepoint=timepoint, ratios=ratios,
+            )
+        except Exception as exc:
+            return ("refused", f"Optimize ThreshFracOn: fold-change inputs not ready ({exc}).")
+        rows_a = get_rows(ctx, well_a)
+        rows_b = get_rows(ctx, well_b)
+        if report.cancelled:
+            return None
+        report.stage(f"Scanning {channel_key} thresholds between {well_a} and {well_b}…")
+        try:
+            result = _optimize_thresh_frac_on_between_wells(
+                rows_a,
+                rows_b,
+                channel_key=channel_key,
+                min_threshold=lo,
+                max_threshold=hi,
+                steps=steps,
+                ratios=ratios,
+                timepoint=timepoint,
+                weight=weight,
+                **fc_kwargs,
+            )
+        except ValueError as exc:
+            # The scan's own refusals already say what is wrong with the data;
+            # the range is added here because it is the part the user can change
+            # from this window, and the scan does not know it came from two
+            # fields.
+            return ("refused", f"Optimize ThreshFracOn ({channel_key}, {well_a} vs {well_b} "
+                               f"across [{lo:g}, {hi:g}]): {exc}")
+        return ("found", (result, fc_kwargs, fc_note))
 
+    def _done(outcome) -> None:
+        if outcome is None:
+            return
+        kind, payload = outcome
+        if kind == "refused":
+            _status(payload)
+            return
+        result, fc_kwargs, fc_note = payload
+        _apply_optimized_threshold(
+            ctx, _status, channel_key=channel_key, well_a=well_a, well_b=well_b,
+            timepoint=timepoint, lo=lo, hi=hi, steps=steps, result=result,
+            fc_kwargs=fc_kwargs, fc_note=fc_note,
+        )
+
+    def _failed(message: str) -> None:
+        _status(f"Optimize ThreshFracOn failed: {message}")
+
+    from review.core import progress_jobs
+    progress_jobs.run_in_background(
+        ctx, title="Optimize ThreshFracOn",
+        text=f"Reading {well_a} and {well_b}…",
+        work=_work, on_done=_done, on_failed=_failed, cancellable=True,
+        key="cell_gating.optimize",
+    )
+
+
+def _apply_optimized_threshold(ctx, _status, *, channel_key, well_a, well_b,
+                               timepoint, lo, hi, steps, result, fc_kwargs,
+                               fc_note) -> None:
+    """Write the optimizer's answer into its ThreshFracOn box, apply it, and show
+    the validation curve — the GUI-thread end of the optimizer's job."""
     tp_note = ("" if timepoint is None else f" at {_timepoint_label(timepoint)}") + fc_note
     edit = (ctx.runtime.cell_gating.thresh_frac_edits or {}).get(channel_key)
     if edit is None:
@@ -1522,7 +1730,7 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
                 edit = QLineEdit(str(gate_state.fluor_gates.setdefault(channel, 0.0)), table)
                 edit.setFixedWidth(_GATE_EDIT_W)
                 edit.editingFinished.connect(
-                    lambda _c=ctx: cell_gating_on_gating_change(_c))
+                    lambda _c=ctx: _on_threshold_edit_finished(_c, "fluor"))
                 edits[channel] = edit
         else:
             edits = ctx.runtime.cell_gating.thresh_frac_edits
@@ -1535,7 +1743,7 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
                 edit = QLineEdit(str(seeded), table)
                 edit.setFixedWidth(_THRESH_EDIT_W)
                 edit.editingFinished.connect(
-                    lambda _c=ctx: cell_gating_on_threshold_frac_on_change(_c))
+                    lambda _c=ctx: _on_threshold_edit_finished(_c, "frac"))
                 edits[channel] = edit
         edits[channel].setParent(table)
         grid.addWidget(edits[channel], r, 1)
@@ -1559,7 +1767,7 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
                         "counts every cell, including the ones carrying no spots."
                     )
                     count_edit.editingFinished.connect(
-                        lambda _c=ctx: cell_gating_on_threshold_count_on_change(_c)
+                        lambda _c=ctx: _on_threshold_edit_finished(_c, "count")
                     )
                     count_edits[channel] = count_edit
                 count_edits[channel].setParent(table)
@@ -2004,3 +2212,61 @@ def set_fov_selection(ctx, selection) -> None:
     with swallow("redraw after an FOV selection change"):
         from review.core.plot_orchestrator import redraw_app
         redraw_app(ctx)
+
+
+def apply_fov_selection_with_progress(ctx, selection) -> None:
+    """:func:`set_fov_selection` for the picker: the work behind a progress popup.
+
+    The selection is saved at once. The re-projection of every verdict layer and
+    the re-read of the CDFs' first frames — the two parts that walk every well —
+    run on a thread; the inclusion readout, the CDF figure and the redraw follow
+    on the GUI thread once they have finished. Not cancellable, for the reason
+    :func:`cell_gating_regate_with_progress` gives.
+    """
+    from review.core import progress_jobs
+
+    new = normalise_selection(selection, available_fovs(ctx))
+    if new == selected_fovs(ctx):
+        return
+    ctx.state.cell_gating.fov_selection = new
+    _cell_gating_persist_params(ctx)
+
+    def _work(report):
+        report.stage("Re-applying the inclusion layers to every loaded well…")
+        failed = ctx.features.query("qc.reproject_verdicts", ctx,
+                                    progress=report.progress, default=[])
+        labels = None
+        if ctx.runtime.cell_gating.fluor_gate_edits is not None and not _owed_to_the_load(ctx):
+            report.stage("Reading the first kept field of each well for the CDFs…")
+            labels = _read_first_frames(ctx)
+        return failed, labels
+
+    def _done(result) -> None:
+        failed, labels = result
+        with swallow("finish the re-projection after an FOV selection change"):
+            ctx.features.call("qc.finish_recompute", ctx, failed)
+        refresh_fov_selection_widgets(ctx)
+        with swallow("redraw the Cell Gating CDFs after an FOV selection change"):
+            if labels is not None:
+                ctx.runtime.cell_gating.areas_owed = False
+                _cell_gating_build_channel_controls(ctx)
+                _cell_gating_refresh_optimizer_controls(ctx)
+                _show_cell_areas(ctx, labels)
+            else:
+                cell_gating_load_cell_areas(ctx)
+        with swallow("redraw after an FOV selection change"):
+            redraw_app(ctx)
+
+    def _failed(message: str) -> None:
+        logger.error("FOV selection could not be applied: %s", message)
+        with swallow("finish after a failed FOV selection change"):
+            ctx.features.call("qc.finish_recompute", ctx, [])
+        refresh_fov_selection_widgets(ctx)
+        with swallow("FOV selection failure status"):
+            ctx.notify.set_status(f"Fields of view could not be applied: {message}")
+
+    progress_jobs.run_in_background(
+        ctx, title="Applying the fields of view",
+        text="Re-applying the inclusion layers to every loaded well…",
+        work=_work, on_done=_done, on_failed=_failed, key="cell_gating.fov",
+    )

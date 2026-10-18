@@ -955,7 +955,7 @@ review/
 │   ├── plot_members.py, plot_order.py, fold_change_pairing.py
 │   ├── gating_state.py, sample_definitions.py, viewer_state.py, stats_compute.py
 │   ├── well_population.py   ← a well's threshold-free cells, for threshold edits without a read
-│   ├── bar_groups.py, metric_registry.py, qc_params.py
+│   ├── metric_registry.py, qc_params.py
 │   ├── multivariate_compute.py       ← PCA/correlation/clustering/faceting math (Qt-free)
 │   ├── spatial_compute.py            ← spatial/neighbourhood math (Qt-free)
 │   ├── image_frames.py               ← the per-field frame plan an Image Table

@@ -550,7 +550,7 @@ def from_block(block: Any, *, tok_to_label: Any = None,
                line_order_wells: Sequence[str] | None = None,
                palette: Sequence[str] | None = None,
                id_factory: Callable[[], str] = _default_id_factory):
-    """Parse a ``sample_definitions`` / ``bar_groups.json`` block → unified state.
+    """Parse a ``sample_definitions`` block (v1 or v2) → unified state.
 
     Returns ``(selections, current_id, well_labels, notes, plot_groups)`` —
     five values, so a caller unpacking four raises ``ValueError``. v1 blocks are

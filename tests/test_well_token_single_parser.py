@@ -47,16 +47,17 @@ def _membership_helpers():
     """The two "canonicalise for a membership test" helpers, which must agree
     with the canonicaliser and with each other."""
     from review.features.batch_export.base_panel import _norm_well_token
-    from review.domain import bar_groups
+    from domain.selections_format import from_block
 
-    # bar_groups' copy is nested inside bar_groups_from_data; reach it through
-    # the public entry point rather than restating it here.
+    # A legacy (v1) groups block is parsed by the one live reader,
+    # `selections_format.from_block`; reach its membership rule through that
+    # entry point rather than restating it here.
     def via_bar_groups(tok: str) -> str:
-        rsets, _ = bar_groups.bar_groups_from_data(
+        selections, *_ = from_block(
             {"rep_sets": [{"name": "r", "wells": [tok]}]},
             tok_to_label={"A01": "a", "H12": "h"},
         )
-        return rsets[0].wells[0] if rsets and rsets[0].wells else ""
+        return selections[0]["wells"][0] if selections and selections[0]["wells"] else ""
 
     return _norm_well_token, via_bar_groups
 

@@ -4548,8 +4548,8 @@ laid out as the two questions it answers, in the order the app applies them:
    the progress popup, re-projects every layer (`qc.reproject_verdicts`) and
    re-reads the tab's CDFs on the job's thread, and finishes
    (`qc.finish_recompute`, the CDF figure, the redraw) on the GUI thread.
-   `controller.set_fov_selection` is the synchronous twin, for callers that
-   must read the result before they return.
+   It is the only write path; a restored or loaded selection goes through
+   `persistence/cell_gating.apply_gating_block`.
    With no selection set, the status-line repaint reads nothing but the slice.
    The selection is
    `CellGatingState.fov_selection` and reaches the data as the `FOV_Pass`
@@ -14639,7 +14639,8 @@ its rows excluded while the panel said they were kept.
   is also the only place in Review the recorded value is visible at all.
 * **The plate's quality markers are repainted from the cut**
   (`ctx.runtime.home.quality_refresh_cb`, installed by Home's own builder and
-  called by `qc.controller.set_qc_params`). `wells_needing_review` is a
+  called by `qc.controller._after_qc_params_applied`, which ends every QC apply
+  from the panel, `set_qc_params_with_progress`). `wells_needing_review` is a
   function of `focus_min` and was reachable only through `refresh_home` — page
   activation and load — so changing the cut on Home ▸ Cell Gating and
   switching to Home ▸ Overview left the plate marking wells against the

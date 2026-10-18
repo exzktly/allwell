@@ -165,18 +165,6 @@ def finish_qc_recompute(ctx, failed: list[str]) -> None:
             swallowed()  # a listener must never break the QC recompute
 
 
-def set_qc_params(ctx, params: QCParams) -> None:
-    """Install new thresholds, recompute the verdict everywhere, persist, and
-    re-render the active view so the change is immediately visible.
-
-    A8 teardown: takes ``ctx`` — writes typed ``ctx.state.qc`` and drives the
-    persistence registry / full redraw through the ctx accessors so it names no
-    god-object."""
-    ctx.state.qc.params = params
-    recompute_qc_all(ctx)
-    _after_qc_params_applied(ctx)
-
-
 def _after_qc_params_applied(ctx) -> None:
     """Repaint, save and redraw once new thresholds are on every frame."""
     _repaint_quality_markers(ctx)
@@ -194,9 +182,10 @@ def _after_qc_params_applied(ctx) -> None:
 
 
 def set_qc_params_with_progress(ctx, params: QCParams, *, on_done=None) -> None:
-    """:func:`set_qc_params` for an edit on the panel: the work off the GUI thread.
+    """Install new QC thresholds from the panel and apply them, the work off the GUI thread.
 
-    The thresholds go into state at once, so the panel and the saved file agree
+    The one route a threshold edit takes (``qc/tab_view._apply``). The
+    thresholds go into state at once, so the panel and the saved file agree
     with what the user typed; the re-projection of every verdict layer over every
     held well, and the panel's flagged-cell count, run on a thread behind a
     progress popup (``review.core.progress_jobs``); the save, the plate's

@@ -2220,36 +2220,13 @@ def _cell_gating_persist_params(ctx) -> None:
         logger.exception("Failed to save gating params to pipeline_info.json")
 
 
-def set_fov_selection(ctx, selection) -> None:
-    """Make *selection* the fields of view every calculation uses.
+def apply_fov_selection_with_progress(ctx, selection) -> None:
+    """Make *selection* the fields of view every calculation uses, behind a progress popup.
 
     The one write path for the Cell Gating FOV picker (``fov_view`` calls it
     through the ``on_apply`` the tab builder hands it). ``None``, or every field
-    the dataset has, means all of them. A selection equal to the live one does
-    nothing. Otherwise: save the gating block, re-project every verdict layer
-    onto the cached wells — which also clears the statistics and population
-    caches and repaints the tab's inclusion readout — re-read the tab's CDFs,
-    which are drawn from the first *kept* field, and redraw the app.
-    """
-    new = normalise_selection(selection, available_fovs(ctx))
-    if new == selected_fovs(ctx):
-        return
-    ctx.state.cell_gating.fov_selection = new
-    _cell_gating_persist_params(ctx)
-    with swallow("re-project the inclusion layers after an FOV selection change"):
-        ctx.features.call("qc.recompute_all", ctx)
-    refresh_fov_selection_widgets(ctx)
-    with swallow("re-read the Cell Gating CDFs after an FOV selection change"):
-        cell_gating_load_cell_areas(ctx)
-    with swallow("redraw after an FOV selection change"):
-        from review.core.plot_orchestrator import redraw_app
-        redraw_app(ctx)
-
-
-def apply_fov_selection_with_progress(ctx, selection) -> None:
-    """:func:`set_fov_selection` for the picker: the work behind a progress popup.
-
-    The selection is saved at once. The re-projection of every verdict layer and
+    the dataset has, means all of them, and a selection equal to the live one
+    does nothing. Otherwise the selection is saved at once. The re-projection of every verdict layer and
     the re-read of the CDFs' first frames — the two parts that walk every well —
     run on a thread; the inclusion readout, the CDF figure and the redraw follow
     on the GUI thread once they have finished. Not cancellable, for the reason

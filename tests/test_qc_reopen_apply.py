@@ -16,8 +16,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 
-def test_qc_gate_applies_on_reopen(loaded_app, mini_dataset):
-    from review.features.qc.controller import set_qc_params, get_qc_params
+def test_qc_gate_applies_on_reopen(qtbot, loaded_app, mini_dataset):
+    from review.features.qc.controller import get_qc_params
+    from tests._panel_jobs import apply_qc_params
     from review.domain.qc_params import QCParams
     from review.data.data_loading import df_included_mask
     from review.persistence.qc_params import save_to_data_dir
@@ -27,7 +28,7 @@ def test_qc_gate_applies_on_reopen(loaded_app, mini_dataset):
     before = int(df_included_mask(app._get_rows(well)).sum())
 
     # Enable the gate with a min-area bound that excludes the smaller cells.
-    set_qc_params(app._ctx, QCParams(enabled=True, min_area=250.0))
+    apply_qc_params(qtbot, app._ctx, QCParams(enabled=True, min_area=250.0))
     gated = int(df_included_mask(app._get_rows(well)).sum())
     assert gated < before, "QC gate should exclude small cells"
 

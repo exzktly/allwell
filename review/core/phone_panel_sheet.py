@@ -20,7 +20,7 @@ runs.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from core import phone_layout
@@ -28,8 +28,10 @@ from core.safe import swallowed
 
 _QWIDGETSIZE_MAX = 16_777_215
 
-#: The attribute on the window holding its one panel sheet.
-_SHEET_ATTR = "_aw_phone_panel_sheet"
+#: The Qt property that marks a window's one panel sheet. The sheet is found
+#: among the window's children by it rather than stored on the window, which
+#: holds no loose attributes (CLAUDE.md §5).
+_SHEET_PROPERTY = "phonePanelSheet"
 
 
 class _HideWatcher(QObject):
@@ -55,13 +57,22 @@ def _close_controls_sheets(win: QWidget) -> None:
             d.close()
 
 
+def sheet_of(win: QWidget):
+    """*win*'s panel sheet, or ``None`` before the first panel was presented."""
+    from widgets.drawer import Drawer
+    for d in win.findChildren(Drawer, options=Qt.FindDirectChildrenOnly):
+        if d.property(_SHEET_PROPERTY):
+            return d
+    return None
+
+
 def _sheet_for(win: QWidget):
-    sheet = getattr(win, _SHEET_ATTR, None)
+    sheet = sheet_of(win)
     if sheet is not None:
         return sheet
     from widgets.drawer import Drawer
     sheet = Drawer(win, edge="right", width_fraction=1.0, margin=0)
-    sheet.setProperty("phonePanelSheet", True)
+    sheet.setProperty(_SHEET_PROPERTY, True)
     holder = QWidget()
     lay = QVBoxLayout(holder)
     lay.setContentsMargins(0, 0, 0, 0)
@@ -69,7 +80,6 @@ def _sheet_for(win: QWidget):
     sheet.setContentWidget(holder)
     sheet._aw_lent = None
     sheet.closed.connect(lambda: _give_back(sheet))
-    setattr(win, _SHEET_ATTR, sheet)
 
     def _on_layout(on: bool) -> None:
         if not on:

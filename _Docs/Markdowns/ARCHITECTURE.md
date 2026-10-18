@@ -307,7 +307,10 @@ Controls sheet, lends the dock to a right-edge `Drawer` covering the window's
 whole width with the panel's fixed width lifted, and gives the dock back — at
 its index, with its width limits, hidden — when the panel's own ✕ hides it
 (an event filter on the dock), the sheet is dismissed, or phone layout ends. At
-the desk it returns `False` and changes nothing.
+the desk it returns `False` and changes nothing. A window has one such sheet,
+made on the first `present` and found again among the window's direct children
+by its `phonePanelSheet` property (`phone_panel_sheet.sheet_of(win)`) rather than
+kept in an attribute on the main window.
 
 **The Image Table** authors its grid through the builder shelf and acts on it
 through the action strip, neither of which is a `ControlBand` (its band is empty),

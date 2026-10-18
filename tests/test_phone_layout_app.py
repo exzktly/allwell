@@ -506,7 +506,8 @@ def test_properties_from_the_controls_sheet_opens_a_full_width_sheet(qapp, win, 
         dock = review._bar_export_dock
         assert not shell._sheet.isOpen() and shell._sheet_band is None, \
             "the panel opened under the Controls sheet"
-        sheet = getattr(win, "_aw_phone_panel_sheet", None)
+        from review.core import phone_panel_sheet
+        sheet = phone_panel_sheet.sheet_of(win)
         assert sheet is not None and sheet.isOpen(), \
             "Properties opened in the plot's side dock, not as a phone sheet"
         assert dock.parentWidget() is sheet.contentWidget()

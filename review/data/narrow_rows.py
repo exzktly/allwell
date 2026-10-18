@@ -113,6 +113,21 @@ def _select(names: list[str], wanted: set[str]) -> list[str]:
     return [n for n in names if str(n).strip().lower() in folded]
 
 
+def verdict_copy(frame: pd.DataFrame, want: Iterable[str]) -> pd.DataFrame:
+    """A private copy of *frame*'s columns *want*, the identity columns and every verdict.
+
+    For a reader that must not hold a frame someone else rewrites in place: the
+    copy carries what :func:`data_loading.df_included_mask` reads (``Included``
+    and every ``VERDICT_LAYERS`` column the frame has — a verdict left out would
+    fail open and count the row as included) and the identity columns the
+    curation keys and frame tokens are read from, so the inclusion map and the
+    per-cell lookups built from it equal the held frame's.
+    """
+    from review.data.data_loading import VERDICT_LAYERS
+
+    return frame[_select(list(frame.columns), set(want) | set(VERDICT_LAYERS))].copy()
+
+
 class _Overlay:
     """*base* with some attributes replaced — the scratch context's building block."""
 
@@ -132,12 +147,31 @@ def _detached(ctx, label: str, frame: pd.DataFrame):
     of one; everything else — the settings each verdict reads, the dataset's
     FOV-label verdicts — is the real context's.
     """
+    return scratch_context(ctx, {label: frame})
+
+
+def scratch_context(ctx, cache: dict, *, populations=None):
+    """*ctx* with its row cache replaced by *cache* (and its population store by
+    *populations*, when given).
+
+    Everything else — the settings each verdict reads, the dataset's paths and
+    FOV-label verdicts — is the real context's. A read through the result that
+    misses *cache* lands in *cache* (``load_and_project`` puts the frame where
+    the context's row cache is), so the real row cache is neither read nor
+    written. Used by the projector runs above and by the Image Table's hover
+    lookup, which reads off the GUI thread and so must not touch the held
+    frames the gating pass and curation rewrite in place.
+    """
     from review.data.well_repository import WellRepository
 
-    dataset = _Overlay(ctx.state.dataset, cache={label: frame})
-    state = _Overlay(ctx.state, dataset=dataset)
-    scratch = _Overlay(ctx, state=state)
-    state.__dict__["repo"] = WellRepository(scratch)
+    dataset = _Overlay(ctx.state.dataset, cache=cache)
+    replaced = {}
+    stats = getattr(ctx.state, "stats_cache", None)
+    if populations is not None and stats is not None:
+        replaced["stats_cache"] = _Overlay(stats, populations=populations)
+    scratch_state = _Overlay(ctx.state, dataset=dataset, **replaced)
+    scratch = _Overlay(ctx, state=scratch_state)
+    scratch_state.__dict__["repo"] = WellRepository(scratch)
     return scratch
 
 

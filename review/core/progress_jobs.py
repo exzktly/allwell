@@ -447,6 +447,24 @@ def busy(ctx) -> bool:
     return bool(runner is not None and (runner.current is not None or runner._queue))
 
 
+def frames_busy(ctx) -> bool:
+    """Whether anything off the GUI thread may be rewriting the cached frames now.
+
+    True while a job runs or waits (:func:`busy`) and while any registered
+    blocker says a writer outside the runner is at work — the gating pass a
+    load or a Scatter Plot gate starts. For a reader that is about to copy a
+    held frame on the GUI thread for use elsewhere: while this is true the copy
+    could catch a frame half rewritten, so the read is put off. Never creates
+    the runner: with none, no job has ever been queued and no blocker
+    registered.
+    """
+    if busy(ctx):
+        return True
+    slot = getattr(getattr(ctx, "runtime", None), "jobs", None)
+    runner = getattr(slot, "runner", None) if slot is not None else None
+    return bool(runner is not None and runner._blocked())
+
+
 def stop_jobs(ctx) -> None:
     """App-close teardown: cancel what is running, drop what is waiting."""
     slot = getattr(getattr(ctx, "runtime", None), "jobs", None)

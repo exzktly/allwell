@@ -32,6 +32,8 @@ import threading
 import time
 from pathlib import Path
 
+from util.aw_safe import swallowed
+
 # Set once a suspend signal has been caught. Never cleared: a run that has been
 # asked to wind down does not un-wind-down, and each run is its own process.
 _SUSPENDED = threading.Event()
@@ -211,13 +213,14 @@ def watch_parent(output_dir, *, log=None, poll_s: float = 2.0) -> None:
             alive.parent.mkdir(parents=True, exist_ok=True)
             alive.write_text(str(os.getpid()))
         except OSError:
-            pass    # best-effort: an unwritable output dir fails the run anyway
+            # Best-effort: an unwritable output dir fails the run anyway.
+            swallowed("could not write the liveness heartbeat")
 
     def _clear() -> None:
         try:
             alive.unlink()
         except OSError:
-            pass
+            swallowed("could not remove the liveness heartbeat")
 
     def _watch() -> None:
         last_beat = 0.0

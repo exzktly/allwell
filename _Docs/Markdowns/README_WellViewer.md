@@ -1520,7 +1520,8 @@ and by `remote_fetch_report.txt` in the output folder.
   racing it for the same files. Closing All-Well during a remote run stops it
   the way **Stop** does, and the window waits (up to about 25 seconds) until
   the job on the cluster has been cancelled, so no Slurm allocation is left
-  running behind it. If All-Well crashes or is force-quit instead, a batched
+  running behind it; a notice in the corner and the busy cursor say so while
+  it waits. If All-Well crashes or is force-quit instead, a batched
   run notices within about ten minutes that the app has gone, finishes the
   fields in flight, and gives the node back; Resume then picks up the wells it
   finished. On a remote run, Suspend leaves the connection open: the host
@@ -2046,7 +2047,9 @@ a second question lists those wells and the group each is in, and offers
 **Skip** (they stay in their current groups and the imported groups get only
 the wells in no group; an imported group left with none is not added) or
 **Move** (they go to the imported groups; a current group left with no wells is
-removed). Cancel on either question leaves everything as it was. Each imported
+removed). Cancel on either question leaves everything as it was, and so does an
+import that brings in no group at all — every one left out by Skip, or none
+readable: a warning says so and the current groups are untouched. Each imported
 group keeps its colour, whether it was hidden, and (unless a group here already
 uses it) its identity, so plots saved
 with that group hidden keep it hidden. It is the app's only groups import, and it is hidden on Overview and on
@@ -5148,7 +5151,10 @@ channel for every well).
   (MFI)** when the cursor is over one. The MFI is read in the background, so the
   first hover over a cell may show `MFI: loading…` briefly; the readout fills in by
   itself when the value arrives, even if the cursor is resting, and only the cell
-  under the cursor is ever waited for. The readout stays put when the cursor comes
+  under the cursor is ever waited for. While Cell Gating is re-gating or
+  re-projecting the cells, a first hover shows `MFI: waiting for the cell update…`
+  and asks again on the next hover once that work has finished; a value that could
+  not be read shows `MFI: unavailable` rather than nothing. The readout stays put when the cursor comes
   to rest instead of reverting to the plain cell tooltip. Opening another dataset,
   or reloading this one, drops every remembered MFI, so the readout always quotes
   the data that is open.

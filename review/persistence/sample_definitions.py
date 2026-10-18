@@ -195,7 +195,7 @@ def save_to_pipeline_info(app) -> None:
 
 
 def _apply_unified_state(ctx, block, *, set_notes: bool = True) -> tuple[bool, dict]:
-    """Parse a sample_definitions/bar_groups block → set ``ctx.state.selection.selections``
+    """Parse a sample_definitions block (v1 or v2) → set ``ctx.state.selection.selections``
     (the in-memory source of truth). v1 blocks are migrated by ``from_block``.
 
     ctx-native: reads the typed ``ctx.state`` slices, reports through the

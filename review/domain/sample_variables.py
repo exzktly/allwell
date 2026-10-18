@@ -272,15 +272,37 @@ def refusal_for_value(variable: Variable | None, label: str, *,
             f"that condition into two series holding part of the wells each.")
 
 
+_ASCII_DIGITS = frozenset("0123456789")
+
+
+def _split_leading_number(label: str) -> tuple[str, str] | None:
+    """*label*'s leading numeric run and what follows it, or ``None`` when opaque.
+
+    The run is ASCII digits, sign, decimal point (a comma read as one) and an
+    exponent marker after the first character. **A digit means an ASCII digit**
+    (ARCHITECTURE §15): ``str.isdigit`` accepts some six hundred decimal digits
+    plus superscripts, and ``float`` converts the decimal ones, so ``1`` and
+    ``١`` (Arabic-Indic one) — two different labels — read as one dose and the
+    second was refused as a duplicate. A label whose run stops on a non-ASCII
+    digit (``١``, ``１``, ``2²``) is opaque: it is compared by its label alone,
+    never guessed at. Shared by :func:`parse_number` and :func:`_unit_suffix`,
+    so the number and the unit are always split at the same place.
+    """
+    text = (label or "").strip().replace(",", ".")
+    i = 0
+    while i < len(text) and (text[i] in _ASCII_DIGITS or text[i] in "+-."
+                             or (text[i] in "eE" and i)):
+        i += 1
+    if i < len(text) and text[i].isdigit():
+        return None
+    return text[:i], text[i:]
+
+
 def _unit_suffix(label: str) -> str:
     """What follows a value's number, normalised so ``uM``, ``µM`` (micro
     sign) and ``μM`` (Greek mu) compare equal and spacing does not count."""
-    text = label.strip().replace(",", ".")
-    i = 0
-    while i < len(text) and (text[i].isdigit() or text[i] in "+-."
-                             or (text[i] in "eE" and i)):
-        i += 1
-    rest = text[i:].replace(" ", "").casefold()
+    split = _split_leading_number(label)
+    rest = (split[1] if split is not None else "").replace(" ", "").casefold()
     # casefold maps the micro sign onto Greek mu; fold both onto ASCII "u".
     return rest.replace("μ", "u")
 
@@ -963,20 +985,15 @@ def parse_number(label: str) -> float | None:
     dose**, and a vehicle row that read as 0 would be plotted at the origin as
     though it were a measured concentration.
     """
-    text = (label or "").strip()
-    if not text:
-        return None
     # Take the leading numeric run, so "1 µM" and "10%" read while "µM 1" does
     # not — a value whose number is not at the front is not a quantity with a
-    # unit, it is something else.
-    keep = []
-    for ch in text.replace(",", "."):
-        if ch.isdigit() or ch in "+-." or (ch in "eE" and keep):
-            keep.append(ch)
-        else:
-            break
+    # unit, it is something else. A run of another alphabet's digits is opaque
+    # (`_split_leading_number`).
+    split = _split_leading_number(label)
+    if split is None or not split[0]:
+        return None
     try:
-        return float("".join(keep))
+        return float(split[0])
     except ValueError:
         return None
 

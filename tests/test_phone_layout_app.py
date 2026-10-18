@@ -332,6 +332,28 @@ def test_closing_in_phone_layout_mid_run_asks_first(qapp, win, monkeypatch):
         win._phone.set_on(False, restyle=False)
 
 
+def test_a_close_question_that_could_not_be_asked_keeps_the_real_window_open(
+        qapp, win, monkeypatch):
+    """The real window, with the autouse ``_no_modal_dialogs`` making the
+    question raise: the close is refused, nothing escapes ``closeEvent``, and
+    the run is not stopped (ARCHITECTURE §15)."""
+    import allwell
+    from PySide6.QtGui import QCloseEvent
+
+    stopped = []
+    monkeypatch.setattr(allwell, "_analyze_run_busy", lambda _a: True)
+    monkeypatch.setattr(allwell, "_stop_analyze_runner",
+                        lambda a: stopped.append(a))
+    win._phone.set_on(True, restyle=False)
+    try:
+        ev = QCloseEvent()
+        win.closeEvent(ev)
+        assert not ev.isAccepted() and stopped == []
+        assert win.isVisible()
+    finally:
+        win._phone.set_on(False, restyle=False)
+
+
 def _image_plate(root):
     """Two wells × DAPI/GFP, one field, real TIFFs in the pipeline's in/out
     layout — enough for the Image Table to draw a grid."""
@@ -506,7 +528,8 @@ def test_properties_from_the_controls_sheet_opens_a_full_width_sheet(qapp, win, 
         dock = review._bar_export_dock
         assert not shell._sheet.isOpen() and shell._sheet_band is None, \
             "the panel opened under the Controls sheet"
-        sheet = getattr(win, "_aw_phone_panel_sheet", None)
+        from review.core import phone_panel_sheet
+        sheet = phone_panel_sheet.sheet_of(win)
         assert sheet is not None and sheet.isOpen(), \
             "Properties opened in the plot's side dock, not as a phone sheet"
         assert dock.parentWidget() is sheet.contentWidget()

@@ -18,9 +18,9 @@ Schema written under the ``sample_definitions`` key:
                           "solo_wells": ["B05"]}, ...],
     }
 
-This mirrors the format already used by the standalone bar_groups.json
-loader so the same parser (``barplot_controller.bar_groups_from_data``)
-can hydrate the in-memory state.
+That is the legacy (v1) shape; the block is written in the v2 shape
+(``domain.selections_format``), and ``selections_format.from_block`` reads
+both — migrating v1 — to hydrate the in-memory state.
 """
 
 from __future__ import annotations

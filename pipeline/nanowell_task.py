@@ -22,6 +22,7 @@ import numpy as np
 
 from pipeline import nanowell_measure as nm
 from pipeline import nanowell_run as nr
+from pipeline.run_report import withdraw_seal
 from util.csv_gz import existing_csv
 
 log = logging.getLogger("allwell.nanowell")
@@ -501,6 +502,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     rank = {tp: k for k, tp in enumerate(timepoints)}
     all_sites = sorted((prior["sites"] if prior else []) + outcome.sites, key=lambda r: rank[r["timepoint"]])
     all_cells = sorted((prior["cells"] if prior else []) + records, key=lambda r: rank[r["timepoint"]])
+    withdraw_seal(output_dir, well_label)         # the tables and archive are rewritten from here
     if all_cells:
         write_csv(all_cells, output_dir / f"{csv_prefix}_{well_label}.csv")
     else:

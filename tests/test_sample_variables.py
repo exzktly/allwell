@@ -557,6 +557,20 @@ def test_a_different_number_or_unit_is_still_added(existing, typed):
     assert sv.refusal_for_value(vset.by_id(vid), typed) is None
 
 
+@pytest.mark.parametrize("typed", ["١", "١ µM", "１", "1²"],
+                         ids=["arabic-indic", "arabic-indic-unit", "fullwidth", "superscript"])
+def test_a_label_with_non_ascii_digits_is_not_a_twin_of_an_ascii_number(typed):
+    """§15: a digit means an ASCII digit. ``str.isdigit`` accepts every Unicode decimal digit and ``float``
+    converts them, so ``١`` (Arabic-Indic one) read as the dose ``1`` and was refused as its duplicate — a
+    decision about identity made on a guess. A label whose number is written in another alphabet is opaque:
+    compared by its label, never read as a quantity."""
+    vset, vid = _numeric_dose("1")
+    after = sv.add_value(vset, vid, typed)
+    assert [v.label for v in after.by_id(vid).values] == ["1", typed], (
+        f"{typed!r} was refused as a duplicate of the dose 1")
+    assert sv.parse_number(typed) is None, f"{typed!r} was read as a quantity"
+
+
 def test_a_text_variable_keeps_labels_that_read_as_the_same_number():
     """On a text variable a label is a name, not a quantity: clone ``1`` and
     clone ``1.0`` may be two different things."""

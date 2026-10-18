@@ -707,6 +707,12 @@ def _merge_imported(ctx, payload, *, replace: bool,
         return None
     usable = [sel for sel in items if isinstance(sel, dict)]
     sel_state = ctx.state.selection
+    # Replace and Move both change the current groups before the file's own
+    # are built, and each entry's build can fail (it is caught and logged
+    # below). When none of them is built, those changes are undone: an import
+    # that brought nothing in must not have taken anything away.
+    before = ([dict(s, wells=list(s.get("wells") or [])) for s in sel_state.selections],
+              sel_state.current_selection_id)
     if replace and usable:
         sel_state.selections = []
         sel_state.current_selection_id = None
@@ -764,6 +770,8 @@ def _merge_imported(ctx, payload, *, replace: bool,
     if added:
         sel_state.current_selection_id = from_file or last
         ctx.coordinator.rebuild_all()
+    else:
+        sel_state.selections, sel_state.current_selection_id = before
     return added, left_out
 
 
@@ -923,6 +931,16 @@ def import_selections_from_json(ctx) -> None:
     except Exception:
         swallowed()  # was: pass (silent except)
     from pathlib import Path
+    if not added:
+        # Nothing was built — every entry was left out, or failed (each failure
+        # is in the log) — and the current groups are as they were. Saying
+        # "Replaced the groups with 0 group(s)" in a success toast would report
+        # a degraded import as a good one.
+        why = (f"{left_out} left out, every well of it already in a group" if left_out
+               else "none of its groups could be read; the log names each")
+        ctx.notify.toast(f"Imported nothing from {Path(path).name}: {why}. "
+                         "The current groups are unchanged.", kind="warn")
+        return
     verb = "Replaced the groups with" if replace else "Imported"
     tail = (f"; {left_out} left out, every well of it already in a group"
             if left_out else "")

@@ -150,6 +150,69 @@ def test_the_exemptions_still_describe_real_leaves(leaves):
     assert not stale, f"an exemption names a leaf the registry does not: {stale}"
 
 
+#: Leaves whose registered redraw does not check the plot hold itself, and why.
+_HOLD_CHECKED_UPSTREAM = {
+    "Line Graphs": (
+        "its hook draws only through plot_orchestrator: a bare hook(ctx) goes to "
+        "redraw_app, and the keyword form is called only by "
+        "plot_orchestrator.redraw — which returns before reaching the line plot "
+        "while the plots are held."
+    ),
+}
+
+
+def _hold_check_first(fn) -> bool:
+    """Whether *fn*'s first statement (after its docstring) is
+    ``if plots_held(...): return``."""
+    import inspect
+
+    tree = parse_source(inspect.getsourcefile(fn))
+    node = next((n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef) and n.name == fn.__name__
+                 and n.lineno == fn.__code__.co_firstlineno), None)
+    if node is None:
+        return False
+    body = list(node.body)
+    if body and isinstance(body[0], ast.Expr) and isinstance(getattr(body[0], "value", None), ast.Constant):
+        body = body[1:]
+    # A function-local ``from … import plots_held`` may come first.
+    while body and isinstance(body[0], ast.ImportFrom):
+        body = body[1:]
+    if not body or not isinstance(body[0], ast.If):
+        return False
+    test, then = body[0].test, body[0].body
+    calls_hold = (isinstance(test, ast.Call)
+                  and getattr(test.func, "id", getattr(test.func, "attr", None)) == "plots_held")
+    return calls_hold and len(then) == 1 and isinstance(then[0], ast.Return)
+
+
+def test_every_leaf_s_redraw_returns_while_the_plots_are_held(leaves):
+    """A load holds every plot (``core/plot_hold.py``) and draws the visible tab once
+    at its end. Each Plotting leaf's own redraw must return while held, or it draws
+    the plate mid-load — the previous dataset's figure, then this one's ungated
+    numbers — which is the repeated drawing the hold exists to stop. The roster in
+    ``plot_hold``'s docstring was written by hand; this states it against the
+    registry, so the next leaf is covered by being declared."""
+    unchecked = []
+    for d in leaves:
+        if d.redraw is None or d.name in _HOLD_CHECKED_UPSTREAM:
+            continue
+        fn = d.redraw()
+        if not _hold_check_first(fn):
+            unchecked.append(f"{d.name} ({fn.__module__}.{fn.__name__})")
+    assert not unchecked, (
+        "a Plotting leaf's redraw does not begin with `if plots_held(ctx): return`, "
+        "so it draws while a load holds the plots; add the check, or add the leaf "
+        f"to _HOLD_CHECKED_UPSTREAM with the reason: {unchecked}")
+
+
+def test_the_hold_exemptions_name_real_leaves_whose_redraw_does_not_check(leaves):
+    by_name = {d.name: d for d in leaves}
+    stale = [name for name in _HOLD_CHECKED_UPSTREAM
+             if name not in by_name or _hold_check_first(by_name[name].redraw())]
+    assert not stale, f"these _HOLD_CHECKED_UPSTREAM entries are stale: {stale}"
+
+
 def test_every_leaf_mirrors_the_plate_in_replicate_mode(leaves):
     """With groups defined, the plate paints the active set on every plot tab.
 

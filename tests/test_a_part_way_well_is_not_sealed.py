@@ -36,7 +36,8 @@ from tests.test_a_resumed_run_keeps_its_field_quality import (  # noqa: F401 —
 pytestmark = pytest.mark.usefixtures("stubbed_segmenter")
 
 
-def _main(monkeypatch, plate, *, suspend_after: int | None = None, remote: bool = True) -> None:
+def _main(monkeypatch, plate, *, suspend_after: int | None = None, remote: bool = True,
+          extra: tuple[str, ...] = ()) -> None:
     """Run the pipeline over *plate*; with *suspend_after*, a suspend lands once that many groups have run.
 
     *remote* publishes a suspend request file as ``--suspend_file`` does (``pipeline.suspend.watch_request_file``),
@@ -73,7 +74,7 @@ def _main(monkeypatch, plate, *, suspend_after: int | None = None, remote: bool 
         "process_microscopy.py", "--input_dir", str(plate / "in"), "--output_dir", str(plate / "out"),
         "--scratch_dir", str(plate / "scratch"), "--nuclear_token", "DAPI", "--fluor_tokens", "GFP",
         "--filename_schema", ":".join(SCHEMA), "--workers", "1", "--background", "none",
-        "--flatfield", "none", "--no_auto_threshold", "--no_run_check"])
+        "--flatfield", "none", "--no_auto_threshold", "--no_run_check", *extra])
     try:
         pm.main()
     except SystemExit:
@@ -134,3 +135,57 @@ def test_rewriting_a_well_withdraws_its_seal_first(tmp_path, monkeypatch):
     complete_seal_path(out, "C01").write_text("{}")
     write_well_report(out, "C01", groups_total=3, groups_covered=1)
     assert not complete_seal_path(out, "C01").exists()
+
+
+def test_a_seal_that_cannot_be_withdrawn_stops_the_rewrite(tmp_path, monkeypatch, caplog):
+    """The stale-seal case the audit of #1012 named: a well once whole is run again, its seal cannot be withdrawn,
+    and the new run then dies part way. Withdrawing was best-effort and silent (``except OSError: pass``), so the
+    rewrite went ahead and the old seal stood over the new, partial CSV — which a remote resume adopts as a
+    finished well. The rewrite must not start: the well fails loudly, and its earlier, whole output stays."""
+    plate = _plate(tmp_path)
+    _main(monkeypatch, plate)
+    seal = complete_seal_path(plate / "out", "C01")
+    assert seal.is_file()
+    # A seal no unlink can remove: a directory in its place (tests may run as root, so permissions cannot do it).
+    seal.unlink()
+    seal.mkdir()
+    (seal / "pinned").write_text("x")
+
+    raised: list[BaseException] = []
+    with caplog.at_level(logging.INFO):
+        try:
+            _main(monkeypatch, plate, suspend_after=1, extra=("--force",))
+        except Exception as exc:  # the well's own failure, raised through the serial stub
+            raised.append(exc)
+    done = {fov for fov, _tp in read_done_fov_keys(_csv(plate))}
+    assert done == {"F001", "F002", "F003"}, (
+        f"the well was rewritten under a seal that could not be withdrawn: its CSV now holds {sorted(done)}, and "
+        "the stale seal beside it vouches for that partial output")
+    said = caplog.text + " ".join(str(e) for e in raised)
+    assert "completion seal" in said and "C01" in said, (
+        "a seal that could not be withdrawn left no record naming the well")
+
+
+@pytest.mark.parametrize("fn_name, writers", [
+    ("process_microscopy.process_well_zip_task",
+     ("merge_well_records(", "write_well_csv(", "merge_images_into_zip(", "compress_images_to_zip(")),
+    ("process_microscopy.process_well_folder_task",
+     ("merge_well_records(", "write_well_csv(", "merge_images_into_zip(", "compress_images_to_zip(")),
+    ("pipeline.nanowell_task.process_well_zip",
+     ("write_csv(", "write_empty_cells_csv(", "write_sites_csv(", "write_grid_json(", "update_montage_archive(")),
+])
+def test_every_well_path_withdraws_the_seal_before_its_first_write(fn_name, writers):
+    """The driven test above covers the zip path; the folder and nanowell paths write the same two artefacts, so
+    each must withdraw the seal before the first of its writes, not after them (``write_well_report`` withdraws it
+    too, but only once the CSV has already been rewritten). Read off the source, as
+    ``test_reuse_is_keyed_on_the_settings`` reads the settings stamp's position."""
+    import importlib
+    import inspect
+
+    module, _, name = fn_name.rpartition(".")
+    src = inspect.getsource(getattr(importlib.import_module(module), name))
+    assert "withdraw_seal(output_dir, well_label)" in src, f"{fn_name} never withdraws the completion seal"
+    first_write = min(src.index(w) for w in writers if w in src)
+    assert src.index("withdraw_seal(output_dir, well_label)") < first_write, (
+        f"{fn_name} rewrites the well's output before withdrawing its completion seal, so a run dying part way "
+        "leaves the old seal over new, partial output")

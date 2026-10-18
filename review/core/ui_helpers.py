@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 from ui import theme
 from review.core import empty_state_copy
+from review.core.plot_hold import HOLD_GATING
 from core.safe import swallow
 from domain.image_identity import normalize_tp
 from core.safe import swallowed
@@ -341,7 +342,7 @@ def refresh_empty_state_pages(win: Any) -> None:
                 # than the one it would replace.
                 _apply_reason(stack, NO_DATASET)
                 continue
-            if getattr(win._app_state.plot, "held_for", "") == "gating":
+            if getattr(win._app_state.plot, "held_for", "") == HOLD_GATING:
                 _apply_reason(stack, GATING_IN_PROGRESS)
                 continue
             reason_fn = getattr(stack, "_empty_reason", None)
@@ -958,7 +959,7 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
     ``ctx.runtime.sem`` / ``ctx.runtime.fov`` banks (mirrors the batch-export
     controls row)."""
     from review.core.plot_toggles import (
-        refresh_fov_btn_state,
+        register_fov_button,
         toggle_fov_replicates,
         toggle_sem,
     )
@@ -990,12 +991,7 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
         fov_btn.setProperty("variant", "toggle")
         fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
         h.addWidget(fov_btn)
-        if ctx.runtime.fov.btns is None:
-            ctx.runtime.fov.btns = []
-        ctx.runtime.fov.btns.append(fov_btn)
-        if not ctx.runtime.fov.btn:
-            ctx.runtime.fov.btn = fov_btn
-        refresh_fov_btn_state(ctx)
+        register_fov_button(ctx, fov_btn)
 
     h.addStretch(1)
     return w

@@ -157,7 +157,8 @@ theorising, and compare against the base branch on the same machine rather
 than against a different runner's log.
 
 Re-count rather than trusting these when it matters: `python -m pytest tests -m
-"not slow" -q --collect-only | tail -1` prints the split in about two seconds.
+"not slow and not nanowell_e2e" -q --collect-only | tail -1` prints the fast
+lane's split in about two seconds (that is the marker `scripts/test.sh` runs).
 
 Rules: never run a bare `pytest tests/` or `-m slow` across everything here. Run
 full-app tests a file or two per process (budget ≲15–20 app constructions per
@@ -564,7 +565,13 @@ number instead of adding another. Check with
 work that stacks onto a branch whose PR is still open shares that PR, and
 therefore that one bump — the failure mode is holding a two-PR model in your
 head while the branch carries one. `scripts/preflight.sh` fails when the net
-delta against `origin/main` is more than a single increment.
+delta against `origin/main` is anything other than a single increment: more
+than one, or none at all. None is the failure that actually ships. Two PRs open
+at once each bump to the same next number; the first merges, the second's bump
+now matches `main`, the merge is clean, and the second PR lands with no
+increment of its own — six consecutive releases each name two
+PRs that way. So when `main` moves under an open PR, merge it in and re-bump
+before the push, not after the merge.
 
 Bumping means **one line** — `version.py::__version__`, which the title-bar pill
 and the PyInstaller spec read. The docs state no version at all; they write

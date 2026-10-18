@@ -5,7 +5,7 @@ cleaned up, spread over ``~/.cache/allwell``, the system temp folder and the
 source checkout. The app's own files now live in one folder —
 ``%LOCALAPPDATA%\\allwell`` on Windows, ``~/.allwell`` on macOS and Linux
 (``util.state_dir.gui_state_dir``) — and the title bar's storage button measures
-and clears them (``core.local_storage``, ``core.local_storage_view``).
+and clears them (``core.local_storage``, ``ui.local_storage_view``).
 
 What must never be cleared is pinned here as firmly as what must: a running
 pool's spill, the live boot log, the analysis pipeline's scratch and its CZI
@@ -237,7 +237,7 @@ def test_sizes_read_as_a_file_manager_shows_them():
 
 @pytest.mark.qt
 def test_the_dialog_measures_and_its_button_clears(populated, home, qtbot):
-    from core.local_storage_view import StorageDialog
+    from ui.local_storage_view import StorageDialog
 
     dialog = StorageDialog(None, dataset_dir=home / "plate")
     qtbot.addWidget(dialog)
@@ -339,7 +339,7 @@ def test_sizes_never_read_1000_of_a_unit():
 @pytest.mark.qt
 def test_an_empty_leftover_can_still_be_cleared(home, qtbot):
     """Zero bytes is still something to clear: an empty folder a crash left."""
-    from core.local_storage_view import StorageDialog
+    from ui.local_storage_view import StorageDialog
 
     leftover = home / ".allwell" / "tmp" / "allwell_batch_nodisk_empty"
     leftover.mkdir(parents=True)
@@ -357,7 +357,7 @@ def test_an_empty_leftover_can_still_be_cleared(home, qtbot):
 
 @pytest.mark.qt
 def test_a_dataset_opened_meanwhile_is_not_cleared_under_the_old_name(home, qtbot):
-    from core.local_storage_view import StorageDialog
+    from ui.local_storage_view import StorageDialog
 
     first = _write(home / "first" / ".aw_parquet" / "A.parquet", 10)
     second = _write(home / "second" / ".aw_parquet" / "B.parquet", 10)

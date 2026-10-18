@@ -4,7 +4,9 @@ Each test reproduces one finding: a path on which a well's numbers depended on
 whether it happened to be held, a snapshot that was not one, a readout that went
 stale, a remembered answer that was not remembered, or a concurrent edit that
 could break a walk. R1, R2 and R8 are tested beside the code they concern
-(``test_no_view_holds_the_plate.py``, ``test_opening_reads_what_fits.py``).
+(``test_no_view_holds_the_plate.py``, ``test_opening_reads_what_fits.py``). R11
+concerned the CDF cap on the statistics cache (``stats_compute._make_room_for_cdf``),
+which the app does not have, so it has no test here.
 """
 
 from __future__ import annotations
@@ -194,9 +196,6 @@ def test_an_integer_column_is_written_with_six_decimals(tmp_path, monkeypatch):
         notify=SimpleNamespace(set_status=lambda text: None), window=None)
     svc.export_distribution_data(ctx)
     assert out.read_text().splitlines()[1:] == ["A01,A01,,12.000000", "A01,A01,,3.000000"]
-
-
-# ── R11: the CDF cap tolerates the cache being cleared from another thread ──
 
 
 # ── the per-read costs the benchmark found ─────────────────────────────────

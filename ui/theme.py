@@ -130,13 +130,14 @@ class Colors:
     # beside the rest of the plot surface.
     heatmap_selection = "#FF6B35"   # outline around selected heat-map cells
     # Segmentation overlay: a cell the image border cuts (Border_Pass). Magenta
-    # because it is the one hue the overlay's other six inks leave free that is
-    # not green — and green is the app's "good" colour, while every outline the
-    # overlay draws marks a removed cell. Measured ΔE ≥ 42 to all six.
+    # because it is a hue the overlay's other inks leave free that is not
+    # green — and green is the app's "good" colour, while every outline the
+    # overlay draws marks a removed cell. Measured ΔE ≥ 42 (CIE76) to each of
+    # the overlay's other eight inks (``review_image.renderer._layer_inks``).
     exclusion_border  = "#E879F9"
     # Segmentation overlay: a cell in a field the Cell Gating FOV selection
     # leaves out (FOV_Pass). Yellow, not green, for the reason above; measured
-    # ΔE ≥ 33 to the overlay's other seven inks.
+    # ΔE ≥ 33 (CIE76) to the overlay's other eight inks.
     exclusion_fov     = "#FDE047"
     spatial_observed  = "#4AA3FF"   # observed curve on the Spatial tab
     spatial_reference = "#FF9C4A"   # its random-reference curve
@@ -1928,38 +1929,45 @@ def set_touch_unit(unit: float | None) -> None:
 def _touch_qss(u: float) -> str:
     """Minimum sizes for anything a thumb taps, in phone points × *u*.
 
-    44 pt for controls, 48 for menu and list rows — the floors Apple and
-    Material set — so a control is never smaller than a thumb whatever its
-    text size. Appended last, so it wins over the desk rules above it.
+    ``core.phone_layout.TOUCH_MIN_PT`` for controls and ``TOUCH_ROW_PT`` for
+    menu and list rows — the floors Apple and Material set — so a control is
+    never smaller than a thumb whatever its text size. Read from those
+    constants on every call, so the stylesheet and the widgets the phone shell
+    pins stay on one floor. Appended last, so it wins over the desk rules
+    above it.
     """
+    from core import phone_layout
+
     def pt(n: float) -> int:
         return round(n * u)
+    floor = pt(phone_layout.TOUCH_MIN_PT)
+    row = pt(phone_layout.TOUCH_ROW_PT)
     c = Colors
     return f"""
 /* ── Phone layout: touch sizes (theme.set_touch_unit) ─────────────────── */
 QPushButton, QToolButton, QComboBox, QLineEdit, QAbstractSpinBox {{
-    min-height: {pt(44)}px;
+    min-height: {floor}px;
 }}
 QPushButton, QComboBox {{ padding-left: {pt(12)}px; padding-right: {pt(12)}px; }}
 QComboBox QAbstractItemView::item, QListView::item, QListWidget::item,
 QTreeView::item {{
-    min-height: {pt(48)}px;
+    min-height: {row}px;
 }}
 QMenu::item {{
     padding: {pt(14)}px {pt(20)}px {pt(14)}px {pt(16)}px;
 }}
-QFrame#RailNavRow {{ min-height: {pt(48)}px; }}
+QFrame#RailNavRow {{ min-height: {row}px; }}
 QWidget#Drawer[phoneSheet="true"] QPushButton,
 QWidget#Drawer[phoneSheet="true"] QToolButton,
 QWidget#Drawer[phoneSheet="true"] QComboBox,
 QWidget#Drawer[phoneSheet="true"] QLineEdit {{
-    min-height: {pt(48)}px;
+    min-height: {row}px;
 }}
 QMenu::separator {{ height: 1px; margin: {pt(4)}px 0px; }}
 QCheckBox::indicator, QRadioButton::indicator {{
     width: {pt(24)}px; height: {pt(24)}px;
 }}
-QCheckBox, QRadioButton {{ spacing: {pt(10)}px; min-height: {pt(44)}px; }}
+QCheckBox, QRadioButton {{ spacing: {pt(10)}px; min-height: {floor}px; }}
 QScrollBar:vertical {{ width: {pt(10)}px; }}
 QScrollBar:horizontal {{ height: {pt(10)}px; }}
 QScrollBar::handle {{ background-color: {c.border_strong}; border-radius: {pt(5)}px; }}

@@ -84,6 +84,86 @@ def _remote_runner(monkeypatch):
     return r
 
 
+def test_the_close_says_what_it_is_waiting_for_while_it_waits(monkeypatch):
+    """The bounded wait blocks the GUI thread for up to 25 s. With nothing on screen the window just froze;
+    the notice must be up before the wait starts and come down only after it has finished."""
+    from allwell import CLOSE_WAIT_NOTICE
+
+    runner = _remote_runner(monkeypatch)
+    seen = []
+
+    def notice(text):
+        seen.append(("shown", text, list(runner._remote_runner.cancelled)))
+        return lambda: seen.append(("dismissed", list(runner._remote_runner.cancelled)))
+
+    _stop_analyze_runner(types.SimpleNamespace(_runner=runner), notice=notice)
+    assert seen == [("shown", CLOSE_WAIT_NOTICE, []), ("dismissed", [runner._proc])], (
+        f"the notice did not bracket the wait for the remote cancel: {seen}")
+
+
+def test_no_notice_when_there_is_nothing_to_wait_for():
+    seen = []
+    idle = types.SimpleNamespace(is_running=False, stop=lambda: None, wait_for_teardown=lambda: None)
+    _stop_analyze_runner(types.SimpleNamespace(_runner=idle), notice=seen.append)
+    suspended = types.SimpleNamespace(is_busy=True, was_suspended=True, stop=lambda: None,
+                                      wait_for_teardown=lambda: None)
+    _stop_analyze_runner(types.SimpleNamespace(_runner=suspended), notice=seen.append)
+    assert seen == []
+
+
+def test_a_failing_notice_does_not_skip_the_wait():
+    waited = []
+
+    def boom(_text):
+        raise RuntimeError("no screen")
+
+    runner = types.SimpleNamespace(is_busy=True, stop=lambda: None,
+                                   wait_for_teardown=lambda: waited.append(True))
+    _stop_analyze_runner(types.SimpleNamespace(_runner=runner), notice=boom)
+    assert waited == [True]
+
+
+def test_the_close_notice_is_painted_opaque_with_the_wait_cursor(qapp):
+    """`AllWellApp._show_close_notice`, the notice the real close passes: a toast held at full opacity (its fade
+    would not run while the thread is blocked) and the wait cursor, both undone by the dismisser."""
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    from allwell import AllWellApp
+    from widgets.toast import Toast
+
+    host = QWidget()
+    try:
+        host.show()
+        dismiss = AllWellApp._show_close_notice(host, "waiting")
+        toasts = [w for w in QApplication.topLevelWidgets() if isinstance(w, Toast) and w.isVisible()]
+        assert toasts and toasts[-1].windowOpacity() == 1.0, "the notice was not on screen at full opacity"
+        assert QApplication.overrideCursor() is not None, "no wait cursor while the close blocks"
+        dismiss()
+        assert QApplication.overrideCursor() is None
+        assert not toasts[-1].isVisible()
+    finally:
+        while QApplication.overrideCursor() is not None:
+            QApplication.restoreOverrideCursor()
+        host.close()
+
+
+def test_the_real_close_passes_the_notice():
+    """Building `AllWellApp` is a slow-lane cost, so its `closeEvent` is read rather than run: the call that
+    stops the runner must hand it the window's notice, or every test above measures a seam the app never uses."""
+    import ast
+    import inspect
+    import textwrap
+
+    from allwell import AllWellApp
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(AllWellApp.closeEvent)))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and getattr(n.func, "id", "") == "_stop_analyze_runner"]
+    assert calls, "closeEvent no longer stops the Analyze runner"
+    assert any(kw.arg == "notice" and ast.unparse(kw.value) == "self._show_close_notice"
+               for c in calls for kw in c.keywords), "closeEvent stops the runner without the on-screen notice"
+
+
 def test_closing_waits_for_the_remote_cancel_to_reach_the_host(monkeypatch):
     """The Stop's ssh `kill` + `scancel` run on a daemon thread, which the
     interpreter ends at exit: returning before it finished left the SLURM job

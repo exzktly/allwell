@@ -379,6 +379,56 @@ def test_a_refused_first_add_lists_no_group_or_well(monkeypatch):
     pool.close()
 
 
+def _join_the_sweep() -> None:
+    thread = getattr(cell_pool, "_sweep_thread", None)
+    if thread is not None:
+        thread.join(10)
+
+
+def test_opening_a_pool_does_not_wait_for_the_sweep(tmp_path, monkeypatch):
+    """The first pool opens on the GUI thread, during a collect or a redraw, and the sweep rmtrees what crashed
+    processes left — a DuckDB file that can be gigabytes. Nothing bounds that, so the pool must not wait for it."""
+    pytest.importorskip("duckdb")
+    import subprocess
+    import sys
+    import threading
+
+    monkeypatch.setattr(cell_pool, "gui_temp_dir", lambda: tmp_path)
+    monkeypatch.setattr(cell_pool.tempfile, "tempdir", str(tmp_path / "system-temp"))
+    (tmp_path / "system-temp").mkdir()
+    monkeypatch.setattr(cell_pool, "_swept", False)
+    monkeypatch.setattr(cell_pool, "_sweep_thread", None, raising=False)
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    crashed = tmp_path / "allwell-cellpool-crashed"
+    crashed.mkdir()
+    (crashed / cell_pool.OWNER_FILE).write_text(f"{dead.pid}\n")
+
+    release, entered = threading.Event(), threading.Event()
+    real_rmtree = cell_pool.shutil.rmtree
+
+    def slow_rmtree(path, *a, **k):          # a huge spill on a slow disk
+        entered.set()
+        release.wait(10)
+        return real_rmtree(path, *a, **k)
+
+    monkeypatch.setattr(cell_pool.shutil, "rmtree", slow_rmtree)
+    opened: list[CellPool] = []
+    opener = threading.Thread(target=lambda: opened.append(CellPool(["v"], backend="duckdb")), daemon=True)
+    try:
+        opener.start()
+        assert entered.wait(5), "the sweep never reached the crashed directory"
+        opener.join(2)
+        assert not opener.is_alive() and opened, "opening a pool waited on the stale-spill sweep's rmtree"
+    finally:
+        release.set()
+        opener.join(10)
+        _join_the_sweep()
+        for pool in opened:
+            pool.close()
+    assert not crashed.exists(), "the sweep, once released, did not remove the crashed directory"
+
+
 def test_a_crashed_pool_s_directory_is_swept_and_a_live_one_is_not(tmp_path, monkeypatch):
     """Review L10. A pool killed with its process leaves its spill directory (and its compressed table) behind.
     The next pool sweeps those of processes that no longer exist — never one whose owner is alive, nor an
@@ -396,6 +446,7 @@ def test_a_crashed_pool_s_directory_is_swept_and_a_live_one_is_not(tmp_path, mon
     monkeypatch.setattr(cell_pool, "gui_temp_dir", lambda: tmp_path)
     monkeypatch.setattr(cell_pool.tempfile, "tempdir", str(system_temp))
     monkeypatch.setattr(cell_pool, "_swept", False)
+    monkeypatch.setattr(cell_pool, "_sweep_thread", None)
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
     crashed = tmp_path / "allwell-cellpool-crashed"
@@ -423,6 +474,7 @@ def test_a_crashed_pool_s_directory_is_swept_and_a_live_one_is_not(tmp_path, mon
     (left_by_an_old_version / cell_pool.OWNER_FILE).write_text(f"{dead.pid}\n")
 
     with CellPool(["v"], backend="duckdb") as pool:
+        _join_the_sweep()                          # it runs beside the pool, never in front of it
         from core.process import owner_text
         # ``<pid>@<host>``: a home folder shared between hosts must not let one
         # host's sweep judge another's pool (``core.process``).

@@ -20,10 +20,15 @@ folder mode, and remote runs.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
+
+from util.aw_safe import swallowed
 from util.json_write import write_json_atomic
+
+_log = logging.getLogger(__name__)
 
 # Hidden so it never looks like dataset output; removed once collected.
 RUN_REPORT_DIRNAME = ".aw_run_report"
@@ -57,19 +62,44 @@ def complete_seal_path(output_dir: Path | str, well_label: str) -> Path:
     return Path(output_dir) / COMPLETE_DIRNAME / f"{well_label}.json"
 
 
-def _unseal(output_dir: Path | str, well_label: str) -> None:
-    """Withdraw *well_label*'s completion seal: its output is about to be rewritten.
+class SealNotWithdrawnError(RuntimeError):
+    """A well's completion seal could not be removed, so its output must not be rewritten.
 
-    Called from :func:`write_well_report`, which every well path reaches before
-    it writes its CSV and ``<well>_out.zip``, so a run that dies between the two
-    leaves an older archive with **no** seal rather than a seal vouching for
-    output it never finished. Best-effort; see :func:`seal_well_complete` for
-    why a seal that cannot be withdrawn is the one case that matters.
+    Deliberately not an :class:`OSError`: the well paths catch ``OSError`` around
+    their best-effort bookkeeping, and this failure must reach the well's own
+    failure handling (trace in ``errors/``, the well reported failed) instead.
     """
+
+
+def withdraw_seal(output_dir: Path | str, well_label: str) -> None:
+    """Withdraw *well_label*'s completion seal before its output is rewritten.
+
+    Every well path calls this immediately before it writes its CSV and
+    ``<well>_out.zip`` (and :func:`write_well_report` calls it again), so a run
+    that dies part way through the rewrite leaves output with **no** seal —
+    which a resume reads as "run it again" — rather than an older seal vouching
+    for output this run never finished.
+
+    A seal that cannot be withdrawn is the one case that matters: the well's
+    earlier output and its seal still agree, and the rewrite is what would break
+    that. So the failure is logged and raised as :class:`SealNotWithdrawnError`;
+    the well fails before touching anything, and its earlier output stays as it
+    was, still sealed and still whole.
+    """
+    path = complete_seal_path(output_dir, well_label)
     try:
-        complete_seal_path(output_dir, well_label).unlink(missing_ok=True)
-    except OSError:
-        pass
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        if not os.path.lexists(path):
+            # Nothing there to vouch for anything — e.g. an output "directory"
+            # that is a file, where no seal can ever have been written.
+            return
+        _log.error("Well %s: could not withdraw its completion seal %s (%s: %s); not rewriting the well, "
+                   "so its earlier output and seal are left as they were.",
+                   well_label, path, type(exc).__name__, exc)
+        raise SealNotWithdrawnError(
+            f"Well {well_label}: could not withdraw its completion seal {path} ({type(exc).__name__}: {exc}); "
+            "the well was not rewritten") from exc
 
 
 def recorded_well_report(output_dir: Path | str, well_label: str) -> dict | None:
@@ -127,7 +157,12 @@ def write_well_report(
     aborted_reason: str = "",
     not_attempted: tuple[str, ...] | list[str] = (),
 ) -> Path | None:
-    """Record one well's completeness. Best-effort: never fails the run.
+    """Record one well's completeness. Best-effort, with one exception.
+
+    A record that cannot be written is dropped (a run that cannot write its
+    own bookkeeping must still produce data). A completion seal that cannot be
+    withdrawn is not: :func:`withdraw_seal` raises, because the well's output
+    is being rewritten under it.
 
     ``groups_total`` is how many FOV-groups the well's *input* holds;
     ``groups_covered`` is how many distinct ``(fov, timepoint)`` pairs its
@@ -148,7 +183,7 @@ def write_well_report(
         # for twenty tracebacks when three had been written.
         "not_attempted": sorted(not_attempted or ()),
     }
-    _unseal(output_dir, well_label)
+    withdraw_seal(output_dir, well_label)
     try:
         d = _report_dir(output_dir)
         d.mkdir(parents=True, exist_ok=True)
@@ -209,7 +244,7 @@ def clear_run_report(output_dir: Path | str) -> None:
             path.unlink(missing_ok=True)
         d.rmdir()
     except OSError:
-        pass
+        swallowed("the run-report staging directory could not be removed")
 
 
 def _int(rec, key: str) -> int:

@@ -23,7 +23,7 @@ import logging
 
 from pipeline.io import (
     _sweep_stale_scratch_dirs_all, remove_directory, scratch_base_for)
-from util.aw_safe import swallow
+from util.aw_safe import swallow, swallowed
 from util.settings_digest import primary_settings_key, settings_key_aliases
 
 log = logging.getLogger(__name__)
@@ -269,7 +269,7 @@ def _save_fov_checkpoint(
             # "Invalid argument"/"Inappropriate ioctl for device"). The replace
             # below is still atomic without it. Matches the guarded fsync in
             # pipeline/io.py and review/persistence/_io.py.
-            pass
+            swallowed("fsync unsupported here; the atomic replace still orders the write")
     tmp.replace(records_file)
     # The marker is the atomicity boundary — present iff records_file
     # is on disk and complete.

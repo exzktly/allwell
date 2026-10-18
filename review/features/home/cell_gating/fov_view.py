@@ -9,8 +9,8 @@ to the data is :mod:`review.data.fov_selection`'s ``FOV_Pass`` layer, which the
 inclusion chokepoint ANDs with every other layer, so every plot, statistic and
 export honours it. This module only builds and repaints widgets. Applying a
 selection — saving it, re-projecting the layers, redrawing — is
-``controller.set_fov_selection``, which the tab builder hands in as
-``on_apply``; this module names no controller, so the controller can import it.
+``controller.apply_fov_selection_with_progress``, which the tab builder
+hands in as ``on_apply``; this module names no controller, so the controller can import it.
 
 * :func:`build_fov_selection_row` — the row, registered on ``ctx.widgets``.
 * :func:`refresh_fov_selection_widgets` — repaint the button and the status line.

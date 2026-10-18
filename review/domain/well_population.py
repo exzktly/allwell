@@ -32,7 +32,8 @@ does not rescan the well for each one:
 
 Qt-free and ctx-free: building and querying are pure functions of a frame and
 their arguments. The caching — the key, the byte-bounded store and when it is
-dropped — lives in ``stats_compute`` and ``core/stats_cache_state.py``.
+dropped — lives in ``stats_compute``, ``data/population_store.py`` and
+``core/stats_cache_state.py``.
 """
 
 from __future__ import annotations

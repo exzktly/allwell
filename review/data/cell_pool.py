@@ -71,6 +71,7 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 import time
 import weakref
 from collections.abc import Iterator, Sequence
@@ -108,6 +109,9 @@ UNMARKED_STALE_S = 24 * 3600
 
 _engine_warned = False
 _swept = False
+#: The thread running this process's one sweep, once a pool has started it (:func:`start_stale_spill_sweep`).
+_sweep_thread: threading.Thread | None = None
+_sweep_lock = threading.Lock()
 
 
 def _duckdb() -> ModuleType | None:
@@ -217,7 +221,7 @@ class CellPool:
         self.failure: CellPoolError | None = None
         self._reserve = 0
         if duckdb is not None:
-            sweep_stale_spills()
+            start_stale_spill_sweep()
             self._spill = tempfile.mkdtemp(prefix=SPILL_PREFIX, dir=str(gui_temp_dir()))
             write_owner(self._spill)
             self._reserve = int(DISK_RESERVE * _free_bytes(self._spill))
@@ -621,13 +625,34 @@ def _release(con, spill: str | None) -> None:
             _logger.info("cell pool spill directory %s could not be removed yet", spill)
 
 
+def start_stale_spill_sweep() -> threading.Thread | None:
+    """Start this process's one :func:`sweep_stale_spills` on a daemon thread; the thread, or ``None``.
+
+    The first pool is opened on the GUI thread, during a collect or a redraw,
+    and the sweep ``rmtree``s whatever crashed processes left — a DuckDB file
+    that can be gigabytes, on whatever disk the temp folder is. Nothing bounds
+    that, so the pool never waits for it: the sweep only removes directories
+    whose owner is gone (or unmarked ones a day old), never the one this pool
+    is about to create, so the two need no ordering. ``None`` once a sweep has
+    been started (or run) in this process.
+    """
+    global _sweep_thread
+    with _sweep_lock:
+        if _swept or _sweep_thread is not None:
+            return None
+        _sweep_thread = threading.Thread(target=sweep_stale_spills, name="cellpool-spill-sweep", daemon=True)
+        _sweep_thread.start()
+        return _sweep_thread
+
+
 def sweep_stale_spills() -> list[str]:
     """Remove the spill directories of pools whose process no longer exists; the paths removed.
 
     A pool closed or collected removes its own directory; one killed with its process (a crash, a force-quit
     mid-load) leaves it, with the compressed table inside, and nothing else would ever remove it. A directory is
     swept only when its :data:`OWNER_FILE` names a process that is gone, or, with no owner file, once it is
-    older than :data:`UNMARKED_STALE_S`. Runs once per process, from the first pool it opens.
+    older than :data:`UNMARKED_STALE_S`. Runs once per process, on the thread the first pool it opens starts
+    (:func:`start_stale_spill_sweep`).
     """
     global _swept
     if _swept:

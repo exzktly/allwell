@@ -472,7 +472,7 @@ def _two_fields():
                          "Included": [1, 1]})
 
 
-def test_turning_a_verdict_layer_on_excludes_immediately():
+def test_turning_a_verdict_layer_on_excludes_immediately(qtbot):
     """**The defect this found, which had already shipped.** The cache
     projectors run at *load*; the pass that runs when a Cell Gating control
     moves re-projected ``QC_Pass`` alone, which was correct while the panel
@@ -487,72 +487,72 @@ def test_turning_a_verdict_layer_on_excludes_immediately():
     """
     from review.data.data_loading import df_included_mask
     from review.data.field_quality_cache import flagged_fields
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     ctx = _live_ctx({"A01": _two_fields()}, QCParams(), _flagged_block())
     flagged, refusal = flagged_fields(ctx)
     assert not refusal and flagged, "the fixture must flag something to measure"
     assert list(df_included_mask(ctx.state.dataset.cache["A01"])) == [True, True]
 
-    set_qc_params(ctx, QCParams(exclude_flagged_fields=True))
+    apply_qc_params(qtbot, ctx, QCParams(exclude_flagged_fields=True))
     df = ctx.state.dataset.cache["A01"]
     assert "Field_Pass" in df.columns
     assert list(df_included_mask(df)) == [False, True]
 
 
-def test_turning_a_verdict_layer_off_stops_excluding_immediately():
+def test_turning_a_verdict_layer_off_stops_excluding_immediately(qtbot):
     """The other half, and its own defect: a projector whose switch is off
     returned early and wrote nothing, which leaves the previous setting's
     column on the frame. Unticking left the rows excluded while the panel said
     "currently kept" over them."""
     from review.data.data_loading import df_included_mask
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     ctx = _live_ctx({"A01": _two_fields()}, QCParams(), _flagged_block())
-    set_qc_params(ctx, QCParams(exclude_flagged_fields=True))
+    apply_qc_params(qtbot, ctx, QCParams(exclude_flagged_fields=True))
     assert list(df_included_mask(ctx.state.dataset.cache["A01"])) == [False, True]
 
-    set_qc_params(ctx, QCParams(exclude_flagged_fields=False))
+    apply_qc_params(qtbot, ctx, QCParams(exclude_flagged_fields=False))
     df = ctx.state.dataset.cache["A01"]
     assert "Field_Pass" not in df.columns
     assert list(df_included_mask(df)) == [True, True]
 
 
-def test_the_focus_gate_excludes_and_un_excludes_immediately():
+def test_the_focus_gate_excludes_and_un_excludes_immediately(qtbot):
     """The same two properties for the layer this branch adds, asserted
     through the same real path rather than by analogy — the defect above was
     invisible to every test the layer it broke already had."""
     from review.data.data_loading import df_included_mask
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     df = _frame([0.30, 0.02, None])
     df["Included"] = 1
     ctx = _live_ctx({"A01": df}, QCParams())
     assert list(df_included_mask(ctx.state.dataset.cache["A01"])) == [True] * 3
 
-    set_qc_params(ctx, QCParams(exclude_soft_cells=True, focus_min=0.10))
+    apply_qc_params(qtbot, ctx, QCParams(exclude_soft_cells=True, focus_min=0.10))
     got = ctx.state.dataset.cache["A01"]
     assert "Focus_Pass" in got.columns
     assert list(df_included_mask(got)) == [True, False, True]
 
-    set_qc_params(ctx, QCParams(exclude_soft_cells=False, focus_min=0.10))
+    apply_qc_params(qtbot, ctx, QCParams(exclude_soft_cells=False, focus_min=0.10))
     back = ctx.state.dataset.cache["A01"]
     assert "Focus_Pass" not in back.columns
     assert list(df_included_mask(back)) == [True] * 3
 
 
-def test_the_two_image_quality_layers_compose_rather_than_replace():
+def test_the_two_image_quality_layers_compose_rather_than_replace(qtbot):
     """Neither subsumes the other — a field whose median is fine can still have
     a soft third — so both columns must be able to sit on one frame and be
     ANDed. Excludes the implementation where the newer layer's projector
     overwrites or removes the older one's column."""
     from review.data.data_loading import df_included_mask
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     df = _two_fields()
     df[FOCUS_COLUMN] = [0.50, 0.02]     # field 1 flagged, field 2's cell soft
     ctx = _live_ctx({"A01": df}, QCParams(), _flagged_block())
-    set_qc_params(ctx, QCParams(exclude_flagged_fields=True,
+    apply_qc_params(qtbot, ctx, QCParams(exclude_flagged_fields=True,
                                 exclude_soft_cells=True, focus_min=0.10))
     got = ctx.state.dataset.cache["A01"]
     assert {"Field_Pass", "Focus_Pass"} <= set(got.columns)
@@ -672,39 +672,39 @@ def _uniform(value, n=40):
     return df
 
 
-def test_a_uniformly_soft_frame_is_still_excluded():
+def test_a_uniformly_soft_frame_is_still_excluded(qtbot):
     """Excludes any normalisation by a per-frame statistic. Under one, every
     cell here scores 1.0 (or 0.0 deviation) and **nothing** is dropped, which
     is the exact failure the estimator was replaced to fix."""
     from review.data.data_loading import df_included_mask
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     ctx = _live_ctx({"A01": _uniform(0.02)}, QCParams())
-    set_qc_params(ctx, QCParams(exclude_soft_cells=True, focus_min=0.10))
+    apply_qc_params(qtbot, ctx, QCParams(exclude_soft_cells=True, focus_min=0.10))
     got = ctx.state.dataset.cache["A01"]
     assert list(got["Focus_Pass"]) == [0] * 40
     assert not df_included_mask(got).any()
 
 
-def test_a_uniformly_sharp_frame_is_still_kept():
+def test_a_uniformly_sharp_frame_is_still_kept(qtbot):
     """The other half — without it the test above passes against a gate that
     excludes everything unconditionally."""
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     ctx = _live_ctx({"A01": _uniform(0.40)}, QCParams())
-    set_qc_params(ctx, QCParams(exclude_soft_cells=True, focus_min=0.10))
+    apply_qc_params(qtbot, ctx, QCParams(exclude_soft_cells=True, focus_min=0.10))
     assert list(ctx.state.dataset.cache["A01"]["Focus_Pass"]) == [1] * 40
 
 
-def test_two_wells_at_different_focus_get_different_verdicts():
+def test_two_wells_at_different_focus_get_different_verdicts(qtbot):
     """A per-*well* normalisation is the same defect one pooling up, and it is
     invisible to a single-well fixture: normalise within each well and these
     two frames — internally uniform, an order of magnitude apart — come out
     identical."""
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     ctx = _live_ctx({"A01": _uniform(0.40), "A02": _uniform(0.02)}, QCParams())
-    set_qc_params(ctx, QCParams(exclude_soft_cells=True, focus_min=0.10))
+    apply_qc_params(qtbot, ctx, QCParams(exclude_soft_cells=True, focus_min=0.10))
     cache = ctx.state.dataset.cache
     assert list(cache["A01"]["Focus_Pass"]) == [1] * 40
     assert list(cache["A02"]["Focus_Pass"]) == [0] * 40

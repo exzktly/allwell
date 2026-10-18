@@ -201,7 +201,7 @@ def _reread_cell_gating_cdfs(ctx) -> None:
 
     They are drawn from the first frame of the first *kept* field, so a restored
     or loaded selection moves them exactly as an edit on the picker does
-    (``controller.set_fov_selection`` re-reads them too). Without this they kept
+    (``controller.apply_fov_selection_with_progress`` re-reads them too). Without this they kept
     showing the previous selection's field, and a threshold set from them was
     set against cells no calculation used. A no-op until the tab is built; during
     a dataset load the reading is owed to the end of the load, as always.

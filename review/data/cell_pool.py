@@ -80,7 +80,7 @@ from types import ModuleType
 import numpy as np
 
 from core.process import OWNER_FILE as PROCESS_OWNER_FILE
-from core.process import pid_alive as _pid_alive
+from core.process import owner_alive, write_owner
 from util.state_dir import gui_temp_dir
 
 _logger = logging.getLogger("review")
@@ -219,8 +219,7 @@ class CellPool:
         if duckdb is not None:
             sweep_stale_spills()
             self._spill = tempfile.mkdtemp(prefix=SPILL_PREFIX, dir=str(gui_temp_dir()))
-            with open(os.path.join(self._spill, OWNER_FILE), "w", encoding="ascii") as handle:
-                handle.write(f"{os.getpid()}\n")
+            write_owner(self._spill)
             self._reserve = int(DISK_RESERVE * _free_bytes(self._spill))
             mb = int(os.environ.get("ALLWELL_CELL_POOL_MB") or DEFAULT_MEMORY_MB)
             # A database *file* in the spill directory, not ``:memory:``. An
@@ -641,13 +640,12 @@ def sweep_stale_spills() -> list[str]:
         try:
             if not os.path.isdir(path) or os.path.islink(path):
                 continue
-            owner = os.path.join(path, OWNER_FILE)
-            if os.path.exists(owner):
-                with open(owner, encoding="ascii") as handle:
-                    text = handle.read().strip()
-                if not text.isdigit() or _pid_alive(int(text)):
-                    continue
-            elif time.time() - os.path.getmtime(path) < UNMARKED_STALE_S:
+            # ``<pid>@<host>``: an owner on another host sharing this home folder
+            # is never judged from here (``core.process``).
+            alive = owner_alive(path)
+            if alive:
+                continue
+            if alive is None and time.time() - os.path.getmtime(path) < UNMARKED_STALE_S:
                 continue
             shutil.rmtree(path)
             removed.append(path)

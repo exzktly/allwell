@@ -460,6 +460,25 @@ def _session_pipeline_scratch(_autouse_scratch_root):
         os.environ["ALLWELL_SCRATCH_DIR"] = previous
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _app_files_go_to_a_scratch_directory(_autouse_scratch_root):
+    """No test writes into the developer's real app folder (``util.state_dir.gui_state_dir``:
+    ``~/.allwell`` or ``%LOCALAPPDATA%\\allwell``). Cell-pool spills, Batch Export staging, the font cache and
+    the storage dialog's survey all go there, and the cell pool's start-up sweep and the storage dialog's clear
+    both delete in it — on a developer's machine that is the same folder their running app uses. One folder per
+    worker for the session, as ``_session_pipeline_scratch`` does, rather than one per test: what lands there is
+    owned per process (``owner.pid``), and a numbered directory per test is the quadratic setup cost rule 4 of
+    CLAUDE.md §2 forbids. A test about the folder's own resolution unsets the variable itself
+    (``tests/test_local_storage.py``)."""
+    previous = os.environ.get("ALLWELL_STATE_DIR")
+    os.environ["ALLWELL_STATE_DIR"] = str(_scratch_dir(_autouse_scratch_root, "app-state"))
+    yield
+    if previous is None:
+        os.environ.pop("ALLWELL_STATE_DIR", None)
+    else:
+        os.environ["ALLWELL_STATE_DIR"] = previous
+
+
 @pytest.fixture(autouse=True)
 def _pipeline_scratch_goes_to_a_scratch_directory(_autouse_scratch_root, monkeypatch):
     """No test extracts a well into the developer's real ``~/.allwell/scratch``.

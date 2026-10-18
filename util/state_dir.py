@@ -17,13 +17,14 @@ writes on this machine outside a dataset folder, in one fixed layout:
 ``%LOCALAPPDATA%\\allwell`` on Windows — the folder Windows provides for exactly
 this, per-user and never roamed — and ``~/.allwell`` on macOS and Linux. Each
 falls back to the system temp folder when it cannot be written (Windows tries
-``~/.allwell`` first). The app's caches are cleared from the title bar's
-storage button (``services.local_storage``).
+``~/.allwell`` first). ``ALLWELL_STATE_DIR``, when set, replaces all of that —
+the test harness points it at a per-worker scratch folder so no test writes
+into the real one. The app's caches are cleared from the title bar's storage
+button (``core.local_storage``).
 
-These used to sit in ``~/.cache/allwell`` on every platform, with the font cache
-inside the repository for a run from source and the spill folders in the system
-temp folder. :func:`legacy_gui_paths` names what earlier versions left in those
-places, so the storage button can clear it.
+:func:`legacy_gui_paths` names the app's files in the other places they can be
+found — ``~/.cache/allwell``, the ``.mplcache`` folder of a source checkout —
+so the storage button can clear them.
 
 The Parquet row caches are not here, by design: each sits in a ``.aw_parquet``
 folder beside the CSVs it caches, so it travels and is deleted with its dataset.
@@ -87,6 +88,9 @@ FONT_CACHE_SUBDIR = "mplcache"
 TEMP_SUBDIR = "tmp"
 BOOT_LOG_NAME = "allwell-boot.log"
 BOOTSTRAP_LOG_GLOB = "bootstrap-*.log"
+#: Where a source checkout kept its font cache before it moved into the app's
+#: folder (git-ignored; absent from a frozen build).
+REPO_FONT_CACHE = Path(__file__).resolve().parent.parent / ".mplcache"
 
 
 def is_windows() -> bool:
@@ -94,9 +98,16 @@ def is_windows() -> bool:
     return os.name == "nt"
 
 
+#: Overrides :func:`gui_state_dir` outright when set.
+STATE_DIR_ENV = "ALLWELL_STATE_DIR"
+
+
 def gui_candidate_dirs() -> list[Path]:
     """The folders :func:`gui_state_dir` tries, in order."""
     out: list[Path] = []
+    override = os.environ.get(STATE_DIR_ENV, "").strip()
+    if override:
+        out.append(Path(override).expanduser())
     local = os.environ.get("LOCALAPPDATA")
     if is_windows() and local:
         out.append(Path(local) / APP_DIRNAME)
@@ -135,18 +146,32 @@ def legacy_gui_paths() -> list[Path]:
 
     In ``~/.cache/allwell``: the boot log and its crash copies, the bootstrap
     logs and the font cache — **not** ``czi-scans``, which is the pipeline's and
-    still lives there. On Windows, the same three in ``%LOCALAPPDATA%\\allwell``
-    are current, not legacy, so nothing there is named. Only paths that exist
-    are returned, and none inside the current :func:`gui_state_dir`.
+    lives there. And the ``.mplcache`` folder at the root of a source checkout
+    (git-ignored; a frozen build has none). Only paths that exist are returned,
+    and none that is, or holds, the current :func:`gui_state_dir`.
     """
     current = gui_state_dir().resolve()
-    old = Path(os.path.expanduser("~/.cache")) / APP_DIRNAME
     found: list[Path] = []
+    old = Path(os.path.expanduser("~/.cache")) / APP_DIRNAME
     try:
-        if not old.is_dir() or old.resolve() == current:
-            return found
-        for pattern in (BOOT_LOG_NAME + "*", BOOTSTRAP_LOG_GLOB, FONT_CACHE_SUBDIR):
-            found.extend(sorted(old.glob(pattern)))
+        if old.is_dir() and old.resolve() != current:
+            for pattern in (BOOT_LOG_NAME + "*", BOOTSTRAP_LOG_GLOB, FONT_CACHE_SUBDIR):
+                found.extend(sorted(old.glob(pattern)))
     except OSError:
-        return found
-    return found
+        pass  # an unreadable folder offers nothing; nothing is lost by it
+    repo_cache = REPO_FONT_CACHE
+    try:
+        if repo_cache.is_dir() and not repo_cache.is_symlink():
+            found.append(repo_cache)
+    except OSError:
+        pass  # likewise
+    return [p for p in found if not _holds(p, current)]
+
+
+def _holds(path: Path, other: Path) -> bool:
+    """Whether *path* is *other* or contains it."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return True
+    return resolved == other or other.is_relative_to(resolved)

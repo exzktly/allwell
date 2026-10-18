@@ -1516,19 +1516,24 @@ class AllWellApp(QMainWindow):
     def _open_storage_dialog(self) -> None:
         """Show the storage dialog, offering the open dataset's row cache too.
 
-        Non-modal, and one at a time: a second click raises the open one rather
-        than measuring everything again behind it.
+        Non-modal, and one dialog for the window's life: a click while it is
+        open raises it; a click after it was closed shows the same one again
+        with a fresh survey, rather than building another beside the hidden
+        one. It asks which dataset is open each time it lists or clears.
         """
         from core.local_storage_view import StorageDialog
 
         dialog = self._storage_dialog
-        if dialog is not None and dialog.isVisible():
-            dialog.raise_()
-            dialog.activateWindow()
+        if dialog is None:
+            self._storage_dialog = StorageDialog(
+                self, dataset_dir=self._current_dataset_root)
+            self._storage_dialog.show()
             return
-        self._storage_dialog = StorageDialog(
-            self, dataset_dir=self._current_dataset_root())
-        self._storage_dialog.show()
+        if not dialog.isVisible():
+            dialog.refresh()
+            dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _reload_current_dataset(self) -> None:
         """Reopen the dataset Review has loaded, so live state is re-read from

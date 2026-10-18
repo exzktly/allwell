@@ -191,6 +191,7 @@ def test_an_unwritable_state_dir_is_passed_over(tmp_path, monkeypatch):
     temp = tmp_path / "temp"
     temp.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("ALLWELL_STATE_DIR", raising=False)
     monkeypatch.setattr(os, "name", "posix")
     import tempfile
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(temp))

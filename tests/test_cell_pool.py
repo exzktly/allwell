@@ -333,7 +333,7 @@ def test_a_pool_on_a_full_volume_says_so_and_then_answers_as_empty(limit_mb, row
     done = subprocess.run([sys.executable, str(script), str(limit_mb), repo, str(rows)], capture_output=True,
                           text=True, timeout=240,
                           # The spill goes to the app's own temp folder, under the home folder.
-                          env={**os.environ, "TMPDIR": str(tmp_path), "HOME": str(tmp_path)})
+                          env={**os.environ, "TMPDIR": str(tmp_path), "ALLWELL_STATE_DIR": str(tmp_path)})
     assert done.returncode == 0, done.stderr[-2000:]
     got = json.loads(done.stdout.strip().splitlines()[-1])
     assert got["raised"] == "CellPoolFullError", f"{got['raised']} reached the caller: {got['message'][:300]}"
@@ -413,14 +413,23 @@ def test_a_crashed_pool_s_directory_is_swept_and_a_live_one_is_not(tmp_path, mon
     young_unmarked.mkdir()
     unrelated = tmp_path / "someone-elses-dir"
     unrelated.mkdir()
+    # Another host's pool in a home folder both machines mount: its PID is
+    # meaningless here, so it is never swept from here.
+    other_host = tmp_path / "allwell-cellpool-otherhost"
+    other_host.mkdir()
+    (other_host / cell_pool.OWNER_FILE).write_text(f"{dead.pid}@another-host.example\n")
     left_by_an_old_version = system_temp / "allwell-cellpool-old"
     left_by_an_old_version.mkdir()
     (left_by_an_old_version / cell_pool.OWNER_FILE).write_text(f"{dead.pid}\n")
 
     with CellPool(["v"], backend="duckdb") as pool:
-        assert (Path(pool._spill) / cell_pool.OWNER_FILE).read_text().strip() == str(os.getpid())
+        from core.process import owner_text
+        # ``<pid>@<host>``: a home folder shared between hosts must not let one
+        # host's sweep judge another's pool (``core.process``).
+        assert (Path(pool._spill) / cell_pool.OWNER_FILE).read_text() == owner_text()
         assert Path(pool._spill).parent == tmp_path
         assert not crashed.exists() and not old_unmarked.exists()
         assert not left_by_an_old_version.exists()
+        assert other_host.exists(), "a pool on another host was swept"
         assert live.exists() and young_unmarked.exists() and unrelated.exists()
 

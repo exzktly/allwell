@@ -45,4 +45,12 @@ def test_the_button_opens_one_storage_dialog_in_every_mode(qapp, qtbot):
     btn.click()           # a second click raises the open dialog, not a new one
     _pump(qapp)
     assert win._storage_dialog is dialog
+
+    dialog.close()        # and a click after closing shows the same one again,
+    _pump(qapp)           # surveyed afresh, rather than building another
+    btn.click()
+    _pump(qapp)
+    assert win._storage_dialog is dialog and dialog.isVisible()
+    assert len(win.findChildren(StorageDialog)) == 1
+    qtbot.waitUntil(lambda: not dialog._working, timeout=15_000)
     dialog.close()

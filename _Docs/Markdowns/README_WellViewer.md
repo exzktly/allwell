@@ -5887,9 +5887,12 @@ The dialog lists what can go, each with its size, and clears what you tick:
   behind a large Scatter or Distribution view, a Batch Export that writes no
   files) that a crash or a forced quit left behind. Any still in use is skipped.
 - **Old logs** — the crash logs kept from earlier launches and the logs of
-  setting up remote hosts. This launch's own log is kept.
-- **Files left by earlier versions** — earlier versions kept their logs and
-  font cache in `~/.cache/allwell` and their temporary files in the system temp
+  finished remote setups. This launch's own log is kept, and so is the log of a
+  remote setup that may still be running (the newest one, and any written to in
+  the last three hours).
+- **App files in other places** — earlier versions kept their logs and font
+  cache in `~/.cache/allwell`, a copy run from source kept its font cache in
+  the checkout's `.mplcache`, and temporary folders went to the system temp
   folder. Nothing reads them any more.
 - **Row cache of the open dataset** — unticked to begin with. Fast copies of the
   dataset's CSVs, kept in `.aw_parquet` folders beside them. Clearing it frees
@@ -5899,7 +5902,14 @@ The dialog lists what can go, each with its size, and clears what you tick:
 A file something is still holding open (on Windows, often an antivirus scan)
 is left in place, and the dialog says how many and which; close what holds it,
 or restart the app, and clear again. The total it reports counts only what was
-actually removed.
+actually removed. What is in use is checked again at the moment you press
+Clear, so leaving the dialog open while you work is safe; if you open another
+dataset meanwhile, Clear updates the list for it instead and asks you to press
+Clear again. A shortcut or link inside these folders is removed as a link —
+whatever it points to is never touched.
+
+On Linux, if your home folder is shared between several machines, a temporary
+folder made by the app on another machine is never cleared from this one.
 
 The dialog never touches your images, CSVs or analysis, and never an Analyze
 run's own files: a run's scratch folder (`~/.allwell/scratch`, or the *Scratch

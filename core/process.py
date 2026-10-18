@@ -6,6 +6,14 @@ the process that made them. Anything that wants to remove such a folder — the
 spill sweep at start-up, the storage button's cache clear — asks this first, so a
 folder in use by a running app is never deleted from under it.
 
+**The owner is a process on a host.** The folders live under the app's own
+folder, which on macOS and Linux is in the home folder — and a lab's Linux home
+folder is often one network share mounted on several machines. A PID means
+nothing on another host: process 12345 being absent here says nothing about
+process 12345 on the machine that wrote it. So the file holds ``<pid>@<host>``
+(:func:`owner_text`), and a folder written on another host is always treated as
+in use. A bare ``<pid>`` (no host) is read as this host's.
+
 Stdlib-only. In ``core/`` rather than ``util/`` because only the desktop app
 uses it: everything in ``util/`` is shipped to a remote worker, and this is not
 for one.
@@ -14,6 +22,7 @@ for one.
 from __future__ import annotations
 
 import os
+import socket
 
 #: The file a working folder names its owning process in.
 OWNER_FILE = "owner.pid"
@@ -45,18 +54,38 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+def _host() -> str:
+    return socket.gethostname() or "?"
+
+
+def owner_text(pid: int | None = None) -> str:
+    """What a working folder's :data:`OWNER_FILE` holds: ``<pid>@<host>``."""
+    return f"{os.getpid() if pid is None else pid}@{_host()}\n"
+
+
+def write_owner(folder) -> None:
+    """Name this process as *folder*'s owner."""
+    with open(os.path.join(os.fspath(folder), OWNER_FILE), "w", encoding="utf-8") as handle:
+        handle.write(owner_text())
+
+
 def owner_alive(folder) -> bool | None:
     """Whether *folder*'s :data:`OWNER_FILE` names a running process.
 
-    ``None`` when it has no readable owner file, so the caller applies its own
-    rule (usually an age) instead of guessing.
+    ``True`` for an owner on another host (it cannot be checked from here) and
+    for anything unreadable as ``<pid>[@<host>]``; ``None`` when there is no
+    readable owner file, so the caller applies its own rule (usually an age)
+    instead of guessing.
     """
     path = os.path.join(os.fspath(folder), OWNER_FILE)
     try:
-        with open(path, encoding="ascii") as handle:
+        with open(path, encoding="utf-8") as handle:
             text = handle.read().strip()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
-    if not text.isdigit():
+    pid, _, host = text.partition("@")
+    if not pid.isdigit():
         return True
-    return pid_alive(int(text))
+    if host and host != _host():
+        return True
+    return pid_alive(int(pid))

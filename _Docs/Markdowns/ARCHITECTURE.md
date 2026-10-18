@@ -5374,35 +5374,63 @@ The dataset's own image and CSV files are a third tier no reset touches.
 **The app's own files on this machine are a fourth thing, and not state.** Every
 file the desktop app writes outside a dataset folder lives in one folder,
 `util.state_dir.gui_state_dir()` — `%LOCALAPPDATA%\allwell` on Windows,
-`~/.allwell` on macOS and Linux — in the fixed layout that module's docstring
+`~/.allwell` on macOS and Linux, or `ALLWELL_STATE_DIR` when set (the test
+harness sets it per worker in `tests/conftest.py`, so no test writes into a
+developer's real folder) — in the fixed layout that module's docstring
 tabulates: the boot log and its crash copies, the remote-bootstrap logs,
-matplotlib's font cache (`mplcache/`), and `tmp/`, where `review/data/cell_pool`
-spills and Batch Export's no-disk run stages (`util.state_dir.gui_temp_dir`).
-Each folder in `tmp/` names its owner process in `owner.pid`
-(`core/process.py`, which also answers whether that process is alive). The
-analysis pipeline keeps its own folders and did not move with these: its
+matplotlib's font cache (`mplcache/<key>`, one subfolder per copy of the app,
+keyed on its font folder, because the cached list holds absolute font paths and
+two copies sharing one would each rebuild the other's), and `tmp/`, where
+`review/data/cell_pool` spills and Batch Export's no-disk run stages
+(`util.state_dir.gui_temp_dir`). Each folder in `tmp/` names its owner in
+`owner.pid` as `<pid>@<host>` (`core/process.py`): on Linux the home folder is
+often one network share mounted by several machines, a PID means nothing on
+another host, and an owner on another host is therefore always treated as
+running — by the cell pool's start-up sweep and by the storage dialog alike. The
+analysis pipeline keeps its own folders and is not part of this layout: its
 scratch (`~/.allwell/scratch` unless `ALLWELL_SCRATCH_DIR` says otherwise) and
 the CZI scan cache (`util.state_dir.user_state_dir()`, `~/.cache/allwell`
 first) are resolved by functions this layout leaves untouched, because they run
 on remote hosts too and a suspended run resumes from its scratch.
 
 The title bar's `hard-drive` button, beside Help and shown in every mode, opens
-`core/local_storage_view.StorageDialog` (non-modal; a second click raises the
-open one). The areas it lists, how each is measured and how each is cleared are
-`core/local_storage.py`: the font cache, the `tmp/` folders not in use, the old
-logs (never the one this launch is writing), what earlier versions left in
-`~/.cache/allwell` and the system temp folder (`util.state_dir.legacy_gui_paths`
-names those, and never `czi-scans`), and — unticked by default — the open
-dataset's `.aw_parquet` row caches (`ROW_CACHE_DIRNAME`, pinned to
-`review.data.parquet_cache.CACHE_DIRNAME` by a test, since `core/` may not
-import a pane). A `tmp/` folder whose `owner.pid` names a running process is not
-offered, nor one with no owner file younger than `UNOWNED_GRACE_S`. Measuring and
-clearing run through `core.worker_bridge.run_off_thread`. Clearing removes a
-folder file by file, so a file Windows will not delete costs only itself: it is
-named in `ClearResult.failed`, the rest of its folder still goes, and the freed
-total counts only what went. The pipeline's scratch and scan cache are never
+`core/local_storage_view.StorageDialog`. The shell keeps one per window: a click
+raises it, and a click after it was closed shows the same one with a fresh
+survey. The areas it lists, how each is measured and how each is cleared are
+`core/local_storage.py`:
+
+- the font cache;
+- the `tmp/` folders not in use — not one whose `owner.pid` names a running
+  process, nor one with no owner file younger than `UNOWNED_GRACE_S`;
+- the old logs — never the boot log this launch is writing, never the newest
+  bootstrap log, and never one written within `LIVE_LOG_GRACE_S`, because a
+  remote setup in progress holds its log open and on POSIX an unlink would
+  succeed and lose it;
+- the app's files in other places: `util.state_dir.legacy_gui_paths()` (the
+  logs and font cache in `~/.cache/allwell` — never `czi-scans` — and a source
+  checkout's `.mplcache`) and the folders in the system temp folder with a
+  prefix in `SYSTEM_TEMP_PREFIXES`;
+- unticked by default, the open dataset's `.aw_parquet` row caches, its own and
+  its `out/` folder's (`ROW_CACHE_DIRNAME`, pinned to
+  `review.data.parquet_cache.CACHE_DIRNAME` by a test, since `core/` may not
+  import a pane).
+
+Listing, measuring and clearing all run through `core.worker_bridge.run_off_thread`
+(`survey` lists and measures in one job). The dialog asks the shell which
+dataset is open at every survey and every Clear; a Clear after another dataset
+was opened clears nothing and re-surveys. Clear runs `clear_now`, which lists
+the ticked areas again at that moment, so a folder that came into use while the
+dialog stood open is spared. A link of any kind — a symbolic link, or on Windows
+a directory junction or other reparse point (`is_link` reads
+`FILE_ATTRIBUTE_REPARSE_POINT`, because `os.path.islink` misses a junction and
+`os.walk` on Python 3.10 enters one) — is never listed, never entered when
+measuring, and removed as the link itself. Folders go through `shutil.rmtree`
+with an error handler that clears a read-only flag and retries once, and
+otherwise records the path in `ClearResult.failed` (a folder left only because a
+file inside it was is not listed a second time); the freed total is the size
+before less what remains. The pipeline's scratch and scan cache are never
 listed. `tests/test_local_storage.py` holds every rule, including what must
-survive a clear.
+survive a clear, and `tests/test_storage_button_app.py` drives the real button.
 
 A scope names every storage **domain** it owns, and its `clear` is responsible
 for all of them — the live typed state and every file the value is written to,

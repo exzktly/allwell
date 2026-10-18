@@ -70,17 +70,29 @@ def _bundled_fonts() -> list[str]:
 def _cache_root() -> str:
     """Where the pinned font cache lives — and it has to survive the launch.
 
-    ``mplcache`` in the app's one local folder, the same one the boot log goes
-    to, whether the app runs from source or frozen. Not beside the code: in a
-    **frozen** build PyInstaller unpacks the bundle into ``sys._MEIPASS``, a
+    ``mplcache/<key>`` in the app's one local folder, the same one the boot log
+    goes to, whether the app runs from source or frozen. Not beside the code: in
+    a **frozen** build PyInstaller unpacks the bundle into ``sys._MEIPASS``, a
     fresh temp tree per launch, so a cache there was thrown away and rebuilt
     every single time the app started — the cost this module exists to remove —
     and a cache inside a source checkout is one more folder of the app's files
     that the storage button cannot see.
+
+    ``<key>`` names the font folder this copy of the app ships. The cached list
+    holds absolute font paths, and ``configure()`` rebuilds a list that points
+    outside its own fonts — so a source checkout and the installed app (or two
+    checkouts) sharing one folder would each rebuild the other's list on every
+    launch. A frozen build's key is stable across launches: it hashes the
+    bundle's *relative* font folder, not the per-launch ``_MEIPASS`` path.
     """
+    import hashlib
+
     from startup.boot_diag import user_state_dir
     from util.state_dir import FONT_CACHE_SUBDIR
-    return os.path.join(str(user_state_dir()), FONT_CACHE_SUBDIR)
+
+    where = "frozen" if _frozen() else _FONTS_DIR
+    key = hashlib.sha1(where.encode("utf-8")).hexdigest()[:10]
+    return os.path.join(str(user_state_dir()), FONT_CACHE_SUBDIR, key)
 
 
 def _frozen() -> bool:

@@ -120,7 +120,7 @@ def _plate_markers(app) -> set:
     return set(plate._grid._markers)
 
 
-def test_the_home_plate_repaints_when_the_focus_cut_moves(loaded_app):
+def test_the_home_plate_repaints_when_the_focus_cut_moves(qtbot, loaded_app):
     """**The defect.** ``wells_needing_review`` is a function of the cut and
     was reachable only through ``refresh_home`` — page activation, dataset
     load, and the initial build. No cut-change path called it.
@@ -134,13 +134,13 @@ def test_the_home_plate_repaints_when_the_focus_cut_moves(loaded_app):
     strength could tell a repaint from a stale paint (§7.8 rule 2).
     """
     from review.features.home.controller import refresh_home
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     app = loaded_app
     _give_the_plate_focus(app)
 
     # A cut that marks wells, established through the path that always worked.
-    set_qc_params(app._ctx, QCParams(focus_min=0.10, exclude_soft_cells=False))
+    apply_qc_params(qtbot, app._ctx, QCParams(focus_min=0.10, exclude_soft_cells=False))
     refresh_home(app._ctx)
     marked = _plate_markers(app)
     assert marked, (
@@ -148,24 +148,24 @@ def test_the_home_plate_repaints_when_the_focus_cut_moves(loaded_app):
         "cannot tell a repaint from a stale paint")
 
     # Now move it to a cut nothing is soft at, WITHOUT leaving the page.
-    set_qc_params(app._ctx, QCParams(focus_min=0.001, exclude_soft_cells=False))
+    apply_qc_params(qtbot, app._ctx, QCParams(focus_min=0.001, exclude_soft_cells=False))
 
     assert not _plate_markers(app), (
         "the plate is still marking " + ", ".join(sorted(_plate_markers(app)))
         + " against the previous cut of 0.10; nothing repainted it")
 
 
-def test_the_plate_marks_wells_again_when_the_cut_comes_back(loaded_app):
+def test_the_plate_marks_wells_again_when_the_cut_comes_back(qtbot, loaded_app):
     """The other direction, which a callback wired to run only on a clear
     would pass the test above while failing this one."""
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     app = loaded_app
     _give_the_plate_focus(app)
-    set_qc_params(app._ctx, QCParams(focus_min=0.001, exclude_soft_cells=False))
+    apply_qc_params(qtbot, app._ctx, QCParams(focus_min=0.001, exclude_soft_cells=False))
     assert not _plate_markers(app)
 
-    set_qc_params(app._ctx, QCParams(focus_min=0.10, exclude_soft_cells=False))
+    apply_qc_params(qtbot, app._ctx, QCParams(focus_min=0.10, exclude_soft_cells=False))
     assert _plate_markers(app), (
         "raising the cut marked no well, so the plate is not tracking it")
 
@@ -185,7 +185,7 @@ def _set_recorded_cut(app, value) -> None:
     app._app_state.dataset.pipeline_info = info
 
 
-def test_a_rerun_that_changes_the_cut_reaches_review(loaded_app):
+def test_a_rerun_that_changes_the_cut_reaches_review(qtbot, loaded_app):
     """**The defect.** Persistence won permanently.
 
     The `qc_params` section is written whenever *any* Cell Gating control
@@ -204,14 +204,14 @@ def test_a_rerun_that_changes_the_cut_reaches_review(loaded_app):
     what crosses the disk.
     """
     from review.persistence.qc_params import load_from_data_dir, save_to_data_dir
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     app = loaded_app
     _give_the_plate_focus(app)
     _set_recorded_cut(app, 0.08)
 
     # (2) The user touches a control that has nothing to do with focus.
-    set_qc_params(app._ctx, QCParams(enabled=True, min_area=25.0, focus_min=0.08))
+    apply_qc_params(qtbot, app._ctx, QCParams(enabled=True, min_area=25.0, focus_min=0.08))
     save_to_data_dir(app._ctx)
 
     # (3) A re-run records a different cut.
@@ -228,7 +228,7 @@ def test_a_rerun_that_changes_the_cut_reaches_review(loaded_app):
     assert app._app_state.qc.params.min_area == 25.0
 
 
-def test_a_cut_the_user_typed_survives_and_says_whose_it_is(loaded_app):
+def test_a_cut_the_user_typed_survives_and_says_whose_it_is(qtbot, loaded_app):
     """The other half, and the one a blanket "always re-seed" would break.
 
     A number the user deliberately typed is theirs and must survive a reload.
@@ -237,13 +237,13 @@ def test_a_cut_the_user_typed_survives_and_says_whose_it_is(loaded_app):
     """
     from review.data.focus_gate import recorded_cut_note
     from review.persistence.qc_params import load_from_data_dir, save_to_data_dir
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     app = loaded_app
     _give_the_plate_focus(app)
     _set_recorded_cut(app, 0.08)
 
-    set_qc_params(app._ctx, QCParams(focus_min=0.20))
+    apply_qc_params(qtbot, app._ctx, QCParams(focus_min=0.20))
     save_to_data_dir(app._ctx)
     load_from_data_dir(app._ctx)
 
@@ -255,16 +255,16 @@ def test_a_cut_the_user_typed_survives_and_says_whose_it_is(loaded_app):
         f"cannot see why Analyze disagrees with them: {note!r}")
 
 
-def test_nothing_is_said_when_the_cut_in_force_is_the_run_s(loaded_app):
+def test_nothing_is_said_when_the_cut_in_force_is_the_run_s(qtbot, loaded_app):
     """A note on every ordinary dataset would be noise, and would train the
     reader to ignore the one that matters."""
     from review.data.focus_gate import recorded_cut_note
-    from review.features.qc.controller import set_qc_params
+    from tests._panel_jobs import apply_qc_params
 
     app = loaded_app
     _give_the_plate_focus(app)
     _set_recorded_cut(app, 0.08)
-    set_qc_params(app._ctx, QCParams(focus_min=0.08))
+    apply_qc_params(qtbot, app._ctx, QCParams(focus_min=0.08))
     assert recorded_cut_note(app._ctx) == ""
 
 

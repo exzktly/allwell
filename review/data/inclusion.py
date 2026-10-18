@@ -82,7 +82,7 @@ class FrameExclusions(Mapping):
 
     @property
     def nbytes(self) -> int:
-        """What ``core/stats_cache_state.PopulationStore`` budgets against."""
+        """What ``data/population_store.PopulationStore`` budgets against."""
         held = sum(int(a.nbytes) for a in self._arrays.values())
         made = sum(len(v) for v in self._sets.values())
         return 512 + held + 64 * (len(self._arrays) + made)

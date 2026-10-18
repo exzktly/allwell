@@ -436,6 +436,12 @@ def _mfi_channel(ctx, channel) -> str:
     ).strip().lower()
 
 
+def mfi_column(ctx, channel) -> str:
+    """The intensity column :func:`review_mfi_index` reads for *channel* ('' for none)."""
+    chan = _mfi_channel(ctx, channel)
+    return f"{chan}_mean_intensity" if chan else ""
+
+
 def _mfi_rows(ctx, well: str, col: str) -> tuple | None:
     """``(fov, tp, nid, value)`` arrays for every row of *well* that names a cell.
 
@@ -494,10 +500,10 @@ def review_mfi_index(ctx, well: str, channel=None) -> Mapping[tuple[str, str], d
     (``review_norm_fov`` / ``norm_timepoint`` forms). Empty when the channel has
     no intensity column (an overlay, a ratio pseudo-channel).
     """
-    chan = _mfi_channel(ctx, channel)
-    if not chan:
+    col = mfi_column(ctx, channel)
+    if not col:
         return {}
-    rows = _mfi_rows(ctx, well, f"{chan}_mean_intensity")
+    rows = _mfi_rows(ctx, well, col)
     if rows is None:
         return {}
     fovs, tps, nids, vals = rows
@@ -552,10 +558,10 @@ def review_build_mfi_map(
     nuc+seg overlay or a ratio pseudo-channel), so callers can silently skip the
     readout. Only nuclei actually present in ``mask_arr`` are reported.
     """
-    chan = _mfi_channel(ctx, channel)
-    if not chan:
+    col = mfi_column(ctx, channel)
+    if not col:
         return {}
-    rows = _mfi_rows(ctx, well, f"{chan}_mean_intensity")
+    rows = _mfi_rows(ctx, well, col)
     if rows is None:
         return {}
     fovs, tps, nids, vals = rows

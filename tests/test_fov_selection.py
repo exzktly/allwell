@@ -355,11 +355,12 @@ def test_the_write_path_lives_in_the_controller_and_the_view_builds_only():
     from review.features.home.cell_gating import controller
     from tests._repo_scan import REPO_ROOT, parse_source
 
-    assert callable(controller.set_fov_selection)
+    assert callable(controller.apply_fov_selection_with_progress)
     tree = parse_source(REPO_ROOT / "review/features/home/cell_gating/fov_view.py")
     names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
     attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-    assert not {"set_fov_selection", "save_to_pipeline_info", "redraw_app"} & (names | attrs)
+    assert not {"apply_fov_selection_with_progress", "save_to_pipeline_info",
+                "redraw_app"} & (names | attrs)
     assert "features" not in attrs, "the view reaches a feature service"
     # And it writes no pixel literal into a layout call (CLAUDE.md §5).
     for call in ast.walk(tree):

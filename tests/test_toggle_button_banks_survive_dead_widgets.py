@@ -55,6 +55,10 @@ class _LiveButton:
     def setMinimumWidth(self, w):
         self.min_width = w
 
+    def reserve(self, labels, slack):
+        # The FOV bank holds ReservedWidthButtons only (plot_toggles.register_fov_button).
+        self.reserved = (tuple(labels), slack)
+
     def font(self):
         from PySide6.QtGui import QFont
         return QFont()

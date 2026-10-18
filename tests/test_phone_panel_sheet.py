@@ -64,7 +64,7 @@ def test_the_panel_opens_full_width_over_the_controls_and_comes_back(qtbot, phon
     index = lay.indexOf(dock)
 
     assert phone_panel_sheet.present(dock) is True
-    sheet = win._aw_phone_panel_sheet
+    sheet = phone_panel_sheet.sheet_of(win)
     assert not controls.isOpen(), "the Controls sheet must close, not cover the panel"
     assert sheet.isOpen() and dock.parentWidget() is sheet.contentWidget()
     assert dock.maximumWidth() > 360 and panel.maximumWidth() > 360
@@ -82,6 +82,22 @@ def test_leaving_phone_layout_gives_the_dock_back(qtbot, phone):
     win, lay, dock, panel, controls = _window(qtbot)
     phone_panel_sheet.present(dock)
     phone_layout.set_on(False)
-    assert not win._aw_phone_panel_sheet.isOpen()
+    assert not phone_panel_sheet.sheet_of(win).isOpen()
     assert dock.parentWidget() is win and dock.maximumWidth() == 360
     assert not dock.isVisible(), "the sheet closing is the panel closing"
+
+
+def test_the_window_holds_one_sheet_and_no_loose_attribute(qtbot, phone):
+    """The window keeps no ``_aw_*`` attribute for its sheet (CLAUDE.md §5: state
+    lives on typed objects, not loose attributes on the main window); the sheet
+    is the window's one child Drawer marked ``phonePanelSheet``, reused by every
+    later panel."""
+    win, lay, dock, panel, controls = _window(qtbot)
+    phone_panel_sheet.present(dock)
+    dock.setVisible(False)
+    phone_panel_sheet.present(dock)
+    loose = [name for name in vars(win) if name.startswith("_aw_")]
+    assert loose == [], f"the window carries loose attributes: {loose}"
+    sheets = [d for d in win.findChildren(Drawer) if d.property("phonePanelSheet")]
+    assert len(sheets) == 1, f"{len(sheets)} panel sheets on one window"
+    assert sheets[0].isOpen() and dock.parentWidget() is sheets[0].contentWidget()

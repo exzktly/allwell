@@ -174,7 +174,8 @@ def test_the_remembered_cdfs_are_bounded_by_the_population_store(monkeypatch):
     a large well — so the memo must not keep one per well ever drawn. They live
     in the byte-bounded population store, least recently used out first, which
     also retires an array keyed on a superseded ``rows_version``."""
-    from review.core.stats_cache_state import PopulationStore, StatsCacheState
+    from review.core.stats_cache_state import StatsCacheState
+    from review.data.population_store import PopulationStore
     from review.domain import stats_compute
 
     monkeypatch.setattr(stats_compute, "_cdf_rows", lambda *a: None)

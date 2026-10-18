@@ -5348,3 +5348,89 @@ def test_narrow_silent_guard_reads_process_microscopy(tmp_path, monkeypatch):
 def test_narrow_silent_guard_clears(tmp_path, monkeypatch, shape):
     exc = _run_narrow_scan(tmp_path, monkeypatch, "pipeline/good_handler.py", NARROW_SILENT_CLEAN[shape])
     assert exc is None, f"the guard fired on a legitimate {shape}: {exc}"
+
+
+# ── a state module is a dataclass container ─────────────────────────────────
+
+STATE_MACHINERY_VIOLATIONS = {
+    # The shape that shipped in review/core/stats_cache_state.py: a hand-written
+    # store class with a lock beside the dataclass.
+    "store_class": ("import threading\nfrom dataclasses import dataclass\n\n\n"
+                    "class Store:\n    def __init__(self):\n"
+                    "        self._lock = threading.RLock()\n\n\n"
+                    "@dataclass\nclass S:\n    x: int = 0\n"),
+    "env_parse": "import os\n\nBUDGET = os.environ.get('X', '')\n",
+    "function_local": "def budget():\n    from os import environ\n    return environ\n",
+    "plain_class": "class Holder:\n    pass\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(STATE_MACHINERY_VIOLATIONS))
+def test_state_module_guard_catches_machinery(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_{shape}_state.py", STATE_MACHINERY_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_state_modules_hold_no_machinery",
+                    "test_state_modules_hold_only_dataclasses_and_no_machinery", [bad])
+    assert exc is not None and f"bad_{shape}_state.py" in str(exc), shape
+
+
+def test_state_module_guard_clears_dataclasses_enums_and_other_modules(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_state.py",
+                  "from dataclasses import dataclass, field\nfrom enum import Enum\n\n\n"
+                  "class Mode(str, Enum):\n    A = 'a'\n\n\n"
+                  "@dataclass(frozen=True)\nclass S:\n    xs: list = field(default_factory=list)\n")
+    # Not a state module, so its machinery is its own business.
+    store = _write(tmp_path, "population_store.py", STATE_MACHINERY_VIOLATIONS["store_class"])
+    assert _run_scan(monkeypatch, "tests.test_state_modules_hold_no_machinery",
+                     "test_state_modules_hold_only_dataclasses_and_no_machinery",
+                     [good, store]) is None
+
+
+# ── the plot hold's reasons go through plot_hold's constants ────────────────
+
+HOLD_LITERAL_VIOLATIONS = {
+    # The two shapes that shipped (home/controller.py, core/ui_helpers.py).
+    "getattr": ('def f(ctx):\n    return getattr(getattr(ctx.state, "plot", None), '
+                '"held_for", "") == "gating"\n'),
+    "attribute": 'def f(win):\n    return win._app_state.plot.held_for == "gating"\n',
+    "accessor_reversed": 'def f(ctx, plot_hold):\n    return "loading" != plot_hold.held_for(ctx)\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(HOLD_LITERAL_VIOLATIONS))
+def test_hold_literal_guard_catches_a_bare_reason(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_hold_{shape}.py", HOLD_LITERAL_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_plot_hold_reasons_are_named",
+                    "test_no_reader_compares_the_hold_to_a_bare_reason_string", [bad])
+    assert exc is not None and f"bad_hold_{shape}.py" in str(exc), shape
+
+
+def test_fov_bank_guard_catches_a_direct_append(tmp_path, monkeypatch):
+    # The shape both registrants had: append straight onto the bank.
+    bad = _write(tmp_path, "bad_fov_bank.py",
+                 "def wire(ctx, btn):\n    ctx.runtime.fov.btns.append(btn)\n")
+    exc = _run_scan(monkeypatch, "tests.test_fov_button_bank_is_typed",
+                    "test_nothing_outside_plot_toggles_appends_to_the_fov_bank", [bad])
+    assert exc is not None and "bad_fov_bank.py" in str(exc)
+
+
+def test_fov_bank_guard_clears_the_register_call_and_other_banks(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_fov_bank.py",
+                  "def wire(ctx, btn, sem_btn):\n"
+                  "    register_fov_button(ctx, btn)\n"
+                  "    ctx.runtime.sem.btns.append(sem_btn)\n")
+    assert _run_scan(monkeypatch, "tests.test_fov_button_bank_is_typed",
+                     "test_nothing_outside_plot_toggles_appends_to_the_fov_bank",
+                     [good]) is None
+
+
+def test_hold_literal_guard_clears_the_constant_and_the_empty_default(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_hold.py",
+                  "from review.core import plot_hold\n\n\n"
+                  "def f(ctx, plot):\n"
+                  "    a = plot_hold.held_for(ctx) == plot_hold.HOLD_GATING\n"
+                  "    b = getattr(plot, 'held_for', '') == ''\n"
+                  "    c = plot.mode == 'gating'\n"
+                  "    return a, b, c\n")
+    assert _run_scan(monkeypatch, "tests.test_plot_hold_reasons_are_named",
+                     "test_no_reader_compares_the_hold_to_a_bare_reason_string",
+                     [good]) is None

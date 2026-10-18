@@ -10,11 +10,12 @@ pytestmark = pytest.mark.qt
 pd = pytest.importorskip("pandas")
 
 from review.data.data_loading import df_included_mask
-from review.features.qc.controller import get_qc_params, set_qc_params
+from review.features.qc.controller import get_qc_params
+from tests._panel_jobs import apply_qc_params
 from review.features.qc.params import QCParams
 
 
-def test_qc_gate_excludes_small_cells_via_chokepoint(loaded_app):
+def test_qc_gate_excludes_small_cells_via_chokepoint(qtbot, loaded_app):
     app = loaded_app
     well = sorted(app._app_state.dataset.well_paths)[0]
     df = app._get_rows(well)
@@ -26,7 +27,7 @@ def test_qc_gate_excludes_small_cells_via_chokepoint(loaded_app):
     incl_before = int(df_included_mask(df).sum())
     thresh = float(areas.median()) + 1.0
 
-    set_qc_params(app._ctx, QCParams(enabled=True, min_area=thresh))
+    apply_qc_params(qtbot, app._ctx, QCParams(enabled=True, min_area=thresh))
 
     df2 = app._get_rows(well)
     # Non-destructive: no rows removed.
@@ -38,9 +39,9 @@ def test_qc_gate_excludes_small_cells_via_chokepoint(loaded_app):
     assert get_qc_params(app._ctx).min_area == thresh
 
 
-def test_qc_disabled_includes_everything(loaded_app):
+def test_qc_disabled_includes_everything(qtbot, loaded_app):
     app = loaded_app
-    set_qc_params(app._ctx, QCParams(enabled=False))
+    apply_qc_params(qtbot, app._ctx, QCParams(enabled=False))
     well = sorted(app._app_state.dataset.well_paths)[0]
     df = app._get_rows(well)
     # QC_Pass all-pass when disabled → chokepoint == manual Included only.

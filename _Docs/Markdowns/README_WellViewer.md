@@ -5151,7 +5151,10 @@ channel for every well).
   (MFI)** when the cursor is over one. The MFI is read in the background, so the
   first hover over a cell may show `MFI: loading…` briefly; the readout fills in by
   itself when the value arrives, even if the cursor is resting, and only the cell
-  under the cursor is ever waited for. The readout stays put when the cursor comes
+  under the cursor is ever waited for. While Cell Gating is re-gating or
+  re-projecting the cells, a first hover shows `MFI: waiting for the cell update…`
+  and asks again on the next hover once that work has finished; a value that could
+  not be read shows `MFI: unavailable` rather than nothing. The readout stays put when the cursor comes
   to rest instead of reverting to the plain cell tooltip. Opening another dataset,
   or reloading this one, drops every remembered MFI, so the readout always quotes
   the data that is open.

@@ -20,7 +20,7 @@ def _pump(qapp, n: int = 15) -> None:
 
 def test_the_button_opens_one_storage_dialog_in_every_mode(qapp, qtbot):
     from allwell import AllWellApp
-    from core.local_storage_view import StorageDialog
+    from ui.local_storage_view import StorageDialog
 
     win = AllWellApp(None)
     qtbot.addWidget(win)

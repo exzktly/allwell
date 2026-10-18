@@ -1,6 +1,6 @@
 """What the desktop app keeps on this machine, how big it is, and clearing it.
 
-The title bar's storage button (``core/local_storage_view.py``) is built on this
+The title bar's storage button (``ui/local_storage_view.py``) is built on this
 module. It knows the app's own working files only — the folder
 :func:`util.state_dir.gui_state_dir` names, the app's files in the other places
 :func:`util.state_dir.legacy_gui_paths` and :data:`SYSTEM_TEMP_PREFIXES` cover,

@@ -779,8 +779,8 @@ allwell/
 │   ├── process.py              ← owner.pid and pid_alive(): whether the process that
 │   │                              made one of the app's working folders still runs
 │   ├── local_storage.py        ← the app's own files on this machine, as the areas the
-│   │                              storage dialog offers: listed, measured, cleared (Qt-free)
-│   ├── local_storage_view.py   ← StorageDialog, behind the title bar's hard-drive button
+│   │                              storage dialog offers: listed, measured, cleared (Qt-free;
+│   │                              its dialog is ui/local_storage_view.py)
 │   └── phone_layout.py         ← whether phone layout is on (one process-wide flag every
 │                                  pane may read) and its Qt-free rules: the phone point,
 │                                  touch sizes, type scale, phone-shaped screen, plot DPI
@@ -819,6 +819,8 @@ allwell/
 │   │                              alongside domain/well_palette.py, whose 96 rank colours
 │   │                              this module re-exports)
 │   ├── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
+│   ├── local_storage_view.py   ← StorageDialog, behind the title bar's hard-drive button: the
+│   │                              view over core/local_storage.py, split as phone layout is
 │   └── phone_shell.py          ← phone layout's Qt half: the top bar, strip and ⋯ menu, the
 │                                  Controls sheet, the switch both ways, the window fitting its
 │                                  screen, the live restyle and the rescale pass (§2, §8). Handed every pane widget it moves
@@ -5455,7 +5457,7 @@ first) are resolved by functions this layout leaves untouched, because they run
 on remote hosts too and a suspended run resumes from its scratch.
 
 The title bar's `hard-drive` button, beside Help and shown in every mode, opens
-`core/local_storage_view.StorageDialog`. The shell keeps one per window: a click
+`ui/local_storage_view.StorageDialog`. The shell keeps one per window: a click
 raises it, and a click after it was closed shows the same one with a fresh
 survey. The areas it lists, how each is measured and how each is cleared are
 `core/local_storage.py`:
@@ -17494,7 +17496,12 @@ writing into the repository.
   a non-ASCII digit costs an ordering, never a merge. The one caller that does
   decide identity with it, `review/data/fov_selection.fov_match_key`, first
   requires the whole label to match an ASCII `[0-9]` single-number pattern, so
-  `parse_fov` only ever sees labels it cannot misread.
+  `parse_fov` only ever sees labels it cannot misread. A sample variable's value
+  labels decide identity too — `review/domain/sample_variables._twin_value`
+  refuses a value that reads as the same dose as an existing one — so
+  `parse_number` and `_unit_suffix` split a label through one ASCII scanner,
+  `_split_leading_number`, and a label whose number stops on a non-ASCII digit
+  (`١`, `１`, `2²`) is opaque: compared by its label, never read as a quantity.
   `tests/test_well_token_single_parser.py` fails on any *whole-token* well
   pattern outside `util/well_token.py`. Two neighbouring shapes are deliberately
   not caught by it, because they are different operations: a **trailing**-token

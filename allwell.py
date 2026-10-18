@@ -512,7 +512,7 @@ class AllWellApp(QMainWindow):
 
         # The app's own files on this machine — logs, the font cache, temporary
         # working folders, the open dataset's row cache — measured and cleared
-        # from one dialog (core/local_storage_view.py). Outside the Review
+        # from one dialog (ui/local_storage_view.py). Outside the Review
         # cluster for the help button's reason: none of it is about the loaded
         # dataset alone, and a disk filling up is not a Review-only problem.
         self._storage_btn = IconButton("hard-drive")
@@ -1551,7 +1551,7 @@ class AllWellApp(QMainWindow):
         with a fresh survey, rather than building another beside the hidden
         one. It asks which dataset is open each time it lists or clears.
         """
-        from core.local_storage_view import StorageDialog
+        from ui.local_storage_view import StorageDialog
 
         dialog = self._storage_dialog
         if dialog is None:

@@ -191,10 +191,11 @@ def test_an_unwritable_state_dir_is_passed_over(tmp_path, monkeypatch):
     temp = tmp_path / "temp"
     temp.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("ALLWELL_STATE_DIR", raising=False)
     monkeypatch.setattr(os, "name", "posix")
     import tempfile
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(temp))
-    blocked = home / ".cache" / "allwell"
+    blocked = home / ".allwell"
     real_access = os.access
     monkeypatch.setattr(boot_diag.os, "access",
                         lambda p, mode: False if Path(p) == blocked else real_access(p, mode))

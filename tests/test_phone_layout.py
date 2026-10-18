@@ -679,20 +679,19 @@ def test_plots_get_220_points_per_row_of_axes_and_their_own_height_back(qapp):
     assert canvas.minimumHeight() == 150
 
 
-def test_a_matplotlib_toolbar_shown_in_phone_layout_is_hidden(qapp):
-    from types import SimpleNamespace
-
-    from ui.phone_shell import PhoneShell
-
+def test_a_matplotlib_toolbar_shown_in_phone_layout_is_hidden(qapp, app_sheet):
     class MplToolbar(QWidget):      # matched by class name, as the app's is
         pass
 
-    bar = MplToolbar()
+    win = _window()
+    QVBoxLayout(win)
+    shell = _shell(win)
+    bar = MplToolbar(win)
+    win.layout().addWidget(bar)
     bar.show()
-    shell = SimpleNamespace(_hide=lambda w: w.hide(), _sheet_band=None)
     phone_layout.set_on(True)
     try:
-        PhoneShell.adapt(shell, bar)
+        shell.adapt(bar)
     finally:
         phone_layout.set_on(False)
     assert bar.isHidden()
@@ -1396,3 +1395,37 @@ def test_the_text_size_buttons_follow_the_named_touch_sizes(
     for b in buttons:
         assert (b.minimumWidth(), b.minimumHeight()) == (shell.pt(61), shell.pt(50))
     assert row.layout().spacing() == shell.pt(11)
+
+
+def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
+    """``PhoneShell.adapt`` and ``_phone_relevant`` read one roster: every
+    kind ``_adapt_kind`` can name has an adapter, every adapter's kind can be
+    named, and a widget of each kind — the real classes, named the way the app
+    names them — is watched. The drift this rejects: a type taught to
+    ``adapt`` but not to the watch list is never watched, so a widget built
+    after the switch never gets its phone form, and nothing fails."""
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    from ui import phone_shell as ps
+    from widgets.control_band import ControlBand
+    from widgets.mpl_toolbar import MplToolbar
+    from widgets.stepper import Stepper
+
+    assert set(ps.PhoneShell._ADAPTERS) == set(ps.ADAPTED_KINDS)
+    for meth in ps.PhoneShell._ADAPTERS.values():
+        assert callable(getattr(ps.PhoneShell, meth, None)), meth
+    host = QWidget()
+    canvas = FigureCanvasQTAgg(Figure())
+    canvas.setParent(host)
+    row = QWidget(host)
+    row.setObjectName("AnalyzeFormRow")
+    block = QWidget(host)
+    block.setProperty("phoneControls", True)
+    block.setStacked = lambda _on: None
+    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), row, block]
+    named = {ps._adapt_kind(w) for w in widgets}
+    assert named == set(ps.ADAPTED_KINDS), named
+    assert all(ps._phone_relevant(w) for w in widgets)
+    assert ps._adapt_kind(QLabel("plain", host)) is None
+    host.deleteLater()

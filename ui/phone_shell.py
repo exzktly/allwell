@@ -462,18 +462,43 @@ def _is_phone_controls(w: QWidget) -> bool:
     return bool(w.property("phoneControls")) and hasattr(w, "setStacked")
 
 
+#: The widgets ``PhoneShell.adapt`` gives a phone form, by kind — the one
+#: roster of them. ``adapt`` dispatches on the kind :func:`_adapt_kind` names
+#: (``PhoneShell._ADAPTERS``) and :func:`_phone_relevant` watches every widget
+#: that has one, so a kind added here is both watched and adapted; a kind that
+#: ``_ADAPTERS`` lacks fails ``tests/test_phone_layout.py``.
+_KIND_BY_CLASS = {"ControlBand": "controls", "MplToolbar": "toolbar",
+                  "Stepper": "stepper"}
+_KIND_BY_OBJECT_NAME = {"AnalyzeFormRow": "form_row"}
+ADAPTED_KINDS = frozenset(
+    ("controls", *_KIND_BY_CLASS.values(), *_KIND_BY_OBJECT_NAME.values()))
+
+
+def _adapt_kind(w: QWidget) -> str | None:
+    """Which kind of phone form ``PhoneShell.adapt`` gives *w*, or ``None``
+    for a widget it leaves alone: a page's controls (a ``ControlBand`` or a
+    ``phoneControls`` block), a plot toolbar, a stepper, an Analyze form row."""
+    kind = _KIND_BY_CLASS.get(type(w).__name__)
+    if kind is not None:
+        return kind
+    if _is_phone_controls(w):
+        return "controls"
+    return _KIND_BY_OBJECT_NAME.get(w.objectName())
+
+
 def _phone_relevant(w: QWidget) -> bool:
-    """Whether phone layout adapts *w* when it is shown: a plot canvas, a
-    top-level dialog, a page's controls, a stepper, a plot toolbar, an Analyze
-    form row, or an ⓘ hint. Everything else is left alone and never watched."""
+    """Whether phone layout acts on *w* when it is shown: whatever
+    :func:`_adapt_kind` names, plus the three the event filter acts on
+    itself — a plot canvas (its DPI), a top-level dialog (its place on the
+    screen) and an ⓘ hint (a tap). Everything else is left alone and never
+    watched."""
+    if _adapt_kind(w) is not None:
+        return True
     if getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure"):
         return True
     if w.isWindow() and isinstance(w, QDialog):
         return True
-    name = type(w).__name__
-    if name in ("ControlBand", "MplToolbar", "Stepper") or _is_phone_controls(w):
-        return True
-    return w.objectName() in ("AnalyzeFormRow", "InfoHint")
+    return w.objectName() == "InfoHint"
 
 
 class _PhoneEventFilter(QObject):
@@ -988,21 +1013,31 @@ class PhoneShell(QObject):
         *on* defaults to whether phone layout is on; a restyle made inside
         phone layout passes False to take the form off for its duration."""
         on = phone_layout.is_on() if on is None else bool(on)
-        name = type(w).__name__
-        if name == "ControlBand" or _is_phone_controls(w):
-            if on and w is not self._sheet_band and self._band_managed(w):
-                self._hide(w)
-                self._refresh_soon.start()
-        elif name == "MplToolbar":
-            # Its pan and zoom are modes a mouse drag over VNC fights with;
-            # the plot is for reading on a phone, and Reset is in Controls.
-            if on:
-                self._hide(w)
-        elif name == "Stepper" and hasattr(w, "setTouchMode"):
-            if w.isTouchMode() != on:
-                w.setTouchMode(on)
-        elif w.objectName() == "AnalyzeFormRow":
-            self._stack_form_row(w, on)
+        kind = _adapt_kind(w)
+        if kind is not None:
+            getattr(self, self._ADAPTERS[kind])(w, on)
+
+    #: ``adapt``'s dispatch: one method per kind in :data:`ADAPTED_KINDS`.
+    _ADAPTERS = {"controls": "_adapt_controls", "toolbar": "_adapt_toolbar",
+                 "stepper": "_adapt_stepper", "form_row": "_stack_form_row"}
+
+    def _adapt_controls(self, w: QWidget, on: bool) -> None:
+        """A page's controls go to the Controls sheet: hidden in the page."""
+        if on and w is not self._sheet_band and self._band_managed(w):
+            self._hide(w)
+            self._refresh_soon.start()
+
+    def _adapt_toolbar(self, w: QWidget, on: bool) -> None:
+        """Its pan and zoom are modes a mouse drag over VNC fights with; the
+        plot is for reading on a phone, and Reset is in Controls."""
+        if on:
+            self._hide(w)
+
+    @staticmethod
+    def _adapt_stepper(w: QWidget, on: bool) -> None:
+        """A stepper takes its touch form (− / + beside the field)."""
+        if hasattr(w, "setTouchMode") and w.isTouchMode() != on:
+            w.setTouchMode(on)
 
     def _set_watching(self, on: bool) -> None:
         """Start or stop finding and watching the widgets phone layout adapts."""

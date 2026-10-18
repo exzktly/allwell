@@ -162,7 +162,7 @@ def test_a_per_field_aggregate_after_a_plain_one_is_the_direct_one(ctx, monkeypa
 def test_the_store_is_bounded_by_bytes():
     import numpy as np
 
-    from review.core.stats_cache_state import PopulationStore
+    from review.data.population_store import PopulationStore
 
     store = PopulationStore(budget_bytes=10_000)
     for i in range(5):

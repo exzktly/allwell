@@ -5269,3 +5269,38 @@ def test_font_size_guard_clears_a_token_and_a_docstring(tmp_path, monkeypatch):
                   'TPL = "QLabel { font-size: ${fs_small}px; }"\n')
     assert _run_scan(monkeypatch, "tests.test_font_sizes_come_from_tokens",
                      "test_no_literal_font_size_in_a_stylesheet", [good]) is None
+
+
+# ── a state module is a dataclass container ─────────────────────────────────
+
+STATE_MACHINERY_VIOLATIONS = {
+    # The shape that shipped in review/core/stats_cache_state.py: a hand-written
+    # store class with a lock beside the dataclass.
+    "store_class": ("import threading\nfrom dataclasses import dataclass\n\n\n"
+                    "class Store:\n    def __init__(self):\n"
+                    "        self._lock = threading.RLock()\n\n\n"
+                    "@dataclass\nclass S:\n    x: int = 0\n"),
+    "env_parse": "import os\n\nBUDGET = os.environ.get('X', '')\n",
+    "function_local": "def budget():\n    from os import environ\n    return environ\n",
+    "plain_class": "class Holder:\n    pass\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(STATE_MACHINERY_VIOLATIONS))
+def test_state_module_guard_catches_machinery(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_{shape}_state.py", STATE_MACHINERY_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_state_modules_hold_no_machinery",
+                    "test_state_modules_hold_only_dataclasses_and_no_machinery", [bad])
+    assert exc is not None and f"bad_{shape}_state.py" in str(exc), shape
+
+
+def test_state_module_guard_clears_dataclasses_enums_and_other_modules(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_state.py",
+                  "from dataclasses import dataclass, field\nfrom enum import Enum\n\n\n"
+                  "class Mode(str, Enum):\n    A = 'a'\n\n\n"
+                  "@dataclass(frozen=True)\nclass S:\n    xs: list = field(default_factory=list)\n")
+    # Not a state module, so its machinery is its own business.
+    store = _write(tmp_path, "population_store.py", STATE_MACHINERY_VIOLATIONS["store_class"])
+    assert _run_scan(monkeypatch, "tests.test_state_modules_hold_no_machinery",
+                     "test_state_modules_hold_only_dataclasses_and_no_machinery",
+                     [good, store]) is None

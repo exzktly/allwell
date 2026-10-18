@@ -268,7 +268,7 @@ def _lookup_context(ctx, well: str, chan: str):
         return ctx
     from review.data.narrow_rows import scratch_context, verdict_copy
     from review.features.image_browser.review_image.collect import mfi_column
-    from review.core.stats_cache_state import PopulationStore
+    from review.data.population_store import PopulationStore
 
     rows = getattr(dataset, "cache", None)
     held = rows.get(well) if rows is not None else None

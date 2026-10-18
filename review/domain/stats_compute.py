@@ -22,7 +22,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from review.core.stats_cache_state import PopulationStore
+    from review.data.population_store import PopulationStore
     from review.domain.well_population import ExtraTable, WellPopulation
 
 from review.data.data_loading import (

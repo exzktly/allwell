@@ -91,8 +91,9 @@ def cache_dir() -> "Path | None":
     """The directory the scan caches live in, or ``None`` when disabled.
 
     ``czi-scans`` inside the first usable folder of
-    :func:`util.state_dir.candidate_dirs` (``~/.cache/allwell`` first), beside
-    the boot log and the bootstrap logs. ``None`` rather than an exception when nothing is writable:
+    :func:`util.state_dir.candidate_dirs` (``~/.cache/allwell`` first) — the
+    pipeline's folder, which the desktop app's logs and caches no longer share
+    (they are in ``util.state_dir.gui_state_dir``). ``None`` rather than an exception when nothing is writable:
     a scan that cannot be remembered is a slow scan, not a failed one.
     """
     raw = os.environ.get(_OVERRIDE, "").strip()

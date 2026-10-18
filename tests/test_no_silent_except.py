@@ -15,7 +15,7 @@ positives on handlers that log, re-raise, or do real recovery work.
 import ast
 from functools import lru_cache
 from pathlib import Path
-from tests._repo_scan import parse_source, python_sources, rel
+from tests._repo_scan import parse_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REVIEW = REPO_ROOT / "review"
@@ -180,6 +180,8 @@ def _silent_sites():
     would let one exemption cover two different functions' worth of swallowing.
     A handler outside any function is reported under ``"<module>"``.
     """
+    from tests._repo_scan import python_sources, rel
+
     found = []
     for path in python_sources():
         try:
@@ -292,6 +294,10 @@ def _narrow_silent_sites_in_tree(tree, where):
 
 
 def _narrow_silent_sites():
+    # Read from `_repo_scan` at call time, as `_silent_sites` does, so a test
+    # that redirects the shared scan redirects this one too.
+    from tests._repo_scan import python_sources, rel
+
     found = []
     for path in python_sources():
         where = rel(path)

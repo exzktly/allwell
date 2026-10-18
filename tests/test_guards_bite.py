@@ -5322,9 +5322,10 @@ NARROW_SILENT_CLEAN = {
 
 def _run_narrow_scan(tmp_path, monkeypatch, rel_name: str, body: str):
     module = importlib.import_module("tests.test_no_silent_except")
+    scan = importlib.import_module("tests._repo_scan")
     path = _write(tmp_path, rel_name, body)
-    monkeypatch.setattr(module, "python_sources", lambda **kw: [path])
-    monkeypatch.setattr(module, "rel", lambda p: str(Path(p).relative_to(tmp_path)))
+    monkeypatch.setattr(scan, "python_sources", lambda **kw: [path])
+    monkeypatch.setattr(scan, "rel", lambda p: str(Path(p).relative_to(tmp_path)))
     try:
         module.test_no_silent_narrow_except_in_pipeline()
     except AssertionError as exc:

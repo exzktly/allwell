@@ -34,6 +34,7 @@ import tempfile
 from pathlib import Path
 
 from pipeline.run_report import merge_into_pipeline_info
+from util.aw_safe import swallowed
 from util.json_write import write_json_atomic
 
 #: The per-cell focus column's name, as it appears in every well CSV.
@@ -213,7 +214,7 @@ def clear_field_quality(output_dir) -> None:
             path.unlink(missing_ok=True)
         d.rmdir()
     except OSError:
-        pass
+        swallowed("the field-quality staging directory could not be removed")
 
 
 def summarize(block: dict | None) -> str:

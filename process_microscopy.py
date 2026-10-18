@@ -194,7 +194,7 @@ from pipeline.well_skip import (
 from pipeline.run_report import (
     clear_run_report,
     finalize_run_report, read_run_report_block,
-    record_well_completeness, seal_well_complete,
+    record_well_completeness, seal_well_complete, withdraw_seal,
 )
 from pipeline.completeness import record_run_check
 from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
@@ -1725,7 +1725,7 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
     except (ImportError, ValueError, OSError):
         # resource is POSIX-only; ignore on platforms / environments where
         # the bump isn't permitted.
-        pass
+        swallowed("could not raise the open-file limit")
 
     # Restore stdout/stderr before configuring logging — the worker may
     # have inherited a windowed-PyInstaller-bootloader-detached
@@ -1878,7 +1878,7 @@ def _prune_scratch_files(tmp_images: Path) -> None:
             try:
                 p.unlink()
             except OSError:
-                pass
+                swallowed("could not remove a leftover temp file from the staging dir")
 
 
 def _process_groups_in_worker(
@@ -2338,6 +2338,7 @@ def process_well_zip_task(
                 measured_of=groups_in_input if incremental else None)
             if _suspended_before_any_group(well_label, records, failed):
                 return [], []
+            withdraw_seal(output_dir, well_label)    # before the CSV / out.zip rewrite; raises if it cannot
 
             # The extracted inputs are dead weight from here on, and what
             # follows — building <well>_out.zip beside a staging dir that still
@@ -2539,6 +2540,7 @@ def process_well_folder_task(
                 measured_of=groups_in_input if incremental else None)
             if _suspended_before_any_group(well_label, records, failed):
                 return [], []
+            withdraw_seal(output_dir, well_label)    # before the CSV / out.zip rewrite; raises if it cannot
 
             if incremental:
                 # Merge new rows / images into the existing well outputs.

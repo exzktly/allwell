@@ -135,7 +135,7 @@ def _purge_stardist_cache() -> list[str]:
                     t.unlink()
                 removed.append(key)
             except OSError:
-                pass
+                swallowed("could not remove a stale StarDist cache entry")
     return removed
 
 
@@ -221,7 +221,7 @@ def _stardist_download_lock(timeout: float | None = None):
             try:
                 (lockdir / f"pid.{os.getpid()}").touch()
             except OSError:
-                pass
+                swallowed("could not record this worker's pid in the StarDist download lock")
             break
         except FileExistsError:
             # Reclaim immediately if the holder is dead (PID gone) — the leaked-

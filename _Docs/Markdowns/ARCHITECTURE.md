@@ -839,7 +839,7 @@ allwell/
 ├── services/                    ← Analyze-side service modules
 ├── assets/                      ← runtime resources: fonts/ (Inter, JetBrains Mono) + icons/ (SVG)
 ├── profiles/                    ← build profiles — the feature subsets ALLWELL_PROFILE selects
-├── scripts/                     ← build_executable.sh / .ps1, preflight.sh, dev helpers
+├── scripts/                     ← build_executable.sh / .ps1, preflight.sh (+ version_delta.py), dev helpers
 ├── _Docs/                       ← everything that is not source
 │   ├── Markdowns/              ← live docs (this file, README_WellViewer.md, the roadmap)
 │   ├── _Installation/          ← the PyInstaller spec, its hooks, the build scripts
@@ -10748,14 +10748,19 @@ parent process supervises the per-well worker pool:
   of wells that had new data. That is the reason the completeness *record*
   below is a separate thing rather than a reading of this one. The one durable
   per-well trace of it is the **completion seal**, `<out>/.aw_complete/<WELL>.json`:
-  `write_well_report` withdraws a well's seal before the well's CSV and archive
-  are rewritten, and `seal_well_complete` — called beside `record_well_settings`
+  `run_report.withdraw_seal` removes a well's seal in each of the three well
+  paths immediately before the well's CSV and archive are rewritten (and
+  `write_well_report` calls it again). A seal that cannot be removed is logged
+  and raised as `SealNotWithdrawnError`, which fails that well before it writes
+  anything, so its earlier output and seal stay consistent instead of the old
+  seal standing over a rewrite that may die part way. `seal_well_complete` — called beside `record_well_settings`
   in all three well paths, after both artefacts are on disk — writes it back only
   when the record just written says the output covers the whole input (no group
   failed, skipped or missing). Never cleared by a run, it is what a later remote
   resume reads before it adopts a well left on the host
   (`services/remote_batch_resume.py`); `tests/test_a_part_way_well_is_not_sealed.py`
-  drives `main` through a whole well, a part-way one and its resume. Without this,
+  drives `main` through a whole well, a part-way one, its resume, and a seal that
+  cannot be withdrawn. Without this,
   per-field statistics
   silently described whatever fields survived and the first visible symptom was
   an absent error bar several layers from the cause. The per-FOV tracebacks in
@@ -16662,7 +16667,15 @@ well, for anyone who can fetch it.
 working-tree check in one pass (`--quick` skips the fast lane). The tree check is
 the non-obvious one: it fails on *untracked* files, because a hand-run job's
 scratch output is what `git add -A` sweeps into a commit — that is how a sweep's
-JUnit reports once reached `main`.
+JUnit reports once reached `main`. Last, it compares `version.py` against
+`origin/main` and fails unless the net move is exactly one increment: none fails
+as surely as two, because a bump that collided with a PR merged first leaves the
+branch at the number `main` already ships. The verdict is
+`scripts/version_delta.py`, tested by `tests/test_version_delta.py`, which also
+runs the real script in a throwaway repository. On a stacked branch the
+comparison against `origin/main` counts the bump of the branch below as well and
+reports more than one; that is the comparison's limit, and the stacked number is
+left as it is (CLAUDE.md §6).
 
 **No test may reach a modal dialog.** An `autouse` fixture in `conftest.py`
 replaces every `QMessageBox` / `QInputDialog` / `QFileDialog` / `QColorDialog` /
@@ -17417,19 +17430,27 @@ writing into the repository.
   `aw_safe.swallow(...)` / `swallowed(...)` (pipeline / `services` / `widgets`,
   none of which may import `review`) so a suppressed failure still leaves a
   DEBUG breadcrumb. Enforced by `tests/test_no_silent_except.py`, which names
-  `review/`, `widgets/`, `datasets/` and the pipeline modules one area at a
-  time — each with the helper that area may use — and then runs the rule over
-  **everything `tests/_repo_scan.py` calls application code**, root modules and
-  `scripts/` included. The area tests were the whole surface until that last one
-  landed, and between them they left exactly the files the remaining handlers
-  were in. (Two near-identical helpers exist on purpose: the pipeline must not
-  import `review` — see §6.2.) The handful of sites where swallowing is
+  `review/`, `widgets/`, `datasets/` and the pipeline side (`services/`, every
+  module under `pipeline/` — derived from the package, not listed — and
+  `process_microscopy.py`) one area at a time, each with the helper that area
+  may use, and also runs the rule over **everything `tests/_repo_scan.py` calls
+  application code**, root modules and `scripts/` included. (Two near-identical
+  helpers exist on purpose: the pipeline must not import `review` — see §6.2.)
+  On the pipeline side (`pipeline/` and `process_microscopy.py`) the rule also
+  covers **narrow** handlers: an `except OSError:` whose whole body is `pass` is
+  as silent as a broad one, and it is the shape that hid a completion seal that
+  could not be withdrawn (`run_report.withdraw_seal`). A `continue` that skips
+  one item of a loop is not flagged. The handful of sites where swallowing is
   correct are allowlisted by *file and function*, never by file, so an exemption
   cannot cover the next handler added beside it; a liveness test fails when an
-  entry stops naming a real handler. Those sites are the crash reporter in
-  `startup/boot_diag.py` — where an escaping exception loses the crash report, the one
-  artifact that makes a native crash diagnosable — matplotlib's font-cache
-  rebuild, and `remote_bootstrap._quietly`'s own last-resort note to stderr.
+  entry stops naming a real handler. The broad-handler sites are the crash
+  reporter in `startup/boot_diag.py` — where an escaping exception loses the
+  crash report, the one artifact that makes a native crash diagnosable — and
+  `remote_bootstrap._quietly`'s own last-resort note to stderr; the narrow ones
+  are the suspend signal handler (`pipeline/suspend.py::_handle`, where logging
+  could deadlock on a lock the interrupted frame holds) and
+  `pipeline/io.py::_salvage_cut_csv`, whose exception marks where a cut-short
+  CSV ends.
 - **Never hardcode colours.** Use `ui.theme.Colors.*` or QSS object names.
 - **Never block the UI thread.** Heavy operations spawn workers (see
   `review/features/smfish/worker.py` and the `services.pipeline_runner`
@@ -17571,7 +17592,7 @@ The map (each rule links to the test that holds it):
 | Every analysis domain reaches the provenance log — each `ANALYSIS_SCOPES` storage domain has a stored location in `review/persistence/provenance.STORED_AT` or a written reason in `RECORDED_UNDER`, and neither names a domain that is not analysis state (§5.7) | `tests/test_review_provenance.py::test_every_analysis_domain_reaches_the_log`, with `::test_the_roster_guard_bites` |
 | One definition of where a remote run lives — no module builds `{remote_staging_dir}/runs/{run_id}` from a literal outside `remote_run_dir` / `remote_run_paths`. It was spelled nine times across three classes while the dataset address beside it had one definition, and the half-sweeps that produced left a re-attaching run's own directory uncreated. | `tests/test_one_definition_of_the_run_dir.py`, with its bite cases in `tests/test_guards_bite.py`. Matched on the literal's static text, so the spelling of the run-id expression cannot dodge it, and on the *position* of a bare `"runs"` segment for the two builders that never write a separator — `posixpath.join(staging, "runs", run_id)` and `PurePosixPath(staging) / "runs" / run_id`. Reading only f-strings left `%`, `.format` and `+` concatenation as ways around the rule. Scanned through `tests/_repo_scan.py` — the first version read one hardcoded file and went vacuous the moment an extraction moved code out of it — and it fails when it cannot find the funnel at all, rather than passing with nothing to compare against. |
 | `domain/` & `data/` never import `features/` (the layering) | `tests/test_layering.py` |
-| No silent broad-except anywhere (§15) — the four area tests, plus one over the whole `_repo_scan` surface (root modules and `scripts/` included) with a per-site, file-and-function allowlist and a liveness test | `tests/test_no_silent_except.py` |
+| No silent broad-except anywhere (§15) — the four area tests, plus one over the whole `_repo_scan` surface (root modules and `scripts/` included) with a per-site, file-and-function allowlist and a liveness test; on the pipeline side no silent narrow `except X: pass` either, with its own allowlist and liveness test | `tests/test_no_silent_except.py` |
 | Nothing deletes a directory it only partly archived. Every path that turns a `<well>/` into `<well>.zip` packs an extension-filtered subset, so removing the folder destroyed the companion XML, acquisition logs and mask subdirectories the filter skipped. Archive-writing is followed one call deep within a module, because the two worst sites zipped through a one-line helper and a guard matching only a literal `atomic_zip` found two of the four (§6.5) | `tests/test_no_unarchived_delete.py`, with its bite cases in `tests/test_guards_bite.py` |
 | Every figure registered as `_*_fig` has a `_FIG_PREF_KEY_MAP` entry, so its axis and mark prefs key on a stable name rather than on `id(fig)` and survive a reload (§5.8) | `tests/test_figure_pref_keys.py`, with bite cases in `tests/test_guards_bite.py` |
 | A function that returns a value on one path and an explicit `None` on another declares it. Without the annotation a caller cannot tell "no value" from "computed zero" by signature, which is the conflation behind this codebase's silently-wrong numbers | `tests/test_optional_returns_declared.py`, with bite cases in `tests/test_guards_bite.py` |

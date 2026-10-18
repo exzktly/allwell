@@ -40,7 +40,7 @@ import imageio.v3 as iio
 from tifffile import imread, imwrite
 from skimage.segmentation import find_boundaries
 
-from util.aw_safe import swallow
+from util.aw_safe import swallow, swallowed
 from util.retry_io import retry_io
 from util.image_exts import GROUP_IMAGE_EXTS
 from util.zip_write import atomic_zip, fsync_path, staging_path
@@ -224,7 +224,7 @@ def remove_directory(path: Path, *, retries: int = 4, backoff: float = 0.5) -> N
                 func(target)
                 return
             except OSError:
-                pass
+                swallowed("chmod-and-retry failed; re-raising the original rmtree error")
         if exc is not None:
             raise exc
         raise OSError(f"unknown rmtree error on {target!r}")
@@ -450,7 +450,7 @@ def _safe_imwrite(out_path: Path | str, data: np.ndarray) -> None:
             if tmp.exists():
                 tmp.unlink()
         except OSError:
-            pass
+            swallowed("could not remove a staged temp file")
 
     for attempt in range(_WRITE_MAX_ATTEMPTS):
         try:
@@ -537,7 +537,7 @@ class _AtomicTextHandle:
                     except OSError:
                         # fsync isn't supported on every filesystem; the replace
                         # below is still atomic without it.
-                        pass
+                        swallowed("fsync unsupported here; the replace still orders the write")
                 finally:
                     try:
                         self._fh.close()
@@ -553,7 +553,7 @@ class _AtomicTextHandle:
                 if self._tmp.exists():
                     self._tmp.unlink()
             except OSError:
-                pass
+                swallowed("could not remove the staged CSV temp file")
             if exc_type is not None:
                 return False        # propagate the caller's original exception
             raise close_exc         # our own failure — surface it to the retry
@@ -904,7 +904,7 @@ def _compress_images_to_zip(image_dir: Path, out_zip: Path) -> list[Path]:
             if tmp_zip.exists():
                 tmp_zip.unlink()
         except OSError:
-            pass
+            swallowed("could not remove a staged temp archive")
 
     def _build() -> None:
         try:
@@ -1255,7 +1255,7 @@ def merge_images_into_zip(out_zip: Path | str, image_dir: Path | str) -> int:
             if tmp_zip.exists():
                 tmp_zip.unlink()
         except OSError:
-            pass
+            swallowed("could not remove a staged temp archive")
 
     def _build() -> None:
         try:

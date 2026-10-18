@@ -15,7 +15,7 @@ positives on handlers that log, re-raise, or do real recovery work.
 import ast
 from functools import lru_cache
 from pathlib import Path
-from tests._repo_scan import parse_source
+from tests._repo_scan import parse_source, python_sources, rel
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REVIEW = REPO_ROOT / "review"
@@ -37,23 +37,13 @@ WIDGETS = REPO_ROOT / "widgets"
 DATASETS = REPO_ROOT / "datasets"
 
 # Pipeline / services side (Qt-free; uses aw_safe.swallowed instead of
-# core.safe). Guarded so these don't silently regress either.
-PIPELINE_DIRS = [REPO_ROOT / "services"]
-PIPELINE_FILES = [
-    REPO_ROOT / "process_microscopy.py",
-    REPO_ROOT / "pipeline/background.py",
-    REPO_ROOT / "pipeline/cellpose.py",
-    REPO_ROOT / "pipeline/stardist.py",
-    REPO_ROOT / "pipeline/io.py",
-    # Code-review G4: close the coverage gap — these Qt-free pipeline modules
-    # were audited and are currently free of broad silent-pass handlers, so
-    # guard them too. (Extending the check to tuple/typed ``pass`` and broad
-    # ``return None`` needs a frozen offender baseline first — G4's remaining
-    # scope.)
-    REPO_ROOT / "pipeline/auto_threshold.py",
-    REPO_ROOT / "pipeline/flatfield.py",
-    REPO_ROOT / "pipeline/shape_features.py",
-]
+# core.safe). Guarded so these don't silently regress either. The pipeline's
+# files are derived from the package rather than listed: a hand list here once
+# named eight modules and omitted `pipeline/run_report.py` and
+# `pipeline/fov_checkpoint.py`, the two that hold the completion seal and the
+# per-FOV checkpoints a resume trusts.
+PIPELINE_DIRS = [REPO_ROOT / "services", REPO_ROOT / "pipeline"]
+PIPELINE_FILES = [REPO_ROOT / "process_microscopy.py"]
 
 
 def _is_broad(handler: ast.ExceptHandler) -> bool:
@@ -190,8 +180,6 @@ def _silent_sites():
     would let one exemption cover two different functions' worth of swallowing.
     A handler outside any function is reported under ``"<module>"``.
     """
-    from tests._repo_scan import python_sources, rel
-
     found = []
     for path in python_sources():
         try:
@@ -249,4 +237,87 @@ def test_silent_except_allowlist_is_live():
     assert not stale, (
         "These allowlist entries no longer name a silent broad-except handler "
         "— delete them:\n  " + "\n  ".join(f"{file}::{func}" for file, func in stale)
+    )
+
+
+# ── narrow handlers on the pipeline side ─────────────────────────────────────
+#
+# The rules above flag only a *broad* handler. A narrow one — `except OSError:
+# pass` — is just as silent, and on the pipeline side it is where the costly
+# failures live: `pipeline/run_report.py::_unseal` withdrew a well's completion
+# seal inside `except OSError: pass`, so a seal that could not be removed stood
+# over a rewrite and a remote resume adopted the partial output as a finished
+# well. On the pipeline side (`pipeline/` and `process_microscopy.py`, the code
+# the remote worker runs), a handler whose whole body is `pass` must leave a
+# breadcrumb (`util.aw_safe.swallowed`) or be exempted here with its reason.
+#
+# `continue` is not flagged: inside a loop it is a decision to skip one item
+# (an unreadable file, a label that is not a number), which is visible in what
+# the loop then returns. `pass` is the shape that does nothing at all.
+
+#: ``(file, innermost function)`` -> why a narrow silent handler is right there.
+NARROW_SILENT_ALLOWLIST = {
+    ("pipeline/suspend.py", "_handle"):
+        "a signal handler: logging from it can deadlock on the logging lock held by the frame the signal "
+        "interrupted, and restoring the previous handler is all it does",
+    ("pipeline/io.py", "_salvage_cut_csv"):
+        "the exception is the expected outcome, not a failure: it marks where a cut-short CSV ends, and the "
+        "caller writes the shortfall to errors/ and the log (`_merge_onto_cut_csv`)",
+}
+
+
+def _pipeline_area(where: str) -> bool:
+    return where.startswith("pipeline/") or where == "process_microscopy.py"
+
+
+@lru_cache(maxsize=1024)
+def _narrow_silent_sites_in_tree(tree, where):
+    found = []
+    stack = []
+
+    def visit(node):
+        is_fn = isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        if is_fn:
+            stack.append(node.name)
+        if (isinstance(node, ast.ExceptHandler) and not _is_broad(node)
+                and len(node.body) == 1 and isinstance(node.body[0], ast.Pass)):
+            found.append((where, stack[-1] if stack else "<module>", node.body[0].lineno))
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+        if is_fn:
+            stack.pop()
+
+    visit(tree)
+    return tuple(found)
+
+
+def _narrow_silent_sites():
+    found = []
+    for path in python_sources():
+        where = rel(path)
+        if not _pipeline_area(where):
+            continue
+        found.extend(_narrow_silent_sites_in_tree(parse_source(path), where))
+    return found
+
+
+def test_no_silent_narrow_except_in_pipeline():
+    offenders = [
+        f"{file}:{line} (in {func})"
+        for file, func, line in _narrow_silent_sites()
+        if (file, func) not in NARROW_SILENT_ALLOWLIST
+    ]
+    assert not offenders, (
+        "Silent narrow-except handler(s) on the pipeline side. Log the swallow with "
+        "util.aw_safe.swallowed('why'), handle the failure, or exempt the site in "
+        "NARROW_SILENT_ALLOWLIST with its reason:\n  " + "\n  ".join(sorted(offenders))
+    )
+
+
+def test_narrow_silent_allowlist_is_live():
+    real = {(file, func) for file, func, _line in _narrow_silent_sites()}
+    stale = sorted(set(NARROW_SILENT_ALLOWLIST) - real)
+    assert not stale, (
+        "These narrow-handler exemptions no longer name a silent handler — delete them:\n  "
+        + "\n  ".join(f"{file}::{func}" for file, func in stale)
     )

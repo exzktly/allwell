@@ -5269,3 +5269,81 @@ def test_font_size_guard_clears_a_token_and_a_docstring(tmp_path, monkeypatch):
                   'TPL = "QLabel { font-size: ${fs_small}px; }"\n')
     assert _run_scan(monkeypatch, "tests.test_font_sizes_come_from_tokens",
                      "test_no_literal_font_size_in_a_stylesheet", [good]) is None
+
+
+# ── narrow silent handlers on the pipeline side ──────────────────────────────
+#
+# `pipeline/run_report.py::_unseal` withdrew a well's completion seal inside
+# `except OSError: pass`. The silent-except guard flagged only broad handlers,
+# so a seal that could not be removed went unrecorded and a remote resume
+# adopted the partial output under it as a finished well.
+
+NARROW_SILENT_VIOLATIONS = {
+    # The shape that shipped.
+    "oserror-pass": (
+        "def _unseal(p):\n"
+        "    try:\n"
+        "        p.unlink(missing_ok=True)\n"
+        "    except OSError:\n"
+        "        pass\n"
+    ),
+    # A tuple of specific types is still a handler that does nothing.
+    "tuple-pass": (
+        "def f(p):\n"
+        "    try:\n"
+        "        p.unlink()\n"
+        "    except (OSError, ValueError):\n"
+        "        pass\n"
+    ),
+}
+
+NARROW_SILENT_CLEAN = {
+    "swallowed": (
+        "from util.aw_safe import swallowed\n"
+        "def f(p):\n"
+        "    try:\n"
+        "        p.unlink()\n"
+        "    except OSError:\n"
+        "        swallowed('note')\n"
+    ),
+    # Skipping one item of a loop is a decision the loop's result shows.
+    "continue-in-a-loop": (
+        "def f(paths):\n"
+        "    out = []\n"
+        "    for p in paths:\n"
+        "        try:\n"
+        "            out.append(p.read_text())\n"
+        "        except OSError:\n"
+        "            continue\n"
+        "    return out\n"
+    ),
+}
+
+
+def _run_narrow_scan(tmp_path, monkeypatch, rel_name: str, body: str):
+    module = importlib.import_module("tests.test_no_silent_except")
+    path = _write(tmp_path, rel_name, body)
+    monkeypatch.setattr(module, "python_sources", lambda **kw: [path])
+    monkeypatch.setattr(module, "rel", lambda p: str(Path(p).relative_to(tmp_path)))
+    try:
+        module.test_no_silent_narrow_except_in_pipeline()
+    except AssertionError as exc:
+        return exc
+    return None
+
+
+@pytest.mark.parametrize("shape", sorted(NARROW_SILENT_VIOLATIONS))
+def test_narrow_silent_guard_catches_a_pipeline_handler(tmp_path, monkeypatch, shape):
+    exc = _run_narrow_scan(tmp_path, monkeypatch, "pipeline/bad_handler.py", NARROW_SILENT_VIOLATIONS[shape])
+    assert exc is not None and "pipeline/bad_handler.py" in str(exc), f"the {shape} handler walked past the guard"
+
+
+def test_narrow_silent_guard_reads_process_microscopy(tmp_path, monkeypatch):
+    exc = _run_narrow_scan(tmp_path, monkeypatch, "process_microscopy.py", NARROW_SILENT_VIOLATIONS["oserror-pass"])
+    assert exc is not None and "process_microscopy.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", sorted(NARROW_SILENT_CLEAN))
+def test_narrow_silent_guard_clears(tmp_path, monkeypatch, shape):
+    exc = _run_narrow_scan(tmp_path, monkeypatch, "pipeline/good_handler.py", NARROW_SILENT_CLEAN[shape])
+    assert exc is None, f"the guard fired on a legitimate {shape}: {exc}"

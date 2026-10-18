@@ -108,10 +108,17 @@ if [[ -n "$modified" ]]; then
 fi
 
 step "version bump"
-# CLAUDE.md §6: one bump per pull request, not one per commit. The failure this
-# catches is not forgetting the rule — it is holding a mental model of two
-# pull requests while the branch carries one, which is what happens when a
-# second body of planned work stacks onto a branch whose PR is still open.
+# CLAUDE.md §6: exactly one bump per pull request — not one per commit, and
+# not none. More than one comes from holding a mental model of two pull
+# requests while the branch carries one (a second body of work stacked onto a
+# branch whose PR is still open). None comes from a bump that collided with a
+# PR merged first, or from forgetting it. The verdict is decided by
+# scripts/version_delta.py, which tests/test_version_delta.py covers.
+#
+# A stacked branch measured against origin/main reports more than one
+# increment when the branch below carries its own bump. That is a property of
+# this comparison, not of the branch: do not "correct" the stacked number to
+# satisfy it (CLAUDE.md §6).
 base_ref="origin/main"
 if ! git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
     echo "   skipped ($base_ref not fetched)"
@@ -123,30 +130,11 @@ else
     # The *net* delta is the rule, not how many commits touched the file: a
     # branch that bumps, over-bumps and then corrects is fine, and that is
     # exactly the history this check was written from.
-    verdict=$(python - "$base_version" "$head_version" <<'PY_VER'
-import sys
-
-def parse(v):
-    try:
-        return tuple(int(x) for x in v.split("."))
-    except ValueError:
-        return None
-
-base, head = parse(sys.argv[1]), parse(sys.argv[2])
-if base is None or head is None or len(base) != 3 or len(head) != 3:
-    print("UNREADABLE"); raise SystemExit
-if head == base:
-    print("SAME"); raise SystemExit
-ok = (
-    head == (base[0], base[1], base[2] + 1)
-    or head == (base[0], base[1] + 1, 0)
-    or head == (base[0] + 1, 0, 0)
-)
-print("ONE" if ok else "MANY")
-PY_VER
-)
+    verdict=$(python scripts/version_delta.py "$base_version" "$head_version")
     case "$verdict" in
-        SAME)  echo "   unchanged from $base_ref ($base_version)" ;;
+        SAME)  fail "version.py is unchanged from $base_ref ($base_version). Every pull \
+request bumps the version once (CLAUDE.md §6) — patch for fixes, docs and tooling. \
+When another branch's merge took the number this branch bumped to, bump again" ;;
         ONE)   echo "   $base_version → $head_version, one increment (in $bump_commits commit(s))" ;;
         UNREADABLE) echo "   could not read a version on one side; skipped" ;;
         *)     git log --oneline "$base_ref..HEAD" -- version.py | sed 's/^/     /'

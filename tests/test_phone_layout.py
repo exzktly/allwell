@@ -1229,3 +1229,55 @@ def test_a_rail_section_glyph_is_measured_off_the_font_it_is_drawn_in(
     row._aw_rescale()
     assert row._glyph_px == built
     assert row._glyph.maximumWidth() == built
+
+
+def test_a_close_confirmation_that_could_not_be_asked_keeps_the_window_open(
+        monkeypatch):
+    """ARCHITECTURE §15: a confirmation that could not be obtained is not
+    consent. Offscreen, the autouse ``_no_modal_dialogs`` makes
+    ``QMessageBox.question`` raise — the dialog-unavailable case. The close
+    must be refused (event ignored, no exception out of ``closeEvent``) and
+    nothing that a close tears down may run: the run keeps going and the
+    window stays whole, rather than leaving a closed window with the run
+    stopped by nobody and Review never torn down.
+
+    The wrong implementation this rejects is the bare ask: the exception
+    escapes ``closeEvent`` with the event still accepted, so Qt closes the
+    window having skipped every teardown step below the question.
+    """
+    import types
+
+    import allwell
+    from PySide6.QtGui import QCloseEvent
+
+    phone_layout.set_on(True)
+    monkeypatch.setattr(allwell, "_analyze_run_busy", lambda _a: True)
+    torn = []
+    monkeypatch.setattr(allwell, "_stop_analyze_runner",
+                        lambda _a: torn.append("stop_analyze_runner"))
+    monkeypatch.setattr(allwell, "_save_review_before_close",
+                        lambda _r: torn.append("save_review"))
+    win = types.SimpleNamespace(_analyze=object(), _review=None,
+                                _datasets=None)
+    win._confirm_close_in_phone_layout = (
+        lambda: allwell.AllWellApp._confirm_close_in_phone_layout(win))
+    win._save_window_state = lambda: torn.append("save_window_state")
+
+    ev = QCloseEvent()
+    ev.accept()
+    try:
+        allwell.AllWellApp.closeEvent(win, ev)
+    except AssertionError as e:   # ModalDialogInTest is an AssertionError
+        raise AssertionError(
+            "a close confirmation that raised escaped closeEvent with the "
+            f"event accepted, so the window closes without consent: {e}") from e
+    assert not ev.isAccepted(), "an unanswerable close question closed the window"
+    assert torn == [], f"a refused close still ran teardown: {torn}"
+    # And the answer the user does give still decides it.
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: QMessageBox.Close)
+    assert allwell.AllWellApp._confirm_close_in_phone_layout(win) is True
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: QMessageBox.Cancel)
+    assert allwell.AllWellApp._confirm_close_in_phone_layout(win) is False

@@ -1966,16 +1966,28 @@ class AllWellApp(QMainWindow):
         that is a deliberate act; on a phone the window's close button is a
         corner of a maximized window under the thumb, and watching a run is
         what the phone is there for. Desktop layout keeps its behaviour.
+
+        A question that could not be asked is not consent (ARCHITECTURE §15):
+        if the dialog raises, the answer is "no" and the window stays open
+        with the run going. Letting the exception out would leave Qt's close
+        event accepted, closing the window having skipped every teardown step
+        ``closeEvent`` runs after this question.
         """
         from core import phone_layout
         if not phone_layout.is_on() or not _analyze_run_busy(self._analyze):
             return True
         from PySide6.QtWidgets import QMessageBox
-        answer = QMessageBox.question(
-            self, "Stop the running analysis?",
-            "An analysis is running. Closing All-Well stops it.\n\n"
-            "Close anyway?",
-            QMessageBox.Close | QMessageBox.Cancel, QMessageBox.Cancel)
+        try:
+            answer = QMessageBox.question(
+                self, "Stop the running analysis?",
+                "An analysis is running. Closing All-Well stops it.\n\n"
+                "Close anyway?",
+                QMessageBox.Close | QMessageBox.Cancel, QMessageBox.Cancel)
+        except Exception:
+            swallowed("phone layout: the close confirmation could not be "
+                      "asked; keeping the window open",
+                      level=logging.WARNING)
+            return False
         return answer == QMessageBox.Close
 
     def _qsettings(self):

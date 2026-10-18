@@ -49,33 +49,6 @@ def fit_cell_px(avail_w: int, n_cols: int, *, label_w: int, per_col_px: int,
     return max(MIN_CELL_PX, int(room / n * float(zoom or 1.0)))
 
 
-def _label_width(plan, ui_scale: float) -> int:
-    """The width the row-label columns of *plan* take on screen, measured with
-    the fonts ``facet_view`` draws them in."""
-    from PySide6.QtGui import QFont, QFontMetrics
-
-    def metrics(px: int) -> QFontMetrics:
-        f = QFont()
-        f.setPixelSize(max(1, round(px * ui_scale)))
-        return QFontMetrics(f)
-
-    inner, group = metrics(plan.label_pt), metrics(plan.group_pt)
-    widths: dict[int, int] = {}
-    for text, _gr, gc, _rs, _cs, is_group in plan.left:
-        if not text:
-            continue
-        # A group label is drawn vertically (``facet_view._VLabel``), so its
-        # width is a line height plus the band's padding.
-        w = group.height() + 16 if is_group else inner.horizontalAdvance(text) + 8
-        widths[gc] = max(widths.get(gc, 0), w)
-    # The corner ("T:0h · FOV:F001", the values held fixed) sits over the label
-    # columns, so they are at least as wide as it is.
-    corner = 0
-    if plan.corner:
-        corner = metrics(max(8, plan.label_pt - 1)).horizontalAdvance(plan.corner) + 8
-    return max(sum(widths.values()), corner)
-
-
 def phone_cell_px(ctx, cells, plan, zoom: float, grid) -> int | None:
     """The fitted cell size for the grid in phone layout, or ``None`` at the
     desk (and wherever the page's width cannot be read), which keeps the desk's
@@ -84,7 +57,7 @@ def phone_cell_px(ctx, cells, plan, zoom: float, grid) -> int | None:
         return None
     from PySide6.QtWidgets import QScrollArea
 
-    from ui import theme
+    from review.features.image_browser.image_table import facet_view
     host = grid.parentWidget()
     scroll = host
     while scroll is not None and not isinstance(scroll, QScrollArea):
@@ -102,11 +75,14 @@ def phone_cell_px(ctx, cells, plan, zoom: float, grid) -> int | None:
     bar = scroll.verticalScrollBar()
     if not bar.isVisible():
         avail -= bar.sizeHint().width()
-    label_w = _label_width(plan, theme.ui_scale()) if plan is not None else 0
-    spacer_w = (len(plan.spacer_cols) * plan.col_gap) if plan is not None else 0
-    # Each cell widget has 2 px margins either side (controller._render_cell's
-    # host), and the grid spends its spacing once per column.
-    per_col = max(0, grid.spacing()) + 4
+    # Every grid column — label, spacer or cell — spends the grid's spacing
+    # once. The label columns are measured off the labels ``facet_view``
+    # builds; each cell spends its host's margin on either side.
+    spacing = max(0, grid.horizontalSpacing())
+    label_w = facet_view.label_columns_width(plan, spacing) if plan is not None else 0
+    spacer_w = (len(plan.spacer_cols) * (plan.col_gap + spacing)
+                if plan is not None else 0)
+    per_col = spacing + 2 * facet_view.CELL_MARGIN_PX
     return fit_cell_px(avail, len(cells[0]), label_w=label_w, per_col_px=per_col,
                        spacer_w=spacer_w, zoom=zoom)
 

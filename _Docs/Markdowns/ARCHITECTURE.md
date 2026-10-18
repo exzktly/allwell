@@ -337,10 +337,16 @@ facet gaps and each column's spacing leave between the columns, and the zoom
 multiplies that, so 100 % fills the screen and zooming in scrolls sideways (the
 page's vertical scrollbar is reserved while it is not shown, since the grid being
 sized is what usually brings it on); the
-desk keeps its 240 px × zoom. The label width is measured with the fonts the
-labels are drawn in, corner text included, since the corner ("T:0h · FOV:F001")
-sits over the label columns and widened them past the screen when it was left
-out. The live grid's axis labels are drawn at the UI scale (`facet_view._on_screen`)
+desk keeps its 240 px × zoom. The label width is measured off the labels
+themselves — `facet_view.label_columns_width` builds them with the same
+factories `render_facet_chrome` places, and sums their size hints — so the fit
+follows their fonts, padding and rotation with no numbers of its own; the
+corner ("T:0h · FOV:F001") sits over the label columns, so they are at least
+as wide as it is. Each column also spends the grid's spacing and the cell
+host's margin on either side (`facet_view.CELL_MARGIN_PX`, which the controller
+builds the host with), and at 100 % the columns fill the page to within the
+last column's spacing and a pixel of rounding per column
+(`tests/test_phone_layout.py::test_image_table_fitted_columns_fill_the_page_exactly`). The live grid's axis labels are drawn at the UI scale (`facet_view._on_screen`)
 while the export renderer keeps the Properties sidebar's own sizes. A drawn grid
 is drawn again — from the decode cache — when phone layout turns on or off and
 when the page's width changes by more than 5 % while it is on (the phone turned),

@@ -40,6 +40,10 @@ _DIM_LABEL = {"well": "Well", "channel": "Channel",
               "timepoint": "Timepoint", "fov": "FOV",
               "well_row": "Row", "well_col": "Column"}
 _GROUP_GAP = 18          # px gap between facet groups (the non-uniform spacing)
+#: Each rendered cell's margin on every side, in px: the host widget the
+#: controller builds around a cell's image (``controller._render_cell``'s
+#: caller), and what phone layout's fit (``_phone_fit``) spends per column.
+CELL_MARGIN_PX = 2
 
 # Scoped label styling — muted per-value labels, a subtle strip behind the
 # outer/group labels so they read as facet bands. Font sizes come from state
@@ -314,6 +318,54 @@ def plan_facets(ctx, cells) -> FacetPlan | None:
     return plan
 
 
+def _left_label(text: str, is_group: bool, plan: FacetPlan) -> QLabel:
+    """A row label as the grid shows it: a vertical facet band for a group, a
+    muted per-value label otherwise."""
+    if is_group:
+        lbl = _VLabel(text)
+        lbl.setStyleSheet(_group_qss(plan.group_pt))
+    else:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(_inner_qss(plan.label_pt))
+    lbl.setAlignment(Qt.AlignCenter)
+    return lbl
+
+
+def _corner_label(plan: FacetPlan) -> QLabel:
+    """The corner over the row labels: the values the layout holds fixed."""
+    c = QLabel(plan.corner)
+    c.setStyleSheet(_corner_qss(plan.label_pt))
+    c.setAlignment(Qt.AlignCenter)
+    return c
+
+
+def label_columns_width(plan: FacetPlan, spacing: int) -> int:
+    """The width the row-label columns of *plan* take in a grid whose
+    horizontal spacing is *spacing*, each column's spacing included.
+
+    Measured off the labels :func:`render_facet_chrome` builds — the same
+    factories, so their fonts, padding and rotation — rather than estimated
+    beside them: a grid sizes a column to its widest label's size hint, and
+    that hint is what is summed here. The corner spans the label columns, so
+    they are at least as wide as it is.
+    """
+    widths: dict[int, int] = {}
+    for text, _gr, gc, _rs, _cs, is_group in plan.left:
+        if not text:
+            continue
+        lbl = _left_label(text, is_group, plan)
+        lbl.ensurePolished()
+        widths[gc] = max(widths.get(gc, 0), lbl.sizeHint().width())
+        lbl.deleteLater()
+    total = sum(w + spacing for w in widths.values())
+    if plan.corner:
+        c = _corner_label(plan)
+        c.ensurePolished()
+        total = max(total, c.sizeHint().width() + spacing)
+        c.deleteLater()
+    return total
+
+
 def render_facet_chrome(grid, plan: FacetPlan) -> None:
     """Add the axis labels + inter-group spacers described by *plan* to *grid*."""
     inner_qss, group_qss = _inner_qss(plan.label_pt), _group_qss(plan.group_pt)
@@ -328,20 +380,10 @@ def render_facet_chrome(grid, plan: FacetPlan) -> None:
     for text, gr, gc, rs, cs, is_group in plan.left:
         if not text:
             continue
-        if is_group:
-            lbl = _VLabel(text)
-            lbl.setStyleSheet(group_qss)
-        else:
-            lbl = QLabel(text)
-            lbl.setStyleSheet(inner_qss)
-        lbl.setAlignment(Qt.AlignCenter)
-        grid.addWidget(lbl, gr, gc, rs, cs)
+        grid.addWidget(_left_label(text, is_group, plan), gr, gc, rs, cs)
 
     if plan.corner and plan.first_row and plan.first_col:
-        c = QLabel(plan.corner)
-        c.setStyleSheet(_corner_qss(plan.label_pt))
-        c.setAlignment(Qt.AlignCenter)
-        grid.addWidget(c, 0, 0, plan.first_row, plan.first_col)
+        grid.addWidget(_corner_label(plan), 0, 0, plan.first_row, plan.first_col)
 
     for sr in plan.spacer_rows:
         grid.setRowMinimumHeight(sr, plan.row_gap)

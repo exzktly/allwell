@@ -735,6 +735,76 @@ def test_image_table_cells_share_the_width_between_their_columns():
     assert fit_cell_px(300, 12, label_w=100, per_col_px=10, spacer_w=0, zoom=1.0) == MIN_CELL_PX
 
 
+def _fit_and_lay_out(qapp, group_qss=None):
+    """Fit a 3-column grid with two row-label columns (a vertical group band
+    and per-value labels) into a 500 px page in phone layout, then lay the grid
+    out the way the controller does — ``facet_view``'s chrome plus one cell
+    host per column — and return (available width, width the grid needs,
+    columns, grid spacing)."""
+    from PySide6.QtWidgets import QGridLayout, QScrollArea
+
+    from review.features.image_browser.image_table import facet_view
+    from review.features.image_browser.image_table._phone_fit import phone_cell_px
+    phone_layout.set_on(True)
+    scroll = QScrollArea()
+    _WINDOWS.append(scroll)
+    scroll.setWidgetResizable(True)
+    inner = QWidget()
+    QVBoxLayout(inner).setContentsMargins(0, 0, 0, 0)
+    host = QWidget(inner)
+    grid = QGridLayout(host)
+    grid.setContentsMargins(0, 0, 0, 0)
+    inner.layout().addWidget(host)
+    scroll.setWidget(inner)
+    scroll.resize(500, 400)
+    scroll.show()
+    _pump(qapp)
+    plan = facet_view.FacetPlan()
+    plan.left = [("Well B05", 1, 0, 2, 1, True), ("GFP", 1, 1, 1, 1, False),
+                 ("DAPI overlay", 2, 1, 1, 1, False)]
+    plan.corner = "T:0h  ·  FOV:F001"
+    plan.first_row, plan.first_col = 1, 2
+    n = 3
+    sz = phone_cell_px(None, [[{}] * n], plan, 1.0, grid)
+    facet_view.render_facet_chrome(grid, plan)
+    margin = getattr(facet_view, "CELL_MARGIN_PX", 2)
+    for r in (1, 2):
+        for c in range(n):
+            cell = QWidget(host)
+            cell.setFixedWidth(sz + 2 * margin)
+            grid.addWidget(cell, r, 2 + c)
+    _pump(qapp)
+    avail = scroll.viewport().width()
+    bar = scroll.verticalScrollBar()
+    if not bar.isVisible():
+        avail -= bar.sizeHint().width()
+    return avail, grid.minimumSize().width(), n, max(0, grid.horizontalSpacing())
+
+
+@pytest.mark.parametrize("group_padding", [None, "padding:24px 6px;"])
+def test_image_table_fitted_columns_fill_the_page_exactly(
+        qapp, app_sheet, monkeypatch, group_padding):
+    """Phone layout's fit measures the row labels ``facet_view`` draws, rather
+    than restating their padding as numbers of its own: at 100 % the columns
+    fill the page — no sideways scroll, and no more slack than the spacing
+    after the last column plus the rounding of one pixel per column. The
+    wrong implementation this rejects is the copied estimate (a group band's
+    line height + 16, a label's text + 8, per column spacing + 4), which left
+    a strip unused at the desk's styling and scrolled sideways once the band's
+    padding grew — the second case widens it by 44 px."""
+    from review.features.image_browser.image_table import facet_view
+    qapp.setStyleSheet(theme.qss())
+    if group_padding:
+        base = facet_view._group_qss
+        monkeypatch.setattr(
+            facet_view, "_group_qss",
+            lambda pt: base(pt).replace("padding:2px 6px;", group_padding))
+    avail, need, n, spacing = _fit_and_lay_out(qapp)
+    assert need <= avail, f"the fitted grid scrolls sideways by {need - avail} px"
+    assert avail - need <= spacing + n, (
+        f"the fitted grid leaves {avail - need} px of the page unused")
+
+
 def test_image_table_labels_grow_with_the_ui_scale_on_screen_only():
     from review.features.image_browser.image_table import facet_view
     assert "font-size:11px" in facet_view._inner_qss(11)

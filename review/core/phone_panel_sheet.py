@@ -20,11 +20,16 @@ runs.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from core import phone_layout
 from core.safe import swallowed
+
+if TYPE_CHECKING:
+    from widgets.drawer import Drawer
 
 _QWIDGETSIZE_MAX = 16_777_215
 
@@ -57,7 +62,7 @@ def _close_controls_sheets(win: QWidget) -> None:
             d.close()
 
 
-def sheet_of(win: QWidget):
+def sheet_of(win: QWidget) -> Drawer | None:
     """*win*'s panel sheet, or ``None`` before the first panel was presented."""
     from widgets.drawer import Drawer
     for d in win.findChildren(Drawer, options=Qt.FindDirectChildrenOnly):

@@ -267,8 +267,9 @@ def _lookup_context(ctx, well: str, chan: str):
     if dataset is None:
         return ctx
     from review.data.narrow_rows import scratch_context, verdict_copy
-    from review.features.image_browser.review_image.collect import mfi_column
     from review.data.population_store import PopulationStore
+
+    mfi_column = _review_collect().mfi_column
 
     rows = getattr(dataset, "cache", None)
     held = rows.get(well) if rows is not None else None
@@ -364,6 +365,14 @@ def cell_mfi(ctx, label, chan: str, well: str, tp: str, fov: str,
     return frame.get(nid) if frame else None
 
 
+def _review_collect():
+    """``review_image.collect``, imported on first use (the one deferred import
+    of it here: it pulls the Segmentation tab's data layer, which a hover that
+    never lands on a cell does not need)."""
+    from review.features.image_browser.review_image import collect
+    return collect
+
+
 def mfi_frame(ctx, well: str, chan: str, tp: str, fov: str, *, memo: dict | None = None) -> dict:
     """``{nid: MFI}`` for one frame of *well*, from the memoized per-well index.
 
@@ -375,10 +384,8 @@ def mfi_frame(ctx, well: str, chan: str, tp: str, fov: str, *, memo: dict | None
     carries the raw image-filename tokens, so both are normalised before the
     lookup, as the binary-mask render does.
     """
-    from review.features.image_browser.review_image.collect import (
-        review_mfi_index,
-        review_norm_fov,
-    )
+    collect = _review_collect()
+    review_mfi_index, review_norm_fov = collect.review_mfi_index, collect.review_norm_fov
     from review.core.ui_helpers import norm_timepoint
     base = _binary_base(chan)
     if memo is None:

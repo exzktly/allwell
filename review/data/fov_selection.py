@@ -47,7 +47,7 @@ FOV_PASS_COLUMN = "FOV_Pass"
 #: matched by its text. ``[0-9]`` rather than ``\d`` because this decides
 #: identity — two labels it maps to one number are one field — and ``\d`` (with
 #: the ``float()`` inside ``parse_fov``) also reads digits from other alphabets,
-#: which would merge labels nobody wrote as the same field (ARCHITECTURE §17's
+#: which would merge labels nobody wrote as the same field (ARCHITECTURE §15's
 #: rule for identity parsers).
 _SINGLE_NUMBER_LABEL = re.compile(r"^[A-Za-z_]*[0-9]+(?:\.[0-9]+)?$")
 

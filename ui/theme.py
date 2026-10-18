@@ -130,13 +130,14 @@ class Colors:
     # beside the rest of the plot surface.
     heatmap_selection = "#FF6B35"   # outline around selected heat-map cells
     # Segmentation overlay: a cell the image border cuts (Border_Pass). Magenta
-    # because it is the one hue the overlay's other six inks leave free that is
-    # not green — and green is the app's "good" colour, while every outline the
-    # overlay draws marks a removed cell. Measured ΔE ≥ 42 to all six.
+    # because it is a hue the overlay's other inks leave free that is not
+    # green — and green is the app's "good" colour, while every outline the
+    # overlay draws marks a removed cell. Measured ΔE ≥ 42 (CIE76) to each of
+    # the overlay's other eight inks (``review_image.renderer._layer_inks``).
     exclusion_border  = "#E879F9"
     # Segmentation overlay: a cell in a field the Cell Gating FOV selection
     # leaves out (FOV_Pass). Yellow, not green, for the reason above; measured
-    # ΔE ≥ 33 to the overlay's other seven inks.
+    # ΔE ≥ 33 (CIE76) to the overlay's other eight inks.
     exclusion_fov     = "#FDE047"
     spatial_observed  = "#4AA3FF"   # observed curve on the Spatial tab
     spatial_reference = "#FF9C4A"   # its random-reference curve

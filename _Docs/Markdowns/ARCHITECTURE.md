@@ -379,9 +379,19 @@ debounced 250 ms (`install_refit`); the listener goes with the tab.
 **Long panels scroll by dragging** (`_grab_scrolling`): over VNC a touch-drag
 arrives as a left-button mouse drag, which a Qt scroll area ignores, so
 `QScroller` grabs the left-button gesture on the side rail, the Controls sheet and
-the read-only logs — never on the plate or a plot, whose drags mean something
-else. Whether RealVNC's touch mode delivers drags that way is not verified on a
-device.
+the read-only logs. **Plot pages scroll by a swipe on the plot** too
+(`PhoneShell._swipe_plot_area`, run from `size_canvas` — so on the switch, on Show
+and from the sweep, and a plot built later gets it): the scroll area holding a
+canvas on a page `band_roots` names grabs the gesture, and gives it back at the
+desk. A tap still reaches the plot, because Qt's flick gesture holds a press until
+it can tell a tap from a drag; a drag on a plot no longer reaches matplotlib in
+phone layout, where its pan and zoom are already hidden. Nothing else in the
+centre is grabbed — the Home editors' plates and the Image Table's chips own their
+drags. `tests/test_phone_plot_swipe.py` asserts the calls to `QScroller` rather
+than a simulated swipe: QTest stamps its mouse events from its own clock, from
+which QScroller reads a drag's speed, so a simulated swipe scrolls or not by
+timing. Whether RealVNC's touch mode delivers drags as mouse drags is not
+verified on a device.
 
 **The window fits its screen — in both layouts.** `PhoneShell.fit_window` runs at
 startup and on every `screenChanged` / `availableGeometryChanged`: the minimum is

@@ -1304,6 +1304,32 @@ class PhoneShell(QObject):
         elif base is not None:
             c.setMinimumHeight(int(base))
             c.setProperty("_awMinH", None)
+        self._swipe_plot_area(c, on)
+
+    def _swipe_plot_area(self, c, on: bool) -> None:
+        """A swipe on a plot scrolls the page it is on.
+
+        A plot page is taller than the phone (each panel is ``PLOT_ROW_PT``
+        tall), and over VNC its scroll bar is a few pixels wide; a touch-drag
+        arrives as a left-button mouse drag, which a scroll area ignores. So the
+        scroll area holding the plot takes Qt's drag-to-scroll — only one on a
+        page phone layout manages (``band_roots``), so a plot elsewhere (a
+        dialog, the Properties preview) is left alone. A tap on the plot still
+        reaches it: the gesture holds the press until it can tell a tap from a
+        drag. Run for every canvas on the switch, on Show and by the sweep, so
+        a plot built later gets it too.
+        """
+        from PySide6.QtWidgets import QScrollArea, QScroller
+        area = c.parentWidget()
+        while area is not None and not isinstance(area, QScrollArea):
+            area = area.parentWidget()
+        if area is None or not self._band_managed(area):
+            return
+        vp = area.viewport()
+        if on:
+            QScroller.grabGesture(vp, QScroller.LeftMouseButtonGesture)
+        else:
+            QScroller.ungrabGesture(vp)
 
     def _apply_analyze_columns(self, two: bool) -> None:
         """Sideways, Analyze is two columns: the run summary and plate on the

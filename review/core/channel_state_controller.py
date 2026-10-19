@@ -1312,8 +1312,10 @@ def refresh_thresh_frac_quick_edit(ctx) -> None:
             stepper.setToolTip(_COUNT_TIP if count else _INTENSITY_TIP)
             # setRange / setDecimals / setSuffix each re-run Stepper._update_size,
             # which resets the width bounds — undoing the setFixedWidth its host
-            # row applied at build time and reflowing the band. Re-pin it.
-            stepper.setFixedWidth(theme.Metrics.stepper_w)
+            # row applied at build time and reflowing the band. Re-pin it —
+            # through ``pinWidth``, which in phone layout's touch mode keeps the
+            # width the − / + need instead of the desk's.
+            stepper.pinWidth(theme.Metrics.stepper_w)
         finally:
             stepper.blockSignals(blocked)
         lbl = ctx.widgets.get_or_none(label_attr) if label_attr else None

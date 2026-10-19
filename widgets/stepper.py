@@ -253,6 +253,22 @@ class Stepper(QFrame):
     def isTouchMode(self) -> bool:
         return self._touch
 
+    def pinWidth(self, width: int) -> None:
+        """Pin the width a host row wants, the way ``setTouchMode`` keeps it.
+
+        At the desk this is ``setFixedWidth``. In touch mode the pin is
+        remembered for the desk and the frame keeps the width its − / + need:
+        a host that re-pinned with a bare ``setFixedWidth`` on every value
+        change put the desk's 96 px back on a phone, where the two square
+        buttons alone are wider, and the number vanished between them the
+        moment − or + was tapped.
+        """
+        if self._touch:
+            self._pre_touch_w = int(width)
+            self.setFixedWidth(max(int(width), self._full_width()))
+        else:
+            self.setFixedWidth(int(width))
+
     def bindingAdapter(self):
         """``(getter, setter, change_signal)`` for binding-driven panels."""
         return (self.value, self.setValue, self.valueChanged)

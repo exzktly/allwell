@@ -101,3 +101,62 @@ def test_the_window_holds_one_sheet_and_no_loose_attribute(qtbot, phone):
     sheets = [d for d in win.findChildren(Drawer) if d.property("phonePanelSheet")]
     assert len(sheets) == 1, f"{len(sheets)} panel sheets on one window"
     assert sheets[0].isOpen() and dock.parentWidget() is sheets[0].contentWidget()
+
+
+def test_mounting_a_panel_in_phone_layout_never_squeezes_the_plot(qtbot, phone):
+    """Reported: opening Properties in phone layout crushed the bar plots for
+    good. ``mount_widget_in_plot_dock`` showed the dock *beside* the figure and
+    only then lent it to the sheet, so for that instant the 360 px panel took
+    its width out of the plot — and the style pass that runs as Properties opens
+    fitted the titles and margins to the squeezed figure, where they stayed.
+
+    Driven through the real helpers a plot tab is built from: the dock must
+    never be shown while it sits in the plot, and the plot must never get
+    narrower than the window."""
+    from PySide6.QtCore import QEvent, QObject
+
+    from review.core.ui_helpers import make_plot_with_right_dock, mount_widget_in_plot_dock
+
+    win = QWidget()
+    qtbot.addWidget(win)
+    win.resize(390, 780)
+    plot_area, _plot_layout, dock = make_plot_with_right_dock(win)
+    host = dock.parentWidget()
+    win.show()
+    qtbot.waitUntil(lambda: plot_area.width() == win.width(), timeout=2000)
+
+    class _Spy(QObject):
+        def __init__(self):
+            super().__init__()
+            self.shown_in_plot = 0
+            self.plot_widths = []
+
+        def eventFilter(self, obj, ev):
+            if obj is dock and ev.type() == QEvent.Show and dock.parentWidget() is host:
+                self.shown_in_plot += 1
+            if obj is plot_area and ev.type() == QEvent.Resize:
+                self.plot_widths.append(ev.size().width())
+            return False
+
+    spy = _Spy()
+    dock.installEventFilter(spy)
+    plot_area.installEventFilter(spy)
+
+    panel = QWidget()
+    panel.setFixedWidth(360)
+    mount_widget_in_plot_dock(dock, panel, 360)
+    sheet = phone_panel_sheet.sheet_of(win)
+    assert sheet is not None and sheet.isOpen()
+    assert dock.parentWidget() is sheet.contentWidget() and dock.isVisible()
+    qtbot.wait(50)
+
+    assert spy.shown_in_plot == 0, "the dock was shown beside the plot before the sheet took it"
+    assert all(w == win.width() for w in spy.plot_widths), \
+        f"the plot was squeezed while the panel opened: widths {spy.plot_widths}"
+    assert plot_area.width() == win.width()
+
+    # And at the desk the dock still opens beside the plot.
+    dock.setVisible(False)
+    phone_layout.set_on(False)
+    mount_widget_in_plot_dock(dock, panel, 360)
+    assert dock.parentWidget() is host and dock.isVisible()

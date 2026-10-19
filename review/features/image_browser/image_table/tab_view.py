@@ -140,11 +140,15 @@ def _toggle_props_dock(ctx) -> None:
     # toggle is correct regardless of whether the tab is currently shown.
     dock = getattr(ctx.runtime.image_table, "props_dock", None)
     if dock is not None:
-        dock.setVisible(dock.isHidden())
-        if dock.isVisible():
-            # Phone layout: a full-width sheet, not a column beside the grid.
-            from review.core import phone_panel_sheet
-            phone_panel_sheet.present(dock)
+        if not dock.isHidden():
+            dock.setVisible(False)
+            return
+        # Phone layout: a full-width sheet, not a column beside the grid —
+        # lent before it is shown, so the grid is never refitted to the width
+        # the column would have left it (``mount_widget_in_plot_dock``).
+        from review.core import phone_panel_sheet
+        if not phone_panel_sheet.present(dock):
+            dock.setVisible(True)
 
 
 def _build_properties_dock(ctx, dock) -> None:

@@ -36,7 +36,7 @@ from services.pipeline_runner import (
     is_transient_progress,
 )
 from ui import theme
-from ui import theme
+from widgets.flow_layout import FlowLayout
 from core.safe import swallowed
 from analyze.bg_map import AnalyzeBackgroundMapMixin
 from analyze.domain.input import AnalyzeInputMixin
@@ -306,12 +306,8 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
     # ------------------------------------------------------------------
     def _fluor_add_row(self, default_token: str = "") -> None:
         row = QWidget(self._fluor_frame)
-        # A flow, not a box: the field, ✕, smFISH and Phase need more width
-        # than phone layout's drawer has at touch size, and in one unbreakable
-        # row they pinned the whole form wider than the drawer, cutting every
-        # section off at its right edge. With room they lie on one line as
-        # before; without it the checkboxes wrap under the field.
-        from widgets.flow_layout import FlowLayout
+        # A flow, so the checkboxes wrap under the field when phone layout's
+        # drawer is too narrow for one line (an unbreakable row clipped the form).
         rl = FlowLayout(row, h_spacing=8, v_spacing=4)
 
         edit = QLineEdit(default_token, row)

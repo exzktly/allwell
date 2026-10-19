@@ -389,6 +389,31 @@ def _scratch_dir(root, prefix: str):
     return Path(tempfile.mkdtemp(prefix=prefix + "-", dir=root))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _session_settings_go_to_a_scratch_file(_autouse_scratch_root):
+    """The same redirect as the fixture below, for what is built *before* it.
+
+    The per-test redirect is a function-scoped fixture, and pytest sets up a
+    module- or session-scoped fixture before any function-scoped one. A window
+    a test file builds once for all its tests (``test_phone_layout_app.py``'s
+    ``win``) was therefore constructed against the developer's real store —
+    and ``PhoneShell`` keeps the ``app_settings`` it is handed at construction.
+    A ``phone_text_size=L`` left in ``~/.config/AllWell/AllWellApp.conf`` by
+    running the app made that file's first test read a UI scale 1.13 times the
+    expected one, and the half-finished switch it left behind failed the next.
+    """
+    from PySide6.QtCore import QSettings
+
+    from core import app_settings as app_settings_module
+
+    scratch = _scratch_dir(_autouse_scratch_root, "qsettings-session") / "AllWellApp.ini"
+    mp = pytest.MonkeyPatch()
+    mp.setattr(app_settings_module, "app_settings",
+               lambda: QSettings(str(scratch), QSettings.IniFormat))
+    yield scratch
+    mp.undo()
+
+
 @pytest.fixture(autouse=True)
 def _settings_go_to_a_scratch_file(_autouse_scratch_root, monkeypatch):
     """No test writes the developer's real ``~/.config/AllWell/AllWellApp.conf``.

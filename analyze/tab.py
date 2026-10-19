@@ -24,7 +24,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QFileDialog, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+    QCheckBox, QFileDialog, QLineEdit, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
@@ -306,9 +306,13 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
     # ------------------------------------------------------------------
     def _fluor_add_row(self, default_token: str = "") -> None:
         row = QWidget(self._fluor_frame)
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(8)
+        # A flow, not a box: the field, ✕, smFISH and Phase need more width
+        # than phone layout's drawer has at touch size, and in one unbreakable
+        # row they pinned the whole form wider than the drawer, cutting every
+        # section off at its right edge. With room they lie on one line as
+        # before; without it the checkboxes wrap under the field.
+        from widgets.flow_layout import FlowLayout
+        rl = FlowLayout(row, h_spacing=8, v_spacing=4)
 
         edit = QLineEdit(default_token, row)
         edit.setFixedWidth(theme.Metrics.num_field_w_lg)
@@ -340,7 +344,6 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
             "correction and is resaved from the original image. With the "
             "Label-free method it is also the Cellpose segmentation input."
         )
-        rl.addStretch(1)
 
         self._fluor_rows.append((edit, smfish_cb, phase_cb, remove_btn))
 

@@ -460,9 +460,20 @@ size on the phone. The renderers lay out axes with fixed margins, which clip a
 title at that size, so in phone layout `plot_style._apply_layout_engine` switches
 every figure to constrained layout — first putting back `in_layout` on the grid's
 axes, which `set_position` turns off, without which the engine moves nothing — and
-`_fit_labels_to_phone` breaks a title too wide for its axes: at " — " first (so
-"— t = 0 h" stays together), then into lines as full as the axes' width allows; a
-y-label too tall for its axes is broken the same way. Constrained layout measures
+`_fit_labels_to_phone` fits every title into its axes' width (`_fit_title`): one
+line when it fits, else **two lines and never more** — broken at " — " when the
+title has that clause (so "— t = 0 h" stays together), else at the space that
+balances the two — and if two lines still do not fit, the two lines drawn at the
+size that does, so a title is never clipped. A renderer's own line breaks are kept
+when every line fits and undone when one does not (Line Graphs and the Scatter
+Plot break their own titles). Each fit starts from the title as its renderer wrote
+it (`_UNBROKEN` / `_FITTED` on the `Text`), never from an earlier fit's breaks, and
+runs twice: once before constrained layout and once against the axes it settles
+on, since the engine widens the left margin for phone-sized tick labels. A figure's
+canvas re-fits on every `resize_event` (`_refit_on_resize`, attached by
+`apply_export_style_to_current`) — which is how a plot drawn at the desk gets the
+phone fit when phone layout raises its DPI, and gets its own titles back when
+phone layout ends. A y-label too tall for its axes is broken onto more lines. Constrained layout measures
 every text an axes holds, so a note drawn *inside* the axes — the bar Split-by
 notice (`barplot/_annotations.annotate_split_notice`), the "drawn from a sample"
 notes on Bar Plots and Distribution, Spatial's ICC line — is taken out of layout

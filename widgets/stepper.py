@@ -146,6 +146,8 @@ class Stepper(QFrame):
         # Touch mode's pair: a full-height − and + either side of the value,
         # in place of the two half-height arrows a thumb cannot tell apart.
         self._touch = False
+        # True while a focus change re-polishes the frame (``eventFilter``).
+        self._repolishing = False
         self._minus = QToolButton(self)
         self._minus.setObjectName("StepperMinus")
         self._minus.setText("−")
@@ -332,8 +334,18 @@ class Stepper(QFrame):
         if obj is self._edit:
             if event.type() in (QEvent.FocusIn, QEvent.FocusOut):
                 self.setProperty("focused", event.type() == QEvent.FocusIn)
-                self.style().unpolish(self)
-                self.style().polish(self)
+                # The re-polish only recolours the border, so it must not
+                # re-measure the row height: ``control_row_height`` run from
+                # inside ``polish`` measures its probe combo without the
+                # application stylesheet's touch floors, and in phone layout
+                # that pinned a 110 px stepper to the desk's 21 px the moment
+                # its field was tapped.
+                self._repolishing = True
+                try:
+                    self.style().unpolish(self)
+                    self.style().polish(self)
+                finally:
+                    self._repolishing = False
             elif event.type() == QEvent.Wheel:
                 self.stepBy(1 if event.angleDelta().y() > 0 else -1)
                 return True
@@ -392,7 +404,8 @@ class Stepper(QFrame):
         combos for the rest of the session. This is the same staleness
         ``mode_bar.tab_bar_height`` refuses to cache for.
         """
-        if event.type() in (QEvent.StyleChange, QEvent.FontChange):
+        if (event.type() in (QEvent.StyleChange, QEvent.FontChange)
+                and not getattr(self, "_repolishing", False)):
             self._apply_row_height()
         super().changeEvent(event)
 

@@ -501,6 +501,20 @@ def _phone_relevant(w: QWidget) -> bool:
     return w.objectName() == "InfoHint"
 
 
+class _RefitOnLayout(QObject):
+    """Re-fits a bottom sheet (``Drawer.refit``) whenever the widget it is
+    installed on lays out again or changes size."""
+
+    def __init__(self, watched: QWidget, sheet) -> None:
+        super().__init__(watched)
+        self._sheet = sheet
+
+    def eventFilter(self, obj, ev) -> bool:  # Qt naming
+        if isinstance(ev, QEvent) and ev.type() in (QEvent.LayoutRequest, QEvent.Resize):
+            self._sheet.refit()
+        return False
+
+
 class _PhoneEventFilter(QObject):
     """While phone layout is on, the things built or shown later get it too:
     a plot its DPI, a dialog a place on the screen, a page's control band a
@@ -1493,6 +1507,14 @@ class PhoneShell(QObject):
         sheet.setContentWidget(scroll)
         sheet._aw_land = land
         sheet._aw_holder = holder
+        if not land:
+            # The height is measured off the controls the sheet holds, and they
+            # are lent in still at their page width: measured at ``open`` the
+            # sheet came up about a third short, with the threshold row and the
+            # Properties button below its fold. So it re-sizes whenever its
+            # content lays out again — after the lend settles, and whenever a
+            # control in it grows or shrinks.
+            holder.installEventFilter(_RefitOnLayout(holder, sheet))
         sheet.closed.connect(self._give_band_back)
         self._sheet = sheet
         return sheet

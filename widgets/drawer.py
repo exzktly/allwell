@@ -40,7 +40,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 from PySide6.QtCore import (
-    QEasingCurve, QEvent, QPropertyAnimation, QRect, Qt, Signal,
+    QAbstractAnimation, QEasingCurve, QEvent, QPropertyAnimation, QRect, Qt, Signal,
 )
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QVBoxLayout, QWidget
@@ -168,6 +168,23 @@ class Drawer(QWidget):
 
     def toggle(self) -> None:
         self.close() if self._open else self.open()
+
+    def refit(self) -> None:
+        """Re-size an open drawer to what its hints say now.
+
+        ``open`` sizes the panel once, from the hints as they read at that
+        moment — and a hint measured off content that has not been laid out
+        yet (a widget just moved in, still at its old width) is wrong. A host
+        whose content settles after ``open`` calls this; mid-slide it retargets
+        the slide rather than jumping.
+        """
+        if not self._open:
+            return
+        end = self._open_rect()
+        if self._anim.state() == QAbstractAnimation.Running:
+            self._anim.setEndValue(end)
+        elif self.geometry() != end:
+            self.setGeometry(end)
 
     def closeNow(self) -> None:
         """Dismiss at once, without the slide — for a host tearing down."""

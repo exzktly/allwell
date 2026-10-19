@@ -305,7 +305,14 @@ in phone layout, and with it every control the page has.
 `ControlBand.setStacked(True)` flows the band's
 actions into its scope flow so it wraps to the sheet's width; the sheet's buttons,
 combos and fields are 48 pt (`QWidget#Drawer[phoneSheet="true"]` in the touch
-block) with 8 pt gaps. The sheet has no scrim, because the plot above it redraws
+block) with 8 pt gaps. The sheet's height is measured off the controls lent
+into it, and at `open` they still have their page's width, so the estimate is
+wrong (measured: 359 px against the 505 px they need once laid out, the
+threshold row and the Properties button below the fold). The upright sheet
+therefore watches its holder (`phone_shell._RefitOnLayout`) and calls
+`Drawer.refit` whenever the holder lays out or resizes, which re-sizes an open
+drawer to its hints as they read now — retargeting the slide if it is still
+running. The sheet has no scrim, because the plot above it redraws
 as its controls change and a dimmed plot cannot be judged by. Its button reads
 **Done ✕** while it is open. Closing it — that button, a mode switch, rotating the
 phone, leaving phone layout — gives the band back to its page at its index,
@@ -317,8 +324,14 @@ at the desk in the plot's right dock, a layout sibling of the figure
 (`ui_helpers.make_plot_with_right_dock`). In phone layout that dock would be
 `Metrics.dock_w` wide on a screen barely wider, and it is opened from the
 Controls sheet, which is drawn over the page. So `ui_helpers.mount_widget_in_plot_dock`
-(and the Image Table's own Properties toggle) end with
-`review/core/phone_panel_sheet.present(dock)`: in phone layout it closes the
+(and the Image Table's own Properties toggle) call
+`review/core/phone_panel_sheet.present(dock)` *instead of* showing the dock, and
+show it in the plot only when that returns `False`. The order matters: a dock
+shown beside the figure even for an instant takes its fixed width out of the
+plot, and the style pass that runs as Properties opens then fitted the phone
+titles and constrained layout to the squeezed figure (394 px of a 754 px
+canvas), where they stayed (`tests/test_phone_panel_sheet.py::test_mounting_a_panel_in_phone_layout_never_squeezes_the_plot`).
+In phone layout `present` closes the
 Controls sheet, lends the dock to a right-edge `Drawer` covering the window's
 whole width with the panel's fixed width lifted, and gives the dock back — at
 its index, with its width limits, hidden — when the panel's own ✕ hides it
@@ -1545,6 +1558,13 @@ taller — its two stacked step buttons each want a full text row, which came to
 35px against the combos' 25px and made the row read as ragged. The measurement
 has to use the same subclass the band uses: a bare `QComboBox` is 3px taller,
 so probing one reproduced the mismatch the function exists to remove.
+The pin is re-measured on every `StyleChange` and `FontChange` except the one
+the stepper causes itself: focusing its field re-polishes the frame to colour
+its border, and `control_row_height` run from inside that polish measures the
+probe without the application stylesheet's touch floors — in phone layout it
+pinned a 110 px stepper to the desk's 21 px the moment its number was tapped.
+`Stepper._repolishing` marks that re-polish, and `changeEvent` leaves the height
+alone while it is set (`tests/test_stepper_focus_keeps_height.py`).
 
 A `Stepper` carrying a prefix or suffix draws it inside its line-edit, so the
 validator on that edit is `stepper._AffixValidator`, which strips the affixes

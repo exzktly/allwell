@@ -53,3 +53,40 @@ def test_unknown_edge_falls_back_to_right(qtbot):
     d = Drawer(host, edge="diagonal", width_hint=200)
     assert d._edge == "right"
     assert d._open_rect().height() == 600
+
+
+def test_refit_follows_a_height_hint_that_settles_after_open(qtbot):
+    """Reported (phone layout): the ⚙ Controls sheet's threshold box was not
+    visible. The sheet measures its height off the controls lent into it, which
+    at ``open`` still have their page width — it came up 359 px against the
+    505 px they need, threshold row and Properties button below its fold.
+    ``refit`` re-sizes an open drawer to its hint as it reads now."""
+    from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QVBoxLayout
+
+    from ui.phone_shell import _RefitOnLayout
+
+    host = _host(qtbot, w=400, h=900)
+    host.show()
+    holder = QWidget()
+    lay = QVBoxLayout(holder)
+    lay.addWidget(QLabel("x"))
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setWidget(holder)
+    d = Drawer(host, edge="bottom", scrim=0.0,
+               height_hint=lambda: holder.sizeHint().height())
+    d.setContentWidget(scroll)
+    holder.installEventFilter(_RefitOnLayout(holder, d))
+    d.open()
+    qtbot.waitUntil(lambda: d._anim.state() == d._anim.State.Stopped, timeout=2000)
+    short = d.height()
+
+    # The content grows once the drawer is open: it follows.
+    for _ in range(12):
+        tall = QLabel("row")
+        tall.setFixedHeight(30)
+        lay.addWidget(tall)
+    qtbot.waitUntil(lambda: d.height() > short + 300, timeout=2000)
+    QApplication.processEvents()
+    assert d.geometry() == d._open_rect()
+    assert d.geometry().bottom() == host.height() - 1, "the sheet runs past the window's bottom"

@@ -147,8 +147,11 @@ def _give_back(sheet) -> None:
 def present(dock: QWidget | None) -> bool:
     """In phone layout, show *dock* as a full-width sheet. ``True`` when it did.
 
-    Called after the dock has been made visible in its plot. At the desk it
-    returns ``False`` and changes nothing.
+    Called *instead of* showing the dock in its plot: a caller shows it there
+    only when this returns ``False``. A dock made visible in its plot first,
+    even for an instant, squeezes the figure beside it, and whatever measures
+    the figure in that instant (the style pass that wraps phone titles) keeps
+    the squeezed size. At the desk it returns ``False`` and changes nothing.
     """
     if dock is None or not phone_layout.is_on():
         return False

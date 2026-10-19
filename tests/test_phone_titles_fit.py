@@ -195,3 +195,26 @@ def test_the_title_fits_the_axes_the_layout_settles_on(phone):
     assert ax.title.get_text().count("\n") <= 1
     assert bb.x0 >= -0.5 and bb.x1 <= fig.bbox.width + 0.5, \
         f"title spans {bb.x0:.1f}–{bb.x1:.1f} of a {fig.bbox.width:.0f} px figure"
+
+
+def test_a_shrunk_title_fits_even_where_text_does_not_scale_with_its_size():
+    """CI failed where this machine passed: the two lines, shrunk in
+    proportion to their overrun, still came out 1.4 px wider than the room —
+    hinting rounds glyph advances, by different amounts on different FreeType
+    builds, so text width is not exactly proportional to size. A renderer
+    whose text carries a few pixels that do not scale reproduces that here."""
+    title, real = _title(LONG, 18.0)
+
+    class _Hinted:
+        def get_text_width_height_descent(self, s, prop, ismath=False):
+            w, h, d = real.get_text_width_height_descent(s, prop, ismath=ismath)
+            return w + 4.0, h, d
+
+    hinted = _Hinted()
+    room = 150.0
+    _fit_title(title, room, hinted)
+    prop = title.get_fontproperties()
+    widest = max(hinted.get_text_width_height_descent(line, prop)[0]
+                 for line in title.get_text().split("\n"))
+    assert title.get_text().count("\n") == 1
+    assert widest <= room, f"the shrunk title is {widest:.1f} px in a {room:.0f} px room"

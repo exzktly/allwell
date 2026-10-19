@@ -1636,6 +1636,14 @@ def _fit_title(title, room: float, renderer) -> None:
         lines = _two_lines(" ".join(line.strip() for line in given), width_of)
         widest = max(width_of(line) for line in lines)
         fitted = size if widest <= room else size * room / widest
+        # Text does not scale exactly with its size — hinting rounds glyph
+        # advances, by different amounts on different FreeType builds — so
+        # the proportional size can still overrun by a pixel or two (CI's
+        # did, where this machine's did not). Measure again and step down.
+        for _ in range(12):
+            if max(width_of(line, fitted) for line in lines) <= room:
+                break
+            fitted *= 0.97
     title.set_text("\n".join(lines))
     title.set_fontsize(fitted)
     setattr(title, _UNBROKEN, (text, size))

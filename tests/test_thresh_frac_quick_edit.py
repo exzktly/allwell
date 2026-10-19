@@ -95,6 +95,12 @@ class _FakeStepper:
         # setDecimals / setSuffix, which is why the refresh has to re-pin this.
         self.fixed_width = int(w)
 
+    def pinWidth(self, w: int) -> None:
+        # The refresh re-pins through ``Stepper.pinWidth`` (desk: a fixed
+        # width; touch mode: kept wide enough for − / +). This double is a
+        # desk stepper.
+        self.fixed_width = int(w)
+
     def blockSignals(self, b: bool) -> bool:
         prev = self.blocked
         self.blocked = b
@@ -498,3 +504,33 @@ def test_a_channel_without_counts_keeps_the_intensity_cutoff(monkeypatch):
     set_on_cutoff(app._ctx, 42.0, "mcherry")
     assert get_thresh_frac_on(app._ctx, "mcherry") == 42.0
     assert get_thresh_count_on(app._ctx, "mcherry") == -1.0
+
+
+def test_a_threshold_change_in_phone_layout_keeps_the_stepper_wide_enough(qapp):
+    """Reported: in phone layout, tapping + or − beside the ON threshold moved
+    the field and hid the number. Every change runs this refresh, and it
+    re-pinned the stepper to the desk's ``Metrics.stepper_w`` (96 px) — on a
+    touch stepper, narrower than its two square buttons, so the number between
+    them was squeezed to nothing. A real ``Stepper`` in touch mode, refreshed
+    the way a tap refreshes it, keeps its touch width; back at the desk it gets
+    the desk pin."""
+    from ui import theme
+    from widgets.stepper import Stepper
+
+    app = _FakeApp()
+    app._app_state.cell_gating.thresh_frac_on["gfp"] = 51.0
+    stepper = Stepper(value=50.0, minimum=0.0, maximum=1e9, decimals=1)
+    stepper.setFixedWidth(theme.Metrics.stepper_w)
+    stepper.setTouchMode(True)
+    touch_w = stepper.width()
+    assert touch_w > theme.Metrics.stepper_w, "touch mode did not widen the stepper"
+    app._ctx.widgets.register("_plotting_thresh_frac_stepper", stepper)
+
+    refresh_thresh_frac_quick_edit(app._ctx)
+    assert stepper.value() == 51.0
+    assert stepper.minimumWidth() == stepper.maximumWidth() == touch_w, (
+        f"the refresh pinned a touch stepper to {stepper.maximumWidth()} px; "
+        f"its − / + and number need {touch_w}")
+
+    stepper.setTouchMode(False)
+    assert stepper.maximumWidth() == theme.Metrics.stepper_w

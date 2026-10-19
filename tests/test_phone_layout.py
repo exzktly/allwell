@@ -678,7 +678,8 @@ def test_plots_get_220_points_per_row_of_axes_and_their_own_height_back(qapp):
         fig.add_subplot(3, 1, i + 1)
     canvas = FigureCanvasQTAgg(fig)
     canvas.setMinimumHeight(150)
-    shell = SimpleNamespace(pt=lambda p: int(p * 2))
+    # The swipe a plot page gets is test_phone_plot_swipe.py's subject.
+    shell = SimpleNamespace(pt=lambda p: int(p * 2), _swipe_plot_area=lambda _c, _on: None)
     PhoneShell.size_canvas(shell, canvas, True)
     assert canvas.minimumHeight() == 3 * 440
     PhoneShell.size_canvas(shell, canvas, False)

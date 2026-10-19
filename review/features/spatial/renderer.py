@@ -437,10 +437,13 @@ def _render_colony_metric_dist(ax, payload) -> None:
             f"σ²_within = {decomp.sigma2_within:.3g}  ·  "
             f"n = {decomp.n_cells} cells in {decomp.n_colonies} colonies"
         )
-        ax.text(0.01, 0.98, text, transform=ax.transAxes, ha="left", va="top",
-                fontsize=8, color=title_fg,
-                bbox=dict(boxstyle="round,pad=0.3", facecolor=bg,
-                          edgecolor=muted, alpha=0.85))
+        icc = ax.text(0.01, 0.98, text, transform=ax.transAxes, ha="left", va="top",
+                      fontsize=8, color=title_fg, wrap=True,
+                      bbox=dict(boxstyle="round,pad=0.3", facecolor=bg,
+                                edgecolor=muted, alpha=0.85))
+        # Out of layout: drawn inside the axes, and under phone layout's
+        # constrained layout an in-layout line this long shrinks them to fit it.
+        icc.set_in_layout(False)
     style_legend(ax.legend(fontsize=7, frameon=False, loc="upper right"), ax)
 
 

@@ -1437,3 +1437,78 @@ def test_the_per_cell_figures_name_their_clusters_over_every_panel():
         plt.close(fig)
     assert drawn == [[("t=0", 0.5), ("t=24", 3.0)]] * 2
     assert pad == 18
+
+
+def test_the_split_notice_does_not_shrink_the_axes_under_constrained_layout():
+    """Reported (phone layout): Decorate → Split by crushed the bar axes. The
+    notice is drawn inside the axes, but phone layout runs constrained layout,
+    which measures every text an axes holds — so a one-line sentence wider than
+    the axes made the engine shrink them until it fitted beside them (491 px to
+    298 px on a phone-width figure). The axes must keep the width they have
+    with no notice at all."""
+    from types import SimpleNamespace
+
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    from review.features.barplot._annotations import annotate_split_notice
+
+    notice = ("Split by replaced the existing 2 band(s) (A01, A02) — each "
+              "bar's label now carries it.")
+    slice_ = SimpleNamespace(split_notice=notice)
+    ctx = SimpleNamespace(state=SimpleNamespace(feature_slice=lambda _name: slice_))
+
+    def axes_width(with_notice: bool) -> float:
+        fig = Figure(figsize=(3.9, 4.0), dpi=144)
+        FigureCanvasAgg(fig)
+        ax = fig.add_subplot(111)
+        ax.bar([0, 1], [1.0, 2.0])
+        ax.set_title("GFP Mean Intensity")
+        fig.set_layout_engine("constrained")
+        if with_notice:
+            annotate_split_notice(ctx, ax)
+            assert any(t.get_text() == notice for t in ax.texts), "the notice was not drawn"
+        fig.canvas.draw()
+        return ax.bbox.width
+
+    assert axes_width(True) == axes_width(False)
+
+
+@pytest.mark.parametrize("site", ["bar", "distribution"])
+def test_the_sampled_notes_do_not_shrink_the_axes_either(monkeypatch, site):
+    """The two "drawn from a sample" notes are the Split-by notice's siblings:
+    the same kind of sentence drawn inside the axes. Under phone layout's
+    constrained layout they shrank the axes the same way."""
+    from types import SimpleNamespace
+
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    text = ("Curves for 3 of 4 groups are drawn from a sample of 20,000 cells "
+            "each; the statistics use every cell.")
+
+    def axes_width(with_note: bool) -> float:
+        fig = Figure(figsize=(3.9, 4.0), dpi=144)
+        FigureCanvasAgg(fig)
+        ax = fig.add_subplot(111)
+        ax.plot([0, 1], [1.0, 2.0])
+        fig.set_layout_engine("constrained")
+        if with_note:
+            if site == "bar":
+                import review.features.barplot._pooled as mod
+                monkeypatch.setattr(mod, "sampled_note", lambda _cols: text)
+                mod.finish_columns(ax, [])
+            else:
+                import review.features.distribution.controller as mod
+                monkeypatch.setattr(mod, "sampled_note", lambda _g, _e: text)
+                widgets = SimpleNamespace(get_or_none=lambda _k: fig)
+                mod._note_sampled(SimpleNamespace(widgets=widgets), [], True)
+            assert any(t.get_text() == text for t in ax.texts), "the note was not drawn"
+        fig.canvas.draw()
+        return ax.bbox.width
+
+    assert axes_width(True) == axes_width(False)

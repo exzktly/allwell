@@ -212,7 +212,11 @@ def finish_columns(ax, columns) -> None:
         if text and ax is not None:
             from review.core.plot_style import follows_theme, tokens_for
             note = follows_theme(ax.text(0.01, 0.01, text, transform=ax.transAxes, ha="left", va="bottom",
-                                         fontsize=7, color=tokens_for(ax)[2], zorder=6, clip_on=False), muted=True)
+                                         fontsize=7, color=tokens_for(ax)[2], zorder=6, clip_on=False,
+                                         wrap=True), muted=True)
+            # Out of layout, like the Split-by notice: under phone layout's
+            # constrained layout an in-layout note shrinks the axes to fit it.
+            note.set_in_layout(False)
             setattr(note, SAMPLED_NOTE_TAG, True)
     finally:
         for column in columns:

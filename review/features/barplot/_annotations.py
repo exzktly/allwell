@@ -339,6 +339,13 @@ def annotate_split_notice(ctx, ax) -> None:
         return
     note = follows_theme(ax.text(
         0.01, 0.94, notice, transform=ax.transAxes, ha="left", va="top",
-        fontsize=7, color=tokens_for(ax)[2], zorder=6, clip_on=False),
+        fontsize=7, color=tokens_for(ax)[2], zorder=6, clip_on=False,
+        wrap=True),
         muted=True)
+    # Out of layout: the note is drawn inside the axes, but a layout engine
+    # measures every text an axes holds, and in phone layout the figure runs
+    # constrained layout — which shrank the axes until the one-line sentence
+    # fitted beside them (491 px to 298 px on a phone-width figure). Wrapped,
+    # so it stays on the figure rather than running off its edge.
+    note.set_in_layout(False)
     setattr(note, DECORATION_TAG, True)

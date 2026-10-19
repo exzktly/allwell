@@ -379,9 +379,19 @@ debounced 250 ms (`install_refit`); the listener goes with the tab.
 **Long panels scroll by dragging** (`_grab_scrolling`): over VNC a touch-drag
 arrives as a left-button mouse drag, which a Qt scroll area ignores, so
 `QScroller` grabs the left-button gesture on the side rail, the Controls sheet and
-the read-only logs — never on the plate or a plot, whose drags mean something
-else. Whether RealVNC's touch mode delivers drags that way is not verified on a
-device.
+the read-only logs. **Plot pages scroll by a swipe on the plot** too
+(`PhoneShell._swipe_plot_area`, run from `size_canvas` — so on the switch, on Show
+and from the sweep, and a plot built later gets it): the scroll area holding a
+canvas on a page `band_roots` names grabs the gesture, and gives it back at the
+desk. A tap still reaches the plot, because Qt's flick gesture holds a press until
+it can tell a tap from a drag; a drag on a plot no longer reaches matplotlib in
+phone layout, where its pan and zoom are already hidden. Nothing else in the
+centre is grabbed — the Home editors' plates and the Image Table's chips own their
+drags. `tests/test_phone_plot_swipe.py` asserts the calls to `QScroller` rather
+than a simulated swipe: QTest stamps its mouse events from its own clock, from
+which QScroller reads a drag's speed, so a simulated swipe scrolls or not by
+timing. Whether RealVNC's touch mode delivers drags as mouse drags is not
+verified on a device.
 
 **The window fits its screen — in both layouts.** `PhoneShell.fit_window` runs at
 startup and on every `screenChanged` / `availableGeometryChanged`: the minimum is
@@ -452,7 +462,13 @@ every figure to constrained layout — first putting back `in_layout` on the gri
 axes, which `set_position` turns off, without which the engine moves nothing — and
 `_fit_labels_to_phone` breaks a title too wide for its axes: at " — " first (so
 "— t = 0 h" stays together), then into lines as full as the axes' width allows; a
-y-label too tall for its axes is broken the same way. The figure keeps its pixel
+y-label too tall for its axes is broken the same way. Constrained layout measures
+every text an axes holds, so a note drawn *inside* the axes — the bar Split-by
+notice (`barplot/_annotations.annotate_split_notice`), the "drawn from a sample"
+notes on Bar Plots and Distribution, Spatial's ICC line — is taken out of layout
+(`set_in_layout(False)`) and wrapped; left in, a one-line sentence made the engine
+shrink the axes until it fitted beside them (491 px to 298 px for the Split-by
+notice on a phone-width figure). The figure keeps its pixel
 size and loses inches, so a figure saved *from the screen* while phone layout is
 on is laid out as the phone shows it; the raster exports pass `dpi=300` and keep
 their resolution. The scale also sets matplotlib's private
@@ -1564,7 +1580,12 @@ its border, and `control_row_height` run from inside that polish measures the
 probe without the application stylesheet's touch floors — in phone layout it
 pinned a 110 px stepper to the desk's 21 px the moment its number was tapped.
 `Stepper._repolishing` marks that re-polish, and `changeEvent` leaves the height
-alone while it is set (`tests/test_stepper_focus_keeps_height.py`).
+alone while it is set (`tests/test_stepper_focus_keeps_height.py`). A host that
+re-pins a stepper's width after building it calls `Stepper.pinWidth`, not
+`setFixedWidth`: in touch mode it remembers the pin for the desk and keeps the
+width the − / + need. `channel_state_controller.refresh_thresh_frac_quick_edit`
+re-pins on every threshold change, and its bare 96 px pin squeezed the number out
+from between the touch buttons the first time − or + was tapped.
 
 A `Stepper` carrying a prefix or suffix draws it inside its line-edit, so the
 validator on that edit is `stepper._AffixValidator`, which strips the affixes

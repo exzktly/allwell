@@ -1853,6 +1853,14 @@ row instead of squeezing in beside a narrow field. `tests/test_analyze_narrow_si
 drives every collapsible section open (a real `QTest.mouseClick`, since a
 collapsed section contributes nothing to the form's measured width until
 expanded) and asserts the form's laid-out minimum width fits inside `rail_w`.
+Fitting the desk's rail is not enough for phone layout, where the same form is
+drawn at touch size in the ☰ drawer: no row may be unbreakable. A fluorescent
+channel row (field, ✕, smFISH, Phase) is a `FlowLayout` that wraps the two
+checkboxes under the field when there is no room, and "Detect schema & channels
+at run time" is a `WrapCheckBox`, like the form's other long-label boxes — as a
+bare `QCheckBox` and a `QHBoxLayout` they pinned the form 14 px wider than the
+drawer on a 432 px screen, clipping every section at its right edge
+(`test_a_channel_row_and_the_run_time_detect_box_can_narrow_to_one_control`).
 
 **The page tab bars are in this band too**, to the right of the mode bar and
 sharing its bottom edge. They used to sit inside each tab's own body, one row

@@ -23,9 +23,10 @@ widget still lands on the ``AnalyzeTab`` instance under the same
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QCheckBox, QLabel, QWidget
+from PySide6.QtWidgets import QLabel, QWidget
 
 from widgets.schema_picker import SchemaPicker
+from widgets.wrap_checkbox import WrapCheckBox
 
 #: Stand-in tokens for the "e.g. ..." line, one per schema field. The channel
 #: slot is filled from the form's own channel tokens instead.
@@ -76,8 +77,11 @@ class AnalyzeSchemaSectionMixin:
         # will run. The Segmentation channel stays live, because which channel
         # to segment is a choice rather than a fact the filenames carry: it is
         # used whenever the input turns out to carry it.
-        self._auto_detect_cb = QCheckBox(
-            "Detect schema && channels at run time", sec)
+        # A WrapCheckBox: a plain QCheckBox reports its whole label as its
+        # minimum width, which pinned the form wider than phone layout's
+        # drawer, so every section was cut off at its right edge.
+        self._auto_detect_cb = WrapCheckBox(
+            "Detect schema & channels at run time", sec)
         self._auto_detect_cb.setToolTip(
             "For a queued run whose input does not exist yet. When the run "
             "starts, the filename schema and the channels are read from the "

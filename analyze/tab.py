@@ -24,7 +24,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QFileDialog, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+    QCheckBox, QFileDialog, QLineEdit, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
@@ -36,7 +36,7 @@ from services.pipeline_runner import (
     is_transient_progress,
 )
 from ui import theme
-from ui import theme
+from widgets.flow_layout import FlowLayout
 from core.safe import swallowed
 from analyze.bg_map import AnalyzeBackgroundMapMixin
 from analyze.domain.input import AnalyzeInputMixin
@@ -306,9 +306,9 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
     # ------------------------------------------------------------------
     def _fluor_add_row(self, default_token: str = "") -> None:
         row = QWidget(self._fluor_frame)
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(8)
+        # A flow, so the checkboxes wrap under the field when phone layout's
+        # drawer is too narrow for one line (an unbreakable row clipped the form).
+        rl = FlowLayout(row, h_spacing=8, v_spacing=4)
 
         edit = QLineEdit(default_token, row)
         edit.setFixedWidth(theme.Metrics.num_field_w_lg)
@@ -340,7 +340,6 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
             "correction and is resaved from the original image. With the "
             "Label-free method it is also the Cellpose segmentation input."
         )
-        rl.addStretch(1)
 
         self._fluor_rows.append((edit, smfish_cb, phase_cb, remove_btn))
 

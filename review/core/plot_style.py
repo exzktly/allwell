@@ -1578,34 +1578,138 @@ def _break_to_fit(text: str, measured_px: float, room_px: float) -> str:
     return textwrap.fill(text, width=width, break_long_words=False)
 
 
-def _fit_labels_to_phone(fig) -> None:
-    """Break a title wider than its figure, or a y-label taller than its axes,
-    onto more lines — at phone sizes a plot's own title is often longer than a
-    phone is wide. Real line breaks rather than matplotlib's ``wrap``, which
-    constrained layout measures before wrapping, so a wrapped title still ran
-    off the top of the figure."""
-    renderer = fig.canvas.get_renderer()
+#: On a title: the ``(text, size)`` its renderer gave it, and the ``(text,
+#: size)`` the last phone fit wrote. A title still carrying the second was not
+#: touched since, so the next fit starts again from the first — every fit
+#: measures the title as the renderer wrote it, never a previous fit's breaks.
+_UNBROKEN = "_aw_unbroken"
+_FITTED = "_aw_fitted"
+
+
+def _title_source(title) -> tuple[str, float]:
+    """The title as its renderer last wrote it."""
+    current = (title.get_text(), float(title.get_fontsize()))
+    if getattr(title, _FITTED, None) == current:
+        return getattr(title, _UNBROKEN, current)
+    return current
+
+
+def _two_lines(text: str, width_of) -> list[str]:
+    """*text* as two lines: at its " — " clause (the timepoint, a scope) when it
+    has one, so "— t = 0 h" stays together; otherwise at the space that makes
+    the wider of the two lines narrowest."""
+    pieces = re.split(r"\s+—\s+", text, maxsplit=1)
+    if len(pieces) == 2:
+        return [pieces[0], f"— {pieces[1]}"]
+    words = text.split(" ")
+    if len(words) < 2:
+        return [text]
+    splits = ([" ".join(words[:i]), " ".join(words[i:])] for i in range(1, len(words)))
+    return min(splits, key=lambda lines: max(width_of(line) for line in lines))
+
+
+def _fit_title(title, room: float, renderer) -> None:
+    """Fit *title* into *room* pixels: one line if it fits, else two lines,
+    and if two lines still do not fit, the two lines at the size that does.
+
+    Never clipped, never more than two lines: a title broken onto five short
+    lines took the height its plot needed, and one cut at the figure's edge
+    lost the words that said what was plotted.
+    """
+    text, size = _title_source(title)
+    if not text or room <= 0:
+        return
+    prop = title.get_fontproperties()
+
+    def width_of(line: str, at: float = size) -> float:
+        p = prop.copy()
+        p.set_size(at)
+        return renderer.get_text_width_height_descent(line, p, ismath=False)[0]
+
+    given = text.split("\n")
+    if all(width_of(line) <= room for line in given):
+        # As the renderer wrote it — one line, or the lines it chose — when
+        # every line fits. A renderer's own break that does not fit is
+        # undone, and the title fitted like any other.
+        lines, fitted = given, size
+    else:
+        lines = _two_lines(" ".join(line.strip() for line in given), width_of)
+        widest = max(width_of(line) for line in lines)
+        fitted = size if widest <= room else size * room / widest
+        # Text does not scale exactly with its size — hinting rounds glyph
+        # advances, by different amounts on different FreeType builds — so
+        # the proportional size can still overrun by a pixel or two (CI's
+        # did, where this machine's did not). Measure again and step down.
+        for _ in range(12):
+            if max(width_of(line, fitted) for line in lines) <= room:
+                break
+            fitted *= 0.97
+    title.set_text("\n".join(lines))
+    title.set_fontsize(fitted)
+    setattr(title, _UNBROKEN, (text, size))
+    setattr(title, _FITTED, (title.get_text(), float(title.get_fontsize())))
+
+
+def _unfit_titles(fig) -> None:
+    """Give every title back the text and size its renderer wrote — leaving
+    phone layout, the desk's width needs none of the phone's breaks."""
     for ax in fig.axes:
         title = ax.title
-        text = title.get_text()
-        if text and "\n" not in text:
-            # The axes' own width: constrained layout moves the axes after
-            # this runs (it widens the left margin for larger tick labels),
-            # so the room the title will have is the axes', not the figure's.
-            room = ax.bbox.width
-            w = title.get_window_extent(renderer).width
-            if w > room:
-                # A clause after " — " (the timepoint, a scope) is the natural
-                # second line; break there first, then fit each part.
-                pieces = re.split(r"\s+—\s+", text, maxsplit=1)
-                parts = pieces[:1] + [f"— {p}" for p in pieces[1:]]
-                per_char = w / len(text)
-                title.set_text("\n".join(
-                    _break_to_fit(p, per_char * len(p), room) for p in parts))
+        if getattr(title, _FITTED, None) == (title.get_text(), float(title.get_fontsize())):
+            text, size = getattr(title, _UNBROKEN)
+            title.set_text(text)
+            title.set_fontsize(size)
+        setattr(title, _FITTED, None)
+
+
+def _fit_labels_to_phone(fig) -> None:
+    """Fit each title into its axes' width (:func:`_fit_title`), and break a
+    y-label taller than its axes onto more lines — at phone sizes a plot's own
+    title is often longer than a phone is wide. Real line breaks rather than
+    matplotlib's ``wrap``, which constrained layout measures before wrapping,
+    so a wrapped title still ran off the top of the figure."""
+    renderer = fig.canvas.get_renderer()
+    for ax in fig.axes:
+        # The axes' own width: constrained layout moves the axes after this
+        # runs (it widens the left margin for larger tick labels), so the room
+        # the title will have is the axes', not the figure's.
+        _fit_title(ax.title, ax.bbox.width, renderer)
         ylab = ax.yaxis.label
         if ylab.get_text():
             h = ylab.get_window_extent(renderer).height
             ylab.set_text(_break_to_fit(ylab.get_text(), h, ax.bbox.height))
+
+
+def _refit_on_resize(ctx, fig, canvas) -> None:
+    """Re-fit *fig*'s titles and layout whenever its canvas changes size.
+
+    A title is fitted to the width its axes had when the figure was styled. A
+    plot drawn at the desk and then shown in phone layout — or one on a phone
+    that turned, or a page that resized — kept the old fit: switching into
+    phone layout raised its DPI and cut its titles off at both edges until
+    something redrew it. The canvas's ``resize_event`` is what all three have
+    in common (phone layout's DPI change sends one too,
+    ``ui/phone_shell.scale_canvas``). At the desk with nothing fitted it does
+    nothing; leaving phone layout it gives the titles their own text back.
+    """
+    if getattr(canvas, "_aw_refit_cid", None) is not None:
+        return
+
+    def _on_resize(_event) -> None:
+        from core import phone_layout
+        on = phone_layout.is_on()
+        if not on and not getattr(fig, "_aw_phone_fitted", False):
+            return
+        try:
+            if not on:
+                _unfit_titles(fig)
+            fig._aw_phone_fitted = on
+            _apply_layout_engine(fig, figure_prefs(ctx, fig))
+            canvas.draw_idle()
+        except Exception:
+            swallowed("re-fit a plot's titles to its new size")
+
+    canvas._aw_refit_cid = canvas.mpl_connect("resize_event", _on_resize)
 
 
 def _apply_layout_engine(fig, prefs: dict) -> None:
@@ -1634,6 +1738,15 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
             fig.set_layout_engine("constrained")
         except Exception:
             swallowed()  # a figure that refuses an engine keeps its margins
+            return
+        # Once more against the axes the engine settled on: it widens the
+        # left margin for phone-sized tick labels, so a title fitted to the
+        # axes' earlier width overran the figure's edge by a few pixels.
+        try:
+            fig.get_layout_engine().execute(fig)
+            _fit_labels_to_phone(fig)
+        except Exception:
+            swallowed("re-fit the titles to the laid-out axes")
         return
     use_constrained = bool(prefs.get("layout_constrained", False))
     use_tight = bool(prefs.get("layout_tight", False))
@@ -1665,6 +1778,11 @@ def apply_export_style_to_current(ctx, fig, canvas=None) -> None:
     prefs = figure_prefs(ctx, fig)
     apply_export_style_prefs(fig, prefs)
     _apply_grouping_notice(ctx, fig)
+    from core import phone_layout
+    fig._aw_phone_fitted = phone_layout.is_on()
+    target = canvas if canvas is not None else getattr(fig, "canvas", None)
+    if target is not None and hasattr(target, "mpl_connect"):
+        _refit_on_resize(ctx, fig, target)
     if canvas is not None:
         canvas.draw_idle()
 

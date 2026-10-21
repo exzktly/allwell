@@ -252,6 +252,20 @@ still refuses such a well, naming the reason. An overlap shorter
 than a nanowell needs is logged once as a warning with the expected number of nanowells on a seam, and the
 run goes on.
 
+**Reuse registration** (a folder and a **Browse…** button) is for analysing a plate a second time with other
+segmentation or measurement settings — another cell diameter, margin, or occlusion or clipping threshold — without
+registering every tile again. Name the earlier run's output folder. For each well and timepoint, the run takes the
+tile positions that run stored in `nanowells/<well>_grid.json` only when they were made from exactly the same
+inputs: the same images, the same acquisition record, the same plate format, geometry and measured lattice pitch,
+and the same version of the registration step. Anything else is registered again, so the positions are always the
+ones registering would give, and reusing them changes nothing but the time a run takes. Left blank, the output
+folder's own earlier registration is reused the same way, so re-running a plate into the folder it was analysed
+into keeps its registration too. Registration is only stored this way by runs from this version on: a folder
+analysed by an earlier version has nothing to reuse, and its first re-run registers every tile. The run log says
+`registration reused from <folder>` for each well that took it, and each timepoint's grid record names the folder
+(`registration.reused_from`). Run refuses to start when the folder is not a nanowell run's output folder. A
+remote host cannot read a folder on this computer: the log says so, and the host registers every tile.
+
 **Test detection…** runs registration and detection on one well at one timepoint, in the background, and opens a
 window with the montage: every nanowell outlined (green empty, blue holding cells, amber occluded, red
 clipped, grey without an address, dashed purple on a seam), addresses written once you zoom in far enough to
@@ -283,8 +297,9 @@ cell size the label-free segmenter is given, `--nanowell_margin_um` the margin a
 inside one tile for that tile to own it (default a tenth of the diameter), and `--nanowell_square_edge_deg` the
 angle of the central square's edges to a lattice row (default 0). `--nanowell_geometry infer` finds the array by
 its contrast and infers the lattice kind (hexagonal or square), pitch, orientation and outline, as *Infer from
-the image* does on the form; without it (`hex_circle`) the array is a hexagonal lattice in a circle. Wells must
-be zips.
+the image* does on the form; without it (`hex_circle`) the array is a hexagonal lattice in a circle.
+`--nanowell_registration_from <folder>` reuses an earlier run's tile registration, as **Reuse registration** does
+on the form. Wells must be zips.
 
 Besides the usual per-cell CSV (one row per cell, with the owner tile as `fov` and the nanowell's address
 `nw_q`, `nw_r`, `nw_ring`, `nw_label` and its position `well_x_um`, `well_y_um`), the run writes

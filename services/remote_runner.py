@@ -1115,16 +1115,12 @@ class RemoteRunner:
                 else:
                     i += 1
             elif arg == "--incremental":
-                # Incremental is a client-side concern on remote runs: the
-                # client uploads only the new-FOV files and merges the partial
-                # outputs back on fetch. The remote just processes what it
-                # received, so the flag (and its prior-dir) are dropped here.
+                # Incremental is client-side on remote runs: the client uploads only the
+                # new-FOV files and merges the partial outputs back on fetch, so the flag
+                # and its prior-dir are dropped here; so is a local folder to reuse nanowell
+                # registration from (the host registers anew, to the same positions).
                 i += 1
-            elif arg == "--incremental_prior_dir":
-                i += 2
-            elif arg == "--nanowell_registration_from":
-                # A folder on this computer, which the host cannot read. Registration reuse is a cache keyed on
-                # the run's own inputs, so without it the host registers every tile and gets the same positions.
+            elif arg in ("--incremental_prior_dir", "--nanowell_registration_from"):
                 i += 2
             else:
                 out.append(arg)

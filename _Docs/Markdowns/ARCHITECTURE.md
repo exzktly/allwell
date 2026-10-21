@@ -622,7 +622,8 @@ allwell/
 │   │                              from the run's events, and the indicator's tooltip
 │   ├── nanowell_hook.py        ← picks the section or a stand-in by the build's profile
 │   ├── nanowell_section.py     ← the Nanowells section: mode, plate format, the numeric
-│   │                              fields, Test detection, and the run validation
+│   │                              fields, Reuse registration, Test detection, and the run
+│   │                              validation
 │   ├── nanowell_preflight.py   ← what is checkable before a nanowell run without reading an
 │   │                              image: record, archives, grids, overlap and seam estimate
 │   ├── nanowell_preview.py     ← the Test detection window and the marks drawn on the montage
@@ -9797,6 +9798,28 @@ detected, with no address. Consistency of pitch and roster across timepoints is 
 timepoint; the lattice angle is not checked within one well, because the plate's rotation between timepoints
 is only measurable across wells.
 
+**Registration reuse** (`nanowell_run.registration_key`, `stored_placement`, `Placement`). A plate analysed a
+second time with other segmentation or measurement settings does not register its tiles again. Every grid block
+that carries `tiles` also carries a `registration` block: the key the placement was solved under, the
+registration's own warnings, how many tiles' lattice fits constrained it, and `reused_from` (the folder it was
+taken from, or `null` when this run solved it). The key digests everything registration reads:
+`REGISTRATION_SCHEME` (raise it whenever `tile_register` or the per-tile fits could move a tile), the timepoint's
+`record_digest`, every tile's pixels, the geometry, nominal pitch and diameter, and the working pitch and lattice
+kind measured on the timepoint — and nothing that acts after registration (cell diameter, margin, square edge,
+occlusion and clipping thresholds, the segmenter). `locate_timepoint` computes the key once the working pitch is
+measured and takes the first stored placement under it for exactly the plan's tiles, skipping the per-tile fits
+and `register_tiles`; otherwise it registers. So reuse is a cache whose hits are the positions registering would
+give, which is why the source folder is outside `util.settings_digest.KEYED_ON` (listed in `NOT_KEYED_ON`), the
+remote run digest (`services.remote_run_id._DIGEST_SKIP_VALUE`) and the sidecar's `nanowell.settings` (Merge
+Plates compares those blocks). `nanowell_task.stored_placements` gathers the candidates per timepoint from the
+folder named by `--nanowell_registration_from` (the form's *Reuse registration*, key
+`nanowell_registration_from`, refused unless it holds `nanowells/`) and then the output folder itself, read
+before the run rewrites its grid record; `_log_reused_registration` logs one line per well that took any. The
+remote argv drops the flag (`RemoteRunner._build_remote_argv`): the host cannot read the folder and registers
+anew. Grid records written before the key existed carry no `registration` block and are never reused.
+`tests/test_reuse_is_keyed_completely.py` mutates each key input alone; `tests/test_nanowell_registration_reuse.py`
+drives the reuse through `process_microscopy.main`.
+
 **Outputs** (`pipeline/nanowell_task.py`). The per-cell CSV keeps the existing columns (`fov` is the owner
 tile) and adds `nw_q`, `nw_r`, `nw_ring`, `nw_label`, `well_x_um`, `well_y_um`; it is written with its header and
 no rows for a well none of whose nanowells holds a cell, because a missing CSV reads as an unfinished well
@@ -9886,7 +9909,10 @@ Nanowells section (`analyze/nanowell_section.py`, folded by default, directly be
 checkbox, the plate format, the array geometry (*Hexagonal lattice in a circle*, which sends no flag, or *Infer
 from the image*, which sends `--nanowell_geometry infer`; `GEOMETRY_CHOICES` in `domain/nanowell_fields.py`), the
 cell diameter, the margin, the square's edge angle and the occlusion and
-clipping thresholds; a blank number sends no flag and the pipeline's default applies. Its option keys are
+clipping thresholds; a blank number sends no flag and the pipeline's default applies. *Reuse registration* (a path
+and a Browse button, key `nanowell_registration_from`) sends `--nanowell_registration_from` when filled; a folder
+without `nanowells/` is refused (`registration_from_error`), and with a remote host chosen the run goes on and the log
+says once that the host registers every tile (`_nanowell_log_once`). Its option keys are
 the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's
 `execution_options` all name the same things and the edit-a-queued-job round trip and the sidecar restore
 need no translation; a sidecar that states `nanowell_format: null` switches the mode off, and one that

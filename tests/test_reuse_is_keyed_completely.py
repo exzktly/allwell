@@ -165,6 +165,28 @@ REUSE_CONTRACTS = {
             "third as many timepoints. The plate would go ragged with nothing "
             "raising"),
     },
+    # A nanowell run's tile registration, reused from an earlier run's grid
+    # record (``--nanowell_registration_from``, or the output folder's own).
+    # Reusing it is only right when registering again would give the same
+    # positions, so the key is everything registration reads.
+    "nanowell_run.registration_key": {
+        "REGISTRATION_SCHEME": (
+            "the registration algorithm itself. A fix to tile_register or the "
+            "per-tile lattice fits would otherwise go on serving the positions "
+            "the broken one solved"),
+        "record": (
+            "the acquisition record's tile positions, tile size, pixel size and "
+            "declared overlap: they seed the solve and bound its search window"),
+        "pixels": (
+            "overlap correlation and the lattice fits read the tiles. A plate "
+            "re-exported with corrected images keeps its record, so without "
+            "this it would keep the old images' registration"),
+        "geometry": "decides how each tile's lattice is fitted (by contrast or at the format's diameter)",
+        "nominal_pitch": "seeds the working pitch and the fits on a format or custom plate",
+        "diameter": "the matched filter the hexagonal tile fits find sites with",
+        "working_pitch": "the fits' seed and the overlap search window, measured on this timepoint",
+        "kind": "the lattice kind (hex or square) an inferred geometry fits every tile as",
+    },
     "scan_cache.load": {
         "size": (
             "the CZI's byte count. What is being reused is everything the "
@@ -268,6 +290,7 @@ def test_every_reuse_decision_is_registered():
     assert "czi_import.resume_state" in REUSE_CONTRACTS
     assert "nd2_import.resume_state" in REUSE_CONTRACTS
     assert "scan_cache.load" in REUSE_CONTRACTS
+    assert "nanowell_run.registration_key" in REUSE_CONTRACTS
 
 
 def test_the_roster_names_every_key_the_decision_actually_takes():
@@ -956,3 +979,100 @@ def test_the_roster_names_every_setting_that_decides_the_mapping(
     assert set(MAPPING_EXEMPTIONS) <= fields, (
         "MAPPING_EXEMPTIONS names a setting no converter has any more — an "
         "exemption that stopped describing a real decision.")
+
+
+# ── nanowell_run.registration_key ───────────────────────────────────────────
+
+_REGISTRATION = "nanowell_run.registration_key"
+
+
+def _registration_inputs():
+    """Small but complete inputs to ``registration_key``: two tiles of one timepoint of one well."""
+    import numpy as np
+
+    from pipeline import nanowell_run as nr
+
+    record = {"tiles": [{"well": "A01", "timepoint": "0h", "field": f, "mosaic_xy_px": [x, 0], "stage_xy_um": None}
+                        for f, x in (("F0", 0), ("F1", 90))],
+              "timepoints": {"0h": {"tile_size_px": {"x": 100, "y": 100}, "pixel_size_um": {"x": 1.0, "y": 1.0},
+                                    "declared_overlap_percent": 10.0}}}
+    images = {f: np.full((100, 100), k + 1.0, dtype=np.float32) for k, f in enumerate(("F0", "F1"))}
+    return {"record": record, "images": images, "settings": nr.NanowellSettings("custom", custom=(172.0, 100.0)),
+            "pitch_um": 170.0, "kind": "auto"}
+
+
+def _changed(name: str, inputs: dict, monkeypatch) -> dict:
+    """*inputs* with the one registration input *name* changed and every other left as it was."""
+    from dataclasses import replace
+
+    from pipeline import nanowell_run as nr
+
+    out = dict(inputs)
+    if name == "REGISTRATION_SCHEME":
+        monkeypatch.setattr(nr, "REGISTRATION_SCHEME", nr.REGISTRATION_SCHEME + 1)
+    elif name == "record":
+        out["record"] = {**inputs["record"], "tiles": [dict(t) for t in inputs["record"]["tiles"]]}
+        out["record"]["tiles"][1]["mosaic_xy_px"] = [91, 0]
+    elif name == "pixels":
+        out["images"] = {f: im.copy() for f, im in inputs["images"].items()}
+        out["images"]["F1"][50, 50] += 1.0
+    elif name == "geometry":
+        out["settings"] = replace(inputs["settings"], geometry=nr.GEOMETRY_INFER)
+    elif name == "nominal_pitch":
+        out["settings"] = replace(inputs["settings"], custom=(160.0, 100.0))
+    elif name == "diameter":
+        out["settings"] = replace(inputs["settings"], custom=(172.0, 90.0))
+    elif name == "working_pitch":
+        out["pitch_um"] = 171.0
+    elif name == "kind":
+        out["kind"] = "square"
+    else:
+        raise AssertionError(f"no mutation written for {name!r}: add one beside its reason in REUSE_CONTRACTS")
+    return out
+
+
+def _registration_key(inputs: dict) -> str:
+    from pipeline import nanowell_run as nr
+
+    return nr.registration_key(inputs["record"], "A01", "0h", inputs["images"], inputs["settings"],
+                               inputs["pitch_um"], inputs["kind"])
+
+
+@pytest.mark.parametrize("key", sorted(REUSE_CONTRACTS[_REGISTRATION]))
+def test_changing_one_registration_input_alone_changes_the_key(key, monkeypatch):
+    inputs = _registration_inputs()
+    before = _registration_key(inputs)
+    after = _registration_key(_changed(key, inputs, monkeypatch))
+    assert before != after, (
+        f"registration_key ignores {key!r}, so a placement solved from other inputs would be reused. It is keyed "
+        f"because: {REUSE_CONTRACTS[_REGISTRATION][key]}.")
+
+
+@pytest.mark.parametrize("setting, value", [
+    ("cell_diameter_um", 11.0), ("margin_um", 3.0), ("occluded_below", 0.3), ("clipped_below", 0.7),
+    ("square_edge_deg", 5.0)])
+def test_segmentation_and_measurement_settings_leave_the_registration_key_alone(setting, value):
+    """The point of the feature: these act after registration, so changing them must not cost a re-registration."""
+    from dataclasses import replace
+
+    inputs = _registration_inputs()
+    other = {**inputs, "settings": replace(inputs["settings"], **{setting: value})}
+    assert _registration_key(other) == _registration_key(inputs)
+
+
+def test_a_stored_placement_is_taken_only_under_its_own_key_and_for_the_same_tiles():
+    from pipeline import nanowell_run as nr
+
+    tiles = [{"tile": "F0", "left_um": 0.0, "top_um": 0.0, "source": "lattice", "residual_um": 0.1,
+              "correction_um": 0.2},
+             {"tile": "F1", "left_um": 90.25, "top_um": -0.5, "source": "overlap", "residual_um": 0.3,
+              "correction_um": 0.4}]
+    block = {"tiles": tiles, "registration": {"key": "k1", "warnings": ["w"], "tile_lattice_fits": 1}}
+    old = {"tiles": tiles}                                          # written before registration was keyed
+    taken = nr.stored_placement([("/old", old), ("/a", {**block, "registration": {**block["registration"],
+                                                                                   "key": "k0"}}),
+                                 ("/b", block)], "k1", ["F1", "F0"])
+    assert taken == nr.Placement(tuple(tiles), ("w",), "k1", 1, "/b")
+    assert taken.positions() == {"F0": (0.0, 0.0), "F1": (90.25, -0.5)}
+    assert nr.stored_placement([("/b", block)], "k1", ["F0", "F1", "F2"]) is None   # another grid of tiles
+    assert nr.stored_placement([("/old", old)], "k1", ["F0", "F1"]) is None

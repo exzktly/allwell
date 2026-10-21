@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import re
+from pathlib import Path
 
 #: The plate formats the pipeline knows (``pipeline.nanowell_run.PLATE_FORMATS``), as (option value, label), and
 #: the custom one whose diameter and pitch the form gives (``CUSTOM_FORMAT``, tracker A7). Restated here, with a
@@ -120,6 +121,25 @@ def pattern_from_opts(opts: dict) -> dict | None:
             "overlap_percent": overlap, "pixel_size_um": pixel}
 
 
+#: An earlier nanowell run's output folder whose tile registration the run may reuse (``--nanowell_registration_from``).
+REGISTRATION_FROM_KEY = "nanowell_registration_from"
+
+
+def registration_from_error(text: str) -> str | None:
+    """Why *text* cannot be a folder to reuse registration from, or ``None`` (blank is fine: nothing is reused but
+    the output folder's own). The pipeline's argument check makes the same test, so a run never starts on a typo."""
+    folder = str(text or "").strip()
+    if not folder:
+        return None
+    path = Path(folder).expanduser()
+    if not path.is_dir():
+        return f"Reuse registration from: {folder} is not a folder."
+    if not (path / "nanowells").is_dir():
+        return (f"Reuse registration from: {folder} is not a nanowell run's output folder (it has no nanowells/ "
+                "folder of grid records).")
+    return None
+
+
 def nanowell_enabled(opts: dict) -> bool:
     return bool(str(opts.get("nanowell_format") or "").strip())
 
@@ -141,6 +161,9 @@ def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]
     geometry = str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]).strip()
     if geometry not in {value for value, _label in GEOMETRY_CHOICES}:
         errors.append(f"Nanowell geometry {geometry!r} is not one this version knows.")
+    source = registration_from_error(str(opts.get(REGISTRATION_FROM_KEY) or ""))
+    if source:
+        errors.append(source)
     if need_phase and not str(opts.get("phase_token") or "").strip():
         errors.append("Nanowell mode needs a Phase channel: tick Phase on the channel the tiles are imaged in.")
     custom = str(opts.get("nanowell_format") or "").strip() == CUSTOM_FORMAT

@@ -101,6 +101,7 @@ _OPTS = {
     "nanowell_occluded_below": "0.6",
     "nanowell_clipped_below": "0.7",
     "nanowell_geometry": "infer",
+    "nanowell_registration_from": "/data/plate6/out",
 }
 
 # ``cleanup_remote`` / ``dry_run_cleanup`` are remote-only settings: nothing

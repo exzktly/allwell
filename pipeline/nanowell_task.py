@@ -65,7 +65,7 @@ def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
 
 
 def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
-                    template_path, staging_dir, settings_key, scratch_dir, expected_shape):
+                    template_path, staging_dir, settings_key, scratch_dir, expected_shape, stored_placements=None):
     """``run_well`` over *todo* on what an earlier run kept (*prior*, or ``None``): ``(outcome, fixed radius,
     fixed roster, kept template)``. *expected_shape* is a described grid's shape: a well short of a whole row or
     column is incomplete, which a record's positions alone could not show."""
@@ -77,8 +77,52 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
                           checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key),
                           earliest_template=None if saved is None else saved[0],
                           spill_dir=Path(scratch_dir) / ".montages",     # removed with the scratch (X23)
-                          expected_shape=expected_shape)
+                          expected_shape=expected_shape, stored_placements=stored_placements)
     return outcome, fixed, fixed_roster, saved
+
+
+def stored_placements(folders, well_label: str) -> dict:
+    """``timepoint -> [(folder, grid block), ...]`` from each of *folders*' ``nanowells/<well>_grid.json``, in order.
+
+    These are only candidates: ``nanowell_run.stored_placement`` takes one only when it was registered from exactly
+    this run's inputs (its ``registration_key``), so a folder of another plate, other images or another algorithm
+    contributes nothing. A folder named twice, or without a readable grid record for the well, is skipped.
+    """
+    out: dict = {}
+    seen = set()
+    for folder in folders:
+        if folder is None:
+            continue
+        folder = Path(folder)
+        resolved = folder.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        path = folder / NANOWELL_DIR / f"{well_label}_grid.json"
+        try:
+            grid = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError) as exc:
+            log.warning("Well %s — the grid record %s could not be read, so its registration is not reused (%s).",
+                        well_label, path, exc)
+            continue
+        for tp, block in (grid.get("timepoints") or {}).items() if isinstance(grid, dict) else ():
+            if isinstance(block, dict):
+                out.setdefault(tp, []).append((folder, block))
+    return out
+
+
+def _log_reused_registration(well_label: str, outcome: nr.WellOutcome, todo) -> None:
+    """One line per well saying which of its timepoints took an earlier run's registration, and from where."""
+    reused: dict = {}
+    for tp in todo:
+        folder = ((outcome.timepoints.get(tp) or {}).get("registration") or {}).get("reused_from")
+        if folder:
+            reused.setdefault(folder, []).append(tp)
+    for folder, tps in reused.items():
+        log.info("Well %s — registration reused from %s for %d of %d timepoint(s): %s.",
+                 well_label, folder, len(tps), len(todo), ", ".join(tps))
 
 
 def _kept_evidence(prior: dict | None) -> dict | None:
@@ -457,13 +501,18 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         log.info("Well %s — up to date (no new timepoints).", well_label)
         return [], []
 
+    # Read now, before this run rewrites the output folder's grid record: a folder named on the form first, then the
+    # output folder itself, so re-running a plate in place with other segmentation settings keeps its registration.
+    placements = stored_placements((shared_kwargs_template["_nanowell"].get("registration_from"), output_dir),
+                                   well_label)
+
     def run(prior, todo):
         wanted = {Path(p).name for (tp, _), (nuclear, fluors) in index.items() if tp in todo
                   for p in [nuclear, *fluors]}
         extract(zip_path, scratch_dir, members_to_extract=wanted & set(needed))
         return _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
                                Path(prior_dir or output_dir) / NANOWELL_DIR / template_path.name, staging_dir,
-                               settings_key, scratch_dir, tuple(pattern["grid"]) if described else None)
+                               settings_key, scratch_dir, tuple(pattern["grid"]) if described else None, placements)
 
     def load_phase(tp, tile) -> np.ndarray | None:
         found = index.get((tp, tile))
@@ -490,6 +539,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         reason = _reanalysis_reason(kept_radius, outcome.radius)
         outcome.radius["reanalysed_because"] = reason
         log.warning("Well %s — %s.", well_label, reason)
+    _log_reused_registration(well_label, outcome, todo)
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)
@@ -604,7 +654,11 @@ def record_nanowell_info(info_path, options: dict, input_dir) -> None:
 
     if not options:
         return
-    block = {"nanowell": {"scheme_version": SCHEME_VERSION, "settings": dict(options),
+    # Where registration may be reused from is not a setting of the results: positions are reused only when
+    # registering again would give exactly them. A path here would also make two plates' settings differ for Merge
+    # Plates, which compares these blocks.
+    settings = {k: v for k, v in options.items() if k != "registration_from"}
+    block = {"nanowell": {"scheme_version": SCHEME_VERSION, "settings": settings,
                           "conventions": {"origin": "top-left of the well frame, y down",
                                           "angle": "counter-clockwise on screen, degrees, from image east",
                                           "mirror": "recorded per timepoint in nanowells/<well>_grid.json",

@@ -114,7 +114,7 @@ def pipeline_argv_digest(
 #: key leaves out for the reason ``util.settings_digest.NOT_KEYED_ON`` gives —
 #: so the same option change is treated alike on both sides.
 _DIGEST_SKIP_VALUE = frozenset({
-    "--input_dir", "--output_dir", "--incremental_prior_dir",
+    "--input_dir", "--output_dir", "--incremental_prior_dir", "--nanowell_registration_from",
     "--workers", "--tf_threads", "--focus_min",
     "--phase_output", "--tophat_dtype",
 })

@@ -15,12 +15,21 @@ thread, and shows the addresses land before anyone starts a plate.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox, QComboBox, QFileDialog, QLabel, QLineEdit, QPushButton, QSizePolicy, QWidget,
+)
 
 from analyze.domain.nanowell_fields import (
-    CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, PLATE_FORMAT_CHOICES, SCAN_CHOICES, nanowell_enabled,
-    nanowell_option_errors,
+    CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, PLATE_FORMAT_CHOICES, REGISTRATION_FROM_KEY, SCAN_CHOICES,
+    nanowell_enabled, nanowell_option_errors,
 )
+
+_REGISTRATION_TIP = (
+    "An earlier nanowell run's output folder whose tile registration this run reuses, so a second analysis with "
+    "other segmentation or measurement settings skips registering the tiles. A timepoint's stored registration is "
+    "used only when it was made from exactly this run's inputs (the same images, acquisition record and plate "
+    "geometry); any other is registered afresh. Blank: only the output folder's own earlier registration is "
+    "reused, the same way. Runs on a remote host register every tile.")
 
 #: field key -> (row label, edit attribute, tooltip). The edits' placeholders are the pipeline's defaults.
 _FIELDS = (
@@ -140,6 +149,7 @@ class AnalyzeNanowellSectionMixin:
         grid_rows.append(row.parentWidget())
         grid_rows += [self._nanowell_edit_row(sec, *spec) for spec in _GRID_FIELDS[1:]]
         self._nanowell_field_rows += grid_rows
+        self._nanowell_field_rows.append(self._build_nanowell_registration_row(sec))
         self._nanowell_format_cb.currentIndexChanged.connect(lambda _i: self._refresh_nanowell_custom())
 
         row = self._row(sec, "Check")
@@ -167,6 +177,28 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_cb.toggled.connect(self._refresh_nanowell_enabled)
         self._refresh_nanowell_enabled()
 
+    def _build_nanowell_registration_row(self, sec) -> QWidget:
+        """The folder an earlier run's registration is reused from: a path and a Browse button."""
+        row = self._row(sec, "Reuse registration", tooltip=_REGISTRATION_TIP)
+        layout = row.layout()
+        self._nanowell_registration_edit = QLineEdit(row)
+        self._nanowell_registration_edit.setPlaceholderText("(the output folder's own)")
+        self._nanowell_registration_edit.setMinimumWidth(0)
+        self._nanowell_registration_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        layout.addWidget(self._nanowell_registration_edit, 1)
+        self._nanowell_registration_btn = QPushButton("Browse…", row)
+        self._nanowell_registration_btn.setProperty("variant", "secondary")
+        self._nanowell_registration_btn.clicked.connect(lambda _=False: self._browse_nanowell_registration())
+        layout.addWidget(self._nanowell_registration_btn)
+        return row.parentWidget()
+
+    def _browse_nanowell_registration(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select an earlier nanowell run's output folder", self._nanowell_registration_edit.text().strip(),
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks)
+        if folder:
+            self._nanowell_registration_edit.setText(folder)
+
     def _nanowell_edit_row(self, sec, key, label, attr, tip):
         r = self._row(sec, label, tooltip=tip)
         edit = self._entry(r, "", width=70)
@@ -189,6 +221,8 @@ class AnalyzeNanowellSectionMixin:
         for _key, _label, attr, _tip in _FIELDS + _CUSTOM_FIELDS + _GRID_FIELDS:
             getattr(self, attr).setEnabled(on)
         self._nanowell_scan_cb.setEnabled(on)
+        self._nanowell_registration_edit.setEnabled(on)
+        self._nanowell_registration_btn.setEnabled(on)
         self._nanowell_preview_btn.setEnabled(on)
         self._nanowell_pin_segmentation(on)
         self._refresh_nanowell_custom()
@@ -222,6 +256,7 @@ class AnalyzeNanowellSectionMixin:
             out[key] = getattr(self, attr).text().strip()
         out["nanowell_scan"] = self._nanowell_scan_cb.currentData() or SCAN_CHOICES[0]
         out["nanowell_geometry"] = self._nanowell_geometry_cb.currentData() or GEOMETRY_CHOICES[0][0]
+        out[REGISTRATION_FROM_KEY] = self._nanowell_registration_edit.text().strip()
         return out
 
     def _apply_nanowell_settings(self, d: dict) -> None:
@@ -260,6 +295,7 @@ class AnalyzeNanowellSectionMixin:
         # Absent or None is a run that did not choose: the format's hexagonal lattice in a circle.
         geometry = self._nanowell_geometry_cb.findData(str(d.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]))
         self._nanowell_geometry_cb.setCurrentIndex(max(geometry, 0))
+        self._nanowell_registration_edit.setText(str(d.get(REGISTRATION_FROM_KEY) or ""))
         self._refresh_nanowell_custom()
 
     def _nanowell_validation_error(self, *, check_input: bool, for_run: bool = True) -> str | None:
@@ -274,19 +310,27 @@ class AnalyzeNanowellSectionMixin:
             return None
         problems = nanowell_option_errors(opts, need_phase=not self._auto_detect_on())
         # Only for a run: Test detection runs on this computer whatever host the run would go to (X30).
-        if for_run and self._remote_cb.currentData() is not None and self._incremental_cb.isChecked():
+        remote = for_run and self._remote_cb.currentData() is not None
+        if remote and self._incremental_cb.isChecked():
             from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
 
             problems.append(NANOWELL_REMOTE_INCREMENTAL_REFUSAL)
+        if remote and str(opts.get(REGISTRATION_FROM_KEY) or "").strip():
+            self._nanowell_log_once("Reuse registration names a folder on this computer, which a remote host "
+                                    "cannot read: the host registers every tile itself (the positions are the same).")
         if not problems and check_input:
             from analyze.nanowell_preflight import nanowell_input_report
 
             problems, warnings = nanowell_input_report(self._input_edit.text().strip(), opts)
             for warning in warnings:                # said, not refused: the run goes on, so say it where the run logs
-                if warning not in self._nanowell_logged:      # once per distinct finding, not once per validation
-                    self._nanowell_logged.add(warning)
-                    self._log_line(f"Nanowells: {warning}", "WARNING")
+                self._nanowell_log_once(warning)
         return "\n".join(problems) if problems else None
+
+    def _nanowell_log_once(self, warning: str) -> None:
+        """Log a finding that does not stop the run, once per distinct finding rather than once per validation."""
+        if warning not in self._nanowell_logged:
+            self._nanowell_logged.add(warning)
+            self._log_line(f"Nanowells: {warning}", "WARNING")
 
     def _on_nanowell_preview(self) -> None:
         """Open the Test detection window for the form's current input and settings."""

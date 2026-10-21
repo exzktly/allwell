@@ -51,8 +51,8 @@ def _emit_num_flag(args: list[str], opts: dict, key: str, flag: str, cast) -> No
 
 def _emit_nanowell_flags(args: list[str], opts: dict) -> None:
     """Nanowell mode: ``--nanowell_format`` when the section is on, and each of its numeric fields that is filled;
-    a custom format's diameter and pitch, the array geometry when it is inferred, and the tile grid when one is
-    given (for data with no record).
+    a custom format's diameter and pitch, the array geometry when it is inferred, the folder to reuse tile registration
+    from when one is named, and the tile grid when one is given (for data with no record).
 
     Absent or blank ``nanowell_format`` is the mode off and sends nothing, so an opts dict from before the
     section existed builds the argv it always did. A blank numeric field sends no flag and the pipeline's
@@ -70,6 +70,9 @@ def _emit_nanowell_flags(args: list[str], opts: dict) -> None:
     if plate_format == "custom":                     # a known format's geometry is its own, never sent
         for key in ("nanowell_diameter_um", "nanowell_pitch_um"):
             _emit_num_flag(args, opts, key, f"--{key}", float)
+    source = str(opts.get("nanowell_registration_from") or "").strip()
+    if source:                                       # an earlier run whose tile registration may be reused
+        args += ["--nanowell_registration_from", source]
     grid = str(opts.get("nanowell_grid") or "").strip()
     if grid:                                         # the tile grid for a dataset with no acquisition record
         args += ["--nanowell_grid", grid, "--nanowell_scan", str(opts.get("nanowell_scan") or "top-left-row")]

@@ -378,8 +378,16 @@ debounced 250 ms (`install_refit`); the listener goes with the tab.
 
 **Long panels scroll by dragging** (`_grab_scrolling`): over VNC a touch-drag
 arrives as a left-button mouse drag, which a Qt scroll area ignores, so
-`QScroller` grabs the left-button gesture on the side rail, the Controls sheet and
-the read-only logs. **Plot pages scroll by a swipe on the plot** too
+`QScroller` grabs the left-button gesture on the side rail, the Controls sheet, the
+read-only logs, and every `QScrollArea` under `PhoneHandles.swipe_roots` — the form
+pages of Datasets (one per tool) and Analyze (`_grab_page_scrolling`, run on the
+switch and on every `refresh`). Those forms hold plates (Datasets' subset,
+concatenate and OME-import tools, Analyze's background map), so every grabbed
+viewport carries `_DragOwnerGuard`, which refuses Qt's `QScrollPrepareEvent` when
+a drag starts on a plate or a slider: the press then reaches the plate as if no
+gesture were there, where grabbed blindly it neither selected wells nor scrolled
+(`set_drag_scroll` grabs and installs the guard together;
+`tests/test_phone_form_swipe.py`). **Plot pages scroll by a swipe on the plot** too
 (`PhoneShell._swipe_plot_area`, run from `size_canvas` — so on the switch, on Show
 and from the sweep, and a plot built later gets it): the scroll area holding a
 canvas on a page `band_roots` names grabs the gesture, and gives it back at the

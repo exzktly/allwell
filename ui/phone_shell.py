@@ -115,6 +115,9 @@ class PhoneHandles:
     #: The stack of pages whose ``currentChanged`` is a page change (Review's
     #: notebook): phone layout sweeps for what the new page built at once.
     pages: QWidget | None = None
+    #: Panes whose form pages scroll by a drag in phone layout (Datasets'
+    #: tools, Analyze's form): every ``QScrollArea`` under them.
+    swipe_roots: Callable[[], list] = lambda: []
 
 
 # ── the rescale pass ──────────────────────────────────────────────────────
@@ -513,6 +516,48 @@ class _RefitOnLayout(QObject):
         if isinstance(ev, QEvent) and ev.type() in (QEvent.LayoutRequest, QEvent.Resize):
             self._sheet.refit()
         return False
+
+
+#: Widgets whose own drag means something — a plate's drag selects wells, a
+#: slider's moves its handle. Named by class: the plate's grid is private to
+#: ``widgets/well_plate_selector.py``.
+_DRAG_OWNERS = ("WellPlateSelector", "_PlateGrid")
+
+
+class _DragOwnerGuard(QObject):
+    """On a viewport that scrolls by a drag: a drag that starts on a plate or
+    a slider is left to it. Qt asks the viewport before it starts scrolling
+    (``QScrollPrepareEvent``); refused, the press reaches the widget under it
+    as if no gesture were there. Grabbed without this, a swipe starting on a
+    plate neither selected wells nor scrolled."""
+
+    def eventFilter(self, obj, ev) -> bool:  # Qt naming
+        if not isinstance(ev, QEvent) or ev.type() != QEvent.ScrollPrepare:
+            return False
+        from PySide6.QtWidgets import QAbstractSlider
+        w = obj.childAt(ev.startPos().toPoint()) if isinstance(obj, QWidget) else None
+        while w is not None and w is not obj:
+            if isinstance(w, QAbstractSlider) or type(w).__name__ in _DRAG_OWNERS:
+                ev.ignore()
+                return True
+            w = w.parentWidget()
+        return False
+
+
+def set_drag_scroll(viewport: QWidget, on: bool) -> None:
+    """Scroll *viewport*'s area by a left-button drag, or stop. Idempotent."""
+    from PySide6.QtWidgets import QScroller
+    guard = viewport.findChild(_DragOwnerGuard, options=Qt.FindDirectChildrenOnly)
+    if on:
+        QScroller.grabGesture(viewport, QScroller.LeftMouseButtonGesture)
+        if guard is None:
+            guard = _DragOwnerGuard(viewport)
+            viewport.installEventFilter(guard)
+    else:
+        QScroller.ungrabGesture(viewport)
+        if guard is not None:
+            viewport.removeEventFilter(guard)
+            guard.deleteLater()
 
 
 class _PhoneEventFilter(QObject):
@@ -1174,13 +1219,13 @@ class PhoneShell(QObject):
         """Let a drag scroll the long panels, the way a thumb expects.
 
         Over VNC a touch-drag arrives as a left-button mouse drag, which a Qt
-        scroll area ignores. Grabbed only on the side rail, the Controls sheet
-        and the logs — never on the plate or a plot, whose drags mean
-        something else. A press on a control inside still reaches the control.
-        Whether RealVNC's touch mode sends drags this way is not verified on a
-        device.
+        scroll area ignores. Grabbed on the side rail, the Controls sheet, the
+        logs and the form pages of Datasets and Analyze (``_grab_page_scrolling``)
+        — and on plot pages (``_swipe_plot_area``). A press on a control inside
+        still reaches the control, and a drag that starts on a plate or a
+        slider is left to it (``_DragOwnerGuard``).
         """
-        from PySide6.QtWidgets import QAbstractScrollArea, QScroller
+        from PySide6.QtWidgets import QAbstractScrollArea
         roots = [self._h.rail_drawer, self._sheet]
         targets = []
         for r in roots:
@@ -1190,11 +1235,22 @@ class PhoneShell(QObject):
                     if type(w).__name__ in ("QTextEdit", "QPlainTextEdit")
                     and w.isReadOnly()]
         for area in targets:
-            vp = area.viewport()
-            if on:
-                QScroller.grabGesture(vp, QScroller.LeftMouseButtonGesture)
-            else:
-                QScroller.ungrabGesture(vp)
+            set_drag_scroll(area.viewport(), on)
+        self._grab_page_scrolling(on)
+
+    def _grab_page_scrolling(self, on: bool = True) -> None:
+        """Every form page under ``swipe_roots`` scrolls by a drag. Run on the
+        switch and on every ``refresh`` (a mode or page change), since a
+        Datasets tool page is built when it is first shown."""
+        from PySide6.QtWidgets import QScrollArea
+        for root in self._h.swipe_roots():
+            if root is None:
+                continue
+            for area in root.findChildren(QScrollArea):
+                try:
+                    set_drag_scroll(area.viewport(), on)
+                except RuntimeError:
+                    swallowed()  # deleted while the list was walked
 
     def _restore_navigator(self) -> None:
         state = self._desk_state or {}
@@ -1319,17 +1375,13 @@ class PhoneShell(QObject):
         drag. Run for every canvas on the switch, on Show and by the sweep, so
         a plot built later gets it too.
         """
-        from PySide6.QtWidgets import QScrollArea, QScroller
+        from PySide6.QtWidgets import QScrollArea
         area = c.parentWidget()
         while area is not None and not isinstance(area, QScrollArea):
             area = area.parentWidget()
         if area is None or not self._band_managed(area):
             return
-        vp = area.viewport()
-        if on:
-            QScroller.grabGesture(vp, QScroller.LeftMouseButtonGesture)
-        else:
-            QScroller.ungrabGesture(vp)
+        set_drag_scroll(area.viewport(), on)
 
     def _apply_analyze_columns(self, two: bool) -> None:
         """Sideways, Analyze is two columns: the run summary and plate on the
@@ -1622,6 +1674,7 @@ class PhoneShell(QObject):
                                     or self.controls_button.isVisibleTo(self._strip)))
         if not review:
             self.close_controls()
+        self._grab_page_scrolling()
 
     def _refresh_when_settled(self) -> None:
         self._sweep(force=False)

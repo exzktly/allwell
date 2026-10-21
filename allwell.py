@@ -736,6 +736,7 @@ class AllWellApp(QMainWindow):
             logs=lambda: [w for w in (getattr(self._analyze, "_log", None),) if w is not None],
             status_text=lambda: self._status_lbl_app.text() if self._status_lbl_app else "",
             pages=getattr(review, "_notebook", None),
+            swipe_roots=lambda: [getattr(self, "_datasets", None), self._analyze],
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
         # Among the small icon buttons at the band's right end, just before

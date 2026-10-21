@@ -533,6 +533,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="With --nanowell_grid: the nominal tile overlap set in the acquisition software, percent.")
     p.add_argument("--nanowell_pixel_size_um", type=float, default=None,
                    help="With --nanowell_grid: the image pixel size in micrometres.")
+    p.add_argument("--nanowell_registration_from", default=None,
+                   help=("An earlier nanowell run's output folder whose tile registration this run reuses, so a "
+                         "second analysis with other segmentation or measurement settings does not register the "
+                         "tiles again. A timepoint's stored registration is used only when it was made from exactly "
+                         "this run's inputs (the same images, acquisition record, plate geometry and registration "
+                         "algorithm); any other is registered afresh, so the positions are always the ones "
+                         "registering would give. The output folder's own earlier registration is reused the same "
+                         "way without this flag."))
     p.add_argument("--nanowell_cell_diameter_um", type=float, default=15.0,
                    help="Typical cell diameter in micrometres, the scale the label-free segmenter is given.")
     p.add_argument("--nanowell_margin_um", type=float, default=None,
@@ -594,6 +602,12 @@ def nanowell_options_from_args(args, error) -> dict | None:
     pattern = _grid_pattern(args, error)
     if pattern:
         options["pattern"] = pattern
+    if args.nanowell_registration_from:
+        source = Path(args.nanowell_registration_from).expanduser()
+        if not (source / "nanowells").is_dir():
+            error(f"--nanowell_registration_from {source} is not a nanowell run's output folder: it has no "
+                  "nanowells/ folder of grid records to reuse.")
+        options["registration_from"] = str(source)
     return options
 
 

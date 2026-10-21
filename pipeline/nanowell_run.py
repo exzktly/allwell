@@ -243,27 +243,114 @@ def _montage_to_common(point, montage) -> np.ndarray:
     return np.asarray(point, dtype=float) + np.asarray(montage.origin_um, dtype=float)
 
 
-def _grid_block(plan, registration, extra: dict, warnings=()) -> dict:
+# ── registration reuse ───────────────────────────────────────────────────────
+#: The version of the registration step's algorithm (``tile_register`` and the per-tile lattice fits that feed it).
+#: It joins :func:`registration_key`, so positions an older algorithm solved are never taken for this one's. Raise it
+#: whenever a change there could move a tile.
+REGISTRATION_SCHEME = 1
+
+
+@dataclass(frozen=True)
+class Placement:
+    """Where registration put a timepoint's tiles, as the grid record stores it, and where that came from.
+
+    *tiles* are the grid block's ``tiles`` rows; *warnings* the registration's own (not the locating stage's);
+    *key* the :func:`registration_key` it was solved under; *fitted* how many tiles' own lattice fits constrained
+    it; *reused_from* the output folder whose grid record it was taken from, or ``None`` when this run registered
+    the tiles itself.
+    """
+    tiles: tuple
+    warnings: tuple
+    key: str
+    fitted: int
+    reused_from: str | None = None
+
+    def positions(self) -> dict[str, tuple[float, float]]:
+        return {t["tile"]: (float(t["left_um"]), float(t["top_um"])) for t in self.tiles}
+
+
+def registration_key(record: dict, well: str, timepoint: str, images: dict, settings: NanowellSettings,
+                     pitch_um: float, kind: str) -> str:
+    """A digest of everything registration's result depends on, so stored positions are reused only when
+    registering again would produce exactly them.
+
+    Each part, and why it is in the key:
+
+    * :data:`REGISTRATION_SCHEME`: the algorithm itself;
+    * :func:`record_digest`: the recorded tile positions, tile size, pixel size and declared overlap, which seed the
+      solve and bound its search;
+    * every tile's pixels (shape, type and bytes): overlap correlation and the per-tile lattice fits read them, and a
+      plate re-exported with corrected images keeps its record but not its registration;
+    * the geometry, nominal pitch and diameter: how each tile's lattice is fitted (:func:`_tile_fit`);
+    * the working pitch and lattice kind measured on this timepoint: the fits' seed and the search window.
+
+    Nothing about measurement or segmentation is in it (cell diameter, margin, occlusion and clipping thresholds,
+    the segmenter): those act after registration, which is the point of reusing it.
+    """
+    import hashlib
+    import json
+
+    pixels = hashlib.sha256()
+    for tile in sorted(images):
+        image = np.ascontiguousarray(images[tile])
+        pixels.update(json.dumps([tile, list(image.shape), image.dtype.str]).encode())
+        pixels.update(image.tobytes())
+    payload = json.dumps([REGISTRATION_SCHEME, record_digest(record, well, timepoint), pixels.hexdigest(),
+                          settings.geometry, settings.pitch_um, settings.diameter_um, float(pitch_um), kind])
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def stored_placement(candidates, key: str, tile_ids) -> Placement | None:
+    """The first stored placement among *candidates* solved under *key* for exactly *tile_ids*, or ``None``.
+
+    *candidates* are ``(folder, grid block)`` pairs: this timepoint's block in an earlier run's grid record. A block
+    without a ``registration`` key (written before registration was keyed) or with another key is never reused.
+    """
+    for folder, block in candidates or ():
+        stored = (block or {}).get("registration")
+        tiles = (block or {}).get("tiles")
+        if not isinstance(stored, dict) or stored.get("key") != key or not isinstance(tiles, list):
+            continue
+        try:
+            rows = tuple({**t, "left_um": float(t["left_um"]), "top_um": float(t["top_um"])} for t in tiles)
+            fitted = int(stored["tile_lattice_fits"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if sorted(t["tile"] for t in rows) != sorted(tile_ids):
+            continue
+        return Placement(rows, tuple(stored.get("warnings") or ()), key, fitted, str(folder))
+    return None
+
+
+def _solved_placement(registration, key: str, fitted: int) -> Placement:
+    return Placement(tuple({"tile": t.tile_id, "left_um": t.left_um, "top_um": t.top_um, "source": t.source,
+                            "residual_um": t.residual_um, "correction_um": t.correction_um}
+                           for t in registration.tiles), tuple(registration.warnings), key, fitted)
+
+
+def _grid_block(plan, placement: Placement | None, extra: dict, warnings=()) -> dict:
     block = {"grid_status": plan.status if plan is not None else None,
              "rows": getattr(plan, "rows", None), "cols": getattr(plan, "cols", None),
              "missing": list(getattr(plan, "missing", ())),
              "overlap_um": list(getattr(plan, "overlap_um", (None, None))),
              "overlap_fraction": list(getattr(plan, "overlap_fraction", (None, None)))}
-    if registration is not None:
-        block["tiles"] = [{"tile": t.tile_id, "left_um": t.left_um, "top_um": t.top_um, "source": t.source,
-                           "residual_um": t.residual_um, "correction_um": t.correction_um}
-                          for t in registration.tiles]
-        block["registration_warnings"] = list(registration.warnings) + list(warnings)
+    if placement is not None:
+        block["tiles"] = [dict(t) for t in placement.tiles]
+        block["registration_warnings"] = list(placement.warnings) + list(warnings)
+        block["registration"] = {"key": placement.key, "warnings": list(placement.warnings),
+                                 "tile_lattice_fits": placement.fitted, "reused_from": placement.reused_from}
     block.update(extra)
     return block
 
 
 def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, settings: NanowellSettings, *,
-                     plate_rigid=None, expected_shape: tuple[int, int] | None = None) -> Located:
+                     plate_rigid=None, expected_shape: tuple[int, int] | None = None, stored=None) -> Located:
     """Place, register, montage and address one (well, timepoint). Never raises on bad data.
 
     *images* maps a tile id to its phase image. A tile of the grid with no image is a status of its
-    own (``no_images``), not a smaller grid: a missing tile would change which sites it owns.
+    own (``no_images``), not a smaller grid: a missing tile would change which sites it owns. *stored* is
+    ``(folder, grid block)`` pairs for this timepoint from earlier runs: a placement among them solved under this
+    timepoint's :func:`registration_key` is taken instead of registering the tiles again (:func:`stored_placement`).
     """
     from pipeline.nanowell_detect import check_orientation, detect_sites, estimate_lattice_fft, score_fiducial
     from pipeline.nanowell_lattice import index_points, resolve_origin
@@ -290,20 +377,26 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         (pitch, kind), pitch_source = probe, "contrast"
     else:
         (pitch, pitch_source), kind = working_pitch(images, plan, px, settings), "auto"
-    observations = [TileObservation(p.tile_id, (p.left_um, p.top_um), (p.width_um, p.height_um),
-                                    _tile_fit(images[p.tile_id], px, settings, pitch, kind))
-                    for p in plan.placements]
-    fitted = sum(o.fit is not None for o in observations)
+    key = registration_key(record, well, timepoint, images, settings, pitch, kind)
+    registration = stored_placement(stored, key, [p.tile_id for p in plan.placements])
+    if registration is None:
+        observations = [TileObservation(p.tile_id, (p.left_um, p.top_um), (p.width_um, p.height_um),
+                                        _tile_fit(images[p.tile_id], px, settings, pitch, kind))
+                        for p in plan.placements]
+        registration = _solved_placement(
+            register_tiles(observations, images=images, pixel_size_um=px, pitch_um=pitch), key,
+            sum(o.fit is not None for o in observations))
+    fitted = registration.fitted
     warnings = [] if fitted else [
         f"No tile's lattice could be fitted (working pitch {pitch:.1f} um, {pitch_source}): every tile was placed "
         "by overlap correlation or where the acquisition record put it, with no lattice constraint"]
-    registration = register_tiles(observations, images=images, pixel_size_um=px, pitch_um=pitch)
     positions = registration.positions()
     montage = build_montage(images, positions, px)
     located = Located(timepoint, OK, "", plan=plan, positions=positions, pixel_size_um=px, montage=montage,
                       pitch_um=pitch)
     located.stage_offset_um = stage_offset(record, well, timepoint, positions, tolerance_um=pitch)
-    seed = {"pitch_seed_um": pitch, "pitch_seed_source": pitch_source, "tile_lattice_fits": [fitted, len(observations)]}
+    seed = {"pitch_seed_um": pitch, "pitch_seed_source": pitch_source,
+            "tile_lattice_fits": [fitted, len(plan.placements)]}
 
     def refuse(status, reason, **extra):
         located.status, located.reason = status, reason
@@ -1332,7 +1425,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
              expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None,
              reference: dict | None = None, earliest_template=None, spill_dir=None, fixed_roster=None,
-             kept_evidence: dict | None = None) -> WellOutcome:
+             kept_evidence: dict | None = None, stored_placements: dict | None = None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -1354,13 +1447,15 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     *fixed_radius_um* (tracker X35). *kept_evidence* is the evidence an earlier run's kept timepoints left about a
     default well's rim (``{"detected": sites, "imaged": sites}``): when the new timepoints change the roster it implies,
     ``outcome.roster_change`` says how, and the caller re-runs the well over every timepoint (tracker X35a-R1).
+    *stored_placements* maps a timepoint to ``(folder, grid block)`` pairs from earlier runs' grid records, whose
+    registration :func:`locate_timepoint` takes when it was solved from exactly this timepoint's inputs.
     """
     outcome = WellOutcome(well)
     timepoints = list(timepoints)
     for tp in timepoints:
         images = _images_for(record, well, tp, load_phase)
         located = locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape,
-                                   plate_rigid=(plate_rigid or {}).get(tp))
+                                   plate_rigid=(plate_rigid or {}).get(tp), stored=(stored_placements or {}).get(tp))
         if spill_dir is not None and located.montage is not None:
             located.montage = _spill_montage(located.montage, Path(spill_dir), f"{well}_{tp}")
         outcome.located[tp] = located

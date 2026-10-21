@@ -1122,6 +1122,10 @@ class RemoteRunner:
                 i += 1
             elif arg == "--incremental_prior_dir":
                 i += 2
+            elif arg == "--nanowell_registration_from":
+                # A folder on this computer, which the host cannot read. Registration reuse is a cache keyed on
+                # the run's own inputs, so without it the host registers every tile and gets the same positions.
+                i += 2
             else:
                 out.append(arg)
                 i += 1

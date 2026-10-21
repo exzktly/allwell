@@ -118,6 +118,14 @@ class PhoneHandles:
     #: Panes whose form pages scroll by a drag in phone layout (Datasets'
     #: tools, Analyze's form): every ``QScrollArea`` under them.
     swipe_roots: Callable[[], list] = lambda: []
+    #: Panes whose form pages are narrowed to the phone's width in phone layout
+    #: (``ui/phone_fit``): Datasets, whose tools are laid out for the desk.
+    fit_roots: Callable[[], list] = lambda: []
+    #: Datasets' tools, for the page button in Datasets mode: their names, the
+    #: one showing, and how to show one. The tool list is otherwise only in ☰.
+    tool_names: Callable[[], list] = lambda: []
+    current_tool: Callable[[], str] = lambda: ""
+    show_tool: Callable[[str], None] = lambda _name: None
 
 
 # ── the rescale pass ──────────────────────────────────────────────────────
@@ -558,6 +566,47 @@ def set_drag_scroll(viewport: QWidget, on: bool) -> None:
         if guard is not None:
             viewport.removeEventFilter(guard)
             guard.deleteLater()
+
+
+class _FitOnShow(QObject):
+    """On a form page under ``fit_roots``: in phone layout, fit it to its
+    viewport (``ui/phone_fit``) whenever it is shown or its viewport changes
+    width — a Datasets tool page is shown by the pane's own rail, which phone
+    layout does not hear about, and turning the phone changes the width."""
+
+    def __init__(self, area: QWidget, on_show=None) -> None:
+        super().__init__(area)
+        self._area = area
+        self._fitted_at: int | None = None
+        # A page shown is a tool picked — from ☰ as well as the page button —
+        # so the bar's label follows.
+        self._on_show = on_show
+
+    def refit(self) -> None:
+        from ui import phone_fit
+        if not phone_layout.is_on():
+            if self._fitted_at is not None:
+                phone_fit.unfit(self._area)
+                self._fitted_at = None
+            return
+        width = self._area.viewport().width()
+        if not self._area.isVisible() or width <= 0 or width == self._fitted_at:
+            return
+        if self._fitted_at is not None:
+            phone_fit.unfit(self._area)      # wider than before: stack less
+        phone_fit.fit(self._area)
+        self._fitted_at = width
+
+    def eventFilter(self, obj, ev) -> bool:  # Qt naming
+        if isinstance(ev, QEvent) and ev.type() in (QEvent.Show, QEvent.Resize):
+            try:
+                self.refit()
+                if ev.type() == QEvent.Show and self._on_show is not None \
+                        and phone_layout.is_on():
+                    self._on_show()
+            except RuntimeError:
+                swallowed()  # the page went while it was being fitted
+        return False
 
 
 class _PhoneEventFilter(QObject):
@@ -1237,6 +1286,28 @@ class PhoneShell(QObject):
         for area in targets:
             set_drag_scroll(area.viewport(), on)
         self._grab_page_scrolling(on)
+        if not on:
+            self._fit_pages()
+
+    def _fit_pages(self) -> None:
+        """Watch every form page under ``fit_roots`` and fit the ones showing
+        (``_FitOnShow``). Run on every ``refresh`` and on leaving phone layout,
+        where each watcher gives its page back its desk form."""
+        from PySide6.QtWidgets import QScrollArea
+        for root in self._h.fit_roots():
+            if root is None:
+                continue
+            for area in root.findChildren(QScrollArea):
+                try:
+                    watcher = area.findChild(_FitOnShow, options=Qt.FindDirectChildrenOnly)
+                    if watcher is None:
+                        if not phone_layout.is_on():
+                            continue
+                        watcher = _FitOnShow(area, on_show=self._refresh_tool_label)
+                        area.installEventFilter(watcher)
+                    watcher.refit()
+                except RuntimeError:
+                    swallowed()  # deleted while the list was walked
 
     def _grab_page_scrolling(self, on: bool = True) -> None:
         """Every form page under ``swipe_roots`` scrolls by a drag. Run on the
@@ -1663,18 +1734,22 @@ class PhoneShell(QObject):
         self.menu_button.setChecked(open_)
         self.menu_button.setText("✕" if open_ else "☰")
         review = self._h.mode() == "review"
+        tools = self._h.mode() == "datasets" and bool(self._h.tool_names())
         bar = self._current_page_bar()
-        self.page_button.setVisible(bar is not None and review)
-        if bar is not None:
+        self.page_button.setVisible((bar is not None and review) or tools)
+        if tools:
+            self.page_button.setText(f"{self._h.current_tool()} ▾")
+        elif bar is not None:
             self.page_button.setText(f"{bar.tabText(bar.currentIndex())} ▾")
         self.controls_button.setVisible(review and self._current_band() is not None)
         land = bool(self._landscape)
-        self._strip.setVisible(review and not land
+        self._strip.setVisible((review or tools) and not land
                                and (self.page_button.isVisibleTo(self._strip)
                                     or self.controls_button.isVisibleTo(self._strip)))
         if not review:
             self.close_controls()
         self._grab_page_scrolling()
+        self._fit_pages()
 
     def _refresh_when_settled(self) -> None:
         self._sweep(force=False)
@@ -1701,6 +1776,9 @@ class PhoneShell(QObject):
 
     def _fill_page_menu(self) -> None:
         self._page_menu.clear()
+        if self._h.mode() == "datasets":
+            self._fill_tool_menu()
+            return
         bar = self._current_page_bar()
         if bar is None:
             return
@@ -1712,6 +1790,25 @@ class PhoneShell(QObject):
             act.triggered.connect(lambda _c=False, b=bar, idx=i: self._pick_page(b, idx))
             group.addAction(act)
             self._page_menu.addAction(act)
+
+    def _fill_tool_menu(self) -> None:
+        """Datasets mode: the page button lists the tools, as ☰ does."""
+        group = QActionGroup(self._page_menu)
+        current = self._h.current_tool()
+        for name in self._h.tool_names():
+            act = QAction(name, self._page_menu, checkable=True)
+            act.setChecked(name == current)
+            act.triggered.connect(lambda _c=False, n=name: self._pick_tool(n))
+            group.addAction(act)
+            self._page_menu.addAction(act)
+
+    def _refresh_tool_label(self) -> None:
+        if self._h.mode() == "datasets" and self.page_button.isVisible():
+            self.page_button.setText(f"{self._h.current_tool()} ▾")
+
+    def _pick_tool(self, name: str) -> None:
+        self._h.show_tool(name)
+        self.refresh()
 
     def _pick_page(self, bar, idx: int) -> None:
         bar.setCurrentIndex(idx)

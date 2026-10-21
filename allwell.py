@@ -737,6 +737,13 @@ class AllWellApp(QMainWindow):
             status_text=lambda: self._status_lbl_app.text() if self._status_lbl_app else "",
             pages=getattr(review, "_notebook", None),
             swipe_roots=lambda: [getattr(self, "_datasets", None), self._analyze],
+            fit_roots=lambda: [getattr(self, "_datasets", None)],
+            tool_names=lambda: (self._datasets.tool_names()
+                                if getattr(self, "_datasets", None) is not None else []),
+            current_tool=lambda: (self._datasets.current_tool_name()
+                                  if getattr(self, "_datasets", None) is not None else ""),
+            show_tool=lambda name: (self._datasets.show_tool(name)
+                                    if getattr(self, "_datasets", None) is not None else None),
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
         # Among the small icon buttons at the band's right end, just before

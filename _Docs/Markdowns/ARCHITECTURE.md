@@ -286,6 +286,32 @@ visibility rule is re-applied, since a reparent can show a hidden widget. The
 floating rail toggle is hidden in phone layout — `position_rail_toggle` ends by
 showing it on every resize and mode switch, so the check is inside it.
 
+**The Datasets tools fit the phone.** They are laid out for the desk — paired
+fields side by side, option rows, a dashboard of eight counters in one line,
+radio buttons whose labels are sentences — and seven of the nine were wider than
+a 432 px screen. Every `QScrollArea` under `PhoneHandles.fit_roots` (the Datasets
+pane) carries a `_FitOnShow` watcher that, in phone layout, fits it to its
+viewport whenever it is shown or its viewport changes width (a tool page is shown
+by the pane's own rail, which the shell does not hear), and gives it its desk form
+back when phone layout ends. The fitting is `ui/phone_fit.py`, Qt-only and
+pane-free: a widget with a phone form of its own (`setStacked` — `PlateProgress`
+and the dashboards on it, `ControlBand`) takes it; any other horizontal box row
+wider than its room is turned top-to-bottom, outermost first, re-measuring after
+each pass so a pair of fields stacks while each keeps its browse button beside
+it; and a button (checkbox, radio or push) whose label still does not fit gets
+line breaks. `tests/test_phone_fit.py` holds every tool of the real pane to a
+phone's width at touch size, so a tool added tomorrow is covered by being in the
+pane; its pane is module-scoped because force-deleting a shown `DatasetsTab`
+(the fast lane's reaper) crashes inside Shiboken's wrapper release with or
+without any fitting, while the app's own quit exits cleanly.
+
+**Datasets' tool picker.** In Datasets mode the page button (Review's
+"Bar Plots ▾") reads "‹tool› ▾" and lists the tools (`_fill_tool_menu`, from the
+`tool_names` / `current_tool` / `show_tool` handles, which are
+`DatasetsTab.tool_names` / `current_tool_name` / `show_tool`), so a tool is one
+tap away rather than only in ☰; the label follows a tool picked from ☰ through
+the same page watcher.
+
 **The Controls sheet.** A Review page's own controls — its `ControlBand`
 (channel, property, display, threshold, …) — are hidden in phone layout so the
 plot gets the screen, and **⚙ Controls** lends the current page's band to a sheet:

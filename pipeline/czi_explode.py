@@ -43,7 +43,7 @@ from typing import Callable
 from pipeline.czi_read import CziReader, CziReadError
 from pipeline.czi_set import CziSet, ScenePosition, read_czi_set
 from pipeline.czi_acquisition import (
-    acquisition_publication, source_catalog, frame_comment, prepare_publication, resumable_wells,
+    StageReporter, acquisition_publication, source_catalog, frame_comment, prepare_publication, resumable_wells,
 )
 from pipeline.explode_common import (
     ExplodeCancelled,
@@ -295,6 +295,7 @@ def explode_czi(
     log_fn: "Callable[[str], None] | None" = None,
     progress_fn: "Callable[[int, int], None] | None" = None,
     well_progress_fn: "Callable[[str, int, int], None] | None" = None,
+    status_fn: "Callable[[str], None] | None" = None,
     should_abort: "Callable[[], bool] | None" = None,
     well_subset: "tuple[str, ...]" = (),
     resume: bool = False,
@@ -328,6 +329,12 @@ def explode_czi(
     plane and deliberately unthrottled — how often is often enough to repaint is
     a question about a UI, so the quantising belongs to the caller that owns one
     (``datasets.czi_import.apply``).
+
+    *status_fn* receives a short line naming the stage in progress whenever the run is in one of its metadata
+    passes rather than writing planes — reading every tile's acquisition time before the first archive, and building
+    ``acquisition.json`` after the last — which ``progress_fn`` and ``well_progress_fn`` cannot show: no plane is
+    written and no well changes then, yet each can take minutes on a large plate (``czi_acquisition.StageReporter``).
+    Each pass also logs a line as it starts and ends.
 
     *should_abort* is polled per plane and raises :class:`CziExplodeCancelled`;
     each in-flight well's staged archive is discarded, so no partial
@@ -418,7 +425,8 @@ def explode_czi(
         _log(f"[czi] {uneven}\n")
 
     acquisition = prepare_publication(out_in_dir, czi_set, well_map, tp_plan,
-                                      exp_tok, source_stamps, selected)
+                                      exp_tok, source_stamps, selected,
+                                      report=StageReporter(log_fn, status_fn))
 
     # Wells a previous attempt already finished. Each archive is published
     # atomically, so one that exists holding every member these settings call
@@ -515,9 +523,14 @@ def explode_czi(
                                     continue
                                 read_s += time.perf_counter() - started
                                 started = time.perf_counter()
+                                # The timepoint's final name, decided from every tile's
+                                # acquisition time before the first archive is written
+                                # (``RecordBuilder.tokens``). Written under a placeholder,
+                                # every archive had to be copied whole at the end to rename
+                                # it, which on a large plate was most of a silent last step.
                                 member = (
                                     f"{exp_tok}_{layout.channel_names[channel]}_"
-                                    f"{label}_f{fov}_t{t_index}.tif")
+                                    f"{label}_f{fov}_{acquisition.tokens[t_index]}.tif")
                                 info = zipfile.ZipInfo(member)
                                 info.comment = frame_comment(t_index)
                                 archive.writestr(info, encode_tiff(plane))

@@ -28,6 +28,14 @@ from util.well_token import well_archives
 
 FRAME_COMMENT_PREFIX = b"allwell:czi-source-timepoint="
 
+#: The slow metadata passes a conversion reports through ``RecordBuilder.report``. Each reads metadata only, no
+#: pixels, but one plane at a time, so on a large plate or a network drive each can take minutes with nothing else
+#: on screen moving: the first before any archive is written, the other two after the last one.
+STAGE_TIMES = "times"          # reading every tile's acquisition time, to name the timepoints
+STAGE_ARCHIVES = "archives"    # listing what each published archive holds
+STAGE_TILES = "tiles"          # reading the metadata of every published tile for the record
+STAGE_NAMES = "names"          # renaming archives an earlier conversion wrote under another naming rule
+
 
 def frame_comment(index):
     """A native ordinal for recovery, never a per-image acquisition clock."""
@@ -65,6 +73,63 @@ def source_stamp(path):
     return info.st_size, info.st_mtime_ns
 
 
+class StageReporter:
+    """Turns ``RecordBuilder.report`` counts into what a person watching the conversion sees.
+
+    Each stage logs one line as it starts, saying what it does and that the dataset is not usable until it ends,
+    and one as it ends, with how long it took. In between, *status* receives a short running count, at most every
+    *interval* seconds, so a pass over hundreds of thousands of tiles repaints a label a few times a second rather
+    than once per tile. *log* and *status* may be ``None``; *clock* is injectable for tests.
+    """
+
+    #: stage -> (the line that starts it, the status prefix, the unit counted)
+    TEXT = {
+        STAGE_TIMES: ("Reading the acquisition time of every tile, to name the timepoints, before any archive is "
+                      "written", "Reading acquisition times", "tile(s)"),
+        STAGE_ARCHIVES: ("All archives written. Writing the acquisition record (in/acquisition.json), which the "
+                         "dataset cannot be analysed without: checking the archives",
+                         "Writing the acquisition record: checking archives", "archive(s)"),
+        STAGE_TILES: ("Writing the acquisition record: reading the metadata of every converted tile",
+                      "Writing the acquisition record", "tile(s)"),
+        STAGE_NAMES: ("Writing the acquisition record: checking every archive's image names, and rewriting any "
+                      "an earlier conversion named under another rule",
+                      "Writing the acquisition record: checking names", "archive(s)"),
+    }
+
+    def __init__(self, log=None, status=None, *, interval: float = 0.25, clock=None):
+        import time
+
+        self._log, self._status = log, status
+        self._interval = interval
+        self._clock = clock or time.monotonic
+        self._started: dict = {}
+        self._finished: set = set()
+        self._last_status = None
+
+    def __call__(self, stage: str, done: int, total: int) -> None:
+        if stage in self._finished:
+            return
+        start_line, prefix, unit = self.TEXT[stage]
+        now = self._clock()
+        if stage not in self._started:
+            self._started[stage] = now
+            if self._log:
+                self._log(f"[czi] {start_line} ({total:,} {unit})…\n")
+            self._show(f"{prefix}: 0 of {total:,} {unit}…", now)
+        if done >= total:
+            self._finished.add(stage)
+            self._show(f"{prefix}: {total:,} of {total:,} {unit}", now)
+            if self._log:
+                self._log(f"[czi] {prefix} — done in {now - self._started[stage]:.1f}s.\n")
+        elif self._last_status is None or now - self._last_status >= self._interval:
+            self._show(f"{prefix}: {done:,} of {total:,} {unit}…", now)
+
+    def _show(self, text: str, now: float) -> None:
+        self._last_status = now
+        if self._status:
+            self._status(text)
+
+
 def _coordinate(readings, attribute) -> list | None:
     positions = {getattr(item, attribute) for item in readings
                  if getattr(item, attribute) is not None}
@@ -74,8 +139,12 @@ def _coordinate(readings, attribute) -> list | None:
 class RecordBuilder:
     """Source catalog and immutable file identity for one conversion."""
 
-    def __init__(self, directory, source, positions, timepoint_plan, experiment, *, stamps=None):
+    def __init__(self, directory, source, positions, timepoint_plan, experiment, *, stamps=None, report=None):
         self.directory = Path(directory)
+        #: ``(stage, done, total)`` as the slow metadata passes advance: ``STAGE_TIMES`` while the acquisition
+        #: clocks are read before any archive is written, then ``STAGE_ARCHIVES`` and ``STAGE_TILES`` while the
+        #: record is built after the last one. Each pass reports ``done == 0`` first and ``done == total`` last.
+        self.report = report or (lambda stage, done, total: None)
         self.layouts = dict(zip(source.files, source.layouts))
         self.stamps = {path: source_stamp(path) if stamps is None else stamps[path]
                        for path in source.files}
@@ -104,6 +173,8 @@ class RecordBuilder:
         fields = {(well, field): position
                   for (well, field, _index), (position, _t) in self.positions.items()}
         ordered = sorted(fields, key=lambda key: (fields[key].path, key))
+        total, done = len(ordered) * self.source_time_count, 0
+        self.report(STAGE_TIMES, 0, total)
         for path, keys in groupby(ordered, key=lambda key: fields[key].path):
             with CziReader(path, self.layouts[path]) as reader:
                 for key in keys:
@@ -112,6 +183,10 @@ class RecordBuilder:
                         readings = reader.position_metadata(position.scene, position.tile, index)
                         clocks.setdefault(index, AcquisitionClock()).add_tile(
                             item.acquired_at for item in readings)
+                        done += 1
+                        self.report(STAGE_TIMES, done, total)
+        if done < total or not total:
+            self.report(STAGE_TIMES, total, total)
         self._unchanged()
         return clocks
 
@@ -136,11 +211,12 @@ class RecordBuilder:
         raise AcquisitionRecordError(
             f"{well}.zip: {info.filename!r} does not belong to this CZI conversion")
 
-    def _published_tiles(self, *, ignore_wells=()):
+    def _published_tiles(self, *, ignore_wells=(), report=False):
         tiles = {}
-        for path in well_archives(self.directory):
-            if path.stem in ignore_wells:
-                continue
+        archives = [path for path in well_archives(self.directory) if path.stem not in ignore_wells]
+        if report:
+            self.report(STAGE_ARCHIVES, 0, len(archives))
+        for done, path in enumerate(archives, 1):
             with zipfile.ZipFile(path) as archive:
                 found = False
                 for info in archive.infolist():
@@ -151,6 +227,8 @@ class RecordBuilder:
                     found = True
                 if not found:
                     raise AcquisitionRecordError(f"{path.name} has no published input images")
+            if report:
+                self.report(STAGE_ARCHIVES, done, len(archives))
         return tiles
 
     def well_complete(self, well):
@@ -172,7 +250,9 @@ class RecordBuilder:
         return len(actual) == len(expected) and set(actual) == expected
 
     def _relabel(self, tokens):
-        for path in well_archives(self.directory):
+        archives = well_archives(self.directory)
+        for done, path in enumerate(archives):
+            self.report(STAGE_NAMES, done, len(archives))
             with zipfile.ZipFile(path) as source:
                 renamed = []
                 for info in source.infolist():
@@ -194,6 +274,7 @@ class RecordBuilder:
                     destination.comment = source.comment
                     for old, new in renamed:
                         destination.writestr(new, source.read(old))
+        self.report(STAGE_NAMES, len(archives), len(archives))
 
     def preflight(self, selected_wells):
         """Retained archives must belong to the source before pixels change."""
@@ -234,15 +315,19 @@ class RecordBuilder:
                 raise AcquisitionRecordError(f"Source changed during conversion: {path.name}")
 
     def _assemble(self):
-        published = self._published_tiles()
+        published = self._published_tiles(report=True)
         record = new_record()
         clocks = self.clocks
         used_paths = {}
         sizes_by_timepoint = {}
         ordered = sorted(published, key=lambda key: (self.positions[key][0].path, key))
+        self.report(STAGE_TILES, 0, len(ordered))
+        done = 0
         for path, keys in groupby(ordered, key=lambda key: self.positions[key][0].path):
             with CziReader(path, self.layouts[path]) as reader:
                 for key in keys:
+                    done += 1
+                    self.report(STAGE_TILES, done, len(ordered))
                     well, field, token = key
                     position, t_index = self.positions[key]
                     readings = reader.position_metadata(
@@ -321,9 +406,9 @@ def _publish_record(builder, path, marker):
     marker.unlink()
 
 
-def prepare_publication(directory, source, well_map, plan, experiment, stamps, selected):
+def prepare_publication(directory, source, well_map, plan, experiment, stamps, selected, *, report=None):
     builder = RecordBuilder(directory, source, dict(zip(well_map.wells, well_map.positions)),
-                            plan, experiment, stamps=stamps)
+                            plan, experiment, stamps=stamps, report=report)
     builder.preflight({well_map.wells[index] for index in selected})
     return builder
 

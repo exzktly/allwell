@@ -813,6 +813,20 @@ class AnalyzeSuspendMixin:
                         rec.outcome, "a run that did not finish")
         return None
 
+    def _unfinished_output_dirs(self, raw_input: str) -> list[str]:
+        """The output folders of the unfinished runs of *raw_input* — a suspended one, and every run the journal
+        holds open or closed unfinished — for :func:`pipeline.run_report.wells_left_part_way` to look in."""
+        folders = [r.output_dir for r in load_all() if same_dir(r.input_dir, raw_input) and r.output_dir]
+        for entry in run_journal.unfinished_runs():
+            out = str(entry.get("output_dir") or "")
+            if not out:
+                continue
+            with swallow(f"reading the run journal in {out}"):
+                rec = run_journal.read_journal(out)
+                if rec is not None and _journal_names_input(rec, raw_input):
+                    folders.append(out)
+        return list(dict.fromkeys(folders))
+
     def resume_aware_spec(self, spec: RunSpec) -> RunSpec:
         """Force incremental when this spec's input has an unfinished run behind it.
 
@@ -841,6 +855,9 @@ class AnalyzeSuspendMixin:
         skipped as complete for ever. That is the defect this is for; the
         suspend case was only the half that already had a record.
         """
+        # Which named wells this call found left part-way, for the remote nanowell refusal to name; reset on every
+        # call so a later run never reports an earlier one's wells.
+        self._resume_part_way_wells = ()
         try:
             raw = str((spec.opts or {}).get("raw") or "").strip()
             # Force means recompute from scratch, and this function's own log
@@ -852,6 +869,21 @@ class AnalyzeSuspendMixin:
             cause = self._input_has_unfinished_work(raw)
             if cause is None:
                 return spec
+            named = list(spec.opts.get("only_wells") or ())
+            folders = self._unfinished_output_dirs(raw)
+            if named and folders:
+                # A run limited to named wells can leave half-done only those wells' output, so only they decide:
+                # an unfinished run that never touched them, or left them whole, is no reason to resume them.
+                from pipeline.run_report import wells_left_part_way
+
+                part_way = sorted({w for out in folders for w in wells_left_part_way(out, named)})
+                if not part_way:
+                    self._log_line(
+                        f"[resume] This input has {cause} behind it, but none of the wells this run names "
+                        f"({', '.join(sorted(named))}) was left part-way by it — running them as asked.\n",
+                        "INFO")
+                    return spec
+                self._resume_part_way_wells = tuple(part_way)
             opts = dict(spec.opts)
             opts["incremental"] = True
             self._log_line(

@@ -1263,7 +1263,12 @@ archives and outputs are always written as per-well `.zip` archives. See
   also works for remote runs: only the named wells are uploaded (plus an
   empty-well blank the correction needs). It is never filled in from a previous
   run's settings — a subset is a decision for one run. The pipeline flag is
-  `--only_wells`.
+  `--only_wells`. When an earlier run of the plate did not finish, a run limited
+  to named wells picks up only what that run left half-done in *those* wells
+  (output written but never marked complete); wells it never reached, or
+  finished, are run as asked, and the log says so. A remote nanowell run that
+  would have to pick up a named well is refused, naming the well; tick **Force**
+  to redo just the named wells in full, or run on this computer.
 - **Force these wells.** Comma-separated wells to reprocess in full, whatever
   else the run decides. This is the only thing that recovers a well whose
   `<WELL>_out.zip` exists but whose measurements CSV is missing: its own

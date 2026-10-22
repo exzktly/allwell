@@ -11695,6 +11695,18 @@ message itself tells the user to tick it for that — and on a remote run an
 incremental staging under it uploaded nothing for wells already complete
 locally, so Force did nothing on any input with an unfinished run behind it.
 
+**A run limited to named wells resumes only those wells.** With `only_wells` set, an unfinished run of the input
+makes the run incremental only when one of the named wells was left part-way by it:
+`pipeline.run_report.wells_left_part_way` looks in the unfinished runs' output folders
+(`_unfinished_output_dirs`: the suspend record's and every journal entry naming the input) for a named well with
+output — `<well>_out.zip`, `<prefix>_<well>.csv[.gz]` or `nanowells/<well>_grid.json`, non-empty — and no
+completion seal. A well with no output has nothing to resume and a sealed one is whole, so for both a plain run
+does what an incremental one would; with none part-way the spec goes unchanged and the log says why. The wells
+found are kept on `_resume_part_way_wells` (reset on every call) for the remote nanowell refusal, which then names
+them and says Force redoes only the named wells (`remote_run_state.nanowell_remote_resume_refusal_for`); a run of
+the whole plate keeps `NANOWELL_REMOTE_RESUME_REFUSAL`. Without the narrowing, one unfinished run of a plate
+would make every later subset incremental, and refuse every remote nanowell subset until a full run finished.
+
 **The resume message names the cause it found.** `resume_aware_spec` fires on
 every outcome in `UNFINISHED_OUTCOMES` plus a record left open, which is four
 different events — a suspend, a stop, a failure, and an app that was killed. One

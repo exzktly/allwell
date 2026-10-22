@@ -7560,7 +7560,7 @@ the same, once, for the new shape.
 
 | Control | What it does |
 |---|---|
-| **☰** | Slides the sidebar out over the page from the left: the dataset, every section (Home, Plotting, Statistics, …) as a grid of tiles, and the well plate, just as at the desk. Its top line shows the well and nuclei counts the desktop's status bar shows. Tap wells as usual — the sidebar stays out while you pick several; a row or column label selects the whole row or column (except on the smFISH page, which picks one well at a time). Tap a section, **✕**, or the dimmed page at the right to slide it away. In Analyze it holds the run form, in Datasets the tools. |
+| **☰** | Slides the sidebar out over the page from the left: the dataset, every section (Home, Plotting, Statistics, …) as a grid of tiles, and the well plate, just as at the desk. Its top line shows the well and nuclei counts the desktop's status bar shows. Tap wells as usual — the sidebar stays out while you pick several; a row or column label selects the whole row or column (except on the smFISH page, which picks one well at a time). Tap a section, **✕**, or the dimmed page at the right to slide it away. In Datasets it holds the tools. Analyze has no sidebar in phone layout — its form is the page — so **☰** is not shown there. |
 | **Review · Analyze · Datasets** | Switches mode, as on the desktop. |
 | **⋯** | **Text size** (S, M, L), **Reload dataset**, **Help**, **App log**, and **Desktop layout** — the way back. A **!** on it means the app log has something new. |
 
@@ -7603,13 +7603,20 @@ analysis, the publication look, Reveal folder and Storage — are hidden in phon
 stray tap cannot reach them, as are the Review CSV and Batch Export sections;
 switch back to the desktop layout to use them.
 
-**Watching a run.** Analyze opens on the run progress: the headline (*Running · 52
-of 96 wells · 1 failed*), the overall bar, the stages, and the plate map coloured
-by each well's progress, one above the other. Tap a well to see what it is doing
-on the line under the plate. The log is below, with long lines wrapped. Sideways,
-the progress sits on the left and the log on the right. The run form — including
-**Stop** and **Suspend** — slides out from **☰**. Closing the window while a run is
-in progress asks first in phone layout, because closing stops the run.
+**Analyze** has two views, picked from the button under the top bar:
+
+- **Settings ▾** — the run form fills the screen, under a strip with the run's
+  headline (*Running · 52 of 96 wells · 1 failed*) and its overall bar.
+- **Progress ▾** — the headline, the overall bar, the stages, and the plate map
+  coloured by each well's progress, one above the other. Tap a well to see what
+  it is doing on the line under the plate. The log is below, with long lines
+  wrapped. Sideways, the progress sits on the left and the log on the right.
+
+**Run Pipeline**, **Suspend**, **+ Queue** and **Stop** sit in a bar along the
+bottom of the screen in both views, so they are always in reach. Starting a run —
+from **Run Pipeline**, the queue, or a resumed job — switches to **Progress**.
+Closing the window while a run is in progress asks first in phone layout, because
+closing stops the run.
 
 **Text size.** **⋯** → **Text size**: **S**, **M** or **L**. Medium sets body text at
 15 points, a phone's usual reading size; the others are a step either side. Plots follow the

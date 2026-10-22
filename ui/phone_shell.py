@@ -126,6 +126,11 @@ class PhoneHandles:
     tool_names: Callable[[], list] = lambda: []
     current_tool: Callable[[], str] = lambda: ""
     show_tool: Callable[[str], None] = lambda _name: None
+    #: Analyze's views in phone layout (Settings, Progress), for the page
+    #: button in Analyze mode: their names, the one showing, how to show one.
+    page_views: Callable[[], list] = lambda: []
+    page_view: Callable[[], str] = lambda: ""
+    show_page_view: Callable[[str], None] = lambda _name: None
 
 
 # ── the rescale pass ──────────────────────────────────────────────────────
@@ -1735,15 +1740,21 @@ class PhoneShell(QObject):
         self.menu_button.setText("✕" if open_ else "☰")
         review = self._h.mode() == "review"
         tools = self._h.mode() == "datasets" and bool(self._h.tool_names())
+        views = self._h.mode() == "analyze" and bool(self._h.page_views())
+        # Analyze's form is its page in phone layout, so ☰ has nothing to
+        # show there.
+        self.menu_button.setVisible(not views)
         bar = self._current_page_bar()
-        self.page_button.setVisible((bar is not None and review) or tools)
-        if tools:
+        self.page_button.setVisible((bar is not None and review) or tools or views)
+        if views:
+            self.page_button.setText(f"{self._h.page_view()} ▾")
+        elif tools:
             self.page_button.setText(f"{self._h.current_tool()} ▾")
         elif bar is not None:
             self.page_button.setText(f"{bar.tabText(bar.currentIndex())} ▾")
         self.controls_button.setVisible(review and self._current_band() is not None)
         land = bool(self._landscape)
-        self._strip.setVisible((review or tools) and not land
+        self._strip.setVisible((review or tools or views) and not land
                                and (self.page_button.isVisibleTo(self._strip)
                                     or self.controls_button.isVisibleTo(self._strip)))
         if not review:
@@ -1779,6 +1790,10 @@ class PhoneShell(QObject):
         if self._h.mode() == "datasets":
             self._fill_tool_menu()
             return
+        if self._h.mode() == "analyze":
+            self._fill_named_menu(self._h.page_views(), self._h.page_view(),
+                                  self._pick_page_view)
+            return
         bar = self._current_page_bar()
         if bar is None:
             return
@@ -1793,14 +1808,21 @@ class PhoneShell(QObject):
 
     def _fill_tool_menu(self) -> None:
         """Datasets mode: the page button lists the tools, as ☰ does."""
+        self._fill_named_menu(self._h.tool_names(), self._h.current_tool(),
+                              self._pick_tool)
+
+    def _fill_named_menu(self, names, current: str, pick) -> None:
         group = QActionGroup(self._page_menu)
-        current = self._h.current_tool()
-        for name in self._h.tool_names():
+        for name in names:
             act = QAction(name, self._page_menu, checkable=True)
             act.setChecked(name == current)
-            act.triggered.connect(lambda _c=False, n=name: self._pick_tool(n))
+            act.triggered.connect(lambda _c=False, n=name: pick(n))
             group.addAction(act)
             self._page_menu.addAction(act)
+
+    def _pick_page_view(self, name: str) -> None:
+        self._h.show_page_view(name)
+        self.refresh()
 
     def _refresh_tool_label(self) -> None:
         if self._h.mode() == "datasets" and self.page_button.isVisible():

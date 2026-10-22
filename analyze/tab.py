@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
+from analyze.phone_view import AnalyzePhoneView
 from services.input_resolution_service import plan_input_layout
 from services.pipeline_runner import (
     PipelineRunner,
@@ -186,8 +187,8 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)
         self._build_log(right)
-
         splitter.setSizes([theme.Metrics.rail_w, 600])
+        self._phone_view = AnalyzePhoneView(self)  # follows phone layout on its own
 
     # ------------------------------------------------------------------
     # Form orchestration

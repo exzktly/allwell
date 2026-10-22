@@ -36,3 +36,10 @@ def pane_index(mode: str) -> int:
     made a second time, in a second place, with its own chance of drifting.
     """
     return PANE_MODES.index(mode) if mode in PANE_MODES else 0
+
+
+#: Qt property a pane sets on its ``_left_sidebar`` while that panel is the
+#: page itself rather than a rail beside it — Analyze's form in phone layout
+#: (``analyze/phone_view.py``). The shell's rail collapse leaves such a panel
+#: alone; collapsing it would empty the page.
+PANEL_IS_PAGE = "awPanelIsPage"

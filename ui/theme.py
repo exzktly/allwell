@@ -1715,6 +1715,12 @@ QWidget#PhoneStrip {{
     background-color: {c.rail};
     border-bottom: 1px solid {c.border_subtle};
 }}
+/* Analyze's run controls, moved to the foot of the pane in phone layout
+   (analyze/phone_view.py) so Run and + Queue stay in reach. */
+QWidget#PhoneRunBar {{
+    background-color: {c.rail};
+    border-top: 1px solid {c.border_subtle};
+}}
 QToolButton#PhoneMenuButton, QToolButton#PhonePageButton,
 QToolButton#PhoneOptionsButton, QToolButton#PhoneControlsButton {{
     background-color: transparent;

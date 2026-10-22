@@ -313,6 +313,7 @@ class AllWellApp(QMainWindow):
         self.resize(1640, 980)
         self.setMinimumSize(_WINDOW_MIN_W, _WINDOW_MIN_H)
         self._phone = None  # ui.phone_shell.PhoneShell, built in _build_ui
+        self._analyze_phone = None  # analyze.phone_view.AnalyzePhoneView
 
         self._review: QWidget | None = None
         self._analyze: QWidget | None = None
@@ -707,6 +708,10 @@ class AllWellApp(QMainWindow):
             getattr(self, "_storage_btn", None),
         ) if w is not None]
 
+        # Analyze's phone form: the form as the page, the run a strip above it
+        # (analyze/phone_view.py). The pane builds it; it follows phone layout
+        # on its own, and the shell only asks it for its views.
+        self._analyze_phone = getattr(getattr(self, "_analyze", None), "_phone_view", None)
         drawer = self._build_rail_drawer(band)
         dash = getattr(self._analyze, "_dashboard", None)
         analyze_page = dash.parentWidget() if dash is not None else None
@@ -744,6 +749,12 @@ class AllWellApp(QMainWindow):
                                   if getattr(self, "_datasets", None) is not None else ""),
             show_tool=lambda name: (self._datasets.show_tool(name)
                                     if getattr(self, "_datasets", None) is not None else None),
+            page_views=lambda: (self._analyze_phone.views()
+                                if self._analyze_phone is not None else []),
+            page_view=lambda: (self._analyze_phone.current()
+                               if self._analyze_phone is not None else ""),
+            show_page_view=lambda name: (self._analyze_phone.show_view(name)
+                                         if self._analyze_phone is not None else None),
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
         # Among the small icon buttons at the band's right end, just before
@@ -775,8 +786,12 @@ class AllWellApp(QMainWindow):
         review = self._review
 
         def _panels() -> dict:
+            # Not Analyze's form in phone layout: there it is the page
+            # (analyze/phone_view.py), not a panel to slide out.
+            analyze_form = (None if phone_layout.is_on() else
+                            getattr(getattr(self, "_analyze", None), "_left_sidebar", None))
             found = (("review", getattr(review, "_sidebar_root", None)),
-                     ("analyze", getattr(getattr(self, "_analyze", None), "_left_sidebar", None)),
+                     ("analyze", analyze_form),
                      ("datasets", getattr(getattr(self, "_datasets", None), "_left_sidebar", None)))
             return {m: p for m, p in found if p is not None}
 

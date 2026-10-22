@@ -544,7 +544,7 @@ class PlateProgress(QWidget):
         self._status.setVisible(not self._stacked)
         for head in self._rail_host.findChildren(QLabel, "StageRailHead"):
             head.setVisible(not self._stacked)
-        if self._stacked and not self._body.isVisible():
+        if self._stacked and not self._body.isVisible() and not self.isCompact():
             self._toggle.setChecked(True)
             self._on_toggle()
         self._headline.setProperty("phone", self._stacked)
@@ -559,7 +559,8 @@ class PlateProgress(QWidget):
                 plate.setMaximumSize(_QWIDGETSIZE_MAX, _QWIDGETSIZE_MAX)
             else:
                 apply_plate_geometry(plate, role="status")
-        self._well_detail.setVisible(self._stacked and bool(self._well_detail.text()))
+        self._well_detail.setVisible(self._stacked and not self.isCompact()
+                                     and bool(self._well_detail.text()))
         self._pin_rail_width()
 
     def _show_well_detail(self, well_id: str) -> None:
@@ -599,8 +600,35 @@ class PlateProgress(QWidget):
 
     def _on_toggle(self) -> None:
         show = self._toggle.isChecked()
-        self._body.setVisible(show)
+        self._body.setVisible(show and not getattr(self, "_compact", False))
         self._toggle.setText("▾" if show else "▸")
+
+    def setCompact(self, compact: bool) -> None:
+        """Only the header, headline and overall bar: the stage rail, plate,
+        legend and well detail go.
+
+        For phone layout's Analyze *Settings* view, where the run is a strip
+        above the form rather than the page (``analyze/phone_view.py``). Undone
+        by ``setCompact(False)``, which shows the body again as the collapse
+        toggle has it.
+        """
+        self._compact = bool(compact)
+        self._body.setVisible(not self._compact and self._toggle.isChecked())
+        if self._compact:
+            self._well_detail.setVisible(False)
+        else:
+            # The body may have been re-shaped while hidden (``setStacked``
+            # comes in while compact). Showing it at an unchanged size sends
+            # the plate no resize, so its grid kept the height it was last
+            # laid out at — a quarter of the plate — until relaid out here.
+            for w in [self._body, *self._body.findChildren(QWidget)]:
+                if w.layout() is not None:
+                    w.layout().invalidate()
+            self._well_detail.setVisible(
+                getattr(self, "_stacked", False) and bool(self._well_detail.text()))
+
+    def isCompact(self) -> bool:
+        return bool(getattr(self, "_compact", False))
 
     # ── hooks a subclass must implement ─────────────────────────────────────
     def _build_rail(self) -> None:

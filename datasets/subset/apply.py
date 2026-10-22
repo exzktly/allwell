@@ -49,6 +49,8 @@ from datasets.subset.subset_compute import (
     row_verdict,
     timepoint_kept,
 )
+from datasets.core.nanowell_anchors_carry import AnchorSource, carry_anchors
+from util.well_token import canonical_well_label
 from datasets.core.nanowell_tables import carry_nanowell_tables
 
 
@@ -345,6 +347,13 @@ def execute_plan(
     if acquisition is not None:
         write_record(plan.dest.root, filter_record_to_archives(
             plan.dest.root, acquisition, schema=":".join(plan.schema.fields), sep=plan.schema.sep))
+    kept_wells = {canonical_well_label(w) or w for w in plan.wells_kept}
+    try:
+        carry_anchors([AnchorSource(plan.src.in_dir, well=lambda w: w if w in kept_wells else None,
+                                    timepoint=lambda tp: tp if timepoint_kept(tp, plan.filt) else None)],
+                      plan.dest.in_dir, emit)
+    except ValueError as exc:
+        raise SubsetError(str(exc)) from exc
 
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)

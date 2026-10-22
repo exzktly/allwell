@@ -35,6 +35,7 @@ from util.timepoint import parse_hours
 from util.aw_safe import swallow
 from domain.tp_match import tp_close
 from datasets.core.concurrency import pick_workers
+from datasets.core.nanowell_anchors_carry import AnchorSource, carry_anchors
 from datasets.core.provenance import record_derivation
 from util.csv_gz import open_csv_text
 from datasets.core.containers import (
@@ -561,6 +562,18 @@ def _ds2_members(container: Path) -> dict[str, int | None]:
 
 
 def _merge_acquisition_records(plan: MergePlan, emit: Callable[[str], None]) -> None:
+    """Write the merged acquisition record (:func:`_merge_record`) and the nanowell anchors set by hand, with
+    dataset 2's timepoints renamed as its images were (``datasets.core.nanowell_anchors_carry``)."""
+    _merge_record(plan, emit)
+    second = AnchorSource(plan.ds2.in_dir, timepoint=lambda tp: remap_timepoint_label(tp, plan.offset_hours,
+                                                                                      plan.tp_format))
+    try:
+        carry_anchors([AnchorSource(plan.ds1.in_dir), second], plan.dest.in_dir, emit)
+    except ValueError as exc:
+        raise ConcatError(str(exc)) from exc
+
+
+def _merge_record(plan: MergePlan, emit: Callable[[str], None]) -> None:
     """Write the merged ``in/acquisition.json``, or say why none is written.
 
     Both datasets' records, with dataset 2's timepoints renamed as its images

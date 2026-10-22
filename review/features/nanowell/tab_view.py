@@ -134,6 +134,16 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_well_cb", well_cb)
     grp_well = band.add_scope("Well", well_cb)
 
+    qc_montage_box = QCheckBox("Montage")
+    qc_montage_box.setToolTip("Draw the montage image. Off, the outlines and marks stay on an empty frame.")
+    qc_montage_box.toggled.connect(lambda on: nwc.set_qc_montage(ctx, on))
+    reg.register("_nw_qc_montage_box", qc_montage_box)
+    qc_overlay_box = QCheckBox("Overlay")
+    qc_overlay_box.setToolTip("Draw the tile outlines and the nanowell marks over the montage. Off, the image alone.")
+    qc_overlay_box.toggled.connect(lambda on: nwc.set_qc_overlay(ctx, on))
+    reg.register("_nw_qc_overlay_box", qc_overlay_box)
+    grp_qc = band.add_scope("Show", qc_montage_box, qc_overlay_box)
+
     tp_slider = QSlider(Qt.Horizontal)
     tp_slider.setToolTip(_SLIDER_TIP)
     tp_slider.setMinimum(0)
@@ -232,7 +242,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     def page_visible() -> bool:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
-    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box, responding_edit)
+    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box, responding_edit,
+                qc_montage_box, qc_overlay_box)
 
     def refresh_controls() -> None:
         channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None
@@ -283,6 +294,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_baseline.setVisible(view != "array_qc")
             grp_axis.setVisible(distribution)
             cohort_box.setChecked(st.cohort)
+            qc_montage_box.setChecked(st.qc_montage)
+            qc_overlay_box.setChecked(st.qc_overlay)
+            grp_qc.setVisible(view == "array_qc")
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
             # applies to what it draws, so its box stays where it can be turned off.

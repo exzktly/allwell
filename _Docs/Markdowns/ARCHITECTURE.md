@@ -10308,6 +10308,9 @@ its residual. A tile size comes from the acquisition record's `tile_size_px` and
 the tile's corner is marked and the figure says the outline is unknown, never a guessed rectangle. The grid
 record of every timepoint is listed beside the image. The montage (a PNG of up to 4096 px) is read on a
 worker; the figure says *Reading the montage…* until it arrives, and the last `MONTAGES_KEPT` are kept.
+*Show: Montage / Overlay* (`state.qc_montage`, `qc_overlay`, persisted with the page's settings and on unless
+saved off) pass `show_montage` / `show_overlay` to the renderer: without the montage the axes keep its extent, so
+the overlay sits where it would over the image (`tests/test_array_qc_toggles.py`).
 
 **Full montage.** Array QC's **Full montage…** button (`controller.open_full_montage`) opens a non-modal window
 (`full_montage_view.FullMontageWindow`, registered as `_nw_full_montage`, one at a time) on the well and

@@ -4879,6 +4879,9 @@ use them.
   nanowells there may hold cells, and that timepoint's counts and confluence may be biased. A tile whose size the acquisition
   record does not give is marked at its corner, and the figure says so. The montage is read in the
   background; the figure says *Reading the montage…* meanwhile.
+  **Show: Montage / Overlay** turn the image and the drawn layer (tile outlines, their labels, the nanowell
+  marks) on and off separately: the overlay alone on an empty frame, or the image with nothing over it. Both
+  start on, and the page remembers the choice with its other settings.
   **Full montage…** opens the same well at full resolution in a window of its own, drawn from the raw images
   where the run placed each tile, with the tile outlines, every nanowell's address, and the anchor set by hand.
   Drag to pan, scroll to zoom, *Fit* for the whole well, *1:1* for one image pixel per screen pixel; the detail

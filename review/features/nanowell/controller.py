@@ -408,7 +408,7 @@ def _draw_qc(ctx, st, fig, well: str) -> None:
         montage, why = None, "Reading the montage…"
     sites = st.metrics[(st.metrics["well"] == well) & (st.metrics["timepoint"] == tp)]
     render_array_qc(fig, montage, tile_boxes(st.data, well, tp), sites, st.data.grids.get(well) or {},
-                    timepoint=tp, why=why)
+                    timepoint=tp, why=why, show_montage=st.qc_montage, show_overlay=st.qc_overlay)
 
 
 def open_full_montage(ctx) -> FullMontageWindow | None:
@@ -591,6 +591,14 @@ def set_view(ctx, view: str) -> None:
 
 def set_cohort(ctx, on: bool) -> None:
     _set(ctx, "cohort", bool(on))
+
+
+def set_qc_montage(ctx, on: bool) -> None:
+    _set(ctx, "qc_montage", bool(on))
+
+
+def set_qc_overlay(ctx, on: bool) -> None:
+    _set(ctx, "qc_overlay", bool(on))
 
 
 def set_metric(ctx, metric: str) -> None:

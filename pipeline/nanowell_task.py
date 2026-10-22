@@ -508,6 +508,14 @@ def _well_manual_anchors(input_dir: Path, well_label: str) -> tuple[dict, str]:
     return found, digest
 
 
+def _stamp_anchors(outcome, todo, digest: str) -> None:
+    """Record on each timepoint this run located the plate's anchors as they were (``_prior_state`` keeps a
+    ``plate_rigid`` timepoint only under the same digest)."""
+    for tp in todo:
+        if tp in outcome.timepoints:
+            outcome.timepoints[tp]["anchors_digest"] = digest
+
+
 def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
                      csv_prefix, schema, sep, *, grouper, parse, extract, scratch_dir, write_csv, segmenter=None,
                      incremental=False, prior_dir=None, settings_key="", staging_dir=None, plate_rigid=None):
@@ -586,9 +594,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         outcome.radius["reanalysed_because"] = reason
         log.warning("Well %s — %s.", well_label, reason)
     _log_reused_registration(well_label, outcome, todo)
-    for tp in todo:                            # the plate's anchors as they were when these were located
-        if tp in outcome.timepoints:
-            outcome.timepoints[tp]["anchors_digest"] = digest
+    _stamp_anchors(outcome, todo, digest)
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)

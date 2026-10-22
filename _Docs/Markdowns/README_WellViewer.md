@@ -270,7 +270,9 @@ remote host cannot read a folder on this computer: the log says so, and the host
 window with the montage: every nanowell outlined (green empty, blue holding cells, amber occluded, red
 clipped, grey without an address, dashed purple on a seam), addresses written once you zoom in far enough to
 read them, the origin method, the measured overlap against the one a nanowell needs, and a few
-rim-suppressed nanowells beside their segmentation. Use it before a plate-wide run: if the addresses do not
+rim-suppressed nanowells beside their segmentation. Untick **Nanowell outlines** to see the montage without
+them — the outlines cover the very edges you are checking them against — and tick it again to bring them back;
+neither re-runs the detection. Use it before a plate-wide run: if the addresses do not
 land on the right nanowells, the run would not either. Finding the nanowells does not need Cellpose; only counting
 the cells in them does. Without it Test detection still draws every nanowell with its address and state, outlines
 the ones it could see in grey as *not counted*, shows no crops, and says at the top of its notes that Cellpose
@@ -1984,7 +1986,10 @@ What is on it:
   complete (green), partial (amber, with an arc showing how much of it landed),
   failures recorded (red), images with no measurements behind them (blue — the
   same colour the Datasets tools use to flag an odd well), measurements whose
-  output archive is gone (cyan), staged but never processed (grey). Those
+  output archive is gone (cyan), staged but never processed (grey). A nanowell
+  well whose timepoints ran but could not be addressed (no central square found)
+  is partial, not "never processed", and the health card lists it under
+  *Nanowell timepoints not addressed* with what to do about it. Those
   colours are the ones every other well map in the app uses for the same
   things, so a colour you have learnt once reads the same here. A well the record says nothing about — because no completeness check has
   been run, or because it produced nothing at all — is left plain, uncoloured:

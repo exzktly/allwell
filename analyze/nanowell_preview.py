@@ -16,7 +16,7 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication, QThread, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ui.theme import Colors
@@ -94,8 +94,9 @@ def _montage_image(result) -> QImage:
     return image.copy()                                   # own the pixels: the array may go away with the result
 
 
-def render_montage(result, zoom: float, *, show_addresses: bool = True) -> QPixmap:
-    """The montage at *zoom* (screen pixels per montage pixel) with every site outlined and, where room allows, labelled."""
+def render_montage(result, zoom: float, *, show_addresses: bool = True, show_sites: bool = True) -> QPixmap:
+    """The montage at *zoom* (screen pixels per montage pixel) with every site outlined and, where room allows, labelled.
+    With *show_sites* off, the montage alone: the outlines cover the very edges a person checks them against."""
     image = _montage_image(result)
     pixmap = QPixmap.fromImage(image.scaled(max(int(image.width() * zoom), 1), max(int(image.height() * zoom), 1),
                                             Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
@@ -104,7 +105,7 @@ def render_montage(result, zoom: float, *, show_addresses: bool = True) -> QPixm
     font = QFont()
     font.setPixelSize(max(int(MIN_LABEL_DIAMETER_PX * 0.3), 8))
     painter.setFont(font)
-    for mark in site_marks(result):
+    for mark in site_marks(result) if show_sites else ():
         pen = QPen(QColor(STATE_COLOURS[mark.colour]))
         pen.setWidthF(1.5)
         if mark.fused:
@@ -207,12 +208,17 @@ class NanowellPreviewWindow(QWidget):
         for label, value in ZOOMS:
             self._zoom_cb.addItem(label, userData=value)
         self._zoom_cb.setCurrentIndex(0)
+        self._sites_cb = QCheckBox("Nanowell outlines", self)
+        self._sites_cb.setChecked(True)
+        self._sites_cb.setToolTip("Draw each nanowell's coloured outline and address over the montage. Off, the "
+                                  "montage alone, to see the edges the outlines would cover.")
         top.addWidget(QLabel("Well", self))
         top.addWidget(self._well_cb)
         top.addWidget(QLabel("Timepoint", self))
         top.addWidget(self._tp_cb)
         top.addWidget(self._run_btn)
         top.addStretch(1)
+        top.addWidget(self._sites_cb)
         top.addWidget(QLabel("Zoom", self))
         top.addWidget(self._zoom_cb)
         layout.addLayout(top)
@@ -233,6 +239,7 @@ class NanowellPreviewWindow(QWidget):
         layout.addLayout(self._crops)
         self._well_cb.currentTextChanged.connect(self._fill_timepoints)
         self._zoom_cb.currentIndexChanged.connect(lambda _i: self._draw())
+        self._sites_cb.toggled.connect(lambda _on: self._draw())
         self._fill_timepoints(self._well_cb.currentText())
 
     def reload(self, wells: dict[str, Path], timepoints: dict[str, list[str]]) -> None:
@@ -333,7 +340,7 @@ class NanowellPreviewWindow(QWidget):
         if result is None or result.montage is None:
             self._montage_label.clear()
             return
-        pixmap = render_montage(result, self._capped_zoom())
+        pixmap = render_montage(result, self._capped_zoom(), show_sites=self._sites_cb.isChecked())
         self._montage_label.setPixmap(pixmap)
         self._montage_label.resize(pixmap.size())
         for crop in result.crops:

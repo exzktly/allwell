@@ -104,6 +104,10 @@ class ConverterSpec:
     #: converters today; here so a reader does not have to wonder whether the
     #: uniform two-argument call is a coincidence.
     read_kwargs: dict = field(default_factory=dict)
+    #: Whether :attr:`convert` takes ``status=``: a callback receiving one line naming a stage of the run that
+    #: writes no planes (the CZI converter's metadata passes, which can take minutes on a large plate with no
+    #: other sign of life). The page then shows it on its status line through ``set_stage_status``.
+    reports_status: bool = False
 
     def __post_init__(self) -> None:
         if not self.plan_refusals:
@@ -129,6 +133,7 @@ class PackedConverterWorker(QThread):
 
     logLine = Signal(str)          # one line for the status window
     progress = Signal(int, int)    # (planes_written, total_planes)
+    status = Signal(str)           # a stage that writes no planes, for the status line (ConverterSpec.reports_status)
     # (well, done, total) — one well's share of the conversion, so its cell on
     # the acquisition plate can fill as a dial rather than the page having only
     # a single run-wide bar. Quantised in each tool's ``apply.convert``.
@@ -166,6 +171,7 @@ class PackedConverterWorker(QThread):
                 is_cancelled=self.isInterruptionRequested,
                 progress=self.progress.emit,
                 well_progress=self.wellFraction.emit,
+                **({"status": self.status.emit} if spec.reports_status else {}),
             )
         except spec.cancelled:
             self.failed.emit(CANCELLED_MESSAGE)
@@ -264,6 +270,8 @@ class PackedConverterController(DatasetToolController):
         worker = PackedConverterWorker(self.spec, src, dest, self.page.params())
         worker.logLine.connect(self.page.append_log)
         worker.progress.connect(self.page.set_progress)
+        if self.spec.reports_status:
+            worker.status.connect(self.page.set_stage_status)
         worker.wellFraction.connect(self.page.set_well_fraction)
         worker.succeeded.connect(self._on_succeeded)
         worker.failed.connect(self._on_failed)

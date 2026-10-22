@@ -8106,8 +8106,26 @@ with its name and the instruction to include it. Native ordinals in ZIP member c
 provenance preserve identity through label changes. The final labels use elapsed
 hours from shared starts, using the existing jitter rounding; unknown or incomparable
 starts use ordinal tokens and retain a naming reason. A single frame is always
-0h even if its absolute start remains unknown. Retained ZIPs are rewritten
-only when labels or lineage comments change. ZIP and JSON are individually atomic, not a two-
+0h even if its absolute start remains unknown. The labels are decided by the
+acquisition-time pass that runs before the first plane is written
+(`RecordBuilder.tokens`), so `explode_czi` writes each member under its final
+name and a fresh conversion's `_relabel` pass finds nothing to rewrite; retained
+ZIPs are rewritten only when labels or lineage comments change.
+
+**Progress through the metadata passes.** Four passes write no planes and can take
+minutes on a large plate or a network drive: the acquisition-time read before the
+first archive (`STAGE_TIMES`), and after the last one the archive listing
+(`STAGE_ARCHIVES`), the per-tile metadata read (`STAGE_TILES`) and the name check
+(`STAGE_NAMES`). `RecordBuilder.report(stage, done, total)` reports each, `done == 0`
+first and `done == total` last, to `StageReporter`, which logs a line as each starts
+(the record's first says the dataset cannot be analysed until it ends) and as it ends
+with its duration, and sends a running count to `explode_czi`'s `status_fn` at most
+every 0.25 s. The Convert CZI page shows it on the status line beside the plate
+(`ConverterSpec.reports_status`, the worker's `status` signal,
+`CziImportPage.set_stage_status`), where the image count stands while planes are
+written; a run that ends done puts the image count back. Without it the page showed
+every well done while `acquisition.pending.json` still stood, and closing the app
+then left a folder every reader refuses. ZIP and JSON are individually atomic, not a two-
 file atomic transaction. Dataset-root APIs delegate to explicit file APIs so
 CLI conversions into an arbitrary input-folder name do not append another in/.
 

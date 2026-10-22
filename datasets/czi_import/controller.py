@@ -35,6 +35,9 @@ CZI_CONVERTER = ConverterSpec(
     # a crash to log a traceback for.
     refusals=(CziImportError, ValueError),
     cancelled=CziExplodeCancelled,
+    # Reading every tile's acquisition time before the first archive, and building acquisition.json after the
+    # last, write no planes: without a status line the page looked finished while the record was still unwritten.
+    reports_status=True,
 )
 
 

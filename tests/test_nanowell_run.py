@@ -363,9 +363,10 @@ def test_a_spilled_well_holds_its_montages_on_disk_and_measures_the_same(tmp_pat
 
 @pytest.mark.parametrize("diameter_um, finding", [
     (100.0, None),                                                     # the plate's own: nothing to say
-    (140.0, "The measured nanowell diameter (median over the well's timepoints) (99.8 um) disagrees with the 140 um"),
-    # Past the 30 % a site fit keeps around a seed: the seed is the plate's rough diameter now, not the setting.
-    (150.0, "The measured nanowell diameter (median over the well's timepoints) (99.9 um) disagrees with the 150 um"),
+    (140.0, "The measured nanowell diameter (median over the well's timepoints) (99.6 um) disagrees with the 140 um"),
+    # Past the 30 % a site fit keeps around a seed: the seed is the plate's own, so the reading does not move with
+    # the setting (both read 99.6).
+    (150.0, "The measured nanowell diameter (median over the well's timepoints) (99.6 um) disagrees with the 150 um"),
 ])
 def test_the_format_s_diameter_is_checked_against_the_nanowells_fitted_at_full_resolution(diameter_um, finding):
     """Roll-up review X25: the format's diameter is checked against nanowells fitted at full resolution, and a

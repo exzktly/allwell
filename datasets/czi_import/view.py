@@ -98,6 +98,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._dest_root = ""
         self._dest_user_set = False
         self._running = False
+        self._last_progress: tuple[int, int] = (0, 0)   # the run's last image count, restored when it ends done
         #: The last layout read, keyed on the source path and its mtime, so
         #: typing in a grid field does not re-read a multi-gigabyte file on
         #: every keystroke. Keyed on mtime as well as path because a re-export
@@ -622,6 +623,9 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         if outcome == "done":
             self._readout.setText(recorded_metadata_summary(self.destination_path()))
             self._dashboard.set_done(message)
+            # The record stages wrote their lines over the image count; a finished run reads as what it wrote. A
+            # failed or cancelled one keeps the stage line, which says where it stopped.
+            self.set_progress(*self._last_progress)
         elif outcome == "cancelled":
             self._dashboard.set_cancelled(message)
         else:
@@ -642,10 +646,18 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         being wrong depending on which label you assumed. Both numbers are worth
         having, so each goes where it means something.
         """
+        self._last_progress = (done, total)
         if total <= 0:
             self._dashboard.set_status("")
             return
         self._dashboard.set_status(f"{done:,} of {total:,} image(s)")
+
+    def set_stage_status(self, text: str) -> None:
+        """Name the stage of the run that writes no planes — reading acquisition times before the first archive,
+        writing the acquisition record after the last — on the status line beside the plate, where the image count
+        stands while planes are written. Without it the plate showed every well done and the dataset was not yet
+        usable."""
+        self._dashboard.set_status(text)
 
     def set_running(self, running: bool) -> None:
         self._running = bool(running)

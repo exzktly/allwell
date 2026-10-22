@@ -46,8 +46,12 @@ def convert(
     is_cancelled: Callable[[], bool] | None = None,
     progress: Callable[[int, int], None] | None = None,
     well_progress: Callable[[str, int, int], None] | None = None,
+    status: Callable[[str], None] | None = None,
 ) -> str:
     """Convert *src* into ``<dest>/in`` and return a one-line summary.
+
+    *status* receives a line naming the metadata pass in progress while no plane
+    is being written (``pipeline.czi_explode.explode_czi``'s *status_fn*).
 
     *well_progress* receives ``(well, done, total)`` for one well's share of the
     conversion, quantised to whole percentage steps so a well holding thousands
@@ -124,6 +128,7 @@ def convert(
         log_fn=log,
         progress_fn=progress,
         well_progress_fn=None if well_progress is None else _well_progress,
+        status_fn=status,
         should_abort=is_cancelled,
         resume=resuming,
     )

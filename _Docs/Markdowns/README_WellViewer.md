@@ -6355,6 +6355,16 @@ with a reason. No per-well or per-tile acquisition time is saved downstream.
 Unknown metadata remains unknown, including the selected objective and declared
 overlap whose native declarations have not yet been established.
 
+After the last image is written the conversion is not finished yet: it builds
+`in/acquisition.json` by reading the metadata of every tile it converted, which on a
+large plate or a network drive can take minutes. The log says when it starts and
+ends, and the status line beside the plate counts through it (*Writing the
+acquisition record: 1,234 of 5,678 tile(s)…*); before the first image the same
+line counts through *Reading acquisition times*. The run is done when the log
+ends with *Wrote N image(s) for M well(s)* and the summary appears. Until then the
+folder holds `in/acquisition.pending.json`, and Analyze refuses it; if the app was
+closed in that window, run the same conversion again to finish it.
+
 The record covers the archives actually written, including a stopped conversion
 and complete wells kept by resume. If metadata publication fails or the process
 is interrupted during publication, reading the record reports incomplete

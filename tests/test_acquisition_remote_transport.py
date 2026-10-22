@@ -138,6 +138,11 @@ def test_the_nanowell_anchors_reach_the_upload_and_every_batch_and_an_anchor_set
     cache.upload_subset(list(zipped.well_zips), '/remote/b1', acquisition_input=zipped)
     on_disk = anchors_path(root / 'in').read_bytes()
     assert sent == [[on_disk], [on_disk]]
+    # An anchor on a well this upload does not carry leaves its cache key alone: no re-upload for a click elsewhere.
+    set_anchor(anchors_path(root / 'in'), 'B02', '0h', (5.0, 5.0))
+    elsewhere = replace(stage_local_zips(root / 'in', filename_schema=zipped.acquisition_schema, filename_sep='_'),
+                        well_zips=zipped.well_zips)
+    assert zipped.well_zips[0].stem == 'A01' and cache.cache_key(elsewhere) == before
     set_anchor(anchors_path(root / 'in'), 'A01', '0h', (110.0, 20.0))
     again = stage_local_zips(root / 'in', filename_schema=zipped.acquisition_schema, filename_sep='_')
     again = replace(again, well_zips=zipped.well_zips)

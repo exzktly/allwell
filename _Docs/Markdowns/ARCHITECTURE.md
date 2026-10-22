@@ -9321,10 +9321,13 @@ margin has no synthetic default or absolute-score calibration. A
 score exceeds its runner-up by more than the supplied margin. Accepted evidence
 is snapped through the fitted phase in priority order: an anchor set by hand
 (`manual`), fiducial, array centre, then plate-rigid prediction. A manual anchor
-more than a quarter pitch from every site leaves the acquisition `unaddressed`
-with the distance in the reason instead of falling through to the other
-sources, because a person who pointed at a well must not find it anchored
-somewhere else without being told. A fiducial or array centre more than a quarter
+more than a quarter pitch from every lattice site, or whose site lies more than
+`MANUAL_REACH_PITCHES` (1.5) pitches from every detected nanowell (the fitted
+lattice runs on for ever, so a click off the array snaps to a site too; the
+site itself need not be detected, since the central square is often exactly
+what detection missed), leaves the acquisition `unaddressed` with the distance
+in the reason instead of falling through to the other sources, because a person
+who pointed at a well must not find it anchored somewhere else without being told. A fiducial or array centre more than a quarter
 pitch from every site is refused, with the distance in the reason, because the
 nearest site to a point that lies nowhere near one is arbitrary. Three times the
 prediction's one-sigma uncertainty for the target's *true origin*
@@ -10041,10 +10044,15 @@ A file that cannot be used — not JSON, another version, a well that is not a w
 timepoint) — fails the well with the file's problem named, never runs it as if no anchor had been set.
 **Reuse is keyed on the anchor.** `_prior_state` keeps a timepoint only when its recorded `manual_anchor_um`
 is the current one, so an incremental run recomputes a timepoint whose anchor was set, moved or cleared, and
-the resume checkpoint key (`_checkpoint_key`) carries it too. For a remote run, `acquisition_transport` uploads
+the resume checkpoint key (`_checkpoint_key`) carries it too. A `plate_rigid` timepoint was carried from another
+timepoint or other wells, any of which a click may have moved, so every located timepoint also records
+`anchors_digest` — a digest of the whole plate's anchors when it was located — and a `plate_rigid` one is kept
+only under the same digest. For a remote run, `acquisition_transport` uploads
 the file's bytes beside the archives (full upload and every batch), and both the upload cache key and
 `remote_scratch.source_fingerprint` — the re-attach's source key — fold it in, so a re-run after a click is
-neither served from the cache without the file nor re-attached to the run that left the well unaddressed.
+neither served from the cache without the file nor re-attached to the run that left the well unaddressed. The
+cache key folds in only the anchors of the wells being uploaded, so a click on one well does not re-upload a run
+that does not include it; the whole file is still sent, so the remote reads what a local run would.
 Subset, Merge Plates and Concatenate carry it through `datasets/core/nanowell_anchors_carry.py`: Subset keeps
 the anchors of what it keeps, Merge Plates renames dataset 2's wells by the remap, Concatenate shifts dataset
 2's timepoints (and an in-place addition preserves and restores the file with the record). Two sources that
@@ -10313,7 +10321,11 @@ means: the levels at a quarter resolution and coarser for every tile once read, 
 from the finest held level no finer than one output pixel and reports the tiles it wants finer (`wants`) or has
 never read (`unread`); the canvas asks the window to read those on a worker (`core.worker_bridge`) and draws
 again when they arrive, so painting never waits on a read, and a result that arrives after the window is gone
-delivers to nothing. Over the pixels: tile outlines, each nanowell at its measured position coloured by state
+delivers to nothing. Tiles are read one at a time: one that cannot be read is recorded in `TileStore.failed`,
+named in the status line, not drawn and never asked for again, and the rest are still read. A plate placed from a
+scan pattern has no recorded tile size, so it is read from the first tile's TIFF header. Moving to another
+timepoint or closing the window cancels the store's reads at their next tile and lets its pixels go. *Set anchor*
+is offered only where an anchor can change the result (`ANCHORABLE`: `ok` or `unaddressed`). Over the pixels: tile outlines, each nanowell at its measured position coloured by state
 with its `q,r` address where it is drawn large enough, and the anchor. Drag pans, the wheel zooms about the
 pointer, *Fit* and *1:1*. With *Set anchor* on, a click (not a drag) writes the well's anchor at this timepoint;
 *Clear anchor* removes it; *Re-run anchored wells…* hands the dataset to Analyze limited to the anchored wells,

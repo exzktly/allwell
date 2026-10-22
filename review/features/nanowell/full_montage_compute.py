@@ -13,7 +13,7 @@ tile covers an earlier one where they overlap, so every pixel shown is a pixel o
 
 **Memory.** A well can be a hundred tiles of 2,048 px; held whole, that is about 800 MB. So each tile is kept as a
 pyramid of 2× means: the levels at a quarter of the resolution and coarser are kept for every tile once it is read
-(about 1/12 of the tile), and the two finest only within a byte budget (:data:`FINE_BYTES_KEPT`), each level of
+(about 1/6 of a 16-bit tile's bytes), and the two finest only within a byte budget (:data:`FINE_BYTES_KEPT`), each level of
 each tile separately, never evicting a tile the current view draws.
 A view that needs finer levels than are held is drawn from the coarser ones and says which tiles it wants, and the
 window reads them on a worker and draws again (:class:`Rendered.wants`).
@@ -93,8 +93,9 @@ def montage_source(data, well: str, timepoint: str) -> tuple[MontageSource | Non
     acquisition = (data.acquisition or {}).get(timepoint) or {}
     px = float((acquisition.get("pixel_size_um") or {}).get("x") or 0)
     size = acquisition.get("tile_size_px") or {}
-    if px <= 0 or not size.get("x") or not size.get("y"):
-        return None, f"The acquisition record gives no pixel size or tile size for {timepoint}."
+    if px <= 0:
+        return None, (f"No pixel size is known for {timepoint}: neither an acquisition record nor the run's "
+                      "settings give one.")
     if data.in_dir is None:
         return None, "The dataset's in/ folder is not beside its results, so the raw tiles cannot be read."
     archive = Path(data.in_dir) / f"{well}.zip"
@@ -114,11 +115,29 @@ def montage_source(data, well: str, timepoint: str) -> tuple[MontageSource | Non
         tiles.append(PlacedTile(str(row["tile"]), member, float(row["left_um"]), float(row["top_um"])))
     if not tiles:
         return None, f"{archive.name} holds no {data.phase_token} image of any tile of {well} at {timepoint}."
+    if not size.get("x") or not size.get("y"):
+        # A plate placed from a scan pattern has no record to state a tile size; the run read it from the image.
+        shape = _tile_shape(archive, tiles[0].member)
+        if shape is None:
+            return None, f"The tile size of {well} at {timepoint} is not recorded and {tiles[0].member} cannot be read."
+        size = {"x": shape[1], "y": shape[0]}
     note = (f" {len(unfound)} tile(s) have no image in {archive.name} and are not drawn: {', '.join(unfound)}."
             if unfound else "")
     return MontageSource(well, timepoint, archive, px, tuple(tiles),
                          (float(size["x"]) * px, float(size["y"]) * px), str(block.get("status") or ""),
                          str(block.get("reason") or "") + note, block.get("origin_method")), ""
+
+
+def _tile_shape(archive: Path, member: str) -> tuple[int, int] | None:
+    """``(rows, columns)`` of one tile image, from its TIFF header."""
+    import tifffile
+
+    try:
+        with zipfile.ZipFile(archive) as zf, tifffile.TiffFile(io.BytesIO(zf.read(member))) as tif:
+            shape = tif.pages[0].shape
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile, tifffile.TiffFileError):
+        return None
+    return int(shape[0]), int(shape[1])
 
 
 def pyramid(image: np.ndarray) -> list[np.ndarray]:
@@ -155,6 +174,10 @@ class TileStore:
         self._in_view: set[str] = set()
         self._stretch: tuple[float, float] | None = None
         self._lock = threading.Lock()
+        #: Tiles that could not be read, with why: not drawn, never asked for again, and named by the window.
+        self.failed: dict[str, str] = {}
+        #: Set when the window moves to another timepoint or closes: a read in flight stops at its next tile.
+        self.cancelled = False
 
     def _read(self, tile: PlacedTile) -> np.ndarray:
         import tifffile
@@ -164,23 +187,40 @@ class TileStore:
 
     def load(self, names, *, level: int | None = None) -> None:
         """Read *names* (tile ids): their coarse levels and, with *level* finer than those, that level too.
-        Raises what reading raises."""
+
+        Tile by tile: one that cannot be read is recorded in :attr:`failed` with its reason and the rest are still
+        read — a well with one corrupt image is drawn without it, never left half-read, and the failed tile is not
+        asked for again (the first version re-read it on every repaint, for ever)."""
+        import tifffile
+
         by_name = {t.tile: t for t in self.source.tiles}
         fine = level is not None and level < KEEP_FROM_LEVEL
         for name in names:
+            if self.cancelled:
+                return
             with self._lock:
-                held = name in self._coarse and (not fine or (name, level) in self._fine)
+                held = name in self.failed or (name in self._coarse and (not fine or (name, level) in self._fine))
             if held:
                 continue
-            levels = pyramid(self._read(by_name[name]))
+            try:
+                levels = pyramid(self._read(by_name[name]))
+            except (OSError, ValueError, KeyError, zipfile.BadZipFile, tifffile.TiffFileError) as exc:
+                with self._lock:
+                    self.failed[name] = f"{type(exc).__name__}: {exc}"
+                    self._settle_stretch(len(by_name))
+                continue
             with self._lock:
                 self._coarse[name] = {k: a for k, a in enumerate(levels) if k >= KEEP_FROM_LEVEL or k == len(levels) - 1}
                 if fine and level < len(levels) and (name, level) not in self._fine:
                     self._fine[(name, level)] = levels[level]
                     self._fine_bytes += levels[level].nbytes
                 self._evict()
-                if len(self._coarse) == len(by_name):
-                    self._stretch = self._well_stretch()
+                self._settle_stretch(len(by_name))
+
+    def _settle_stretch(self, total: int) -> None:
+        """Fix the well-wide stretch once every tile has been read or found unreadable."""
+        if self._coarse and len(self._coarse) + len(self.failed) >= total:
+            self._stretch = self._well_stretch()
 
     def _evict(self) -> None:
         """Let the least recently drawn fine levels go while over :data:`FINE_BYTES_KEPT`, never one of a tile the
@@ -238,6 +278,8 @@ class TileStore:
                 cols = np.nonzero((xs >= tile.left_um) & (xs < tile.left_um + tw))[0]
                 rows = np.nonzero((ys >= tile.top_um) & (ys < tile.top_um + th))[0]
                 if not len(cols) or not len(rows):
+                    continue
+                if tile.tile in self.failed:
                     continue
                 in_view.add(tile.tile)
                 best = self._best(tile.tile, wanted)
@@ -347,6 +389,11 @@ def anchored_wells(data) -> list[str]:
         return []
 
 
+#: The grid statuses an anchor can change: a timepoint left unaddressed, or one anchored on the wrong site. The
+#: others (no lattice, a refused orientation, a grid that could not be placed) fail before an origin is chosen.
+ANCHORABLE = ("ok", "unaddressed")
+
+
 def status_text(source: MontageSource, anchor, anchor_problem: str = "") -> str:
     """What the window says about this timepoint: how it was addressed (or why not) and its anchor."""
     from util.nanowell_anchors import origin_phrase
@@ -358,10 +405,13 @@ def status_text(source: MontageSource, anchor, anchor_problem: str = "") -> str:
     if anchor_problem:
         lines.append(f"The anchors file cannot be used: {anchor_problem}")
     elif anchor is not None:
-        used = source.origin_method == "manual"
-        lines.append(f"Anchor set by hand at ({anchor[0]:.1f}, {anchor[1]:.1f}) µm"
-                     + ("; this run used it." if used else
-                        "; not used yet: re-run the well in Analyze to address it from the anchor."))
+        where = f"Anchor set by hand at ({anchor[0]:.1f}, {anchor[1]:.1f}) µm"
+        if source.origin_method == "manual":
+            lines.append(where + "; this run used it.")
+        elif source.reason.startswith("The anchor set by hand"):
+            lines.append(where + "; the last run did not use it (above): set it again on the central square.")
+        else:
+            lines.append(where + "; not used yet: re-run the well in Analyze to address it from the anchor.")
     elif source.status == "unaddressed":
         lines.append("Turn on Set anchor and click the central square to anchor this well; the other timepoints "
                      "are then addressed from it, through the rest of the plate, when the well is re-run.")

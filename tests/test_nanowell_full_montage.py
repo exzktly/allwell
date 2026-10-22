@@ -30,11 +30,14 @@ MARK = (10, 20)                               # row, column of the bright pixel 
 SCHEMA, SEP, PHASE = "experiment:channel:well:fov:timepoint", "-", "PHASE"
 
 
-def _tiles_zip(path, timepoints=("t_c", "t_a")):
+def _tiles_zip(path, timepoints=("t_c", "t_a"), *, broken=()):
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr(".DS_Store", b"junk")
         for tp in timepoints:
             for tile, value in VALUES.items():
+                if tile in broken:                                   # named like a tile, not an image
+                    zf.writestr(f"exp-{PHASE}-A01-{tile}-{tp}.tif", b"not a tiff")
+                    continue
                 image = np.full((SIDE, SIDE), value, dtype=np.uint16)
                 if tile == "F0":
                     image[MARK] = 4000
@@ -49,10 +52,10 @@ def _block(status="ok", method="fiducial", reason=""):
             "tiles": [{"tile": t, "left_um": x, "top_um": y, "source": "registered"} for t, (x, y) in LEFT_TOP.items()]}
 
 
-def _data(tmp_path, *, grids=None, in_dir=True):
+def _data(tmp_path, *, grids=None, in_dir=True, broken=(), tile_size=True):
     (tmp_path / "in").mkdir(exist_ok=True)
-    _tiles_zip(tmp_path / "in" / "A01.zip")
-    acq = {"pixel_size_um": {"x": PX, "y": PX}, "tile_size_px": {"x": SIDE, "y": SIDE}}
+    _tiles_zip(tmp_path / "in" / "A01.zip", broken=broken)
+    acq = {"pixel_size_um": {"x": PX, "y": PX}, "tile_size_px": {"x": SIDE, "y": SIDE} if tile_size else {}}
     return SimpleNamespace(grids=grids or {"A01": {"t_c": _block()}}, acquisition={"t_c": acq, "t_a": acq},
                            in_dir=tmp_path / "in" if in_dir else None, schema=SCHEMA, separator=SEP, phase_token=PHASE)
 
@@ -131,6 +134,37 @@ def test_a_tile_never_read_is_not_drawn_and_is_asked_for(tmp_path):
     store.load(["F1", "F2", "F3"], level=0)
     shown = store.render(*ONE_TO_ONE)
     assert shown.unread == {"F0"} and not shown.covered[0, 0] and _at(shown, 60.0, 60.0) == 0
+
+
+def test_an_unreadable_tile_is_named_skipped_and_never_asked_for_again_and_the_rest_are_read(tmp_path, monkeypatch):
+    """Review finding: one corrupt tile stopped the read of every tile after it, and each repaint asked for it
+    again, for ever."""
+    reads = []
+    real = fmc.TileStore._read
+    monkeypatch.setattr(fmc.TileStore, "_read", lambda self, tile: reads.append(tile.tile) or real(self, tile))
+    store = _store(tmp_path, broken=("F1",))
+    store.load(list(VALUES))
+    assert set(store.failed) == {"F1"} and store.loaded() == 3
+    shown = store.render(*ONE_TO_ONE)
+    assert "F1" not in shown.unread and "F1" not in {t for t, _ in shown.wants}
+    assert _at(shown, 180.0, 180.0) == 255 and _at(shown, 180.0, 60.0) == 0      # F3 drawn; F1's area empty
+    store.load(["F1"], level=0)
+    assert reads.count("F1") == 1
+
+
+def test_a_plate_placed_from_a_scan_pattern_takes_its_tile_size_from_the_image(tmp_path):
+    """Review finding: with no acquisition record the sidecar states no tile size, and the window refused every
+    such plate — the very plates converted without a record."""
+    source, why = fmc.montage_source(_data(tmp_path, tile_size=False), "A01", "t_c")
+    assert source is not None, why
+    assert source.tile_size_um == (SIDE * PX, SIDE * PX)
+
+
+def test_a_read_in_flight_stops_when_the_view_moves_on(tmp_path):
+    store = _store(tmp_path)
+    store.cancelled = True
+    store.load(list(VALUES))
+    assert store.loaded() == 0
 
 
 @pytest.mark.parametrize("change, says", [
@@ -259,3 +293,23 @@ def test_the_view_keeps_square_pixels_through_a_resize_before_and_after_the_user
     window.resize(600, 700)
     qtbot.waitUntil(lambda: canvas.height() > 550)
     assert scales() == pytest.approx(before)                  # the zoom the user chose survives the resize
+
+
+def test_set_anchor_is_offered_only_where_an_anchor_can_change_the_result(montage_page, qtbot):
+    ctx, _in_dir = montage_page
+    window = _open(qtbot, ctx)
+    assert window.anchor_btn.isEnabled()                      # unaddressed
+    window.source = SimpleNamespace(**{**window.source.__dict__, "status": "no_lattice"})
+    window._refresh_status()
+    assert not window.anchor_btn.isEnabled()                  # no lattice: no origin is chosen at all
+
+
+def test_moving_to_another_timepoint_stops_the_old_reads_and_closing_lets_the_tiles_go(montage_page, qtbot):
+    ctx, _in_dir = montage_page
+    window = _open(qtbot, ctx)
+    first = window.store
+    window.tp_cb.setCurrentIndex(window.tp_cb.findData("t_c"))
+    assert first.cancelled and window.store is not first
+    second = window.store
+    window.close()
+    assert second.cancelled and window.store is None and window.canvas.store is None

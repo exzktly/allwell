@@ -90,9 +90,26 @@ def _payload(zipped, paths) -> dict | None:
                                   sep=zipped.acquisition_sep)
 
 
+def _anchors_for_wells(anchors: bytes, paths) -> bytes:
+    """The anchors of the wells in *paths* only, canonically, for the cache key; the bytes as they are when the file
+    cannot be parsed (the remote pipeline will fail those wells on it, and the key must still move with it)."""
+    from util.nanowell_anchors import AnchorsFileError, anchors_payload, parse_anchors
+    from util.well_token import canonical_well_label
+
+    try:
+        parsed = parse_anchors(json.loads(anchors.decode('utf-8')))
+    except (AnchorsFileError, ValueError):
+        return anchors
+    wells = {canonical_well_label(Path(p).stem) for p in paths}
+    kept = {key: a for key, a in parsed.items() if key[0] in wells}
+    return json.dumps(anchors_payload(kept), sort_keys=True).encode('utf-8')
+
+
 def acquisition_cache_key(zipped):
     """The upload cache key: the archives, and the record and anchors uploaded beside them. An anchor set since the
-    last upload changes it, so the new file is sent rather than the cache found complete without it."""
+    last upload on one of the uploaded wells changes it, so the new file is sent rather than the cache found complete
+    without it; an anchor on another well does not, so one click does not re-upload a run that does not include it.
+    The whole file is still what is uploaded, so the remote reads exactly what a local run would."""
     base = fingerprint_archives(zipped.well_zips)
     record = _payload(zipped, zipped.well_zips)
     anchors = getattr(zipped, 'nanowell_anchors', None)
@@ -102,7 +119,7 @@ def acquisition_cache_key(zipped):
     if record is not None:
         digest.update(json.dumps(record, sort_keys=True, separators=(',', ':')).encode('utf-8'))
     if anchors is not None:
-        digest.update(b'\0anchors\0' + anchors)
+        digest.update(b'\0anchors\0' + _anchors_for_wells(anchors, zipped.well_zips))
     return digest.hexdigest()
 
 

@@ -273,7 +273,7 @@ class FullMontageWindow(QWidget):
         if not timepoint:
             return
         self.timepoint = timepoint
-        self._pending.clear()
+        self._release()
         self.source, why = fmc.montage_source(self.data, self.well, timepoint)
         if self.source is None:
             self.store = None
@@ -287,18 +287,35 @@ class FullMontageWindow(QWidget):
         self._refresh_status()
         self._load([t.tile for t in self.source.tiles], level=None, first=True)
 
+    def _release(self) -> None:
+        """Stop the reads of the store shown so far and let its pixels go: another timepoint, or the window closing."""
+        if self.store is not None:
+            self.store.cancelled = True
+        self.store = None
+        self.canvas.store = None
+        self._pending.clear()
+
+    def closeEvent(self, event) -> None:
+        self._release()
+        super().closeEvent(event)
+
     def _refresh_status(self, extra: str = "") -> None:
         if self.source is None:
             return
         anchor, problem = fmc.read_well_anchor(self.data, self.well, self.timepoint)
         self.canvas.anchor = anchor
         text = fmc.status_text(self.source, anchor, problem)
+        failed = self.store.failed if self.store is not None else {}
+        if failed:
+            text += (f"\n{len(failed)} tile(s) could not be read and are not drawn: "
+                     + "; ".join(f"{tile} ({why})" for tile, why in sorted(failed.items())))
         self.status.setText(text + (f"\n{extra}" if extra else ""))
         self._refresh_anchor_controls(anchor)
         self.canvas.update()
 
     def _refresh_anchor_controls(self, anchor=None) -> None:
-        can = self.source is not None and fmc.anchors_file(self.data) is not None
+        can = (self.source is not None and fmc.anchors_file(self.data) is not None
+               and self.source.status in fmc.ANCHORABLE)
         self.anchor_btn.setEnabled(can)
         self.clear_btn.setEnabled(can and anchor is not None)
         self.rerun_btn.setEnabled(bool(fmc.anchored_wells(self.data)))
@@ -331,16 +348,15 @@ class FullMontageWindow(QWidget):
             return names
 
         def done(_loaded) -> None:
-            if not self._alive():
+            if not self._alive() or store is not self.store:       # a timepoint since moved away from
                 return
             self._pending -= keys
             if store is self.store:
-                if first:
-                    self._refresh_status()
+                self._refresh_status()          # names any tile this read found unreadable
                 self.canvas.update()
 
         def failed(message) -> None:
-            if not self._alive():
+            if not self._alive() or store is not self.store:
                 return
             self._pending -= keys
             log.warning("Full montage: tiles of %s could not be read: %s", self.well, message)

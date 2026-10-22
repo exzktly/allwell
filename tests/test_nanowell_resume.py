@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from pipeline import nanowell_measure as nm
 from pipeline import nanowell_run as nr
 from pipeline import nanowell_task as nt
 from tests._nanowell_run_fixture import build_well, threshold_segmenter
@@ -69,8 +70,10 @@ def test_a_checkpoint_is_not_taken_back_under_a_different_roster_or_record(tmp_p
     shared = _run(record, load).radius
     # The key a default well's timepoint is checkpointed under: its radius and roster (tracker X35a), its record.
     base = {"radius_um": shared["radius_um"], "record_digest": nr.record_digest(record, "A01", "0h"),
-            "located": ["ok", "fiducial"], "roster": shared["roster"], "roster_rule": nr.ROSTER_RULE_EVIDENCE}
+            "located": ["ok", "fiducial"], "roster": shared["roster"], "roster_rule": nr.ROSTER_RULE_EVIDENCE,
+            "measure_version": nm.MEASURE_VERSION}
     assert store.load("0h", base) is not None
+    assert store.load("0h", {**base, "measure_version": nm.MEASURE_VERSION - 1}) is None  # measured another way
     assert store.load("0h", {**base, "radius_um": base["radius_um"] + 10.0}) is None      # another radius
     assert store.load("0h", {**base, "roster": base["roster"][1:]}) is None              # another roster
     assert store.load("0h", {k: v for k, v in base.items() if k not in ("roster", "roster_rule")}) is None  # disk rule
@@ -86,4 +89,4 @@ def test_a_checkpoint_without_its_marker_is_ignored(tmp_path, well):
     shared = _run(record, load).radius
     assert store.load("0h", {"radius_um": shared["radius_um"], "record_digest": nr.record_digest(record, "A01", "0h"),
                              "located": ["ok", "fiducial"], "roster": shared["roster"],
-                             "roster_rule": nr.ROSTER_RULE_EVIDENCE}) is None
+                             "roster_rule": nr.ROSTER_RULE_EVIDENCE, "measure_version": nm.MEASURE_VERSION}) is None

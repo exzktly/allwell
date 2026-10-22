@@ -9748,7 +9748,14 @@ image it needs as an argument, so none of it needs Cellpose to be tested.
 
 **The template.** `site_crops` samples a square crop around each site centre
 bilinearly, so crops of sites at different sub-pixel positions line up. `build_template`
-ranks the visible crops by texture and takes the median of the least-textured quarter.
+ranks the visible crops by texture and takes the median of the least-textured quarter. The
+run hands it the crops levelled first (`level_crops`): each crop's floor (the median inside 0.6
+of the site radius) and surround (the median beyond 1.2 radii, the lattice between nanowells,
+`crop_levels`) are mapped onto one shared pair, so neither a tile's gain nor its offset changes
+how textured a crop looks, and the quarter — the timepoint's empty nanowells — is chosen by the
+nanowells and not by the tiles they are on. On raw intensity the dimmest tiles read least
+textured and would hold every empty nanowell. With floor and surround too alike to fix both
+(`MIN_LEVEL_CONTRAST`) a crop is scaled by its surround only.
 The texture that ranks them is the departure of a crop inside its disk from its *own*
 radial mean, which needs no reference, because the obvious reference (the median of all
 crops) is the loaded crop when more than half of the sites hold cells; a second pass
@@ -9779,9 +9786,24 @@ defocus 0.17) it is `suspect`, a note says the counts may be biased, and Array Q
 pass is recomputed whole each time, so a kept block is never flagged twice or against a stale
 earliest. The measurement itself is not changed.
 
+**Bringing a site to the template's levels.** Before a site is divided, its pixels are taken as
+`(value - offset) / gain` (`rim_suppress`'s `levels`, worked out per timepoint by
+`nanowell_run._normalise`). An empty nanowell shows the template's floor and surround through its
+tile's gain and offset — two equations — so each tile's **offset** is the median over its own empty
+nanowells (`tile_offsets`); a tile with none takes the well's median and is named in the grid
+block's `offset_fallback_tiles`, and if that leaves no positive gain on it the tile is corrected for
+gain alone (`scale_only_tiles`). Each **site's gain** comes from its own surround (`site_gain`), the
+lattice around it, which holds no cells however loaded the nanowell is; a site whose surround is
+off the image takes its tile's median gain, and a tile with no readable surround at all is left
+unmeasured (`tiles_without_gain`). The site's own floor is never its reference — in a loaded
+nanowell it is not floor, and normalising to it would subtract the confluence being measured. The
+timepoint's `template` block carries all of this as `normalisation`, with `measure_version`
+(`nanowell_measure.MEASURE_VERSION`) and the one `texture_threshold`, and each substitution is a
+note on the timepoint.
+
 **Rim suppression.** `rim_suppress` divides every site's pixels (out to 1.05 times its
-radius, which takes in the rim) by the template at the same offset from the site centre,
-and sets everything else to exactly 1.0. An empty site comes out within about 0.2 of 1
+radius, which takes in the rim), brought to the template's levels, by the template at the same
+offset from the site centre, and sets everything else to exactly 1.0. An empty site comes out within about 0.2 of 1
 including its rim and a cell stands out as a departure from it. The divisor is floored at
 a tenth of the template's central level. It refuses (`ValueError`) a template whose
 central level is not positive and finite, one covering less than the largest site's
@@ -9792,11 +9814,13 @@ fit lets a radius differ from nominal) and `interior_radius_px = SUPPRESSION_RAD
 nominal radius; `fits_template` splits off the sites a template cannot cover, so one oversize
 site is reported unmeasured instead of failing the tile.
 
-**Confluence without segmentation.** `texture_threshold` is the median plus five robust
+**Confluence without segmentation.** The texture threshold is the median plus five robust
 standard deviations of the smoothed departure from 1 (never under 0.02, so a noise-free flat tile does not call a
 whisper a cell; a site with a non-finite pixel is neither calibration nor measured) over the interiors (0.9 of the
-radius) of the sites known to be empty; `site_confluence` is the share of a site's
-interior above it. It is `None`, not zero, with no empty site to calibrate against or with under half
+radius) of the sites known to be empty — **one per timepoint**, pooled over every tile's empty nanowells
+(`empty_departures`, `threshold_from_departures`; `texture_threshold` is the one-tile form). Taken per tile, a tile
+with no empty nanowell of its own would have no threshold and every nanowell on it no confluence. `site_confluence` is the share of a site's interior above it. A tile with no empty nanowell of its own
+likewise takes the well's fluorescence background (`site_fluorescence(..., background=)`), with a note. It is `None`, not zero, with no empty site to calibrate against or with under half
 the interior on the image (a quadrant is not a site); 0.0 is a measurement. Because "departs from an empty nanowell"
 includes the optical halo of a cell, it reads high: on the synthetic scene it lies
 between the painted coverage and the coverage of a disk 3 px larger in radius, which
@@ -9924,7 +9948,10 @@ records the plate fit read — every well in the output folder, which in a batch
 every earlier batch's, though only this run's wells can be re-run) and an `acquisition` block (pixel and tile
 size per timepoint). A re-run by the re-anchoring logs `Well X — re-anchored.`, not a second `— done.`.
 
-**Incremental, resume, completeness.** The done unit is a timepoint whose grid status is `ok` under the same
+**Incremental, resume, completeness.** A timepoint is reused only when it was measured under the same
+`measure_version` (the grid record's top level, and the `nanowell` block of `pipeline_info.json`); resume
+checkpoints carry it in their key, and Merge Plates refuses two datasets measured under different ones
+(`datasets.core.nanowell_tables.nanowell_block_conflict`). The done unit is a timepoint whose grid status is `ok` under the same
 settings (every `nanowell_*` option is in `util.settings_digest.KEYED_ON`, and is digested only on a run with
 `nanowell_format` set: the options carry parser defaults on every run, and keyed outside the mode they would
 make every plate recorded before they existed read as recorded under other settings) and the same digest of the

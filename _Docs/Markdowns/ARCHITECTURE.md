@@ -286,6 +286,43 @@ visibility rule is re-applied, since a reparent can show a hidden widget. The
 floating rail toggle is hidden in phone layout — `position_rail_toggle` ends by
 showing it on every resize and mode switch, so the check is inside it.
 
+**The Datasets tools fit the phone.** They are laid out for the desk — paired
+fields side by side, option rows, a dashboard of eight counters in one line,
+radio buttons whose labels are sentences — and seven of the nine were wider than
+a 432 px screen. Every `QScrollArea` under `PhoneHandles.fit_roots` (the Datasets
+pane) carries a `_FitOnShow` watcher that, in phone layout, fits it to its
+viewport whenever it is shown or its viewport changes width (a tool page is shown
+by the pane's own rail, which the shell does not hear), and gives it its desk form
+back when phone layout ends. The fitting is `ui/phone_fit.py`, Qt-only and
+pane-free: a widget with a phone form of its own (`setStacked` — `PlateProgress`
+and the dashboards on it, `ControlBand`) takes it; any other horizontal box row
+wider than its room is turned top-to-bottom, outermost first, re-measuring after
+each pass so a pair of fields stacks while each keeps its browse button beside
+it; a button (checkbox, radio or push) whose label still does not fit gets
+line breaks — measured line by line, and broken again from its original text if
+it still does not fit — a `QLabel` that does not wrap (a section heading) is set
+to wrap, and a `QComboBox` sized to its longest entry is let shrink to a few
+characters (`AdjustToMinimumContentsLengthWithIcon`; a `StyleChange` event then
+clears the minimum size hint QComboBox caches). A label or combo is judged
+against the tighter of its centred room and the room to its right less the
+content's right margin. The fonts matter: CI's runner has no Inter and draws in
+DejaVu Sans, which runs wider — it found Zip Loose Folder's heading and Convert
+ND2's position-name combo each holding the page a few pixels wide where this
+container fitted them — so `tests/test_phone_fit.py` holds every tool of the
+real pane to a phone's width at touch size and again at a 1.6 type scale, and
+breaks a synthetic label under the app's stylesheet. Hiding Inter from
+fontconfig (a `FONTCONFIG_FILE` with a `rejectfont` for it) reproduces CI's
+measurements locally. A tool added tomorrow is covered by being in the pane; its pane is module-scoped because force-deleting a shown `DatasetsTab`
+(the fast lane's reaper) crashes inside Shiboken's wrapper release with or
+without any fitting, while the app's own quit exits cleanly.
+
+**Datasets' tool picker.** In Datasets mode the page button (Review's
+"Bar Plots ▾") reads "‹tool› ▾" and lists the tools (`_fill_tool_menu`, from the
+`tool_names` / `current_tool` / `show_tool` handles, which are
+`DatasetsTab.tool_names` / `current_tool_name` / `show_tool`), so a tool is one
+tap away rather than only in ☰; the label follows a tool picked from ☰ through
+the same page watcher.
+
 **The Controls sheet.** A Review page's own controls — its `ControlBand`
 (channel, property, display, threshold, …) — are hidden in phone layout so the
 plot gets the screen, and **⚙ Controls** lends the current page's band to a sheet:
@@ -378,8 +415,16 @@ debounced 250 ms (`install_refit`); the listener goes with the tab.
 
 **Long panels scroll by dragging** (`_grab_scrolling`): over VNC a touch-drag
 arrives as a left-button mouse drag, which a Qt scroll area ignores, so
-`QScroller` grabs the left-button gesture on the side rail, the Controls sheet and
-the read-only logs. **Plot pages scroll by a swipe on the plot** too
+`QScroller` grabs the left-button gesture on the side rail, the Controls sheet, the
+read-only logs, and every `QScrollArea` under `PhoneHandles.swipe_roots` — the form
+pages of Datasets (one per tool) and Analyze (`_grab_page_scrolling`, run on the
+switch and on every `refresh`). Those forms hold plates (Datasets' subset,
+concatenate and OME-import tools, Analyze's background map), so every grabbed
+viewport carries `_DragOwnerGuard`, which refuses Qt's `QScrollPrepareEvent` when
+a drag starts on a plate or a slider: the press then reaches the plate as if no
+gesture were there, where grabbed blindly it neither selected wells nor scrolled
+(`set_drag_scroll` grabs and installs the guard together;
+`tests/test_phone_form_swipe.py`). **Plot pages scroll by a swipe on the plot** too
 (`PhoneShell._swipe_plot_area`, run from `size_canvas` — so on the switch, on Show
 and from the sweep, and a plot built later gets it): the scroll area holding a
 canvas on a page `band_roots` names grabs the gesture, and gives it back at the

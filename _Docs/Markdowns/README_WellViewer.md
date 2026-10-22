@@ -7575,6 +7575,12 @@ The **Properties** button among those controls (the sliders icon) puts the
 controls away and opens the figure's Properties panel across the whole screen.
 Its **✕** closes it and returns you to the plot.
 
+In Datasets the second row holds **‹tool› ▾** — the tool on screen (Convert CZI,
+Merge Plates, Job Queue, …); tap it to pick another, as you would from **☰**.
+Every tool's page fits the phone's width: fields that sit side by side at the
+desk are stacked, and long option labels wrap, so nothing needs a sideways
+scroll.
+
 **The Image Table** opens on its images in phone layout, sized so the columns
 fill the screen; **−** and **+** zoom from there, and past 100 % the table
 scrolls sideways. The table builder and the Generate, Crop, ON threshold, Save and
@@ -7586,7 +7592,9 @@ narrower panel, and **⚙ Controls** opens as a panel on the right. Plots keep a
 readable height and the page scrolls, rather than squashing several plots into
 the screen's height.
 
-Long panels — the sidebar, the controls, the logs — scroll by dragging. The
+Long panels — the sidebar, the controls, the logs, plot pages and the Datasets
+and Analyze forms — scroll by dragging. A drag that starts on a well plate
+still selects wells, and one on a slider still moves it. The
 plot toolbar's pan and zoom are hidden in phone layout; switch back to the
 desktop layout for them. An **ⓘ** shows its explanation when tapped.
 

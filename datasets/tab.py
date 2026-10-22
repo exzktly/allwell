@@ -389,6 +389,18 @@ class DatasetsTab(QWidget):
         self._nav.setCurrentKey(page_name)
         self._pages.setCurrentByName(page_name)
 
+    def tool_names(self) -> list[str]:
+        """Every tool's page name, in the rail's order."""
+        return [feat.name for feat in _FEATURES]
+
+    def current_tool_name(self) -> str:
+        return self._pages.currentName()
+
+    def show_tool(self, name: str) -> None:
+        """Show the tool named *name* — rail and page together."""
+        if name in self.tool_names():
+            self._show_page(name)
+
     def _page_name_for(self, kind: str | None) -> str | None:
         for feat in _FEATURES:
             if feat.kind == kind:

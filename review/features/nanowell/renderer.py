@@ -22,6 +22,7 @@ import numpy as np
 
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
+from util.nanowell_anchors import origin_phrase
 
 #: A dot's diameter, in points.
 DOT_PT = 3.4
@@ -655,7 +656,7 @@ def render_array_qc(fig, montage, boxes, sites, grid_blocks: dict, *, timepoint:
         ax.set_axis_off()
     block = grid_blocks.get(timepoint) or {}
     lines = [f"{timepoint}: {block.get('status', 'no record')}"
-             + (f" — origin from the {str(block.get('origin_method', '')).replace('_', ' ')}"
+             + (f" — origin from {origin_phrase(block.get('origin_method'))}"
                 f" ({block.get('origin_agreement') or 'single source'})" if block.get("origin_method") else ""),
              f"pitch {_num(block.get('pitch_um'), 1)} µm · angle {_num(block.get('angle_deg'), 2)}° · "
              f"overlap {_overlap(block.get('overlap_um'))} · {block.get('n_detected', '?')} detected of "

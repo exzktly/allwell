@@ -28,17 +28,17 @@ well's registered montage to click it on.
 
 | State | Count |
 |---|---|
-| done | 0 |
-| open | 14 |
+| done | 6 |
+| open | 8 |
 
 | # | Item | State | Where | Evidence |
 |---|---|---|---|---|
-| A1 | Anchors file: Qt-free read/write/validate, one anchor per (well, timepoint) | open | `util/nanowell_anchors.py`, remote manifest | |
-| A2 | `locate_timepoint` takes the anchor; `resolve_origin` offers `manual` first; a click far from a site is refused with the distance | open | `pipeline/nanowell_run.py`, `pipeline/nanowell_lattice.py` | |
-| A3 | Grid record states the anchor that was used (`origin_method: manual`, `manual_anchor_um`) | open | `pipeline/nanowell_run.py` | |
-| A4 | A manual anchor is independent evidence for the plate re-anchoring | open | `pipeline/nanowell_task.py::_INDEPENDENT` | |
-| A5 | Reuse is keyed on the anchor: an incremental run and a checkpoint do not keep a timepoint computed under another anchor | open | `pipeline/nanowell_task.py::_prior_state`, `nanowell_run._checkpoint_key` | |
-| A6 | `process_well_zip` reads the anchors beside the record and hands each timepoint its own | open | `pipeline/nanowell_task.py` | |
+| A1 | Anchors file: Qt-free read/write/validate, one anchor per (well, timepoint) | done | `util/nanowell_anchors.py`, remote manifest | `tests/test_nanowell_manual_anchor.py` (set/replace/clear, five unusable files each refused by name) |
+| A2 | `locate_timepoint` takes the anchor; `resolve_origin` offers `manual` first; a click far from a site is refused with the distance | done | `pipeline/nanowell_run.py`, `pipeline/nanowell_lattice.py` | `test_an_anchor_near_a_site_…`, `test_an_anchor_between_sites_…` (both fail with the manual branch removed); `test_nanowell_manual_anchor_run.py::test_the_anchor_is_read_in_the_well_frame_…` (fails without the frame conversion) |
+| A3 | Grid record states the anchor that was used (`origin_method: manual`, `manual_anchor_um`) | done | `pipeline/nanowell_run.py` | `test_one_anchor_at_one_timepoint_addresses_the_well_at_both` reads `origin_method: manual` and `manual_anchor_um` from the grid record |
+| A4 | A manual anchor is independent evidence for the plate re-anchoring | done | `pipeline/nanowell_task.py::_INDEPENDENT` | `test_a_manual_anchor_is_evidence_the_plate_re_anchoring_can_carry` (fails without `manual` in `_INDEPENDENT`); end to end, 24h is carried by `plate_rigid` with every address right |
+| A5 | Reuse is keyed on the anchor: an incremental run and a checkpoint do not keep a timepoint computed under another anchor | done | `pipeline/nanowell_task.py::_prior_state`, `nanowell_run._checkpoint_key` | `test_an_incremental_run_recomputes_…`, `test_a_checkpoint_is_keyed_on_the_anchor_…` (each fails with its line removed) |
+| A6 | `process_well_zip` reads the anchors beside the record and hands each timepoint its own | done | `pipeline/nanowell_task.py` | `test_one_anchor_at_one_timepoint_…` fails with `('unaddressed', None)` when `process_well_zip` drops the anchors; Test detection reads them too (`pipeline/nanowell_preview.py`) |
 | B1 | Remote: the anchors file is uploaded with the input and reaches every batch; the upload cache is keyed on it | open | `services/acquisition_transport.py`, `services/remote_upload.py` | |
 | B2 | Subset / Merge Plates / Concatenate carry the anchors (wells remapped, timepoints shifted), or say they did not | open | `datasets/*/…_compute.py` | |
 | C1 | Qt-free render of a region of a well's registered montage at a chosen resolution, from the raw tiles | open | `review/features/nanowell/` | |

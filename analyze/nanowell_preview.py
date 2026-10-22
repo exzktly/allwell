@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.theme import Colors
+from util.nanowell_anchors import origin_phrase
 
 #: A site's outline colour by what the run would record for it. Fused is drawn dashed over whichever applies.
 STATE_COLOURS = {"empty": Colors.success, "measured": Colors.accent, "occluded": Colors.warn,
@@ -72,7 +73,7 @@ def summary_text(result) -> str:
     lines = [f"{result.well} at {result.timepoint}: {result.tile_count} tile(s), "
              f"pitch {result.pitch_um:.1f} µm, lattice angle {result.angle_deg:.1f}°."]
     if result.status == "ok":
-        lines.append(f"Origin found from the {str(result.origin_method).replace('_', ' ')} "
+        lines.append(f"Origin found from {origin_phrase(result.origin_method)} "
                      f"({result.origin_agreement or 'single source'}).")
     else:
         lines.append(f"Not addressed: {str(result.reason).rstrip('.')}. The sites found are drawn without addresses.")

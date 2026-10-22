@@ -53,6 +53,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Nanowell addressing and geometry are Qt-free; the manifest mirrors
     # these packages even while their only callers are synthetic tests.
     "util/nanowell_address.py",
+    # Anchors a person set by hand for wells whose central square the run could not find, read by the
+    # nanowell task beside the acquisition record.
+    "util/nanowell_anchors.py",
     # One `os.scandir` in place of a `stat` per directory entry. Client-side
     # only — its importers are the Analyze input scan and the remote runner's
     # own staging, both of which run here — but the manifest must list every

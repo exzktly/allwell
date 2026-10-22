@@ -103,6 +103,23 @@ def test_a_form_that_fits_is_left_alone(qtbot):
     assert radio.text() == text
 
 
+def test_a_heading_that_does_not_wrap_is_set_to_wrap(qtbot):
+    """A ``QLabel`` reports its whole text as its minimum width unless it
+    wraps; a heading longer than the page held it wide."""
+    area, *_ = _form(qtbot, 300)
+    heading = QLabel("How are the filenames laid out in this folder of images, "
+                     "and which part of each name says the well?")
+    area.widget().layout().insertWidget(0, heading)
+    QApplication.processEvents()     # a widget added to a shown form shows on the next pass
+    assert heading.isVisible()
+    assert _min_width(heading) > area.viewport().width(), \
+        "the heading must start wider than the page, or this measures nothing"
+    assert phone_fit.fit(area)
+    assert heading.wordWrap()
+    phone_fit.unfit(area)
+    assert not heading.wordWrap()
+
+
 def test_a_widget_with_its_own_phone_form_takes_it(qtbot):
     """A dashboard built on ``PlateProgress`` — the CZI and ND2 converters',
     Concatenate's, Analyze's — knows its phone form (``setStacked``: the stage
@@ -163,10 +180,7 @@ def datasets_pane(qapp, tmp_path_factory):
     qapp.setStyleSheet(before)
 
 
-def test_every_datasets_tool_fits_a_phone(datasets_pane):
-    """The nine tools as phone layout draws them, in a 400 px-wide page. A
-    tool added tomorrow is covered by being in the pane."""
-    tab = datasets_pane
+def _tools_too_wide(tab) -> dict:
     names = tab.tool_names()
     assert len(names) >= 9
     too_wide, fitted = {}, []
@@ -188,4 +202,28 @@ def test_every_datasets_tool_fits_a_phone(datasets_pane):
     finally:
         for area in fitted:
             phone_fit.unfit(area)
+    return too_wide
+
+
+def test_every_datasets_tool_fits_a_phone(datasets_pane):
+    """The nine tools as phone layout draws them, in a 400 px-wide page. A
+    tool added tomorrow is covered by being in the pane."""
+    too_wide = _tools_too_wide(datasets_pane)
     assert not too_wide, f"Datasets tools still wider than a phone: {too_wide}"
+
+
+def test_every_datasets_tool_fits_with_wider_type(qapp, datasets_pane):
+    """CI's runner set Zip Loose Folder one pixel wider than the page
+    (390 px in 389) where this machine fitted it with 18 to spare: its fonts
+    run wider. The same tools at a larger type scale leave no such slack, so
+    a page held wide by text that cannot wrap fails here on any machine."""
+    from ui import theme
+    before = theme.ui_scale()
+    theme.apply_ui_scale(1.6)
+    qapp.setStyleSheet(theme.qss())
+    try:
+        too_wide = _tools_too_wide(datasets_pane)
+    finally:
+        theme.apply_ui_scale(before)
+        qapp.setStyleSheet(theme.qss())
+    assert not too_wide, f"Datasets tools wider than a phone at large type: {too_wide}"

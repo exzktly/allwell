@@ -18,7 +18,14 @@ undone by :func:`unfit`:
 2. **Break a label that still does not fit.** A checkbox, radio button or push
    button reports its whole label as its minimum width; one longer than the room
    is given line breaks ("Choose a folder of .czi files instead…" was the last
-   thing holding the CZI and ND2 pages wide).
+   thing holding the CZI and ND2 pages wide). A ``QLabel`` that does not wrap —
+   a section heading such as "How are the filenames laid out?" — is set to
+   wrap; that heading held Zip Loose Folder one pixel wider than the page on a
+   machine whose font ran a little wider.
+
+   A label is judged against both its centred room (``_room``) and the room to
+   its right, less the content's right margin, since a margin wider on the
+   right than the label's left offset leaves less than the centred estimate.
 
 Qt-only and pane-free: it reads layouts and widths, never a feature.
 """
@@ -28,7 +35,7 @@ from __future__ import annotations
 import textwrap
 
 from PySide6.QtWidgets import (
-    QAbstractButton, QBoxLayout, QScrollArea, QWidget,
+    QAbstractButton, QBoxLayout, QLabel, QScrollArea, QWidget,
 )
 
 #: A widget's original form, for :func:`unfit`: the box layouts stacked, and
@@ -36,6 +43,7 @@ from PySide6.QtWidgets import (
 _P_STACKED = "_awPhoneStacked"
 _P_TEXT = "_awPhoneText"
 _P_OWN_FORM = "_awPhoneOwnForm"
+_P_WRAPPED = "_awPhoneWrapped"
 
 
 def _own_phone_form(content: QWidget, width: int) -> bool:
@@ -93,6 +101,22 @@ def _activate(content: QWidget) -> None:
             lay.activate()
 
 
+def _label_room(w: QWidget, content: QWidget, width: int) -> int:
+    """The tighter of *w*'s centred room and the room to its right."""
+    x = w.mapTo(content, w.rect().topLeft()).x()
+    lay = content.layout()
+    right = lay.contentsMargins().right() if lay is not None else 0
+    return max(0, min(_room(w, content, width), width - max(0, x) - right))
+
+
+def _wrap_label(label: QLabel) -> bool:
+    if label.wordWrap() or not label.text():
+        return False
+    label.setWordWrap(True)
+    label.setProperty(_P_WRAPPED, True)
+    return True
+
+
 def _break_label(button: QAbstractButton, room: int) -> bool:
     text = button.text()
     if not text or "\n" in text:
@@ -135,8 +159,13 @@ def fit(area: QScrollArea, *, max_passes: int = 40) -> bool:
             continue
         broke = False
         for b in content.findChildren(QAbstractButton):
-            if b.isVisibleTo(content) and _min_width(b) > _room(b, content, width):
-                broke |= _break_label(b, _room(b, content, width))
+            room = _label_room(b, content, width)
+            if b.isVisibleTo(content) and _min_width(b) > room:
+                broke |= _break_label(b, room)
+        for label in content.findChildren(QLabel):
+            if (label.isVisibleTo(content)
+                    and _min_width(label) > _label_room(label, content, width)):
+                broke |= _wrap_label(label)
         if not broke:
             break
     _activate(content)
@@ -157,6 +186,9 @@ def unfit(area: QScrollArea) -> None:
             if isinstance(lay, QBoxLayout):
                 lay.setDirection(QBoxLayout.LeftToRight)
             w.setProperty(_P_STACKED, None)
+        if w.property(_P_WRAPPED) and isinstance(w, QLabel):
+            w.setWordWrap(False)
+            w.setProperty(_P_WRAPPED, None)
         text = w.property(_P_TEXT)
         if text is not None and isinstance(w, QAbstractButton):
             w.setText(text)

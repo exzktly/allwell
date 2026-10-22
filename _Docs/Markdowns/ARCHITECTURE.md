@@ -298,10 +298,14 @@ pane-free: a widget with a phone form of its own (`setStacked` — `PlateProgres
 and the dashboards on it, `ControlBand`) takes it; any other horizontal box row
 wider than its room is turned top-to-bottom, outermost first, re-measuring after
 each pass so a pair of fields stacks while each keeps its browse button beside
-it; and a button (checkbox, radio or push) whose label still does not fit gets
-line breaks. `tests/test_phone_fit.py` holds every tool of the real pane to a
-phone's width at touch size, so a tool added tomorrow is covered by being in the
-pane; its pane is module-scoped because force-deleting a shown `DatasetsTab`
+it; a button (checkbox, radio or push) whose label still does not fit gets
+line breaks, and a `QLabel` that does not wrap (a section heading) is set to
+wrap. A label is judged against the tighter of its centred room and the room to
+its right less the content's right margin. `tests/test_phone_fit.py` holds every
+tool of the real pane to a phone's width at touch size, and again at a 1.6 type
+scale — CI's runner, whose fonts run wider, found Zip Loose Folder's heading
+holding the page one pixel wide where this container had 18 to spare — so a tool
+added tomorrow is covered by being in the pane; its pane is module-scoped because force-deleting a shown `DatasetsTab`
 (the fast lane's reaper) crashes inside Shiboken's wrapper release with or
 without any fitting, while the app's own quit exits cleanly.
 

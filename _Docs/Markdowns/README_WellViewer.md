@@ -271,7 +271,10 @@ window with the montage: every nanowell outlined (green empty, blue holding cell
 clipped, grey without an address, dashed purple on a seam), addresses written once you zoom in far enough to
 read them, the origin method, the measured overlap against the one a nanowell needs, and a few
 rim-suppressed nanowells beside their segmentation. Use it before a plate-wide run: if the addresses do not
-land on the right nanowells, the run would not either.
+land on the right nanowells, the run would not either. Finding the nanowells does not need Cellpose; only counting
+the cells in them does. Without it Test detection still draws every nanowell with its address and state, outlines
+the ones it could see in grey as *not counted*, shows no crops, and says at the top of its notes that Cellpose
+could not be loaded. A run needs Cellpose, so install it before starting one.
 
 The same run from the command line:
 

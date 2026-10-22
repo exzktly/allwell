@@ -57,6 +57,8 @@ _RESPONDING_TIP = ("A nanowell counts as responding when its value is above this
                    "a fold change, a count, a confluence, an intensity — and the figure states each group's fraction "
                    "responding at it; empty, no fraction is computed. Kept per metric and channel.")
 _RESPONDING_W = 90
+_MONTAGE_TIP = ("The well's registered montage at full resolution, drawn from the raw tiles, with every nanowell's "
+                "address — and where a well's central square was not found, the place to click it.")
 _CONTROL_TIP = "Compare each group's centre with this group's, computed the same way (× ratio, or a difference on log₂)."
 
 
@@ -170,6 +172,12 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         data_tooltip="Every nanowell, timepoint and metric of this dataset, one row each",
         cells_cb=lambda: export_cell_data_from(
             ctx, cell_scope, unavailable="Select wells with nanowell tables first."))
+    montage_btn = QPushButton("Full montage…")
+    montage_btn.setProperty("variant", "secondary")
+    montage_btn.setToolTip(_MONTAGE_TIP)
+    montage_btn.clicked.connect(lambda _=False: nwc.open_full_montage(ctx))
+    reg.register("_nw_montage_btn", montage_btn)
+    band.add_action(montage_btn)
     band.add_action(export_btn)
     band.add_action(make_properties_button(ctx, band, "nanowell"))
     layout.addWidget(band)
@@ -287,6 +295,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position")
             grp_well.setVisible(view in ONE_WELL_VIEWS)
             grp_slider.setVisible(view in ONE_WELL_VIEWS)
+            montage_btn.setVisible(view == "array_qc")
+            montage_btn.setEnabled(bool(st.data and nwc.page_well(ctx)))
         finally:
             for w, b in zip(controls, blocked):
                 w.blockSignals(b)

@@ -333,6 +333,19 @@ When a well's own evidence cannot say which nanowell is which (no visible centra
 edge), the end of the run addresses it from the plate's other wells, which move together between timepoints,
 and says how many it anchored and how many remain unaddressed.
 
+**Setting the anchor by hand.** When the run cannot find a well's central square, you can point at it. In
+Review, open the Nanowells page, choose *Array QC*, pick the well and timepoint, and press **Full montage…**.
+Zoom to the square, turn on **Set anchor**, and click it. The click is saved in `in/nanowell_anchors.json`
+beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
+Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
+run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
+addressed from it at the end of the run, through the plate's other wells. A timepoint that still cannot be
+addressed says so, and takes a click of its own. A click that is not on a nanowell (more than a quarter of the
+spacing from every one) is not used, and the well's record says how far off it was. On a remote host, a run
+limited to a few wells sees only those wells at its end, so it can carry a click to other timepoints only when
+at least four of the plate's wells are in the run; otherwise click each timepoint. Subset, Merge Plates and
+Concatenate carry the anchors of the wells and timepoints they keep, renamed as they rename them.
+
 `--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile
 record recomputes the timepoint. An incremental nanowell run is refused on a remote host for now — the remote
 would analyse the new timepoints without the earlier ones — so run it on this computer, or run the remote plate
@@ -4860,6 +4873,12 @@ use them.
   nanowells there may hold cells, and that timepoint's counts and confluence may be biased. A tile whose size the acquisition
   record does not give is marked at its corner, and the figure says so. The montage is read in the
   background; the figure says *Reading the montage…* meanwhile.
+  **Full montage…** opens the same well at full resolution in a window of its own, drawn from the raw images
+  where the run placed each tile, with the tile outlines, every nanowell's address, and the anchor set by hand.
+  Drag to pan, scroll to zoom, *Fit* for the whole well, *1:1* for one image pixel per screen pixel; the detail
+  sharpens as the tiles in view are read. Where tiles overlap, the later tile is shown, not a blend. **Set
+  anchor**, **Clear anchor** and **Re-run anchored wells…** are described under *Setting the anchor by hand*
+  above. It needs the dataset's `in/` folder beside its results.
 
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
 brightness and site signal against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to

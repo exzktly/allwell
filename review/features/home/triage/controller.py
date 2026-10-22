@@ -10,7 +10,7 @@ the path that already owns it, so triage adds no second way to do anything:
   one redraw fan-out (``plot_orchestrator.redraw_app``).
 * **Accept** and **Reopen** write ``ctx.state.dataset.triage_decisions``.
 * **Re-run wells** hands the dataset to Analyze through Home's own hand-off
-  (``home.controller.open_in_analyze``), with the chosen wells both forced and
+  (``review.core.analyze_handoff.open_in_analyze``), with the chosen wells both forced and
   the only wells run, so nothing else on the plate is touched. Nothing is run
   from here: Analyze opens configured, and the user presses Run.
 
@@ -114,7 +114,7 @@ def rerun_wells(ctx, rows) -> list[str]:
     wells = tc.rerun_wells(rows)
     if not wells:
         return []
-    from ..controller import open_in_analyze
+    from review.core.analyze_handoff import open_in_analyze
     if not open_in_analyze(ctx, force_wells=wells, only_wells=wells):
         # No Analyze pane in this build, or a folder Analyze cannot open: the
         # caller must not say a rerun is set up when nothing was.

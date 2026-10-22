@@ -28,8 +28,8 @@ well's registered montage to click it on.
 
 | State | Count |
 |---|---|
-| done | 7 |
-| open | 7 |
+| done | 14 |
+| open | 0 |
 
 | # | Item | State | Where | Evidence |
 |---|---|---|---|---|
@@ -40,10 +40,10 @@ well's registered montage to click it on.
 | A5 | Reuse is keyed on the anchor: an incremental run and a checkpoint do not keep a timepoint computed under another anchor | done | `pipeline/nanowell_task.py::_prior_state`, `nanowell_run._checkpoint_key` | `test_an_incremental_run_recomputes_…`, `test_a_checkpoint_is_keyed_on_the_anchor_…` (each fails with its line removed) |
 | A6 | `process_well_zip` reads the anchors beside the record and hands each timepoint its own | done | `pipeline/nanowell_task.py` | `test_one_anchor_at_one_timepoint_…` fails with `('unaddressed', None)` when `process_well_zip` drops the anchors; Test detection reads them too (`pipeline/nanowell_preview.py`) |
 | B1 | Remote: the anchors file is uploaded with the input and reaches every batch; the upload cache is keyed on it | done | `services/acquisition_transport.py`, `services/remote_scratch.py::source_fingerprint` | `test_acquisition_remote_transport.py::test_the_nanowell_anchors_reach_…`: the bytes reach the full upload and a batch, the cache key and the re-attach fingerprint move with an anchor; each of the three fails with its line removed |
-| B2 | Subset / Merge Plates / Concatenate carry the anchors (wells remapped, timepoints shifted), or say they did not | open | `datasets/*/…_compute.py` | |
-| C1 | Qt-free render of a region of a well's registered montage at a chosen resolution, from the raw tiles | open | `review/features/nanowell/` | |
-| C2 | Zoomable, pannable full-resolution montage view with tile outlines and nanowell addresses | open | `review/features/nanowell/` | |
-| C3 | Anchor mode in that view: click sets the well's anchor at this timepoint, marker shown, clear/replace, written to the anchors file | open | `review/features/nanowell/` | |
-| C4 | Array QC opens the view; the page says which timepoints are unaddressed and why, and how to re-run with the anchors | open | `review/features/nanowell/` | |
-| D1 | ARCHITECTURE.md and README describe the anchor and the view | open | `_Docs/Markdowns/` | |
-| D2 | One test drives the real Array QC entry and the real view constructor | open | `tests/` | |
+| B2 | Subset / Merge Plates / Concatenate carry the anchors (wells remapped, timepoints shifted), or say they did not | done | `datasets/*/…_compute.py` | `tests/test_nanowell_anchors_follow_the_dataset_tools.py`: each tool through its real entry point; each of the four call sites (and the in-place preserve) fails its test when removed |
+| C1 | Qt-free render of a region of a well's registered montage at a chosen resolution, from the raw tiles | done | `review/features/nanowell/` | `tests/test_nanowell_full_montage.py`: pixel values from four constant tiles, the overlap drawn by the later tile, a one-pixel mark only full resolution shows, eviction; reversing the draw order, always taking the coarsest level and disabling eviction each fail |
+| C2 | Zoomable, pannable full-resolution montage view with tile outlines and nanowell addresses | done | `review/features/nanowell/` | same file, through the real page (`build_nanowell_tab`): the button opens the window on Array QC's well and timepoint |
+| C3 | Anchor mode in that view: click sets the well's anchor at this timepoint, marker shown, clear/replace, written to the anchors file | done | `review/features/nanowell/` | `test_a_click_with_set_anchor_on_writes_the_anchor_where_it_landed_and_clear_removes_it` (fails with the click unconnected) |
+| C4 | Array QC opens the view; the page says which timepoints are unaddressed and why, and how to re-run with the anchors | done | `review/features/nanowell/` | `test_the_button_opens_…_says_why_it_is_unaddressed`, `test_re_run_opens_analyze_limited_to_the_anchored_wells_each_forced` (Incremental off, so a remote nanowell run is not refused) |
+| D1 | ARCHITECTURE.md and README describe the anchor and the view | done | `_Docs/Markdowns/` | ARCHITECTURE.md (origin resolution, end of run, *Anchors set by hand*, *Full montage*, `core/analyze_handoff.py` row) and README (*Setting the anchor by hand*, Array QC) |
+| D2 | One test drives the real Array QC entry and the real view constructor | done | `tests/` | the three window tests above press the real button, canvas and re-run on the real tab builder |

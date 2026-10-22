@@ -9,7 +9,8 @@ live in ``ui/phone_shell.py``:
   changes — a tool page is shown by the pane's own rail, which phone layout does
   not hear — and given back its desk form when phone layout ends;
 - in Datasets mode the page button lists the tools (``_fill_tool_menu``), which
-  were otherwise reachable only from ☰.
+  were otherwise reachable only from ☰; in Analyze mode it lists the pane's
+  phone views (Settings, Progress).
 """
 
 from __future__ import annotations
@@ -87,6 +88,11 @@ def test_a_page_shown_later_is_fitted_when_it_shows(qtbot, phone):
     assert row.layout().direction() == QBoxLayout.TopToBottom
 
 
+def _bind(shell, *names):
+    for name in names:
+        setattr(shell, name, getattr(PhoneShell, name).__get__(shell))
+
+
 def test_the_page_button_lists_the_tools_in_datasets_mode(qtbot):
     shown = []
     tools = ["Concatenate Datasets", "Convert CZI", "Job Queue"]
@@ -98,11 +104,33 @@ def test_the_page_button_lists_the_tools_in_datasets_mode(qtbot):
         _page_menu=QMenu(host),
         refresh=lambda: None,
     )
-    shell._fill_tool_menu = lambda: PhoneShell._fill_tool_menu(shell)
-    shell._pick_tool = lambda name: PhoneShell._pick_tool(shell, name)
+    _bind(shell, "_fill_tool_menu", "_fill_named_menu", "_pick_tool")
     PhoneShell._fill_page_menu(shell)
     actions = shell._page_menu.actions()
     assert [a.text() for a in actions] == tools
     assert [a.text() for a in actions if a.isChecked()] == ["Convert CZI"]
     actions[2].trigger()
     assert shown == ["Job Queue"]
+
+
+def test_the_page_button_lists_analyze_s_views_in_analyze_mode(qtbot):
+    """Analyze's phone form has two views (``analyze/phone_view.py``); the
+    page button names the one on screen and switches between them."""
+    shown = []
+    host = QWidget()
+    qtbot.addWidget(host)
+    shell = SimpleNamespace(
+        _h=SimpleNamespace(mode=lambda: "analyze",
+                           page_views=lambda: ["Settings", "Progress"],
+                           page_view=lambda: "Settings",
+                           show_page_view=shown.append),
+        _page_menu=QMenu(host),
+        refresh=lambda: None,
+    )
+    _bind(shell, "_fill_named_menu", "_pick_page_view")
+    PhoneShell._fill_page_menu(shell)
+    actions = shell._page_menu.actions()
+    assert [a.text() for a in actions] == ["Settings", "Progress"]
+    assert [a.text() for a in actions if a.isChecked()] == ["Settings"]
+    actions[1].trigger()
+    assert shown == ["Progress"]

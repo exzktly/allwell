@@ -246,8 +246,8 @@ events cannot drive it, because they never arrive while the status bar is hidden
 **The side rail slides out over the page.** A phone held upright has no room for
 a column beside the page, so in phone layout `ui/phone_drawer.py` (`RailDrawer`) lends
 every pane's left panel — Review's rail (dataset, sections, well plate, the page's
-own rail frames, saved selections), the Analyze form, the Datasets tool list — to
-one left-edge `widgets.drawer.Drawer`, and ☰ slides the current mode's panel out
+own rail frames, saved selections) and the Datasets tool list — to one left-edge
+`widgets.drawer.Drawer`, and ☰ slides the current mode's panel out
 *over* the page: the window's width less 56 pt upright (360 pt sideways), with the
 page left showing behind a 50 % scrim. Review's sections become a two-wide grid of
 48 pt tiles (`RailNav.setColumns(2)`), and the top of the rail carries the status
@@ -482,7 +482,31 @@ touch floors take them then. `tests/test_phone_layout.py::test_a_window_launched
 drives that sequence against a desk-built twin. `_save_window_state` saves no geometry or splitter sizes while phone
 layout is on or the screen is phone-shaped.
 
-**The run dashboard** is the Analyze page in phone layout
+**Analyze in phone layout** is the form, not a drawer: `analyze/phone_view.py`
+(`AnalyzePhoneView`, built in `_build_phone_shell`) listens for phone layout itself
+and rearranges the pane's own widgets — nothing is rebuilt. The splitter turns
+vertical with the run side above the form, the form loses its fixed rail width,
+and the run row (Run, Suspend, + Queue, Stop) moves from the foot of the form to
+the bottom of the pane as `QWidget#PhoneRunBar`, in reach in both views. The page
+button lists two views (`PhoneHandles.page_views` / `page_view` /
+`show_page_view`; ☰ is hidden in Analyze): **Settings** shows the form under the
+dashboard reduced to its headline and overall bar (`PlateProgress.setCompact`,
+the log and last-run card hidden, the run side capped at its own height);
+**Progress** hides the form and shows the full dashboard and the log. The Stop
+button turning enabled — the one signal every way of starting a run shares — shows
+Progress. Leaving phone layout puts back the orientation, sizes, form width and
+the run row's place in the form. Because the form is the page, it carries the
+`core.panes.PANEL_IS_PAGE` property while phone layout is on, and
+`tab_controller.apply_sidebar_visibility` leaves a panel with it alone — the rail
+collapse phone layout runs would otherwise hide the whole page — and
+`AllWellApp._build_rail_drawer`'s `_panels()` does not lend it to the drawer.
+`setCompact(False)` invalidates the body's layouts: `setStacked` arrives while the
+strip is compact, and the body shown again at an unchanged size got no resize,
+so the plate's grid kept a quarter of the plate's height.
+`tests/test_analyze_phone_view.py` pins the view on a bare pane;
+`tests/test_phone_layout_app.py` pins the wiring and the plate in the real window.
+
+**The run dashboard** in phone layout is stacked
 (`PlateProgress.setStacked`): the body row turns to a column, the column dividers,
 legend, title, collapse toggle, status word and "Stages" heading go (the headline
 says the state, the stage rows name themselves), the headline is set larger
@@ -685,6 +709,8 @@ allwell/
 │   ├── log_pane.py             ← the output pane — log view, raw-log toggle,
 │   │                              run-outcome surfacing, "Last run ·" card
 │   ├── pinfo.py                ← restore a prior run's pipeline_info into the form
+│   ├── phone_view.py           ← phone layout: the form as the page, the run a strip
+│   │                              above it (Settings / Progress), Run in a bottom bar
 │   ├── preflight.py            ← what the output folder already holds, and offering
 │   │                              the settings that produced it
 │   ├── progress.py             ← run-progress rendering (ETA + progress events → dashboard)

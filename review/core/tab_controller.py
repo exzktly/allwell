@@ -16,7 +16,7 @@ _logger = logging.getLogger("review.runtime_app")
 # Central-pane stack order, shared with runtime_app / allwell so the index↔name
 # mapping lives in one place. Review is always index 0; Analyze and Datasets are
 # mounted after it in this order (see ReviewApp.mount*Pane).
-from core.panes import PANE_MODES, pane_mode  # noqa: F401  (re-exported)
+from core.panes import PANE_MODES, PANEL_IS_PAGE, pane_mode  # noqa: F401  (re-exported)
 
 # The review-image (Segmentation) panel builder is a feature-layer god-method
 # (~30 app-bound method lambdas); bind it as a lazy proxy so this core module
@@ -623,7 +623,9 @@ def apply_sidebar_visibility(ctx) -> None:
     for attr in ("_analyze_pane", "_datasets_pane"):
         pane = getattr(app, attr, None)
         pane_sb = getattr(pane, "_left_sidebar", None)
-        if pane_sb is not None:
+        # A panel its pane has made the page itself (Analyze's form in phone
+        # layout, analyze/phone_view.py) is not a rail to collapse.
+        if pane_sb is not None and not pane_sb.property(PANEL_IS_PAGE):
             pane_sb.setVisible(not collapsed)
     # Phone layout lends the left panels to a slide-out drawer over the page;
     # it has the last word on what shows, and gives them back on the desk.

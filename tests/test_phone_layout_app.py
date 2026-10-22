@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtWidgets import QBoxLayout, QPushButton, QWidget
+from PySide6.QtCore import Qt
 
 pytestmark = pytest.mark.slow
 
@@ -145,22 +146,40 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert band.parentWidget() is not shell._sheet._aw_holder
     assert not _visible(band)                      # hidden in its page again
 
-    # Analyze: the run dashboard first, stacked; ☰ slides the form out.
+    # Analyze: the form is the page, under a compact run strip, with Run at
+    # the foot of the screen; the page button switches to the run's progress
+    # (analyze/phone_view.py). ☰ has no panel to slide out here.
+    from analyze.phone_view import PROGRESS, SETTINGS
     win._mode_seg.setCurrentIndex(1)
     _pump(qapp)
     analyze = win._analyze
-    assert analyze._dashboard.isStacked()
-    assert not drawer.isOpen()
-    split_btn = getattr(review._ctx.runtime.split, "toggle_btn", None)
-    shell.menu_button.click()
+    dash = analyze._dashboard
+    form = analyze._left_sidebar
+    run_bar = analyze._run_btn.parentWidget()
+    assert dash.isStacked() and dash.isCompact()
+    assert not drawer.isOpen() and not _visible(shell.menu_button)
+    assert _visible(shell.page_button) and shell.page_button.text() == f"{SETTINGS} ▾"
+    assert form.parentWidget() is not drawer.contentWidget() and _visible(form)
+    assert form.width() == analyze.width(), "the form is not the page's width"
+    assert not _visible(analyze._log)
+    assert run_bar.objectName() == "PhoneRunBar" and _visible(analyze._run_btn)
+    top = analyze.mapFromGlobal(run_bar.mapToGlobal(run_bar.rect().topLeft())).y()
+    assert top + run_bar.height() == analyze.height(), "Run is not at the foot of the pane"
+    assert dash.height() < form.height(), "the run strip is not a strip"
+    shell._fill_page_menu()
+    assert [a.text() for a in shell._page_menu.actions()] == [SETTINGS, PROGRESS]
+    shell._page_menu.actions()[1].trigger()
     _pump(qapp)
-    assert drawer.isOpen()
-    assert analyze._left_sidebar.parentWidget() is drawer.contentWidget()
-    assert _visible(analyze._left_sidebar) and not _visible(review._sidebar_root)
-    # Picking a mode with the rail out closes it.
+    assert shell.page_button.text() == f"{PROGRESS} ▾"
+    assert not _visible(form) and not dash.isCompact() and _visible(analyze._log)
+    grid = dash._plate.findChild(QWidget)
+    assert grid.height() == grid.heightForWidth(grid.width()), \
+        "the plate kept the height it had while the strip was compact"
+    win._analyze_phone.show_view(SETTINGS)
+    _pump(qapp)
+    split_btn = getattr(review._ctx.runtime.split, "toggle_btn", None)
     win._on_titlebar_mode_seg(0)
     _pump(qapp)
-    assert not drawer.isOpen()
     assert split_btn is None or not _visible(split_btn)
     assert not _visible(review._sidebar_toggle_btn)
 
@@ -195,6 +214,11 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     # Every left panel is back in its own splitter, rail first.
     assert review._h_pane.indexOf(review._sidebar_root) == 0
     assert analyze._left_sidebar.parentWidget() is not drawer.contentWidget()
+    split = analyze._left_sidebar.parentWidget()
+    assert split.orientation() == Qt.Horizontal and split.indexOf(form) == 0
+    assert form.width() == theme.Metrics.rail_w
+    assert run_bar.objectName() != "PhoneRunBar" and form.isAncestorOf(run_bar)
+    assert not dash.isCompact()
     assert not drawer.isVisible()
     assert (review._sidebar_root.minimumWidth(),
             review._sidebar_root.maximumWidth()) == (theme.Metrics.rail_w,) * 2

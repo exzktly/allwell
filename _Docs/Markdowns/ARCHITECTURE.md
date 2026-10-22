@@ -299,13 +299,20 @@ and the dashboards on it, `ControlBand`) takes it; any other horizontal box row
 wider than its room is turned top-to-bottom, outermost first, re-measuring after
 each pass so a pair of fields stacks while each keeps its browse button beside
 it; a button (checkbox, radio or push) whose label still does not fit gets
-line breaks, and a `QLabel` that does not wrap (a section heading) is set to
-wrap. A label is judged against the tighter of its centred room and the room to
-its right less the content's right margin. `tests/test_phone_fit.py` holds every
-tool of the real pane to a phone's width at touch size, and again at a 1.6 type
-scale — CI's runner, whose fonts run wider, found Zip Loose Folder's heading
-holding the page one pixel wide where this container had 18 to spare — so a tool
-added tomorrow is covered by being in the pane; its pane is module-scoped because force-deleting a shown `DatasetsTab`
+line breaks — measured line by line, and broken again from its original text if
+it still does not fit — a `QLabel` that does not wrap (a section heading) is set
+to wrap, and a `QComboBox` sized to its longest entry is let shrink to a few
+characters (`AdjustToMinimumContentsLengthWithIcon`; a `StyleChange` event then
+clears the minimum size hint QComboBox caches). A label or combo is judged
+against the tighter of its centred room and the room to its right less the
+content's right margin. The fonts matter: CI's runner has no Inter and draws in
+DejaVu Sans, which runs wider — it found Zip Loose Folder's heading and Convert
+ND2's position-name combo each holding the page a few pixels wide where this
+container fitted them — so `tests/test_phone_fit.py` holds every tool of the
+real pane to a phone's width at touch size and again at a 1.6 type scale, and
+breaks a synthetic label under the app's stylesheet. Hiding Inter from
+fontconfig (a `FONTCONFIG_FILE` with a `rejectfont` for it) reproduces CI's
+measurements locally. A tool added tomorrow is covered by being in the pane; its pane is module-scoped because force-deleting a shown `DatasetsTab`
 (the fast lane's reaper) crashes inside Shiboken's wrapper release with or
 without any fitting, while the app's own quit exits cleanly.
 

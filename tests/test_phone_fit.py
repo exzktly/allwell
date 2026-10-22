@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtWidgets import (
-    QApplication, QBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton,
+    QApplication, QBoxLayout, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QRadioButton,
     QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -118,6 +119,49 @@ def test_a_heading_that_does_not_wrap_is_set_to_wrap(qtbot):
     assert heading.wordWrap()
     phone_fit.unfit(area)
     assert not heading.wordWrap()
+
+
+@pytest.mark.parametrize("scale,touch", [(1.0, None), (1.6, 1.1)])
+def test_a_broken_label_is_measured_line_by_line_under_the_app_s_type(
+        qtbot, qapp, scale, touch):
+    """Under the app's stylesheet at a large type scale, a label broken by an
+    average character width came out with lines still wider than the page,
+    and was never broken again: CI, whose DejaVu Sans runs wider than Inter,
+    failed the synthetic form here with ``fit`` returning False."""
+    from ui import theme
+    before = qapp.styleSheet()
+    theme.set_touch_unit(touch)
+    theme.apply_ui_scale(scale)
+    qapp.setStyleSheet(theme.qss())
+    try:
+        area, _pair, _one, radio, _buttons = _form(qtbot, 300)
+        assert phone_fit.fit(area), (
+            f"{_min_width(area.widget())} px in {area.viewport().width()} px")
+        fm = radio.fontMetrics()
+        widest = max(fm.horizontalAdvance(line) for line in radio.text().split("\n"))
+        assert widest < area.viewport().width()
+    finally:
+        theme.set_touch_unit(None)
+        theme.apply_ui_scale(1.0)
+        qapp.setStyleSheet(before)
+
+
+def test_a_combo_sized_to_its_longest_entry_is_let_shrink(qtbot):
+    """A combo box reports its longest entry as its minimum width; one held
+    Convert ND2 three pixels wider than the page in DejaVu Sans."""
+    area, *_ = _form(qtbot, 300)
+    combo = QComboBox()
+    combo.addItems(["Short", "The file's own position names, read from its "
+                             "metadata and matched to the plate"])
+    area.widget().layout().insertWidget(0, combo)
+    QApplication.processEvents()
+    assert _min_width(combo) > area.viewport().width(), \
+        "the combo must start wider than the page, or this measures nothing"
+    assert phone_fit.fit(area)
+    assert _min_width(combo) <= area.viewport().width()
+    phone_fit.unfit(area)
+    assert combo.sizeAdjustPolicy() == QComboBox.AdjustToContentsOnFirstShow
+    assert _min_width(combo) > area.viewport().width()
 
 
 def test_a_widget_with_its_own_phone_form_takes_it(qtbot):

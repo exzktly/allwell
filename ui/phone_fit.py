@@ -26,6 +26,12 @@ undone by :func:`unfit`:
    A label is judged against both its centred room (``_room``) and the room to
    its right, less the content's right margin, since a margin wider on the
    right than the label's left offset leaves less than the centred estimate.
+   A broken label's lines are measured, not estimated, and a label broken
+   here is broken again if it still does not fit. A combo box sized to its
+   longest entry is let shrink to a few characters, its entry elided.
+
+The fonts matter: CI's runner has no Inter and draws in DejaVu Sans, which runs
+wider, so the tests run the Datasets tools at a larger type scale too.
 
 Qt-only and pane-free: it reads layouts and widths, never a feature.
 """
@@ -34,8 +40,9 @@ from __future__ import annotations
 
 import textwrap
 
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import (
-    QAbstractButton, QBoxLayout, QLabel, QScrollArea, QWidget,
+    QAbstractButton, QApplication, QBoxLayout, QComboBox, QLabel, QScrollArea, QWidget,
 )
 
 #: A widget's original form, for :func:`unfit`: the box layouts stacked, and
@@ -44,6 +51,7 @@ _P_STACKED = "_awPhoneStacked"
 _P_TEXT = "_awPhoneText"
 _P_OWN_FORM = "_awPhoneOwnForm"
 _P_WRAPPED = "_awPhoneWrapped"
+_P_COMBO = "_awPhoneCombo"
 
 
 def _own_phone_form(content: QWidget, width: int) -> bool:
@@ -117,24 +125,67 @@ def _wrap_label(label: QLabel) -> bool:
     return True
 
 
+def _widest_line(fm, text: str) -> int:
+    return max(fm.horizontalAdvance(line) for line in text.split("\n"))
+
+
+def _wrap_to(fm, text: str, usable: int) -> str:
+    """*text* broken at spaces into the fewest lines whose widest fits
+    *usable* px, measured line by line — an average character width
+    underestimates a line of wide letters, and a font that runs wider than
+    this machine's (CI's DejaVu Sans against Inter) left a broken label
+    still too wide. The narrowest breaking when nothing fits."""
+    wrapped = text
+    for chars in range(len(text), 0, -1):
+        wrapped = textwrap.fill(text, width=chars, break_long_words=False)
+        if _widest_line(fm, wrapped) <= usable:
+            return wrapped
+    return wrapped
+
+
 def _break_label(button: QAbstractButton, room: int) -> bool:
-    text = button.text()
-    if not text or "\n" in text:
+    """Break *button*'s label to fit *room*. A label already broken here is
+    broken again from its original text; one whose own text has a line
+    break is the author's and is left alone."""
+    original = button.property(_P_TEXT)
+    current = button.text()
+    if not current or (original is None and "\n" in current):
         return False
+    text = original if original is not None else current
     fm = button.fontMetrics()
-    chrome = _min_width(button) - fm.horizontalAdvance(text)
+    chrome = _min_width(button) - _widest_line(fm, current)
     usable = room - max(0, chrome)
-    if usable <= 0 or fm.horizontalAdvance(text) <= usable:
+    if usable <= 0 or _widest_line(fm, current) <= usable:
         return False
-    per_char = fm.horizontalAdvance(text) / len(text)
-    wrapped = textwrap.fill(text, width=max(8, int(usable / per_char)),
-                            break_long_words=False)
-    if wrapped == text:
+    wrapped = _wrap_to(fm, text, usable)
+    if wrapped == current:
         return False
-    if button.property(_P_TEXT) is None:
+    if original is None:
         button.setProperty(_P_TEXT, text)
     button.setText(wrapped)
     return True
+
+
+def _narrow_combo(combo: QComboBox) -> bool:
+    """Let a combo box sized to its longest entry be narrower: the closed box
+    shows the current entry elided, and the open list is as wide as it needs.
+    One held Convert ND2 three pixels wider than the page with DejaVu Sans."""
+    if combo.property(_P_COMBO) is not None:
+        return False
+    combo.setProperty(_P_COMBO, (int(combo.sizeAdjustPolicy().value),
+                                 combo.minimumContentsLength()))
+    combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(8)
+    _forget_size_hints(combo)
+    return True
+
+
+def _forget_size_hints(combo: QComboBox) -> None:
+    """QComboBox caches its minimum size hint, and changing the adjust policy
+    clears only the size hint: measured, the minimum stayed 360 px while the
+    size hint fell to 180. A style change clears both."""
+    QApplication.sendEvent(combo, QEvent(QEvent.StyleChange))
+    combo.updateGeometry()
 
 
 def fit(area: QScrollArea, *, max_passes: int = 40) -> bool:
@@ -166,6 +217,10 @@ def fit(area: QScrollArea, *, max_passes: int = 40) -> bool:
             if (label.isVisibleTo(content)
                     and _min_width(label) > _label_room(label, content, width)):
                 broke |= _wrap_label(label)
+        for combo in content.findChildren(QComboBox):
+            if (combo.isVisibleTo(content)
+                    and _min_width(combo) > _label_room(combo, content, width)):
+                broke |= _narrow_combo(combo)
         if not broke:
             break
     _activate(content)
@@ -186,6 +241,12 @@ def unfit(area: QScrollArea) -> None:
             if isinstance(lay, QBoxLayout):
                 lay.setDirection(QBoxLayout.LeftToRight)
             w.setProperty(_P_STACKED, None)
+        combo = w.property(_P_COMBO)
+        if combo is not None and isinstance(w, QComboBox):
+            w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy(combo[0]))
+            w.setMinimumContentsLength(combo[1])
+            w.setProperty(_P_COMBO, None)
+            _forget_size_hints(w)
         if w.property(_P_WRAPPED) and isinstance(w, QLabel):
             w.setWordWrap(False)
             w.setProperty(_P_WRAPPED, None)

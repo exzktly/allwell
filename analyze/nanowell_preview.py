@@ -23,7 +23,7 @@ from ui.theme import Colors
 
 #: A site's outline colour by what the run would record for it. Fused is drawn dashed over whichever applies.
 STATE_COLOURS = {"empty": Colors.success, "measured": Colors.accent, "occluded": Colors.warn,
-                 "clipped": Colors.danger, "unaddressed": Colors.text_muted}
+                 "clipped": Colors.danger, "unaddressed": Colors.text_muted, "uncounted": Colors.text_secondary}
 #: The dashed outline of a fused site (on a seam, measured from a blended crop).
 FUSED_COLOUR = Colors.accent2
 #: Zoom steps offered; addresses are written only where a nanowell is drawn at least this many screen pixels across.
@@ -56,6 +56,8 @@ def site_marks(result) -> list[SiteMark]:
     marks = []
     for site in result.sites:
         colour = site["state"] if site["address"] is not None else "unaddressed"
+        if colour == "measured" and not getattr(result, "counted", True):
+            colour = "uncounted"            # seen, but no cell was counted anywhere: not "holding cells"
         marks.append(SiteMark((site["well_x_um"] - result.origin_um[0]) / scale,
                               (site["well_y_um"] - result.origin_um[1]) / scale,
                               site["radius_um"] / scale, colour, site["address"] or "", bool(site["fused"]),
@@ -246,8 +248,8 @@ class NanowellPreviewWindow(QWidget):
 
     @staticmethod
     def _legend_html() -> str:
-        keys = {"empty": "empty", "measured": "cells", "occluded": "occluded", "clipped": "clipped",
-                "unaddressed": "no address"}
+        keys = {"empty": "empty", "measured": "cells", "uncounted": "not counted", "occluded": "occluded",
+                "clipped": "clipped", "unaddressed": "no address"}
         chips = "  ".join(f'<span style="color:{STATE_COLOURS[k]}">●</span> {v}' for k, v in keys.items())
         return chips + f'  <span style="color:{FUSED_COLOUR}">┄</span> fused (on a seam)'
 

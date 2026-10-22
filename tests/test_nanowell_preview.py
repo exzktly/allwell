@@ -130,3 +130,54 @@ def test_test_detection_says_its_rim_is_one_timepoint_s_not_the_run_s(plate, tmp
     dataset's roster; the preview says so rather than show a set the run may not write."""
     result = _preview(plate, tmp_path)
     assert any("a run decides them over all of the well's timepoints" in n for n in result.notes)
+
+
+def _segmenter_that_cannot_load():
+    """What ``pipeline.cellpose`` raises when the package is not installed: a RuntimeError from the ImportError."""
+    def segment(_tile):
+        try:
+            raise ModuleNotFoundError("No module named 'cellpose'")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("Cellpose segmentation requires the 'cellpose' package") from exc
+    return segment
+
+
+def test_without_cellpose_the_nanowells_are_still_found_and_say_they_were_not_counted(plate, tmp_path):
+    """Reported: Test detection failed because Cellpose was absent. Finding the nanowells needs no segmenter;
+    only counting the cells in them does. So the array, its addresses and every site's state are shown, no site
+    carries a count (None, never 0, so no nanowell reads as empty), and the notes say why."""
+    (tmp_path / "a").mkdir()
+    counted = _preview(plate, tmp_path / "a")
+    result = preview_timepoint(plate[0], WELL, "0h", SETTINGS, grouper=pm.find_image_groups_in_zip,
+                               parse=pm.parse_filename, schema=SCHEMA, sep="_", phase_token="PHASE",
+                               scratch=_scratch(tmp_path), segmenter=_segmenter_that_cannot_load())
+    assert result.status == nr.OK and result.counted is False
+    assert [(s["address"], s["state"] if s["state"] != "empty" else "measured") for s in result.sites] == \
+        [(s["address"], s["state"] if s["state"] != "empty" else "measured") for s in counted.sites]
+    assert all(s["n_cells"] is None for s in result.sites)
+    assert "empty" not in result.counts() and result.counts()["not counted"] > 200
+    assert result.crops == []
+    assert result.notes[0] == (
+        "Cells were not counted: Cellpose could not be loaded (ModuleNotFoundError: No module named 'cellpose'). The "
+        "nanowells, their addresses and states are found without it; a run needs it to count cells, so install it "
+        "(see requirements) before starting one.")
+
+
+def test_the_real_default_segmenter_without_cellpose_installed_is_the_same_case(plate, tmp_path):
+    """The path the app takes: no segmenter handed in, so the preview builds Cellpose's, which cannot load here."""
+    import importlib.util
+
+    if importlib.util.find_spec("cellpose") is not None:
+        pytest.skip("Cellpose is installed in this environment")
+    result = preview_timepoint(plate[0], WELL, "0h", SETTINGS, grouper=pm.find_image_groups_in_zip,
+                               parse=pm.parse_filename, schema=SCHEMA, sep="_", phase_token="PHASE",
+                               scratch=_scratch(tmp_path))
+    assert result.counted is False and len([s for s in result.sites if s["address"]]) > 200
+    assert result.notes[0].startswith("Cells were not counted: Cellpose could not be loaded (")
+
+
+def test_a_counted_preview_keeps_its_fused_sites_measured(plate, tmp_path):
+    """A fused site has no count in an ordinary preview too; it stays "measured", not "not counted"."""
+    result = _preview(plate, tmp_path)
+    assert result.counted is True and "not counted" not in result.counts()
+    assert any(s["fused"] and s["state"] == "measured" and s["n_cells"] is None for s in result.sites)

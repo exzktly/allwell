@@ -10020,7 +10020,14 @@ runs `pipeline.nanowell_preview.preview_timepoint` on a parentless `QThread` hel
 finishes (a window or tab closed mid-run cannot destroy a running thread; `aboutToQuit` waits for it): the same locate-and-measure the run does for
 one (well, timepoint), returning the montage, every site with its address, state and fused flag, the origin
 method, the measured overlap against the needed one, and a few rim-suppressed crops beside their
-segmentation. What is drawn is `site_marks` of the result, a pure function in continuous micrometre/pixel-size coordinates, coloured
+segmentation. When the segmenter cannot be loaded — an `ImportError` anywhere in the measuring exception's chain
+(`_missing_import`), which is how `pipeline.cellpose` reports a missing or broken install — the timepoint is
+measured again with `measure_timepoint(..., count_cells=False)`: every site keeps its state, confluence and
+fluorescence and carries `n_cells` `None` (so a seen site is `measured` with no number, never `empty`), no cell
+rows are made and no crops are cut. `PreviewResult.counted` is then `False`, its first note names the import
+failure, `counts()` reports the seen sites as `not counted` and `site_marks` draws them in the `uncounted` colour
+rather than the "cells" one. A segmenter that loads and then fails is still a measuring failure, which keeps the
+location and drops the sites. What is drawn is `site_marks` of the result, a pure function in continuous micrometre/pixel-size coordinates, coloured
 from `ui.theme.Colors`; the pixmap side is capped and "Fit" follows the window; addresses are written only
 where a nanowell is drawn at least 34 pixels across. The square's edge angle and the two thresholds are
 read by the analysis (`check_orientation`'s `square_to_axis_deg`, `site_state`'s cut-offs), not only

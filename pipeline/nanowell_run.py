@@ -750,7 +750,8 @@ def _normalise(located, images, template, by_tile, geoms, empties, empty_levels,
     departures, backgrounds = [], {c: [] for c in (channels or {})}
     for owner in tiles:
         fit_sites, _ = _local_fit(owner, by_tile[owner], located, geoms, template)
-        mine = [g for g in fit_sites if g.index in empties]
+        # Only sites brought to the template's levels: one divided in raw units is no calibration of anything.
+        mine = [g for g in fit_sites if g.index in empties and g.index in out.levels]
         if not mine:
             continue
         rim = nm.rim_suppress(images[owner], px, template, mine, levels=out.levels)

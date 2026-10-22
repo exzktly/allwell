@@ -213,7 +213,11 @@ for that tile to own it, the angle of the central square's edges to a lattice ro
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
 
 **Array geometry** says how the array is found. *Hexagonal lattice in a circle* (the default) looks for nanowells
-of the plate format's diameter on a hexagonal lattice inside a circular array. *Infer from the image* assumes only
+on a hexagonal lattice inside a circular array. Either way the nanowells' diameter is measured on the images — one
+diameter for the whole well, the median over its timepoints — and the nanowells are found, fitted and measured at
+it; the plate format's diameter is only a check, and a measured diameter more than 25 % off it is written as a note
+on the timepoint with both numbers. The format's diameter is used only when none could be measured, and the note
+says so. *Infer from the image* assumes only
 that nanowells are light and the lattice between them dark: it separates light from dark to find where the
 nanowells are, and reads from their positions whether the lattice is hexagonal or square, its pitch and
 orientation, and the array's outline (a circle, or whatever shape the nanowells fill), then gives every nanowell
@@ -223,10 +227,8 @@ timepoint, and where a bubble hides it at one it is written as occluded there; a
 timepoint counts, but a single bright speck one timepoint alone shows beside the array does not, and that
 timepoint's notes name it. The plate format's pitch and
 diameter are then compared with what was measured: a pitch more than 5 % off is written as a note on the timepoint
-with both numbers (the addresses always use the measured pitch), and a diameter more than 25 % off is written the
-same way and the nanowells are then fitted and measured at the measured diameter — one diameter
-for the whole well (the median over its timepoints, or what an earlier run used). A format whose nanowells would
-fill the measured pitch is a note too, not a refusal. A timepoint whose array lost a whole edge row (a bubble along
+with both numbers (the addresses always use the measured pitch), and the diameter as above. A format whose
+nanowells would fill the measured pitch is a note too, not a refusal. A timepoint whose array lost a whole edge row (a bubble along
 the edge) cannot say which edge, so unless the central square anchors it, it is measured without addresses and the
 grid record says why; one whose lattice is a different kind from the well's other timepoints — or from the timepoints an
 earlier run kept, when it is added incrementally — is refused by name. A
@@ -329,6 +331,9 @@ nanowells it was analysed with when timepoints are added to it; Validate, Merge 
 wells whose sets two versions decided, since they count the rim differently. Test detection shows the rim one
 timepoint supports and says so. A timepoint that could not
 be placed, found or addressed is named in the grid record with the reason, and the other timepoints still run.
+An unaddressed timepoint's reason names every source it tried and why each was refused — for the central square,
+whether no site could be scored, the most square outline read under the floor (with its score), or it led the
+next most square by less than the margin (with both scores) — and the grid record keeps those scores.
 When a well's own evidence cannot say which nanowell is which (no visible central square, no readable array
 edge), the end of the run addresses it from the plate's other wells, which move together between timepoints,
 and says how many it anchored and how many remain unaddressed.

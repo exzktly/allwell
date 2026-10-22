@@ -67,8 +67,10 @@ MIN_LEVEL_CONTRAST = 0.05
 #: incremental run's kept timepoints, a resume checkpoint, Merge Plates — refuses to mix two. Raise it whenever a change
 #: here moves a measured number. 2: each site is brought to the template's levels before it is divided by it (a gain
 #: from its own surround, an offset per tile from its empty nanowells), the template is built from crops normalised by
-#: their own surround, and one texture threshold is taken per timepoint from every tile's empty nanowells.
-MEASURE_VERSION = 2
+#: their own surround, and one texture threshold is taken per timepoint from every tile's empty nanowells. 3: every
+#: site is fitted, owned and measured at the plate's own nanowell diameter, measured on the image, rather than the
+#: format's whenever the two were within 25 % (``nanowell_run._measured_diameter``; nanowell tracker F2-F4).
+MEASURE_VERSION = 3
 #: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
 MIN_TEXTURE_THRESHOLD = 0.02
 #: A timepoint's template whose floor-to-surround ratio (:func:`floor_ratio`) has moved by more than a factor of two

@@ -11,7 +11,20 @@ import numpy as np
 
 from pipeline import nanowell_detect as nd
 from pipeline import nanowell_run as nr
-from tests._nanowell_run_fixture import PITCH, build_well
+from tests._nanowell_run_fixture import PITCH, PX, build_well, record_for, threshold_segmenter
+from tests._nanowell_synth import TilePlan, render_tiles
+
+#: The first real plate's measured geometry (well D07): finer than the 100 um format's nominal 172 um pitch, and
+#: wells a quarter wider than its 100 um, so the walls between them are 27 um where the format's are 72.
+PLATE_PITCH, PLATE_DIAMETER = 152.6, 125.8
+
+
+def _plate(*, timepoint="T0", blur=1.0, seed=1, rotation=7.0, shift=(0.0, 0.0), square=True):
+    plan = TilePlan(2, 2, (700, 700), 0.1, PX)
+    rendered = render_tiles(plan, pitch_um=PLATE_PITCH, diameter_um=PLATE_DIAMETER, radius_um=700.0,
+                            rotation_deg=rotation, noise_sigma=0.05, blur_px=blur, seed=seed, array_shift_um=shift,
+                            square_centre=square)
+    return rendered, record_for(rendered, timepoint=timepoint)
 
 SETTINGS = nr.NanowellSettings("100um")
 
@@ -62,3 +75,68 @@ def test_the_block_is_written_to_the_grid_record_as_plain_numbers():
     located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
     again = json.loads(json.dumps(located.grid["fiducial"]))
     assert again == located.grid["fiducial"]
+
+
+# ── F2-F4: the plate's diameter is measured, never assumed ───────────────────
+def test_the_plate_s_own_diameter_is_measured_and_every_site_is_measured_at_it():
+    rendered, record = _plate()
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert located.status == nr.OK
+    geometry = located.grid["geometry"]
+    # Within 1 %: the montage's contrast blobs read these wells 9 % small, the format says 100.
+    assert abs(located.diameter_um / PLATE_DIAMETER - 1) < 0.01
+    assert geometry["diameter_used_um"] == located.diameter_um == geometry["diameter_check"]["measured_um"]
+    assert geometry["diameter_check"]["agrees"] is False
+    assert located.notes == [geometry["diameter_check"]["note"]]
+    assert located.notes[0].startswith(f"The measured nanowell diameter ({located.diameter_um:.1f} um) disagrees with "
+                                       "the 100 um the settings give")
+    measured = nr.measure_timepoint(located, rendered.images, SETTINGS, 700.0, count_cells=False)
+    # The real plate's run left 1,206 of 1,253 sites unmeasured: the template was sized from 100 um.
+    assert not [n for n in measured.notes if "exceed the template" in n]
+    fitted = [r["radius_um"] for r in measured.sites if r["geometry"] == nd.FITTED]
+    assert len(fitted) > 50 and abs(2 * float(np.median(fitted)) / PLATE_DIAMETER - 1) < 0.01
+
+
+def test_a_plate_that_matches_its_format_is_measured_too_and_says_nothing():
+    rendered, record = build_well()
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    check = located.grid["geometry"]["diameter_check"]
+    assert check["agrees"] is True and check["note"] == "" and located.notes == []
+    # Measured, not the setting's 100 with a measurement beside it.
+    assert located.diameter_um == check["measured_um"] != SETTINGS.diameter_um
+    assert abs(located.diameter_um / 100.0 - 1) < 0.01
+
+
+def test_a_diameter_that_cannot_be_measured_falls_back_to_the_format_and_says_so(monkeypatch):
+    rendered, record = _plate()
+    monkeypatch.setattr(nr, "MIN_DIAMETER_FITS", 10_000)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert located.diameter_um == SETTINGS.diameter_um
+    assert located.grid["geometry"]["diameter_check"]["measured_um"] is None
+    assert any(n.startswith("The nanowell diameter could not be measured (") and
+               n.endswith("10000 needed): the plate format's 100 um is used") for n in located.notes)
+
+
+def test_one_diameter_serves_every_timepoint_of_a_well():
+    first, record = _plate()
+    # The same plate put back a little shifted and imaged softer: its own fit reads the wells a little smaller.
+    second, second_record = _plate(timepoint="T1", blur=2.5, seed=2, rotation=8.0, shift=(60.0, -40.0))
+    record["timepoints"].update(second_record["timepoints"])
+    record["tiles"] += second_record["tiles"]
+    images = {("T0", t): v for t, v in first.images.items()} | {("T1", t): v for t, v in second.images.items()}
+    outcome = nr.run_well("A01", record, ["T0", "T1"], lambda tp, tile: images.get((tp, tile)), SETTINGS,
+                          segmenter=threshold_segmenter())
+    own = [outcome.timepoints[tp]["geometry"]["diameter_check"]["measured_um"] for tp in ("T0", "T1")]
+    assert own[0] != own[1]
+    used = {outcome.timepoints[tp]["geometry"]["diameter_used_um"] for tp in ("T0", "T1")}
+    assert used == {float(np.median(own))} == {outcome.radius["diameter_used_um"]}
+    assert not [n for tp in ("T0", "T1") for n in outcome.timepoints[tp].get("notes", []) if "exceed the template" in n]
+
+
+# ── F5: the square on a plate with thin walls ────────────────────────────────
+def test_the_square_anchors_a_plate_whose_walls_are_thin():
+    rendered, record = _plate()
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert located.origin_method == "fiducial", located.grid["fiducial"]
+    block = located.grid["fiducial"]
+    assert np.hypot(*(np.asarray(block["position_um"]) - rendered.array.origin)) < PLATE_PITCH / 10

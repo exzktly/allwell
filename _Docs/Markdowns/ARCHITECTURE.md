@@ -9532,7 +9532,7 @@ strongest peak on its own reciprocal lattice (an integer combination of its vect
 a lower family that does not explain the strongest peak is not used, because one chosen
 only for being lowest put the pitch 3.6 % off on a small array. Fewer lattice periods
 across the image give a wider peak: 0.6 % at 13 periods. `detect_sites` then runs a matched filter (a light disk at the
-plate format's radius inside a dark annulus; the template sums to zero, so an
+plate's measured radius inside a dark annulus; the template sums to zero, so an
 additive illumination offset or ramp changes no candidate; a multiplicative ramp does,
 since it scales the response), takes local maxima a half-pitch apart that clear half the
 typical site's response, refines the lattice with `fit_lattice` on them and fits the
@@ -9610,14 +9610,15 @@ period) and roster with a reference, and names the first violated check as the s
 `shared_array_radius` takes the median of the timepoints whose boundary fitted as one
 radius per well, records each timepoint's deviation, and flags a timepoint more than half a
 pitch away `radius_disagrees` and one with no boundary `no_boundary`. `check_format` refuses
-a plate-format setting two ways: a nanowell nearly as wide as the measured pitch cannot be
+a nanowell diameter two ways: a nanowell nearly as wide as the measured pitch cannot be
 right, which is decidable from the Fourier estimate alone before any filter is chosen, and
 fitted nanowells more than 25 % off the setting's diameter are a mismatch. Passing the pitch
 test alone proves little (a setting too small for the array passes it), so with no fitted
 nanowell the answer is `unverified` (`ok` is `None`), never `ok`; an unreadable pitch is
 unverified too. A 100 um array read with the 50 um setting fits no site and is unverified:
 only the 50 um array with the 100 um setting is reported as a mismatch. The run asks it twice: while locating
-with the pitch alone (a mismatch refuses the timepoint), and in `measure_timepoint` with the sites fitted at full
+with the pitch alone (a mismatch refuses the timepoint only when no diameter could be measured and the format's
+was used; a measured diameter is the plate, and the format's disagreement is a note), and in `measure_timepoint` with the sites fitted at full
 resolution, where a mismatch — or, at a pixel size that could fit, no fitted site at all — is written as a note
 on the timepoint rather than a refusal, until real plates have calibrated it.
 
@@ -9641,8 +9642,28 @@ not established. The user reports the square's edges parallel to the plate's, wh
 a lattice row (modulo the square's 90°) for either regular placement of a hex lattice on the
 plate. Nothing has run on real phase-contrast images (tracker N10, blocked on Q7).
 
-**The array's geometry from its contrast (`pipeline/nanowell_infer.py`).** The matched filter above assumes the
-plate format's diameter, a hexagonal lattice and a circular array. `--nanowell_geometry infer` assumes only the
+**The plate's nanowell diameter is measured, never assumed.** Before anything is sized from a diameter,
+`locate_timepoint` measures it (`_measured_diameter`): `find_wells_by_contrast` reads the light blobs of the
+montage for a rough diameter and their positions, and `_fitted_diameter` fits the edges of the sites wholly inside
+the tile that holds the most of them at full resolution (`refine_sites`, seeded at the rough diameter and keeping
+radii within 30 % of it), taking the median of at least `MIN_DIAMETER_FITS`. The montage is block-averaged, so its
+blobs alone read 125.8 µm wells as 111–117 µm on rendered plates; the fit reads them within a few tenths of a
+micrometre, in a tenth of a second. That diameter sizes the matched filter, the central square's scoring ring, the
+site fits, ownership's margin and the empty-nanowell template; `_settle_diameter` then takes one diameter for the
+whole well, the median over its timepoints (or what an earlier run kept), whatever the geometry. The plate
+format's diameter is a check: a measured diameter more than `DIAMETER_AGREEMENT` (25 %) off it is a note naming
+both, and the format's value is used only when nothing could be measured, which is said. Registration's per-tile
+lattice fits still use the format's diameter, since they run before any tile is placed; a matched filter tolerates
+that, and only the lattice they fit is used. The first real plate measured 125.8 µm wells against the 100 µm
+format, which left 1,206 of its 1,253 sites unmeasured as larger than a template sized from 100 µm.
+
+On such a plate the walls are thin (a 152.6 µm pitch leaves 27 µm), so `square_score`'s ring, 0.6 to 1.5 radii
+to reach the square's corners at 1.41, read the neighbouring wells' round edges from 1.43 radii and a rendered
+square fell under the squareness floor. Given the pitch, the ring stops where the neighbours begin (a pitch less a
+radius, less two pixels), never inside 1.2 radii; `score_fiducial` passes it on.
+
+**The array's geometry from its contrast (`pipeline/nanowell_infer.py`).** The matched filter above assumes a
+hexagonal lattice and a circular array. `--nanowell_geometry infer` assumes only the
 plate's polarity: nanowells are light and the lattice between them dark, and a bubble over a nanowell makes it
 dark too, so it is not found rather than mistaken for one. `find_wells_by_contrast` splits light from dark twice,
 in float32 and with each component's sums taken over its own pixels only (index grids over a 4096-pixel montage
@@ -9683,8 +9704,9 @@ the lattice kind come from the centre tiles' fits (`_contrast_lattice`, the most
 registration fit is made as that kind, because a sparse edge tile left to choose can choose the other. The
 measured pitch and the wells' diameter are compared with the settings' (`compare_given`: 5 % for the pitch, 25 %
 for the diameter, which a threshold reads less precisely), and a disagreement is a note on the timepoint naming
-both numbers and what the run does instead. Addresses always use the measured pitch. The diameter is the
-setting's while it agrees, and otherwise the measured one: the timepoint's `diameter_used_um`, which
+both numbers and what the run does instead. Addresses always use the measured pitch. The diameter is the measured
+one, fitted at full resolution as for the hexagonal geometry (the blobs' own when no fit succeeds): the
+timepoint's `diameter_used_um`, which
 `measure_timepoint` applies as `NanowellSettings.diameter_override_um` (outside the reuse key, which already holds
 the setting) to fitting, ownership, the margin's default and the template. The format check that refuses a
 nanowell as wide as the pitch is, for an inferred geometry, a note: the plate was measured, and the format is a
@@ -9723,9 +9745,9 @@ consistency check compares each timepoint's own set with that of the timepoint n
 timepoint is a `roster_mismatch`. The grid record keeps the roster as `array_radius.roster` (with `radius_um:
 null`, `shape` the outline or `mixed`, and `diameter_used_um`), which an incremental or re-anchoring run keeps as
 `run_well(fixed_roster=…)`; an empty one (an earlier run that anchored nothing) is not kept. The diameter the
-sites are measured at is chosen once for the well (`_settle_diameter`): the kept run's, else the setting's unless
-the median of the timepoints' measured diameters is more than 25 % off it, then that median — chosen per timepoint
-it flipped between 125 and 100 µm within one well. A polygon array has no bubble mask: the mask is the lattice
+sites are measured at is chosen once for the well (`_settle_diameter`): the kept run's, else the median of the
+timepoints' measured diameters — chosen per timepoint it flipped between 125 and 100 µm within one well, and a
+rule that kept the setting's while within 25 % flipped the same way on a plate 25.8 % off it. A polygon array has no bubble mask: the mask is the lattice
 signal's absence inside a circle, visibility already reads a hidden nanowell as occluded from its brightness, and
 no rendered case shows the mask changing a polygon's states. On a square lattice `nw_ring` is `max(|q|, |r|)`
 (`lattice_ring`), the rings `util/nanowell_address.py` labels, and `lattice_kind` in each timepoint's grid record

@@ -317,7 +317,8 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
     # The central square and the origin, as a run resolves them: the square when it clears its margin, else
     # the array's centre (a circle's, or the middle site of a whole polygon).
     candidate, scores = score_fiducial(image, um_per_px, diameter, wells.points_um, centre_um=centre_um,
-                                       search_radius_um=2.2 * pitch if centre_um is not None else None)
+                                       search_radius_um=2.2 * pitch if centre_um is not None else None,
+                                       pitch_um=pitch)
     square = max(scores, key=lambda s: s.coherence) if candidate is not None and scores else None
     if square is not None:
         out.square_px = tuple(to_px(square.position_um))

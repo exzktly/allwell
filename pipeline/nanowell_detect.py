@@ -338,7 +338,8 @@ class SquareScore:
     straightness: float = 0.0           # the two-fold sum: high where one edge direction dominates
 
 
-def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, position_um) -> SquareScore | None:
+def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, position_um, *,
+                 pitch_um: float | None = None) -> SquareScore | None:
     """The four-fold gradient coherence of the outline around *position_um*.
 
     Every outline pixel's gradient direction ``a`` contributes ``exp(4ia)`` weighted by its
@@ -346,6 +347,11 @@ def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, posit
     concentrates them on two directions 90 degrees apart and adds. The argument of the sum is
     four times the edge direction, so the same number gives the orientation. ``None`` when
     the patch is off the image or has no gradient at all.
+
+    The outline is read from 0.6 to 1.5 radii, which reaches the square's corners (1.41 radii). Given *pitch_um* the
+    ring stops where the neighbouring nanowells' edges begin (a pitch less a radius), less two pixels of blur: on a
+    plate with thin walls (152.6 um pitch, 125.8 um wells: neighbours from 1.43 radii) the fixed ring read the
+    neighbours' round edges and a rendered square fell under the floor (tracker F5).
     """
     from scipy import ndimage
 
@@ -361,7 +367,10 @@ def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, posit
     gy, gx = np.gradient(patch)
     yy, xx = np.mgrid[0:2 * half + 1, 0:2 * half + 1]
     rho = np.hypot(xx + x0 - cx, yy + y0 - cy)
-    weight = np.hypot(gx, gy) * ((rho >= 0.6 * r) & (rho <= 1.5 * r))
+    outer = 1.5 * r
+    if pitch_um is not None and math.isfinite(pitch_um) and pitch_um > 0:
+        outer = min(outer, max(pitch_um / pixel_size_um - r - 2.0, 1.2 * r))
+    weight = np.hypot(gx, gy) * ((rho >= 0.6 * r) & (rho <= outer))
     total = float(weight.sum())
     if total <= 0:
         return None
@@ -384,7 +393,7 @@ MIN_SQUARENESS = 0.4
 
 
 def score_fiducial(image, pixel_size_um: float, nanowell_diameter_um: float, points_um, *,
-                   centre_um=None, search_radius_um: float | None = None,
+                   centre_um=None, search_radius_um: float | None = None, pitch_um: float | None = None,
                    min_squareness: float = MIN_SQUARENESS
                    ) -> tuple[FiducialCandidate | None, list[SquareScore]]:
     """Square-versus-circle score of every candidate near the array centre, and the best one.
@@ -398,7 +407,7 @@ def score_fiducial(image, pixel_size_um: float, nanowell_diameter_um: float, poi
     if centre_um is not None and search_radius_um is not None:
         points = points[np.hypot(points[:, 0] - centre_um[0], points[:, 1] - centre_um[1]) <= search_radius_um]
     scores = [s for p in points
-              if (s := square_score(image, pixel_size_um, nanowell_diameter_um, p)) is not None]
+              if (s := square_score(image, pixel_size_um, nanowell_diameter_um, p, pitch_um=pitch_um)) is not None]
     if len(scores) < 2:
         return None, scores
     ranked = sorted(scores, key=lambda s: s.coherence, reverse=True)

@@ -13,7 +13,8 @@ tile covers an earlier one where they overlap, so every pixel shown is a pixel o
 
 **Memory.** A well can be a hundred tiles of 2,048 px; held whole, that is about 800 MB. So each tile is kept as a
 pyramid of 2× means: the levels at a quarter of the resolution and coarser are kept for every tile once it is read
-(about 1/12 of the tile), and the two finest only for the tiles last drawn at that detail (:data:`FINE_TILES_KEPT`).
+(about 1/12 of the tile), and the two finest only within a byte budget (:data:`FINE_BYTES_KEPT`), each level of
+each tile separately, never evicting a tile the current view draws.
 A view that needs finer levels than are held is drawn from the coarser ones and says which tiles it wants, and the
 window reads them on a worker and draws again (:class:`Rendered.wants`).
 
@@ -40,8 +41,9 @@ from review.features.nanowell.image_compute import _member_for
 
 #: Levels this coarse and coarser (1/4 resolution, 1/8, …) are kept for every tile once it is read.
 KEEP_FROM_LEVEL = 2
-#: How many tiles keep their two finest levels (full and half resolution).
-FINE_TILES_KEPT = 12
+#: The bytes the two finest levels (full and half resolution) may hold across tiles, beyond those the last view
+#: drew. About 30 full-resolution 2,048-px 16-bit tiles.
+FINE_BYTES_KEPT = 256 * 1024 * 1024
 #: A pyramid stops when its level's longer side would be under this many pixels.
 MIN_LEVEL_SIDE = 32
 #: The stretch, as ``tile_register.build_montage`` applies it.
@@ -120,10 +122,11 @@ def montage_source(data, well: str, timepoint: str) -> tuple[MontageSource | Non
 
 
 def pyramid(image: np.ndarray) -> list[np.ndarray]:
-    """``[full, 1/2, 1/4, …]`` as float32, each level the 2×2 mean of the one above (an odd edge row is dropped)."""
-    levels = [np.asarray(image, dtype=np.float32)]
+    """``[full, 1/2, 1/4, …]``: the image as it was read (its own dtype, the cheapest to hold), then float32 levels,
+    each the 2×2 mean of the one above (an odd edge row is dropped)."""
+    levels = [np.asarray(image)]
     while max(levels[-1].shape[:2]) // 2 >= MIN_LEVEL_SIDE:
-        a = levels[-1]
+        a = levels[-1].astype(np.float32, copy=False)
         h, w = a.shape[0] // 2 * 2, a.shape[1] // 2 * 2
         levels.append(a[:h, :w].reshape(h // 2, 2, w // 2, 2).mean(axis=(1, 3)))
     return levels
@@ -133,21 +136,23 @@ def pyramid(image: np.ndarray) -> list[np.ndarray]:
 class Rendered:
     image: np.ndarray                 # uint8, rows × columns
     covered: np.ndarray               # bool: a tile was drawn at this pixel
-    wants: set = field(default_factory=set)       # tiles whose finer levels the view needs and does not hold
+    wants: set = field(default_factory=set)       # (tile, level): finer levels the view needs and does not hold
     unread: set = field(default_factory=set)      # tiles in view never read at all
 
 
 class TileStore:
     """The tiles of one :class:`MontageSource`, read on demand and kept as pyramids (see the module docstring).
 
-    :meth:`load` is called on a worker; :meth:`render` on the GUI thread. A lock guards the two maps, and
-    :meth:`load` builds a pyramid before taking it, so the GUI never waits on a decode.
+    :meth:`load` is called on a worker; :meth:`render` on the GUI thread. A lock guards the maps, and :meth:`load`
+    builds a pyramid before taking it, so the GUI never waits on a decode.
     """
 
     def __init__(self, source: MontageSource):
         self.source = source
         self._coarse: dict[str, dict[int, np.ndarray]] = {}
-        self._fine: OrderedDict[str, dict[int, np.ndarray]] = OrderedDict()
+        self._fine: OrderedDict[tuple[str, int], np.ndarray] = OrderedDict()     # (tile, level) -> pixels
+        self._fine_bytes = 0
+        self._in_view: set[str] = set()
         self._stretch: tuple[float, float] | None = None
         self._lock = threading.Lock()
 
@@ -157,24 +162,34 @@ class TileStore:
         with zipfile.ZipFile(self.source.archive) as zf:
             return np.asarray(tifffile.imread(io.BytesIO(zf.read(tile.member))))
 
-    def load(self, names, *, fine: bool) -> None:
-        """Read *names* (tile ids). With *fine*, keep their two finest levels too. Raises what reading raises."""
+    def load(self, names, *, level: int | None = None) -> None:
+        """Read *names* (tile ids): their coarse levels and, with *level* finer than those, that level too.
+        Raises what reading raises."""
         by_name = {t.tile: t for t in self.source.tiles}
+        fine = level is not None and level < KEEP_FROM_LEVEL
         for name in names:
             with self._lock:
-                held = name in self._coarse and (not fine or name in self._fine)
+                held = name in self._coarse and (not fine or (name, level) in self._fine)
             if held:
                 continue
             levels = pyramid(self._read(by_name[name]))
             with self._lock:
                 self._coarse[name] = {k: a for k, a in enumerate(levels) if k >= KEEP_FROM_LEVEL or k == len(levels) - 1}
-                if fine:
-                    self._fine[name] = {k: a for k, a in enumerate(levels) if k < KEEP_FROM_LEVEL}
-                    self._fine.move_to_end(name)
-                    while len(self._fine) > FINE_TILES_KEPT:
-                        self._fine.popitem(last=False)
+                if fine and level < len(levels) and (name, level) not in self._fine:
+                    self._fine[(name, level)] = levels[level]
+                    self._fine_bytes += levels[level].nbytes
+                self._evict()
                 if len(self._coarse) == len(by_name):
                     self._stretch = self._well_stretch()
+
+    def _evict(self) -> None:
+        """Let the least recently drawn fine levels go while over :data:`FINE_BYTES_KEPT`, never one of a tile the
+        last view drew: evicting what the view needs would have it ask for the level again, and the two would
+        trade tiles for ever. One view's needs are bounded by the screen, so this stays bounded too."""
+        for key in [k for k in self._fine if k[0] not in self._in_view]:
+            if self._fine_bytes <= FINE_BYTES_KEPT:
+                break
+            self._fine_bytes -= self._fine.pop(key).nbytes
 
     def loaded(self) -> int:
         with self._lock:
@@ -188,9 +203,10 @@ class TileStore:
     def _best(self, name: str, wanted: int) -> tuple[int, np.ndarray] | None:
         """The finest held level not finer than *wanted*, else the finest held at all."""
         levels = dict(self._coarse.get(name) or {})
-        if name in self._fine:
-            levels.update(self._fine[name])
-            self._fine.move_to_end(name)
+        for level in range(KEEP_FROM_LEVEL):
+            if (name, level) in self._fine:
+                levels[level] = self._fine[(name, level)]
+                self._fine.move_to_end((name, level))
         if not levels:
             return None
         usable = [k for k in levels if k >= wanted]
@@ -215,6 +231,7 @@ class TileStore:
         xs = left + (np.arange(width) + 0.5) * um_x
         ys = top + (np.arange(height) + 0.5) * um_y
         tw, th = self.source.tile_size_um
+        in_view = set()
         with self._lock:
             stretch = self._stretch
             for tile in self.source.tiles:
@@ -222,18 +239,20 @@ class TileStore:
                 rows = np.nonzero((ys >= tile.top_um) & (ys < tile.top_um + th))[0]
                 if not len(cols) or not len(rows):
                     continue
+                in_view.add(tile.tile)
                 best = self._best(tile.tile, wanted)
                 if best is None:
                     out.unread.add(tile.tile)
                     continue
                 level, image = best
-                if level > wanted:
-                    out.wants.add(tile.tile)
+                if level > wanted and wanted < KEEP_FROM_LEVEL:
+                    out.wants.add((tile.tile, wanted))
                 scale = px * 2 ** level
                 sx = np.clip(((xs[cols] - tile.left_um) / scale).astype(int), 0, image.shape[1] - 1)
                 sy = np.clip(((ys[rows] - tile.top_um) / scale).astype(int), 0, image.shape[0] - 1)
                 canvas[np.ix_(rows, cols)] = image[np.ix_(sy, sx)]
                 covered[np.ix_(rows, cols)] = True
+            self._in_view = in_view
         if stretch is None and covered.any():
             stretch = (float(np.percentile(canvas[covered], STRETCH_PERCENTILES[0])),
                        float(np.percentile(canvas[covered], STRETCH_PERCENTILES[1])))

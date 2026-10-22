@@ -10300,8 +10300,8 @@ timepoint the page shows. It draws the registered montage at any resolution from
 finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the record's order with a later tile
 covering an earlier one in the overlap — no blending, so every pixel is a pixel of one real image — under one
 well-wide stretch (1st–99.5th percentile, as `build_montage` stretches). Each tile is held as a pyramid of 2×
-means: the levels at a quarter resolution and coarser for every tile once read, the two finest only for the last
-`FINE_TILES_KEPT` tiles, so a hundred-tile well is not held whole. `TileStore.render` draws each output pixel
+means: the levels at a quarter resolution and coarser for every tile once read, the two finest only within
+`FINE_BYTES_KEPT` bytes, each (tile, level) apart and never one the current view draws (evicting it would have the view ask for it again, trading tiles for ever), so a hundred-tile well is not held whole. `TileStore.render` draws each output pixel
 from the finest held level no finer than one output pixel and reports the tiles it wants finer (`wants`) or has
 never read (`unread`); the canvas asks the window to read those on a worker (`core.worker_bridge`) and draws
 again when they arrive, so painting never waits on a read, and a result that arrives after the window is gone

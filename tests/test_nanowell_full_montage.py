@@ -76,7 +76,7 @@ def _at(rendered, x_um, y_um, region=ONE_TO_ONE):
 # ── the pixels ───────────────────────────────────────────────────────────────
 def test_each_pixel_comes_from_the_tile_registration_placed_there_and_a_later_tile_covers_the_overlap(tmp_path):
     store = _store(tmp_path)
-    store.load(list(VALUES), fine=True)
+    store.load(list(VALUES), level=0)
     shown = store.render(*ONE_TO_ONE)
     for tile, (x, y) in LEFT_TOP.items():
         assert _at(shown, x + 60, y + 60) == SHADE[tile], tile
@@ -87,34 +87,48 @@ def test_each_pixel_comes_from_the_tile_registration_placed_there_and_a_later_ti
 def test_full_resolution_shows_the_one_bright_pixel_and_the_held_coarse_level_averages_it_away(tmp_path):
     x, y = (MARK[1] + 0.5) * PX, (MARK[0] + 0.5) * PX
     store = _store(tmp_path)
-    store.load(list(VALUES), fine=False)
+    store.load(list(VALUES))
     coarse = store.render(*ONE_TO_ONE)
     assert _at(coarse, x, y) == 15                           # a quarter-resolution mean: 1000 + 3000/16
-    assert coarse.wants == set(VALUES)                       # and the view says it wants better
-    store.load(["F0"], fine=True)
+    assert coarse.wants == {(tile, 0) for tile in VALUES}    # and the view says it wants full resolution
+    store.load(["F0"], level=0)
     fine = store.render(*ONE_TO_ONE)
-    assert _at(fine, x, y) == 255 and "F0" not in fine.wants
+    assert _at(fine, x, y) == 255 and ("F0", 0) not in fine.wants
 
 
 def test_a_zoomed_out_view_needs_no_more_than_the_coarse_levels(tmp_path):
     store = _store(tmp_path)
-    store.load(list(VALUES), fine=False)
+    store.load(list(VALUES))
     region = ((0.0, 0.0, 248.0, 248.0), 62, 62)               # 4 µm, eight image pixels, per output pixel
     shown = store.render(*region)
     assert not shown.wants and _at(shown, 180.0, 180.0, region) == SHADE["F3"]
 
 
-def test_only_the_last_tiles_drawn_finely_keep_their_finest_levels(tmp_path, monkeypatch):
-    monkeypatch.setattr(fmc, "FINE_TILES_KEPT", 2)
+def test_fine_levels_are_let_go_least_recently_drawn_first_but_never_one_the_view_is_drawing(tmp_path, monkeypatch):
+    tile_bytes = SIDE * SIDE * 2                              # one full-resolution 16-bit tile
+    monkeypatch.setattr(fmc, "FINE_BYTES_KEPT", 2 * tile_bytes)
     store = _store(tmp_path)
-    store.load(["F0", "F1", "F2"], fine=True)
+    store.load(["F0", "F1", "F2"], level=0)                   # nothing drawn yet: F0, the oldest, goes
     shown = store.render(*ONE_TO_ONE)
-    assert shown.wants == {"F0"} and shown.unread == {"F3"}  # F0 was let go; F3 was never read at all
+    assert shown.wants == {("F0", 0)} and shown.unread == {"F3"}
+    # That view drew all four, so reading what it asked for evicts none of them, although that is over the
+    # budget: evicting a tile in view would have the view ask for it again, and the two would trade it for ever.
+    store.load(["F0", "F3"], level=0)
+    assert not store.render(*ONE_TO_ONE).wants
+
+
+def test_a_view_at_half_resolution_asks_for_that_level_and_not_for_full(tmp_path):
+    store = _store(tmp_path)
+    store.load(list(VALUES))
+    region = ((0.0, 0.0, 248.0, 248.0), 248, 248)             # 1 µm, two image pixels, per output pixel
+    assert store.render(*region).wants == {(tile, 1) for tile in VALUES}
+    store.load(list(VALUES), level=1)
+    assert not store.render(*region).wants
 
 
 def test_a_tile_never_read_is_not_drawn_and_is_asked_for(tmp_path):
     store = _store(tmp_path)
-    store.load(["F1", "F2", "F3"], fine=True)
+    store.load(["F1", "F2", "F3"], level=0)
     shown = store.render(*ONE_TO_ONE)
     assert shown.unread == {"F0"} and not shown.covered[0, 0] and _at(shown, 60.0, 60.0) == 0
 
@@ -225,3 +239,23 @@ def test_re_run_opens_analyze_limited_to_the_anchored_wells_each_forced(montage_
     qtbot.mouseClick(window.rerun_btn, Qt.LeftButton)
     # Incremental off: every well is forced anyway, and a remote nanowell run refuses Incremental.
     assert calls == [{"force_wells": ["A01"], "only_wells": ["A01"], "incremental": False}]
+
+
+def test_the_view_keeps_square_pixels_through_a_resize_before_and_after_the_user_moves_it(montage_page, qtbot):
+    ctx, _in_dir = montage_page
+    window = _open(qtbot, ctx)
+    canvas = window.canvas
+
+    def scales():
+        left, top, right, bottom = canvas.region
+        return (right - left) / canvas.width(), (bottom - top) / canvas.height()
+
+    window.resize(900, 500)
+    qtbot.waitUntil(lambda: canvas.width() > 700)
+    sx, sy = scales()
+    assert sx == pytest.approx(sy)                            # refitted, not stretched to the new shape
+    canvas.zoom(0.5)
+    before = scales()
+    window.resize(600, 700)
+    qtbot.waitUntil(lambda: canvas.height() > 550)
+    assert scales() == pytest.approx(before)                  # the zoom the user chose survives the resize

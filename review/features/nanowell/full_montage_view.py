@@ -50,7 +50,7 @@ class MontageCanvas(QWidget):
     """The pixels and what is drawn over them. Knows nothing of files: the window hands it a store."""
 
     anchorClicked = Signal(float, float)         # well-frame µm
-    tilesWanted = Signal(object, bool)           # tile ids, whether their fine levels are wanted
+    tilesWanted = Signal(object)                 # {(tile id, level or None for its coarse levels only)}
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -64,11 +64,13 @@ class MontageCanvas(QWidget):
         self.message = ""
         self._press = None
         self._last = None
+        self._moved = False          # the user panned or zoomed: a resize keeps their view instead of refitting
 
     # ── what is shown ────────────────────────────────────────────────────────
     def show_store(self, store, sites, anchor, *, keep_region: bool = False) -> None:
         self.store, self.sites, self.anchor, self.message = store, sites, anchor, ""
         if not keep_region or self.region is None:
+            self._moved = False
             self.fit()
         self.update()
 
@@ -90,6 +92,7 @@ class MontageCanvas(QWidget):
         cx, cy = (left + right) / 2, (top + bottom) / 2
         half_w, half_h = self.width() * px / 2, self.height() * px / 2
         self.region = (cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+        self._moved = True
         self.update()
 
     def zoom(self, factor: float, at_view: tuple[float, float] | None = None) -> None:
@@ -97,6 +100,7 @@ class MontageCanvas(QWidget):
             return
         x, y = at_view if at_view is not None else (self.width() / 2, self.height() / 2)
         self.region = fmc.zoom_region(self.region, factor, self._well(x, y))
+        self._moved = True
         self.update()
 
     def _well(self, x: float, y: float) -> tuple[float, float]:
@@ -123,10 +127,9 @@ class MontageCanvas(QWidget):
         self._draw_sites(painter)
         self._draw_anchor(painter)
         painter.end()
-        if rendered.unread:
-            self.tilesWanted.emit(set(rendered.unread), False)
-        if rendered.wants:
-            self.tilesWanted.emit(set(rendered.wants), True)
+        wanted = {(tile, None) for tile in rendered.unread} | set(rendered.wants)
+        if wanted:
+            self.tilesWanted.emit(wanted)
 
     def _draw_tiles(self, painter) -> None:
         painter.setPen(QPen(QColor(Colors.text_muted), 1, Qt.DotLine))
@@ -174,6 +177,7 @@ class MontageCanvas(QWidget):
         left, top, right, bottom = self.region
         sx, sy = (right - left) / self.width(), (bottom - top) / self.height()
         self.region = (left - dx * sx, top - dy * sy, right - dx * sx, bottom - dy * sy)
+        self._moved = True
         self.update()
 
     def mouseReleaseEvent(self, event) -> None:
@@ -192,9 +196,18 @@ class MontageCanvas(QWidget):
             self.zoom(WHEEL_STEP ** steps, (pos.x(), pos.y()))
 
     def resizeEvent(self, event) -> None:
+        """Keep one µm per screen pixel on both axes: refit while the user has not moved the view, else keep its
+        top-left corner and scale and show more or less of the well."""
         super().resizeEvent(event)
-        if self.store is not None and self.region is None:
+        if self.store is None:
+            return
+        old = event.oldSize()
+        if self.region is None or not self._moved or old.width() <= 0:
             self.fit()
+            return
+        left, top, right, _bottom = self.region
+        scale = (right - left) / old.width()
+        self.region = (left, top, left + self.width() * scale, top + self.height() * scale)
 
 
 class FullMontageWindow(QWidget):
@@ -272,7 +285,7 @@ class FullMontageWindow(QWidget):
         anchor, _problem = fmc.read_well_anchor(self.data, self.well, timepoint)
         self.canvas.show_store(self.store, fmc.site_overlays(self.metrics, self.well, timepoint), anchor)
         self._refresh_status()
-        self._load([t.tile for t in self.source.tiles], fine=False, first=True)
+        self._load([t.tile for t in self.source.tiles], level=None, first=True)
 
     def _refresh_status(self, extra: str = "") -> None:
         if self.source is None:
@@ -293,30 +306,34 @@ class FullMontageWindow(QWidget):
             self.anchor_btn.setChecked(False)
 
     # ── reading tiles ────────────────────────────────────────────────────────
-    def _want(self, names, fine: bool) -> None:
-        names = set(names) - self._pending
-        if names:
-            self._load(sorted(names), fine=fine)
+    def _want(self, wanted) -> None:
+        """Read what the canvas asked for, once: a request already on its way is not sent again."""
+        by_level: dict = {}
+        for tile, level in set(wanted) - self._pending:
+            by_level.setdefault(level, []).append(tile)
+        for level, names in by_level.items():
+            self._load(sorted(names), level=level)
 
-    def _load(self, names, *, fine: bool, first: bool = False) -> None:
+    def _load(self, names, *, level, first: bool = False) -> None:
         from core.worker_bridge import run_off_thread
 
         store = self.store
         if store is None:
             return
-        self._pending |= set(names)
+        keys = {(name, level) for name in names}
+        self._pending |= keys
         total = len(names)
 
         def job(reporter):
             for k, name in enumerate(names, 1):
-                store.load([name], fine=fine)
+                store.load([name], level=level)
                 reporter.progress(k, total)
             return names
 
-        def done(loaded) -> None:
+        def done(_loaded) -> None:
             if not self._alive():
                 return
-            self._pending -= set(loaded)
+            self._pending -= keys
             if store is self.store:
                 if first:
                     self._refresh_status()
@@ -325,7 +342,7 @@ class FullMontageWindow(QWidget):
         def failed(message) -> None:
             if not self._alive():
                 return
-            self._pending -= set(names)
+            self._pending -= keys
             log.warning("Full montage: tiles of %s could not be read: %s", self.well, message)
             if store is self.store:
                 self._refresh_status(f"Some tiles could not be read: {message}")

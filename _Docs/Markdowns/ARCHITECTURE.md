@@ -13223,7 +13223,18 @@ named well back as already whole, and the host's pipeline would refuse a subset
 naming a well its input lacks, so the argv the host receives is rewritten
 (`argv_with_only_wells`) to the wells actually sent; a subset that is entirely up
 to date ends the run with "nothing to run" rather than launching an empty host
-run. The subset rides in `pipeline_argv_digest`, so a different subset is a
+run. A batched remote run runs that one argv once per batch while each batch's
+`in/` holds only its share of the wells, so the subset would name the other
+batches' wells as missing and every batch would refuse; `remote_commands.
+batch_pipeline_argv` therefore adds `--only_wells_absent_ok` to the batch argv
+whenever it carries `--only_wells`, and `scope_to_only_wells` then logs the
+absent wells as another batch's and runs the ones it holds. The flag is safe
+only because the app has already checked every named well against the plate
+before uploading; it is never set on a single-process run, local or remote, and
+it is under `NOT_KEYED_ON` like `--only_wells` itself. It is added after
+`pipeline_argv_digest` is taken, so it does not change the run address. Pinned
+by `tests/test_a_batched_subset_run_finds_its_wells.py`, which reads the flag
+out of the launched driver script. The subset rides in `pipeline_argv_digest`, so a different subset is a
 different run address and never reattaches to another run's directory. The
 fetch's `merge_fetched_run_report` / `merge_fetched_field_quality` keep every
 local record the fetched block does not name — which also means a subset well

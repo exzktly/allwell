@@ -3378,8 +3378,8 @@ def main() -> None:
         refuse_images_only_in_ignored_folders(input_dir, well_zips)
     refuse_uncovered_wells(blank_groups, well_zips, well_folders)
     plate_containers = dict(well_zips or well_folders or [])  # run_check's, below
-    well_zips, well_folders = scope_to_only_wells(
-        well_zips, well_folders, args.only_wells, refuse=parser.error, log=log)
+    well_zips, well_folders = scope_to_only_wells(well_zips, well_folders, args.only_wells, refuse=parser.error,
+                                                  log=log, absent_ok=args.only_wells_absent_ok)
     ran_wells = [w for w, _p in well_zips or well_folders or []]
 
     # Precompute per-channel flat-field models once (basic / empty_well). The

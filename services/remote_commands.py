@@ -457,3 +457,22 @@ def unpack_login_shell_command(command: str) -> str:
     if m is None:
         raise ValueError("not a packed launch command")
     return gzip.decompress(base64.b64decode(m.group(1))).decode("utf-8")
+
+
+def batch_pipeline_argv(remote_argv) -> list[str]:
+    """The pipeline argv every batch of a batched remote run is given: the run's own, with what a slice of a plate
+    needs added.
+
+    * ``--no_auto_threshold``: each batch sees only its own slice, so the in-pipeline auto-threshold pass would write
+      defaults from a fraction of the plate; it is re-run once locally over everything.
+    * ``--only_wells_absent_ok`` when the run names wells: the same argv runs every batch, so its ``--only_wells``
+      names the whole subset while each batch's input holds only its share, and the pipeline refused the other
+      batches' wells as "not in the input" — every batch, so the run failed after a clean upload. Every named well
+      was checked against the plate before anything was uploaded (``pipeline_runner.scope_staged_to_only_wells``).
+    """
+    argv = list(remote_argv)
+    if "--no_auto_threshold" not in argv:
+        argv.append("--no_auto_threshold")
+    if "--only_wells" in argv and "--only_wells_absent_ok" not in argv:
+        argv.append("--only_wells_absent_ok")
+    return argv

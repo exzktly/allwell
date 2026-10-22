@@ -439,6 +439,16 @@ def build_parser() -> argparse.ArgumentParser:
                        "Well labels are matched canonically (C8 == C08)."
                    ))
 
+    p.add_argument("--only_wells_absent_ok", action="store_true",
+                   help=(
+                       "With --only_wells: a named well that is not in this "
+                       "input is skipped with a log line instead of refused. "
+                       "For a remote run split into batches, which tells every "
+                       "batch the whole subset while each holds only its own "
+                       "share of it; the app has checked before the upload "
+                       "that every named well is in the plate."
+                   ))
+
     p.add_argument("--incremental_prior_dir", default=None,
                    help=(
                        "Directory holding the prior per-well CSVs used to build "

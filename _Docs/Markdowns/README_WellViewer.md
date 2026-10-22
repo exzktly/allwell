@@ -1268,7 +1268,8 @@ archives and outputs are always written as per-well `.zip` archives. See
   which wells it is limited to. Combine it with **Incremental** to finish
   partial wells and with **Force these wells** to regenerate named ones. It
   also works for remote runs: only the named wells are uploaded (plus an
-  empty-well blank the correction needs). It is never filled in from a previous
+  empty-well blank the correction needs), including runs the remote splits
+  into batches, where each batch runs the named wells it was sent. It is never filled in from a previous
   run's settings — a subset is a decision for one run. The pipeline flag is
   `--only_wells`. When an earlier run of the plate did not finish, a run limited
   to named wells picks up only what that run left half-done in *those* wells

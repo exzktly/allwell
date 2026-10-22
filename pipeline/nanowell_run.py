@@ -553,6 +553,9 @@ class Measured:
     cells: dict = field(default_factory=dict)            # per-cell columns
     template: dict = field(default_factory=dict)         # which template, from where, how many sites
     notes: list = field(default_factory=list)            # findings that are not errors
+    #: site index -> (offset, gain) each site was brought to the template's levels with (``nanowell_measure.rim_suppress``);
+    #: not written, kept for a caller that suppresses a site again (Test detection's crops).
+    levels: dict = field(default_factory=dict)
 
 
 def _roster_positions(located: Located, radius_um: float | None, sites=None):
@@ -656,7 +659,7 @@ def _pooled_template(located: Located, images: dict, settings: NanowellSettings,
 
     px = located.pixel_size_um
     half = nm.template_half(settings.diameter_um / 2 / px)
-    crops, crop_sites = [], []
+    crops, crop_sites, crop_tiles = [], [], []
     for owner, indices in by_tile.items():
         if owner is None:
             continue
@@ -667,19 +670,123 @@ def _pooled_template(located: Located, images: dict, settings: NanowellSettings,
             local = np.array([(geoms[i].centre_um[0] - left, geoms[i].centre_um[1] - top) for i in usable])
             crops.append(nm.site_crops(images[owner], px, local, half))
             crop_sites += usable
-    template = None
+            crop_tiles += [owner] * len(usable)
+    template, raw = None, None
     if crops:
-        template = nm.build_template(np.concatenate(crops),
+        raw = np.concatenate(crops)
+        # Each crop brought to one shared floor and surround, so the template and the choice of empty nanowells do
+        # not depend on a tile's brightness or offset: on raw intensity the dimmest tiles read least textured and held
+        # every empty nanowell, and every other tile had no calibration of its own.
+        template = nm.build_template(nm.level_crops(raw, half),
                                      interior_radius_px=nm.SUPPRESSION_RADIUS * settings.diameter_um / 2 / px,
                                      earliest=earliest)
     template = template or nm.as_fallback(earliest)
     if template is None or template.source == nm.SOURCE_EARLIEST:
-        return template, set()
-    return template, {crop_sites[k] for k in template.used}
+        return template, set(), {}
+    empty_levels: dict = {}
+    floors, surrounds = nm.crop_levels(raw[list(template.used)], half)
+    for k, floor, surround in zip(template.used, floors, surrounds):
+        empty_levels.setdefault(crop_tiles[k], []).append((float(floor), float(surround)))
+    return template, {crop_sites[k] for k in template.used}, empty_levels
+
+
+def _local_fit(owner, indices, located, geoms, template):
+    """The sites *owner* owns, in its own pixel frame, split into (those the template covers, those it does not)."""
+    from pipeline import nanowell_measure as nm
+
+    left, top = located.positions[owner]
+    local = [replace(geoms[i], centre_um=(geoms[i].centre_um[0] - left, geoms[i].centre_um[1] - top)) for i in indices]
+    return nm.fits_template(template, local, pixel_size_um=located.pixel_size_um)
+
+
+@dataclass
+class Normalisation:
+    """How a timepoint's sites are brought to the template's levels, and the one texture threshold over them."""
+    levels: dict = field(default_factory=dict)           # site index -> (offset, gain)
+    threshold: float | None = None                       # texture threshold, from every tile's empty nanowells
+    backgrounds: dict = field(default_factory=dict)      # fluorescence channel -> the well's empty-site background
+    block: dict = field(default_factory=dict)            # what the grid record says about it
+    notes: list = field(default_factory=list)
+
+
+def _normalise(located, images, template, by_tile, geoms, empties, empty_levels, channels) -> Normalisation:
+    """Each site's ``(offset, gain)`` and the timepoint's texture threshold (``MEASURE_VERSION`` 2).
+
+    A tile's offset comes from its empty nanowells, each of which shows the template's floor and surround through the
+    tile's gain and offset (``nanowell_measure.tile_offsets``); a tile with none takes the well's. Each site's gain
+    comes from its own surround, the lattice around it, which holds no cells whatever the nanowell does. Divided by
+    the template after that, an empty nanowell reads 1 on every tile, so one texture threshold, pooled over every
+    tile's empty nanowells, serves the whole timepoint: per tile, a tile with no empty nanowell of its own had no
+    threshold and every nanowell on it no confluence.
+    """
+    from pipeline import nanowell_measure as nm
+
+    px = located.pixel_size_um
+    out = Normalisation()
+    tiles = [t for t in by_tile if t is not None]
+    offsets = nm.tile_offsets(empty_levels, template, tiles)
+    no_gain, scale_only = [], []
+    for owner in tiles:
+        fit_sites, _ = _local_fit(owner, by_tile[owner], located, geoms, template)
+        if not fit_sites:
+            continue
+        crops = nm.site_crops(images[owner], px, np.array([g.centre_um for g in fit_sites]), template.half)
+        _floors, surrounds = nm.crop_levels(crops, template.half)
+        offset = offsets.offsets[owner]
+        gains = {g.index: nm.site_gain(float(s), offset, template) for g, s in zip(fit_sites, surrounds)}
+        known = [v for v in gains.values() if v is not None]
+        if not known and owner in offsets.fallback and offset:
+            # The well's offset was a guess for this tile, and it leaves no positive gain: the tile is evidently
+            # offset differently, so it is corrected for brightness alone rather than left unmeasured.
+            offset = 0.0
+            gains = {g.index: nm.site_gain(float(s), offset, template) for g, s in zip(fit_sites, surrounds)}
+            known = [v for v in gains.values() if v is not None]
+            scale_only.append(owner)
+        if not known:
+            no_gain.append(owner)
+            continue
+        tile_gain = float(np.median(known))      # a site whose surround is off the image takes its tile's
+        out.levels.update({i: (offset, gain if gain is not None else tile_gain) for i, gain in gains.items()})
+    departures, backgrounds = [], {c: [] for c in (channels or {})}
+    for owner in tiles:
+        fit_sites, _ = _local_fit(owner, by_tile[owner], located, geoms, template)
+        mine = [g for g in fit_sites if g.index in empties]
+        if not mine:
+            continue
+        rim = nm.rim_suppress(images[owner], px, template, mine, levels=out.levels)
+        departures += nm.empty_departures(rim, px, mine)
+        for channel, load in (channels or {}).items():
+            image = load(owner)
+            if image is not None:
+                found = nm.site_fluorescence(image, px, mine, {g.index for g in mine})
+                if found and found[0].background is not None:
+                    backgrounds[channel].append(found[0].background)
+    out.threshold = nm.threshold_from_departures(departures)
+    out.backgrounds = {c: float(np.median(v)) for c, v in backgrounds.items() if v}
+    with_empties = sorted({owner for owner in tiles if any(i in empties for i in by_tile[owner])})
+    out.block = {"measure_version": nm.MEASURE_VERSION,
+                 "offset": "measured" if offsets.identifiable and empty_levels else
+                           ("not identifiable" if not offsets.identifiable else "no empty nanowells"),
+                 "offset_fallback_tiles": list(offsets.fallback), "tiles_without_gain": sorted(no_gain),
+                 "scale_only_tiles": sorted(scale_only),
+                 "texture_threshold": out.threshold, "tiles_with_empties": len(with_empties)}
+    if offsets.fallback and offsets.identifiable and empty_levels:
+        out.notes.append(f"{len(offsets.fallback)} tile(s) have no empty nanowell of their own ({', '.join(offsets.fallback)}): "
+                         "their offset is the well's, taken from the other tiles' empty nanowells")
+    if scale_only:
+        out.notes.append(f"The well's offset leaves tile(s) {', '.join(sorted(scale_only))} no positive brightness: "
+                         "their nanowells are corrected for brightness only")
+    if not offsets.identifiable:
+        out.notes.append("The template's floor and surround are too alike to tell a tile's offset from its gain: each "
+                         "nanowell is corrected for brightness only")
+    if no_gain:
+        out.notes.append(f"No nanowell's surround could be read on tile(s) {', '.join(sorted(no_gain))}: their "
+                         "nanowells cannot be brought to the template's levels and are unmeasured")
+    return out
 
 
 def _tile_contents(owner, indices, located, images, settings, geoms, addresses, template, empties, segment, channels,
-                   kind=None):
+                   kind=None, norm: "Normalisation | None" = None):
     """Counts, confluence, area estimate, fluorescence and focus for the sites one tile owns, and its cell rows.
 
     *segment* ``None`` counts no cells: every site keeps its confluence (texture, no segmentation), fluorescence and
@@ -689,15 +796,18 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
 
     px = located.pixel_size_um
     left, top = located.positions[owner]
-    local = [replace(geoms[i], centre_um=(geoms[i].centre_um[0] - left, geoms[i].centre_um[1] - top)) for i in indices]
-    fit_sites, too_large = nm.fits_template(template, local, pixel_size_um=px)
+    norm = norm or Normalisation()
+    fit_sites, too_large = _local_fit(owner, indices, located, geoms, template)
     notes = [f"{len(too_large)} site(s) on tile {owner} exceed the template and are unmeasured"] if too_large else []
+    # The template is in units of a site's own surround, so a site with no level to bring it there would be divided
+    # in raw units and read as a nonsense departure: it is unmeasured instead (named in the timepoint's notes).
+    fit_sites = [g for g in fit_sites if g.index in norm.levels] if norm.levels or norm.block else fit_sites
     if not fit_sites:
         return {}, {}, notes
-    rim = nm.rim_suppress(images[owner], px, template, fit_sites)
+    rim = nm.rim_suppress(images[owner], px, template, fit_sites, levels=norm.levels)
     mine = [g for g in fit_sites if g.index in empties]
-    threshold = nm.texture_threshold(rim, px, mine) if mine else None
-    confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, threshold)))
+    # The timepoint's one threshold, from every tile's empty nanowells (``_normalise``), not this tile's alone.
+    confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, norm.threshold)))
     channel_images = {c: img for c, f in (channels or {}).items() if (img := f(owner)) is not None}
     counts = area = None
     table: dict = {}
@@ -707,7 +817,9 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
         area = nm.area_estimate(labels, px, fit_sites, counts)
         table = _cell_rows(labels, px, fit_sites, counts, addresses, owner, (left, top), channel_images, channels,
                            kind)
-    fluorescence = {c: {f.index: f for f in nm.site_fluorescence(img, px, fit_sites, {g.index for g in mine})}
+    # A tile with no empty nanowell of its own takes the well's background (named in the timepoint's notes).
+    fluorescence = {c: {f.index: f for f in nm.site_fluorescence(img, px, fit_sites, {g.index for g in mine},
+                                                                 background=norm.backgrounds.get(c))}
                     for c, img in channel_images.items()}
     contents = {g.index: {"n_cells": None if counts is None else counts[g.index].n_cells,
                           "confluence": confluence[g.index],
@@ -801,8 +913,8 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     if fmt.status == "format_mismatch" or (fmt.ok is None and geoms and fine_enough):
         out.notes.append(fmt.reason)
     visibility, coverage = _visibility_and_coverage(located, geoms, array_radius_um)
-    template, empties = _pooled_template(located, images, settings, geoms, by_tile, visibility, coverage,
-                                         earliest_template)
+    template, empties, empty_levels = _pooled_template(located, images, settings, geoms, by_tile, visibility, coverage,
+                                                       earliest_template)
     if template is None:
         out.notes.append("No template could be built (no fully imaged, visible site): contents are undefined")
     else:
@@ -811,12 +923,22 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
         if template.source != nm.SOURCE_EARLIEST:                  # its own: what flag_template_drift compares
             out.template["floor_ratio"] = nm.floor_ratio(template)
     segment = (segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)) if count_cells else None
+    norm = None
+    if template is not None:
+        norm = _normalise(located, images, template, by_tile, geoms, empties, empty_levels, channels)
+        out.levels = norm.levels
+        out.template["normalisation"] = norm.block
+        out.notes += norm.notes
+        tiles_with_channels = [t for t in by_tile if t is not None and not any(i in empties for i in by_tile[t])]
+        if channels and norm.backgrounds and tiles_with_channels:
+            out.notes.append(f"{len(tiles_with_channels)} tile(s) have no empty nanowell of their own: their "
+                             "fluorescence background is the well's, from the other tiles' empty nanowells")
     contents: dict[int, dict] = {}
     for owner, indices in by_tile.items():
         if owner is None or template is None:
             continue
         got, table, notes = _tile_contents(owner, indices, located, images, settings, geoms, addresses, template,
-                                           empties, segment, channels, kind)
+                                           empties, segment, channels, kind, norm)
         contents.update(got)
         out.notes += notes
         for name, values in table.items():
@@ -1381,8 +1503,10 @@ def _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts) -
     the store is keyed on — the radius, the record, how it was located, and the roster: for an inferred well with the
     step its addresses were moved by and the diameter (X35-R1, R5, R14); for a default well with its rule, so a
     disk-rule checkpoint is never taken back into an evidence-rule well (X35a)."""
+    from pipeline.nanowell_measure import MEASURE_VERSION
+
     key = {"radius_um": radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
-           "located": [located.status, located.origin_method]}
+           "located": [located.status, located.origin_method], "measure_version": MEASURE_VERSION}
     if roster is not None and settings.infer:
         key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))),
                    diameter_used_um=outcome.radius["diameter_used_um"])

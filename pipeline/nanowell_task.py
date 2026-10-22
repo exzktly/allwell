@@ -285,7 +285,8 @@ def write_sites_csv(path: Path, rows: list[dict], fluor_tokens) -> None:
 
 
 def write_grid_json(path: Path, well: str, outcome: nr.WellOutcome, settings: nr.NanowellSettings) -> None:
-    payload = {"scheme_version": SCHEME_VERSION, "well": well, "settings": settings.key(),
+    payload = {"scheme_version": SCHEME_VERSION, "measure_version": nm.MEASURE_VERSION, "well": well,
+               "settings": settings.key(),
                "array_radius": outcome.radius, "timepoints": outcome.timepoints}
     plate = _plate_of(path)
     if plate:                       # a well Merge Plates brought from another plate stays that plate's
@@ -332,6 +333,9 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
     except (OSError, ValueError):
         return None
     if grid.get("scheme_version") != SCHEME_VERSION:
+        return None
+    if grid.get("measure_version") != nm.MEASURE_VERSION:
+        # Measured another way: kept beside this run's timepoints, the two would not be comparable numbers.
         return None
     kept = {tp for tp in timepoints
             if grid.get("timepoints", {}).get(tp, {}).get("status") == nr.OK
@@ -658,7 +662,8 @@ def record_nanowell_info(info_path, options: dict, input_dir) -> None:
     # registering again would give exactly them. A path here would also make two plates' settings differ for Merge
     # Plates, which compares these blocks.
     settings = {k: v for k, v in options.items() if k != "registration_from"}
-    block = {"nanowell": {"scheme_version": SCHEME_VERSION, "settings": settings,
+    block = {"nanowell": {"scheme_version": SCHEME_VERSION, "measure_version": nm.MEASURE_VERSION,
+                          "settings": settings,
                           "conventions": {"origin": "top-left of the well frame, y down",
                                           "angle": "counter-clockwise on screen, degrees, from image east",
                                           "mirror": "recorded per timepoint in nanowells/<well>_grid.json",

@@ -72,7 +72,8 @@ def _missing_import(exc: BaseException) -> str | None:
     return None
 
 
-def _crop_for(site: dict, images: dict, located, template, segment, px: float, half_um: float) -> dict | None:
+def _crop_for(site: dict, images: dict, located, template, segment, px: float, half_um: float,
+              level: tuple | None = None) -> dict | None:
     """A rim-suppressed crop of one site and its segmentation, from the tile that owns it."""
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_detect import SiteGeometry
@@ -85,7 +86,8 @@ def _crop_for(site: dict, images: dict, located, template, segment, px: float, h
     fit, too_large = nm.fits_template(template, [local], pixel_size_um=px)
     if too_large:
         return None
-    rim = nm.rim_suppress(images[owner], px, template, fit)
+    # The site's own level, as the run suppressed it (``nanowell_run.Measured.levels``).
+    rim = nm.rim_suppress(images[owner], px, template, fit, levels=None if level is None else {0: level})
     cx, cy = local.centre_um[0] / px - 0.5, local.centre_um[1] / px - 0.5
     half = int(np.ceil(half_um / px))
     x0, y0 = max(int(round(cx)) - half, 0), max(int(round(cy)) - half, 0)
@@ -171,16 +173,19 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
         # every timepoint, and a dataset analysed before keeps the roster it was analysed with.
         result.notes.append("The nanowells at the rim are the ones this timepoint's image supports; a run decides them "
                             "over all of the well's timepoints, and adding to an analysed dataset keeps its roster")
-    for row in measured.sites:
+    index_of = {}                                  # a result site -> its index in the timepoint's sites
+    for i, row in enumerate(measured.sites):
         q, r = row["nw_q"], row["nw_r"]
         result.sites.append({**row, "address": None if q is None else f"{q},{r}"})
+        index_of[id(result.sites[-1])] = i
     template = measured.template.get("_object")
     ranked = sorted((s for s in result.sites if s["state"] == "measured" and (s["n_cells"] or 0) > 0 and not s["fused"]),
                     key=lambda s: -(s["n_cells"] or 0))
     chosen = ranked[:max(n_crops - 1, 0)]
     empty = next((s for s in result.sites if s["state"] == "empty" and not s["fused"]), None)
     for site in (chosen + ([empty] if empty is not None and n_crops else [])) if segment is not None else []:
-        crop = _crop_for(site, images, located, template, segment, px, 0.75 * settings.diameter_um)
+        level = measured.levels.get(index_of.get(id(site)))
+        crop = _crop_for(site, images, located, template, segment, px, 0.75 * settings.diameter_um, level)
         if crop is not None:
             result.crops.append(crop)
     return result

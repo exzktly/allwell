@@ -10009,7 +10009,15 @@ each well's rows are right under its own rule, and only the count at the rim dif
 one timepoint, so its rim is that timepoint's, and its notes say a run decides the rim over every timepoint and
 keeps an analysed dataset's roster. Completeness counts
 timepoints, not (fov, timepoint) pairs (`completeness.nanowell_coverage`): a well of empty nanowells has no
-cell rows and is whole.
+cell rows and is whole. A timepoint is covered only when its grid record says `ok`, so a timepoint the run
+located and measured but left unaddressed (or refused with any other recorded reason) is missing — an incremental
+run redoes it — and the well record also lists it under `not_addressed` (`[timepoint, status]`, with
+`not_addressed_count`). That list is what keeps "ran and could not be addressed" apart from "never reached": Home
+paints a partial well that covers nothing as *Staged, never processed* only when `not_addressed_count` is zero,
+and otherwise as *Partial*, with a *Nanowell timepoints not addressed* row naming the wells and pointing at the
+anchor (`review/features/home/collect.py`; `tests/test_an_unaddressed_nanowell_well_is_not_staged_and_never_processed.py`).
+Validate's scan does not use this rule for nanowell wells — it counts (fov, timepoint) pairs from the
+measurements CSV — so a record Validate rewrites carries no `not_addressed`.
 
 **End of run.** `nanowell_endgame` re-runs each unaddressed (well, timepoint) the rest of the plate can anchor:
 the wells anchored on their own evidence at a reference timepoint and at this one fix the plate's rigid

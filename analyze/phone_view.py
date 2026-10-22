@@ -17,9 +17,11 @@ The run controls (Run, Suspend, + Queue, Stop) leave the foot of the form for
 a bar along the bottom of the pane, in reach in both views. A run starting
 shows Progress. Leaving phone layout puts every widget back where it was.
 
-The pane listens for phone layout itself (``core.phone_layout`` listeners), so
-the shell — which imports no pane — only needs the view names and a way to
-show one (``PhoneHandles.page_views`` and friends, from ``allwell.py``).
+``AnalyzeTab`` builds the view (``tab._phone_view``) and the view listens for
+phone layout itself (``core.phone_layout`` listeners), so the shell — which
+imports no pane — only needs the view names and a way to show one
+(``PhoneHandles.page_views`` and friends, which ``allwell.py`` reads off the
+pane).
 """
 
 from __future__ import annotations
@@ -87,7 +89,7 @@ class AnalyzePhoneView:
             self.show_view(PROGRESS)
 
     # ── the parts ──────────────────────────────────────────────────────────
-    def _parts(self):
+    def _parts(self) -> tuple[QWidget, QSplitter, QWidget | None, QWidget] | None:
         tab = self._tab
         form = tab._left_sidebar
         splitter = form.parentWidget()

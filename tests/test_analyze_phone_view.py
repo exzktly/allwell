@@ -21,7 +21,7 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
-from analyze.phone_view import PROGRESS, SETTINGS, AnalyzePhoneView
+from analyze.phone_view import PROGRESS, SETTINGS
 from core import phone_layout
 from core.panes import PANEL_IS_PAGE
 
@@ -48,7 +48,7 @@ def test_phone_layout_makes_the_form_the_page_with_run_at_the_foot(tab):
     splitter = form.parentWidget()
     run_row = tab._run_btn.parentWidget()
     home = run_row.parentWidget()
-    view = AnalyzePhoneView(tab)
+    view = tab._phone_view
 
     phone_layout.set_on(True)
     _pump()
@@ -72,7 +72,7 @@ def test_phone_layout_makes_the_form_the_page_with_run_at_the_foot(tab):
 
 
 def test_progress_shows_the_run_and_hides_the_form(tab):
-    view = AnalyzePhoneView(tab)
+    view = tab._phone_view
     phone_layout.set_on(True)
     _pump()
     view.show_view(PROGRESS)
@@ -88,7 +88,7 @@ def test_progress_shows_the_run_and_hides_the_form(tab):
 def test_a_run_starting_shows_progress(tab):
     """The Stop button turning enabled is what every way of starting a run
     shares; it, not the Run button, is what the view watches."""
-    view = AnalyzePhoneView(tab)
+    view = tab._phone_view
     phone_layout.set_on(True)
     _pump()
     tab._stop_btn.setEnabled(False)
@@ -99,7 +99,7 @@ def test_a_run_starting_shows_progress(tab):
 
 
 def test_a_run_starting_at_the_desk_changes_nothing(tab):
-    view = AnalyzePhoneView(tab)
+    view = tab._phone_view
     tab._stop_btn.setEnabled(False)
     tab._stop_btn.setEnabled(True)
     assert view.current() == SETTINGS

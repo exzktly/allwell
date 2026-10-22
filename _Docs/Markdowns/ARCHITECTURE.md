@@ -483,7 +483,7 @@ drives that sequence against a desk-built twin. `_save_window_state` saves no ge
 layout is on or the screen is phone-shaped.
 
 **Analyze in phone layout** is the form, not a drawer: `analyze/phone_view.py`
-(`AnalyzePhoneView`, built in `_build_phone_shell`) listens for phone layout itself
+(`AnalyzePhoneView`, which `AnalyzeTab` builds as `_phone_view` and `_build_phone_shell` reads off the pane) listens for phone layout itself
 and rearranges the pane's own widgets — nothing is rebuilt. The splitter turns
 vertical with the run side above the form, the form loses its fixed rail width,
 and the run row (Run, Suspend, + Queue, Stop) moves from the foot of the form to

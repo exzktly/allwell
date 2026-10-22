@@ -709,10 +709,9 @@ class AllWellApp(QMainWindow):
         ) if w is not None]
 
         # Analyze's phone form: the form as the page, the run a strip above it
-        # (analyze/phone_view.py). It follows phone layout on its own.
-        from analyze.phone_view import AnalyzePhoneView
-        self._analyze_phone = (AnalyzePhoneView(self._analyze)
-                               if getattr(self, "_analyze", None) is not None else None)
+        # (analyze/phone_view.py). The pane builds it; it follows phone layout
+        # on its own, and the shell only asks it for its views.
+        self._analyze_phone = getattr(getattr(self, "_analyze", None), "_phone_view", None)
         drawer = self._build_rail_drawer(band)
         dash = getattr(self._analyze, "_dashboard", None)
         analyze_page = dash.parentWidget() if dash is not None else None

@@ -274,7 +274,7 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
     *covered* marks the pixels that hold image (a montage's coverage); *record_places_tiles* says an acquisition
     record placed the tiles, which is what leaves the tile-grid fields blank rather than unknown.
     """
-    from pipeline.nanowell_detect import MIN_SQUARENESS, score_fiducial
+    from pipeline.nanowell_detect import MIN_SQUARENESS, describe_fiducial, score_fiducial
     from pipeline.nanowell_infer import ARRAY_CIRCLE, find_wells_by_contrast, infer_array
     from pipeline.nanowell_lattice import index_points, resolve_origin
     from pipeline.nanowell_run import FIDUCIAL_MARGIN
@@ -321,7 +321,9 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
     square = max(scores, key=lambda s: s.coherence) if candidate is not None and scores else None
     if square is not None:
         out.square_px = tuple(to_px(square.position_um))
-    resolved = resolve_origin(fit, fiducial=candidate, array_centre=centre_um, fiducial_margin=FIDUCIAL_MARGIN)
+    refusal = describe_fiducial(candidate, scores, near_centre=centre_um is not None)["reason"]
+    resolved = resolve_origin(fit, fiducial=candidate, array_centre=centre_um, fiducial_margin=FIDUCIAL_MARGIN,
+                              fiducial_refusal=refusal)
     rings = None
     if resolved.status == "anchored":
         out.origin_px = tuple(to_px(resolved.origin_xy))

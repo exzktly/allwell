@@ -407,6 +407,33 @@ def score_fiducial(image, pixel_size_um: float, nanowell_diameter_um: float, poi
     return FiducialCandidate(ranked[0].position_um, ranked[0].coherence, ranked[1].coherence), scores
 
 
+def describe_fiducial(candidate: FiducialCandidate | None, scores, *, min_squareness: float = MIN_SQUARENESS,
+                      near_centre: bool = True) -> dict:
+    """What the square search found, in a form a grid block can carry, and why it found no square.
+
+    ``reason`` is empty when :func:`score_fiducial` returned a candidate (the margin is ``resolve_origin``'s to
+    judge, and it says so itself); otherwise it names which test failed, so an unaddressed timepoint says whether
+    no site could be scored, the most square outline was not square enough, or nothing was searched at all
+    (tracker F1). Scores are kept as numbers, never rounded, so a threshold can later be set from them (F6).
+    """
+    ranked = sorted((s.coherence for s in scores), reverse=True)
+    where = "near the array centre" if near_centre else "in the montage"
+    block = {"scored": len(ranked), "best": ranked[0] if ranked else None,
+             "runner_up": ranked[1] if len(ranked) > 1 else None, "min_squareness": min_squareness,
+             "position_um": None if candidate is None else [float(v) for v in candidate.position], "reason": ""}
+    if candidate is not None:
+        return block
+    if not ranked:
+        block["reason"] = f"the central square was not found: no site {where} could be scored for squareness"
+    elif len(ranked) == 1:
+        block["reason"] = (f"the central square was not found: only one site {where} could be scored, and a lead "
+                           "over nothing is not a lead")
+    else:
+        block["reason"] = (f"the central square was not found: the most square outline among the {len(ranked)} "
+                           f"sites scored {where} reads {ranked[0]:.2f}, under the {min_squareness:g} a square needs")
+    return block
+
+
 @dataclass(frozen=True)
 class OrientationCheck:
     ok: bool

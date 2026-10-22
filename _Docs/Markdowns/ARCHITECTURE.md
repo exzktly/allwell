@@ -9556,7 +9556,15 @@ sum minus the two-fold one: a bubble's rim crossing a circle concentrates its gr
 one direction, which the four-fold sum alone scores as high as a square (one such case
 anchored a well 1.7 pitches off), but a straight edge has a two-fold sum and a square's two
 edges cancel in it. A fiducial must also be at least 0.4 square in absolute terms, whatever
-its margin. `check_orientation` (tracker N3a)
+its margin. **A refused square says which test it failed.** `describe_fiducial` turns the
+search into a block — sites scored, the best and runner-up squareness, the floor, where the
+square was, and a sentence naming the failure when there is no candidate (no site could be
+scored; only one could; the most square outline read under the floor) — and `resolve_origin`
+takes that sentence as `fiducial_refusal`, and names a candidate that led the runner-up by
+less than the margin with both scores, so an unaddressed timepoint's reason lists every
+source that was refused and why. `locate_timepoint` writes the block to the grid record as
+`fiducial` (position in the well frame, the margin beside the floor), and the Playground's
+array search passes the same sentence. `check_orientation` (tracker N3a)
 compares the square's edge direction with the lattice axis the fit chose: a hexagonal
 array rotated 40 degrees is fitted at -20, inside the limit and wrong by a sixth of a
 turn, and the square still reads 40, so the well is refused with the reason. The angle

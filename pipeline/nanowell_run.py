@@ -145,6 +145,9 @@ class Located:
     diameter_um: float | None = None                      # inferred only: the diameter sites are measured at
     array_found: np.ndarray | None = None                 # inferred only: per array site, a light nanowell was found
     notes: list = field(default_factory=list)             # findings of the locating stage that are not refusals
+    #: The central square's search: sites scored, best and runner-up squareness, the thresholds, where it was (well
+    #: frame) and why none was taken (``nanowell_detect.describe_fiducial``; tracker F1). ``None`` before the search.
+    fiducial: dict | None = None
 
 
 def stage_offset(record: dict, well: str, timepoint: str, positions: dict,
@@ -352,7 +355,9 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     ``(folder, grid block)`` pairs for this timepoint from earlier runs: a placement among them solved under this
     timepoint's :func:`registration_key` is taken instead of registering the tiles again (:func:`stored_placement`).
     """
-    from pipeline.nanowell_detect import check_orientation, detect_sites, estimate_lattice_fft, score_fiducial
+    from pipeline.nanowell_detect import (
+        check_orientation, describe_fiducial, detect_sites, estimate_lattice_fft, score_fiducial,
+    )
     from pipeline.nanowell_lattice import index_points, resolve_origin
     from pipeline.nanowell_sites import check_format
     from pipeline.tile_grid import OK as GRID_OK, place_from_record, tiles_from_record
@@ -443,8 +448,14 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         if not orientation.ok:
             return refuse(ORIENTATION_REFUSED, orientation.reason if hasattr(orientation, "reason") else
                           "The square's edges disagree with the fitted lattice axis")
+    fiducial = describe_fiducial(candidate, scores, near_centre=detection.boundary_centre_um is not None)
+    fiducial["margin"] = FIDUCIAL_MARGIN
+    if fiducial["position_um"] is not None:
+        fiducial["position_um"] = [float(v) for v in _montage_to_common(fiducial["position_um"], montage)]
+    located.fiducial = fiducial
     resolved = resolve_origin(detection.fit, fiducial=candidate, array_centre=detection.boundary_centre_um,
-                              plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN)
+                              plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN,
+                              fiducial_refusal=fiducial["reason"])
     located.fit = detection.fit
     located.pitch_um = float(detection.fit.pitch)
     located.mirrored = bool(detection.fit.mirrored)
@@ -527,7 +538,8 @@ def _lattice_block(located: Located, status: str, reason: str) -> dict:
             "angle_deg": fit.angle_deg, "mirrored": located.mirrored,
             "origin_method": located.origin_method, "origin_agreement": located.origin_agreement,
             "array_boundary": located.boundary, "montage_um_per_px": located.montage.um_per_px,
-            "n_detected": 0 if located.detected_common is None else len(located.detected_common)}
+            "n_detected": 0 if located.detected_common is None else len(located.detected_common),
+            "fiducial": located.fiducial}
 
 
 def hex_ring(q: int | None, r: int | None) -> int | None:

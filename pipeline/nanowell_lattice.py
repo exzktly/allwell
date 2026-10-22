@@ -472,7 +472,7 @@ def _snap_origin(fit, position):
 
 
 def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
-                   plate_rigid=None, fiducial_margin) -> OriginResolution:
+                   plate_rigid=None, fiducial_margin, fiducial_refusal: str = "") -> OriginResolution:
     """Resolve independent evidence in priority order, with explicit conflicts.
 
     The caller supplies its score margin; it is not calibrated from synthetic
@@ -481,6 +481,11 @@ def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
     target's true origin (``uncertainty_with_site``), not only of the transform.
     Every accepted position is snapped to a site, and a fiducial or array centre
     farther than a quarter pitch from every site is refused instead of snapped.
+
+    Every source that was offered and refused is named in the reason (tracker F1):
+    a square whose lead over the runner-up is under the margin says so with both
+    scores, and *fiducial_refusal* is the caller's sentence for a square that was
+    never a candidate (``nanowell_detect.describe_fiducial``).
     """
     if not math.isfinite(fiducial_margin) or fiducial_margin < 0:
         raise ValueError("fiducial_margin must be finite and non-negative")
@@ -503,6 +508,11 @@ def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
         scores = (fiducial.score, fiducial.runner_up_score)
         if all(math.isfinite(v) for v in scores) and scores[0] - scores[1] > fiducial_margin:
             offer("fiducial", fiducial.position)
+        else:
+            rejected.append(f"the most square outline reads {scores[0]:.2f} and the next {scores[1]:.2f}, a lead "
+                            f"of {scores[0] - scores[1]:.2f} under the {fiducial_margin:g} a central square needs")
+    elif fiducial_refusal:
+        rejected.append(fiducial_refusal)
     if array_centre is not None:
         offer("array_centre", array_centre)
     if (plate_rigid is not None and plate_rigid.ok and plate_rigid.uncertainty is not None

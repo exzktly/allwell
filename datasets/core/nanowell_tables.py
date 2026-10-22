@@ -218,7 +218,8 @@ def nanowell_block_conflict(info1: dict, info2: dict) -> str | None:
     first, second = info1.get("nanowell"), info2.get("nanowell")
     if not first or not second:
         return None
-    for key, label in (("scheme_version", "table scheme"), ("settings", "nanowell settings")):
+    for key, label in (("scheme_version", "table scheme"), ("measure_version", "measurement version"),
+                       ("settings", "nanowell settings")):
         if first.get(key) != second.get(key):
             return f"the two datasets' nanowell results were computed under different {label}"
     return None

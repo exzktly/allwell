@@ -309,7 +309,14 @@ Besides the usual per-cell CSV (one row per cell, with the owner tile as `fov` a
 `nanowells/<well>.csv`, one row per nanowell and timepoint (its address, position, state, imaged and visible
 fractions, cell count, confluence, and fluorescence over the empty nanowells' background), and
 `nanowells/<well>_grid.json`, the registration, lattice and status of every timepoint. A nanowell no tile could
-see, or that was hidden, has a row with its state and **no number**, never a zero. The nanowells of a circular array are the
+see, or that was hidden, has a row with its state and **no number**, never a zero. Tiles imaged at different
+brightness or with a different offset are measured alike: each nanowell is compared with the empty nanowells only
+after it has been brought to their levels — its brightness from the lattice around it, which never holds cells, and
+its tile's offset from that tile's own empty nanowells (or, for a tile with none, the well's, which the grid
+record and the run's notes name). One texture threshold serves every tile of a timepoint, so every nanowell that
+was seen has a confluence. Results measured this way carry a measurement version: adding timepoints to a dataset
+measured by an earlier version analyses the well again in full, and Merge Plates refuses to combine two datasets
+measured by different versions. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image
 showed in full; floor just beyond the rim that every image showed empty is not a nanowell and has no row. Adding a
 timepoint to an analysed well gives the same nanowells a run over every timepoint would: when the new images show a

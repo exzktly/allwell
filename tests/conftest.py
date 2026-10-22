@@ -970,6 +970,7 @@ NANOWELL_E2E_FILES = {
     "test_nanowell_sites.py": "site state on rendered tiles; 22 s",
     "test_nanowell_detection_chain.py": "image in, addresses out; 18 s",
     "test_nanowell_registration_reuse.py": "a second run reuses the first's tile registration; 29 s",
+    "test_nanowell_tile_brightness.py": "tiles of different gain and offset measure alike; 30 s",
 }
 
 

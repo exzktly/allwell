@@ -59,7 +59,7 @@ from services.remote_commands import (
     BATCH_DONE,
     BATCH_READY,
     _batch_driver_snippet,
-    _compose_driver_cmd, pack_for_login_shell,
+    _compose_driver_cmd, batch_pipeline_argv, pack_for_login_shell,
 )
 from services.remote_run_id import (
     _compute_run_id,
@@ -735,11 +735,7 @@ class _BatchedRemoteProcess:
             self._output_filter, self._zipped.mode,
             background_dir=f"{run_dir}/bg" if blanks else "",
         )
-        # Each batch still sees only its own slice, so the in-pipeline
-        # auto-threshold pass would write defaults from a fraction of the plate
-        # — it is suppressed here and re-run once locally over everything.
-        if "--no_auto_threshold" not in remote_argv:
-            remote_argv = list(remote_argv) + ["--no_auto_threshold"]
+        remote_argv = batch_pipeline_argv(remote_argv)
         remote_argv = (list(remote_argv) + ["--suspend_file", paths.suspend_request]
                        + background_aliases(self, run_dir, bool(blanks)))     # the blank's earlier paths
         run.suspend_request = paths.suspend_request

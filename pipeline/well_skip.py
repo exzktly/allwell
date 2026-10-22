@@ -100,7 +100,7 @@ def select_only_wells(items, only_wells):
     return kept, sorted(wanted - present)
 
 
-def scope_to_only_wells(well_zips, well_folders, only_wells, *, refuse, log):
+def scope_to_only_wells(well_zips, well_folders, only_wells, *, refuse, log, absent_ok: bool = False):
     """Narrow a run's ``(well_zips, well_folders)`` to its ``--only_wells``.
 
     Called once the plate's own well list has served everything that needs the
@@ -108,14 +108,21 @@ def scope_to_only_wells(well_zips, well_folders, only_wells, *, refuse, log):
     and background models are then still built from the whole input, because a
     blank outside the subset is a reference, not a well whose output is wanted.
     *refuse* is the parser's ``error`` — a named well missing from the input
-    stops the run before any image is read.
+    stops the run before any image is read — unless *absent_ok*
+    (``--only_wells_absent_ok``), for one batch of a batched remote run: every
+    batch is told the whole subset and holds only its share, and the app has
+    already refused a named well the plate lacks before uploading. Those wells
+    are then logged as belonging to another batch.
     """
     if only_wells is None:
         return well_zips, well_folders
     zips, missing_z = select_only_wells(well_zips, only_wells)
     folders, missing_f = select_only_wells(well_folders, only_wells)
     missing = missing_z if well_zips else missing_f
-    if missing:
+    if missing and absent_ok:
+        log.info("Only wells: %s not in this input (another batch's); this batch runs the named wells it holds.",
+                 ", ".join(missing))
+    elif missing:
         refuse(f"--only_wells names well(s) not in the input: {', '.join(missing)}")
     log.info("Only wells: %d of %d well(s) — %s. Every other well's output and "
              "records are left as they are.", len(zips or folders),

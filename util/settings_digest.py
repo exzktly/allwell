@@ -152,6 +152,8 @@ NOT_KEYED_ON: dict[str, str] = {
     "force_wells":           "the same, for named wells",
     "incremental":           "asks for reuse; it does not change the result",
     "only_wells":            "which wells run, not how any one is computed",
+    "only_wells_absent_ok":  "whether a named well absent from one batch's input "
+                             "is skipped or refused; it computes nothing",
     "incremental_prior_dir": "where reuse looks, not what is computed",
     "nanowell_registration_from": "where a nanowell run looks for tile registration to reuse; a stored one "
                                   "is taken only when its own key matches this run's inputs exactly, so "

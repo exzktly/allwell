@@ -420,3 +420,25 @@ def test_the_nanowells_section_sits_directly_below_quality_control(tab):
     layout = tab._section_widgets["Quality Control"].parentWidget().layout()
     order = sorted(titles, key=lambda t: layout.indexOf(tab._section_widgets[t]))
     assert order.index("Nanowells") == order.index("Quality Control") + 1, order
+
+
+def test_an_uncounted_preview_draws_its_seen_sites_as_not_counted_rather_than_as_holding_cells():
+    """Without Cellpose every seen site is "measured" with no count; drawn in the "cells" colour, the whole array
+    would read as full. They take their own colour and legend entry; occluded and clipped keep theirs."""
+    import numpy as np
+
+    from analyze.nanowell_preview import STATE_COLOURS
+
+    result = PreviewResult("ok", montage=np.zeros((200, 300), np.uint8), um_per_px=4.0, origin_um=(100.0, 100.0),
+                           counted=False)
+    result.sites = [_site(0, 1, "measured"), _site(0, 0, "occluded"), _site(1, 0, "clipped")]
+    assert [m.colour for m in site_marks(result)] == ["uncounted", "occluded", "clipped"]
+    assert STATE_COLOURS["uncounted"] not in (STATE_COLOURS["measured"], STATE_COLOURS["empty"])
+    assert "Sites: 1 clipped, 1 not counted, 1 occluded." in summary_text(_summarisable(result))
+
+
+def _summarisable(result):
+    result.well, result.timepoint, result.tile_count = WELL, "0h", 4
+    result.pitch_um, result.angle_deg, result.origin_method = 172.0, 0.0, "fiducial"
+    result.overlap_um, result.overlap_needed_um = (130.0, 130.0), 120.0
+    return result

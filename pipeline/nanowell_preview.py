@@ -39,15 +39,37 @@ class PreviewResult:
     tile_count: int = 0
     crops: list[dict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    #: Whether cells were counted. ``False`` when the segmenter could not be loaded (Cellpose not installed or not
+    #: importable): the nanowells, their addresses and states stand, and no site carries a count.
+    counted: bool = True
 
     def counts(self) -> dict[str, int]:
         """Sites per state, with ``fused`` counted beside the states (it is a flag on a measured site)."""
         out: dict[str, int] = {}
         for site in self.sites:
-            out[site["state"]] = out.get(site["state"], 0) + 1
+            # Without counting, a seen site says so rather than adding to the sites "measured" with cells counted.
+            # Only then: a fused site is measured with no count in an ordinary preview too, and stays "measured".
+            state = "not counted" if not self.counted and site["state"] == "measured" else site["state"]
+            out[state] = out.get(state, 0) + 1
             if site["fused"]:
                 out["fused"] = out.get("fused", 0) + 1
         return out
+
+
+def _missing_import(exc: BaseException) -> str | None:
+    """The import failure behind *exc*, as text, when the segmenter could not be loaded at all; otherwise ``None``.
+
+    ``pipeline.cellpose`` raises ``RuntimeError`` *from* the ``ImportError``, so the chain is walked: a missing
+    package and a broken install both end in an import failure, while a segmenter that loaded and then failed on
+    the image does not, and is still a measuring failure.
+    """
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, ImportError):
+            return f"{type(exc).__name__}: {exc}"
+        exc = exc.__cause__ or exc.__context__
+    return None
 
 
 def _crop_for(site: dict, images: dict, located, template, segment, px: float, half_um: float) -> dict | None:
@@ -120,15 +142,30 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
     if located.status not in (nr.OK, nr.UNADDRESSED) or (located.boundary is None and located.array_sites is None):
         return result
     px = located.pixel_size_um
+    segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
+    missing = None
     try:
-        segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
         radius, own = nr.own_array_model(located, settings)
-        measured = nr.measure_timepoint(located, images, settings, radius, roster=own, segmenter=segment)
+        try:
+            measured = nr.measure_timepoint(located, images, settings, radius, roster=own, segmenter=segment)
+        except Exception as exc:
+            missing = _missing_import(exc)
+            if missing is None:
+                raise
+            # Finding the nanowells needs no segmenter, only counting the cells in them does: measure again without
+            # counting, so the array is still shown, and say why no site has a count.
+            log.warning("Test detection: the segmenter could not be loaded (%s); measuring without counting", missing)
+            measured = nr.measure_timepoint(located, images, settings, radius, roster=own, count_cells=False)
+            result.counted, segment = False, None
     except Exception as exc:          # the location above is still worth showing; the reason goes with it (X27)
         log.warning("Test detection: measuring %s %s failed", well, timepoint, exc_info=True)
         result.notes = [f"Measuring failed ({type(exc).__name__}: {exc}); the lattice and addresses above stand."]
         return result
     result.notes = list(measured.notes)
+    if not result.counted:
+        result.notes.insert(0, f"Cells were not counted: Cellpose could not be loaded ({missing}). The nanowells, "
+                               "their addresses and states are found without it; a run needs it to count cells, so "
+                               "install it (see requirements) before starting one.")
     if not settings.infer:
         # What one timepoint shows of the rim, not what a run will keep (tracker X35a-R5): a run decides it over
         # every timepoint, and a dataset analysed before keeps the roster it was analysed with.
@@ -142,7 +179,7 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
                     key=lambda s: -(s["n_cells"] or 0))
     chosen = ranked[:max(n_crops - 1, 0)]
     empty = next((s for s in result.sites if s["state"] == "empty" and not s["fused"]), None)
-    for site in chosen + ([empty] if empty is not None and n_crops else []):
+    for site in (chosen + ([empty] if empty is not None and n_crops else [])) if segment is not None else []:
         crop = _crop_for(site, images, located, template, segment, px, 0.75 * settings.diameter_um)
         if crop is not None:
             result.crops.append(crop)

@@ -680,7 +680,10 @@ def _pooled_template(located: Located, images: dict, settings: NanowellSettings,
 
 def _tile_contents(owner, indices, located, images, settings, geoms, addresses, template, empties, segment, channels,
                    kind=None):
-    """Counts, confluence, area estimate, fluorescence and focus for the sites one tile owns, and its cell rows."""
+    """Counts, confluence, area estimate, fluorescence and focus for the sites one tile owns, and its cell rows.
+
+    *segment* ``None`` counts no cells: every site keeps its confluence (texture, no segmentation), fluorescence and
+    focus, its ``n_cells`` and area estimate are ``None`` (not counted, never zero) and there are no cell rows."""
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_sites import rim_focus
 
@@ -692,15 +695,35 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     if not fit_sites:
         return {}, {}, notes
     rim = nm.rim_suppress(images[owner], px, template, fit_sites)
-    labels = nm.segment_tile(rim, segment)
-    counts = nm.count_cells(labels, px, fit_sites, owned={g.index for g in fit_sites})
     mine = [g for g in fit_sites if g.index in empties]
     threshold = nm.texture_threshold(rim, px, mine) if mine else None
     confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, threshold)))
-    area = nm.area_estimate(labels, px, fit_sites, counts)
     channel_images = {c: img for c, f in (channels or {}).items() if (img := f(owner)) is not None}
+    counts = area = None
+    table: dict = {}
+    if segment is not None:
+        labels = nm.segment_tile(rim, segment)
+        counts = nm.count_cells(labels, px, fit_sites, owned={g.index for g in fit_sites})
+        area = nm.area_estimate(labels, px, fit_sites, counts)
+        table = _cell_rows(labels, px, fit_sites, counts, addresses, owner, (left, top), channel_images, channels,
+                           kind)
+    fluorescence = {c: {f.index: f for f in nm.site_fluorescence(img, px, fit_sites, {g.index for g in mine})}
+                    for c, img in channel_images.items()}
+    contents = {g.index: {"n_cells": None if counts is None else counts[g.index].n_cells,
+                          "confluence": confluence[g.index],
+                          "interior_imaged": nm.interior_imaged(images[owner].shape, px, g),
+                          "area": None if area is None else area[g.index],
+                          "fluor": {c: f[g.index] for c, f in fluorescence.items()},
+                          "focus": rim_focus(images[owner], px, g)} for g in fit_sites}
+    return contents, table, notes
+
+
+def _cell_rows(labels, px, fit_sites, counts, addresses, owner, origin, channel_images, channels, kind) -> dict:
+    """The cell table for the cells one tile's segmentation counted, in the well's columns."""
+    from pipeline import nanowell_measure as nm
+
     table = nm.cell_table(labels, px, fit_sites, counts, {g.index: addresses[g.index] for g in fit_sites},
-                          tile_origin_um=(left, top), intensity=channel_images or None)
+                          tile_origin_um=origin, intensity=channel_images or None)
     n = len(table["label"])
     table["fov"] = [owner] * n
     for channel in (channels or {}):
@@ -710,13 +733,7 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     located_at = [addresses[i] or (None, None) for i in table["site_index"]]
     table["nw_ring"] = [lattice_ring(q, r, kind) for q, r in located_at]
     table["nw_label"] = [None if q is None else f"{q}_{r}" for q, r in located_at]
-    fluorescence = {c: {f.index: f for f in nm.site_fluorescence(img, px, fit_sites, {g.index for g in mine})}
-                    for c, img in channel_images.items()}
-    contents = {g.index: {"n_cells": counts[g.index].n_cells, "confluence": confluence[g.index],
-                          "interior_imaged": nm.interior_imaged(images[owner].shape, px, g),
-                          "area": area[g.index], "fluor": {c: f[g.index] for c, f in fluorescence.items()},
-                          "focus": rim_focus(images[owner], px, g)} for g in fit_sites}
-    return contents, table, notes
+    return table
 
 
 def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused, channels, kind=None) -> dict:
@@ -728,8 +745,8 @@ def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused
            "state": state.state, "partially_visible": state.partially_visible,
            "focus": None if got is None else got["focus"], "n_cells": state.n_cells,
            "confluence": state.confluence,
-           "area_est_cells": None if got is None else got["area"].area_count,
-           "count_disagreement": None if got is None else got["area"].count_disagreement}
+           "area_est_cells": None if got is None or got["area"] is None else got["area"].area_count,
+           "count_disagreement": None if got is None or got["area"] is None else got["area"].count_disagreement}
     for channel in (channels or {}):
         f = None if got is None else got["fluor"].get(channel)
         row[f"{channel}_integrated"] = None if f is None else f.integrated
@@ -739,13 +756,16 @@ def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused
 
 def measure_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float | None, *,
                       segmenter=None, channels: dict | None = None, earliest_template=None,
-                      roster=None) -> Measured:
+                      roster=None, count_cells: bool = True) -> Measured:
     """Rows for every roster site of a located timepoint, and the cells inside them.
 
     *array_radius_um* is the well's one shared array-model radius (so every timepoint has the same
     roster); for an inferred array that is not a circle it is ``None`` and *roster* is the well's shared set of
     addresses instead. *segmenter* maps a rim-suppressed tile to a label image (default: Cellpose's label-free
-    path). *channels* maps a fluorescence channel name to ``f(tile_id) -> image | None``. A timepoint
+    path). *count_cells* ``False`` segments nothing: the sites keep their states, confluence and fluorescence, and
+    carry no count (``n_cells`` ``None``, so a seen site is ``measured`` with no number, never ``empty``) — what
+    Test detection shows when Cellpose cannot be loaded. *channels* maps a fluorescence channel name to
+    ``f(tile_id) -> image | None``. A timepoint
     that is not ``ok`` (no origin) is measured on the sites actually detected, with no address.
     """
     from pipeline import nanowell_measure as nm
@@ -790,7 +810,7 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
                         "_object": template}
         if template.source != nm.SOURCE_EARLIEST:                  # its own: what flag_template_drift compares
             out.template["floor_ratio"] = nm.floor_ratio(template)
-    segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
+    segment = (segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)) if count_cells else None
     contents: dict[int, dict] = {}
     for owner, indices in by_tile.items():
         if owner is None or template is None:

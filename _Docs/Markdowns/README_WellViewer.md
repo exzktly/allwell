@@ -465,6 +465,15 @@ name the same folder:
 python -c "from services.remote_config import resolve_rsync_binary as r, resolve_ssh_for_rsync as s; print(r()); print(s())"
 ```
 
+That pairing means two `ssh.exe` are in play — Git's for All-Well's own commands and the connection test, rsync's
+for every transfer — and each MSYS2 / Cygwin runtime has its own home folder. All-Well tells both to use the one
+host-key file in your Windows profile, `C:\Users\<you>\.ssh\known_hosts`, so a host whose key changed (it was
+rebuilt or reinstalled: "REMOTE HOST IDENTIFICATION HAS CHANGED", and transfers fail with rsync's
+"error in rsync protocol data stream (code 12)") is fixed in one place: remove its line from that file, or the
+file, and run the remote configurator's connection test, which records the new key for both. A
+`known_hosts` under the rsync runtime's own home (`C:\msys64\home\<you>\.ssh`, or cwRsync's `home` folder) is no
+longer read.
+
 To produce a distributable Windows bundle (optional — only if you want
 `AllWell.exe` for users who don't have the env), run this from the same
 Miniforge Prompt you have been using:

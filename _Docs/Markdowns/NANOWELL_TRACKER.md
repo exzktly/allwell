@@ -1381,6 +1381,54 @@ failing without the fix.
 | X35a-R9 | Review of X35a-R1 (Low, suspected). `_kept_evidence` read the rows of a kept timepoint flagged a roster mismatch, whose addresses may name its neighbours' sites | `pipeline/nanowell_task.py` | `done` | Such rows are skipped, with the reason at the site. Not built end to end: a misanchored kept timepoint's rows cover only roster sites, and no rendered case showed its evidence changing the roster. `test_a_kept_timepoint_flagged_a_roster_mismatch_says_nothing_about_the_rim` pins the rule on rows; reading them fails it |
 | X35a-R10 | Review of X35a-R1 (Low). README and ARCHITECTURE described re-analysis as it was before X35a-R6 to R8 | `_Docs/Markdowns/` | `done` | Both rewritten to the behaviour above: what counts as seen, the misanchor check against kept detections, the measured reason, and where the re-analysis is said. Text only |
 
+### Section F — Fiducials and measured geometry on a real plate
+
+The first real plate run through Test detection (well D07 at 0 h, 5 × 5 tiles at 10 % overlap, 100 µm format
+selected) left **8 of 10 wells unaddressed**, although a person finds the central square at a glance. The reported
+numbers, and what they establish:
+
+- *Pitch 152.6 µm, lattice angle −0.3°.* The format's nominal pitch is 172 µm (§1.2's estimate from "about 1,100
+  nanowells in a 3.0 mm radius"); the plate's is 11 % finer.
+- *The fitted nanowells measure 125.8 µm across but the plate format sets 100 µm.* 1.258 against the format's
+  diameter while the pitch is 0.887 of its pitch: no single scale error produces both, so the pixel size is not
+  the cause.
+- *Overlap 141 × 104 µm.* At 10 % that is a 1410 × 1040 µm tile: a 4096 × 3008 sensor at 0.345 µm/px, or the same
+  sensor binned 2 × 2 at 0.69 µm/px (the user reports 2 × 2 binning), at 10x. Binning leaves a tile's extent
+  unchanged, and a pixel size that ignored it would halve every length (pitch ≈ 76 µm). **The pixel size read from
+  the CZI is consistent with the images (inferred, not confirmed against ZEN).**
+- *1,253 measured + 41 fused + 35 occluded sites* at 152.6 µm fill a circle of radius ≈ 2.92 mm. Five 1.04 mm tiles
+  at 10 % overlap cover 4.78 mm vertically against an array ≈ 5.84 mm across, so **the rim is cut top and bottom**
+  and the circle fitted to it places the centre badly: the array centre landed 47 % of a pitch from a site
+  (accepted only under 25 %).
+- *30–60 sites per tile "exceed the template and are unmeasured"*: 1,206 of the 1,253 sites. The template and every
+  site fit are sized from the format's 100 µm, not the 125.8 µm measured.
+
+Running the chain on rendered tiles at the plate's numbers (pitch 152.6, diameter 125.8, the square drawn as one
+nanowell-sized square on the centre site) still anchors on the square, but its squareness falls from 0.85 to 0.51
+(0.45 with blur 4 px and cells), against a floor of 0.40 and a required lead of 0.30, because the square is scored
+in an annulus sized from 100 µm. A real square (rounded molded corners, phase halo) has less margin than the
+rendered one, which is consistent with 8 of 10 failing (inferred). Nothing written by the run says which test the
+square failed.
+
+The plan this section follows, in the user's words: measure the plate's geometry from the images instead of
+assuming it; say why a square was refused; and let an unaddressed well be completed by the pipeline and anchored
+afterwards in Review.
+
+| # | Item | Place | State | Evidence |
+|---|---|---|---|---|
+| F1 | An unaddressed timepoint does not say why the central square was refused. `resolve_origin`'s reason names a rejected array centre but never the square: whether no site near the centre could be scored, the most square outline scored under `MIN_SQUARENESS`, or it led the runner-up by less than `FIDUCIAL_MARGIN`. The scores are not written either | `pipeline/nanowell_detect.py`, `pipeline/nanowell_lattice.py`, `pipeline/nanowell_run.py` | `todo` | |
+| F2 | In the default `hex_circle` geometry the format's diameter is used, never the plate's: the matched filter, the square's scoring annulus, refinement (kept within 30 % of the setting) and the empty-nanowell template are all sized from 100 µm on a plate measuring 125.8 µm. Measure the diameter on the montage before detection, use it for every one of those, and keep the format's value only as a check that is reported | `pipeline/nanowell_run.py` | `todo` | |
+| F3 | One diameter per well, as X35-R14 decided for the inferred geometry: the median of the timepoints' measured diameters, so ownership and templates do not differ between timepoints of one well | `pipeline/nanowell_run.py` | `todo` | |
+| F4 | `DIAMETER_AGREEMENT = 0.25` decided whether the measured diameter replaces the setting's, and the first real plate sits at +25.8 %, on the line: the X35-R14 docstring records the flip (125 µm at some timepoints, 100 at others). Once the measured diameter is always used (F2), the tolerance only decides whether a disagreement is reported | `pipeline/nanowell_infer.py`, `pipeline/nanowell_run.py` | `todo` | |
+| F5 | The square is modelled as one nanowell-sized, bright, axis-aligned square on the centre site, and is scored only at sites the round-well matched filter found (whose dark annulus is built to reject a light region wider than a nanowell). Score the square over a range of sizes, at positions not limited to the detected sites | `pipeline/nanowell_detect.py` | `todo` | Needs a crop of a real square (Q7) to choose the size range; the rendered square is the only one tested |
+| F6 | `MIN_SQUARENESS = 0.4` and `FIDUCIAL_MARGIN = 0.3` were chosen on rendered squares. Calibrate both on real squares and on the real runner-ups | `pipeline/nanowell_detect.py`, `pipeline/nanowell_run.py` | `blocked` | Q7: needs real CZIs |
+| F7 | The 100 µm format's nominal pitch (172 µm) is §1.2's estimate; the first real plate measures 152.6 µm. It only seeds a search from half to twice it, so it does no harm yet, but the number is wrong | `pipeline/nanowell_run.py` | `blocked` | Q7: one plate is not a format; confirm against the plate's specification |
+| F8 | An unaddressed timepoint is measured on the sites detected only: a site dark under a bubble is never predicted, so it has no row, against §1.1's "every nanowell's position must always be deduced". The lattice and the array's boundary place every site; only the address needs the origin. Measure the whole roster, with the address blank | `pipeline/nanowell_run.py` | `todo` | |
+| F9 | Nothing written lets an origin be supplied later: the grid block carries pitch, angle and mirroring but not the fitted basis and phase, so re-addressing the rows needs them reconstructed. Write the lattice basis and phase origin in the well frame | `pipeline/nanowell_run.py` | `todo` | |
+| F10 | Review: set a well's origin by hand on the montage (snap to the nearest lattice site), written into the dataset as a correction marked `manual` beside the run's own result, never over it; the rows are re-addressed by arithmetic and the timepoint join rebuilt, and every output of a manually anchored well says so | `review/features/nanowell/`, `domain/` | `todo` | Depends on F8, F9 |
+| F11 | Pool the plate: one diameter (and a pitch cross-check) as the median over the plate's wells, a well far from the median flagged | `pipeline/nanowell_task.py` | `todo` | |
+| F12 | Close-out: ARCHITECTURE and README rewritten for F1–F11, version bump, the section's review | `_Docs/Markdowns/` | `todo` | |
+
 ## 6. What would make this plan wrong
 
 Each of these, if it turns out true, changes a section rather than a row.

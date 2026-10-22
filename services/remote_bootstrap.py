@@ -387,7 +387,9 @@ def _ssh_run(
     user in their own terminal as the Setup SSH Key wizard's Step 2)
     handles that one-shot interaction.
     """
-    cmd = [_ssh_binary()]
+    sys.path.insert(0, str(REPO_ROOT))
+    from services.remote_config import known_hosts_options
+    cmd = [_ssh_binary(), *known_hosts_options()]
     if ssh_key_path:
         cmd += ["-i", str(Path(ssh_key_path).expanduser())]
     cmd += [
@@ -1003,10 +1005,13 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
     # MSYS2's rsync) and ``dup() in/out/err failed`` kills the fork
     # → rsync exit 12 / ``connection unexpectedly closed``.
     sys.path.insert(0, str(REPO_ROOT))
-    from services.remote_config import resolve_ssh_for_rsync
+    from services.remote_config import known_hosts_options, resolve_ssh_for_rsync
     rsync_argv = [_rsync_binary(), "-a"]
     ssh_inner = [
         resolve_ssh_for_rsync(),
+        # Quoted here, as the key path is below: the -e string is split by rsync, and a profile path with a space
+        # would otherwise reach ssh as two files.
+        *(shlex.quote(a) for a in known_hosts_options()),
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "ConnectTimeout=15",
         # v5.2.8: BatchMode=yes so rsync's transport ssh fails fast

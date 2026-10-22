@@ -33,7 +33,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from services.remote_config import resolve_ssh_binary
+from services.remote_config import known_hosts_options, resolve_ssh_binary
 from services.subprocess_text import TEXT_UTF8
 
 
@@ -225,6 +225,7 @@ def probe_ssh_connection(
     """
     cmd = [
         resolve_ssh_binary(),
+        *known_hosts_options(),      # the file transfers check too, so a key this accepts is one they accept
         "-o", "BatchMode=yes",
         "-o", "ConnectTimeout=10",
         "-o", "StrictHostKeyChecking=accept-new",

@@ -230,7 +230,7 @@ class RemoteHost:
         v5.2.1 wizard rather than whichever identity ssh's default
         search order would pick.
         """
-        argv = [resolve_ssh_binary()]
+        argv = [resolve_ssh_binary(), *known_hosts_options()]
         if allocate_tty:
             argv.append("-tt")
         if self.ssh_key_path:
@@ -334,6 +334,28 @@ def _is_windows() -> bool:
     this module funnels through here.
     """
     return os.name == "nt"
+
+
+def known_hosts_options() -> list[str]:
+    """``-o UserKnownHostsFile=…`` naming the one known-hosts file every ssh this app starts must share; ``[]`` on POSIX.
+
+    On Windows the app starts two different ``ssh.exe``: Git for Windows' (:func:`resolve_ssh_binary`) for its own
+    commands and the connection test, and the one beside ``rsync.exe`` (:func:`resolve_ssh_for_rsync`) for every
+    transfer, which has to come from rsync's own MSYS2 / Cygwin runtime. Each runtime has its own home, so each read
+    its own ``~/.ssh/known_hosts`` — Git's under ``C:\\Users\\<you>``, rsync's under its install's ``/home/<you>`` — and
+    a host whose key changed was fixed in the first by deleting it (or by the connection test accepting the new key)
+    while every transfer went on failing on the stale key in the second: "REMOTE HOST IDENTIFICATION HAS CHANGED",
+    then rsync's "error in rsync protocol data stream (code 12)". Naming the file makes them one: the Windows
+    profile's ``.ssh/known_hosts``, beside the keys the setup wizard writes (``ssh_key_setup``). Forward slashes,
+    which all three runtimes read; quoted when the path holds a space, since the option takes a space-separated list.
+    On POSIX every ssh is the same binary with the same home, so nothing is added.
+    """
+    if not _is_windows():
+        return []
+    path = (Path.home() / ".ssh" / "known_hosts").as_posix()
+    if " " in path:
+        path = f'"{path}"'
+    return ["-o", f"UserKnownHostsFile={path}"]
 
 
 def resolve_ssh_binary() -> str:

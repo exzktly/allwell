@@ -28,6 +28,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from services.remote_config import (
+    known_hosts_options,
     RemoteHost,
     resolve_rsync_binary,
     resolve_ssh_for_rsync,
@@ -193,6 +194,7 @@ def _rsync_ssh_transport(host: RemoteHost) -> list[str]:
     """
     ssh_inner = [
         resolve_ssh_for_rsync(),
+        *known_hosts_options(),      # the same known-hosts file as every other ssh, not rsync runtime's own
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "ConnectTimeout=15",
         "-o", "BatchMode=yes",

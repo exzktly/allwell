@@ -98,7 +98,8 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
             remote = spec.resolve_remote()
         except RunSpecError as exc:
             return str(exc)
-        refusal = _nanowell_remote_resume_refusal(spec.opts, remote)
+        refusal = _nanowell_remote_resume_refusal(spec.opts, remote,
+                                                  getattr(self, "_resume_part_way_wells", ()))
         if refusal:
             return refusal
         self._run_ok = False
@@ -443,7 +444,7 @@ def _earlier_run_still_alive(spec: RunSpec) -> str | None:
             "race it for the same files.")
 
 
-def _nanowell_remote_resume_refusal(opts: dict, remote) -> str | None:
+def _nanowell_remote_resume_refusal(opts: dict, remote, part_way=()) -> str | None:
     """Why a remote nanowell run that has become incremental cannot start, or ``None``.
 
     The form refuses a remote nanowell run with Incremental ticked; this is the same refusal for the runs the app
@@ -457,4 +458,10 @@ def _nanowell_remote_resume_refusal(opts: dict, remote) -> str | None:
     nanowell = bool(str(opts.get("nanowell_format") or "").strip())
     if remote is None or not nanowell or not opts.get("incremental") or opts.get("force"):
         return None
+    if part_way:
+        # A run limited to named wells was made incremental for those of them an unfinished run left half-done: say
+        # which, and that Force redoes only the named wells, not the plate.
+        from services.remote_run_state import nanowell_remote_resume_refusal_for
+
+        return nanowell_remote_resume_refusal_for(part_way)
     return NANOWELL_REMOTE_RESUME_REFUSAL

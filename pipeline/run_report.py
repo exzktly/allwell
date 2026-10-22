@@ -20,6 +20,7 @@ folder mode, and remote runs.
 from __future__ import annotations
 
 import json
+import re
 import logging
 import os
 import tempfile
@@ -100,6 +101,44 @@ def withdraw_seal(output_dir: Path | str, well_label: str) -> None:
         raise SealNotWithdrawnError(
             f"Well {well_label}: could not withdraw its completion seal {path} ({type(exc).__name__}: {exc}); "
             "the well was not rewritten") from exc
+
+
+#: Output files that name the well they belong to: ``<well>_out.zip``, ``<prefix>_<well>.csv[.gz]`` and a nanowell
+#: well's ``nanowells/<well>_grid.json``, each read as the well token it carries.
+_WELL_OUTPUT_PATTERNS = (
+    (".", re.compile(r"^(?P<well>[^_/]+)_out\.zip$")),
+    (".", re.compile(r"^.+_(?P<well>[A-Za-z]{1,2}\d{1,3})\.csv(?:\.gz)?$")),
+    ("nanowells", re.compile(r"^(?P<well>[^_/]+)_grid\.json$")),
+)
+
+
+def wells_left_part_way(output_dir: Path | str, wells) -> list[str]:
+    """The wells among *wells* whose output in *output_dir* exists without a completion seal, sorted.
+
+    The one thing an unfinished run can leave that only ``--incremental`` recovers: a well that wrote some output
+    and was not sealed whole (:func:`seal_well_complete`), which a plain run would otherwise skip as complete. A
+    well with no output has nothing to resume, and a sealed one is whole, so for those an incremental run and a
+    plain one do the same thing. Wells are compared canonically (``A1`` is ``A01``). An unreadable folder answers
+    with every well, so the caller stays on the safe side.
+    """
+    from util.well_token import canonical_well_label
+
+    wanted = {canonical_well_label(str(w)) or str(w) for w in wells}
+    root = Path(output_dir)
+    try:
+        sealed = {canonical_well_label(p.stem) for p in (root / COMPLETE_DIRNAME).glob("*.json")}
+        written = set()
+        for sub, pattern in _WELL_OUTPUT_PATTERNS:
+            folder = root / sub
+            if not folder.is_dir():
+                continue
+            for entry in folder.iterdir():
+                found = pattern.match(entry.name)
+                if found and entry.is_file() and entry.stat().st_size > 0:
+                    written.add(canonical_well_label(found.group("well")))
+    except OSError:
+        return sorted(wanted)
+    return sorted(w for w in wanted if w in written and w not in sealed)
 
 
 def recorded_well_report(output_dir: Path | str, well_label: str) -> dict | None:

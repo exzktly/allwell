@@ -9642,20 +9642,24 @@ not established. The user reports the square's edges parallel to the plate's, wh
 a lattice row (modulo the square's 90°) for either regular placement of a hex lattice on the
 plate. Nothing has run on real phase-contrast images (tracker N10, blocked on Q7).
 
-**The plate's nanowell diameter is measured, never assumed.** Before anything is sized from a diameter,
-`locate_timepoint` measures it (`_measured_diameter`): `find_wells_by_contrast` reads the light blobs of the
-montage for a rough diameter and their positions, and `_fitted_diameter` fits the edges of the sites wholly inside
-the tile that holds the most of them at full resolution (`refine_sites`, seeded at the rough diameter and keeping
-radii within 30 % of it), taking the median of at least `MIN_DIAMETER_FITS`. The montage is block-averaged, so its
-blobs alone read 125.8 µm wells as 111–117 µm on rendered plates; the fit reads them within a few tenths of a
-micrometre, in a tenth of a second. That diameter sizes the matched filter, the central square's scoring ring, the
-site fits, ownership's margin and the empty-nanowell template; `_settle_diameter` then takes one diameter for the
-whole well, the median over its timepoints (or what an earlier run kept), whatever the geometry. The plate
-format's diameter is a check: a measured diameter more than `DIAMETER_AGREEMENT` (25 %) off it is a note naming
-both, and the format's value is used only when nothing could be measured, which is said. Registration's per-tile
-lattice fits still use the format's diameter, since they run before any tile is placed; a matched filter tolerates
-that, and only the lattice they fit is used. The first real plate measured 125.8 µm wells against the 100 µm
-format, which left 1,206 of its 1,253 sites unmeasured as larger than a template sized from 100 µm.
+**The plate's nanowell diameter is measured, never assumed.** Before anything is sized from a diameter — before
+registration, whose per-tile lattice fits run a matched filter — `locate_timepoint` measures it on the tiles nearest
+the grid's centre (`_tile_diameter`): `find_wells_by_contrast` reads the light blobs of a copy block-averaged to
+about 1,024 px for a rough diameter and their positions, and `_fitted_diameter` fits the edges of the sites wholly
+inside that tile at full resolution (`refine_sites`, seeded at the rough diameter and keeping radii within 30 % of
+it), taking the median of at least `MIN_DIAMETER_FITS`; the first centre tile that gives one decides. The blobs
+alone read 125.8 µm wells as 111–117 µm on rendered plates; the fit reads them within a few tenths of a micrometre.
+That diameter sizes the per-tile fits registration rests on (`_tile_fit`) and joins the registration key, then the
+matched filter on the montage, the central square's scoring ring, the site fits, ownership's margin and the
+empty-nanowell template; `_settle_diameter` then takes one diameter for the whole well, the median over its
+timepoints (or what an earlier run kept), whatever the geometry. The plate format's diameter is a check: a measured
+diameter more than `DIAMETER_AGREEMENT` (25 %) off it is a note naming both, and the format's value is used only when
+nothing could be measured, which is said with the reason per tile. A per-tile fit at a template smaller than the
+nanowells has a flat-topped response whose peak wanders: at 100 µm on 125.8 µm wells one tile's lattice fit had an
+rms of 13 µm and a pitch 0.7 % short, and the lattice-phase steps between tiles (about eight pitches) multiplied that
+into tiles 33 µm off, overruling an overlap correlation that was right. The first real plate measured 125.8 µm wells
+against the 100 µm format, which also left 1,206 of its 1,253 sites unmeasured as larger than a template sized from
+100 µm.
 
 On such a plate the walls are thin (a 152.6 µm pitch leaves 27 µm), so `square_score`'s ring, 0.6 to 1.5 radii
 to reach the square's corners at 1.41, read the neighbouring wells' round edges from 1.43 radii and a rendered

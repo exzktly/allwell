@@ -140,3 +140,21 @@ def test_the_square_anchors_a_plate_whose_walls_are_thin():
     assert located.origin_method == "fiducial", located.grid["fiducial"]
     block = located.grid["fiducial"]
     assert np.hypot(*(np.asarray(block["position_um"]) - rendered.array.origin)) < PLATE_PITCH / 10
+
+
+# ── F13: registration fits each tile at the plate's diameter ─────────────────
+def test_tiles_are_registered_at_the_plate_s_diameter():
+    """The expert review measured tiles 33 um off on this geometry when each tile's lattice was fitted with a 100 um
+    template: the response is flat-topped on a 125.8 um well, and the lattice-phase steps between tiles (about eight
+    pitches) multiply the error. The overlap correlation was right and was overruled."""
+    plan = TilePlan(3, 3, (705, 520), 0.1, 2.0)              # 1410 x 1040 um tiles, the real plate's
+    rendered = render_tiles(plan, pitch_um=PLATE_PITCH, diameter_um=PLATE_DIAMETER, radius_um=2000.0,
+                            rotation_deg=-0.3, noise_sigma=0.05, blur_px=1.0, seed=1, square_centre=False)
+    located = nr.locate_timepoint("T0", record_for(rendered), "A01", rendered.images, SETTINGS)
+    errors = np.array([np.subtract(located.positions[t], rendered.true_left_top_um[t]) for t in located.positions])
+    errors -= errors.mean(axis=0)                            # the common frame's own offset is free
+    assert float(np.abs(errors).max()) < 4.0, errors.round(1)
+    assert not [w for w in located.grid.get("registration_warnings", []) if "disagree" in w]
+    assert located.grid["registration"]["key"] == nr.registration_key(
+        record_for(rendered), "A01", "T0", rendered.images, SETTINGS, located.grid["pitch_seed_um"], "auto",
+        located.diameter_um)

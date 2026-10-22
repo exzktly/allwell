@@ -20,6 +20,7 @@ Positions are in micrometres in the registration's common frame (the "well frame
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import math
 from pathlib import Path
 
 import numpy as np
@@ -179,11 +180,15 @@ def stage_offset(record: dict, well: str, timepoint: str, positions: dict,
 
 
 def _tile_fit(image, pixel_size_um: float, settings: NanowellSettings, pitch_um: float | None = None,
-              kind: str = "auto"):
+              kind: str = "auto", diameter_um: float | None = None):
     """The lattice fitted to one tile alone (tile-local um), or ``None`` when it has too few sites to fit.
 
     Registration's lattice-phase constraint needs it; a tile of bare floor or a wholly occluded one
-    simply contributes the other two sources. *pitch_um* is the working pitch (the nominal one by default).
+    simply contributes the other two sources. *pitch_um* is the working pitch (the nominal one by default);
+    *diameter_um* the plate's measured diameter (the format's by default). A matched filter smaller than the
+    nanowells has a flat-topped response whose peak wanders: at 100 um on 125.8 um wells one tile's fit had an rms
+    of 13 um and its pitch 0.7 % short, which the lattice-phase steps between tiles multiplied into tiles 33 um off
+    (tracker F13).
     """
     from pipeline.nanowell_detect import detect_sites
 
@@ -191,7 +196,8 @@ def _tile_fit(image, pixel_size_um: float, settings: NanowellSettings, pitch_um:
         from pipeline.nanowell_infer import contrast_fit
 
         return contrast_fit(image, pixel_size_um, expected_pitch_um=pitch_um, kind=kind)
-    found = detect_sites(image, pixel_size_um, settings.diameter_um, expected_pitch_um=pitch_um or settings.pitch_um)
+    found = detect_sites(image, pixel_size_um, diameter_um or settings.diameter_um,
+                         expected_pitch_um=pitch_um or settings.pitch_um)
     return found.fit if found.ok else None
 
 
@@ -250,7 +256,7 @@ def _montage_to_common(point, montage) -> np.ndarray:
 #: The version of the registration step's algorithm (``tile_register`` and the per-tile lattice fits that feed it).
 #: It joins :func:`registration_key`, so positions an older algorithm solved are never taken for this one's. Raise it
 #: whenever a change there could move a tile.
-REGISTRATION_SCHEME = 1
+REGISTRATION_SCHEME = 2
 
 
 @dataclass(frozen=True)
@@ -273,7 +279,7 @@ class Placement:
 
 
 def registration_key(record: dict, well: str, timepoint: str, images: dict, settings: NanowellSettings,
-                     pitch_um: float, kind: str) -> str:
+                     pitch_um: float, kind: str, diameter_um: float | None = None) -> str:
     """A digest of everything registration's result depends on, so stored positions are reused only when
     registering again would produce exactly them.
 
@@ -284,7 +290,8 @@ def registration_key(record: dict, well: str, timepoint: str, images: dict, sett
       solve and bound its search;
     * every tile's pixels (shape, type and bytes): overlap correlation and the per-tile lattice fits read them, and a
       plate re-exported with corrected images keeps its record but not its registration;
-    * the geometry, nominal pitch and diameter: how each tile's lattice is fitted (:func:`_tile_fit`);
+    * the geometry, nominal pitch and diameter, and the diameter measured on the tiles: how each tile's lattice is
+      fitted (:func:`_tile_fit`);
     * the working pitch and lattice kind measured on this timepoint: the fits' seed and the search window.
 
     Nothing about measurement or segmentation is in it (cell diameter, margin, occlusion and clipping thresholds,
@@ -299,7 +306,8 @@ def registration_key(record: dict, well: str, timepoint: str, images: dict, sett
         pixels.update(json.dumps([tile, list(image.shape), image.dtype.str]).encode())
         pixels.update(image.tobytes())
     payload = json.dumps([REGISTRATION_SCHEME, record_digest(record, well, timepoint), pixels.hexdigest(),
-                          settings.geometry, settings.pitch_um, settings.diameter_um, float(pitch_um), kind])
+                          settings.geometry, settings.pitch_um, settings.diameter_um, float(pitch_um), kind,
+                          None if diameter_um is None else float(diameter_um)])
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -377,16 +385,20 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         return Located(timepoint, NO_IMAGES, f"No image for tile(s) {', '.join(absent)}",
                        _grid_block(plan, None, {"status": NO_IMAGES}), plan)
     px = float(pixel_size["x"])
+    # The plate's own diameter, measured on the tiles before anything is sized from one (tracker F2, F13): the
+    # per-tile fits registration rests on, the matched filter, the square's scoring ring, the site fits and the
+    # template all follow it, and the format only checks it.
+    tile_diameter, diameter_info = _tile_diameter(images, plan, px)
     probe = _contrast_lattice(images, plan, px) if settings.infer else None
     if probe is not None:
         (pitch, kind), pitch_source = probe, "contrast"
     else:
         (pitch, pitch_source), kind = working_pitch(images, plan, px, settings), "auto"
-    key = registration_key(record, well, timepoint, images, settings, pitch, kind)
+    key = registration_key(record, well, timepoint, images, settings, pitch, kind, tile_diameter)
     registration = stored_placement(stored, key, [p.tile_id for p in plan.placements])
     if registration is None:
         observations = [TileObservation(p.tile_id, (p.left_um, p.top_um), (p.width_um, p.height_um),
-                                        _tile_fit(images[p.tile_id], px, settings, pitch, kind))
+                                        _tile_fit(images[p.tile_id], px, settings, pitch, kind, tile_diameter))
                         for p in plan.placements]
         registration = _solved_placement(
             register_tiles(observations, images=images, pixel_size_um=px, pitch_um=pitch), key,
@@ -410,7 +422,7 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         return located
 
     if settings.infer:
-        detection, inferred, seed["geometry"] = _detect_by_contrast(montage, settings, images, positions, px)
+        detection, inferred, seed["geometry"] = _detect_by_contrast(montage, settings, tile_diameter, diameter_info)
         if not detection.ok:
             return refuse(NO_LATTICE, detection.reason)
         lattice_pitch = float(detection.fit.pitch)
@@ -419,9 +431,9 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         if not estimate.ok:
             return refuse(NO_LATTICE, estimate.reason)
         lattice_pitch = float(estimate.pitch_um)
-        # The plate's own diameter, measured before anything is sized from one (tracker F2): the matched filter, the
-        # square's scoring annulus, the site fits and the template all follow it, and the format only checks it.
-        seed["geometry"] = _measured_diameter(montage, settings, images, positions, px)
+        info = {k: v for k, v in diameter_info.items() if k != "why_not"}
+        seed["geometry"] = _diameter_block({"method": "matched_filter", "notes": [], **info}, tile_diameter,
+                                           settings, diameter_info["why_not"])
     diameter = located.diameter_um = seed["geometry"]["diameter_used_um"]
     measured = seed["geometry"]["diameter_check"]["measured_um"] is not None
     fmt = check_format(lattice_pitch, diameter)
@@ -541,27 +553,43 @@ def _diameter_block(block: dict, measured: float | None, settings: NanowellSetti
     return block
 
 
-def _measured_diameter(montage, settings: NanowellSettings, images: dict, positions: dict, px: float) -> dict:
-    """The geometry block of a ``hex_circle`` timepoint: the nanowell diameter measured, never assumed (tracker F2).
+#: The long side, in pixels, a tile is block-averaged to for the rough diameter: enough for a nanowell of any format
+#: at 10x to span tens of pixels, and a fraction of the full tile's cost.
+_ROUGH_SIDE_PX = 1024
 
-    Rough from the light blobs of the montage (``nanowell_infer.find_wells_by_contrast``), then fitted at full
-    resolution (:func:`_fitted_diameter`).
+
+def _tile_diameter(images: dict, plan, px: float) -> tuple[float | None, dict]:
+    """``(diameter or None, info)``: the nanowell diameter measured on the tiles nearest the grid's centre.
+
+    Rough from the light blobs of a block-averaged copy of the tile (``nanowell_infer.find_wells_by_contrast``),
+    then fitted at full resolution on that tile (:func:`_fitted_diameter`); the first centre tile that gives one
+    decides. *info* carries the rough diameter, the number of fits and the tile, and ``why_not`` names the reason
+    when none measured. Measured before registration, because registration's per-tile fits need it (tracker F13).
     """
     from pipeline.nanowell_infer import find_wells_by_contrast
 
-    block = {"method": "matched_filter", "notes": []}
-    wells = find_wells_by_contrast(montage.image, montage.um_per_px, covered=montage.covered)
-    if not wells.ok:
-        return _diameter_block(block, None, settings, f"no nanowells stood out by their contrast: {wells.reason}")
-    fitted, fits, tile = _fitted_diameter(images, positions, px, _montage_to_common(wells.points_um, montage),
-                                          wells.diameter_um)
-    block.update(diameter_rough_um=float(wells.diameter_um), diameter_fits=fits, diameter_tile=tile)
-    return _diameter_block(block, fitted, settings,
-                           f"{fits} nanowell(s) fitted at full resolution, {MIN_DIAMETER_FITS} needed")
+    info = {"diameter_rough_um": None, "diameter_fits": 0, "diameter_tile": None, "why_not": ""}
+    reasons = []
+    for tile in _centre_tiles(plan):
+        image = np.asarray(images[tile], dtype=np.float32)
+        factor = max(1, int(math.ceil(max(image.shape) / _ROUGH_SIDE_PX)))
+        h, w = (image.shape[0] // factor) * factor, (image.shape[1] // factor) * factor
+        small = image[:h, :w].reshape(h // factor, factor, w // factor, factor).mean(axis=(1, 3))
+        wells = find_wells_by_contrast(small, px * factor)
+        if not wells.ok:
+            reasons.append(f"{tile}: no nanowells stood out by their contrast ({wells.reason})")
+            continue
+        fitted, fits, _ = _fitted_diameter({tile: image}, {tile: (0.0, 0.0)}, px, wells.points_um, wells.diameter_um)
+        info.update(diameter_rough_um=float(wells.diameter_um), diameter_fits=fits, diameter_tile=tile)
+        if fitted is not None:
+            return fitted, info
+        reasons.append(f"{tile}: {fits} nanowell(s) fitted at full resolution, {MIN_DIAMETER_FITS} needed")
+    info["why_not"] = "; ".join(reasons) or "no tile to measure it on"
+    return None, info
 
 
-def _detect_by_contrast(montage, settings: NanowellSettings, images: dict | None = None,
-                        positions: dict | None = None, px: float | None = None):
+def _detect_by_contrast(montage, settings: NanowellSettings, tile_diameter: float | None = None,
+                        diameter_info: dict | None = None):
     """``(detection, ArrayGeometry or None, geometry block)`` for an inferred geometry: the wells found by contrast on the montage, the
     lattice and array they imply, and how the measured pitch and diameter compare with the settings' (tracker X35).
 
@@ -589,16 +617,10 @@ def _detect_by_contrast(montage, settings: NanowellSettings, images: dict | None
     block["pitch_check"] = compare_given(geometry.fit.pitch, settings.pitch_um, PITCH_AGREEMENT, "pitch",
                                          "addresses use the measured pitch")
     block["notes"] = [block["pitch_check"]["note"]] if block["pitch_check"]["note"] else []
-    # The diameter sites are measured at: the plate's, fitted at full resolution where the tiles are given, else the
-    # contrast finder's rough one (tracker F2, F4).
-    measured, why_not = float(wells.diameter_um), ""
-    if images is not None and positions is not None and px is not None:
-        fitted, fits, tile = _fitted_diameter(images, positions, px, _montage_to_common(wells.points_um, montage),
-                                              wells.diameter_um)
-        block.update(diameter_rough_um=float(wells.diameter_um), diameter_fits=fits, diameter_tile=tile)
-        if fitted is not None:
-            measured = fitted
-    _diameter_block(block, measured, settings, why_not)
+    # The diameter sites are measured at: the plate's, fitted at full resolution on the tiles (tracker F2, F13), else
+    # the montage's light blobs' (tracker F4).
+    block.update({k: v for k, v in (diameter_info or {}).items() if k != "why_not"})
+    _diameter_block(block, float(wells.diameter_um) if tile_diameter is None else tile_diameter, settings, "")
     if geometry.missing:
         block["notes"].append(f"{geometry.missing} of the array's {len(geometry.found)} lattice sites showed no "
                               "light nanowell (a bubble, or not detected): each keeps its address and is measured "

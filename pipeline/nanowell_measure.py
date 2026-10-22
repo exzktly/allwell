@@ -69,7 +69,7 @@ MIN_LEVEL_CONTRAST = 0.05
 #: from its own surround, an offset per tile from its empty nanowells), the template is built from crops normalised by
 #: their own surround, and one texture threshold is taken per timepoint from every tile's empty nanowells. 3: every
 #: site is fitted, owned and measured at the plate's own nanowell diameter, measured on the image, rather than the
-#: format's whenever the two were within 25 % (``nanowell_run._measured_diameter``; nanowell tracker F2-F4).
+#: format's whenever the two were within 25 % (``nanowell_run._tile_diameter``; nanowell tracker F2-F4).
 MEASURE_VERSION = 3
 #: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
 MIN_TEXTURE_THRESHOLD = 0.02

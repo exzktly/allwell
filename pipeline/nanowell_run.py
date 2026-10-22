@@ -456,7 +456,8 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     manual = (None if located.manual_anchor_um is None
               else np.subtract(located.manual_anchor_um, montage.origin_um))       # well frame -> montage frame
     resolved = resolve_origin(detection.fit, fiducial=candidate, array_centre=detection.boundary_centre_um,
-                              plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN, manual=manual)
+                              plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN, manual=manual,
+                              detected=detection.points_um)
     located.fit = detection.fit
     located.pitch_um = float(detection.fit.pitch)
     located.mirrored = bool(detection.fit.mirrored)

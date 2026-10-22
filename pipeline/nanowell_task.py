@@ -320,13 +320,16 @@ def _json_default(value):
 
 
 def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, record,
-                 manual_anchors=None) -> dict | None:
+                 manual_anchors=None, anchors_digest: str = "") -> dict | None:
     """What an earlier run of this well left, if it is still valid for this one: ``(grid, site rows, cell rows)``.
 
     Valid means: the settings that produced it are this run's (the same check the per-field path makes),
     the scheme version is understood, and each timepoint kept is ``ok`` with the record digest unchanged
     since, and the anchor set by hand for it (*manual_anchors*, ``timepoint -> position``) the one it was located
     with: a timepoint anchored by its fiducial, or by an earlier click, is recomputed when a click is set or moved.
+    A timepoint the end-of-run pass anchored from the rest of the plate (``plate_rigid``) is kept only under the
+    plate's anchors as they were then (*anchors_digest*): its origin was carried from another timepoint, or other
+    wells, any of which a moved or cleared click may have changed.
     Anything else is recomputed, never reused. ``None`` when nothing can be reused.
     """
     from pipeline.settings_record import well_settings_allow_reuse
@@ -346,7 +349,9 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
     kept = {tp for tp in timepoints
             if grid.get("timepoints", {}).get(tp, {}).get("status") == nr.OK
             and grid["timepoints"][tp].get("record_digest") == nr.record_digest(record, well_label, tp)
-            and grid["timepoints"][tp].get("manual_anchor_um") == _anchor_list((manual_anchors or {}).get(tp))}
+            and grid["timepoints"][tp].get("manual_anchor_um") == _anchor_list((manual_anchors or {}).get(tp))
+            and (grid["timepoints"][tp].get("origin_method") != "plate_rigid"
+                 or grid["timepoints"][tp].get("anchors_digest", "") == anchors_digest)}
     if not kept:
         return None
     sites_path = Path(prior_dir) / NANOWELL_DIR / f"{well_label}.csv"
@@ -480,13 +485,16 @@ def _reanalysis_reason(kept_radius: dict, radius: dict) -> str:
             "rewritten")
 
 
-def _well_manual_anchors(input_dir: Path, well_label: str) -> dict:
-    """``timepoint -> position`` of the anchors set by hand for this well (``util.nanowell_anchors``).
+def _well_manual_anchors(input_dir: Path, well_label: str) -> tuple[dict, str]:
+    """``(timepoint -> position, plate digest)``: the anchors set by hand for this well (``util.nanowell_anchors``),
+    and a digest of every well's, ``""`` without any — what a timepoint carried from the rest of the plate depends on.
 
     An anchors file that cannot be used fails the well with the file's problem stated, rather than running it as
     if no anchor had been set: the wells a person anchored would come out unaddressed with nothing to say why.
     """
-    from util.nanowell_anchors import AnchorsFileError, anchors_path, read_anchors, well_anchors
+    import hashlib
+
+    from util.nanowell_anchors import AnchorsFileError, anchors_path, anchors_payload, read_anchors, well_anchors
 
     try:
         anchors = read_anchors(anchors_path(input_dir))
@@ -495,7 +503,9 @@ def _well_manual_anchors(input_dir: Path, well_label: str) -> dict:
     found = well_anchors(anchors, well_label)
     if found:
         log.info("Well %s — anchor set by hand at %s.", well_label, ", ".join(sorted(found, key=_tp_rank)))
-    return found
+    digest = (hashlib.sha256(json.dumps(anchors_payload(anchors), sort_keys=True).encode()).hexdigest()[:16]
+              if anchors else "")
+    return found, digest
 
 
 def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
@@ -528,9 +538,9 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         record = _pattern_record(well_label, zip_path, index, pattern)
     timepoints = timepoint_order(record, well_label)
     output_dir = Path(output_dir)
-    manual = _well_manual_anchors(Path(zip_path).parent, well_label)
-    prior = (_prior_state(prior_dir or output_dir, well_label, csv_prefix, settings_key, timepoints, record, manual)
-             if incremental else None)
+    manual, digest = _well_manual_anchors(Path(zip_path).parent, well_label)
+    prior = (_prior_state(prior_dir or output_dir, well_label, csv_prefix, settings_key, timepoints, record, manual,
+                          digest) if incremental else None)
     todo = [tp for tp in timepoints if prior is None or tp not in prior["kept"]]
     if not todo:
         log.info("Well %s — up to date (no new timepoints).", well_label)
@@ -576,6 +586,9 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         outcome.radius["reanalysed_because"] = reason
         log.warning("Well %s — %s.", well_label, reason)
     _log_reused_registration(well_label, outcome, todo)
+    for tp in todo:                            # the plate's anchors as they were when these were located
+        if tp in outcome.timepoints:
+            outcome.timepoints[tp]["anchors_digest"] = digest
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)

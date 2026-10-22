@@ -80,6 +80,20 @@ def test_an_anchor_between_sites_leaves_the_timepoint_unaddressed_with_the_dista
     assert refused.reason.startswith("The anchor set by hand lies 50.0 um from the nearest nanowell (50 % of a pitch)")
 
 
+def test_a_click_off_the_array_is_refused_though_the_lattice_runs_under_it_and_an_undetected_square_is_not(fit):
+    """Review finding: the fitted lattice is infinite, so a click 4 mm outside the array snapped to a site and was
+    anchored with wrong addresses. The site must be near a nanowell found — but the square itself may be the one
+    nanowell detection missed, and a click on it must still be taken."""
+    points = make_array(radius=1000, pitch=100, diameter=50).points
+    far = resolve_origin(fit, manual=(5003.0, 2.0), fiducial_margin=0.2, detected=points)
+    assert far.status == "unaddressed" and far.reason.startswith(
+        "The anchor set by hand is 4000 um (40.0 pitches) from the nearest nanowell found")
+    without_square = points[np.hypot(points[:, 0], points[:, 1]) > 1.0]
+    square = resolve_origin(fit, manual=(4.0, -3.0), fiducial_margin=0.2, detected=without_square)
+    assert (square.status, square.method) == ("anchored", "manual")
+    np.testing.assert_allclose(square.origin_xy, (0, 0), atol=1e-9)
+
+
 def test_the_origin_is_described_as_set_by_hand():
     assert na.origin_phrase("manual") == "the anchor set by hand"
     assert na.origin_phrase("array_centre") == "the array's centre"
@@ -98,6 +112,9 @@ def test_a_checkpoint_is_keyed_on_the_anchor_it_was_located_with():
 
 
 def test_an_incremental_run_recomputes_a_timepoint_whose_anchor_was_set_or_moved(tmp_path, monkeypatch):
+    """0h is anchored by a click; 24h was carried from it by the end-of-run pass (``plate_rigid``); 48h found its
+    own square. Moving or clearing the click must recompute 0h *and* 24h — the first version kept 24h, whose
+    addresses came from the old click, and this test asserted that (review finding); 48h depends on no click."""
     import pipeline.settings_record as settings_record
     from pipeline import nanowell_measure as nm
 
@@ -105,17 +122,29 @@ def test_an_incremental_run_recomputes_a_timepoint_whose_anchor_was_set_or_moved
     monkeypatch.setattr(nr, "record_digest", lambda record, well, tp: "d")
     (tmp_path / nt.NANOWELL_DIR).mkdir()
     grid = {"scheme_version": nt.SCHEME_VERSION, "measure_version": nm.MEASURE_VERSION, "timepoints": {
-        "0h": {"status": "ok", "record_digest": "d", "manual_anchor_um": [1.0, 2.0]},
-        "24h": {"status": "ok", "record_digest": "d"}}}
+        "0h": {"status": "ok", "record_digest": "d", "origin_method": "manual", "manual_anchor_um": [1.0, 2.0],
+               "anchors_digest": "then"},
+        "24h": {"status": "ok", "record_digest": "d", "origin_method": "plate_rigid", "anchors_digest": "then"},
+        "48h": {"status": "ok", "record_digest": "d", "origin_method": "fiducial", "anchors_digest": "then"}}}
     (tmp_path / nt.NANOWELL_DIR / "A01_grid.json").write_text(json.dumps(grid))
 
-    def kept(anchors):
-        prior = nt._prior_state(tmp_path, "A01", "m", "k", ["0h", "24h"], {}, anchors)
+    def kept(anchors, digest):
+        prior = nt._prior_state(tmp_path, "A01", "m", "k", ["0h", "24h", "48h"], {}, anchors, digest)
         return None if prior is None else prior["kept"]
-    assert kept({"0h": (1.0, 2.0)}) == {"0h", "24h"}
-    assert kept({"0h": (101.0, 2.0)}) == {"24h"}                    # moved: 0h is recomputed
-    assert kept({"0h": (1.0, 2.0), "24h": (5.0, 5.0)}) == {"0h"}    # set where the fiducial had anchored it
-    assert kept({}) == {"24h"}                                       # cleared: 0h is located again without it
+    assert kept({"0h": (1.0, 2.0)}, "then") == {"0h", "24h", "48h"}
+    assert kept({"0h": (101.0, 2.0)}, "now") == {"48h"}                 # moved: 0h and what was carried from it
+    assert kept({}, "") == {"48h"}                                       # cleared: the same
+    assert kept({"0h": (1.0, 2.0), "48h": (5.0, 5.0)}, "now") == {"0h"}  # set where the fiducial had anchored it
+
+
+def test_the_anchors_digest_is_the_plate_s_and_moves_with_any_well_s_click(tmp_path):
+    na.set_anchor(na.anchors_path(tmp_path), "A01", "0h", (1.0, 2.0))
+    _found, first = nt._well_manual_anchors(tmp_path, "B02")             # B02 has no click of its own
+    na.set_anchor(na.anchors_path(tmp_path), "A01", "0h", (101.0, 2.0))
+    found, second = nt._well_manual_anchors(tmp_path, "B02")
+    assert found == {} and first and second and first != second
+    na.clear_anchor(na.anchors_path(tmp_path), "A01", "0h")
+    assert nt._well_manual_anchors(tmp_path, "B02") == ({}, "")
 
 
 def test_a_manual_anchor_is_evidence_the_plate_re_anchoring_can_carry():

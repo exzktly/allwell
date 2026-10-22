@@ -128,7 +128,7 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
     extract_zip(zip_path, scratch, members_to_extract=wanted & set(needed))
     images = {fov: nt._read_tif(nuclear) for (tp, fov), (nuclear, _fl) in index.items() if tp == timepoint}
     try:
-        manual = nt._well_manual_anchors(zip_path.parent, well).get(timepoint)      # as the run would use it
+        manual = nt._well_manual_anchors(zip_path.parent, well)[0].get(timepoint)   # as the run would use it
     except nt.NanowellInputError as exc:
         result.reason = str(exc)
         return result

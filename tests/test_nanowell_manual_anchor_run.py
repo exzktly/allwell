@@ -39,11 +39,11 @@ def _run(monkeypatch, plate, blind=frozenset({("B02", "0h"), ("B02", "24h")})):
         state["blind"] = (well, tp) in blind
         return real_locate(tp, record, well, *args, **kwargs)
 
-    def resolve(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin, manual=None):
+    def resolve(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin, manual=None, detected=None):
         if state["blind"]:
             fiducial = array_centre = None
         return real_resolve(fit, fiducial=fiducial, array_centre=array_centre, plate_rigid=plate_rigid,
-                            fiducial_margin=fiducial_margin, manual=manual)
+                            fiducial_margin=fiducial_margin, manual=manual, detected=detected)
 
     def serial(*, well_zips, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix, schema, sep,
                incremental, incremental_prior_dir, settings_key, force, force_wells=None, **_ignored):
@@ -97,6 +97,8 @@ def test_one_anchor_at_one_timepoint_addresses_the_well_at_both(tmp_path, monkey
     assert (grid["0h"]["status"], grid["0h"]["origin_method"]) == ("ok", "manual")
     assert grid["0h"]["manual_anchor_um"] == pytest.approx(list(np.add(square, CLICK_ERROR_UM)))
     assert (grid["24h"]["status"], grid["24h"]["origin_method"]) == ("ok", "plate_rigid")
+    # Both stamped with the plate's anchors as they were, which keeps 24h from outliving a moved click.
+    assert grid["24h"].get("anchors_digest") == grid["0h"].get("anchors_digest") != ""
     for tp, rendered in (("0h", plate_0h), ("24h", truth["B02"])):
         addressed, wrong = _wrong_addresses(out, rendered, tp)
         assert addressed > 40 and wrong == 0, (tp, addressed, wrong)
@@ -128,8 +130,8 @@ def test_the_anchor_is_read_in_the_well_frame_where_tiles_sit_far_from_its_origi
 
     real_resolve = lattice.resolve_origin
 
-    def blind(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin, manual=None):
-        return real_resolve(fit, plate_rigid=plate_rigid, fiducial_margin=fiducial_margin, manual=manual)
+    def blind(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin, manual=None, detected=None):
+        return real_resolve(fit, plate_rigid=plate_rigid, fiducial_margin=fiducial_margin, manual=manual, detected=detected)
 
     monkeypatch.setattr(lattice, "resolve_origin", blind)
     assert nr.locate_timepoint("T0", record, "A01", rendered.images, settings).status == nr.UNADDRESSED
@@ -137,3 +139,7 @@ def test_the_anchor_is_read_in_the_well_frame_where_tiles_sit_far_from_its_origi
                                   manual_anchor_um=np.add(square, CLICK_ERROR_UM))
     assert (clicked.status, clicked.origin_method) == (nr.OK, "manual")
     np.testing.assert_allclose(clicked.origin_montage, reference.origin_montage, atol=1e-6)
+    # Off the array, where the fitted lattice still runs: refused, not snapped to a site out there.
+    off = nr.locate_timepoint("T0", record, "A01", rendered.images, settings,
+                              manual_anchor_um=np.add(square, 40 * np.asarray(reference.fit.a1)))
+    assert off.status == nr.UNADDRESSED and "from the nearest nanowell found" in off.reason

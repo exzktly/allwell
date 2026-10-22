@@ -9555,8 +9555,13 @@ the array centre anchors the well, giving the same addresses. The score is the f
 sum minus the two-fold one: a bubble's rim crossing a circle concentrates its gradients in
 one direction, which the four-fold sum alone scores as high as a square (one such case
 anchored a well 1.7 pitches off), but a straight edge has a two-fold sum and a square's two
-edges cancel in it. A fiducial must also be at least 0.4 square in absolute terms, whatever
-its margin. **A refused square says which test it failed.** `describe_fiducial` turns the
+edges cancel in it. A square is decided by how far it stands above the rest: `resolve_origin`
+accepts it when it leads the runner-up by more than `FIDUCIAL_MARGIN` (0.15) and scores at least
+`FIDUCIAL_RATIO` (3) times it, above an absolute floor of `MIN_SQUARENESS` (0.25) that stops the
+least circular of a set of circles. A fixed floor of 0.4 decided it before: rendered squares with
+rounded corners, a halo or a few micrometres of defocus read 0.34 to 0.50 against circles at 0.01 to
+0.15, and were refused while standing six times above every circle. All three numbers are assumed
+until real squares calibrate them (tracker F6). **A refused square says which test it failed.** `describe_fiducial` turns the
 search into a block — sites scored, the best and runner-up squareness, the floor, where the
 square was, and a sentence naming the failure when there is no candidate (no site could be
 scored; only one could; the most square outline read under the floor) — and `resolve_origin`

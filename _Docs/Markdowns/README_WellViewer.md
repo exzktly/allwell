@@ -332,8 +332,9 @@ wells whose sets two versions decided, since they count the rim differently. Tes
 timepoint supports and says so. A timepoint that could not
 be placed, found or addressed is named in the grid record with the reason, and the other timepoints still run.
 An unaddressed timepoint's reason names every source it tried and why each was refused — for the central square,
-whether no site could be scored, the most square outline read under the floor (with its score), or it led the
-next most square by less than the margin (with both scores) — and the grid record keeps those scores.
+whether no site could be scored, the most square outline read under the floor (with its score), or it did not
+stand far enough above the next most square, by its lead or by how many times the next one's score it is (with
+both scores) — and the grid record keeps those scores.
 When a well's own evidence cannot say which nanowell is which (no visible central square, no readable array
 edge), the end of the run addresses it from the plate's other wells, which move together between timepoints,
 and says how many it anchored and how many remain unaddressed.

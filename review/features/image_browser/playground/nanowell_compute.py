@@ -277,7 +277,7 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
     from pipeline.nanowell_detect import MIN_SQUARENESS, describe_fiducial, score_fiducial
     from pipeline.nanowell_infer import ARRAY_CIRCLE, find_wells_by_contrast, infer_array
     from pipeline.nanowell_lattice import index_points, resolve_origin
-    from pipeline.nanowell_run import FIDUCIAL_MARGIN
+    from pipeline.nanowell_run import FIDUCIAL_MARGIN, FIDUCIAL_RATIO
     from util.nanowell_address import NanowellAddress
 
     image = np.asarray(image, dtype=np.float32)
@@ -324,6 +324,7 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
         out.square_px = tuple(to_px(square.position_um))
     refusal = describe_fiducial(candidate, scores, near_centre=centre_um is not None)["reason"]
     resolved = resolve_origin(fit, fiducial=candidate, array_centre=centre_um, fiducial_margin=FIDUCIAL_MARGIN,
+                              fiducial_ratio=FIDUCIAL_RATIO,
                               fiducial_refusal=refusal)
     rings = None
     if resolved.status == "anchored":

@@ -388,8 +388,11 @@ def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, posit
 
 #: A fiducial must be at least this square in absolute terms, whatever its margin over the runner-up:
 #: a clean square scores about 0.74 and a circle near 0, and a margin alone would anchor the well on
-#: the least circular of a set of circles.
-MIN_SQUARENESS = 0.4
+#: the least circular of a set of circles. Low on purpose (tracker F14): a molded square with rounded corners,
+#: a halo or a few micrometres of defocus reads 0.34 to 0.50 while circles read 0.01 to 0.15, so what decides is
+#: how far the square stands above the rest (``resolve_origin``'s lead and ratio), not this floor. Assumed, not
+#: calibrated on a real plate (tracker F6).
+MIN_SQUARENESS = 0.25
 
 
 def score_fiducial(image, pixel_size_um: float, nanowell_diameter_um: float, points_um, *,

@@ -36,10 +36,10 @@ def test_one_scorable_site_is_named():
 
 def test_a_square_under_the_floor_is_named_with_its_score_and_the_floor():
     # Ordered against the ranking, so a block that took the first score rather than the best is caught.
-    block = describe_fiducial(None, _scores(0.12, 0.31, 0.2))
+    block = describe_fiducial(None, _scores(0.12, 0.21, 0.2))
     assert block["reason"] == ("the central square was not found: the most square outline among the 3 sites scored "
-                               f"near the array centre reads 0.31, under the {MIN_SQUARENESS:g} a square needs")
-    assert (block["scored"], block["best"], block["runner_up"]) == (3, 0.31, 0.2)
+                               f"near the array centre reads 0.21, under the {MIN_SQUARENESS:g} a square needs")
+    assert (block["scored"], block["best"], block["runner_up"]) == (3, 0.21, 0.2)
     assert block["min_squareness"] == MIN_SQUARENESS
 
 
@@ -62,12 +62,35 @@ def test_a_square_short_of_the_margin_is_named_with_both_scores(fit):
 
 
 def test_the_caller_s_refusal_joins_the_array_centre_s(fit):
-    refusal = describe_fiducial(None, _scores(0.12, 0.31))["reason"]
+    refusal = describe_fiducial(None, _scores(0.12, 0.21))["reason"]
     resolved = resolve_origin(fit, array_centre=(50, 0), fiducial_margin=0.3, fiducial_refusal=refusal)
     assert resolved.status == "unaddressed"
     assert resolved.reason.startswith("No accepted fiducial, array centre, or precise plate-rigid prediction; the "
                                       "central square was not found: the most square outline among the 2 sites")
     assert "; the array_centre lies 50.0 from the nearest site (50 % of a pitch)" in resolved.reason
+
+
+def test_a_square_that_leads_but_is_not_far_enough_above_the_next_is_named(fit):
+    resolved = resolve_origin(fit, fiducial=FiducialCandidate((0, 0), 0.45, 0.2), fiducial_margin=0.15,
+                              fiducial_ratio=3.0)
+    assert resolved.status == "unaddressed"
+    assert resolved.reason.endswith("; the most square outline reads 0.45 and the next 0.20, 2.2 times it where a "
+                                    "central square needs 3")
+
+
+@pytest.mark.parametrize("best, runner_up, accepted", [
+    (0.389, 0.025, True),           # the review's defocused square, refused by the old 0.4 floor
+    (0.344, 0.024, True),           # its rounded, haloed, defocused, noisy one
+    (0.40, 0.14, False),            # leads by 0.26 but is under three times the next
+    (0.30, 0.16, False),            # three times? no; leads? no
+    (0.45, 0.15, True),             # exactly three times
+])
+def test_the_square_is_judged_by_how_far_it_stands_above_the_next(fit, best, runner_up, accepted):
+    from pipeline.nanowell_run import FIDUCIAL_MARGIN, FIDUCIAL_RATIO
+
+    resolved = resolve_origin(fit, fiducial=FiducialCandidate((0, 0), best, runner_up),
+                              fiducial_margin=FIDUCIAL_MARGIN, fiducial_ratio=FIDUCIAL_RATIO)
+    assert (resolved.method == "fiducial") is accepted
 
 
 def test_a_refusal_is_ignored_when_a_candidate_was_offered(fit):

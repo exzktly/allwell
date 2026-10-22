@@ -158,3 +158,17 @@ def test_tiles_are_registered_at_the_plate_s_diameter():
     assert located.grid["registration"]["key"] == nr.registration_key(
         record_for(rendered), "A01", "T0", rendered.images, SETTINGS, located.grid["pitch_seed_um"], "auto",
         located.diameter_um)
+
+
+# ── F14: the square is judged by how far it stands above the rest ───────────
+def test_a_soft_square_under_the_old_floor_still_anchors_the_well(monkeypatch):
+    """Defocus takes a rendered square to 0.37 against a runner-up of 0.06: it stands six times above every circle,
+    and the old absolute floor of 0.4 refused it. The array centre is put half a pitch off, so only the square can
+    anchor the well."""
+    rendered, record = _plate(blur=4.0)
+    _centre_off_site(monkeypatch)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    block = located.grid["fiducial"]
+    assert 0.25 < block["best"] < 0.4 and block["best"] >= 3 * block["runner_up"]
+    assert located.status == nr.OK and located.origin_method == "fiducial"
+    assert (block["margin"], block["ratio"]) == (nr.FIDUCIAL_MARGIN, nr.FIDUCIAL_RATIO)

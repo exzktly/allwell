@@ -48,8 +48,13 @@ LATTICE_KIND_MISMATCH = "lattice_kind_mismatch"
 TERMINAL_WITHOUT_ROWS = (INCOMPLETE_GRID, BAD_GRID, NO_RECORD, NO_LATTICE, FORMAT_MISMATCH,
                          ORIENTATION_REFUSED, NO_IMAGES, LATTICE_KIND_MISMATCH)
 
-#: How far a fiducial's score must clear the runner-up's to anchor an address (assumed; Q-row in the tracker).
-FIDUCIAL_MARGIN = 0.3
+#: How far a fiducial's score must clear the runner-up's to anchor an address, and how many times the runner-up's it
+#: must be (tracker F14). Both are needed: a lead alone accepts a square under the floor's noise when everything
+#: reads high (cells, debris), a ratio alone accepts 0.05 against 0.01. Rendered squares under defocus, halo and
+#: rounding read 0.34 to 0.65 against runner-ups of 0.02 to 0.13; a blur that leaves them 0.21 against 0.10 is
+#: refused as ambiguous. Assumed, not calibrated on a real plate (tracker F6).
+FIDUCIAL_MARGIN = 0.15
+FIDUCIAL_RATIO = 3.0
 
 
 #: The plate format whose pitch and diameter the run is given rather than knowing (tracker A7).
@@ -463,12 +468,12 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
             return refuse(ORIENTATION_REFUSED, orientation.reason if hasattr(orientation, "reason") else
                           "The square's edges disagree with the fitted lattice axis")
     fiducial = describe_fiducial(candidate, scores, near_centre=detection.boundary_centre_um is not None)
-    fiducial["margin"] = FIDUCIAL_MARGIN
+    fiducial["margin"], fiducial["ratio"] = FIDUCIAL_MARGIN, FIDUCIAL_RATIO
     if fiducial["position_um"] is not None:
         fiducial["position_um"] = [float(v) for v in _montage_to_common(fiducial["position_um"], montage)]
     located.fiducial = fiducial
     resolved = resolve_origin(detection.fit, fiducial=candidate, array_centre=detection.boundary_centre_um,
-                              plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN,
+                              plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN, fiducial_ratio=FIDUCIAL_RATIO,
                               fiducial_refusal=fiducial["reason"])
     located.fit = detection.fit
     located.pitch_um = float(detection.fit.pitch)

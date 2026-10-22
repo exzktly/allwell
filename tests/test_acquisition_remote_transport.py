@@ -106,3 +106,40 @@ def test_actual_cli_refuses_invalid_record_before_pixel_setup(tmp_path, monkeypa
         pass
     assert not reached, "invalid acquisition metadata reached pixel setup"
     assert error is not None
+
+
+def test_the_nanowell_anchors_reach_the_upload_and_every_batch_and_an_anchor_set_is_a_new_upload_and_source(
+        tmp_path, monkeypatch):
+    """``in/nanowell_anchors.json`` (anchors set by hand, ``util.nanowell_anchors``) travels beside the record: in
+    the full upload and in each batch's, byte for byte. Setting an anchor changes the upload cache key, so the new
+    file is sent, and the source fingerprint the remote re-attach compares, so a re-run after the click does not
+    re-attach to the run that left the well unaddressed and fetch its results back."""
+    from util.nanowell_anchors import anchors_path, set_anchor
+
+    root = tmp_path / 'dataset'
+    _dataset(root)
+    set_anchor(anchors_path(root / 'in'), 'A01', '0h', (10.0, 20.0))
+    zipped = stage_local_zips(root / 'in', filename_schema='experiment:channel:well:fov:timepoint',
+                              filename_sep='_')
+    zipped = replace(zipped, well_zips=(zipped.well_zips[0],))       # the remote's listing below reports one
+    cache = DatasetCache(RemoteHost(name='test', ssh_alias='test-host'))
+    monkeypatch.setattr(cache, '_ssh_run', lambda *a, **k: SimpleNamespace(returncode=0, stdout=''))
+    monkeypatch.setattr(cache, '_ssh_script', lambda *a, **k: SimpleNamespace(returncode=0, stdout='1'))
+    sent = []
+
+    def transfer(command, **options):
+        files = [Path(part) for part in command if str(part).endswith('/nanowell_anchors.json')]
+        sent.append([f.read_bytes() for f in files])
+        return 0, 0.0, 0, 1
+
+    monkeypatch.setattr(remote_upload, '_stream_rsync_with_retry', transfer)
+    before, fingerprint = cache.cache_key(zipped), source_fingerprint(root / 'in')
+    cache.ensure_uploaded(zipped)
+    cache.upload_subset(list(zipped.well_zips), '/remote/b1', acquisition_input=zipped)
+    on_disk = anchors_path(root / 'in').read_bytes()
+    assert sent == [[on_disk], [on_disk]]
+    set_anchor(anchors_path(root / 'in'), 'A01', '0h', (110.0, 20.0))
+    again = stage_local_zips(root / 'in', filename_schema=zipped.acquisition_schema, filename_sep='_')
+    again = replace(again, well_zips=zipped.well_zips)
+    assert cache.cache_key(again) != before
+    assert source_fingerprint(root / 'in') != fingerprint

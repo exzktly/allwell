@@ -28,8 +28,8 @@ well's registered montage to click it on.
 
 | State | Count |
 |---|---|
-| done | 6 |
-| open | 8 |
+| done | 7 |
+| open | 7 |
 
 | # | Item | State | Where | Evidence |
 |---|---|---|---|---|
@@ -39,7 +39,7 @@ well's registered montage to click it on.
 | A4 | A manual anchor is independent evidence for the plate re-anchoring | done | `pipeline/nanowell_task.py::_INDEPENDENT` | `test_a_manual_anchor_is_evidence_the_plate_re_anchoring_can_carry` (fails without `manual` in `_INDEPENDENT`); end to end, 24h is carried by `plate_rigid` with every address right |
 | A5 | Reuse is keyed on the anchor: an incremental run and a checkpoint do not keep a timepoint computed under another anchor | done | `pipeline/nanowell_task.py::_prior_state`, `nanowell_run._checkpoint_key` | `test_an_incremental_run_recomputes_…`, `test_a_checkpoint_is_keyed_on_the_anchor_…` (each fails with its line removed) |
 | A6 | `process_well_zip` reads the anchors beside the record and hands each timepoint its own | done | `pipeline/nanowell_task.py` | `test_one_anchor_at_one_timepoint_…` fails with `('unaddressed', None)` when `process_well_zip` drops the anchors; Test detection reads them too (`pipeline/nanowell_preview.py`) |
-| B1 | Remote: the anchors file is uploaded with the input and reaches every batch; the upload cache is keyed on it | open | `services/acquisition_transport.py`, `services/remote_upload.py` | |
+| B1 | Remote: the anchors file is uploaded with the input and reaches every batch; the upload cache is keyed on it | done | `services/acquisition_transport.py`, `services/remote_scratch.py::source_fingerprint` | `test_acquisition_remote_transport.py::test_the_nanowell_anchors_reach_…`: the bytes reach the full upload and a batch, the cache key and the re-attach fingerprint move with an anchor; each of the three fails with its line removed |
 | B2 | Subset / Merge Plates / Concatenate carry the anchors (wells remapped, timepoints shifted), or say they did not | open | `datasets/*/…_compute.py` | |
 | C1 | Qt-free render of a region of a well's registered montage at a chosen resolution, from the raw tiles | open | `review/features/nanowell/` | |
 | C2 | Zoomable, pannable full-resolution montage view with tile outlines and nanowell addresses | open | `review/features/nanowell/` | |

@@ -17,7 +17,7 @@ from __future__ import annotations
 import pytest
 
 import pipeline.czi_acquisition as acquisition
-from pipeline.czi_acquisition import STAGE_ARCHIVES, STAGE_TILES, STAGE_TIMES, StageReporter
+from pipeline.czi_acquisition import STAGE_ARCHIVES, STAGE_TILES, StageReporter
 from pipeline.czi_explode import explode_czi
 from tests.test_czi_acquisition_record import _source
 

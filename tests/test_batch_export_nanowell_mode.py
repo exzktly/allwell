@@ -91,6 +91,10 @@ def test_the_array_map_writes_one_figure_per_well(panel, tmp_path, monkeypatch):
     assert sorted(f.name for f in (tmp_path / "export").glob("*.png")) == [
         "nanowell_Drug_A_c_A01.png", "nanowell_Drug_A_n_A01.png"]
     assert [(c["view"], c["well"]) for c in calls] == [("array", "A01"), ("array", "A01")]
+    # Drawn as the lattice map, and its gallery record restores those layers, not whatever the page was left on.
+    from review.features.nanowell.state import ArrayLayers
+
+    assert p._figure_view.get("layers") == ArrayLayers.preset("map")
 
 
 def test_a_group_with_no_nanowell_table_is_skipped_and_says_so(panel, tmp_path):

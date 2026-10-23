@@ -411,7 +411,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
             self._scratch_user_set = True
 
     def _build_run_controls(self, parent: QWidget) -> None:
-        # Remote-execution selector. Populated from ~/.config/allwell/remotes.toml
+        # Remote-execution selector. Populated from remotes.toml in the app folder
         # so users can flip between Local and any configured SSH host
         # without restarting the GUI.
         remote_widget = QWidget(parent)

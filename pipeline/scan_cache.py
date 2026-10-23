@@ -51,6 +51,7 @@ from pathlib import Path
 from pipeline import czi_read
 from pipeline.timepoints import TimeScan
 from util.aw_safe import swallowed
+from util.state_dir import SCAN_CACHE_ENV, SCAN_CACHE_OFF, SCAN_CACHE_SUBDIR, gui_state_dir
 
 #: Bump when :func:`pipeline.czi_read.read_czi_layout` or
 #: :func:`~pipeline.czi_read.parse_plate_metadata` could produce a different
@@ -66,7 +67,7 @@ FORMAT_VERSION = 2
 #: ``ALLWELL_SCAN_CACHE=off`` disables it; any other value is a directory to
 #: use instead of the default. For a machine where the cache directory is not
 #: writable, and for measuring a cold scan without deleting anything.
-_OVERRIDE = "ALLWELL_SCAN_CACHE"
+_OVERRIDE = SCAN_CACHE_ENV
 
 #: How many folders' caches to keep. Each is a few hundred kilobytes for a
 #: 96-file plate, and the oldest go first — a bound rather than a policy, so
@@ -90,23 +91,20 @@ _LOCK = threading.Lock()
 def cache_dir() -> "Path | None":
     """The directory the scan caches live in, or ``None`` when disabled.
 
-    ``czi-scans`` inside the first usable folder of
-    :func:`util.state_dir.candidate_dirs` (``~/.cache/allwell`` first) — the
-    pipeline's folder, which the desktop app's logs and caches no longer share
-    (they are in ``util.state_dir.gui_state_dir``). ``None`` rather than an exception when nothing is writable:
-    a scan that cannot be remembered is a slow scan, not a failed one.
+    ``czi-scans`` in the app's folder (:func:`util.state_dir.gui_state_dir`:
+    ``~/.allwell`` on macOS, Linux and a remote worker,
+    ``%LOCALAPPDATA%\\allwell`` on Windows), beside everything else All-Well
+    keeps on a machine. Earlier versions used ``~/.cache/allwell/czi-scans``;
+    that copy is not carried over — a cache rebuilds — and the storage button
+    offers it for deletion. ``None`` rather than an exception when nothing is
+    writable: a scan that cannot be remembered is a slow scan, not a failed one.
     """
     raw = os.environ.get(_OVERRIDE, "").strip()
-    if raw.lower() in {"off", "0", "false", "no"}:
+    if raw.lower() in SCAN_CACHE_OFF:
         return None
     if raw:
         return _usable(Path(raw).expanduser())
-    from util.state_dir import candidate_dirs
-    for base in candidate_dirs():
-        found = _usable(base / "czi-scans")
-        if found is not None:
-            return found
-    return None
+    return _usable(gui_state_dir() / SCAN_CACHE_SUBDIR)
 
 
 def _usable(folder: Path) -> "Path | None":

@@ -287,7 +287,8 @@ def _argv_parser() -> argparse.ArgumentParser:
             "One-time idempotent setup of an AllWell remote-execution host. "
             "Probes the remote, installs miniforge / the conda env if missing, "
             "syncs the four required pipeline files, measures bandwidth, and "
-            "writes a [remote.<alias>] block to ~/.config/allwell/remotes.toml."
+            "writes a [remote.<alias>] block to remotes.toml in the app's folder "
+            "(~/.allwell, or %%LOCALAPPDATA%%\\allwell on Windows)."
         ),
     )
     p.add_argument("alias", help="The SSH alias of the remote host.")
@@ -1074,20 +1075,17 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
 
 
 def default_config_path() -> Path:
-    """Where to write ``remotes.toml``.
+    """Where to write ``remotes.toml``: the file the app reads.
 
-    On Windows we prefer ``%APPDATA%\\allwell\\remotes.toml`` (the
-    convention Windows users expect) but only if ``%APPDATA%`` is set
-    and the legacy ``~/.config/allwell/remotes.toml`` doesn't already
-    exist. The legacy path stays the default everywhere else for
-    cross-platform consistency.
+    :func:`services.remote_config.default_config_path` — ``remotes.toml`` in the
+    app's folder, honouring ``$ALLWELL_REMOTES``. This used to resolve the path
+    itself, by a rule that ignored ``$ALLWELL_REMOTES`` and could pick a
+    different file from the one the app reads on Windows.
     """
-    legacy = Path("~/.config/allwell/remotes.toml").expanduser()
-    if os.name == "nt" and not legacy.is_file():
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            return Path(appdata) / "allwell" / "remotes.toml"
-    return legacy
+    sys.path.insert(0, str(REPO_ROOT))
+    from services.remote_config import default_config_path as app_config_path
+
+    return app_config_path()
 
 
 def write_or_update_remotes_toml(

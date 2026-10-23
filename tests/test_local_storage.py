@@ -93,13 +93,18 @@ def test_the_app_s_writers_all_use_the_app_folder(home, monkeypatch):
         fh.close()
 
 
-def test_the_scan_cache_did_not_move(home, monkeypatch):
-    """The CZI scan cache is the pipeline's and keeps its own folder,
-    ``~/.cache/allwell/czi-scans``, on every platform."""
+def test_the_scan_cache_is_in_the_app_folder(home, monkeypatch):
+    """The CZI scan cache sits in the app's folder like everything else, and
+    its old copy in ``~/.cache/allwell`` is offered — unless
+    ``ALLWELL_SCAN_CACHE`` still points runs at it."""
     from pipeline import scan_cache
 
     monkeypatch.delenv("ALLWELL_SCAN_CACHE", raising=False)
-    assert scan_cache.cache_dir() == home / ".cache" / "allwell" / "czi-scans"
+    assert scan_cache.cache_dir() == home / ".allwell" / "czi-scans"
+    old = _write(home / ".cache" / "allwell" / "czi-scans" / "k" / "scan.json", 10)
+    assert old.parent.parent in state_dir.legacy_gui_paths()
+    monkeypatch.setenv("ALLWELL_SCAN_CACHE", str(old.parent.parent))
+    assert old.parent.parent not in state_dir.legacy_gui_paths()
 
 
 def _windows(tmp_path, monkeypatch) -> tuple[Path, Path]:
@@ -212,13 +217,17 @@ def populated(home, monkeypatch):
         "live_spill": _write(app / "tmp" / "allwell-cellpool-b" / "cells.duckdb", 4000),
         "young_unowned": _write(app / "tmp" / "allwell_batch_nodisk_c" / "f.png", 3000),
         "old_unowned": _write(app / "tmp" / "allwell_batch_nodisk_d" / "f.png", 2000),
-        # the pipeline's, in the same home folder: never offered
+        # runs' files and the user's records, in the same folder: never offered
         "scratch": _write(app / "scratch" / "_tmp_images_x" / ".fov_1.done", 9000),
         "suspended": _write(app / "suspended_runs.json", 50),
-        "scan": _write(home / ".cache" / "allwell" / "czi-scans" / "k" / "scan.json", 8000),
+        "scan": _write(app / "czi-scans" / "k" / "scan.json", 8000),
+        "remotes": _write(app / "remotes.toml", 30),
+        "queue": _write(app / "job_queue.json", 30),
+        "settings": _write(app / "settings.ini", 30),
         # earlier versions' leftovers
         "legacy_boot": _write(home / ".cache" / "allwell" / "allwell-boot.log", 40),
         "legacy_fonts": _write(home / ".cache" / "allwell" / "mplcache" / "f.json", 600),
+        "legacy_scan": _write(home / ".cache" / "allwell" / "czi-scans" / "k" / "scan.json", 260),
         "legacy_spill": _write(home / "system-temp" / "allwell-cellpool-z" / "c.duckdb", 700),
         "repo_fonts": _write(home / "checkout" / ".mplcache" / "fontlist.json", 400),
         # the open dataset
@@ -251,8 +260,8 @@ def test_each_area_offers_exactly_what_may_go(populated, home):
         "fonts": {app / "mplcache"},
         "temp": {f["dead_spill"].parent, f["old_unowned"].parent},
         "logs": {f["boot1"], f["bootstrap"]},
-        "legacy": {f["legacy_boot"], f["legacy_fonts"].parent, f["legacy_spill"].parent,
-                   f["repo_fonts"].parent},
+        "legacy": {f["legacy_boot"], f["legacy_fonts"].parent, f["legacy_scan"].parent.parent,
+                   f["legacy_spill"].parent, f["repo_fonts"].parent},
         "rows": {f["rows"].parent},
     }
     # The row cache is offered unticked: clearing it slows the next open.
@@ -266,13 +275,13 @@ def test_clearing_everything_frees_exactly_that_and_spares_the_rest(populated, h
     areas = ls.cache_areas(home / "plate")
     sizes = ls.measure(areas)
     assert sizes == {"fonts": 1000, "temp": 7000 + OWNER_BYTES, "logs": 500,
-                     "legacy": 1740 + OWNER_BYTES, "rows": 6000}
+                     "legacy": 2000 + OWNER_BYTES, "rows": 6000}
     result = ls.clear(areas)
     assert result.freed == sum(sizes.values()) and result.failed == []
     gone = ("fonts", "boot1", "bootstrap", "dead_spill", "old_unowned",
-            "legacy_boot", "legacy_fonts", "legacy_spill", "repo_fonts", "rows")
+            "legacy_boot", "legacy_fonts", "legacy_scan", "legacy_spill", "repo_fonts", "rows")
     kept = ("boot", "bootstrap_recent", "bootstrap_new", "live_spill", "young_unowned",
-            "scratch", "suspended", "scan", "csv")
+            "scratch", "suspended", "scan", "remotes", "queue", "settings", "csv")
     assert [k for k in gone if f[k].exists()] == []
     assert [k for k in kept if not f[k].exists()] == []
     assert not f["rows"].parent.exists() and not f["dead_spill"].parent.exists()
@@ -329,14 +338,14 @@ def test_the_dialog_measures_and_its_button_clears(populated, home, qtbot):
     assert dialog._status.text() == "", "the status line still says it is measuring"
     # Ticked by default: everything but the row cache.
     assert dialog.selected_keys() == ["fonts", "temp", "logs", "legacy"]
-    assert clear_btn.text() == "Clear 10.3 KB"
+    assert clear_btn.text() == "Clear 10.5 KB"
 
     clear_btn.click()
     qtbot.waitUntil(lambda: dialog.last_result is not None, timeout=10_000)
     # The clear is followed by a re-measure; the sentence must survive it.
     qtbot.waitUntil(lambda: clear_btn.text() == "Clear selected", timeout=10_000)
-    assert dialog.last_result.freed == 1000 + 7000 + 500 + 1740 + 2 * OWNER_BYTES
-    assert "Freed 10.3 KB." in dialog._status.text()
+    assert dialog.last_result.freed == 1000 + 7000 + 500 + 2000 + 2 * OWNER_BYTES
+    assert "Freed 10.5 KB." in dialog._status.text()
     assert populated["rows"].exists(), "the unticked row cache was cleared"
     assert populated["scratch"].exists() and populated["boot"].exists()
 

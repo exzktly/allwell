@@ -12,9 +12,9 @@ that was running, plus enough context to describe it back to the user — and
 nothing about the run's internal state. The same ``to_json`` the job queue
 already uses; no second serialisation format to keep in step with the form.
 
-It lives beside the scratch directory in the user's home rather than in the
-output folder, because at startup the app does not yet know which output folder
-to look in. One file, holding a list: several suspended runs can coexist (a user
+It lives in the app's folder (``util.state_dir``), beside the default scratch
+directory, rather than in the output folder, because at startup the app does
+not yet know which output folder to look in. One file, holding a list: several suspended runs can coexist (a user
 who suspends one plate, starts another, and suspends that too), and each is keyed
 by its output directory so resuming the same plate twice replaces its entry
 instead of stacking duplicates.
@@ -26,19 +26,31 @@ both read it.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from util.json_write import try_write_json_atomic
+from util.state_dir import HOME_DIRNAME, SUSPENDED_RUNS_NAME, adopt_legacy_file, app_file
+
+_LOG = logging.getLogger(__name__)
 
 RECORD_VERSION = 1
 
 
 def record_path() -> Path:
-    """``~/.allwell/suspended_runs.json`` — beside the default scratch base."""
-    return Path.home() / ".allwell" / "suspended_runs.json"
+    """``suspended_runs.json`` in the app's folder (``util.state_dir``), beside
+    the default scratch base.
+
+    Earlier versions wrote it to ``~/.allwell`` on every platform — the same
+    file on macOS and Linux, a different folder on Windows — so a record left
+    there is moved over the first time it is asked for, and a run suspended
+    before the upgrade is still offered back.
+    """
+    legacy = Path(os.path.expanduser("~")) / HOME_DIRNAME / SUSPENDED_RUNS_NAME
+    return adopt_legacy_file(app_file(SUSPENDED_RUNS_NAME), [legacy], log=_LOG)
 
 
 @dataclass(frozen=True)

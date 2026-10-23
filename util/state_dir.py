@@ -1,9 +1,7 @@
-"""The per-user folders All-Well keeps its local files in.
+"""The one per-user folder All-Well keeps its local files in.
 
-Two folders, for two different owners.
-
-**The app's folder — :func:`gui_state_dir`.** Everything the desktop app itself
-writes on this machine outside a dataset folder, in one fixed layout:
+**The app's folder — :func:`gui_state_dir`.** Everything All-Well keeps on a
+machine outside a dataset folder, in one fixed layout:
 
 =========================  ======================================================
 ``allwell-boot.log``       the startup and crash log (``startup.boot_diag``),
@@ -15,38 +13,43 @@ writes on this machine outside a dataset folder, in one fixed layout:
 ``scratch/``               an Analyze run's working files — extracted inputs,
                            intermediate images, per-FOV checkpoints — unless the
                            user points the run elsewhere (:func:`default_scratch_dir`)
+``czi-scans/``             the pipeline's CZI header cache (``pipeline.scan_cache``)
+``settings.ini``           window geometry, recent datasets and the other Qt
+                           settings (``core.app_settings``)
+``remotes.toml``           the remote hosts (``services.remote_config``)
+``job_queue.json``         the Datasets job queue (``services.job_queue``)
+``run_index.json``         the run journal's index (``services.run_journal``)
+``suspended_runs.json``    the suspended Analyze runs (``services.suspend_record``)
 =========================  ======================================================
 
 ``%LOCALAPPDATA%\\allwell`` on Windows — the folder Windows provides for exactly
-this, per-user and never roamed — and ``~/.allwell`` on macOS and Linux. Each
-falls back to the system temp folder when it cannot be written (Windows tries
-``~/.allwell`` first). ``ALLWELL_STATE_DIR``, when set, replaces all of that —
-the test harness points it at a per-worker scratch folder so no test writes
-into the real one. The app's caches are cleared from the title bar's storage
-button (``core.local_storage``).
+this, per-user and never roamed — and ``~/.allwell`` on macOS, Linux and a
+remote worker. Each falls back to the system temp folder when it cannot be
+written (Windows tries ``~/.allwell`` first). ``ALLWELL_STATE_DIR``, when set,
+replaces all of that — the test harness points it at a per-worker scratch
+folder so no test writes into the real one. The app's caches are cleared from
+the title bar's storage button (``core.local_storage``); the scratch, the scan
+cache and the four records are never offered there.
 
-:func:`legacy_gui_paths` names the app's files in the other places they can be
-found — ``~/.cache/allwell``, the ``.mplcache`` folder of a source checkout —
-so the storage button can clear them.
+**One folder on every platform.** Earlier versions spread these over four
+trees: the run scratch in ``~/.allwell`` even on Windows, the scan cache in
+``~/.cache/allwell``, the remotes, job queue and run index in
+``~/.config/allwell`` (``%APPDATA%\\allwell`` on Windows), and the Qt settings
+in the platform's native store (a plist on macOS, the registry on Windows,
+``~/.config/AllWell`` on Linux). The user's own data among them is carried
+over on first use by :func:`adopt_legacy_file` (and by ``core.app_settings``
+for the Qt settings); the caches are not carried — they rebuild — and the
+storage button offers their old copies instead (:func:`legacy_gui_paths`).
 
 The Parquet row caches are not here, by design: each sits in a ``.aw_parquet``
 folder beside the CSVs it caches, so it travels and is deleted with its dataset.
 
-**The analysis pipeline's folder — :func:`user_state_dir`.** The CZI scan cache
-(``pipeline.scan_cache``) is the pipeline's, runs on remote hosts as well, and
-keeps its own rule: ``~/.cache/allwell`` first, then ``%LOCALAPPDATA%\\allwell``,
-then the temp folder. It is not a GUI cache and does not move with the app's.
-
-**Scratch sits in the app's folder on every platform.** The run scratch is the
-pipeline's, but its default location is ``scratch/`` inside the app's folder —
-``%LOCALAPPDATA%\\allwell\\scratch`` on Windows, ``~/.allwell/scratch`` on
-macOS and Linux — so that everything the app keeps on a machine is in one place
-whichever platform it is. On Windows that is also the right volume class: the
-scratch holds gigabytes of transient files, and ``%LOCALAPPDATA%`` is the part
-of a profile that is never roamed. The storage button still never clears it
-(a suspended run resumes from its checkpoints); it only offers the old
-``~/.allwell/scratch`` on Windows, which nothing reads any more
-(:func:`legacy_scratch_dir`).
+**Scratch on Windows.** The scratch holds gigabytes of transient files, and
+``%LOCALAPPDATA%`` is the part of a profile that is never roamed, so the move
+out of ``%USERPROFILE%\\.allwell`` is also the right volume class. The storage
+button never clears the scratch in use (a suspended run resumes from its
+checkpoints); it only offers the old ``~/.allwell/scratch`` on Windows, which
+nothing reads any more (:func:`legacy_scratch_dir`).
 
 Stdlib-only and Qt-free: ``startup.boot_diag`` imports it before PySide6, and
 ``util/`` is shipped to the remote worker.
@@ -57,35 +60,6 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
-
-
-def candidate_dirs() -> list[Path]:
-    """The folders :func:`user_state_dir` tries, in order."""
-    out = [Path(os.path.expanduser("~/.cache")) / "allwell"]
-    local = os.environ.get("LOCALAPPDATA")
-    if local:
-        out.append(Path(local) / "allwell")
-    out.append(Path(tempfile.gettempdir()) / "allwell")
-    return out
-
-
-def user_state_dir() -> Path:
-    """The first folder of :func:`candidate_dirs` that exists or can be made,
-    *and* can be written; the system temp directory when none can.
-
-    ``mkdir(exist_ok=True)`` succeeds on a folder that exists but cannot be
-    written (one left owned by another user, say), so writability is checked
-    separately — otherwise the log's ``open`` fails later, silently, and the
-    fallbacks are never reached.
-    """
-    for d in candidate_dirs():
-        try:
-            d.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            continue
-        if os.access(d, os.W_OK):
-            return d
-    return Path(tempfile.gettempdir())
 
 
 # ── the desktop app's own folder ────────────────────────────────────────────
@@ -106,6 +80,18 @@ SCRATCH_SUBDIR = "scratch"
 #: The environment variable that overrides the scratch default — the Analyze
 #: form's "Scratch disk" field and ``--scratch_dir`` both set it.
 SCRATCH_DIR_ENV = "ALLWELL_SCRATCH_DIR"
+#: The pipeline's CZI header cache (``pipeline.scan_cache``), its override
+#: variable, and the override values that switch it off.
+SCAN_CACHE_SUBDIR = "czi-scans"
+SCAN_CACHE_ENV = "ALLWELL_SCAN_CACHE"
+SCAN_CACHE_OFF = frozenset({"off", "0", "false", "no"})
+#: The user's records, each carried over from where an earlier version kept it
+#: by :func:`adopt_legacy_file`.
+SETTINGS_NAME = "settings.ini"
+REMOTES_NAME = "remotes.toml"
+JOB_QUEUE_NAME = "job_queue.json"
+RUN_INDEX_NAME = "run_index.json"
+SUSPENDED_RUNS_NAME = "suspended_runs.json"
 BOOT_LOG_NAME = "allwell-boot.log"
 BOOTSTRAP_LOG_GLOB = "bootstrap-*.log"
 #: Where a source checkout kept its font cache before it moved into the app's
@@ -235,6 +221,89 @@ def legacy_scratch_dir() -> Path | None:
     return old
 
 
+def app_file(name: str) -> Path:
+    """*name* in the app's folder — where every record in the layout table lives."""
+    return gui_state_dir() / name
+
+
+def legacy_config_dirs() -> list[Path]:
+    """The folders earlier versions kept the remotes, job queue and run index in.
+
+    ``%APPDATA%\\allwell`` (Windows only) and ``~/.config/allwell`` (every
+    platform; Windows read it too when it already held a ``remotes.toml``).
+    """
+    out: list[Path] = []
+    appdata = os.environ.get("APPDATA")
+    if is_windows() and appdata:
+        out.append(Path(appdata) / APP_DIRNAME)
+    out.append(Path(os.path.expanduser("~/.config")) / APP_DIRNAME)
+    return [d for d in out if d.is_absolute()]
+
+
+def adopt_legacy_file(target: Path, legacy: list[Path], *,
+                      log=None) -> Path:
+    """Return *target*, first moving a record an earlier version kept elsewhere.
+
+    When *target* does not exist, the first file of *legacy* that does is moved
+    to it — copied, then the original removed — so the user's remotes, queue or
+    suspended runs follow the app into its folder instead of silently starting
+    empty. A copy that fails leaves the original where it was and *target*
+    absent, so nothing is lost and the next call tries again; an original that
+    will not go after a good copy is left, and is never read again because
+    *target* now exists. Each outcome is reported through *log* (a
+    ``logging.Logger``), when given.
+
+    Never moves anything while ``ALLWELL_STATE_DIR`` is set: that variable
+    means "not the real folders" (the test harness sets it), and a move would
+    take the user's real records out of their real home folder.
+    """
+    if os.environ.get(STATE_DIR_ENV, "").strip():
+        return target
+    try:
+        if target.exists():
+            return target
+    except OSError:
+        return target
+    for old in legacy:
+        try:
+            if not old.is_file() or _overlaps(old, target):
+                continue
+        except OSError:
+            continue
+        import shutil
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(target.name + ".adopting")
+            shutil.copy2(old, tmp)
+            os.replace(tmp, target)
+        except OSError as exc:
+            if log is not None:
+                log.warning("Could not move %s to %s (%s); it stays where it is "
+                            "and is read from there until the move succeeds.",
+                            old, target, exc)
+            return old
+        try:
+            old.unlink()
+            _remove_if_empty(old.parent)
+        except OSError as exc:
+            if log is not None:
+                log.warning("Moved %s to %s but could not remove the original "
+                            "(%s); it is no longer read.", old, target, exc)
+        else:
+            if log is not None:
+                log.info("Moved %s to %s.", old, target)
+        return target
+    return target
+
+
+def _remove_if_empty(folder: Path) -> None:
+    """Remove *folder* when the move just emptied it; leave it otherwise."""
+    try:
+        folder.rmdir()
+    except OSError:
+        pass  # not empty, or not ours to remove: either way it stays
+
+
 def _overlaps(a: Path, b: Path) -> bool:
     """Whether either path is, or contains, the other."""
     try:
@@ -248,8 +317,8 @@ def legacy_gui_paths() -> list[Path]:
     """Files and folders earlier versions of the app wrote and this one does not.
 
     In ``~/.cache/allwell``: the boot log and its crash copies, the bootstrap
-    logs and the font cache — **not** ``czi-scans``, which is the pipeline's and
-    lives there. The ``.mplcache`` folder at the root of a source checkout
+    logs, the font cache and the CZI scan cache (``czi-scans``, unless
+    ``ALLWELL_SCAN_CACHE`` points runs at it). The ``.mplcache`` folder at the root of a source checkout
     (git-ignored; a frozen build has none). And on Windows, the run scratch an
     older version left in ``~/.allwell/scratch`` (:func:`legacy_scratch_dir`).
     Only paths that exist are returned, and none that is, or holds, the current
@@ -260,7 +329,8 @@ def legacy_gui_paths() -> list[Path]:
     old = Path(os.path.expanduser("~/.cache")) / APP_DIRNAME
     try:
         if old.is_dir() and old.resolve() != current:
-            for pattern in (BOOT_LOG_NAME + "*", BOOTSTRAP_LOG_GLOB, FONT_CACHE_SUBDIR):
+            for pattern in (BOOT_LOG_NAME + "*", BOOTSTRAP_LOG_GLOB, FONT_CACHE_SUBDIR,
+                            SCAN_CACHE_SUBDIR):
                 found.extend(sorted(old.glob(pattern)))
     except OSError:
         pass  # an unreadable folder offers nothing; nothing is lost by it
@@ -273,7 +343,11 @@ def legacy_gui_paths() -> list[Path]:
     old_scratch = legacy_scratch_dir()
     if old_scratch is not None:
         found.append(old_scratch)
-    return [p for p in found if not _holds(p, current)]
+    scan_override = os.environ.get(SCAN_CACHE_ENV, "").strip()
+    in_use = [current]
+    if scan_override and scan_override.lower() not in SCAN_CACHE_OFF:
+        in_use.append(Path(scan_override).expanduser())
+    return [p for p in found if not any(_overlaps(p, u) for u in in_use)]
 
 
 def _holds(path: Path, other: Path) -> bool:

@@ -4,7 +4,7 @@
 Wraps the same argparse surface as ``process_microscopy.py`` and adds
 the v5.0.0 remote-execution flags:
 
-    --remote NAME           name of a host in ~/.config/allwell/remotes.toml
+    --remote NAME           name of a host in remotes.toml (in the app folder)
     --bring-back {full,csv-only}
                             output filter for what to materialize locally
                             (default: full — local output_dir is byte-

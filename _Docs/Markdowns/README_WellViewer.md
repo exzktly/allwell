@@ -1358,10 +1358,12 @@ that lands on the scratch disk.
 ### 11. Running on a remote host
 
 The last thing the form asks before the run buttons is a **Run on:** dropdown.
-It lists `Local` plus every SSH host configured in
-`~/.config/allwell/remotes.toml` (on Windows, `%APPDATA%\allwell\remotes.toml`
-takes precedence, and the `ALLWELL_REMOTES` environment variable overrides
-both), and it defaults to the first configured remote when there is one.
+It lists `Local` plus every SSH host configured in `remotes.toml`, in the
+app's own folder (`~/.allwell/remotes.toml` on macOS and Linux,
+`%LOCALAPPDATA%\allwell\remotes.toml` on Windows; the `ALLWELL_REMOTES`
+environment variable overrides it). A `remotes.toml` an earlier version kept in
+`~/.config/allwell` or `%APPDATA%\allwell` is moved there the first time the
+app starts, so your hosts carry over. It defaults to the first configured remote when there is one.
 Picking a remote changes nothing
 about the form above it — the same schema, channels, folders and options are
 sent — only where the segmentation runs. Results come back into the same output
@@ -5980,13 +5982,21 @@ tab's Edit menu, which is the same action as the Curation checkbox above.
 
 The **storage** button (the hard-drive icon, to the left of Help, in every mode)
 shows how much room the app's own files take and clears them. Everything the
-app keeps on this computer outside your dataset folders is in one folder:
+app keeps on this computer outside your dataset folders is in one folder — its
+logs and caches, an Analyze run's scratch, the CZI scan cache, and your
+settings, remote hosts, job queue and suspended runs:
 
 - **Windows:** `%LOCALAPPDATA%\allwell` — usually
   `C:\Users\<you>\AppData\Local\allwell`.
 - **macOS and Linux:** `~/.allwell`. It is hidden (it starts with a dot); in
   Finder use **Go → Go to Folder…** and type `~/.allwell`, or press ⌘⇧. to show
   hidden files. **Open folder** in the dialog takes you there either way.
+
+Earlier versions spread these over several places (`~/.config/allwell`,
+`~/.cache/allwell`, `%APPDATA%\allwell`, and the system's own settings store).
+The first time this version starts, your settings, remote hosts, queued jobs
+and suspended runs are moved into the folder above; the old scan cache is not
+moved — it rebuilds as you open plates — and the dialog offers it for deletion.
 
 The dialog lists what can go, each with its size, and clears what you tick:
 
@@ -6021,12 +6031,13 @@ whatever it points to is never touched.
 On Linux, if your home folder is shared between several machines, a temporary
 folder made by the app on another machine is never cleared from this one.
 
-The dialog never touches your images, CSVs or analysis, and never an Analyze
-run's own files. A run's scratch folder is the `scratch` folder inside the app's
-folder above, on every platform (or the *Scratch disk* you set); it and the CZI
-scan cache (`~/.cache/allwell/czi-scans`) belong to runs — a suspended run
-resumes from what is in its scratch — and are not offered. To reclaim scratch
-space, delete the `scratch` folder by hand while no run is going or suspended.
+The dialog never touches your images, CSVs or analysis, your settings, remote
+hosts, queued jobs or suspended runs, or an Analyze run's own files. A run's
+scratch folder is the `scratch` folder inside the app's folder above (or the
+*Scratch disk* you set), and the CZI scan cache is its `czi-scans` folder; both
+belong to runs — a suspended run resumes from what is in its scratch — and are
+not offered. To reclaim scratch space, delete the `scratch` folder by hand while
+no run is going or suspended.
 
 ### Copying analysis from another dataset
 
@@ -6686,7 +6697,8 @@ It is remembered per file and keyed on the file's size and modification time,
 so a plate you re-export is read again and only the files that changed cost
 anything. Nothing is written into the folder holding your images — a plate is
 often on a read-only archive or a share you do not administer — it goes with
-the analysis pipeline's other working files, in `~/.cache/allwell/czi-scans`, one small file per
+the app's other files, in the `czi-scans` folder of the app's folder
+(`~/.allwell/czi-scans`, or `%LOCALAPPDATA%\allwell\czi-scans` on Windows), one small file per
 folder you have opened. Deleting them costs one slow scan and nothing else. Set
 `ALLWELL_SCAN_CACHE` to a folder to keep them somewhere else, or to `off` to
 turn it off.

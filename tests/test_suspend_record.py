@@ -23,7 +23,9 @@ import services.suspend_record as sr
 
 @pytest.fixture(autouse=True)
 def _fake_home(tmp_path, monkeypatch):
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    """A private app folder per test (``ALLWELL_STATE_DIR``), so no record
+    leaks between tests and none reaches the real one."""
+    monkeypatch.setenv("ALLWELL_STATE_DIR", str(tmp_path / "app"))
     return tmp_path
 
 
@@ -49,9 +51,9 @@ def test_a_saved_run_round_trips(_fake_home):
     assert got.wells_done == 3 and got.wells_total == 10
 
 
-def test_the_record_lives_beside_the_scratch_dir(_fake_home):
+def test_the_record_lives_in_the_app_folder(_fake_home):
     sr.save(_run("/data/out"))
-    assert sr.record_path() == _fake_home / ".allwell" / "suspended_runs.json"
+    assert sr.record_path() == _fake_home / "app" / "suspended_runs.json"
     assert sr.record_path().is_file()
 
 
@@ -121,7 +123,7 @@ def test_describe_survives_an_unknown_total():
 
 def test_an_unwritable_home_reports_failure_rather_than_raising(monkeypatch):
     """A run that cannot record its suspension still suspends."""
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/proc/x/y")))
+    monkeypatch.setattr(sr, "record_path", lambda: Path("/proc/x/y/suspended_runs.json"))
     assert sr.save(_run("/data/out")) is False
     assert sr.load_all() == []
 

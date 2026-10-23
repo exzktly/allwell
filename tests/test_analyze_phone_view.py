@@ -105,3 +105,95 @@ def test_a_run_starting_at_the_desk_changes_nothing(tab):
     assert view.current() == SETTINGS
     assert tab._left_sidebar.isVisible() and not tab._dashboard.isCompact()
 
+
+
+def _y_in(tab, w) -> tuple[int, int]:
+    top = w.mapTo(tab, w.rect().topLeft()).y()
+    return top, top + w.height()
+
+
+def test_progress_on_a_short_screen_scrolls_rather_than_covering_the_plate(tab):
+    """Reported: on a phone, Analyze's plate was cut off by the log and could
+    not be viewed. At full phone width the plate alone needs ~250 px here (540
+    in the real window), so on a short page the dashboard and log do not fit;
+    the column was squeezed below its minimum, the dashboard cut short and the
+    log drawn over the plate. Progress now scrolls: the dashboard keeps its
+    full height and the log starts below the plate."""
+    from PySide6.QtWidgets import QScrollArea, QWidget
+    view = tab._phone_view
+    dash = tab._dashboard
+    # A child placed by geometry, as in the real window: a top-level pane
+    # grows to its own minimum height and the page is never short.
+    host = QWidget()
+    try:
+        host.resize(390, 360)
+        tab.setParent(host)
+        tab.setGeometry(0, 0, 390, 360)
+        host.show()
+        phone_layout.set_on(True)
+        dash.setStacked(True)   # the shell's half of phone layout
+        _pump()
+        assert tab.height() == 360
+        view.show_view(PROGRESS)
+        _pump()
+
+        _, plate_bottom = _y_in(tab, dash._plate)
+        _, dash_bottom = _y_in(tab, dash)
+        log_top, _ = _y_in(tab, tab._log)
+        assert dash.height() >= dash.minimumSizeHint().height(), \
+            f"the dashboard was squeezed to {dash.height()} of {dash.minimumSizeHint().height()} px"
+        assert plate_bottom <= dash_bottom, "the plate runs out of the dashboard"
+        assert log_top >= plate_bottom, \
+            f"the log (from y={log_top}) is drawn over the plate (to y={plate_bottom})"
+        scroll = view._scroll
+        assert isinstance(scroll, QScrollArea) and scroll.isVisible()
+        assert dash.isVisibleTo(scroll) and scroll.widget().isAncestorOf(dash)
+        bar = scroll.verticalScrollBar()
+        assert bar.maximum() > 0, "the column does not fit, so it must scroll"
+        bar.setValue(bar.maximum())
+        _pump()
+        _, log_bottom = _y_in(tab, tab._log)
+        assert log_bottom <= scroll.mapTo(tab, scroll.rect().bottomLeft()).y() + 1, \
+            "scrolled to the end, the log is still out of reach"
+    finally:
+        # The pane is the fixture's to tear down, not the host's to delete.
+        tab.setParent(None)
+        host.deleteLater()
+
+
+def test_settings_keeps_the_strip_unscrolled_and_desk_gets_the_column_back(tab):
+    view = tab._phone_view
+    form = tab._left_sidebar
+    splitter = form.parentWidget()
+    phone_layout.set_on(True)
+    _pump()
+    view.show_view(PROGRESS)
+    _pump()
+    view.show_view(SETTINGS)
+    _pump()
+    right = view._parts()[2]
+    assert splitter.widget(0) is right, "the Settings strip is not straight in the splitter"
+    assert not view._scroll.isVisible()
+    view.show_view(PROGRESS)
+    _pump()
+    phone_layout.set_on(False)
+    _pump()
+    assert [splitter.widget(i) for i in range(splitter.count())] == [form, right]
+    assert right.isVisible() and tab._dashboard.isVisible() and tab._log.isVisible()
+    assert view._scroll.widget() is None and not view._scroll.isVisible()
+
+
+def test_a_drag_on_a_status_plate_scrolls_the_page(qtbot):
+    """The run dashboard's plate fills most of the Progress page; if it kept
+    every drag that started on it, there would be almost nowhere left to
+    scroll from. A plate that selects wells still keeps its drags."""
+    from ui.phone_shell import _plate_owns_drag
+    from widgets.plate_geometry import apply_plate_geometry
+    from widgets.well_plate_selector import WellPlateSelector
+    status, picker = WellPlateSelector(), WellPlateSelector()
+    qtbot.addWidget(status)
+    qtbot.addWidget(picker)
+    apply_plate_geometry(status, role="status")
+    apply_plate_geometry(picker, role="picker")
+    assert not _plate_owns_drag(status) and not _plate_owns_drag(status._grid)
+    assert _plate_owns_drag(picker) and _plate_owns_drag(picker._grid)

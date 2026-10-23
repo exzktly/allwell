@@ -7728,7 +7728,8 @@ switch back to the desktop layout to use them.
 - **Progress ▾** — the headline, the overall bar, the stages, and the plate map
   coloured by each well's progress, one above the other. Tap a well to see what
   it is doing on the line under the plate. The log is below, with long lines
-  wrapped. Sideways, the progress sits on the left and the log on the right.
+  wrapped; when the screen is too short for both, swipe up past the plate to
+  reach it. Sideways, the progress sits on the left and the log on the right.
 
 **Run Pipeline**, **Suspend**, **+ Queue** and **Stop** sit in a bar along the
 bottom of the screen in both views, so they are always in reach. Starting a run —

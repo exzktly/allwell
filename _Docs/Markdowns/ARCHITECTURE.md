@@ -424,7 +424,10 @@ viewport carries `_DragOwnerGuard`, which refuses Qt's `QScrollPrepareEvent` whe
 a drag starts on a plate or a slider: the press then reaches the plate as if no
 gesture were there, where grabbed blindly it neither selected wells nor scrolled
 (`set_drag_scroll` grabs and installs the guard together;
-`tests/test_phone_form_swipe.py`). **Plot pages scroll by a swipe on the plot** too
+`tests/test_phone_form_swipe.py`). A report-only plate
+(`WellPlateSelector.isReportOnly`, the run dashboard's) selects nothing and does
+not keep the drag (`_plate_owns_drag`), so Analyze's Progress page, most of which
+is that plate, scrolls from anywhere on it. **Plot pages scroll by a swipe on the plot** too
 (`PhoneShell._swipe_plot_area`, run from `size_canvas` — so on the switch, on Show
 and from the sweep, and a plot built later gets it): the scroll area holding a
 canvas on a page `band_roots` names grabs the gesture, and gives it back at the
@@ -492,7 +495,13 @@ button lists two views (`PhoneHandles.page_views` / `page_view` /
 `show_page_view`; ☰ is hidden in Analyze): **Settings** shows the form under the
 dashboard reduced to its headline and overall bar (`PlateProgress.setCompact`,
 the log and last-run card hidden, the run side capped at its own height);
-**Progress** hides the form and shows the full dashboard and the log. The Stop
+**Progress** hides the form and shows the full dashboard and the log inside a
+scroll area (`AnalyzePhoneView._scroll`, `QScrollArea#PhoneRunScroll`, mounted by
+`_mount` for Progress only — Settings keeps the column straight in the splitter,
+where its height is the strip's). At full phone width the stacked plate alone is
+~540 px tall, so on a short screen the column needs more than the page; unscrolled
+it was squeezed below its minimum and the log was drawn over the lower half of the
+plate. Scrolled, the dashboard keeps its height and the log follows it. The Stop
 button turning enabled — the one signal every way of starting a run shares — shows
 Progress. Leaving phone layout puts back the orientation, sizes, form width and
 the run row's place in the form. Because the form is the page, it carries the

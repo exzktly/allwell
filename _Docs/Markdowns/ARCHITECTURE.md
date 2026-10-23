@@ -3026,8 +3026,8 @@ row gets a row of its own, with Reopen.
 
 **What a row offers follows from where the problem arose.** A *processing* row
 (missing, failed, no CSV, never processed, a traceback) offers **Re-run wells**,
-which goes through Home's one Review-side door into Analyze
-(`home.controller.open_in_analyze`, also what *Finish this run* uses) with the
+which goes through Review's one door into Analyze
+(`review.core.analyze_handoff.open_in_analyze`, also what *Finish this run* uses) with the
 selected wells both forced and the only wells run, so nothing else on the plate
 is touched; Analyze opens configured and the user presses Run. The hand-off
 answers whether it happened, and a build with no Analyze pane is told so rather
@@ -5035,6 +5035,7 @@ Cross-cutting controllers (in `review/core/`):
 | `core/tab_controller.py` | `on_tab_change` dispatch, tab history, scope flush, and the repaint that follows a restore. That last one is a seam worth naming: `on_tab_change` draws the tab and **then** drains any view-state pending for it — deliberately, because the apply step validates its values against combo items the draw has populated — which leaves the figure drawn from pre-restore defaults, one step behind controls that have already moved. `redraw_after_restore` closes that gap, and it resolves the tab through the feature registry rather than from a list: it was an `if/elif` over three tab names while six tabs own a block, and the three it did not name were simply not repainted. Response Curves was one — its Series button came back naming the split the user had saved, over curves drawn as a single undivided set, and the first thing that reached a redraw was the user toggling a series off and on. Heat Map was another. Distribution still goes through `redraw_app`, the call the rest of the app makes for that scope, and the Image Table is still not repainted (it reads images off disk and renders only on *Generate*; the restore marks it stale instead) — both rows with the reason written down rather than absences, and `tests/test_restore_repaints_the_tab_it_restored.py` states the rule against the registry. |
 | `core/channel_state_controller.py` | Channel-state machinery: `recalculate_threshold`, `set_active_channel`, `update_channel_selector`, `refresh_metric_combo_for_channel`. **Ordering contract:** `recalculate_threshold` publishes the freshly-detected `smfish_channels` set *before* it calls `update_channel_selector`, because that call ends in the Property-combo refresh and the combo reads the set to decide whether `smFISH Count` is selectable — publishing it afterwards leaves the item greyed out against count columns that already exist. Every combo asks that question through `domain/metric_registry.channel_supports_smfish`, which case-folds both sides: the global combo passes the normalised token (`gfp`) while the scatter, stats, and batch-export combos pass the displayed label (`GFP`), and a raw membership test disabled the item permanently on the upper-case side. **No plate-wide range is computed.** `ChannelState` holds no min / max of the active column, and `_recalculate_threshold` scans no column for one: such a scan is a read of every well the row cache does not hold, on every open and channel switch, and nothing in the app would read its answer (the threshold slider takes its range elsewhere). The gating hydration and `cell_gating.load_cell_areas` in `_recalculate_threshold` run whether or not the column has values. |
 | `core/selection_controller.py::note_group_visibility_changed` | Showing or hiding a replicate set changes which computed results are *drawn*, not what any of them is — ``active_replicate_sets`` filters hidden sets out before anything is computed, and no cache key carries ``hidden``. So a visibility toggle keeps the plate's statistics instead of discarding them, which on twelve groups is 312 cached entries kept per toggle rather than recomputed. It is reached through ``rebuild_all(ctx, invalidate=False)`` rather than beside it: the toggle still needs the Replicates panel, the plate map and the visible redraws that ``rebuild_all`` performs, and an earlier version that notified and then called ``rebuild_all()`` separately had its statistics thrown away by that call's first line — the change bought nothing while its test, which drove the notifier rather than the toggle, stayed green. The refresh has to *know* not to invalidate; being told separately is not the same thing. |
+| `core/analyze_handoff.py` | `open_in_analyze` — Review's one door into the Analyze pane: hand the shell the loaded dataset's root (`dataset_root`, one level above the `out/` Review loads), its recorded settings, *Incremental*, and the wells to force and to limit the run to. Reached through the top-level window's duck-typed `_open_dataset_in_analyze`, so a build without an Analyze pane does nothing. In `core/` because three features use it — Home's *Finish this run*, QC triage's *Re-run wells*, the Nanowells Full montage's *Re-run anchored wells* — and a feature may not import another. |
 | `core/record_sync.py` | `resync_run_check` — re-read the sidecar's `run_check` block, the one part of a loaded dataset's sidecar Review does not own (the pipeline writes it at the end of a run, the Datasets **Validate & Repair** tool at the end of every scan). It takes that key and nothing else, because the rest of the sidecar holds user-side blocks whose in-memory copy may carry unsaved edits, and it returns whether the record changed so a caller repaints only when something arrived. In `core/` rather than in Home, the page that reports the record: what it re-reads is dataset state, and its second caller is `tab_controller`'s pane handler, which cannot import a feature. A sidecar that has gone unreadable keeps the record already loaded; one that is readable and no longer carries the block drops it, since reporting a stale record as current is the failure this exists to avoid. |
 | `core/csv_export.py` | **The one CSV Save-As dialog**, plus the plain writer beside it. `ask_save_csv` roots the picker at the open dataset, parents it to the window and offers one filter; `write_csv_rows` is the open / write / status / `OSError` block that four export paths had each written out with their own wording. In `core/` because it knows nothing about plots, batches or metrics, so a feature wanting to save a table need not import another feature at module scope. **Every CSV export in the app goes through it** — the export service's seven, the Spatial summary and the Multivariate feature matrix — and that is the point rather than a detail: while those kept private copies there were two "all files" filters (`(*)` here, the DOS-era `(*.*)` in the service, which Qt honours literally on some platforms and which then hides every extensionless name behind a label saying it shows everything), two answers to whether the picker starts beside the dataset, and two to whether it suggests a filename. Only the *writers* stay with their callers, because a dict-writer's schema is its field names. `tests/test_one_csv_save_dialog.py` fails on a second CSV `getSaveFileName` anywhere else; it resolves module-level string constants, because its first version read only the literals inside each call and walked past the one site that held its filter in a constant — the site that had actually shipped. |
 | `core/plot_orchestrator.py` | Default-scope fan-out (line + distribution + heat map). Per-tab scopes (bar / scatter / scatter-agg) have their own entry points that consume scope-specific state. Line, Distribution and Heat Map are drawn only when their tab is **on screen**, resolved through `fold_change_scopes.known_visible_scopes` so the unfocused pane of a Split View still counts as visible. A hidden figure is added to `PlotState.fc_dirty_scopes` — the set `flush_dirty_scopes` already drains from the tab-change handler — rather than to a second flag of its own; all three are registered redraw scopes with `on_activate` hooks that re-enter this fan-out on show, so there are two routes to the repaint and one record of whether it is owed. Drawing the line plot whatever is in front would, with Home in front after a load, be a pass over every well for a figure nobody sees (measured at 17 s of a 32 s open of an 8-well plate of large wells). The visibility test **fails open**: `known_visible_scopes` answers `None` when the tab on screen cannot be told (a lookup that throws, an unpopulated scope registry) and an empty set only when a known non-plot tab is in front — `visible_scope_names` returns an empty set for both, which is why it is not the one consulted. Unknown draws everything built: a redundant redraw costs time, a skipped one a stale figure. `redraw_scopes_after_load` leaves the default scope's mark as this fan-out set it. Note that ``redraw_scopes_after_load`` matches the default scope **by name**: ``line``, ``distribution`` and ``heatmap`` all register the same ``_redraw_app_scope`` callable, so an identity test on ``scope.redraw`` cleared the dirty marks of the two hidden ones and left them neither drawn nor owed. |
@@ -9314,12 +9315,19 @@ insufficient or collinear evidence. All of this is validated on synthetic
 point sets only, not on boundaries detected in real phase images.
 
 `resolve_origin(fit, *, fiducial=None, array_centre=None, plate_rigid=None,
-fiducial_margin)` independently anchors each acquisition. The required score
+fiducial_margin, manual=None)` independently anchors each acquisition. The required score
 margin has no synthetic default or absolute-score calibration. A
 `FiducialCandidate(position, score, runner_up_score)` is accepted only when its
 score exceeds its runner-up by more than the supplied margin. Accepted evidence
-is snapped through the fitted phase in priority order: fiducial, array centre,
-then plate-rigid prediction. A fiducial or array centre more than a quarter
+is snapped through the fitted phase in priority order: an anchor set by hand
+(`manual`), fiducial, array centre, then plate-rigid prediction. A manual anchor
+more than a quarter pitch from every lattice site, or whose site lies more than
+`MANUAL_REACH_PITCHES` (1.5) pitches from every detected nanowell (the fitted
+lattice runs on for ever, so a click off the array snaps to a site too; the
+site itself need not be detected, since the central square is often exactly
+what detection missed), leaves the acquisition `unaddressed` with the distance
+in the reason instead of falling through to the other sources, because a person
+who pointed at a well must not find it anchored somewhere else without being told. A fiducial or array centre more than a quarter
 pitch from every site is refused, with the distance in the reason, because the
 nearest site to a point that lies nowhere near one is arbitrary. Three times the
 prediction's one-sigma uncertainty for the target's *true origin*
@@ -10048,14 +10056,54 @@ each well's rows are right under its own rule, and only the count at the rim dif
 one timepoint, so its rim is that timepoint's, and its notes say a run decides the rim over every timepoint and
 keeps an analysed dataset's roster. Completeness counts
 timepoints, not (fov, timepoint) pairs (`completeness.nanowell_coverage`): a well of empty nanowells has no
-cell rows and is whole.
+cell rows and is whole. A timepoint is covered only when its grid record says `ok`, so a timepoint the run
+located and measured but left unaddressed (or refused with any other recorded reason) is missing — an incremental
+run redoes it — and the well record also lists it under `not_addressed` (`[timepoint, status]`, with
+`not_addressed_count`). That list is what keeps "ran and could not be addressed" apart from "never reached": Home
+paints a partial well that covers nothing as *Staged, never processed* only when `not_addressed_count` is zero,
+and otherwise as *Partial*, with a *Nanowell timepoints not addressed* row naming the wells and pointing at the
+anchor (`review/features/home/collect.py`; `tests/test_an_unaddressed_nanowell_well_is_not_staged_and_never_processed.py`).
+Validate's scan does not use this rule for nanowell wells — it counts (fov, timepoint) pairs from the
+measurements CSV — so a record Validate rewrites carries no `not_addressed`.
 
 **End of run.** `nanowell_endgame` re-runs each unaddressed (well, timepoint) the rest of the plate can anchor:
 the wells anchored on their own evidence at a reference timepoint and at this one fix the plate's rigid
 motion (`fit_plate_rigid`), and the well's origin at the reference carried through it is handed to
 `resolve_origin` as a prediction, accepted only when its error is under a third of half a pitch. It needs a
 stage position for every tile (otherwise the reason is recorded) and treats the stage and image axes as
-parallel. Only those wells' rows for those timepoints are rewritten.
+parallel. Only those wells' rows for those timepoints are rewritten. "Its own evidence" is
+`nanowell_task._INDEPENDENT`: an anchor set by hand, the fiducial, or the array centre — never another
+plate-rigid prediction.
+
+**Anchors set by hand.** When a well's central square cannot be found, a person gives the origin instead:
+`in/nanowell_anchors.json` (`util/nanowell_anchors.py`, Qt-free and stdlib-only, in the remote manifest) holds
+one position per (well, timepoint), in the well frame — the frame of the grid record's `tiles` and
+`montage_origin_um`. It sits beside `acquisition.json` because it describes the input images rather than one
+run's output: it survives a re-run, and a remote run carries it as it carries the record. `process_well_zip`
+reads it (`_well_manual_anchors`; Test detection reads it the same way) and `locate_timepoint` converts each
+timepoint's anchor to the montage frame and offers it to `resolve_origin` as `manual`. The grid block records
+`manual_anchor_um` whether or not it was used. One click per well is enough when the rest of the plate is
+anchored: the click is independent evidence, so the end-of-run pass carries it to the well's other timepoints.
+A file that cannot be used — not JSON, another version, a well that is not a well, two anchors for one (well,
+timepoint) — fails the well with the file's problem named, never runs it as if no anchor had been set.
+**Reuse is keyed on the anchor.** `_prior_state` keeps a timepoint only when its recorded `manual_anchor_um`
+is the current one, so an incremental run recomputes a timepoint whose anchor was set, moved or cleared, and
+the resume checkpoint key (`_checkpoint_key`) carries it too. A `plate_rigid` timepoint was carried from another
+timepoint or other wells, any of which a click may have moved, so every located timepoint also records
+`anchors_digest` — a digest of the whole plate's anchors when it was located — and a `plate_rigid` one is kept
+only under the same digest. For a remote run, `acquisition_transport` uploads
+the file's bytes beside the archives (full upload and every batch), and both the upload cache key and
+`remote_scratch.source_fingerprint` — the re-attach's source key — fold it in, so a re-run after a click is
+neither served from the cache without the file nor re-attached to the run that left the well unaddressed. The
+cache key folds in only the anchors of the wells being uploaded, so a click on one well does not re-upload a run
+that does not include it; the whole file is still sent, so the remote reads what a local run would.
+Subset, Merge Plates and Concatenate carry it through `datasets/core/nanowell_anchors_carry.py`: Subset keeps
+the anchors of what it keeps, Merge Plates renames dataset 2's wells by the remap, Concatenate shifts dataset
+2's timepoints (and an in-place addition preserves and restores the file with the record). Two sources that
+anchor one destination well at one timepoint differently are refused. Pinned by
+`tests/test_nanowell_manual_anchor.py`, `test_nanowell_manual_anchor_run.py` (nanowell lane: one click at 0h
+addresses a blind well at both timepoints, every address checked against the drawn plate),
+`test_acquisition_remote_transport.py` and `test_nanowell_anchors_follow_the_dataset_tools.py`.
 
 **The Analyze form.** The section ships with the removable Nanowells feature: `profiles/full.toml` lists
 `analyze/nanowell_section.py`, `nanowell_preview.py`, `nanowell_preflight.py` and `domain/nanowell_fields.py` under
@@ -10304,6 +10352,35 @@ its residual. A tile size comes from the acquisition record's `tile_size_px` and
 the tile's corner is marked and the figure says the outline is unknown, never a guessed rectangle. The grid
 record of every timepoint is listed beside the image. The montage (a PNG of up to 4096 px) is read on a
 worker; the figure says *Reading the montage…* until it arrives, and the last `MONTAGES_KEPT` are kept.
+*Show: Montage / Overlay* (`state.qc_montage`, `qc_overlay`, persisted with the page's settings and on unless
+saved off) pass `show_montage` / `show_overlay` to the renderer: without the montage the axes keep its extent, so
+the overlay sits where it would over the image (`tests/test_array_qc_toggles.py`).
+
+**Full montage.** Array QC's **Full montage…** button (`controller.open_full_montage`) opens a non-modal window
+(`full_montage_view.FullMontageWindow`, registered as `_nw_full_montage`, one at a time) on the well and
+timepoint the page shows. It draws the registered montage at any resolution from the raw tiles
+(`full_montage_compute`, Qt-free): every tile from `in/<well>.zip` (the member `image_compute._member_for`
+finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the record's order with a later tile
+covering an earlier one in the overlap — no blending, so every pixel is a pixel of one real image — under one
+well-wide stretch (1st–99.5th percentile, as `build_montage` stretches). Each tile is held as a pyramid of 2×
+means: the levels at a quarter resolution and coarser for every tile once read, the two finest only within
+`FINE_BYTES_KEPT` bytes, each (tile, level) apart and never one the current view draws (evicting it would have the view ask for it again, trading tiles for ever), so a hundred-tile well is not held whole. `TileStore.render` draws each output pixel
+from the finest held level no finer than one output pixel and reports the tiles it wants finer (`wants`) or has
+never read (`unread`); the canvas asks the window to read those on a worker (`core.worker_bridge`) and draws
+again when they arrive, so painting never waits on a read, and a result that arrives after the window is gone
+delivers to nothing. Tiles are read one at a time: one that cannot be read is recorded in `TileStore.failed`,
+named in the status line, not drawn and never asked for again, and the rest are still read. A plate placed from a
+scan pattern has no recorded tile size, so it is read from the first tile's TIFF header. Moving to another
+timepoint or closing the window cancels the store's reads at their next tile and lets its pixels go. *Set anchor*
+is offered only where an anchor can change the result (`ANCHORABLE`: `ok` or `unaddressed`). Over the pixels: tile outlines, each nanowell at its measured position coloured by state
+with its `q,r` address where it is drawn large enough, and the anchor. Drag pans, the wheel zooms about the
+pointer, *Fit* and *1:1*. With *Set anchor* on, a click (not a drag) writes the well's anchor at this timepoint;
+*Clear anchor* removes it; *Re-run anchored wells…* hands the dataset to Analyze limited to the anchored wells,
+each forced and with Incremental off (a remote nanowell run refuses Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one door into Analyze, shared by
+Home's *Finish this run*, QC triage and this window. The status line states the timepoint's grid status, its
+reason, how it was anchored, and whether the anchor set has been used yet. `tests/test_nanowell_full_montage.py`
+asserts pixel values on four constant-valued tiles with one bright pixel only full resolution shows, and drives
+the real page's button, canvas click and re-run.
 
 **Crops.** `image_compute.site_crops` cuts a nanowell at each timepoint from its **owner tile**, read from
 the input archive the run segmented (`in/<well>.zip`; the member found by the run's filename schema, separator

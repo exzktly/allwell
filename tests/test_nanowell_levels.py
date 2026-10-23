@@ -107,6 +107,6 @@ def test_measurements_of_another_version_are_not_mixed():
     from types import SimpleNamespace
 
     outcome = SimpleNamespace(timepoints={"0h": {"record_digest": "d"}}, radius={})
-    located = SimpleNamespace(status="ok", origin_method="fiducial")
+    located = SimpleNamespace(status="ok", origin_method="fiducial", manual_anchor_um=None)
     key = nr._checkpoint_key(outcome, "0h", located, 100.0, None, nr.NanowellSettings("100um"), {})
     assert key["measure_version"] == nm.MEASURE_VERSION              # a checkpoint of another version is not taken back

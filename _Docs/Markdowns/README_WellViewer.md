@@ -272,7 +272,9 @@ remote host cannot read a folder on this computer: the log says so, and the host
 window with the montage: every nanowell outlined (green empty, blue holding cells, amber occluded, red
 clipped, grey without an address, dashed purple on a seam), addresses written once you zoom in far enough to
 read them, the origin method, the measured overlap against the one a nanowell needs, and a few
-rim-suppressed nanowells beside their segmentation. Use it before a plate-wide run: if the addresses do not
+rim-suppressed nanowells beside their segmentation. Untick **Nanowell outlines** to see the montage without
+them — the outlines cover the very edges you are checking them against — and tick it again to bring them back;
+neither re-runs the detection. Use it before a plate-wide run: if the addresses do not
 land on the right nanowells, the run would not either. Finding the nanowells does not need Cellpose; only counting
 the cells in them does. Without it Test detection still draws every nanowell with its address and state, outlines
 the ones it could see in grey as *not counted*, shows no crops, and says at the top of its notes that Cellpose
@@ -338,6 +340,20 @@ both scores) — and the grid record keeps those scores.
 When a well's own evidence cannot say which nanowell is which (no visible central square, no readable array
 edge), the end of the run addresses it from the plate's other wells, which move together between timepoints,
 and says how many it anchored and how many remain unaddressed.
+
+**Setting the anchor by hand.** When the run cannot find a well's central square, you can point at it. In
+Review, open the Nanowells page, choose *Array QC*, pick the well and timepoint, and press **Full montage…**.
+Zoom to the square, turn on **Set anchor**, and click it. The click is saved in `in/nanowell_anchors.json`
+beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
+Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
+run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
+addressed from it at the end of the run, through the plate's other wells. A timepoint that still cannot be
+addressed says so, and takes a click of its own. A click that is not on a nanowell (more than a quarter of the
+spacing from every one), or that is off the array (more than one and a half spacings from every nanowell
+found), is not used, and the well's record says how far off it was. On a remote host, a run
+limited to a few wells sees only those wells at its end, so it can carry a click to other timepoints only when
+at least four of the plate's wells are in the run; otherwise click each timepoint. Subset, Merge Plates and
+Concatenate carry the anchors of the wells and timepoints they keep, renamed as they rename them.
 
 `--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile
 record recomputes the timepoint. An incremental nanowell run is refused on a remote host for now — the remote
@@ -1977,7 +1993,10 @@ What is on it:
   complete (green), partial (amber, with an arc showing how much of it landed),
   failures recorded (red), images with no measurements behind them (blue — the
   same colour the Datasets tools use to flag an odd well), measurements whose
-  output archive is gone (cyan), staged but never processed (grey). Those
+  output archive is gone (cyan), staged but never processed (grey). A nanowell
+  well whose timepoints ran but could not be addressed (no central square found)
+  is partial, not "never processed", and the health card lists it under
+  *Nanowell timepoints not addressed* with what to do about it. Those
   colours are the ones every other well map in the app uses for the same
   things, so a colour you have learnt once reads the same here. A well the record says nothing about — because no completeness check has
   been run, or because it produced nothing at all — is left plain, uncoloured:
@@ -4866,6 +4885,15 @@ use them.
   nanowells there may hold cells, and that timepoint's counts and confluence may be biased. A tile whose size the acquisition
   record does not give is marked at its corner, and the figure says so. The montage is read in the
   background; the figure says *Reading the montage…* meanwhile.
+  **Show: Montage / Overlay** turn the image and the drawn layer (tile outlines, their labels, the nanowell
+  marks) on and off separately: the overlay alone on an empty frame, or the image with nothing over it. Both
+  start on, and the page remembers the choice with its other settings.
+  **Full montage…** opens the same well at full resolution in a window of its own, drawn from the raw images
+  where the run placed each tile, with the tile outlines, every nanowell's address, and the anchor set by hand.
+  Drag to pan, scroll to zoom, *Fit* for the whole well, *1:1* for one image pixel per screen pixel; the detail
+  sharpens as the tiles in view are read. Where tiles overlap, the later tile is shown, not a blend. **Set
+  anchor**, **Clear anchor** and **Re-run anchored wells…** are described under *Setting the anchor by hand*
+  above. It needs the dataset's `in/` folder beside its results.
 
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
 brightness and site signal against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to

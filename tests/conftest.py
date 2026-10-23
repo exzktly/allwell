@@ -972,6 +972,7 @@ NANOWELL_E2E_FILES = {
     "test_nanowell_registration_reuse.py": "a second run reuses the first's tile registration; 29 s",
     "test_nanowell_tile_brightness.py": "tiles of different gain and offset measure alike; 30 s",
     "test_nanowell_real_plate.py": "tracker section F: the real plate's geometry on rendered tiles; 20 s",
+    "test_nanowell_manual_anchor_run.py": "an anchor set by hand addresses a well end to end; 40 s",
 }
 
 

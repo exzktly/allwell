@@ -30,6 +30,8 @@ class NanowellState:
     selected_sites: list = field(default_factory=list)  # [[well, q, r], ...] — not a plate selection
     control: str = ""                       # the group compared against on *Along x: Wells* ("" = none)
     cohort: bool = False                    # only nanowells with a value at every timepoint (tracker I8)
+    qc_montage: bool = True                 # Array QC draws the montage image
+    qc_overlay: bool = True                 # Array QC draws the tile outlines and the nanowell marks over it
     #: The user's "responding above" cut per metric column (``brightness_fc_GFP``, ``n``; tracker I9). A metric
     #: with none has no fraction responding: there is no default cut.
     thresholds: dict = field(default_factory=dict)
@@ -58,6 +60,7 @@ class NanowellState:
     def to_config(self) -> dict:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
+                "qc_montage": self.qc_montage, "qc_overlay": self.qc_overlay,
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -71,6 +74,8 @@ class NanowellState:
             value = config.get(name)
             setattr(self, name, value if isinstance(value, str) else getattr(fresh, name))
         self.cohort = config.get("cohort") is True
+        self.qc_montage = config.get("qc_montage") is not False       # both on unless saved off
+        self.qc_overlay = config.get("qc_overlay") is not False
         sites = []
         for item in config.get("selected_sites") or []:
             if (isinstance(item, (list, tuple)) and len(item) == 3 and isinstance(item[0], str)

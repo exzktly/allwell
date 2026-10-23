@@ -57,6 +57,8 @@ _RESPONDING_TIP = ("A nanowell counts as responding when its value is above this
                    "a fold change, a count, a confluence, an intensity — and the figure states each group's fraction "
                    "responding at it; empty, no fraction is computed. Kept per metric and channel.")
 _RESPONDING_W = 90
+_MONTAGE_TIP = ("The well's registered montage at full resolution, drawn from the raw tiles, with every nanowell's "
+                "address — and where a well's central square was not found, the place to click it.")
 _CONTROL_TIP = "Compare each group's centre with this group's, computed the same way (× ratio, or a difference on log₂)."
 
 
@@ -132,6 +134,16 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_well_cb", well_cb)
     grp_well = band.add_scope("Well", well_cb)
 
+    qc_montage_box = QCheckBox("Montage")
+    qc_montage_box.setToolTip("Draw the montage image. Off, the outlines and marks stay on an empty frame.")
+    qc_montage_box.toggled.connect(lambda on: nwc.set_qc_montage(ctx, on))
+    reg.register("_nw_qc_montage_box", qc_montage_box)
+    qc_overlay_box = QCheckBox("Overlay")
+    qc_overlay_box.setToolTip("Draw the tile outlines and the nanowell marks over the montage. Off, the image alone.")
+    qc_overlay_box.toggled.connect(lambda on: nwc.set_qc_overlay(ctx, on))
+    reg.register("_nw_qc_overlay_box", qc_overlay_box)
+    grp_qc = band.add_scope("Show", qc_montage_box, qc_overlay_box)
+
     tp_slider = QSlider(Qt.Horizontal)
     tp_slider.setToolTip(_SLIDER_TIP)
     tp_slider.setMinimum(0)
@@ -170,6 +182,12 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         data_tooltip="Every nanowell, timepoint and metric of this dataset, one row each",
         cells_cb=lambda: export_cell_data_from(
             ctx, cell_scope, unavailable="Select wells with nanowell tables first."))
+    montage_btn = QPushButton("Full montage…")
+    montage_btn.setProperty("variant", "secondary")
+    montage_btn.setToolTip(_MONTAGE_TIP)
+    montage_btn.clicked.connect(lambda _=False: nwc.open_full_montage(ctx))
+    reg.register("_nw_montage_btn", montage_btn)
+    band.add_action(montage_btn)
     band.add_action(export_btn)
     band.add_action(make_properties_button(ctx, band, "nanowell"))
     layout.addWidget(band)
@@ -224,7 +242,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     def page_visible() -> bool:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
-    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box, responding_edit)
+    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box, responding_edit,
+                qc_montage_box, qc_overlay_box)
 
     def refresh_controls() -> None:
         channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None
@@ -275,6 +294,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_baseline.setVisible(view != "array_qc")
             grp_axis.setVisible(distribution)
             cohort_box.setChecked(st.cohort)
+            qc_montage_box.setChecked(st.qc_montage)
+            qc_overlay_box.setChecked(st.qc_overlay)
+            grp_qc.setVisible(view == "array_qc")
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
             # applies to what it draws, so its box stays where it can be turned off.
@@ -287,6 +309,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position")
             grp_well.setVisible(view in ONE_WELL_VIEWS)
             grp_slider.setVisible(view in ONE_WELL_VIEWS)
+            montage_btn.setVisible(view == "array_qc")
+            montage_btn.setEnabled(bool(st.data and nwc.page_well(ctx)))
         finally:
             for w, b in zip(controls, blocked):
                 w.blockSignals(b)

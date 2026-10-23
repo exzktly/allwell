@@ -123,13 +123,21 @@ def source_fingerprint(input_dir: "Path | None") -> str:
         return ""
     try:
         from util.acquisition_record import RECORD_FILENAME, read_record_file
+        from util.nanowell_anchors import ANCHORS_FILENAME
         record = read_record_file(Path(input_dir) / RECORD_FILENAME)
+        # Anchors set by hand decide a nanowell well's addresses, so a run re-done after one was set must not
+        # re-attach to the run that left the well unaddressed.
+        anchors = Path(input_dir) / ANCHORS_FILENAME
+        anchors = anchors.read_bytes() if anchors.is_file() else None
         base = fingerprint_archives(archives)
-        if record is None:
+        if record is None and anchors is None:
             return base
         import json
         digest = hashlib.blake2b(base.encode("ascii"), digest_size=16)
-        digest.update(json.dumps(record, sort_keys=True).encode("utf-8"))
+        if record is not None:
+            digest.update(json.dumps(record, sort_keys=True).encode("utf-8"))
+        if anchors is not None:
+            digest.update(b"\0anchors\0" + anchors)
         return digest.hexdigest()
     except OSError:
         return ""

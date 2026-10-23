@@ -9,12 +9,12 @@ loaded with the sidecar.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ui import theme
+from review.core.analyze_handoff import dataset_root, open_in_analyze
 from review.core.lazy import lazy
 from review.core.record_sync import resync_run_check
 from core.safe import swallow
@@ -1006,57 +1006,6 @@ def _complete_run_in_analyze(ctx) -> None:
     """
     open_in_analyze(ctx, force_wells=hc.wells_needing_force(ctx),
                     only_wells=hc.wells_needing_work(ctx))
-
-
-def open_in_analyze(ctx, *, force_wells, only_wells) -> bool:
-    """Open Analyze on this dataset, incremental, scoped to the named wells.
-
-    The one Review-side door into Analyze. Home's *Finish this run* goes
-    through it with the record's own answer to which wells need work; QC
-    triage's *Re-run wells* goes through it with the wells the user picked,
-    both forced and limited, so nothing else on the plate is touched. Returns
-    whether the hand-off happened — ``False`` in a build that mounts no
-    Analyze pane, or for a folder that is not a dataset Analyze can open.
-    """
-    shell = ctx.window.window()
-    handoff = getattr(shell, "_open_dataset_in_analyze", None)
-    if not callable(handoff):
-        return False
-    root = dataset_root(ctx)
-    if not root:
-        return False
-    handoff(
-        Path(root),
-        dict(getattr(ctx.state.dataset, "pipeline_info", None) or {}),
-        incremental=True,
-        force_wells=list(force_wells),
-        only_wells=list(only_wells),
-    )
-    return True
-
-
-def dataset_root(ctx) -> str:
-    """The folder a Datasets tool wants, which is not the one Review loaded.
-
-    Review's ``data_dir`` is where the measurements CSVs are, and for the layout
-    the pipeline writes that is the ``out/`` subfolder — Analyze's own loader
-    descends into it (``load_controller.load_path``). Every Datasets tool wants
-    the folder *above* it, the one holding both ``in/`` and ``out/``, because
-    that is what a dataset is to them (``datasets.core.dataset_paths``).
-    Handing them ``out/`` fails their check and leaves the user re-picking a
-    folder the app already had open.
-
-    ``in_dir`` is the honest signal: the loader sets it precisely when it
-    detected that layout, and leaves it ``None`` for a flat folder of CSVs,
-    which has no parent to prefer and is not a dataset those tools can read
-    anyway.
-    """
-    dataset = getattr(ctx.state, "dataset", None)
-    in_dir = getattr(dataset, "in_dir", None)
-    if in_dir is not None:
-        return str(Path(in_dir).parent)
-    data_dir = getattr(dataset, "data_dir", None)
-    return str(data_dir) if data_dir else ""
 
 
 def _show_pane(ctx, index: int) -> None:

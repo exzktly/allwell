@@ -19,9 +19,11 @@ Positions are in micrometres in the registration's common frame (the "well frame
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 import math
 from pathlib import Path
+from types import MappingProxyType
 
 import numpy as np
 
@@ -143,6 +145,7 @@ class Located:
     indexed: tuple = ()
     mirrored: bool = False
     stage_offset_um: tuple[float, float] | None = None    # the common frame's place in stage coordinates
+    manual_anchor_um: tuple[float, float] | None = None   # the anchor a person set, in the well frame
     pitch_um: float | None = None                         # the pitch this timepoint was located with (measured)
     #: Inferred geometry only (``settings.geometry == "infer"``): every lattice site of the array as inferred from the
     #: wells found, montage frame, found or not — the roster of an array that is not a circle (tracker X35).
@@ -360,8 +363,12 @@ def _grid_block(plan, placement: Placement | None, extra: dict, warnings=()) -> 
 
 
 def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, settings: NanowellSettings, *,
-                     plate_rigid=None, expected_shape: tuple[int, int] | None = None, stored=None) -> Located:
+                     plate_rigid=None, expected_shape: tuple[int, int] | None = None, stored=None,
+                     manual_anchor_um=None) -> Located:
     """Place, register, montage and address one (well, timepoint). Never raises on bad data.
+
+    *manual_anchor_um* is the anchor a person set for this timepoint (``util.nanowell_anchors``), in the well frame;
+    it is offered to ``resolve_origin`` first, and the grid block records it whether or not it was used.
 
     *images* maps a tile id to its phase image. A tile of the grid with no image is a status of its
     own (``no_images``), not a smaller grid: a missing tile would change which sites it owns. *stored* is
@@ -419,6 +426,9 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     located.stage_offset_um = stage_offset(record, well, timepoint, positions, tolerance_um=pitch)
     seed = {"pitch_seed_um": pitch, "pitch_seed_source": pitch_source,
             "tile_lattice_fits": [fitted, len(plan.placements)]}
+    if manual_anchor_um is not None:
+        located.manual_anchor_um = (float(manual_anchor_um[0]), float(manual_anchor_um[1]))
+        seed["manual_anchor_um"] = list(located.manual_anchor_um)
 
     def refuse(status, reason, **extra):
         located.status, located.reason = status, reason
@@ -472,9 +482,11 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     if fiducial["position_um"] is not None:
         fiducial["position_um"] = [float(v) for v in _montage_to_common(fiducial["position_um"], montage)]
     located.fiducial = fiducial
+    manual = (None if located.manual_anchor_um is None
+              else np.subtract(located.manual_anchor_um, montage.origin_um))       # well frame -> montage frame
     resolved = resolve_origin(detection.fit, fiducial=candidate, array_centre=detection.boundary_centre_um,
                               plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN, fiducial_ratio=FIDUCIAL_RATIO,
-                              fiducial_refusal=fiducial["reason"])
+                              fiducial_refusal=fiducial["reason"], manual=manual, detected=detection.points_um)
     located.fit = detection.fit
     located.pitch_um = float(detection.fit.pitch)
     located.mirrored = bool(detection.fit.mirrored)
@@ -1635,6 +1647,8 @@ def _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts) -
 
     key = {"radius_um": radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
            "located": [located.status, located.origin_method], "measure_version": MEASURE_VERSION}
+    if located.manual_anchor_um is not None:
+        key["manual_anchor_um"] = list(located.manual_anchor_um)      # another click may be another site
     if roster is not None and settings.infer:
         key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))),
                    diameter_used_um=outcome.radius["diameter_used_um"])
@@ -1697,7 +1711,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
              expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None,
              reference: dict | None = None, earliest_template=None, spill_dir=None, fixed_roster=None,
-             kept_evidence: dict | None = None, stored_placements: dict | None = None) -> WellOutcome:
+             kept_evidence: dict | None = None, stored_placements: dict | None = None,
+             manual_anchors: Mapping = MappingProxyType({})) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -1721,13 +1736,15 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     ``outcome.roster_change`` says how, and the caller re-runs the well over every timepoint (tracker X35a-R1).
     *stored_placements* maps a timepoint to ``(folder, grid block)`` pairs from earlier runs' grid records, whose
     registration :func:`locate_timepoint` takes when it was solved from exactly this timepoint's inputs.
+    *manual_anchors* maps a timepoint to the anchor a person set for it, in the well frame (``util.nanowell_anchors``).
     """
     outcome = WellOutcome(well)
     timepoints = list(timepoints)
     for tp in timepoints:
         images = _images_for(record, well, tp, load_phase)
         located = locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape,
-                                   plate_rigid=(plate_rigid or {}).get(tp), stored=(stored_placements or {}).get(tp))
+                                   plate_rigid=(plate_rigid or {}).get(tp), stored=(stored_placements or {}).get(tp),
+                                   manual_anchor_um=manual_anchors.get(tp))
         if spill_dir is not None and located.montage is not None:
             located.montage = _spill_montage(located.montage, Path(spill_dir), f"{well}_{tp}")
         outcome.located[tp] = located

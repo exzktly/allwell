@@ -28,6 +28,7 @@ from util.well_token import canonical_well_label
 from datasets.core.concurrency import pick_workers
 from datasets.core.provenance import record_derivation
 from datasets.core.dataset_paths import dataset_wells, split_stem_well
+from datasets.core.nanowell_anchors_carry import AnchorSource, carry_anchors
 from datasets.core.nanowell_tables import carry_nanowell_tables
 from util.csv_gz import csv_stem, is_gz_csv_name, open_csv_text
 from datasets.core.containers import (
@@ -517,6 +518,12 @@ def execute_plan(
         if not validation.ok:
             raise MergePlatesError("; ".join(validation.issues))
         write_record(plan.dest.root, acquisition)
+    renamed = {canonical_well_label(old) or old: canonical_well_label(new) or new for old, new in plan.well_map.items()}
+    try:
+        carry_anchors([AnchorSource(plan.ds1.in_dir), AnchorSource(plan.ds2.in_dir, well=lambda w: renamed.get(w, w))],
+                      plan.dest.in_dir, emit)
+    except ValueError as exc:
+        raise MergePlatesError(str(exc)) from exc
 
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)

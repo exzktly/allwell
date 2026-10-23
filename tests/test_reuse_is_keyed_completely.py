@@ -53,7 +53,11 @@ REUSE_CONTRACTS = {
             "fingerprints the user's own input archives. The upload cache key "
             "churns both when staging rewrites and when the images change; "
             "only this separates them, and without it a re-exported plate "
-            "reuses the results of the images it replaced"),
+            "reuses the results of the images it replaced. It folds in the "
+            "acquisition record and in/nanowell_anchors.json too: an anchor "
+            "set by hand changes a nanowell well's addresses with no image "
+            "touched, so a re-run after the click must not re-attach to the "
+            "run that left the well unaddressed"),
         "host_alias": (
             "the address is a path on one machine. Two hosts can share a "
             "filesystem, so a path recorded against one resolves against the "

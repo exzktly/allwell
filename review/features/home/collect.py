@@ -319,7 +319,10 @@ def plate_cells(ctx) -> dict:
         health = str(rec.get("health") or "")
         if rec.get("failed"):
             cells[well] = CELL_FAILED
-        elif health == "partial" and not int(rec.get("covered_any") or 0):
+        elif (health == "partial" and not int(rec.get("covered_any") or 0)
+              and not int(rec.get("not_addressed_count") or 0)):
+            # Nothing written *and* nothing reached. A nanowell well whose every timepoint was located and measured
+            # but not addressed (no central square found) also covers nothing, and it was processed: it is partial.
             cells[well] = CELL_INPUT_ONLY
         elif health == "partial":
             cells[well] = CELL_PARTIAL
@@ -517,6 +520,16 @@ def health_rows(ctx) -> list:
         if named:
             rows.append({"severity": severity, "label": label,
                          "value": detail, "wells": named})
+
+    not_addressed = sorted(w for w, rec in wells.items()
+                           if isinstance(rec, dict) and int(rec.get("not_addressed_count") or 0))
+    if not_addressed:
+        count = sum(int(wells[w].get("not_addressed_count") or 0) for w in not_addressed)
+        rows.append({"severity": "warn", "label": "Nanowell timepoints not addressed",
+                     "value": f"{count} timepoint(s) were processed but their nanowells could not be told apart (no "
+                              "central square found, say); set an anchor in Nanowells → Array QC → Full montage, "
+                              "then re-run those wells",
+                     "wells": not_addressed})
 
     errors = block.get("errors") if isinstance(block.get("errors"), dict) else {}
     if int(errors.get("files") or 0):

@@ -22,6 +22,7 @@ import numpy as np
 
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
+from util.nanowell_anchors import origin_phrase
 
 #: A dot's diameter, in points.
 DOT_PT = 3.4
@@ -610,9 +611,11 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
 
 
 # ── Array QC (V7) ────────────────────────────────────────────────────────────
-def render_array_qc(fig, montage, boxes, sites, grid_blocks: dict, *, timepoint: str, why: str = "") -> None:
+def render_array_qc(fig, montage, boxes, sites, grid_blocks: dict, *, timepoint: str, why: str = "",
+                    show_montage: bool = True, show_overlay: bool = True) -> None:
     """The montage with each tile's placement (by how it was placed), the measured nanowell positions marked
-    by state, and every timepoint's status."""
+    by state, and every timepoint's status. *show_montage* off leaves the overlay on an empty frame of the same
+    extent; *show_overlay* off leaves the image alone, to see what the outlines cover."""
     from matplotlib.patches import Rectangle
 
     from ui.theme import Colors
@@ -627,12 +630,16 @@ def render_array_qc(fig, montage, boxes, sites, grid_blocks: dict, *, timepoint:
         _ink(ax.text(0.5, 0.5, why or "No montage.", ha="center", va="center", transform=ax.transAxes,
                      fontsize=9, color=muted, gid="nw-qc-missing"), muted=True)
     else:
-        ax.imshow(montage.image, cmap="gray", extent=montage.extent(), interpolation="nearest")
+        left, right, bottom, top = montage.extent()
+        if show_montage:
+            ax.imshow(montage.image, cmap="gray", extent=montage.extent(), interpolation="nearest")
+        ax.set_xlim(left, right)
+        ax.set_ylim(bottom, top)                         # y down, as the image draws it
         # How each tile was placed (pipeline/tile_register.py): on the lattice phase, by overlap correlation, or
         # where the acquisition record put it when neither could be measured.
         source_colour = {"lattice": Colors.success, "overlap": Colors.accent, "recorded": Colors.warn}
         unsized = 0
-        for box in boxes:
+        for box in boxes if show_overlay else ():
             colour = source_colour.get(box.source, Colors.danger)
             if box.width_um and box.height_um:
                 ax.add_patch(Rectangle((box.left_um, box.top_um), box.width_um, box.height_um, fill=False,
@@ -651,11 +658,12 @@ def render_array_qc(fig, montage, boxes, sites, grid_blocks: dict, *, timepoint:
             _ink(ax.text(0.01, 0.01, f"{unsized} tile(s) without a size in the acquisition record: their placed "
                          "corner is marked (+), not an outline.", transform=ax.transAxes, fontsize=6.5,
                          color=muted, gid="nw-qc-unsized"), muted=True)
-        _qc_sites(ax, sites)
+        if show_overlay:
+            _qc_sites(ax, sites)
         ax.set_axis_off()
     block = grid_blocks.get(timepoint) or {}
     lines = [f"{timepoint}: {block.get('status', 'no record')}"
-             + (f" — origin from the {str(block.get('origin_method', '')).replace('_', ' ')}"
+             + (f" — origin from {origin_phrase(block.get('origin_method'))}"
                 f" ({block.get('origin_agreement') or 'single source'})" if block.get("origin_method") else ""),
              f"pitch {_num(block.get('pitch_um'), 1)} µm · angle {_num(block.get('angle_deg'), 2)}° · "
              f"overlap {_overlap(block.get('overlap_um'))} · {block.get('n_detected', '?')} detected of "

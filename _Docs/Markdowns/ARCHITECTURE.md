@@ -658,7 +658,7 @@ allwell/
 ├── allwell_report.py            ← `python allwell_report.py` — draw a dataset's saved plots without a
 │                                  window (Saved Plots → *The headless report*)
 ├── all_well_launcher.py         ← the module PyInstaller boots + the --run-pipeline / --run-zipper
-│                                  / --run-bootstrap / --run-report dispatch. A helper the *app* spawns is not an entry
+│                                  / --run-bootstrap / --run-report / --run-nanowell-preview dispatch. A helper the *app* spawns is not an entry
 │                                  point in this sense and does not belong here — it lives in the package
 │                                  whose work it does (see pipeline/well_plate_zipper.py below)
 │
@@ -10178,7 +10178,17 @@ form shows the diameter and pitch rows only for Custom) and **warnings** are log
 expected seam-site count from `ownership_report` laid over an ideal lattice at several phases; an upper
 bound, since the array may be smaller than the tiles). **Test detection** opens a non-modal window that
 runs `pipeline.nanowell_preview.preview_timepoint` off the GUI thread through `core.worker_bridge.run_off_thread`,
-the bridge Review's Full montage window reads its tiles through; the window or the whole tab can be closed and
+the bridge Review's Full montage window reads its tiles through — and, from that thread, in a **child process**
+(`services/nanowell_preview_job.run_preview`), never in the app's own. Counting cells loads Cellpose and Torch, and
+on a Windows install whose Torch DLLs clash with libraries already loaded, `import torch` kills the process
+natively (`0xC0000138`, *ordinal not found*) where no `except` can catch it. From source the child is the module
+run by path (it repairs `sys.path` itself); frozen it is the launcher's `--run-nanowell-preview` sentinel. The job
+and the `PreviewResult` cross as pickles in a private temporary directory. A child that dies without writing a
+result is run once more with a segmenter that refuses to load (`CellposeUnavailable`, so the fallback below
+applies and its note names the exit status); since that is the only difference between the two runs, a second
+death is reported as a crash in registration or detection (`PreviewCrashed`), not Cellpose. The window's tests
+replace `run_preview`; the child itself is driven, a real native crash included, by `test_nanowell_preview.py`.
+The window or the whole tab can be closed and
 deleted mid-run, and the result then arriving is dropped (`NanowellPreviewWindow._delivered` checks the window
 still exists) rather than drawn into a deleted widget. The analysis is the same locate-and-measure the run does for
 one (well, timepoint), returning the montage, every site with its address, state and fused flag, the origin
@@ -11341,9 +11351,11 @@ PyInstaller entry point. Two responsibilities:
    when running inside a frozen `.app` bundle — there's no Python
    interpreter on `sys.executable`, so re-exec'ing the launcher with the
    sentinel argv routes the same Python process into the pipeline.
-   `--run-zipper`, `--run-bootstrap` and `--run-report` are the same trick
-   for `well_plate_zipper.main()`, `services/remote_bootstrap.main()` and the
-   headless report's `allwell_report.main()` (which from source is
+   `--run-zipper`, `--run-bootstrap`, `--run-report` and
+   `--run-nanowell-preview` are the same trick for `well_plate_zipper.main()`,
+   `services/remote_bootstrap.main()`, the headless report's
+   `allwell_report.main()` and Test detection's child process
+   (`services/nanowell_preview_job.main()`) (which from source is
    `python allwell_report.py`; the spec lists it as a hidden import, since the
    launcher reaches it through a function-level import).
 

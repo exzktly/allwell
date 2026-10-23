@@ -222,6 +222,16 @@ def _dispatch() -> None:
         ensure_std_streams()
         from allwell_report import main as report_main
         sys.exit(report_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "--run-nanowell-preview":
+        # Test detection's child process (services/nanowell_preview_job.py):
+        # counting cells loads Torch, and a Torch that cannot load kills the
+        # process outright, so the GUI never measures in its own. Same
+        # sentinel dispatch as the pipeline; the rest of argv is the job and
+        # result paths.
+        from util.frozen_io import ensure_std_streams
+        ensure_std_streams()
+        from services.nanowell_preview_job import main as preview_main
+        sys.exit(preview_main(sys.argv[2:]))
     _apply_baked_theme()
     from allwell import main
     main()

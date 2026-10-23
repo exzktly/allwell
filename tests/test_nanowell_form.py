@@ -16,7 +16,6 @@ from PySide6.QtWidgets import QMessageBox  # noqa: E402
 
 from analyze.nanowell_preflight import nanowell_input_report, seam_site_estimate  # noqa: E402
 from analyze.nanowell_preview import MIN_LABEL_DIAMETER_PX, render_montage, site_marks, summary_text  # noqa: E402
-from pipeline import nanowell_measure as nm  # noqa: E402
 from pipeline.nanowell_preview import PreviewResult  # noqa: E402
 from services.pipeline_service import build_pipeline_args  # noqa: E402
 from tests._nanowell_run_fixture import build_well, paint_cell, threshold_segmenter  # noqa: E402
@@ -217,7 +216,11 @@ def test_pressing_test_detection_runs_a_worker_and_shows_the_addresses(tab, qtbo
     rendered, record = build_well(timepoint="0h", overlap=0.03)
     paint_cell(rendered, dict(zip(rendered.array.addresses, rendered.sites_um))[(1, 2)], dx_um=3.0)
     root = _write_plate(tmp_path, rendered, record)
-    monkeypatch.setattr(nm, "cellpose_segmenter", lambda *a, **k: threshold_segmenter())
+    import services.nanowell_preview_job as npv
+
+    # The analysis in this process with a stand-in segmenter: the child process itself is driven, crash and all,
+    # by test_nanowell_preview.py.
+    monkeypatch.setattr(npv, "run_preview", lambda job: npv.compute(job, threshold_segmenter()))
     _use_nanowell_schema(tab)
     tab._input_edit.setText(str(root))
     tab._nanowell_cb.setChecked(True)
@@ -244,12 +247,12 @@ def test_a_preview_that_fails_says_so_in_the_window(tab, qtbot, tmp_path, monkey
     tab._input_edit.setText(str(root))
     tab._nanowell_cb.setChecked(True)
     tab._nanowell_preview_btn.click()
-    import pipeline.nanowell_preview as npv
+    import services.nanowell_preview_job as npv
 
     def boom(*a, **k):
         raise RuntimeError("the montage could not be built")
 
-    monkeypatch.setattr(npv, "preview_timepoint", boom)
+    monkeypatch.setattr(npv, "run_preview", boom)
     window = tab._nanowell_preview_window
     window.run()
     qtbot.waitUntil(lambda: "could not run" in window._summary.text(), timeout=30000)

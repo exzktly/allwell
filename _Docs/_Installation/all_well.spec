@@ -302,6 +302,11 @@ hiddenimports = [
     # The headless report entry point, reached only through the launcher's
     # --run-report dispatch (a function-level import).
     "allwell_report",
+    # Test detection's child process, reached only through the launcher's
+    # --run-nanowell-preview dispatch (a function-level import), and the
+    # analysis it imports lazily in turn.
+    "services.nanowell_preview_job",
+    "pipeline.nanowell_preview",
     # Qt-free flat-field estimators shared by pipeline + viewer (imported lazily
     # inside the review-image controller, so static analysis can miss it).
     "pipeline.flatfield",

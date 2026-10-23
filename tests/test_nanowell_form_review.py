@@ -143,7 +143,7 @@ def test_a_running_preview_outlives_its_window(tab, qtbot, tmp_path, monkeypatch
     never drawn into the deleted widget (which raises ``RuntimeError: Internal C++ object already deleted``)."""
     import threading
 
-    import pipeline.nanowell_preview as npv
+    import services.nanowell_preview_job as npv
     from shiboken6 import isValid
 
     root, _ = _plate(tmp_path)
@@ -155,7 +155,7 @@ def test_a_running_preview_outlives_its_window(tab, qtbot, tmp_path, monkeypatch
         returned.set()
         return PreviewResult("no_lattice", "x")
 
-    monkeypatch.setattr(npv, "preview_timepoint", slow)
+    monkeypatch.setattr(npv, "run_preview", slow)
     delivered = []
     monkeypatch.setattr(anp.NanowellPreviewWindow, "_on_done", lambda self, result: delivered.append(result))
     window.run()
@@ -176,11 +176,11 @@ def test_a_running_preview_outlives_its_window(tab, qtbot, tmp_path, monkeypatch
 
 
 def test_a_finished_preview_hands_its_result_to_the_window_and_frees_run(tab, qtbot, tmp_path, monkeypatch):
-    import pipeline.nanowell_preview as npv
+    import services.nanowell_preview_job as npv
 
     root, _ = _plate(tmp_path)
     window = _open(tab, root)
-    monkeypatch.setattr(npv, "preview_timepoint", lambda *a, **k: PreviewResult("no_lattice", "nothing to see"))
+    monkeypatch.setattr(npv, "run_preview", lambda *a, **k: PreviewResult("no_lattice", "nothing to see"))
     window.run()
     qtbot.waitUntil(lambda: window._result is not None, timeout=20000)
     assert window._result.reason == "nothing to see" and window._bridge is None and window._run_btn.isEnabled()

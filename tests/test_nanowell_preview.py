@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 import process_microscopy as pm
@@ -230,3 +232,65 @@ def test_a_counted_preview_keeps_its_fused_sites_measured(plate, tmp_path):
     result = _preview(plate, tmp_path)
     assert result.counted is True and "not counted" not in result.counts()
     assert any(s["fused"] and s["state"] == "measured" and s["n_cells"] is None for s in result.sites)
+
+
+# ── in a child process (tracker F23) ────────────────────────────────────────
+def _job(plate):
+    zip_path, _ = plate
+    return {"zip": zip_path, "well": WELL, "timepoint": "0h", "settings": SETTINGS, "pattern": None,
+            "schema": ":".join(SCHEMA), "sep": "_", "phase_token": "PHASE"}
+
+
+def test_a_real_child_process_finds_the_nanowells_and_hands_them_back(plate, monkeypatch):
+    """The source-tree child, spawned by path: its ``sys.path`` repair, the pickles both ways, and the analysis."""
+    import subprocess
+
+    import services.nanowell_preview_job as job_mod
+
+    commands = []
+
+    def runner(argv, **kwargs):
+        commands.append(argv)
+        return subprocess.run(argv, **kwargs)
+
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    result = job_mod.run_preview(_job(plate), runner=runner)
+    assert len(commands) == 1 and commands[0][1].endswith("nanowell_preview_job.py")
+    assert result.status == nr.OK and result.origin_method == "fiducial" and result.well == WELL
+    assert len([s for s in result.sites if s["address"]]) > 200
+    # Cellpose is not part of the test stack: without it the child says so and draws the array uncounted.
+    assert result.counted is _cellpose_installed()
+
+
+def test_a_child_killed_by_the_segmenter_s_crash_still_draws_the_nanowells_uncounted(plate, monkeypatch):
+    """The first child dies natively, as ``import torch`` does on the reporter's Windows install (0xC0000138); the
+    second is the real child with the segmenter refused, and the app's process loaded neither."""
+    import subprocess
+
+    import services.nanowell_preview_job as job_mod
+
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append(argv)
+        if len(calls) == 1:                        # a real native crash, with nothing written
+            argv = [sys.executable, "-c", "import faulthandler; faulthandler._sigsegv()"]
+        return subprocess.run(argv, **kwargs)
+
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    result = job_mod.run_preview(_job(plate), runner=runner)
+    assert len(calls) == 2
+    assert result.status == nr.OK and result.counted is False
+    assert len([s for s in result.sites if s["address"]]) > 200
+    note = result.notes[0]
+    assert note.startswith("Cells were not counted") and "the process that loaded it crashed" in note
+    assert "the app was not affected" in note
+
+
+def _cellpose_installed() -> bool:
+    """Asked of a fresh interpreter, as the child is one: this process may hold a stand-in ``cellpose`` another
+    test left in ``sys.modules``."""
+    import subprocess
+
+    probe = "import importlib.util, sys; sys.exit(importlib.util.find_spec('cellpose') is None)"
+    return subprocess.run([sys.executable, "-c", probe], check=False).returncode == 0

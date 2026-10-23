@@ -10184,8 +10184,10 @@ still exists) rather than drawn into a deleted widget. The analysis is the same 
 one (well, timepoint), returning the montage, every site with its address, state and fused flag, the origin
 method, the nanowell diameter the run measured, the measured overlap against the one a nanowell of that diameter
 needs, and a few rim-suppressed crops beside their
-segmentation. When the segmenter cannot be loaded — an `ImportError` anywhere in the measuring exception's chain
-(`_missing_import`), which is how `pipeline.cellpose` reports a missing or broken install — the timepoint is
+segmentation. When the segmenter cannot be loaded — `pipeline.cellpose.CellposeUnavailable` (marked
+`segmenter_unavailable`, raised for any failure to import Cellpose or Torch, an `OSError` from a library that will
+not load included, and for a model that cannot be built, as when its weights cannot be downloaded offline) or an
+`ImportError` anywhere in the measuring exception's chain (`_missing_import`) — the timepoint is
 measured again with `measure_timepoint(..., count_cells=False)`: every site keeps its state, confluence and
 fluorescence and carries `n_cells` `None` (so a seen site is `measured` with no number, never `empty`), no cell
 rows are made and no crops are cut. `PreviewResult.counted` is then `False`, its first note names the import

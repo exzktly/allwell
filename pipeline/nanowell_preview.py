@@ -59,15 +59,21 @@ class PreviewResult:
 
 
 def _missing_import(exc: BaseException) -> str | None:
-    """The import failure behind *exc*, as text, when the segmenter could not be loaded at all; otherwise ``None``.
+    """Why the segmenter could not be loaded at all, as text, when that is what *exc* is; otherwise ``None``.
 
-    ``pipeline.cellpose`` raises ``RuntimeError`` *from* the ``ImportError``, so the chain is walked: a missing
-    package and a broken install both end in an import failure, while a segmenter that loaded and then failed on
-    the image does not, and is still a measuring failure.
+    The chain is walked for an ``ImportError`` (``pipeline.cellpose`` itself missing from a feature-subset build, or
+    an older one raising ``RuntimeError`` from the import) or for ``pipeline.cellpose.CellposeUnavailable``, marked by
+    its ``segmenter_unavailable`` attribute: Cellpose or Torch failing to import for any reason — a Torch library
+    that will not load raises ``OSError``, which was reported as a measuring failure that drew no nanowell at all —
+    or its model failing to build. A segmenter that loaded and then failed on the image is none of these, and is
+    still a measuring failure.
     """
     seen = set()
     while exc is not None and id(exc) not in seen:
         seen.add(id(exc))
+        if getattr(exc, "segmenter_unavailable", False):
+            cause = exc.__cause__
+            return str(exc) if cause is None else f"{type(cause).__name__}: {cause}"
         if isinstance(exc, ImportError):
             return f"{type(exc).__name__}: {exc}"
         exc = exc.__cause__ or exc.__context__

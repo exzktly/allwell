@@ -179,6 +179,52 @@ def test_the_real_default_segmenter_without_cellpose_installed_is_the_same_case(
     assert result.notes[0].startswith("Cells were not counted: Cellpose could not be loaded (")
 
 
+def _installed_as(root, files: dict):
+    """Write a fake package tree under *root* (``{"cellpose/__init__.py": source, ...}``) to put on the import path."""
+    for name, source in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    return root
+
+
+_FAKE_TORCH = {"torch/__init__.py": (
+    "class _Cuda:\n    @staticmethod\n    def is_available():\n        return False\n"
+    "cuda = _Cuda()\nclass version:\n    cuda = None\n__version__ = '0'\n"
+    "class device:\n    def __init__(self, kind):\n        self.type = kind\n")}
+
+
+@pytest.mark.parametrize("label, files, cause", [
+    # A Torch library that will not load: the import raises OSError, not ImportError (reported: Test detection
+    # still failed without Cellpose, drawing no nanowell, with "Measuring failed (RuntimeError: Cellpose
+    # segmentation requires the 'cellpose' package ...").
+    ("a broken install", {"cellpose/__init__.py": "raise OSError('dlopen(libtorch_cpu.dylib): image not found')\n"},
+     "OSError: dlopen(libtorch_cpu.dylib): image not found"),
+    # Installed, but its model's weights cannot be fetched on first use (offline).
+    ("an offline first use", {"cellpose/__init__.py": "", "cellpose/models.py": (
+        "import urllib.error\nclass CellposeModel:\n    def __init__(self, *a, **k):\n"
+        "        raise urllib.error.URLError('cannot download cyto3')\n"), **_FAKE_TORCH},
+     "URLError: <urlopen error cannot download cyto3>"),
+])
+def test_cellpose_that_cannot_be_loaded_for_any_reason_is_the_same_case(plate, tmp_path, monkeypatch, label, files,
+                                                                        cause):
+    """Not only a missing package: whatever stops Cellpose loading leaves the nanowells found and uncounted, through
+    the real default segmenter."""
+    import sys
+
+    from pipeline import cellpose as pc
+
+    for name in [m for m in sys.modules if m == "cellpose" or m.startswith(("cellpose.", "torch"))]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.syspath_prepend(str(_installed_as(tmp_path / "site", files)))
+    monkeypatch.setattr(pc, "_CELLPOSE_MODELS", {})
+    result = preview_timepoint(plate[0], WELL, "0h", SETTINGS, grouper=pm.find_image_groups_in_zip,
+                               parse=pm.parse_filename, schema=SCHEMA, sep="_", phase_token="PHASE",
+                               scratch=_scratch(tmp_path))
+    assert result.counted is False and len([s for s in result.sites if s["address"]]) > 200, label
+    assert result.notes[0].startswith(f"Cells were not counted: Cellpose could not be loaded ({cause})")
+
+
 def test_a_counted_preview_keeps_its_fused_sites_measured(plate, tmp_path):
     """A fused site has no count in an ordinary preview too; it stays "measured", not "not counted"."""
     result = _preview(plate, tmp_path)

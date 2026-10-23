@@ -107,11 +107,9 @@ def test_every_section_is_recorded(analyze_tab):
 
 def test_sections_are_recorded_in_build_order(analyze_tab):
     titles = list(analyze_tab._section_widgets)
-    assert titles[0] == "Filename Schema"
-    # The form builds Folders before Channel tokens, and the manual numbers its
-    # Analyze headings to match. This assertion had the pair the other way
-    # round, which is the order neither the form nor the manual uses.
-    assert titles.index("Channel Tokens") > titles.index("Folders")
+    # The input folder heads the form, then Schema, then Channel tokens; the
+    # manual numbers its Analyze headings to match.
+    assert titles[:3] == ["Folders", "Filename Schema", "Channel Tokens"]
     assert titles[-1] == "Scratch Disk"
 
 
@@ -148,7 +146,7 @@ def test_focus_outranks_scroll_position(qapp, analyze_tab):
 def test_top_of_the_form_reports_the_first_section(qapp, analyze_tab):
     _scroll(qapp, analyze_tab, 0)
     _clear_focus(qapp, analyze_tab)
-    assert analyze_tab.current_help_section() == "Filename Schema"
+    assert analyze_tab.current_help_section() == "Folders"
 
 
 def test_a_section_scrolled_past_is_not_reported(qapp, analyze_tab):

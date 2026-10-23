@@ -341,7 +341,9 @@ stand far enough above the next most square, by its lead or by how many times th
 both scores) — and the grid record keeps those scores.
 When a well's own evidence cannot say which nanowell is which (no visible central square, no readable array
 edge), the end of the run addresses it from the plate's other wells, which move together between timepoints,
-and says how many it anchored and how many remain unaddressed.
+and says how many it anchored and how many remain unaddressed. It also compares each well's nanowell diameter
+with the rest of its plate's and names, in the run log, any well more than 5 % off: those wells share a mold, so
+such a well's measurement deserves a look.
 
 **Setting the anchor by hand.** When the run cannot find a well's central square, you can point at it. In
 Review, open the Nanowells page, choose *Array QC*, pick the well and timepoint, and press **Full montage…**.

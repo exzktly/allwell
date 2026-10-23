@@ -10076,7 +10076,13 @@ motion (`fit_plate_rigid`), and the well's origin at the reference carried throu
 stage position for every tile (otherwise the reason is recorded) and treats the stage and image axes as
 parallel. Only those wells' rows for those timepoints are rewritten. "Its own evidence" is
 `nanowell_task._INDEPENDENT`: an anchor set by hand, the fiducial, or the array centre — never another
-plate-rigid prediction.
+plate-rigid prediction. It then compares every well's nanowell diameter with its plate's median
+(`plate_diameters`, the wells analysed under this run's settings, one comparison per physical plate): the wells
+of a plate share a mold, so a well more than `PLATE_DIAMETER_TOLERANCE` (5 %) off — far beyond a one-tile fit's
+few tenths of a micrometre — is logged by name, and the comparison is recorded as `nanowell.plate_diameters` in
+`pipeline_info.json`. It does not impose the median: each well keeps the diameter it measured, because forcing
+one would mean a second pass over the plate to correct what is, for every well but the flagged ones, already
+right.
 
 **Anchors set by hand.** When a well's central square cannot be found, a person gives the origin instead:
 `in/nanowell_anchors.json` (`util/nanowell_anchors.py`, Qt-free and stdlib-only, in the remote manifest) holds

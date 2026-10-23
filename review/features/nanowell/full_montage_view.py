@@ -23,10 +23,11 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from review.features.nanowell import full_montage_compute as fmc
+from ui.nanowell_sites import gray_qimage, paint_site
 from ui.theme import Colors
 
 log = logging.getLogger("review")
@@ -37,13 +38,8 @@ CANVAS_MIN_W, CANVAS_MIN_H = 320, 240
 CLICK_SLOP_PX = 4
 #: One wheel notch zooms by this factor.
 WHEEL_STEP = 0.8
-#: Addresses are written only where a nanowell is drawn at least this many pixels across.
-MIN_LABEL_DIAMETER_PX = 34
 #: The anchor's crosshair arm, in screen pixels.
 ANCHOR_ARM_PX = 14
-#: A nanowell's outline colour by the state the run recorded for it.
-STATE_COLOURS = {"empty": Colors.success, "measured": Colors.accent, "occluded": Colors.warn,
-                 "clipped": Colors.danger}
 
 
 class MontageCanvas(QWidget):
@@ -120,9 +116,7 @@ class MontageCanvas(QWidget):
             return
         w, h = self.width(), self.height()
         rendered = self.store.render(self.region, w, h)
-        pixels = rendered.image.copy(order="C")
-        image = QImage(pixels.data, w, h, w, QImage.Format_Grayscale8)
-        painter.drawImage(0, 0, image)
+        painter.drawImage(0, 0, gray_qimage(rendered.image))
         self._draw_tiles(painter)
         self._draw_sites(painter)
         self._draw_anchor(painter)
@@ -143,16 +137,9 @@ class MontageCanvas(QWidget):
         if not self.sites:
             return
         scale = self.width() / (self.region[2] - self.region[0])          # screen px per µm
-        font = QFont(painter.font())
-        painter.setFont(font)
         for site in self.sites:
-            centre = self._view(site.x_um, site.y_um)
-            radius = site.radius_um * scale
-            painter.setPen(QPen(QColor(STATE_COLOURS.get(site.state, Colors.text_muted)), 1))
-            painter.drawEllipse(centre, radius, radius)
-            if site.label and 2 * radius >= MIN_LABEL_DIAMETER_PX:
-                painter.drawText(QRectF(centre.x() - radius, centre.y() - radius, 2 * radius, 2 * radius),
-                                 Qt.AlignCenter, site.label)
+            paint_site(painter, self._view(site.x_um, site.y_um), site.radius_um * scale, site.state, site.label,
+                       fused=site.fused)
 
     def _draw_anchor(self, painter) -> None:
         if self.anchor is None:

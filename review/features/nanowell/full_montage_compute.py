@@ -338,8 +338,9 @@ class SiteOverlay:
     x_um: float
     y_um: float
     radius_um: float
-    label: str                 # ``q,r`` as Test detection writes it; "" for a site with no address
+    label: str                 # ``q,r`` (``util.nanowell_address.coordinate_text``); "" for a site with no address
     state: str
+    fused: bool = False        # on a tile seam, measured from a blended crop: drawn dashed, as Test detection draws it
 
 
 def site_overlays(metrics, well: str, timepoint: str) -> list[SiteOverlay]:
@@ -348,12 +349,13 @@ def site_overlays(metrics, well: str, timepoint: str) -> list[SiteOverlay]:
         return []
     rows = metrics[(metrics["well"] == well) & (metrics["timepoint"] == timepoint)]
     rows = rows[rows["well_x_um"].notna() & rows["well_y_um"].notna()]
+    from util.nanowell_address import coordinate_text
+
     out = []
     for row in rows.itertuples(index=False):
-        q, r = getattr(row, "nw_q", None), getattr(row, "nw_r", None)
-        addressed = q is not None and r is not None and not (math.isnan(q) or math.isnan(r))
+        label = coordinate_text(getattr(row, "nw_q", None), getattr(row, "nw_r", None)) or ""
         out.append(SiteOverlay(float(row.well_x_um), float(row.well_y_um), float(getattr(row, "radius_um", 0) or 0),
-                               f"{int(q)},{int(r)}" if addressed else "", str(getattr(row, "state", "") or "")))
+                               label, str(getattr(row, "state", "") or ""), str(getattr(row, "fused", "")).lower() == "true"))
     return out
 
 

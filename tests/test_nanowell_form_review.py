@@ -111,7 +111,7 @@ def test_a_bad_field_after_the_window_opened_is_said_in_it_and_run_stays_usable(
     window = _open(tab, root)
     tab._nanowell_margin_edit.setText("-3")
     started = []
-    monkeypatch.setattr(anp._PreviewWorker, "start", lambda self: started.append(self))
+    monkeypatch.setattr(anp, "run_off_thread", lambda *a, **k: started.append(a))
     window.run()
     assert not started and "Margin must be 0 or more" in window._summary.text() and window._run_btn.isEnabled()
     window.close()
@@ -139,19 +139,52 @@ def test_a_montage_is_never_drawn_larger_than_the_pixmap_cap_and_fit_follows_the
 
 
 def test_a_running_preview_outlives_its_window(tab, qtbot, tmp_path, monkeypatch):
-    """A QThread destroyed while running aborts the process; the worker is owned by the module until it finishes."""
+    """The window can be closed and deleted while a preview runs: the result then arrives for nothing and is dropped,
+    never drawn into the deleted widget (which raises ``RuntimeError: Internal C++ object already deleted``)."""
+    import threading
+
+    import pipeline.nanowell_preview as npv
+    from shiboken6 import isValid
+
+    root, _ = _plate(tmp_path)
+    window = _open(tab, root)
+    release, returned = threading.Event(), threading.Event()
+
+    def slow(*_a, **_k):
+        release.wait(20)
+        returned.set()
+        return PreviewResult("no_lattice", "x")
+
+    monkeypatch.setattr(npv, "preview_timepoint", slow)
+    delivered = []
+    monkeypatch.setattr(anp.NanowellPreviewWindow, "_on_done", lambda self, result: delivered.append(result))
+    window.run()
+    assert window._bridge is not None and not window._run_btn.isEnabled()
+    window.close()
+    window.setParent(None)
+    window.deleteLater()
+    from PySide6.QtCore import QEvent
+
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert not isValid(window)
+    release.set()
+    qtbot.waitUntil(returned.is_set, timeout=20000)
+    for _ in range(20):                           # let the queued result reach the GUI thread
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert delivered == []
+
+
+def test_a_finished_preview_hands_its_result_to_the_window_and_frees_run(tab, qtbot, tmp_path, monkeypatch):
     import pipeline.nanowell_preview as npv
 
     root, _ = _plate(tmp_path)
     window = _open(tab, root)
-    monkeypatch.setattr(npv, "preview_timepoint", lambda *a, **k: (time.sleep(1.0), PreviewResult("no_lattice", "x"))[1])
+    monkeypatch.setattr(npv, "preview_timepoint", lambda *a, **k: PreviewResult("no_lattice", "nothing to see"))
     window.run()
-    assert len(anp._RUNNING) == 1
+    qtbot.waitUntil(lambda: window._result is not None, timeout=20000)
+    assert window._result.reason == "nothing to see" and window._bridge is None and window._run_btn.isEnabled()
     window.close()
-    window.setParent(None)
-    window.deleteLater()
-    QApplication.sendPostedEvents(None, 0)
-    qtbot.waitUntil(lambda: not anp._RUNNING, timeout=20000)
 
 
 def test_a_site_list_without_addresses_is_summarised_as_a_reason_then_a_sentence():

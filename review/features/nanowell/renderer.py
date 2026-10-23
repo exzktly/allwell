@@ -718,12 +718,13 @@ def _qc_sites(ax, sites) -> None:
     """The nanowells at their *measured* well-frame positions, outlined where they carry no number."""
     from matplotlib.collections import EllipseCollection
 
-    from ui.theme import Colors
+    from ui.nanowell_sites import FUSED_COLOUR, state_colour
 
     if sites is None or not len(sites):
         return
     placed = sites[sites["well_x_um"].notna() & sites["well_y_um"].notna()]
-    for state, colour in (("occluded", Colors.warn), ("clipped", Colors.danger)):
+    for state in ("occluded", "clipped"):
+        colour = state_colour(state)
         rows = placed[placed["state"] == state]
         if len(rows):
             w = 2 * rows["radius_um"].to_numpy(dtype=float)
@@ -733,4 +734,4 @@ def _qc_sites(ax, sites) -> None:
                                                 linewidths=0.8))
     fused = placed[placed["fused"].eq(True)]
     if len(fused):
-        ax.scatter(fused["well_x_um"], fused["well_y_um"], marker="+", s=14, color=Colors.danger, linewidths=0.8)
+        ax.scatter(fused["well_x_um"], fused["well_y_um"], marker="+", s=14, color=FUSED_COLOUR, linewidths=0.8)

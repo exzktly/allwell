@@ -85,3 +85,24 @@ def parse_label(label: str, *, kind: str = "hex") -> NanowellAddress:
             return NanowellAddress(q + offset * dq, r + offset * dr, kind=kind)
         offset -= length
     raise AssertionError("Validated label exceeded its ring")
+
+
+def coordinate_text(q, r) -> str | None:
+    """A site's lattice coordinates as the ``q,r`` text drawn beside it, or ``None`` for a site with no address.
+
+    Test detection (``pipeline/nanowell_preview.py``) and Review's Full montage window
+    (``review/features/nanowell/full_montage_compute.site_overlays``) both write this beside a nanowell, from rows
+    of different provenance: the first from the run's own integers, the second from a measurements table, where a
+    missing coordinate is ``NaN`` and a present one has been read as a float. Both spellings of "no address" are
+    accepted here, and a whole-number float is written as the integer it is, so the two windows cannot label the
+    same nanowell two ways.
+    """
+    if q is None or r is None:
+        return None
+    try:
+        qf, rf = float(q), float(r)
+    except (TypeError, ValueError):
+        return None
+    if qf != qf or rf != rf:                      # NaN: the table's spelling of a missing coordinate
+        return None
+    return f"{int(qf)},{int(rf)}"

@@ -439,7 +439,8 @@ def test_a_format_too_wide_for_the_measured_pitch_is_measured_not_refused_in_eit
     """Review X35-R3: 80 um nanowells on a 105 um pitch, run as the 100 um format, whose 100 um nanowells would nearly
     fill the pitch. The format check once refused the hexagonal geometry and kept the setting's 100 um in the
     inferred one (within the 25 % that decided which was used). Both now measure the plate's 80 um and address it
-    (tracker F2, F4): the format only checks, and an 80 um nanowell fills nothing."""
+    (tracker F2, F4); the format's diameter is still checked against the pitch, and its failure is a note
+    (review F20d)."""
     plan = TilePlan(2, 2, (700, 700), 0.1, 2.0)
     extent = plan.step_um[0] + plan.extent_um[0]
     rendered = render_tiles(plan, pitch_um=105.0, diameter_um=80.0, radius_um=0.26 * extent, rotation_deg=7.0,
@@ -453,7 +454,8 @@ def test_a_format_too_wide_for_the_measured_pitch_is_measured_not_refused_in_eit
         assert block["status"] == nr.OK and block["geometry"]["diameter_check"]["agrees"] is True
         assert block["geometry"]["diameter_used_um"] == pytest.approx(80.0, rel=0.02)
         assert {(r["nw_q"], r["nw_r"]) for r in outcome.sites} == set(rendered.array.addresses)
-        assert not any("would touch" in n for n in block["notes"])
+        # The format's own 100 um would fill the pitch, and that is said; the plate is still addressed as measured.
+        assert any("neighbouring nanowells would touch" in n and "addressed as measured" in n for n in block["notes"])
 
 
 def test_a_format_whose_nanowells_are_the_wrong_size_is_measured_at_the_measured_size_and_says_so():

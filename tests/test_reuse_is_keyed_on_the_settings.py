@@ -107,6 +107,7 @@ OTHER = {
     "nanowell_diameter_um": 60.0,
     "nanowell_pitch_um": 90.0,
     "nanowell_geometry": "infer",
+    "nanowell_cellpose_model": "livecell_cp3",
     "nanowell_grid": "3x7",
     "nanowell_scan": "bottom-right-column-serpentine",
     "nanowell_overlap_percent": 25.0,

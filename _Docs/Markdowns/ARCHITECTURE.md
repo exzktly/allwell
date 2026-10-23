@@ -9827,60 +9827,64 @@ it does not change what Analyze runs or writes. Phase contrast is the primary re
 and fluorescence is added when it exists; every function takes the segmenter or the
 image it needs as an argument, so none of it needs Cellpose to be tested.
 
-**The template.** `site_crops` samples a square crop around each site centre
-bilinearly, so crops of sites at different sub-pixel positions line up. `build_template`
-ranks the visible crops by texture and takes the median of the least-textured quarter. The
-run hands it the crops levelled first (`level_crops`): each crop's floor (the median inside 0.6
-of the site radius) and surround (the median beyond 1.2 radii, the lattice between nanowells,
-`crop_levels`) are mapped onto one shared pair, so neither a tile's gain nor its offset changes
-how textured a crop looks, and the quarter — the timepoint's empty nanowells — is chosen by the
-nanowells and not by the tiles they are on. On raw intensity the dimmest tiles read least
-textured and would hold every empty nanowell. With floor and surround too alike to fix both
-(`MIN_LEVEL_CONTRAST`) a crop is scaled by its surround only.
-The texture that ranks them is the departure of a crop inside its disk from its *own*
-radial mean, which needs no reference, because the obvious reference (the median of all
-crops) is the loaded crop when more than half of the sites hold cells; a second pass
-re-ranks against the template the first pass made, which removes a round cell sitting
-exactly at the centre (radially symmetric, so the first ranking cannot see it). With
-fewer than `MIN_TEMPLATE_SITES` sites in the quarter it returns the well's earliest
-template through `as_fallback` — the same pixels, `source="earliest"` and no `used` crops,
-because the earliest's crop indices index another timepoint's crops — or the quarter marked
-`own_sparse` when there is none. The earliest template survives between runs: the task keeps
-it as `nanowells/<well>_template.npz` (`save_template` / `load_template`, the first own
-template in time, fetched back from a remote run with the tables) and passes it to `run_well`
-on an incremental run, a checkpoint keeps each timepoint's own template beside it, and
-`run_well` measures its timepoints in time order, so "earliest" means the earliest; `Template.used` says which crops formed it. Above about three quarters
-of the sites loaded the quarter reaches into loaded sites and the template turns
-cell-coloured while still `own`; from one timepoint's crops alone that cannot be told from a
-well of unusually bright cells, so the run compares it with the well's earliest. `floor_ratio`
-is the median of the template's floor (inside 0.6 of the site radius) over the median of its
-surround (beyond 1.2 radii, the lattice floor between nanowells): cells on the floor move it,
-while exposure (a ratio) and focus (both regions flat, away from the rim) barely do. Each
-measured template's ratio is stored on its timepoint's `template` block, and
-`nanowell_run.flag_template_drift` — called at the end of `run_well` and again by the task
-after an incremental run merges its kept timepoints — takes the first timepoint **in time**
-with a ratio of its own as the earliest, whichever run measured it, and records each later
-timepoint's `drift_vs_earliest` (`|ln|` of the ratio of ratios) and `earliest_timepoint`. Beyond a
-factor of two (`TEMPLATE_DRIFT_LIMIT`; measured on rendered 40-site wells: 0.012 or less up to 34
-loaded, 1.12 or more from 35, a 1.6x exposure 0.002, noise up to 0.15 at most 0.009, a 2.5 px
-defocus 0.17) it is `suspect`, a note says the counts may be biased, and Array QC shows it. The
-pass is recomputed whole each time, so a kept block is never flagged twice or against a stale
-earliest. The measurement itself is not changed.
+**Nothing is read from empty nanowells.** A plate seeded at about twenty cells per nanowell has none, so every
+reference level below is the level the pixels **crowd around** rather than a level read from nanowells assumed
+empty: `modal_level` is the median of the narrowest window holding a quarter of the values (`MODAL_SHARE`, a
+"shorth"), and `modal_stack` takes it at every pixel of a stack. A nanowell's bare floor is one tight level and cells
+scatter on both sides of it, at different places in different nanowells, so the densest window is the floor's for
+as long as bare floor is the largest single population — a median needs it to be the majority. Measured on 49
+rendered sites, every one holding four cells of its own brightness, where most sites show a cell at 42 % of the
+interior's pixels: the modal template is off the empty lattice's by 0.009 on average, the median by 0.076. Its limit
+is stated in `build_template`: where most nanowells hold a cell **at the same place**, that cell is the template there.
+
+**The template.** `site_crops` samples a square crop around each site centre bilinearly, so crops of sites at
+different sub-pixel positions line up. The run (`nanowell_run._pooled_template`) takes the crops of every visible,
+fully imaged, fitted site, levels them together (`level_crops`: each crop's floor and surround, `crop_levels`, are
+mapped onto the well's median floor-to-surround ratio, so neither a tile's gain nor its offset changes a crop), and
+`build_template` takes each pixel's modal level over them, up to `TEMPLATE_MAX_CROPS` (400) taken evenly through the
+well. A crop's **floor** is its modal level inside 0.6 of the site radius — under cells, still the bare floor's —
+and its **surround** the median beyond 1.2 radii, the lattice between nanowells, which holds no cells. With floor and
+surround too alike to fix both (`MIN_LEVEL_CONTRAST`) a crop is scaled by its surround only. With fewer than
+`MIN_TEMPLATE_SITES` usable crops `build_template` returns the well's earliest template through `as_fallback` — the
+same pixels, `source="earliest"` and no `used` crops, because the earliest's crop indices index another timepoint's
+crops — or its own marked `own_sparse` when there is none. The earliest template survives between runs: the task
+keeps it as `nanowells/<well>_template.npz` (`save_template` / `load_template`, the first own template in time,
+fetched back from a remote run with the tables) and passes it to `run_well` on an incremental run, a checkpoint
+keeps each timepoint's own template beside it, and `run_well` measures its timepoints in time order, so "earliest"
+means the earliest; `Template.used` says which crops formed it. When cells, not bare floor, are what most crops show
+at most pixels (a confluent late timepoint) the template turns cell-coloured while still `own`; from one timepoint's
+crops alone that cannot be told from a well of unusually bright cells, so the run compares it with the well's
+earliest. `floor_ratio` is the template's floor over its surround: cells on the floor move it, while exposure (a
+ratio) and focus (both regions flat, away from the rim) barely do. Each measured template's ratio is stored on its
+timepoint's `template` block, and `nanowell_run.flag_template_drift` — called at the end of `run_well` and again by
+the task after an incremental run merges its kept timepoints — takes the first timepoint **in time** with a ratio of
+its own as the earliest, whichever run measured it, and records each later timepoint's `drift_vs_earliest` (`|ln|` of
+the ratio of ratios) and `earliest_timepoint`. Beyond a factor of two (`TEMPLATE_DRIFT_LIMIT`; a 1.6x exposure moved
+it 0.002, noise up to 0.15 at most 0.009, a 2.5 px defocus 0.17) it is `suspect`, a note says the counts may be
+biased, and Array QC shows it. The pass is recomputed whole each time, so a kept block is never flagged twice or
+against a stale earliest. The measurement itself is not changed.
 
 **Bringing a site to the template's levels.** Before a site is divided, its pixels are taken as
-`(value - offset) / gain` (`rim_suppress`'s `levels`, worked out per timepoint by
-`nanowell_run._normalise`). An empty nanowell shows the template's floor and surround through its
-tile's gain and offset — two equations — so each tile's **offset** is the median over its own empty
-nanowells (`tile_offsets`); a tile with none takes the well's median and is named in the grid
-block's `offset_fallback_tiles`, and if that leaves no positive gain on it the tile is corrected for
-gain alone (`scale_only_tiles`). Each **site's gain** comes from its own surround (`site_gain`), the
-lattice around it, which holds no cells however loaded the nanowell is; a site whose surround is
-off the image takes its tile's median gain, and a tile with no readable surround at all is left
-unmeasured (`tiles_without_gain`). The site's own floor is never its reference — in a loaded
-nanowell it is not floor, and normalising to it would subtract the confluence being measured. The
-timepoint's `template` block carries all of this as `normalisation`, with `measure_version`
-(`nanowell_measure.MEASURE_VERSION`) and the one `texture_threshold`, and each substitution is a
-note on the timepoint.
+`(value - offset) / gain` (`rim_suppress`'s `levels`, worked out per timepoint by `nanowell_run._normalise` and
+`_site_levels`). A site shows the template's floor and surround through its gain and offset — two equations. Its
+**gain** comes from its floor-to-surround **contrast** (`site_contrast`: surround minus modal floor), which light
+added to both cancels from, taken as the median over the sites within `CONTRAST_NEIGHBOURHOOD_PITCHES` (1.5) of it
+**on the same tile** (`neighbourhood_median`; one tile is one exposure), so a nanowell whose floor is lost under
+cells is outvoted by its six neighbours; its **offset** then comes from its own surround (`site_level`). Light added
+unevenly across a well — glare brighter toward its centre — is an offset that changes from nanowell to nanowell,
+which one offset per tile could not follow: the rest was taken as gain, and every cell where the light was added
+was flattened. The gain is not taken from the surround after subtracting an offset, because the lattice is dark: an
+offset a few hundredths wrong made the gain tens of per cent wrong (on a rendered well with glare, a cell's height
+in the segmenter's image ran 1.126 at the centre and 1.153 at the rim; from the contrast, 1.148 and 1.149). A site
+whose surround is off the image takes its tile's median level, and a tile with no readable surround at all is left
+unmeasured (`tiles_without_gain`). With the template's floor and surround too alike to tell an offset from a gain
+(`offset_identifiable`) every site is corrected for brightness alone, from its surround (`site_gain`), with a note.
+Light added to every crop alike becomes part of the floor the cells are measured against, which scales every cell's
+height alike; Cellpose scales each tile by its own percentiles, which removes that. The timepoint's `template` block
+carries all of this as `normalisation`: `measure_version` (`nanowell_measure.MEASURE_VERSION`), `offset` (`per
+nanowell` or `not identifiable`), `contrast_neighbourhood_um`, `offset_range` (the 5th and 95th percentile of the
+offsets the sites were given: where light was added and how much), `nanowells_levelled`, `tiles_without_gain`, the
+one `texture_threshold` and `cell_share`.
 
 **Rim suppression.** `rim_suppress` divides every site's pixels (out to 1.05 times its
 radius, which takes in the rim), brought to the template's levels, by the template at the same
@@ -9895,21 +9899,29 @@ fit lets a radius differ from nominal) and `interior_radius_px = SUPPRESSION_RAD
 nominal radius; `fits_template` splits off the sites a template cannot cover, so one oversize
 site is reported unmeasured instead of failing the tile.
 
-**Confluence without segmentation.** The texture threshold is the median plus five robust
-standard deviations of the smoothed departure from 1 (never under 0.02, so a noise-free flat tile does not call a
-whisper a cell; a site with a non-finite pixel is neither calibration nor measured) over the interiors (0.9 of the
-radius) of the sites known to be empty — **one per timepoint**, pooled over every tile's empty nanowells
-(`empty_departures`, `threshold_from_departures`; `texture_threshold` is the one-tile form). Taken per tile, a tile
-with no empty nanowell of its own would have no threshold and every nanowell on it no confluence. `site_confluence` is the share of a site's interior above it. A tile with no empty nanowell of its own
-likewise takes the well's fluorescence background (`site_fluorescence(..., background=)`), with a note. It is `None`, not zero, with no empty site to calibrate against or with under half
-the interior on the image (a quadrant is not a site); 0.0 is a measurement. Because "departs from an empty nanowell"
-includes the optical halo of a cell, it reads high: on the synthetic scene it lies
-between the painted coverage and the coverage of a disk 3 px larger in radius, which
-makes it a monotone measure of loading rather than an area.
+**Confluence without segmentation.** The texture threshold is the bare floor's median plus five robust standard
+deviations of the smoothed departure from 1 (never under 0.02, so a noise-free flat tile does not call a whisper a
+cell; a site with a non-finite pixel is neither calibration nor measured), **one per timepoint**, pooled over the
+interiors (0.9 of the radius) of **every** nanowell on every tile, every fourth pixel (`site_departures`,
+`THRESHOLD_STRIDE`; `texture_threshold` is the one-tile form). The pooled values hold the cells too, so
+`threshold_from_departures` starts from the densest quarter of them, which begins at the floor, and grows the kept
+set to everything within three robust standard deviations of it (`CLIP_SIGMAS`) until it stops changing; cells lie
+further out and are never taken in. Against a floor-only threshold it reads 1.04x with a fifth of the values cells,
+1.16x with two fifths and 1.33x with half; past about 60 % the cells reach down into the floor's values and the
+threshold is theirs. It returns the share above it (`cell_share`, on the block), and a share over a half is a note.
+`site_confluence` is the share of a site's interior above the threshold. It is `None`, not zero, with no site to
+calibrate against or with under half the interior on the image (a quadrant is not a site); 0.0 is a measurement.
+Because "departs from the floor" includes the optical halo of a cell, it reads high: on the synthetic scene it lies
+between the painted coverage and the coverage of a disk 3 px larger in radius, which makes it a monotone measure of
+loading rather than an area.
 
 **Counts.** `segment_tile` makes one segmenter call on the whole rim-suppressed tile
 (`cellpose_segmenter` is the production segmenter and imports `pipeline.cellpose` only
-when called). `count_cells` keeps a label only when its centroid lies in the interior of
+when called). Its model is the setting's `cellpose_model`, one of `nanowell_run.CELLPOSE_MODELS`: `cyto3` (Cellpose
+3's generalist, the default) or `livecell_cp3` (the Cellpose 3 model trained on LIVECell's phase-contrast images of
+eight cell lines), both in the pinned `cellpose==3.1.1.2`; it reaches the run as `--nanowell_cellpose_model`, sent
+only when not the default, and joins the reuse key (`NanowellSettings.key`) and the settings digest only then. Which
+of the two counts these plates better has not been measured (tracker C10). `count_cells` keeps a label only when its centroid lies in the interior of
 a site the tile **owns** (`owned_indices(report.owners, tile)` from the `ownership_report` of
 6.2f; fused sites have no owner and are counted by no tile until they are segmented on a blended
 crop, tracker C14, so `site_state` sees an undefined count for them); a cell in the overlap of two tiles
@@ -9928,10 +9940,11 @@ estimate and the flag are `None`.
 **Records.** `cell_table` gives one row per counted cell with the site, its address
 (`None` for an unaddressed timepoint, so the row exists but cannot be joined over time),
 the well-frame position, the area, and the mean of any intensity images passed.
-`site_fluorescence` gives the integrated and mean interior intensity minus the median
-interior mean of the empty sites; with no image, under half the interior on the image,
-or any non-finite pixel in it, the site's fields are `None`, and with no empty
-site the background and everything derived from it are `None`. `site_state` is the §3.5
+`site_fluorescence` gives the integrated and mean interior intensity minus a background: the tile's floor level in
+that channel, the median over its nanowells of each one's modal interior level (`site_floor_levels`), which is the
+floor's whether or not cells sit on it; a tile none of whose nanowells gave one takes the well's, with a note. With
+no image, under half the interior on the image, or any non-finite pixel in it, the site's fields are `None`, and with
+no background the background and everything derived from it are `None`. `site_state` is the §3.5
 state of a site: `clipped` (imaged fraction under half) and `occluded` (visible fraction
 under half) carry no count and no confluence whatever was passed; a seen site with zero
 cells is `empty` with `n_cells == 0` and the confluence it was given (never filled in); a
@@ -10194,7 +10207,10 @@ still exists) rather than drawn into a deleted widget. The analysis is the same 
 one (well, timepoint), returning the montage, every site with its address, state and fused flag, the origin
 method, the nanowell diameter the run measured, the measured overlap against the one a nanowell of that diameter
 needs, and a few rim-suppressed crops beside their
-segmentation. When the segmenter cannot be loaded — `pipeline.cellpose.CellposeUnavailable` (marked
+segmentation. The crops are cut from the owner tile rim-suppressed and segmented **whole**, as the run does
+(`_tile_segmented`, once per tile however many crops it holds), never segmented on their own: Cellpose scales each
+image by its own percentiles, so a crop holding one nanowell was scaled differently from the tile holding a hundred,
+and its outlines were not the ones the run counted. When the segmenter cannot be loaded — `pipeline.cellpose.CellposeUnavailable` (marked
 `segmenter_unavailable`, raised for any failure to import Cellpose or Torch, an `OSError` from a library that will
 not load included, and for a model that cannot be built, as when its weights cannot be downloaded offline) or an
 `ImportError` anywhere in the measuring exception's chain (`_missing_import`) — the timepoint is

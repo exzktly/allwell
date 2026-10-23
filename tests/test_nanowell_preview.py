@@ -294,3 +294,55 @@ def _cellpose_installed() -> bool:
 
     probe = "import importlib.util, sys; sys.exit(importlib.util.find_spec('cellpose') is None)"
     return subprocess.run([sys.executable, "-c", probe], check=False).returncode == 0
+
+
+def test_the_crops_are_cut_from_the_tile_segmented_whole_as_the_run_segments_it(plate, tmp_path):
+    """Tracker L3. A crop was once segmented on its own; Cellpose scales each image by its own percentiles, so a crop
+    holding one nanowell was not segmented as the tile holding a hundred is, and its outlines were not the run's.
+    Every call to the segmenter is now a whole tile, and each crop's labels are a window of one such call's."""
+    import numpy as np
+
+    calls = []
+    inner = threshold_segmenter()
+
+    def recording(rim):
+        labels = inner(rim)
+        calls.append((np.array(rim), labels))
+        return labels
+
+    zip_path, _ = plate
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    result = preview_timepoint(zip_path, WELL, "0h", SETTINGS, grouper=pm.find_image_groups_in_zip,
+                               parse=pm.parse_filename, schema=SCHEMA, sep="_", phase_token="PHASE",
+                               scratch=scratch, segmenter=recording, n_crops=3)
+    assert result.crops and {rim.shape for rim, _ in calls} == {(700, 700)}
+    for crop in result.crops:
+        h, w = crop["rim"].shape
+        assert any(np.array_equal(crop["rim"], rim[y:y + h, x:x + w].astype(np.float32))
+                   and np.array_equal(crop["labels"], labels[y:y + h, x:x + w])
+                   for rim, labels in calls for y in range(rim.shape[0] - h + 1) for x in range(rim.shape[1] - w + 1)
+                   if rim[y, x] == crop["rim"][0, 0])
+
+
+@pytest.mark.parametrize("model", ["cyto3", "livecell_cp3"])
+def test_the_count_segments_with_the_model_the_settings_name(plate, tmp_path, monkeypatch, model):
+    """Tracker L2, at the boundary: what reaches ``pipeline.cellpose._segment_cellpose`` is the setting's model."""
+    import numpy as np
+
+    from pipeline import cellpose
+
+    asked = []
+
+    def fake(image, *, model_type="cyto3", **_):
+        asked.append(model_type)
+        return np.zeros(np.shape(image), dtype=np.int32)
+
+    monkeypatch.setattr(cellpose, "_segment_cellpose", fake)
+    zip_path, _ = plate
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    preview_timepoint(zip_path, WELL, "0h", nr.NanowellSettings("100um", cellpose_model=model),
+                      grouper=pm.find_image_groups_in_zip, parse=pm.parse_filename, schema=SCHEMA, sep="_",
+                      phase_token="PHASE", scratch=scratch)
+    assert asked and set(asked) == {model}

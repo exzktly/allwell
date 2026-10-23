@@ -57,7 +57,7 @@ def test_every_seen_nanowell_has_a_confluence_and_it_does_not_depend_on_the_tile
     assert {k: (sites[k]["state"], sites[k]["n_cells"]) for k in seen} == \
         {k: (reference[k]["state"], reference[k]["n_cells"]) for k in seen}
     block = measured.template["normalisation"]
-    assert block["measure_version"] == 3 and block["offset"] == "measured" and block["tiles_without_gain"] == []
+    assert block["measure_version"] == 4 and block["offset"] == "per nanowell" and block["tiles_without_gain"] == []
 
 
 def test_empty_nanowells_read_empty_and_loaded_ones_textured_on_every_tile(well):
@@ -72,10 +72,38 @@ def test_empty_nanowells_read_empty_and_loaded_ones_textured_on_every_tile(well)
     assert min(sites[a]["confluence"] for a in loaded if a in sites and sites[a]["state"] == "measured") > 0.1
 
 
-def test_a_tile_whose_offset_the_well_cannot_vouch_for_is_corrected_for_brightness_and_says_so(well):
+def test_light_added_toward_the_middle_of_the_well_is_measured_as_if_it_were_not_there(well, even):
+    """The report behind tracker L1: the middle of the well is brighter and undercounts there. Rendered here as light
+    added in a broad peak at the array's centre, half the floor's brightness at its top, so it changes across every
+    tile rather than from tile to tile. One offset per tile could not follow it; each nanowell's own level does, and
+    every seen nanowell's state, count and confluence match the evenly lit well's."""
+    from tests._nanowell_run_fixture import PX
+
     base, record, _ = well
-    _sites, measured = _measure(base, record, 0.3, 0.5)
-    block = measured.template["normalisation"]
-    assert block["scale_only_tiles"] == sorted(set(block["offset_fallback_tiles"]) & set(block["scale_only_tiles"]))
-    for tile in block["scale_only_tiles"]:
-        assert any(tile in note and "brightness only" in note for note in measured.notes)
+    _, measured_even = even
+    centre = np.mean([[r["well_x_um"], r["well_y_um"]] for r in measured_even.sites], axis=0)
+    images = {}
+    for name, image in base.items():
+        left, top = record_left_top(record, name)
+        yy, xx = np.mgrid[0:image.shape[0], 0:image.shape[1]]
+        distance = np.hypot((xx + 0.5) * PX + left - centre[0], (yy + 0.5) * PX + top - centre[1])
+        images[name] = (image + 0.5 * np.exp(-(distance / 900.0) ** 2)).astype(np.float32)
+    located = nr.locate_timepoint("0h", record, "A01", images, SETTINGS)
+    radius, roster = nr.own_array_model(located, SETTINGS)
+    measured = nr.measure_timepoint(located, images, SETTINGS, radius, roster=roster, segmenter=threshold_segmenter())
+    sites = {(r["nw_q"], r["nw_r"]): r for r in measured.sites}
+    reference, _ = even
+    seen = [k for k, r in sites.items() if r["state"] in ("measured", "empty") and k in reference]
+    assert len(seen) > 500
+    assert {k: (sites[k]["state"], sites[k]["n_cells"]) for k in seen} == \
+        {k: (reference[k]["state"], reference[k]["n_cells"]) for k in seen}
+    assert max(abs(sites[k]["confluence"] - reference[k]["confluence"]) for k in seen) < 0.03
+    low, high = measured.template["normalisation"]["offset_range"]
+    assert high - low > 0.2                                    # the block says light was added, and how much
+
+
+def record_left_top(record, field):
+    """A tile's recorded top-left corner in micrometres."""
+    px = next(iter(record["timepoints"].values()))["pixel_size_um"]["x"]
+    tile = next(t for t in record["tiles"] if t["field"] == field)
+    return tile["mosaic_xy_px"][0] * px, tile["mosaic_xy_px"][1] * px

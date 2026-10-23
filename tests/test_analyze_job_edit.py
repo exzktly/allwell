@@ -101,6 +101,7 @@ _OPTS = {
     "nanowell_occluded_below": "0.6",
     "nanowell_clipped_below": "0.7",
     "nanowell_geometry": "infer",
+    "nanowell_cellpose_model": "livecell_cp3",
     "nanowell_registration_from": "/data/plate6/out",
 }
 

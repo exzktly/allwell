@@ -936,6 +936,79 @@ CONTRAST_NEIGHBOURHOOD_PITCHES = 1.5
 THRESHOLD_STRIDE = 4
 
 
+#: A site's floor-to-surround contrast within this factor of its tile's median is a nanowell's; one beyond it — bare
+#: floor outside the array, a bubble, a nanowell under a sheet of cells — has no say in its neighbours' gain and takes
+#: theirs. Vignetting moves a contrast across a tile by well under this.
+PLAUSIBLE_CONTRAST_FACTOR = 2.0
+
+
+def _plausible(contrasts, owners) -> list:
+    """*contrasts* with each one more than ``PLAUSIBLE_CONTRAST_FACTOR`` from its tile's median replaced by NaN.
+
+    Found by the end-to-end lane: a site outside the array is bare floor, its contrast near zero, and its same-tile
+    neighbourhood was mostly sites like it, so its median contrast gave a gain of 0.003 and the noise there, divided
+    by it, was segmented as a cell."""
+    values = np.asarray(contrasts, dtype=np.float64)
+    owners = np.asarray(list(owners), dtype=object)
+    out = values.copy()
+    for owner in dict.fromkeys(owners.tolist()):
+        mine = owners == owner
+        finite = values[mine & np.isfinite(values)]
+        if not len(finite):
+            continue
+        typical = float(np.median(finite))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = values / typical
+        out[mine & ~((ratio >= 1 / PLAUSIBLE_CONTRAST_FACTOR) & (ratio <= PLAUSIBLE_CONTRAST_FACTOR))] = np.nan
+    return out.tolist()
+
+
+def _site_levels(located, images, template, fitted: dict, geoms, pitch_um: float, identifiable: bool):
+    """``(site index -> (offset, gain), tiles none of whose sites gave a level, the sites whose own contrast is a
+    nanowell's)`` for :func:`_normalise`.
+
+    *fitted* maps each tile to the sites it owns that the template covers. A site with no level of its own (its
+    surround off the image) takes its tile's median level."""
+    from pipeline import nanowell_measure as nm
+
+    px = located.pixel_size_um
+    order, owner_of, surrounds, contrasts = [], [], [], []
+    for owner, sites in fitted.items():
+        if not sites:
+            continue
+        crops = nm.site_crops(images[owner], px, np.array([g.centre_um for g in sites]), template.half)
+        floors, rims = nm.crop_levels(crops, template.half)
+        for g, floor, surround in zip(sites, floors, rims):
+            contrast = nm.site_contrast(float(floor), float(surround))
+            order.append(g.index)
+            owner_of.append(owner)
+            surrounds.append(float(surround))
+            contrasts.append(math.nan if contrast is None else contrast)
+    nanowells = set()                                  # sites whose own contrast is a nanowell's
+    if identifiable and order:
+        plausible = _plausible(contrasts, owner_of)
+        nanowells = {i for i, c in zip(order, plausible) if math.isfinite(c)}
+        smoothed = nm.neighbourhood_median([geoms[i].centre_um for i in order], plausible,
+                                           CONTRAST_NEIGHBOURHOOD_PITCHES * pitch_um, groups=owner_of)
+        levels = {i: nm.site_level(s, c, template) for i, s, c in zip(order, surrounds, smoothed)}
+    else:                                                       # brightness alone: the surround sets the gain
+        levels = {}
+        for i, surround in zip(order, surrounds):
+            gain = nm.site_gain(surround, 0.0, template)
+            levels[i] = None if gain is None else (0.0, gain)
+    out, no_gain = {}, []
+    for owner, sites in fitted.items():
+        mine = {g.index: levels.get(g.index) for g in sites}
+        known = [v for v in mine.values() if v is not None]
+        if not known:
+            if sites:
+                no_gain.append(owner)
+            continue
+        fallback = (float(np.median([o for o, _ in known])), float(np.median([v for _, v in known])))
+        out.update({i: v if v is not None else fallback for i, v in mine.items()})
+    return out, no_gain, nanowells
+
+
 def _normalise(located, images, template, by_tile, geoms, channels, pitch_um: float) -> Normalisation:
     """Each site's ``(offset, gain)``, the timepoint's texture threshold and fluorescence backgrounds (``MEASURE_VERSION``
     4), none of which needs an empty nanowell (tracker L1).
@@ -957,38 +1030,7 @@ def _normalise(located, images, template, by_tile, geoms, channels, pitch_um: fl
     tiles = [t for t in by_tile if t is not None]
     identifiable = nm.offset_identifiable(template)
     fitted = {t: _local_fit(t, by_tile[t], located, geoms, template)[0] for t in tiles}
-    order, owner_of, surrounds, contrasts = [], [], [], []
-    for owner in tiles:
-        if not fitted[owner]:
-            continue
-        crops = nm.site_crops(images[owner], px, np.array([g.centre_um for g in fitted[owner]]), template.half)
-        floors, rims = nm.crop_levels(crops, template.half)
-        for g, floor, surround in zip(fitted[owner], floors, rims):
-            contrast = nm.site_contrast(float(floor), float(surround))
-            order.append(g.index)
-            owner_of.append(owner)
-            surrounds.append(float(surround))
-            contrasts.append(math.nan if contrast is None else contrast)
-    if identifiable and order:
-        smoothed = nm.neighbourhood_median([geoms[i].centre_um for i in order], contrasts,
-                                           CONTRAST_NEIGHBOURHOOD_PITCHES * pitch_um, groups=owner_of)
-        levels = {i: nm.site_level(s, c, template) for i, s, c in zip(order, surrounds, smoothed)}
-    else:                                                       # brightness alone: the surround sets the gain
-        levels = {}
-        for i, surround in zip(order, surrounds):
-            gain = nm.site_gain(surround, 0.0, template)
-            levels[i] = None if gain is None else (0.0, gain)
-    no_gain = []
-    for owner in tiles:
-        mine = {g.index: levels.get(g.index) for g in fitted[owner]}
-        known = [v for v in mine.values() if v is not None]
-        if not known:
-            if fitted[owner]:
-                no_gain.append(owner)
-            continue
-        # A site whose surround is off the image takes its tile's median level.
-        fallback = (float(np.median([o for o, _ in known])), float(np.median([v for _, v in known])))
-        out.levels.update({i: v if v is not None else fallback for i, v in mine.items()})
+    out.levels, no_gain, nanowells = _site_levels(located, images, template, fitted, geoms, pitch_um, identifiable)
     departures, floors = [], {c: {} for c in (channels or {})}
     for owner in tiles:
         mine = [g for g in fitted[owner] if g.index in out.levels]
@@ -998,18 +1040,18 @@ def _normalise(located, images, template, by_tile, geoms, channels, pitch_um: fl
         departures += nm.site_departures(rim, px, mine, stride=THRESHOLD_STRIDE)
         for channel, load in (channels or {}).items():
             image = load(owner)
-            if image is not None:
-                levels = nm.site_floor_levels(image, px, mine)
-                if levels:
-                    floors[channel][owner] = float(np.median(list(levels.values())))
+            levels = {} if image is None else nm.site_floor_levels(image, px, mine)
+            if levels:
+                floors[channel][owner] = float(np.median(list(levels.values())))
     out.threshold, cell_share = nm.threshold_from_departures(departures)
     out.tile_backgrounds = {c: v for c, v in floors.items() if v}
     out.backgrounds = {c: float(np.median(list(v.values()))) for c, v in out.tile_backgrounds.items()}
-    offsets = [o for o, _ in out.levels.values()]
+    offsets = [o for i, (o, _) in out.levels.items() if i in nanowells]
     out.block = {"measure_version": nm.MEASURE_VERSION,
                  "offset": "per nanowell" if identifiable else "not identifiable",
                  "contrast_neighbourhood_um": CONTRAST_NEIGHBOURHOOD_PITCHES * pitch_um if identifiable else None,
-                 # Where on the well light was added, and how much: the spread of the offsets the sites were given.
+                 # Where on the well light was added, and how much: the spread of the offsets the nanowells were
+                 # given (bare floor outside the array and the like left out: its offset describes no nanowell).
                  "offset_range": ([float(np.percentile(offsets, 5)), float(np.percentile(offsets, 95))]
                                   if identifiable and offsets else None),
                  "nanowells_levelled": len(out.levels), "tiles_without_gain": sorted(no_gain),

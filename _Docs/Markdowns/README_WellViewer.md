@@ -212,6 +212,12 @@ and, optionally, the cell diameter, the margin around a nanowell that must lie i
 for that tile to own it, the angle of the central square's edges to a lattice row, and the occlusion and
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
 
+**Cellpose model** chooses what counts the cells: *cyto3* (Cellpose's generalist, the default) or *livecell_cp3*
+(the Cellpose model trained on phase-contrast images of eight cell lines, LIVECell). Both come with the installed
+Cellpose; a model's weights are downloaded the first time it is used. Which counts your cells better depends on the
+cells, so compare them on one well with **Test detection** before a plate-wide run: its crops show the outlines the
+run itself would count, cut from the whole tile segmented as the run segments it.
+
 **Array geometry** says how the array is found. *Hexagonal lattice in a circle* (the default) looks for nanowells
 on a hexagonal lattice inside a circular array. Either way the nanowells' diameter is measured on the images — one
 diameter for the whole well, the median over its timepoints — and the nanowells are found, fitted and measured at
@@ -308,20 +314,30 @@ inside one tile for that tile to own it (default a tenth of the diameter), and `
 angle of the central square's edges to a lattice row (default 0). `--nanowell_geometry infer` finds the array by
 its contrast and infers the lattice kind (hexagonal or square), pitch, orientation and outline, as *Infer from
 the image* does on the form; without it (`hex_circle`) the array is a hexagonal lattice in a circle.
-`--nanowell_registration_from <folder>` reuses an earlier run's tile registration, as **Reuse registration** does
-on the form. Wells must be zips.
+`--nanowell_cellpose_model livecell_cp3` counts with the LIVECell model instead of `cyto3`, as **Cellpose model**
+does on the form. `--nanowell_registration_from <folder>` reuses an earlier run's tile registration, as **Reuse
+registration** does on the form. Wells must be zips.
 
 Besides the usual per-cell CSV (one row per cell, with the owner tile as `fov` and the nanowell's address
 `nw_q`, `nw_r`, `nw_ring`, `nw_label` and its position `well_x_um`, `well_y_um`), the run writes
 `nanowells/<well>.csv`, one row per nanowell and timepoint (its address, position, state, imaged and visible
-fractions, cell count, confluence, and fluorescence over the empty nanowells' background), and
+fractions, cell count, confluence, and fluorescence over the nanowell floor's background), and
 `nanowells/<well>_grid.json`, the registration, lattice and status of every timepoint. A nanowell no tile could
-see, or that was hidden, has a row with its state and **no number**, never a zero. Tiles imaged at different
-brightness or with a different offset are measured alike: each nanowell is compared with the empty nanowells only
-after it has been brought to their levels — its brightness from the lattice around it, which never holds cells, and
-its tile's offset from that tile's own empty nanowells (or, for a tile with none, the well's, which the grid
-record and the run's notes name). One texture threshold serves every tile of a timepoint, so every nanowell that
-was seen has a confluence. Results measured this way carry a measurement version: adding timepoints to a dataset
+see, or that was hidden, has a row with its state and **no number**, never a zero.
+
+**No empty nanowell is needed.** A plate seeded at twenty cells to a nanowell has none, so nothing is read from
+"the empty ones": the picture of an empty nanowell every nanowell is divided by is built, pixel by pixel, from the
+value most nanowells share there (cells sit in different places in different nanowells, so the bare floor is what
+they agree on), and the same idea gives each nanowell's floor, the texture that counts as bare floor, and each
+fluorescence channel's background. Tiles imaged at different brightness or with a different offset, and light that
+is brighter toward the middle of a well, are measured alike: each nanowell's brightness comes from the contrast
+between its floor and the lattice around it (taken over its neighbours on the same tile, so one nanowell covered in
+cells does not set its own), and its offset from the lattice around it. The grid record's `normalisation` block
+says how much light was added across the well (`offset_range`) and what share of the nanowells' floor read as
+cells (`cell_share`); over half is noted, because the texture threshold then reads low. One limit: where most
+nanowells hold a cell at the **same** place (cells gathered at the lowest point of a curved floor), that cell
+becomes part of the empty-nanowell picture there and is not counted. One texture threshold serves every tile of a
+timepoint, so every nanowell that was seen has a confluence. Results measured this way carry a measurement version: adding timepoints to a dataset
 measured by an earlier version analyses the well again in full, and Merge Plates refuses to combine two datasets
 measured by different versions. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image

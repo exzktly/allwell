@@ -180,3 +180,16 @@ def test_measurements_of_another_version_are_not_mixed():
     located = SimpleNamespace(status="ok", origin_method="fiducial", manual_anchor_um=None)
     key = nr._checkpoint_key(outcome, "0h", located, 100.0, None, nr.NanowellSettings("100um"), {})
     assert key["measure_version"] == nm.MEASURE_VERSION              # a checkpoint of another version is not taken back
+
+
+def test_a_site_that_is_not_a_nanowell_has_no_say_in_its_neighbours_gain():
+    """Found by the end-to-end lane (tracker L1): bare floor outside the array has a contrast near zero, and where such
+    sites were most of a neighbourhood its median gave a gain of 0.003, which turned noise into a cell. A contrast
+    beyond ``PLAUSIBLE_CONTRAST_FACTOR`` of its tile's median is set aside, each tile by its own median."""
+    from pipeline import nanowell_run as nr
+
+    contrasts = [0.40, 0.42, 0.001, 0.38, 1.5, float("nan"), 0.60, 0.62, 0.01]
+    owners = ["F0"] * 6 + ["F1"] * 3
+    kept = nr._plausible(contrasts, owners)
+    assert [c == c for c in kept] == [True, True, False, True, False, False, True, True, False]
+    assert kept[:2] == [0.40, 0.42] and kept[6:8] == [0.60, 0.62]

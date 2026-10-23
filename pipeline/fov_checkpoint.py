@@ -68,7 +68,7 @@ def _staging_dir_for(output_dir: Path, well_label: str,
     """Where one well's intermediates live, keyed on *this* run.
 
     `scratch_base_for` returns one directory for the whole machine —
-    `$ALLWELL_SCRATCH_DIR` or `~/.allwell/scratch` — and the staging dir under
+    `$ALLWELL_SCRATCH_DIR` or the app folder's `scratch/` — and the staging dir under
     it used to be named `_tmp_images_<WELL>` with the checkpoints inside keyed
     on the input filename stem. Nothing in either named the dataset, the output
     directory, the run or the settings, and acquisition software writes the

@@ -4,8 +4,8 @@ Audit X12. The app honours a handful of environment variables
 (:envvar:`ALLWELL_SCRATCH_DIR`, :envvar:`ALLWELL_REMOTES`,
 :envvar:`ALLWELL_SEG_DEBUG`). Each is read lazily deep inside the code that
 uses it, and a mistyped path silently falls back to a default — the scratch
-override degrades to ``~/.allwell/scratch`` (and to the OS temp dir only if the
-home directory is unwritable too, potentially filling a small system drive), and
+override degrades to the app folder's ``scratch/`` (and to the OS temp dir only
+if that is unwritable too, potentially filling a small system drive), and
 a bad ``ALLWELL_REMOTES`` path yields an empty remotes list with no hint as to
 why. That is invisible until a run misbehaves.
 
@@ -25,6 +25,8 @@ import os
 from pathlib import Path
 from collections.abc import Mapping
 
+from util.state_dir import default_scratch_label
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,8 +39,8 @@ def _check_scratch_dir(value: str) -> str | None:
 
     **The fallback the message names is the fallback that is taken.** Both
     branches said "the OS temp dir", which is the third resolution step, not the
-    second: ``_scratch_dir`` tries ``~/.allwell/scratch`` first and reaches the
-    temp dir only when the home directory is unwritable too. Its own runtime
+    second: ``_scratch_dir`` tries the app folder's ``scratch/`` first and
+    reaches the temp dir only when that is unwritable too. Its own runtime
     warning says so correctly, so a user who hit both saw two different accounts
     of where their staging copies had gone — and the one printed at start-up,
     before anything had happened, was the wrong one.
@@ -49,15 +51,15 @@ def _check_scratch_dir(value: str) -> str | None:
     except OSError as exc:
         return (
             f"ALLWELL_SCRATCH_DIR={value!r} is unusable ({exc}); remote-staging "
-            "scratch will fall back to ~/.allwell/scratch, or to the OS temp "
-            "dir if the home directory is unwritable too — which may fill a "
+            f"scratch will fall back to {default_scratch_label()}, or to the OS "
+            "temp dir if that is unwritable too — which may fill a "
             "small system drive with GB-sized transit copies."
         )
     if not p.is_dir():
         return (
             f"ALLWELL_SCRATCH_DIR={value!r} exists but is not a directory; "
-            "remote-staging scratch will fall back to ~/.allwell/scratch, or "
-            "to the OS temp dir if the home directory is unwritable too."
+            f"remote-staging scratch will fall back to {default_scratch_label()}, "
+            "or to the OS temp dir if that is unwritable too."
         )
     return None
 

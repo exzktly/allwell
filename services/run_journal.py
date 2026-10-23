@@ -456,7 +456,7 @@ def record_remote(
 def record_remote_scratch(output_dir: Path | str, scratch_dir: str) -> bool:
     """Add where the remote pipeline keeps its working files to the current remote address.
 
-    The pipeline resolves its scratch base on the host (``ALLWELL_SCRATCH_DIR`` or ``~/.allwell/scratch``) and
+    The pipeline resolves its scratch base on the host (``ALLWELL_SCRATCH_DIR`` or the app folder's ``scratch/``) and
     names it on its ``Scratch  :`` line; this is where a well's part-way checkpoints live, so a later run that
     resumes the address can look for them there rather than re-deriving a path the host expanded.
     """

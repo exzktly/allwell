@@ -12,6 +12,9 @@ writes on this machine outside a dataset folder, in one fixed layout:
 ``mplcache/``              matplotlib's font cache (``startup.mpl_bootstrap``)
 ``tmp/``                   spill and staging folders the app makes and removes
                            itself (``review.data.cell_pool``, Batch Export)
+``scratch/``               an Analyze run's working files — extracted inputs,
+                           intermediate images, per-FOV checkpoints — unless the
+                           user points the run elsewhere (:func:`default_scratch_dir`)
 =========================  ======================================================
 
 ``%LOCALAPPDATA%\\allwell`` on Windows — the folder Windows provides for exactly
@@ -32,9 +35,18 @@ folder beside the CSVs it caches, so it travels and is deleted with its dataset.
 **The analysis pipeline's folder — :func:`user_state_dir`.** The CZI scan cache
 (``pipeline.scan_cache``) is the pipeline's, runs on remote hosts as well, and
 keeps its own rule: ``~/.cache/allwell`` first, then ``%LOCALAPPDATA%\\allwell``,
-then the temp folder. So does the pipeline's scratch (``pipeline.io``,
-``services.remote_scratch``), which is ``~/.allwell/scratch`` unless the user
-points it elsewhere. Neither is a GUI cache, and neither moves with the app's.
+then the temp folder. It is not a GUI cache and does not move with the app's.
+
+**Scratch sits in the app's folder on every platform.** The run scratch is the
+pipeline's, but its default location is ``scratch/`` inside the app's folder —
+``%LOCALAPPDATA%\\allwell\\scratch`` on Windows, ``~/.allwell/scratch`` on
+macOS and Linux — so that everything the app keeps on a machine is in one place
+whichever platform it is. On Windows that is also the right volume class: the
+scratch holds gigabytes of transient files, and ``%LOCALAPPDATA%`` is the part
+of a profile that is never roamed. The storage button still never clears it
+(a suspended run resumes from its checkpoints); it only offers the old
+``~/.allwell/scratch`` on Windows, which nothing reads any more
+(:func:`legacy_scratch_dir`).
 
 Stdlib-only and Qt-free: ``startup.boot_diag`` imports it before PySide6, and
 ``util/`` is shipped to the remote worker.
@@ -86,6 +98,14 @@ HOME_DIRNAME = ".allwell"
 #: and the cache-clearing code agree.
 FONT_CACHE_SUBDIR = "mplcache"
 TEMP_SUBDIR = "tmp"
+#: The run scratch's default folder. Deliberately a dedicated subfolder rather
+#: than the app's folder itself: the pipeline's stale sweeps glob
+#: ``_tmp_extract_*`` / ``_tmp_images_*`` under the scratch base and delete what
+#: they find.
+SCRATCH_SUBDIR = "scratch"
+#: The environment variable that overrides the scratch default — the Analyze
+#: form's "Scratch disk" field and ``--scratch_dir`` both set it.
+SCRATCH_DIR_ENV = "ALLWELL_SCRATCH_DIR"
 BOOT_LOG_NAME = "allwell-boot.log"
 BOOTSTRAP_LOG_GLOB = "bootstrap-*.log"
 #: Where a source checkout kept its font cache before it moved into the app's
@@ -141,14 +161,99 @@ def gui_temp_dir() -> Path:
         return Path(tempfile.gettempdir())
 
 
+def default_scratch_dir() -> Path | None:
+    """``scratch`` in the app's folder, created; ``None`` when it cannot be made.
+
+    The candidates are :func:`gui_candidate_dirs`, in the same order, so the
+    scratch follows the app's folder wherever that resolves —
+    ``ALLWELL_STATE_DIR`` included — but **not** to the system temp folder. A
+    run's scratch carries gigabytes, the temp folder on Linux is often a tmpfs
+    (memory), and each caller has a better last resort of its own: the pipeline
+    falls back to the output folder, the remote client to the temp folder with
+    a warning (``pipeline.io.scratch_base_for``,
+    ``services.remote_scratch._scratch_dir``).
+
+    A home folder that cannot be resolved (``~`` left unexpanded) is skipped
+    rather than created relative to the working directory.
+    """
+    temp_root = Path(tempfile.gettempdir()) / APP_DIRNAME
+    for d in gui_candidate_dirs():
+        if d == temp_root or not d.is_absolute():
+            continue
+        path = d / SCRATCH_SUBDIR
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        if os.access(path, os.W_OK):
+            return path
+    return None
+
+
+def default_scratch_label() -> str:
+    """Where :func:`default_scratch_dir` puts the scratch, as a person reads it.
+
+    Creates nothing, so a form placeholder or a help line can name the folder
+    without making it. ``~/.allwell/scratch`` on macOS and Linux (the home folder
+    written as ``~``), ``%LOCALAPPDATA%\\allwell\\scratch`` spelled out on
+    Windows. It names the first candidate — the folder used unless that one
+    cannot be written.
+    """
+    path = gui_candidate_dirs()[0] / SCRATCH_SUBDIR
+    if not is_windows():
+        try:
+            return "~/" + path.relative_to(Path(os.path.expanduser("~"))).as_posix()
+        except ValueError:
+            pass  # not under the home folder (ALLWELL_STATE_DIR): the full path
+    return str(path)
+
+
+def legacy_scratch_dir() -> Path | None:
+    """``~/.allwell/scratch`` when it is not where scratch goes now, else ``None``.
+
+    That is where the run scratch lived on every platform before it moved into
+    the app's folder, so on Windows an older version's scratch — extracted
+    inputs and checkpoints, possibly gigabytes — is left there with nothing
+    reading it. ``None`` on macOS and Linux, where the two are the same folder,
+    and whenever the folder is (or holds, or sits inside) the scratch the user
+    has pointed runs at with ``ALLWELL_SCRATCH_DIR``.
+    """
+    old = Path(os.path.expanduser("~")) / HOME_DIRNAME / SCRATCH_SUBDIR
+    if not old.is_absolute():
+        return None
+    try:
+        if not old.is_dir() or old.is_symlink():
+            return None
+    except OSError:
+        return None
+    current = default_scratch_dir()
+    if current is not None and _overlaps(old, current):
+        return None
+    override = os.environ.get(SCRATCH_DIR_ENV, "").strip()
+    if override and _overlaps(old, Path(override).expanduser()):
+        return None
+    return old
+
+
+def _overlaps(a: Path, b: Path) -> bool:
+    """Whether either path is, or contains, the other."""
+    try:
+        ra, rb = a.resolve(), b.resolve()
+    except OSError:
+        return True
+    return _holds(ra, rb) or _holds(rb, ra)
+
+
 def legacy_gui_paths() -> list[Path]:
     """Files and folders earlier versions of the app wrote and this one does not.
 
     In ``~/.cache/allwell``: the boot log and its crash copies, the bootstrap
     logs and the font cache — **not** ``czi-scans``, which is the pipeline's and
-    lives there. And the ``.mplcache`` folder at the root of a source checkout
-    (git-ignored; a frozen build has none). Only paths that exist are returned,
-    and none that is, or holds, the current :func:`gui_state_dir`.
+    lives there. The ``.mplcache`` folder at the root of a source checkout
+    (git-ignored; a frozen build has none). And on Windows, the run scratch an
+    older version left in ``~/.allwell/scratch`` (:func:`legacy_scratch_dir`).
+    Only paths that exist are returned, and none that is, or holds, the current
+    :func:`gui_state_dir`.
     """
     current = gui_state_dir().resolve()
     found: list[Path] = []
@@ -165,6 +270,9 @@ def legacy_gui_paths() -> list[Path]:
             found.append(repo_cache)
     except OSError:
         pass  # likewise
+    old_scratch = legacy_scratch_dir()
+    if old_scratch is not None:
+        found.append(old_scratch)
     return [p for p in found if not _holds(p, current)]
 
 

@@ -27,6 +27,8 @@ import os
 import shutil
 from pathlib import Path
 
+from util.state_dir import default_scratch_label
+
 _LOGGER = logging.getLogger("allwell.disk_space")
 
 __all__ = ["directory_bytes", "free_bytes", "same_volume", "space_message"]
@@ -111,7 +113,7 @@ def space_message(what: str, path: Path | str | None, *, need: int | None = None
         "per FOV-group, times as many wells as run at once) and every "
         "<well>_out.zip the plate has produced so far are not. For a local run, "
         "unless ALLWELL_SCRATCH_DIR (Analyze -> Scratch disk) points elsewhere, "
-        "that staging is on ~/.allwell/scratch and may be competing with the "
+        f"that staging is on {default_scratch_label()} and may be competing with the "
         "output for this same volume. For a remote run it is the remote's own "
         "scratch that carries it (the host's Remote scratch dir), and on this "
         "machine only the input and output volumes are used. Free space or move "

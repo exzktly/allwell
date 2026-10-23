@@ -468,18 +468,23 @@ def test_client_scratch_default_matches_the_pipelines(monkeypatch, tmp_path):
     """One scratch default across the app, not two.
 
     ``pipeline.io.scratch_base_for`` and ``remote_scratch._scratch_dir`` cannot
-    share a constant (the client must not import the imaging stack), so they are
-    pinned here instead. They used to disagree — the client fell back to the OS
+    import each other (the client must not import the imaging stack), so they
+    share ``util.state_dir.default_scratch_dir`` and are pinned to it here. They used to disagree — the client fell back to the OS
     temp dir, which on macOS is an opaque ``/var/folders/…/T`` path and on Linux
     is often a tmpfs — and a remote run then staged gigabytes somewhere the user
     had never chosen and could not find.
     """
-    from pipeline.io import DEFAULT_SCRATCH_SUBDIR
+    from pipeline.io import scratch_base_for
     from services.remote_scratch import _scratch_dir
+    from util import state_dir
 
     monkeypatch.delenv("ALLWELL_SCRATCH_DIR", raising=False)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    assert _scratch_dir() == tmp_path / DEFAULT_SCRATCH_SUBDIR
+    monkeypatch.delenv(state_dir.STATE_DIR_ENV, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(state_dir, "is_windows", lambda: False)
+    want = tmp_path / ".allwell" / "scratch"
+    assert _scratch_dir() == want
+    assert scratch_base_for(tmp_path / "out") == want
 
 
 def test_client_scratch_honours_the_override(monkeypatch, tmp_path):
@@ -3370,12 +3375,15 @@ def test_scratch_dir_honors_env_override(tmp_path, monkeypatch):
 
 def test_scratch_dir_falls_back_when_override_unusable(tmp_path, monkeypatch):
     # A path that can't be created (a file in the way) → fall back to the
-    # default, which is the same ~/.allwell/scratch the pipeline uses.
+    # default, which is the same app-folder scratch the pipeline uses.
+    from util import state_dir
     bad = tmp_path / "afile"
     bad.write_text("x")
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv(state_dir.STATE_DIR_ENV, raising=False)
+    monkeypatch.setattr(state_dir, "is_windows", lambda: False)
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(bad / "nope"))
     assert remote_scratch._scratch_dir() == home / ".allwell" / "scratch"
 
@@ -3385,10 +3393,13 @@ def test_scratch_dir_falls_back_to_os_temp_when_home_is_unwritable(
 ):
     """Last resort. An unwritable home must not fail the run outright."""
     import tempfile as _t
+    from util import state_dir
     blocked = tmp_path / "afile"
     blocked.write_text("x")
     monkeypatch.delenv("ALLWELL_SCRATCH_DIR", raising=False)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: blocked))
+    monkeypatch.delenv(state_dir.STATE_DIR_ENV, raising=False)
+    monkeypatch.setattr(state_dir, "is_windows", lambda: False)
+    monkeypatch.setenv("HOME", str(blocked))
     assert remote_scratch._scratch_dir() == Path(_t.gettempdir())
 
 

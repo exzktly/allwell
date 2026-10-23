@@ -42,6 +42,7 @@ from skimage.segmentation import find_boundaries
 
 from util.aw_safe import swallow, swallowed
 from util.retry_io import retry_io
+from util.state_dir import SCRATCH_DIR_ENV, default_scratch_dir
 from util.image_exts import GROUP_IMAGE_EXTS
 from util.zip_write import atomic_zip, fsync_path, staging_path
 
@@ -62,14 +63,15 @@ from pipeline.capacity import (  # noqa: F401
 log = logging.getLogger("process_microscopy")
 
 
-# Default scratch location, under the user's home directory. Deliberately a
-# dedicated subdirectory rather than ``~`` itself: ``_sweep_stale_scratch_dirs``
-# globs ``_tmp_extract_*`` / ``_tmp_images_*`` under the scratch base and
-# *deletes* what it finds, so pointing the base at a directory the user also
-# keeps their own files in would be destructive. Everything below it is
-# transient per-run working state (it is NOT a cache — deleting it mid-run
-# discards the per-FOV checkpoints a restart resumes from).
-DEFAULT_SCRATCH_SUBDIR = Path(".allwell") / "scratch"
+# The default scratch location is ``scratch`` in the app's own folder
+# (``util.state_dir.default_scratch_dir``): ``%LOCALAPPDATA%\\allwell\\scratch``
+# on Windows, ``~/.allwell/scratch`` on macOS and Linux and on a remote worker.
+# Deliberately a dedicated subdirectory: ``_sweep_stale_scratch_dirs`` globs
+# ``_tmp_extract_*`` / ``_tmp_images_*`` under the scratch base and *deletes*
+# what it finds, so pointing the base at a directory the user also keeps their
+# own files in would be destructive. Everything below it is transient per-run
+# working state (it is NOT a cache — deleting it mid-run discards the per-FOV
+# checkpoints a restart resumes from).
 
 
 def load_2d_gray(path: Path) -> np.ndarray:
@@ -114,14 +116,12 @@ def load_2d_gray_with_ceiling(path: Path) -> tuple[np.ndarray, float | None]:
 
 
 def default_scratch_base() -> Path | None:
-    """``~/.allwell/scratch``, created on demand, or None if unusable."""
-    try:
-        p = Path.home() / DEFAULT_SCRATCH_SUBDIR
-        p.mkdir(parents=True, exist_ok=True)
-        return p
-    except (OSError, RuntimeError):
-        # RuntimeError: Path.home() can't resolve a home directory at all.
-        return None
+    """``scratch`` in the app's folder, created on demand, or None if unusable.
+
+    ``%LOCALAPPDATA%\\allwell\\scratch`` on Windows, ``~/.allwell/scratch``
+    elsewhere — see :func:`util.state_dir.default_scratch_dir`.
+    """
+    return default_scratch_dir()
 
 
 def scratch_base_for(output_dir: Path) -> Path:
@@ -131,11 +131,13 @@ def scratch_base_for(output_dir: Path) -> Path:
 
     1. ``$ALLWELL_SCRATCH_DIR`` — the redirectable-scratch env the GUI sets from
        its "Scratch disk" field and the remote runner already uses.
-    2. ``~/.allwell/scratch`` — the default (see :data:`DEFAULT_SCRATCH_SUBDIR`).
+    2. ``scratch`` in the app's folder — ``%LOCALAPPDATA%\\allwell\\scratch``
+       on Windows, ``~/.allwell/scratch`` on macOS and Linux
+       (:func:`default_scratch_base`).
     3. *output_dir* — last-resort fallback when neither of the above can be
        created, so an unwritable home never fails the run outright.
 
-    **Why the home directory is the default.** This scratch carries the whole
+    **Why local per-user storage is the default.** This scratch carries the whole
     run's transient I/O: every extracted input TIF, every intermediate image
     (~6 per FOV-group, each written tmp → fsync → rename, so three filesystem
     operations apiece), and a JSON checkpoint per FOV-group. It used to default
@@ -153,7 +155,7 @@ def scratch_base_for(output_dir: Path) -> Path:
     copy when the rename would be cross-device — see
     :func:`_commit_staging_dir`).
     """
-    override = os.environ.get("ALLWELL_SCRATCH_DIR", "").strip()
+    override = os.environ.get(SCRATCH_DIR_ENV, "").strip()
     if override:
         try:
             p = Path(override).expanduser()
@@ -165,11 +167,12 @@ def scratch_base_for(output_dir: Path) -> Path:
     if home is not None:
         return home
     log.warning(
-        "Home scratch dir (~/%s) unusable; using the output dir %s for per-well "
-        "working files. On a network-mounted output dir this is the "
-        "configuration that causes 'Bad file descriptor' well failures — set "
-        "ALLWELL_SCRATCH_DIR (Analyze → Scratch disk) to a local path.",
-        DEFAULT_SCRATCH_SUBDIR, output_dir,
+        "The default scratch dir (the app folder's scratch/) is unusable; using "
+        "the output dir %s for per-well working files. On a network-mounted "
+        "output dir this is the configuration that causes 'Bad file descriptor' "
+        "well failures — set ALLWELL_SCRATCH_DIR (Analyze → Scratch disk) to a "
+        "local path.",
+        output_dir,
     )
     return output_dir
 

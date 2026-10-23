@@ -63,7 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--scratch_dir", type=Path, default=None,
                    help="Directory for per-well working files (zip extraction, "
                         "intermediate images, FOV checkpoints). Overrides "
-                        "$ALLWELL_SCRATCH_DIR; both default to ~/.allwell/scratch. "
+                        "$ALLWELL_SCRATCH_DIR; both default to the app folder's "
+                        "scratch — ~/.allwell/scratch, or "
+                        "%%LOCALAPPDATA%%\\allwell\\scratch on Windows. "
                         "Keep this on fast LOCAL storage — pointing it at a "
                         "network mount puts the run's bulk I/O on a volume whose "
                         "dropped sessions surface as 'Bad file descriptor'.")

@@ -5624,12 +5624,20 @@ two copies sharing one would each rebuild the other's), and `tmp/`, where
 `owner.pid` as `<pid>@<host>` (`core/process.py`): on Linux the home folder is
 often one network share mounted by several machines, a PID means nothing on
 another host, and an owner on another host is therefore always treated as
-running — by the cell pool's start-up sweep and by the storage dialog alike. The
-analysis pipeline keeps its own folders and is not part of this layout: its
-scratch (`~/.allwell/scratch` unless `ALLWELL_SCRATCH_DIR` says otherwise) and
-the CZI scan cache (`util.state_dir.user_state_dir()`, `~/.cache/allwell`
-first) are resolved by functions this layout leaves untouched, because they run
-on remote hosts too and a suspended run resumes from its scratch.
+running — by the cell pool's start-up sweep and by the storage dialog alike.
+
+The analysis pipeline's run scratch sits in the same folder, as `scratch/`, on
+every platform: `util.state_dir.default_scratch_dir()` is `scratch` under the
+first of `gui_candidate_dirs()` that can hold it — `%LOCALAPPDATA%\allwell\scratch`
+on Windows, `~/.allwell/scratch` on macOS, Linux and a remote worker — unless
+`ALLWELL_SCRATCH_DIR` says otherwise (§6.5). It skips the system-temp candidate
+the app's folder falls back to, because a run's scratch is gigabytes and the
+temp folder on Linux is often a tmpfs; `pipeline.io.scratch_base_for` and
+`services.remote_scratch._scratch_dir` each keep their own last resort instead.
+Being in the app's folder does not make the scratch a cache: no storage-dialog
+area reaches `scratch/`, because a suspended run resumes from its checkpoints.
+The CZI scan cache is the pipeline's alone (`util.state_dir.user_state_dir()`,
+`~/.cache/allwell` first) and is not part of this layout.
 
 The title bar's `hard-drive` button, beside Help and shown in every mode, opens
 `ui/local_storage_view.StorageDialog`. The shell keeps one per window: a click
@@ -5645,9 +5653,12 @@ survey. The areas it lists, how each is measured and how each is cleared are
   remote setup in progress holds its log open and on POSIX an unlink would
   succeed and lose it;
 - the app's files in other places: `util.state_dir.legacy_gui_paths()` (the
-  logs and font cache in `~/.cache/allwell` — never `czi-scans` — and a source
-  checkout's `.mplcache`) and the folders in the system temp folder with a
-  prefix in `SYSTEM_TEMP_PREFIXES`;
+  logs and font cache in `~/.cache/allwell` — never `czi-scans` — a source
+  checkout's `.mplcache`, and `util.state_dir.legacy_scratch_dir()`: on Windows,
+  the `~/.allwell/scratch` run scratch from before scratch moved into the app's
+  folder, offered only when it is not, and does not overlap, the scratch now in
+  use or the `ALLWELL_SCRATCH_DIR` override) and the folders in the system temp
+  folder with a prefix in `SYSTEM_TEMP_PREFIXES`;
 - unticked by default, the open dataset's `.aw_parquet` row caches, its own and
   its `out/` folder's (`ROW_CACHE_DIRNAME`, pinned to
   `review.data.parquet_cache.CACHE_DIRNAME` by a test, since `core/` may not
@@ -11261,7 +11272,7 @@ parent process supervises the per-well worker pool:
     cannot be reconciled reads as broken. The wording of the override
     lives once, in `capacity.ALLOW_LOW_DISK_HELP`, shared by the CLI flag's help
     and the checkbox's tooltip. When scratch and output share a volume —
-    the default, `~/.allwell/scratch` beside an output dir on the home volume —
+    the default, the app folder's `scratch/` beside an output dir on the same volume —
     the two needs are summed against one free figure, because checking either
     alone reports that the run fits when it does not. The resolved base is
     logged on the `Scratch  :` line either way.
@@ -11298,7 +11309,7 @@ parent process supervises the per-well worker pool:
     would check.
 - **Exhaustion is the common cause of a partial run, and "there is room next to
   my data" does not rule it out.** The scratch base defaults to
-  `~/.allwell/scratch` (§6.5) — the *home* volume — while the dataset usually
+  the app folder's `scratch/` (§6.5) — the *system* volume — while the dataset usually
   lives on an external or network disk. Each FOV-group stages ~6 float32
   intermediates there, so a 6-field × 23-timepoint well is several GB and a
   plate of them is far more; the input archives, meanwhile, are the only
@@ -12211,10 +12222,12 @@ well folder with **no** matching zip, and a stripped one always has one.
 The remote client resolves its own scratch base — the staging rewrites, transit
 output zips, and incremental merge temps — through `remote_scratch._scratch_dir`,
 in the same order and to the same default as the pipeline below:
-`$ALLWELL_SCRATCH_DIR` → `~/.allwell/scratch` → the OS temp dir (last resort,
-when home is unwritable). The two resolvers cannot share a constant, because the
-client must not import `pipeline.io` and drag numpy and tifffile into the remote
-path, so `tests/test_remote_runner.py` pins them to the same value instead. They
+`$ALLWELL_SCRATCH_DIR` → the app folder's `scratch/` → the OS temp dir (last
+resort, when no app folder is writable). The client must not import
+`pipeline.io` and drag numpy and tifffile into the remote path, so both take
+their default from the stdlib-only `util.state_dir.default_scratch_dir`, and
+`tests/test_remote_runner.py` and `tests/test_local_storage.py` pin them to the
+same value on each platform layout. They
 used to disagree, the client defaulting to the OS temp dir: a remote run then
 staged gigabytes into `/var/folders/<hash>/T` on macOS, or a tmpfs — RAM — on
 Linux, at a path the user had never chosen and could not find.
@@ -12223,7 +12236,9 @@ Linux, at a path the user had never chosen and could not find.
 where per-well working files go: the extracted input TIFs, every intermediate
 image, and the per-FOV checkpoints. Resolution order is `$ALLWELL_SCRATCH_DIR`
 (set by `--scratch_dir` or the Analyze tab's *Scratch disk* field) →
-**`~/.allwell/scratch`** (the default) → `output_dir` (last resort, warned).
+**`scratch/` in the app's folder** (the default: `~/.allwell/scratch`, or
+`%LOCALAPPDATA%\allwell\scratch` on Windows — §5's local-files section) →
+`output_dir` (last resort, warned).
 
 The default used to be `output_dir`, and the Analyze field auto-seeded
 `<input>/Temp`, so *both* put the whole run's bulk I/O on user-chosen volumes.
@@ -17338,7 +17353,7 @@ help while `qtbot` still holds the app).
    profile, which a parallel run splits across workers — and any other number
    sets the worker count. Parallel workers share the machine, so a test may not
    share a path with another test: the pipeline's scratch directory defaults to
-   `~/.allwell/scratch` and names a well's extraction directory for the well
+   the app folder's `scratch/` and names a well's extraction directory for the well
    alone, so two tests processing `A01` at once deleted each other's images.
    `conftest._pipeline_scratch_goes_to_a_scratch_directory` gives every test its
    own `ALLWELL_SCRATCH_DIR` (a test measuring the default resolution unsets
@@ -18299,7 +18314,8 @@ would give `ESTALE`. The first question is *which side* the errno came from, and
 the log now says so rather than leaving it to be guessed:
 
 - **A local run.** Check the `Scratch  :` line at the top of the run log — it
-  must **not** be a network path (it defaults to `~/.allwell/scratch`; set
+  must **not** be a network path (it defaults to `~/.allwell/scratch`, or
+  `%LOCALAPPDATA%\allwell\scratch` on Windows; set
   Analyze → *Scratch disk* or `--scratch_dir` to a local SSD if it isn't). That
   line carries the bulk of the run's I/O. What remains on the output dir is the
   two per-well result writes, which retry through the transient; if they still

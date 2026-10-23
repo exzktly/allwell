@@ -68,7 +68,9 @@ class StorageDialog(QDialog):
         where = QLabel(
             f"The app keeps its logs, caches and temporary files in "
             f"{gui_state_dir()}. Your images, CSVs and analysis are never "
-            f"touched here, and neither are an Analyze run's scratch files.",
+            f"touched here, and neither is the scratch folder inside it, "
+            f"where an Analyze run keeps its working files: a suspended run "
+            f"resumes from them.",
             self)
         where.setWordWrap(True)
         layout.addWidget(where)

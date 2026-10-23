@@ -1334,8 +1334,10 @@ folders: each well's archive is extracted, intermediate images are written, and
 per-FOV checkpoints are kept so a crashed run can be completed later. All of
 that lands on the scratch disk.
 
-- **Leave it blank** and the run uses `~/.allwell/scratch`. That is the right
-  answer on a machine with room on its system volume.
+- **Leave it blank** and the run uses the `scratch` folder inside the app's own
+  folder — `~/.allwell/scratch` on macOS and Linux,
+  `%LOCALAPPDATA%\allwell\scratch` on Windows (the field's placeholder shows
+  which). That is the right answer on a machine with room on its system volume.
 - **Keep it on fast local storage.** Pointing it at a network drive (NAS, SMB
   share) puts the run's GB-scale temporary I/O on a volume whose dropped
   sessions invalidate every open file handle — the configuration behind wells
@@ -1464,7 +1466,8 @@ Your own machine's home volume is not used by a remote run either. Wells arrive
 into a hidden `.allwell-transit` folder inside your chosen output folder and
 move into place from there, so the only volumes a remote run needs room on are
 the ones holding your input and your output. If that output folder cannot take
-the folder — a read-only share, say — the run falls back to `~/.allwell/scratch`
+the folder — a read-only share, say — the run falls back to the app's scratch
+folder (`~/.allwell/scratch`, or `%LOCALAPPDATA%\allwell\scratch` on Windows)
 and says so in the log rather than doing it quietly.
 
 Choosing a remote reveals a **Remote options** group, hidden for a local run
@@ -1789,7 +1792,8 @@ disk while a plate is being processed: under the load of a run its session can
 drop and reconnect, and on macOS every file the app had open at that moment
 becomes invalid — the error reads `[Errno 9] Bad file descriptor`. All-Well
 keeps the bulk of a run's file churn off your chosen folders (its scratch
-defaults to `~/.allwell/scratch`; the *Scratch disk* field overrides it), and
+defaults to the `scratch` folder inside the app's own folder; the *Scratch disk*
+field overrides it), and
 every remaining write on your input or output folder is retried a few times
 before it is allowed to fail. You will see a `[retry] …` line in the log when
 that happens — one or two is the app absorbing a blip, a steady stream means the
@@ -3908,7 +3912,7 @@ still exported (see below).
   folder untouched — nothing is copied to your local disk for it, and the log
   says how many archives took that route. Only wells that genuinely lose
   something (a channel you did not select, or fields **incremental** has already
-  done) are rebuilt, into `~/.allwell/scratch` unless the *Scratch disk* field
+  done) are rebuilt, into the app's scratch folder unless the *Scratch disk* field
   says otherwise. If your data is on a network or external drive, this pass reads
   only the images it will upload, so it is roughly as fast as the upload itself.
   Whether an archive counts as unchanged is judged on its images only, so the
@@ -5997,7 +6001,9 @@ The dialog lists what can go, each with its size, and clears what you tick:
 - **App files in other places** — earlier versions kept their logs and font
   cache in `~/.cache/allwell`, a copy run from source kept its font cache in
   the checkout's `.mplcache`, and temporary folders went to the system temp
-  folder. Nothing reads them any more.
+  folder. On Windows, an older version also kept Analyze's scratch in
+  `C:\Users\<you>\.allwell\scratch`; it is listed here too, unless the
+  *Scratch disk* field points at it. Nothing reads them any more.
 - **Row cache of the open dataset** — unticked to begin with. Fast copies of the
   dataset's CSVs, kept in `.aw_parquet` folders beside them. Clearing it frees
   that space but makes the next open of the dataset slower while the copies are
@@ -6016,10 +6022,11 @@ On Linux, if your home folder is shared between several machines, a temporary
 folder made by the app on another machine is never cleared from this one.
 
 The dialog never touches your images, CSVs or analysis, and never an Analyze
-run's own files: a run's scratch folder (`~/.allwell/scratch`, or the *Scratch
-disk* you set) and the CZI scan cache (`~/.cache/allwell/czi-scans`) belong to
-runs — a suspended run resumes from what is in its scratch — and are not
-offered.
+run's own files. A run's scratch folder is the `scratch` folder inside the app's
+folder above, on every platform (or the *Scratch disk* you set); it and the CZI
+scan cache (`~/.cache/allwell/czi-scans`) belong to runs — a suspended run
+resumes from what is in its scratch — and are not offered. To reclaim scratch
+space, delete the `scratch` folder by hand while no run is going or suspended.
 
 ### Copying analysis from another dataset
 

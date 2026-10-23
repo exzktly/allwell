@@ -292,5 +292,8 @@ def test_the_icon_sits_in_the_run_dashboard_s_status_line_not_the_form(qapp):
     icon = tab._slurm_indicator
     assert icon.parentWidget() is tab._dashboard
     header = tab._dashboard._header
-    assert header.indexOf(icon) == header.indexOf(tab._dashboard._status) + 1
+    # Right-aligned: after the stretch and the ETA, last before the collapse
+    # toggle (hidden in phone layout), not trailing the status text.
+    assert header.indexOf(icon) == header.indexOf(tab._dashboard._toggle) - 1
+    assert header.indexOf(icon) > header.indexOf(tab._dashboard._eta)
     assert tab._remote_cb.parentWidget().findChildren(type(icon)) == [], "a second icon is still in the form"

@@ -550,11 +550,22 @@ class _DragOwnerGuard(QObject):
         from PySide6.QtWidgets import QAbstractSlider
         w = obj.childAt(ev.startPos().toPoint()) if isinstance(obj, QWidget) else None
         while w is not None and w is not obj:
-            if isinstance(w, QAbstractSlider) or type(w).__name__ in _DRAG_OWNERS:
+            if isinstance(w, QAbstractSlider) or _plate_owns_drag(w):
                 ev.ignore()
                 return True
             w = w.parentWidget()
         return False
+
+
+def _plate_owns_drag(w: QWidget) -> bool:
+    """A plate keeps a drag that starts on it — unless it is a read-out
+    (``setReportOnly``), which selects nothing. Analyze's run dashboard is one,
+    and in phone layout it fills most of the Progress page: owning the drag
+    there left almost nowhere to scroll the page from."""
+    if type(w).__name__ not in _DRAG_OWNERS:
+        return False
+    is_report_only = getattr(w, "isReportOnly", None) or getattr(w, "is_report_only", None)
+    return not (callable(is_report_only) and is_report_only())
 
 
 def set_drag_scroll(viewport: QWidget, on: bool) -> None:

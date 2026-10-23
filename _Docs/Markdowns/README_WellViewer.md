@@ -613,53 +613,7 @@ with `Ctrl+O`.
 
 The Analyze tab is one tall scrollable form. Top to bottom:
 
-### 1. Filename schema
-
-A colon-separated list of field names, applied left-to-right against the
-underscore-separated tokens in each filename. The `Schema string` field is
-editable directly; the **Position** dropdowns above it are the same value seen
-the other way round, and the two follow each other — pick a field and the
-string rewrites, type a string and the dropdowns reset. When you pick an input
-folder All-Well guesses this schema (and the separator) from a sample of the
-filenames and fills it in — a starting point you can correct, not a lock. The
-**Detect from filenames** button above the separator asks for that guess again;
-the button, the separator box, the dropdowns and the schema string all start at
-one left edge.
-
-The Datasets pane's [Zip Loose Folder](#zip-loose-folder) tool asks for the
-schema with this same control, since the archives it builds are what Analyze
-reads next.
-
-Recognised field names: `experiment`, `channel`, `well`, `fov`, `timepoint`,
-`ignore`.
-
-- `channel` and `well` are **required** and must appear exactly once.
-- `fov` is optional — single-FOV acquisitions work fine without it.
-- `ignore` consumes a token without using it (e.g. an experiment-version
-  prefix).
-
-The well token is normalised: `A1` and `A01` mean the same well.
-
-**Common examples:**
-
-| Filename | Schema | Sep |
-|---|---|---|
-| `Exp01_NIR_B03_F001_02d04h30m.tif` | `experiment:channel:well:fov:timepoint` | `_` |
-| `A1_w1_T01.tif` | `well:channel:timepoint` | `_` |
-| `Scan-A01-0001-GFP.tif` | `ignore:well:fov:channel` | `-` |
-| `A01_DAPI.tif` | `well:channel` | `_` |
-
-**Timepoint formats** the pipeline parses to hours:
-
-```
-DDdHHhMMm   02d04h30m → 52.5 h
-Standalone  48h, 2d, 30m, 90min
-Pure number 24 or 1.5  (interpreted as hours)
-Prefixed    T01, day2, tp_3  (numeric suffix → ordinal)
-Any string  preserved as-is and sorted lexicographically
-```
-
-### 2. Folders
+### 1. Folders
 
 The input folder is resolved by
 [`services/input_resolution_service.py`](../../services/input_resolution_service.py).
@@ -712,8 +666,8 @@ convert it.
 
 You can also explicitly override the output folder.
 
-**If that output folder already holds a run, a card above the form says so
-before you press anything.** It names when the last run against this folder
+**If that output folder already holds a run, a card under the Folders section
+says so before you press anything.** It names when the last run against this folder
 started and how it ended — completed, failed, stopped, suspended, or *never
 finished*, which means All-Well was closed while it was going — followed by how
 many wells it recorded as finished, failed, or produced on a remote machine and
@@ -723,7 +677,7 @@ already accounts for, so you can see how much a re-run has left to do. If new
 images have been dropped in since, it also says what the run will do about them,
 in the same words the run log will use.
 
-**Load settings from a run…**, at the top of the form, does the same from a
+**Load settings from a run…**, just under the Folders section, does the same from a
 `pipeline_info.json` you pick, and points the input at the plate
 that file belongs to. It loads settings only — it does not resume the run; use
 the resume card (or tick **Incremental** and Run) for that. A file from a
@@ -742,6 +696,52 @@ be forced again the moment you loaded its settings back. Both buttons sit on
 their own row beneath the report, so the text has the full width of the sidebar.
 **Dismiss** hides the card for that folder; it comes back if you point somewhere
 else, or once a run has written there again.
+
+### 2. Filename schema
+
+A colon-separated list of field names, applied left-to-right against the
+underscore-separated tokens in each filename. The `Schema string` field is
+editable directly; the **Position** dropdowns above it are the same value seen
+the other way round, and the two follow each other — pick a field and the
+string rewrites, type a string and the dropdowns reset. When you pick an input
+folder All-Well guesses this schema (and the separator) from a sample of the
+filenames and fills it in — a starting point you can correct, not a lock. The
+**Detect from filenames** button above the separator asks for that guess again;
+the button, the separator box, the dropdowns and the schema string all start at
+one left edge.
+
+The Datasets pane's [Zip Loose Folder](#zip-loose-folder) tool asks for the
+schema with this same control, since the archives it builds are what Analyze
+reads next.
+
+Recognised field names: `experiment`, `channel`, `well`, `fov`, `timepoint`,
+`ignore`.
+
+- `channel` and `well` are **required** and must appear exactly once.
+- `fov` is optional — single-FOV acquisitions work fine without it.
+- `ignore` consumes a token without using it (e.g. an experiment-version
+  prefix).
+
+The well token is normalised: `A1` and `A01` mean the same well.
+
+**Common examples:**
+
+| Filename | Schema | Sep |
+|---|---|---|
+| `Exp01_NIR_B03_F001_02d04h30m.tif` | `experiment:channel:well:fov:timepoint` | `_` |
+| `A1_w1_T01.tif` | `well:channel:timepoint` | `_` |
+| `Scan-A01-0001-GFP.tif` | `ignore:well:fov:channel` | `-` |
+| `A01_DAPI.tif` | `well:channel` | `_` |
+
+**Timepoint formats** the pipeline parses to hours:
+
+```
+DDdHHhMMm   02d04h30m → 52.5 h
+Standalone  48h, 2d, 30m, 90min
+Pure number 24 or 1.5  (interpreted as hours)
+Prefixed    T01, day2, tp_3  (numeric suffix → ordinal)
+Any string  preserved as-is and sorted lexicographically
+```
 
 ### 3. Channel tokens
 
@@ -1386,7 +1386,7 @@ about the form above it — the same schema, channels, folders and options are
 sent — only where the segmentation runs. Results come back into the same output
 folder, so Review cannot tell the difference afterwards.
 
-**A small server icon in the run panel's status line, beside the run status, shows the run's Slurm job** on a host that
+**A small server icon in the run panel's status line, at its right end, shows the run's Slurm job** on a host that
 runs through a scheduler. It is green while the job is open — granted a node
 and holding it — and grey while the job is still queued for a node; once the
 job closes, or on a host with no scheduler, there is no icon. Hover over it
@@ -6046,6 +6046,15 @@ The dialog lists what can go, each with its size, and clears what you tick:
   folder. On Windows, an older version also kept Analyze's scratch in
   `C:\Users\<you>\.allwell\scratch`; it is listed here too, unless the
   *Scratch disk* field points at it. Nothing reads them any more.
+- **Analyze run scratch** — unticked to begin with, and marked with a warning.
+  The extracted images and per-field checkpoints Analyze runs keep in the
+  `scratch` folder inside the folder above. It can grow to many gigabytes. A
+  suspended or interrupted run resumes from these files, so clearing them makes
+  that run reprocess those wells from the beginning; results already in your
+  output folders are not affected. Clear asks you to confirm first (Cancel is
+  the default), and refuses while an Analyze run is going. Anything written to
+  in the last hour is skipped, and a *Scratch disk* folder you chose yourself in
+  the Analyze form is never touched.
 - **Row cache of the open dataset** — unticked to begin with. Fast copies of the
   dataset's CSVs, kept in `.aw_parquet` folders beside them. Clearing it frees
   that space but makes the next open of the dataset slower while the copies are
@@ -7410,7 +7419,7 @@ structure yet) into the layout Analyze reads directly.
 
 1. Pick the folder of loose TIFs, then describe their filenames. The separator
    box and the position dropdowns are the same control as
-   [Analyze → Filename schema](#1-filename-schema) — the same field vocabulary
+   [Analyze → Filename schema](#2-filename-schema) — the same field vocabulary
    in the same order, so the schema you build here is the one Analyze will use
    on the result. A readout below it shows how the files split into
    wells × FOVs × timepoints × channels, updating on every keystroke, so a wrong
@@ -7728,7 +7737,8 @@ switch back to the desktop layout to use them.
 - **Progress ▾** — the headline, the overall bar, the stages, and the plate map
   coloured by each well's progress, one above the other. Tap a well to see what
   it is doing on the line under the plate. The log is below, with long lines
-  wrapped. Sideways, the progress sits on the left and the log on the right.
+  wrapped; when the screen is too short for both, swipe up past the plate to
+  reach it. Sideways, the progress sits on the left and the log on the right.
 
 **Run Pipeline**, **Suspend**, **+ Queue** and **Stop** sit in a bar along the
 bottom of the screen in both views, so they are always in reach. Starting a run —
@@ -7750,7 +7760,7 @@ position are never overwritten by the phone's.
 
 The schema is a colon-separated list of field names applied left-to-right
 to filename tokens (split on the chosen separator). See
-[Analyze mode → Filename schema](#1-filename-schema) above for the
+[Analyze mode → Filename schema](#2-filename-schema) above for the
 recognised field names and worked examples.
 
 `pipeline_info.json` records the schema you ran the pipeline with, so the

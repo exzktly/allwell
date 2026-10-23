@@ -198,7 +198,7 @@ class PlateProgress(QWidget):
         hdr.addWidget(self._title_label)
         self._status = QLabel("", self); self._status.setObjectName("Muted")
         hdr.addWidget(self._status)
-        self._header = hdr                       # `add_header_widget` inserts beside the status
+        self._header = hdr                       # `add_header_widget` inserts at the right end
         hdr.addStretch(1)
         self._eta = QLabel("", self); self._eta.setObjectName("Muted")
         hdr.addWidget(self._eta)
@@ -478,12 +478,16 @@ class PlateProgress(QWidget):
                 w.deleteLater()
 
     def add_header_widget(self, widget: QWidget) -> None:
-        """Show *widget* in the header, after the run status and before the ETA.
+        """Show *widget* at the right end of the header, after the ETA and
+        before the collapse toggle.
 
-        For a host's own run-state glyph — Analyze's Slurm-job icon — so it sits with the status it qualifies
-        rather than in a form the user is no longer looking at while the run goes.
+        For a host's own run-state glyph — Analyze's Slurm-job icon — so it sits
+        in the run's own header rather than in a form the user is no longer
+        looking at while the run goes. Right-aligned, so it does not follow the
+        status text around as the text changes length; in phone layout, where
+        the toggle is hidden, it is the last thing on the row.
         """
-        self._header.insertWidget(self._header.indexOf(self._status) + 1, widget)
+        self._header.insertWidget(self._header.indexOf(self._toggle), widget)
 
     def _build_legend(self) -> None:
         """Draw the legend: a heading, then one dot-and-label row per item.

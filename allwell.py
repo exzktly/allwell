@@ -1616,7 +1616,8 @@ class AllWellApp(QMainWindow):
         dialog = self._storage_dialog
         if dialog is None:
             self._storage_dialog = StorageDialog(
-                self, dataset_dir=self._current_dataset_root)
+                self, dataset_dir=self._current_dataset_root,
+                run_active=lambda: bool(getattr(self._analyze, "_running", False)))
             self._storage_dialog.show()
             return
         if not dialog.isVisible():

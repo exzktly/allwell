@@ -574,6 +574,9 @@ class _PlateGrid(QWidget):
         self.setCursor(Qt.ArrowCursor if on else Qt.PointingHandCursor)
         self.update()
 
+    def is_report_only(self) -> bool:
+        return self._report_only
+
     def set_row_column_selectable(self, on: bool) -> None:
         self._rc_selectable = bool(on)
         if not on and (self._hover_row is not None or self._hover_col is not None):
@@ -1847,6 +1850,11 @@ class WellPlateSelector(QWidget):
     def setReportOnly(self, on: bool) -> None:
         """See ``_PlateGrid.set_report_only``."""
         self._grid.set_report_only(on)
+
+    def isReportOnly(self) -> bool:
+        """True for a read-out plate (``setReportOnly``): a press on it selects
+        nothing, so a drag across it has no work to do there."""
+        return self._grid.is_report_only()
 
     def setRowColumnSelectable(self, on: bool) -> None:
         self._grid.set_row_column_selectable(on)

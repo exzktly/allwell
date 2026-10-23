@@ -66,11 +66,12 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
 
     def _build_form(self, parent: QWidget) -> None:
+        # The input folder heads the form (the default schema is valid, so it
+        # is open from launch); the banners under it report on that folder.
+        self._build_folders_section(parent)
         self._build_banner_strips(parent)
         self._build_open_pinfo_row(parent)
         self._build_schema_section(parent)
-        # Folder first, then what is in it; Schema leads both (see its hint).
-        self._build_folders_section(parent)
         self._build_channel_tokens_section(parent)
         self._refresh_schema_preview()
         # Quality Control leads the optional sections and stays open (common tuning
@@ -200,7 +201,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         ipl.addStretch(1)
         sec.layout().addWidget(in_pick)
 
-        self._folder_lock_lbl = QLabel("Define the filename schema above first.", sec)
+        self._folder_lock_lbl = QLabel("Define the filename schema below first.", sec)
         self._folder_lock_lbl.setObjectName("Muted")
         self._folder_lock_lbl.setWordWrap(True)
         sec.layout().addWidget(self._folder_lock_lbl)

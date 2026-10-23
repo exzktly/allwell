@@ -6,8 +6,7 @@ writers chose their folder by different rules (the boot log preferred
 ``%LOCALAPPDATA%\\allwell`` on Windows; the bootstrap hardcoded
 ``~/.cache/allwell``). Both now ask ``util.state_dir.gui_state_dir`` — the
 desktop app's one folder — so they cannot drift apart again. The CZI scan cache
-is the analysis pipeline's and keeps its own folder,
-``util.state_dir.user_state_dir``; the app's folder moving must not move it.
+lives there too, as ``czi-scans/``.
 
 The bootstrap log also records where the launching app's boot log is and
 whether it exists (``ALLWELL_BOOT_LOG``), so a missing crash log can be traced
@@ -28,20 +27,17 @@ from util import state_dir
 
 @pytest.fixture
 def shared(tmp_path, monkeypatch):
-    """Point the app's folder and the pipeline's somewhere private, apart."""
+    """Point the app's folder somewhere private."""
     target = tmp_path / "state"
     target.mkdir()
-    pipeline_dir = tmp_path / "pipeline-state"
-    pipeline_dir.mkdir()
-    monkeypatch.setattr(state_dir, "gui_state_dir", lambda: target)
-    monkeypatch.setattr(state_dir, "candidate_dirs", lambda: [pipeline_dir])
+    monkeypatch.setenv(state_dir.STATE_DIR_ENV, str(target))
     monkeypatch.setattr(boot_diag, "_LOG_PATH", None)
     monkeypatch.delenv("ALLWELL_SCAN_CACHE", raising=False)
-    return target, pipeline_dir
+    return target
 
 
-def test_every_app_log_uses_the_app_folder_and_the_scan_cache_does_not(shared):
-    target, pipeline_dir = shared
+def test_every_app_log_and_the_scan_cache_use_the_app_folder(shared):
+    target = shared
     assert boot_diag.log_path() == target / "allwell-boot.log"
 
     path, fh = remote_bootstrap._open_log_file()
@@ -52,18 +48,7 @@ def test_every_app_log_uses_the_app_folder_and_the_scan_cache_does_not(shared):
         if fh is not None:
             fh.close()
 
-    assert scan_cache.cache_dir() == pipeline_dir / "czi-scans"
-
-
-def test_the_pipeline_s_folder_keeps_its_own_rule(tmp_path, monkeypatch):
-    """The CZI scan cache's folder is the pipeline's and did not move with the
-    app's: ``~/.cache/allwell`` first, even where ``%LOCALAPPDATA%`` is set."""
-    home, local = tmp_path / "home", tmp_path / "local"
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("LOCALAPPDATA", str(local))
-    assert state_dir.candidate_dirs()[0] == home / ".cache" / "allwell"
-    assert state_dir.candidate_dirs()[1] == local / "allwell"
-    assert state_dir.user_state_dir() == home / ".cache" / "allwell"
+    assert scan_cache.cache_dir() == target / "czi-scans"
 
 
 def test_the_bootstrap_log_says_where_the_app_s_boot_log_is(tmp_path, monkeypatch):

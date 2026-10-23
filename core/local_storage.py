@@ -4,10 +4,16 @@ The title bar's storage button (``ui/local_storage_view.py``) is built on this
 module. It knows the app's own working files only — the folder
 :func:`util.state_dir.gui_state_dir` names, the app's files in the other places
 :func:`util.state_dir.legacy_gui_paths` and :data:`SYSTEM_TEMP_PREFIXES` cover,
-and the row cache of the dataset that is open — and never the analysis
-pipeline's: the run scratch and the CZI scan cache belong to runs, including
-ones that are suspended and will resume from what is there, and are not
-offered here.
+and the row cache of the dataset that is open — and never what
+runs and the user own, although it shares the folder: the run scratch
+(``scratch/``) and the CZI scan cache (``czi-scans/``) belong to runs,
+including ones that are suspended and will resume from what is there, and the
+records — ``settings.ini``, ``remotes.toml``, ``job_queue.json``,
+``run_index.json``, ``suspended_runs.json`` — are the user's. No area here
+reaches any of them. What the "legacy" area does offer is their old copies that
+nothing reads any more: on Windows the ``~/.allwell/scratch`` an older version
+used (:func:`util.state_dir.legacy_scratch_dir`), and on every platform the
+scan cache left in ``~/.cache/allwell``.
 
 Each :class:`CacheArea` is one checkbox in the dialog. Clearing is
 conservative in the ways that matter:
@@ -221,9 +227,10 @@ def cache_areas(dataset_dir: Path | None = None, *,
             tuple(_old_logs(base, now=t))),
         CacheArea(
             "legacy", "App files in other places",
-            "Logs and caches in ~/.cache/allwell, a source checkout's "
-            ".mplcache, and working folders in the system temp folder. Nothing "
-            "reads them any more.",
+            "Logs and caches in ~/.cache/allwell (the CZI scan cache among "
+            "them), a source checkout's .mplcache, working folders in the "
+            "system temp folder, and on Windows an older version's run scratch "
+            "in ~/.allwell/scratch. Nothing reads them any more.",
             tuple(p for p in legacy_gui_paths() if not is_link(p))
             + tuple(_working_folders(Path(tempfile.gettempdir()),
                                      SYSTEM_TEMP_PREFIXES, now=t))),

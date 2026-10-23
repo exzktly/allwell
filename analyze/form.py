@@ -51,6 +51,7 @@ from pipeline.capacity import ALLOW_LOW_DISK_HELP
 # Loose Folder page — see widgets/schema_picker.py.
 # ---------------------------------------------------------------------------
 from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP  # noqa: F401 (re-export)
+from util.state_dir import default_scratch_label
 from util.well_token import canonical_well_label, is_valid_well_name
 
 
@@ -356,8 +357,9 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         """Scratch-disk picker — the very last option before the Run controls.
 
         Per-well working files (zip extraction + intermediate images + FOV
-        checkpoints) are written here. It defaults to ``~/.allwell/scratch``
-        (``pipeline.io.scratch_base_for``) and **no longer tracks the input
+        checkpoints) are written here. It defaults to ``scratch`` in the app's
+        folder — ``~/.allwell/scratch``, or ``%LOCALAPPDATA%\\allwell\\scratch``
+        on Windows (``pipeline.io.scratch_base_for``) — and **no longer tracks the input
         folder**: seeding it with ``<input>/Temp`` put the run's whole GB-scale
         temporary I/O on the input volume, which is the configuration behind
         "Bad file descriptor" well failures when that volume is a network mount
@@ -369,7 +371,8 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
             collapsible=True, collapsed=True,
             info="Where per-well working files (zip extraction + intermediate "
                  "images) are written during a run. Leave blank to use "
-                 "~/.allwell/scratch. Keep it on fast LOCAL storage — pointing "
+                 f"{default_scratch_label()}, the scratch folder in the app's "
+                 "own folder. Keep it on fast LOCAL storage — pointing "
                  "it at a network drive (NAS / SMB share) puts the run's "
                  "GB-scale temporary I/O on a volume whose dropped sessions "
                  "make wells fail with 'Bad file descriptor'.",
@@ -379,7 +382,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         pl.setContentsMargins(0, 0, 0, 4)
         pl.setSpacing(4)
         self._scratch_edit = QLineEdit(pick)
-        self._scratch_edit.setPlaceholderText("(defaults to ~/.allwell/scratch)")
+        self._scratch_edit.setPlaceholderText(f"(defaults to {default_scratch_label()})")
         self._scratch_edit.setMinimumWidth(0)
         self._scratch_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         pl.addWidget(self._scratch_edit, 1)
@@ -390,7 +393,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         pl.addStretch(1)
         sec.layout().addWidget(pick)
         # Typing / browsing pins the value; blank means the pipeline default
-        # (~/.allwell/scratch). The field no longer follows the input dir — see
+        # (the app folder's scratch/). The field no longer follows the input dir — see
         # the docstring above for why that default was harmful.
         self._scratch_user_set = False
         self._scratch_edit.textEdited.connect(self._on_scratch_edited)
@@ -408,7 +411,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
             self._scratch_user_set = True
 
     def _build_run_controls(self, parent: QWidget) -> None:
-        # Remote-execution selector. Populated from ~/.config/allwell/remotes.toml
+        # Remote-execution selector. Populated from remotes.toml in the app folder
         # so users can flip between Local and any configured SSH host
         # without restarting the GUI.
         remote_widget = QWidget(parent)

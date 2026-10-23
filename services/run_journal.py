@@ -56,6 +56,7 @@ read it without the GUI.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -63,6 +64,9 @@ from pathlib import Path
 from services.remote_config import default_state_dir
 from util.json_write import try_write_json_atomic
 from util.aw_safe import swallowed
+from util.state_dir import adopt_legacy_file, legacy_config_dirs
+
+_LOG = logging.getLogger(__name__)
 
 #: Bumped when the on-disk shape changes incompatibly. A record written by any
 #: other version reads as "no journal" rather than raising — see
@@ -277,13 +281,17 @@ def _wells_dir(output_dir: Path | str) -> Path:
 
 
 def index_path() -> Path:
-    """``<state dir>/run_index.json`` — the same directory the job queue uses.
+    """``run_index.json`` in the app's folder — beside the job queue and the
+    suspended-runs record (``util.state_dir``).
 
-    Not ``~/.allwell``, where ``services/suspend_record.py`` writes: that path
-    predates :func:`services.remote_config.default_state_dir` and is not the
-    platform-correct location on Windows. New state goes to the state dir.
+    An index an earlier version left in its config folder (``%APPDATA%\\allwell``
+    or ``~/.config/allwell``) is moved over the first time it is asked for.
     """
-    return default_state_dir() / INDEX_FILENAME
+    return adopt_legacy_file(
+        default_state_dir() / INDEX_FILENAME,
+        [d / INDEX_FILENAME for d in legacy_config_dirs()],
+        log=_LOG,
+    )
 
 
 # ── writing ─────────────────────────────────────────────────────────────────
@@ -456,7 +464,7 @@ def record_remote(
 def record_remote_scratch(output_dir: Path | str, scratch_dir: str) -> bool:
     """Add where the remote pipeline keeps its working files to the current remote address.
 
-    The pipeline resolves its scratch base on the host (``ALLWELL_SCRATCH_DIR`` or ``~/.allwell/scratch``) and
+    The pipeline resolves its scratch base on the host (``ALLWELL_SCRATCH_DIR`` or the app folder's ``scratch/``) and
     names it on its ``Scratch  :`` line; this is where a well's part-way checkpoints live, so a later run that
     resumes the address can look for them there rather than re-deriving a path the host expanded.
     """

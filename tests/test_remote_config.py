@@ -570,23 +570,14 @@ def test_ssh_argv_on_posix_keeps_controlmaster(monkeypatch):
     assert any("ControlPersist=60s" in a for a in argv)
 
 
-def test_default_config_path_windows_prefers_appdata_when_file_exists(monkeypatch, tmp_path):
-    _force_windows(monkeypatch)
-    appdata = tmp_path / "AppData"
-    (appdata / "allwell").mkdir(parents=True)
-    cfg = appdata / "allwell" / "remotes.toml"
-    cfg.write_text("[remote.x]\nssh_alias = \"x\"\n")
-    monkeypatch.setenv("APPDATA", str(appdata))
+def test_default_config_path_is_in_the_app_folder(monkeypatch, tmp_path):
+    """``remotes.toml`` sits in the app's folder like everything else All-Well
+    keeps on a machine (the moves from where earlier versions kept it are
+    ``tests/test_one_app_folder.py``)."""
+    monkeypatch.setenv("ALLWELL_STATE_DIR", str(tmp_path / "app"))
     monkeypatch.delenv("ALLWELL_REMOTES", raising=False)
     from services.remote_config import default_config_path
-    assert default_config_path() == cfg
-
-
-def test_default_config_path_posix_unchanged(monkeypatch):
-    _force_posix(monkeypatch)
-    monkeypatch.delenv("ALLWELL_REMOTES", raising=False)
-    from services.remote_config import default_config_path
-    assert str(default_config_path()).endswith(".config/allwell/remotes.toml")
+    assert default_config_path() == tmp_path / "app" / "remotes.toml"
 
 
 def test_controlpath_template_windows_avoids_colon(monkeypatch):

@@ -93,17 +93,105 @@ def test_the_app_s_writers_all_use_the_app_folder(home, monkeypatch):
         fh.close()
 
 
-def test_the_pipeline_s_scratch_and_scan_cache_did_not_move(home, monkeypatch):
-    """The analysis pipeline keeps its own folders: the user asked for the GUI's
-    caches only. Its scratch is ``~/.allwell/scratch`` and its CZI scan cache
-    ``~/.cache/allwell/czi-scans``, exactly as before."""
-    from pipeline import io as pio
+def test_the_scan_cache_is_in_the_app_folder(home, monkeypatch):
+    """The CZI scan cache sits in the app's folder like everything else, and
+    its old copy in ``~/.cache/allwell`` is offered — unless
+    ``ALLWELL_SCAN_CACHE`` still points runs at it."""
     from pipeline import scan_cache
 
-    monkeypatch.delenv("ALLWELL_SCRATCH_DIR", raising=False)
     monkeypatch.delenv("ALLWELL_SCAN_CACHE", raising=False)
-    assert pio.default_scratch_base() == home / ".allwell" / "scratch"
-    assert scan_cache.cache_dir() == home / ".cache" / "allwell" / "czi-scans"
+    assert scan_cache.cache_dir() == home / ".allwell" / "czi-scans"
+    old = _write(home / ".cache" / "allwell" / "czi-scans" / "k" / "scan.json", 10)
+    assert old.parent.parent in state_dir.legacy_gui_paths()
+    monkeypatch.setenv("ALLWELL_SCAN_CACHE", str(old.parent.parent))
+    assert old.parent.parent not in state_dir.legacy_gui_paths()
+
+
+def _windows(tmp_path, monkeypatch) -> tuple[Path, Path]:
+    """A Windows layout: ``LOCALAPPDATA`` and a home folder, no overrides."""
+    local = tmp_path / "AppData" / "Local"
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv(state_dir.STATE_DIR_ENV, raising=False)
+    monkeypatch.delenv(state_dir.SCRATCH_DIR_ENV, raising=False)
+    monkeypatch.setattr(state_dir, "is_windows", lambda: True)
+    # Keep the real temp folder and checkout out of what the dialog offers.
+    monkeypatch.setattr(ls.tempfile, "tempdir", str(tmp_path / "system-temp"))
+    (tmp_path / "system-temp").mkdir(exist_ok=True)
+    monkeypatch.setattr(state_dir, "REPO_FONT_CACHE", tmp_path / "checkout" / ".mplcache")
+    return local, home
+
+
+def test_scratch_sits_in_the_app_folder_on_macos_and_linux(home, monkeypatch):
+    """Reported: the app's caches and the run scratch lived in different
+    places depending on the platform. Scratch is now ``scratch/`` inside the
+    app's folder everywhere — here ``~/.allwell/scratch``, as it always was —
+    and the pipeline and the remote client resolve it identically."""
+    from pipeline import io as pio
+    from services.remote_scratch import _scratch_dir
+
+    monkeypatch.delenv(state_dir.SCRATCH_DIR_ENV, raising=False)
+    want = home / ".allwell" / "scratch"
+    assert state_dir.gui_state_dir() / "scratch" == want
+    assert pio.scratch_base_for(home / "out") == want
+    assert _scratch_dir() == want
+    assert state_dir.default_scratch_label() == "~/.allwell/scratch"
+    assert state_dir.legacy_scratch_dir() is None
+
+
+def test_scratch_sits_in_the_app_folder_on_windows(tmp_path, monkeypatch):
+    """On Windows the app's folder is ``%LOCALAPPDATA%\\allwell``, and scratch
+    used to be ``%USERPROFILE%\\.allwell\\scratch`` beside it in a different
+    tree. Both now resolve to ``%LOCALAPPDATA%\\allwell\\scratch``."""
+    from pipeline import io as pio
+    from services.remote_scratch import _scratch_dir
+
+    local, home = _windows(tmp_path, monkeypatch)
+    want = local / "allwell" / "scratch"
+    assert state_dir.gui_state_dir() / "scratch" == want
+    assert pio.scratch_base_for(tmp_path / "out") == want
+    assert _scratch_dir() == want
+    assert state_dir.default_scratch_label() == str(want)
+    assert not (home / ".allwell").exists(), "nothing is written to the old folder"
+
+
+def test_scratch_follows_the_app_folder_but_not_into_the_temp_folder(tmp_path, monkeypatch):
+    """When no app folder but the system temp one can be written, scratch gives
+    up rather than following: each caller's own last resort applies (the output
+    folder for the pipeline), not a tmpfs that may be memory."""
+    from pipeline import io as pio
+
+    monkeypatch.delenv(state_dir.SCRATCH_DIR_ENV, raising=False)
+    temp_root = Path(state_dir.tempfile.gettempdir()) / state_dir.APP_DIRNAME
+    monkeypatch.setattr(state_dir, "gui_candidate_dirs", lambda: [temp_root])
+    assert state_dir.default_scratch_dir() is None
+    assert pio.scratch_base_for(tmp_path / "out") == tmp_path / "out"
+
+
+def test_on_windows_the_old_scratch_is_offered_as_legacy(tmp_path, monkeypatch):
+    """An older version's scratch in ``~/.allwell/scratch`` is read by nothing
+    once scratch moved, and can be gigabytes — so the legacy area offers it."""
+    local, home = _windows(tmp_path, monkeypatch)
+    old = _write(home / ".allwell" / "scratch" / "_tmp_images_x" / "a.tif", 4000)
+    current = _write(local / "allwell" / "scratch" / "_tmp_images_y" / "b.tif", 3000)
+    offered = {a.key: set(a.paths) for a in ls.cache_areas(None)}
+    assert offered["legacy"] == {home / ".allwell" / "scratch"}
+    assert all(current.parent.parent not in paths for paths in offered.values())
+    ls.clear([a for a in ls.cache_areas(None) if a.key == "legacy"])
+    assert not old.exists() and current.exists()
+
+
+def test_the_old_scratch_is_kept_when_runs_are_pointed_at_it(tmp_path, monkeypatch):
+    """A user who set the Scratch disk field to that same folder is still using it."""
+    _, home = _windows(tmp_path, monkeypatch)
+    _write(home / ".allwell" / "scratch" / "_tmp_images_x" / "a.tif", 4000)
+    monkeypatch.setenv(state_dir.SCRATCH_DIR_ENV, str(home / ".allwell" / "scratch"))
+    assert state_dir.legacy_scratch_dir() is None
+    monkeypatch.setenv(state_dir.SCRATCH_DIR_ENV, str(home / ".allwell" / "scratch" / "sub"))
+    assert state_dir.legacy_scratch_dir() is None
 
 
 # ── what the dialog offers ──────────────────────────────────────────────────
@@ -129,13 +217,17 @@ def populated(home, monkeypatch):
         "live_spill": _write(app / "tmp" / "allwell-cellpool-b" / "cells.duckdb", 4000),
         "young_unowned": _write(app / "tmp" / "allwell_batch_nodisk_c" / "f.png", 3000),
         "old_unowned": _write(app / "tmp" / "allwell_batch_nodisk_d" / "f.png", 2000),
-        # the pipeline's, in the same home folder: never offered
+        # runs' files and the user's records, in the same folder: never offered
         "scratch": _write(app / "scratch" / "_tmp_images_x" / ".fov_1.done", 9000),
         "suspended": _write(app / "suspended_runs.json", 50),
-        "scan": _write(home / ".cache" / "allwell" / "czi-scans" / "k" / "scan.json", 8000),
+        "scan": _write(app / "czi-scans" / "k" / "scan.json", 8000),
+        "remotes": _write(app / "remotes.toml", 30),
+        "queue": _write(app / "job_queue.json", 30),
+        "settings": _write(app / "settings.ini", 30),
         # earlier versions' leftovers
         "legacy_boot": _write(home / ".cache" / "allwell" / "allwell-boot.log", 40),
         "legacy_fonts": _write(home / ".cache" / "allwell" / "mplcache" / "f.json", 600),
+        "legacy_scan": _write(home / ".cache" / "allwell" / "czi-scans" / "k" / "scan.json", 260),
         "legacy_spill": _write(home / "system-temp" / "allwell-cellpool-z" / "c.duckdb", 700),
         "repo_fonts": _write(home / "checkout" / ".mplcache" / "fontlist.json", 400),
         # the open dataset
@@ -168,8 +260,8 @@ def test_each_area_offers_exactly_what_may_go(populated, home):
         "fonts": {app / "mplcache"},
         "temp": {f["dead_spill"].parent, f["old_unowned"].parent},
         "logs": {f["boot1"], f["bootstrap"]},
-        "legacy": {f["legacy_boot"], f["legacy_fonts"].parent, f["legacy_spill"].parent,
-                   f["repo_fonts"].parent},
+        "legacy": {f["legacy_boot"], f["legacy_fonts"].parent, f["legacy_scan"].parent.parent,
+                   f["legacy_spill"].parent, f["repo_fonts"].parent},
         "rows": {f["rows"].parent},
     }
     # The row cache is offered unticked: clearing it slows the next open.
@@ -183,13 +275,13 @@ def test_clearing_everything_frees_exactly_that_and_spares_the_rest(populated, h
     areas = ls.cache_areas(home / "plate")
     sizes = ls.measure(areas)
     assert sizes == {"fonts": 1000, "temp": 7000 + OWNER_BYTES, "logs": 500,
-                     "legacy": 1740 + OWNER_BYTES, "rows": 6000}
+                     "legacy": 2000 + OWNER_BYTES, "rows": 6000}
     result = ls.clear(areas)
     assert result.freed == sum(sizes.values()) and result.failed == []
     gone = ("fonts", "boot1", "bootstrap", "dead_spill", "old_unowned",
-            "legacy_boot", "legacy_fonts", "legacy_spill", "repo_fonts", "rows")
+            "legacy_boot", "legacy_fonts", "legacy_scan", "legacy_spill", "repo_fonts", "rows")
     kept = ("boot", "bootstrap_recent", "bootstrap_new", "live_spill", "young_unowned",
-            "scratch", "suspended", "scan", "csv")
+            "scratch", "suspended", "scan", "remotes", "queue", "settings", "csv")
     assert [k for k in gone if f[k].exists()] == []
     assert [k for k in kept if not f[k].exists()] == []
     assert not f["rows"].parent.exists() and not f["dead_spill"].parent.exists()
@@ -246,14 +338,14 @@ def test_the_dialog_measures_and_its_button_clears(populated, home, qtbot):
     assert dialog._status.text() == "", "the status line still says it is measuring"
     # Ticked by default: everything but the row cache.
     assert dialog.selected_keys() == ["fonts", "temp", "logs", "legacy"]
-    assert clear_btn.text() == "Clear 10.3 KB"
+    assert clear_btn.text() == "Clear 10.5 KB"
 
     clear_btn.click()
     qtbot.waitUntil(lambda: dialog.last_result is not None, timeout=10_000)
     # The clear is followed by a re-measure; the sentence must survive it.
     qtbot.waitUntil(lambda: clear_btn.text() == "Clear selected", timeout=10_000)
-    assert dialog.last_result.freed == 1000 + 7000 + 500 + 1740 + 2 * OWNER_BYTES
-    assert "Freed 10.3 KB." in dialog._status.text()
+    assert dialog.last_result.freed == 1000 + 7000 + 500 + 2000 + 2 * OWNER_BYTES
+    assert "Freed 10.5 KB." in dialog._status.text()
     assert populated["rows"].exists(), "the unticked row cache was cleared"
     assert populated["scratch"].exists() and populated["boot"].exists()
 

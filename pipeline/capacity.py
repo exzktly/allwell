@@ -6,8 +6,9 @@ inputs:
 * **Scratch** (``pipeline.io.scratch_base_for``) carries the transient working
   set — the extracted input TIFs plus roughly six intermediate images per
   FOV-group, written as float32 — for as many wells as ``--workers`` runs at
-  once. It defaults to ``~/.allwell/scratch``, the *home* volume, which is
-  usually not the volume holding the dataset.
+  once. It defaults to ``scratch`` in the app's folder (``~/.allwell/scratch``,
+  ``%LOCALAPPDATA%\\allwell\\scratch`` on Windows) — the *system* volume, which
+  is usually not the volume holding the dataset.
 * **The output volume** carries the durable results: a ``<well>_out.zip`` and a
   per-well CSV for every well, and those accumulate for the whole plate rather
   than being reclaimed between wells.
@@ -217,7 +218,7 @@ def preflight_scratch_space(
 
     When *output_dir* is given the durable plate output is checked too. The two
     needs are summed against one free figure when scratch and output share a
-    volume — the default configuration, where ``~/.allwell/scratch`` and an
+    volume — the default configuration, where the default scratch and an
     output directory under the home volume compete for the same bytes, and
     checking either alone says the run fits when it does not.
     """

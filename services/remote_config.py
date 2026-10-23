@@ -1,6 +1,6 @@
 """Per-host remote-execution config for the AllWell remote-runner.
 
-Loads host definitions from ``~/.config/allwell/remotes.toml`` (or the path
+Loads host definitions from ``remotes.toml`` in the app's folder (or the path
 in ``$ALLWELL_REMOTES``). Each entry describes how to reach one SSH host
 and run ``process_microscopy.py`` on it.
 
@@ -34,6 +34,7 @@ the same way::
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shlex
@@ -44,12 +45,17 @@ from pathlib import Path
 from typing import Any
 
 from services.subprocess_text import TEXT_UTF8
+from util.state_dir import (
+    REMOTES_NAME, adopt_legacy_file, app_file, gui_state_dir, legacy_config_dirs,
+)
 from services.slurm_batch_script import (
     ScriptLauncher,
     directive_flags,
     launcher_from_batch_script,
     single_task,
 )
+
+_LOG = logging.getLogger(__name__)
 
 # tomllib is stdlib on 3.11+; tomli is the 3.10 backport. The project pins
 # 3.10.14, so tomli is the expected provider — but we accept either so the
@@ -66,8 +72,6 @@ except ImportError:  # pragma: no cover
             "<3.11. Install it with: pip install tomli"
         ) from exc
 
-
-_DEFAULT_CONFIG_PATH = Path("~/.config/allwell/remotes.toml")
 
 #: Placeholder shown for ``remote_python`` when the host has not set one.
 #:
@@ -508,46 +512,38 @@ def to_rsync_path(p: Path | str) -> str:
 def default_config_path() -> Path:
     """Return the resolved path to the user's remotes.toml.
 
+    ``remotes.toml`` in the app's folder (``util.state_dir``):
+    ``%LOCALAPPDATA%\\allwell`` on Windows, ``~/.allwell`` on macOS and Linux.
     Honors ``$ALLWELL_REMOTES`` for tests and ad-hoc overrides.
 
-    On Windows, ``%APPDATA%\\allwell\\remotes.toml`` takes precedence
-    over the legacy ``~/.config/allwell/remotes.toml`` if it exists,
-    matching the convention Windows users expect for per-user config.
-    The legacy path is still used as a fall-back so an existing
-    cross-platform user with ``~/.config/allwell`` keeps working.
+    Earlier versions kept it in ``%APPDATA%\\allwell`` or
+    ``~/.config/allwell``; a file left in either is moved into the app's
+    folder the first time this is asked (``%APPDATA%`` first, which is the one
+    those versions preferred when both existed), so the user's hosts carry over.
     """
     override = os.environ.get("ALLWELL_REMOTES")
     if override:
         return Path(override).expanduser()
-    if _is_windows():
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            appdata_path = Path(appdata) / "allwell" / "remotes.toml"
-            legacy = _DEFAULT_CONFIG_PATH.expanduser()
-            if appdata_path.is_file() or not legacy.is_file():
-                return appdata_path
-    return _DEFAULT_CONFIG_PATH.expanduser()
+    return adopt_legacy_file(
+        app_file(REMOTES_NAME),
+        [d / REMOTES_NAME for d in legacy_config_dirs()],
+        log=_LOG,
+    )
 
 
 def default_state_dir() -> Path:
-    """Return the directory for All-Well's persisted app state (the job
-    queue's JSON record).
+    """Return the directory for All-Well's persisted app state — the job
+    queue and the run index: the app's folder (``util.state_dir.gui_state_dir``).
 
-    Deliberately **not** derived from :func:`default_config_path`, despite
-    the obvious similarity. That function honors ``$ALLWELL_REMOTES``, an
-    override meaning "where my remotes live" — routing unrelated state
-    through it would relocate the job queue any time a user or test sets
-    that variable, possibly to a read-only path. Its Windows branch is also
-    conditional on whether ``remotes.toml`` already exists, so the directory
-    it resolves to would flip the day a user creates one — a job queue
-    written before that day would silently vanish. This function does the
-    platform branch alone, with no override and no file-existence check.
+    Deliberately **not** derived from :func:`default_config_path`. That
+    function honors ``$ALLWELL_REMOTES``, an override meaning "where my
+    remotes live" — routing unrelated state through it would relocate the job
+    queue any time a user or test sets that variable, possibly to a read-only
+    path. The records it holds carry themselves over from where earlier
+    versions kept them (``services.job_queue.queue_path``,
+    ``services.run_journal.index_path``).
     """
-    if _is_windows():
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            return Path(appdata) / "allwell"
-    return Path("~/.config/allwell").expanduser()
+    return gui_state_dir()
 
 
 def load_remotes(path: Path | None = None) -> dict[str, RemoteHost]:

@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from util.dir_scan import files_in
+from util.state_dir import SCRATCH_DIR_ENV, default_scratch_dir
 from util.well_token import is_valid_well_name
 
 __all__ = [
@@ -153,22 +154,21 @@ def _scratch_dir() -> Path:
        its "Scratch disk" field, so a user whose data lives on a NAS but whose
        OS temp is a small system drive (Windows ``%TEMP%`` on ``C:``) can put
        the potentially-GB-sized staging rewrite on a roomy volume.
-    2. ``~/.allwell/scratch`` — the default.
-    3. The OS temp dir — last resort, when the home directory is unwritable.
+    2. ``scratch`` in the app's folder — ``%LOCALAPPDATA%\\allwell\\scratch``
+       on Windows, ``~/.allwell/scratch`` on macOS and Linux.
+    3. The OS temp dir — last resort, when no app folder can be written.
 
-    The two resolvers agree deliberately. They used to differ: the pipeline
-    defaulted to ``~/.allwell/scratch`` while this one defaulted to the OS temp
-    dir, so a remote run wrote into a path the user had never heard of and could
-    not find — ``/var/folders/jj/…/T`` on macOS, and on Linux frequently a tmpfs,
-    i.e. RAM. One default, stated in one place, is one thing to reason about when
-    a volume fills.
-
-    This module cannot import ``pipeline.io`` to share the constant (that would
-    drag numpy and tifffile into the remote client, which
-    ``test_architecture_contracts`` forbids), so the path is repeated here and
-    ``test_remote_runner`` pins the two to the same value.
+    The two resolvers agree deliberately, and share their default through
+    :func:`util.state_dir.default_scratch_dir` (this module cannot import
+    ``pipeline.io``, which would drag numpy and tifffile into the remote
+    client). They used to differ: the pipeline defaulted to its home folder
+    while this one defaulted to the OS temp dir, so a remote run wrote into a
+    path the user had never heard of and could not find —
+    ``/var/folders/jj/…/T`` on macOS, and on Linux frequently a tmpfs, i.e. RAM.
+    One default, stated in one place, is one thing to reason about when a
+    volume fills.
     """
-    override = os.environ.get("ALLWELL_SCRATCH_DIR", "").strip()
+    override = os.environ.get(SCRATCH_DIR_ENV, "").strip()
     if override:
         try:
             p = Path(override).expanduser()
@@ -181,13 +181,11 @@ def _scratch_dir() -> Path:
             import logging as _logging
             _logging.getLogger(__name__).warning(
                 "ALLWELL_SCRATCH_DIR=%r is unusable (%s); falling back to "
-                "~/.allwell/scratch", override, exc)
-    try:
-        home = Path.home() / ".allwell" / "scratch"
-        home.mkdir(parents=True, exist_ok=True)
-        return home
-    except OSError:
-        return Path(tempfile.gettempdir())
+                "the app folder's scratch/", override, exc)
+    default = default_scratch_dir()
+    if default is not None:
+        return default
+    return Path(tempfile.gettempdir())
 
 
 def _new_scratch_dir(prefix: str) -> Path:

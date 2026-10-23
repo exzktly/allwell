@@ -360,7 +360,7 @@ class AnalyzePipelineInfoMixin:
         # a per-run decision (analyze/well_scope.py), like ``allow_low_disk``.
 
         # Scratch disk — a recorded value pins the field; absent, it stays blank
-        # so the pipeline default (~/.allwell/scratch) applies.
+        # so the pipeline default (the app folder's scratch/) applies.
         # Not from another machine's sidecar: a remote run pins scratch to the
         # host's output directory, a path that means nothing here.
         scratch = None if foreign else d.get("scratch_dir")

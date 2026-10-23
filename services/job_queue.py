@@ -22,12 +22,16 @@ the queue page calls :meth:`JobQueue.start` explicitly.
 from __future__ import annotations
 
 import json
+import logging
 from util.json_write import write_json_atomic
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from services.remote_config import default_state_dir
+from util.state_dir import adopt_legacy_file, legacy_config_dirs
+
+_LOG = logging.getLogger(__name__)
 
 QUEUE_FILENAME = "job_queue.json"
 
@@ -615,7 +619,19 @@ class JobQueue:
 
 
 def queue_path(state_dir: Path | None = None) -> Path:
-    return (state_dir or default_state_dir()) / QUEUE_FILENAME
+    """``job_queue.json`` in *state_dir*, or in the app's folder.
+
+    In the app's folder, a queue an earlier version left in its config folder
+    (``%APPDATA%\\allwell`` or ``~/.config/allwell``) is moved over first, so
+    queued jobs survive the upgrade (``util.state_dir.adopt_legacy_file``).
+    """
+    if state_dir is not None:
+        return state_dir / QUEUE_FILENAME
+    return adopt_legacy_file(
+        default_state_dir() / QUEUE_FILENAME,
+        [d / QUEUE_FILENAME for d in legacy_config_dirs()],
+        log=_LOG,
+    )
 
 
 def load_queue(state_dir: Path | None = None) -> JobQueue:

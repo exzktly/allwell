@@ -66,9 +66,12 @@ class StorageDialog(QDialog):
 
         layout = QVBoxLayout(self)
         where = QLabel(
-            f"The app keeps its logs, caches and temporary files in "
-            f"{gui_state_dir()}. Your images, CSVs and analysis are never "
-            f"touched here, and neither are an Analyze run's scratch files.",
+            f"Everything the app keeps on this computer is in "
+            f"{gui_state_dir()}. Only the caches and leftovers below are "
+            f"cleared here. Your images, CSVs and analysis are never touched, "
+            f"and neither are your settings, remote hosts, queued and "
+            f"suspended runs, the CZI scan cache, or the scratch folder where "
+            f"an Analyze run keeps its working files.",
             self)
         where.setWordWrap(True)
         layout.addWidget(where)

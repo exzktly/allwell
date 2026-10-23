@@ -100,7 +100,9 @@ def _tile_segmented(owner: str, measured, images: dict, located, template, segme
 
 def _crop_for(site: dict, tile, located, px: float, half_um: float) -> dict | None:
     """A rim-suppressed crop of one site and the run's segmentation of it, cut from its owner tile's *tile*
-    (:func:`_tile_segmented`)."""
+    (:func:`_tile_segmented`), with the tile's scale as the segmenter normalised it (``scale``)."""
+    from pipeline import nanowell_measure as nm
+
     owner = site["owner"]
     if owner is None or tile is None:
         return None
@@ -112,8 +114,12 @@ def _crop_for(site: dict, tile, located, px: float, half_um: float) -> dict | No
     window = rim[y0:y0 + 2 * half + 1, x0:x0 + 2 * half + 1]
     if window.size == 0:
         return None
+    # The tile's own 1st-99th percentiles, which Cellpose scales the whole tile by: drawn on them, a crop shows the
+    # contrast the segmenter saw, where a crop stretched to its own range would make every nanowell look alike.
+    finite = rim[np.isfinite(rim)]
+    scale = tuple(float(v) for v in np.percentile(finite, nm.SEGMENTER_PERCENTILES)) if finite.size else None
     return {"label": site["address"], "n_cells": site["n_cells"], "rim": window.astype(np.float32),
-            "labels": labels[y0:y0 + 2 * half + 1, x0:x0 + 2 * half + 1]}
+            "labels": labels[y0:y0 + 2 * half + 1, x0:x0 + 2 * half + 1], "scale": scale}
 
 
 def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.NanowellSettings, *, grouper, parse, schema,

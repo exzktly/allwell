@@ -9943,9 +9943,14 @@ added to both cancels from, taken as the median over the sites within `CONTRAST_
 cells is outvoted by its six neighbours; a contrast more than twice or half its tile's median
 (`PLAUSIBLE_CONTRAST_FACTOR`, `_plausible`) is not a nanowell's — bare floor outside the array, a bubble — and has no
 vote at all (where such sites were most of a neighbourhood, its median once gave a gain of 0.003 and the noise there
-was segmented as a cell); its **offset** then comes from its own surround (`site_level`). Light added
+was segmented as a cell); its **offset** then comes from its own surround (`site_level`) and is replaced by the
+median of the offsets within the same 1.5 pitches on its tile, read from nanowells only (`_smoothed_offsets`; with fewer than three in reach, its tile's median, as for the
+gain; its own only on a tile with no nanowell offset at all). One misread surround — debris on the lattice, the phase halo
+beside a wall — otherwise moved that one nanowell's floor and nothing else: a ring read 0.12 too bright put a loaded
+nanowell's floor below the flat level between sites (its segmenter floor −0.11 against its neighbour's 0.75), and
+one read 0.08 too dark lost 6 of its 20 cells. Light added
 unevenly across a well — glare brighter toward its centre — is an offset that changes from nanowell to nanowell,
-which one offset per tile could not follow: the rest was taken as gain, and every cell where the light was added
+which one offset per tile could not follow, and which a median over six neighbours still does: the rest was taken as gain, and every cell where the light was added
 was flattened. The gain is not taken from the surround after subtracting an offset, because the lattice is dark: an
 offset a few hundredths wrong made the gain tens of per cent wrong (on a rendered well with glare, a cell's height
 in the segmenter's image ran 1.126 at the centre and 1.153 at the rim; from the contrast, 1.148 and 1.149). A site
@@ -10002,7 +10007,12 @@ a site the tile **owns** (`owned_indices(report.owners, tile)` from the `ownersh
 6.2f; fused sites have no owner and are counted by no tile until they are segmented on a blended
 crop, tracker C14, so `site_state` sees an undefined count for them); a cell in the overlap of two tiles
 is therefore counted by the one tile that owns the site, and a cell on a rim or between
-sites belongs to none. A site with no cell is a zero, not an absence; an owned site with no geometry in the
+sites belongs to none. Beside each count the row records what the segmenter was given: `level_offset` and
+`level_gain`, the site's `(offset, gain)` from `_normalise`, and `segmenter_floor` / `segmenter_contrast` from
+`segmenter_view` — the median and the 1st-to-99th-percentile spread of the site's interior on the 0-1 scale the
+segmenter normalises the whole rim-suppressed tile to (its 1st and 99th percentiles, flat 1.0 between sites
+included). A zero beside a contrast of a few per cent is a nanowell the segmenter could barely see, not an empty
+one; all four are `None` for a site not measured. A site with no cell is a zero, not an absence; an owned site with no geometry in the
 tile is an error, not a missing key.
 
 **The second count.** `area_estimate` divides each site's labelled interior area by the
@@ -10286,7 +10296,11 @@ needs, and a few rim-suppressed crops beside their
 segmentation. The crops are cut from the owner tile rim-suppressed and segmented **whole**, as the run does
 (`_tile_segmented`, once per tile however many crops it holds), never segmented on their own: Cellpose scales each
 image by its own percentiles, so a crop holding one nanowell was scaled differently from the tile holding a hundred,
-and its outlines were not the ones the run counted. When the segmenter cannot be loaded — `pipeline.cellpose.CellposeUnavailable` (marked
+and its outlines were not the ones the run counted. Each crop carries its tile's `scale`, the tile's 1st and 99th
+percentiles (`nanowell_measure.SEGMENTER_PERCENTILES`, the range Cellpose normalises the tile to), and
+`analyze.nanowell_preview.render_crop` draws its grey levels on that scale, so a nanowell the segmenter saw at low
+contrast is drawn at low contrast; stretched to its own range every crop would look alike whatever the segmenter
+saw. When the segmenter cannot be loaded — `pipeline.cellpose.CellposeUnavailable` (marked
 `segmenter_unavailable`, raised for any failure to import Cellpose or Torch, an `OSError` from a library that will
 not load included, and for a model that cannot be built, as when its weights cannot be downloaded offline) or an
 `ImportError` anywhere in the measuring exception's chain (`_missing_import`) — the timepoint is

@@ -340,7 +340,7 @@ class SquareScore:
 
 
 def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, position_um, *,
-                 pitch_um: float | None = None) -> SquareScore | None:
+                 pitch_um: float | None = None, wall_end_um: float | None = None) -> SquareScore | None:
     """The four-fold gradient coherence of the outline around *position_um*.
 
     Every outline pixel's gradient direction ``a`` contributes ``exp(4ia)`` weighted by its
@@ -352,7 +352,11 @@ def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, posit
     The outline is read from 0.6 to 1.5 radii, which reaches the square's corners (1.41 radii). Given *pitch_um* the
     ring stops where the neighbouring nanowells' edges begin (a pitch less a radius), less two pixels of blur: on a
     plate with thin walls (152.6 um pitch, 125.8 um wells: neighbours from 1.43 radii) the fixed ring read the
-    neighbours' round edges and a rendered square fell under the floor (tracker F5).
+    neighbours' round edges and a rendered square fell under the floor (tracker F5). *wall_end_um* states where the
+    neighbours begin outright, for an outline read at another size than the nanowells' (``score_fiducial``'s size
+    factors): the ring then stops there whatever size it is read at, and a size whose ring would be all but empty
+    reads nothing (``None``). Read at 1.2 diameters with the pitch alone, the ring's floor of 1.2 radii reached 1.44
+    nanowell radii, past the neighbours at 1.43, and on a square lattice their arcs add up (review F20).
     """
     from scipy import ndimage
 
@@ -369,7 +373,11 @@ def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, posit
     yy, xx = np.mgrid[0:2 * half + 1, 0:2 * half + 1]
     rho = np.hypot(xx + x0 - cx, yy + y0 - cy)
     outer = 1.5 * r
-    if pitch_um is not None and math.isfinite(pitch_um) and pitch_um > 0:
+    if wall_end_um is not None and math.isfinite(wall_end_um):
+        outer = min(outer, wall_end_um / pixel_size_um - 2.0)
+        if outer <= 0.6 * r + 1.0:
+            return None
+    elif pitch_um is not None and math.isfinite(pitch_um) and pitch_um > 0:
         outer = min(outer, max(pitch_um / pixel_size_um - r - 2.0, 1.2 * r))
     weight = np.hypot(gx, gy) * ((rho >= 0.6 * r) & (rho <= outer))
     total = float(weight.sum())
@@ -423,6 +431,36 @@ def square_search_points(fit: LatticeFit, detected_um, centre_um, radius_um: flo
     return sites[np.hypot(*(sites - centre).T) <= radius_um]
 
 
+#: A site read smaller than a nanowell must be light against what is just outside its outline at that size, by at
+#: least this share of the typical site's light-to-dark drop at its rim (review F20). The square is a nanowell — light
+#: on the dark lattice — while debris inside an ordinary nanowell is either dark, or bright against the nanowell's
+#: own bright floor; read at small sizes without this, straight-edged debris anchored 4 of 10 rendered plates that
+#: had no square. A second guard (no smaller read for a site with a round rim at its own size) was built and
+#: measured: alone it let one of thirty such plates through, and beside this one it changed nothing.
+LIGHT_SQUARE_SHARE = 0.25
+
+
+def _rim_drop(image, pixel_size_um: float, nanowell_diameter_um: float, position_um,
+              wall_end_um: float | None) -> float | None:
+    """How much darker it is just outside a nanowell's rim than just inside it, at *position_um*: the mean over 0.7 to
+    0.92 radii less the mean over 1.08 to 1.3 radii (never past *wall_end_um*). ``None`` off the image."""
+    r = nanowell_diameter_um / 2 / pixel_size_um
+    cx, cy = position_um[0] / pixel_size_um - 0.5, position_um[1] / pixel_size_um - 0.5
+    half = int(math.ceil(1.35 * r)) + 1
+    x0, y0 = int(round(cx)) - half, int(round(cy)) - half
+    image = np.asarray(image)
+    if x0 < 0 or y0 < 0 or x0 + 2 * half + 1 > image.shape[1] or y0 + 2 * half + 1 > image.shape[0]:
+        return None
+    patch = np.asarray(image[y0:y0 + 2 * half + 1, x0:x0 + 2 * half + 1], dtype=np.float64)
+    yy, xx = np.mgrid[0:2 * half + 1, 0:2 * half + 1]
+    rho = np.hypot(xx + x0 - cx, yy + y0 - cy)
+    end = 1.3 * r if wall_end_um is None else min(1.3 * r, wall_end_um / pixel_size_um - 1.0)
+    inner, outer = (rho >= 0.7 * r) & (rho <= 0.92 * r), (rho >= 1.08 * r) & (rho <= end)
+    if not inner.any() or not outer.any():
+        return None
+    return float(patch[inner].mean() - patch[outer].mean())
+
+
 def score_fiducial(image, pixel_size_um: float, nanowell_diameter_um: float, points_um, *,
                    centre_um=None, search_radius_um: float | None = None, pitch_um: float | None = None,
                    size_factors=(1.0,),
@@ -433,16 +471,34 @@ def score_fiducial(image, pixel_size_um: float, nanowell_diameter_um: float, poi
     Returns ``(candidate, scores)``. The candidate carries the best site's score and the
     runner-up's, for ``resolve_origin``'s margin test; the margin is the caller's, not
     calibrated here. Each site is read at every one of *size_factors* (fractions of the nanowell diameter) and keeps
-    its best. ``None`` with fewer than two scorable sites, because a margin over
+    its best — except that a read smaller than a nanowell counts only where the outline is light against what lies
+    just outside it at that size (``LIGHT_SQUARE_SHARE`` of the typical site's drop, :func:`_rim_drop`): a smaller
+    square is still a nanowell on the dark lattice, and straight-edged debris inside an ordinary nanowell, read small,
+    otherwise anchored 4 of 10 rendered plates that had no square at all (review F20). With *pitch_um* the ring stops
+    at the neighbouring nanowells' rims whatever size it is read at. ``None`` with fewer than two scorable sites, because a margin over
     nothing is not a margin, and ``None`` when even the best is under *min_squareness*. Every score is returned so that it can be recorded.
     """
     points = np.asarray(points_um, dtype=float)
     if centre_um is not None and search_radius_um is not None:
         points = points[np.hypot(points[:, 0] - centre_um[0], points[:, 1] - centre_um[1]) <= search_radius_um]
+    wall_end = None if pitch_um is None else pitch_um - nanowell_diameter_um / 2
+    typical = None
+    if any(f < 1.0 for f in size_factors):
+        drops = [_rim_drop(image, pixel_size_um, nanowell_diameter_um, p, wall_end) for p in points]
+        positive = [d for d in drops if d is not None and d > 0]
+        typical = float(np.median(positive)) if positive else None
+
+    def light(p, f):
+        """A smaller square is a nanowell: light against the lattice at the size it is read (review F20)."""
+        drop = _rim_drop(image, pixel_size_um, nanowell_diameter_um * f, p, wall_end)
+        return typical is not None and drop is not None and drop >= LIGHT_SQUARE_SHARE * typical
+
     scores = []
     for p in points:
-        read = [replace(s, size_factor=float(f)) for f in size_factors
-                if (s := square_score(image, pixel_size_um, nanowell_diameter_um * f, p, pitch_um=pitch_um)) is not None]
+        read = [replace(s, size_factor=float(f)) for f in size_factors if f >= 1.0 or light(p, f)
+                if (s := square_score(image, pixel_size_um, nanowell_diameter_um * f, p,
+                                      pitch_um=pitch_um if f == 1.0 else None,
+                                      wall_end_um=None if f == 1.0 else wall_end)) is not None]
         if read:
             scores.append(max(read, key=lambda s: s.coherence))         # each site at the size that reads it best
     if len(scores) < 2:

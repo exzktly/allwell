@@ -325,3 +325,53 @@ def test_no_square_drawn_is_no_square_found_at_any_size():
     rendered, record = build_well(square_centre=False)
     located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
     assert located.origin_method == "array_centre" and located.grid["fiducial"]["best"] < nd.MIN_SQUARENESS
+
+
+# ── F20: straight-edged debris inside ordinary nanowells is not the square ──
+def _rectangles(rendered, pieces, rotation_deg=7.0):
+    """Draw hard-edged rectangles of debris: each ``(address, width_um, height_um, turn_deg, value)`` centred on that
+    site, turned from the lattice's rows by *turn_deg*, *value* bright or dark."""
+    from tests._nanowell_synth import _screen_rotation
+
+    truth = dict(zip(rendered.array.addresses, rendered.sites_um))
+    px = rendered.plan.pixel_size_um
+    for name, image in rendered.images.items():
+        left, top = rendered.true_left_top_um[name]
+        h, w = image.shape
+        gx, gy = np.meshgrid(left + (np.arange(w) + 0.5) * px, top + (np.arange(h) + 0.5) * px)
+        for address, width, height, turn, value in pieces:
+            local = (np.stack((gx, gy), axis=-1) - truth[address]) @ _screen_rotation(rotation_deg + turn)
+            inside = (np.abs(local[..., 0]) < width / 2) & (np.abs(local[..., 1]) < height / 2)
+            image[inside] = value
+
+
+def test_straight_edged_debris_in_ordinary_nanowells_is_never_taken_for_the_square(monkeypatch):
+    """Reading every site at sizes smaller than a nanowell made straight-edged debris inside an ordinary one read as a
+    small square: with five pieces and no square drawn, 4 of 10 rendered plates were anchored on debris. A smaller
+    square must now be light against its surround, as a nanowell is. The real plate's geometry, no square, the array
+    centre put off so a false square is the only anchor; without the guard the first layout anchors on the dark
+    rectangle at 0.79 against 0.10. (A layout of four mixed pieces was dropped: it anchored nothing with or without
+    the guard, so it measured nothing.)"""
+    rendered, record = _plate(square=False)
+    _rectangles(rendered, [((0, 0), 70.0, 70.0, 2.0, 0.05)])         # dark, squarely aligned, in the centre well
+    _centre_off_site(monkeypatch)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert located.origin_method != "fiducial", located.grid["fiducial"]
+
+
+def test_a_ring_read_larger_than_a_nanowell_stops_at_the_neighbours_on_a_square_lattice():
+    """Read at 1.2 diameters, the ring's floor of 1.2 radii reached 1.44 nanowell radii, past the neighbours' rims at
+    1.43 on the real plate's walls; on a hexagonal lattice six arcs cancel in the four-fold sum, on a square one four
+    add up, and every site picked up squareness from its neighbours (0.11 against 0.04 measured in review)."""
+    from scipy import ndimage
+
+    px, n = 2.0, 600
+    xs = (np.arange(n) + 0.5) * px
+    gx, gy = np.meshgrid(xs, xs)
+    nearest_x = np.round(gx / PLATE_PITCH) * PLATE_PITCH
+    nearest_y = np.round(gy / PLATE_PITCH) * PLATE_PITCH
+    rim = np.hypot(gx - nearest_x, gy - nearest_y) - PLATE_DIAMETER / 2
+    image = ndimage.gaussian_filter(0.15 + 0.7 / (1 + np.exp(np.clip(rim / px, -50, 50))), 1.5)
+    site = (4 * PLATE_PITCH, 4 * PLATE_PITCH)
+    _, scores = nd.score_fiducial(image, px, PLATE_DIAMETER, [site], pitch_um=PLATE_PITCH, size_factors=(1.2,))
+    assert all(s.coherence < 0.06 for s in scores)              # 0.116 with the ring reaching the neighbours

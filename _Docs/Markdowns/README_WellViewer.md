@@ -271,7 +271,8 @@ remote host cannot read a folder on this computer: the log says so, and the host
 **Test detection…** runs registration and detection on one well at one timepoint, in the background, and opens a
 window with the montage: every nanowell outlined (green empty, blue holding cells, amber occluded, red
 clipped, grey without an address, dashed purple on a seam), addresses written once you zoom in far enough to
-read them, the origin method, the measured overlap against the one a nanowell needs, and a few
+read them, the origin method, the nanowell diameter measured on the plate, the measured overlap against the one a
+nanowell of that diameter needs, and a few
 rim-suppressed nanowells beside their segmentation. Untick **Nanowell outlines** to see the montage without
 them — the outlines cover the very edges you are checking them against — and tick it again to bring them back;
 neither re-runs the detection. Use it before a plate-wide run: if the addresses do not

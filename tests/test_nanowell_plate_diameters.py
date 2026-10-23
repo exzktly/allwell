@@ -72,9 +72,11 @@ def test_the_end_of_the_run_records_and_logs_it(tmp_path, monkeypatch, caplog):
     folder.mkdir()
     for well, diameter, key in (("B02", 125.8, settings.key()), ("B03", 140.0, settings.key()),
                                 ("B04", 125.6, settings.key()), ("B05", 126.0, settings.key()),
-                                ("B06", 300.0, nr.NanowellSettings("50um").key())):
+                                ("B06", 300.0, nr.NanowellSettings("50um").key()),
+                                ("B07", 100.0, settings.key())):
+        source = "format" if well == "B07" else "measured"              # B07's diameter is the format's, not measured
         payload = {"scheme_version": nt.SCHEME_VERSION, "well": well, "settings": key, "timepoints": {},
-                   "array_radius": {"diameter_used_um": diameter}}
+                   "array_radius": {"diameter_used_um": diameter, "diameter_source": source}}
         (folder / f"{well}_grid.json").write_text(json.dumps(payload), encoding="utf-8")
     monkeypatch.setattr(nt, "reanchor_plate", lambda *a, **k: {"anchored": [], "remaining": {}})
     with caplog.at_level(logging.WARNING, logger="allwell.nanowell"):
@@ -82,7 +84,7 @@ def test_the_end_of_the_run_records_and_logs_it(tmp_path, monkeypatch, caplog):
                             [], "", "", "_", None, grouper=None, parse=None)
     recorded = json.loads((tmp_path / "pipeline_info.json").read_text(encoding="utf-8"))["nanowell"]
     plate = recorded["plate_diameters"][""]
-    assert set(plate["wells"]) == {"B02", "B03", "B04", "B05"}            # B06 was analysed as another format
+    assert set(plate["wells"]) == {"B02", "B03", "B04", "B05"}            # B06 another format, B07 never measured
     assert list(plate["outliers"]) == ["B03"]
     assert any("Well B03: its nanowells measure 140.0 um, +11 % off the 125.9 um" in r.getMessage()
                for r in caplog.records)

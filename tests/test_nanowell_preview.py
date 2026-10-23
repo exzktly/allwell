@@ -46,7 +46,10 @@ def test_the_preview_describes_the_well_it_was_asked_about(plate, tmp_path):
 
 def test_the_overlap_is_reported_against_the_one_a_nanowell_needs(plate, tmp_path):
     result = _preview(plate, tmp_path)
-    assert result.overlap_needed_um == pytest.approx(120.0)             # 100 um + 2 x a tenth
+    # The measured diameter plus a tenth of it on each side, as the run's ownership needs (review F21a); the format's
+    # 100 um gave exactly 120.
+    assert result.diameter_um == pytest.approx(100.0, rel=0.01) and result.diameter_um != 100.0
+    assert result.overlap_needed_um == pytest.approx(1.2 * result.diameter_um)
     measured = [o for o in result.overlap_um if o is not None]
     assert measured and all(o < result.overlap_needed_um for o in measured)       # 3 % of 3010 um = 90 um
     counts = result.counts()

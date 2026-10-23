@@ -9,7 +9,7 @@ rim-suppressed crops beside their segmentation. It writes nothing under the outp
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +37,7 @@ class PreviewResult:
     angle_deg: float | None = None
     overlap_um: tuple = (None, None)
     overlap_needed_um: float | None = None
+    diameter_um: float | None = None              # the nanowell diameter the run measured and sized everything from
     tile_count: int = 0
     crops: list[dict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -138,6 +139,11 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
                                   manual_anchor_um=manual)
     result.status, result.reason = located.status, located.reason
     result.tile_count = len(images)
+    # Everything below is sized from the diameter the run measured, as the run sizes it: the overlap a nanowell
+    # needs, the crops and the roster's coverage test read the format's otherwise (review F21a).
+    if located.diameter_um is not None:
+        settings = replace(settings, diameter_override_um=located.diameter_um)
+    result.diameter_um = settings.diameter_um
     plan = located.plan
     if plan is not None:
         result.overlap_um = tuple(plan.overlap_um)

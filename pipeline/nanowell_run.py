@@ -82,9 +82,10 @@ class NanowellSettings:
     clipped_below: float = 0.5          # a site imaged less than this is clipped and carries no count
     custom: tuple[float, float] | None = None   # (nominal pitch, diameter) um for CUSTOM_FORMAT
     geometry: str = GEOMETRY_HEX_CIRCLE         # how the array is found and its geometry decided (GEOMETRIES)
-    #: The nanowell diameter measured on the image, when an inferred geometry found the setting's wrong by more
-    #: than ``nanowell_infer.DIAMETER_AGREEMENT``: sites are then fitted, owned and measured at it. Set per
-    #: timepoint by :func:`measure_timepoint`, never by a caller, and not in the reuse key (tracker X35-R3).
+    #: The nanowell diameter measured on the plate, whatever the geometry (tracker F2): sites are fitted, owned and
+    #: measured at it. Set from the well's one diameter by :func:`measure_timepoint` and by :func:`run_well` for its
+    #: roster, and by Test detection; never part of the reuse key, which holds the setting (``key``), while the
+    #: checkpoint key holds the diameter used (review F21b).
     diameter_override_um: float | None = None
 
     def __post_init__(self):
@@ -362,6 +363,50 @@ def _grid_block(plan, placement: Placement | None, extra: dict, warnings=()) -> 
     return block
 
 
+def _find_square(montage, detection, diameter: float, lattice_pitch: float, settings: NanowellSettings, manual):
+    """``(candidate, fiducial block, refusal or None)``: the central square's search on the montage (montage frame).
+
+    The square is looked for at every lattice site near the array's centre, detected or not, and read at several
+    sizes (tracker F15): the matched filter finds round nanowells, and a square of another size is not one.
+
+    The orientation check guards against a lattice fit folded onto the wrong row (N3a), and only a square the origin
+    would take can say that: a circle's "orientation" is noise (roll-up review X21), and so is that of square-ish
+    debris ``resolve_origin`` refuses as ambiguous, which refused whole timepoints a hand-set anchor or the array
+    centre would have addressed (review F21). Nor does a candidate on another site than a hand-set anchor's (*manual*,
+    montage frame) name the square. The square's measured edge angle is kept either way, against the lattice row the
+    fit chose, so a real plate can confirm the square's cut (tracker F19, Q11). The refusal is the reason a folded fit
+    gives, or ``None``.
+    """
+    from pipeline.nanowell_detect import (
+        SQUARE_SIZE_FACTORS, check_orientation, describe_fiducial, score_fiducial, square_search_points,
+    )
+    from pipeline.nanowell_lattice import fiducial_accepted, nearest_site
+
+    near = detection.boundary_centre_um
+    if near is None and len(detection.points_um):
+        near = np.median(np.asarray(detection.points_um, dtype=float), axis=0)
+    search = (detection.points_um if near is None or not detection.fit.ok else
+              square_search_points(detection.fit, detection.points_um, near, 2.2 * lattice_pitch))
+    candidate, scores = score_fiducial(montage.image, montage.um_per_px, diameter, search,
+                                       centre_um=detection.boundary_centre_um, search_radius_um=2.2 * lattice_pitch,
+                                       pitch_um=lattice_pitch, size_factors=SQUARE_SIZE_FACTORS)
+    fiducial = describe_fiducial(candidate, scores, near_centre=detection.boundary_centre_um is not None)
+    fiducial["margin"], fiducial["ratio"] = FIDUCIAL_MARGIN, FIDUCIAL_RATIO
+    if fiducial["position_um"] is not None:
+        fiducial["position_um"] = [float(v) for v in _montage_to_common(fiducial["position_um"], montage)]
+    if candidate is None or not scores:
+        return candidate, fiducial, None
+    square = max(scores, key=lambda s: s.coherence)
+    orientation = check_orientation(detection.fit, square.orientation_deg, square_to_axis_deg=settings.square_edge_deg)
+    fiducial.update(edge_deg=orientation.observed_deg, edge_expected_deg=orientation.expected_deg,
+                    edge_discrepancy_deg=orientation.discrepancy_deg)
+    names_square = fiducial_accepted(candidate, FIDUCIAL_MARGIN, FIDUCIAL_RATIO) and (
+        manual is None or nearest_site(detection.fit, manual)[1] == nearest_site(detection.fit, candidate.position)[1])
+    if names_square and not orientation.ok:
+        return candidate, fiducial, (orientation.reason or "The square's edges disagree with the fitted lattice axis")
+    return candidate, fiducial, None
+
+
 def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, settings: NanowellSettings, *,
                      plate_rigid=None, expected_shape: tuple[int, int] | None = None, stored=None,
                      manual_anchor_um=None) -> Located:
@@ -375,10 +420,7 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     ``(folder, grid block)`` pairs for this timepoint from earlier runs: a placement among them solved under this
     timepoint's :func:`registration_key` is taken instead of registering the tiles again (:func:`stored_placement`).
     """
-    from pipeline.nanowell_detect import (
-        SQUARE_SIZE_FACTORS, check_orientation, describe_fiducial, detect_sites, estimate_lattice_fft, score_fiducial,
-        square_search_points,
-    )
+    from pipeline.nanowell_detect import detect_sites, estimate_lattice_fft
     from pipeline.nanowell_lattice import index_points, resolve_origin
     from pipeline.nanowell_sites import check_format
     from pipeline.tile_grid import OK as GRID_OK, place_from_record, tiles_from_record
@@ -472,36 +514,12 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         detection = detect_sites(montage.image, montage.um_per_px, diameter, expected_pitch_um=lattice_pitch)
         if not detection.ok:
             return refuse(NO_LATTICE, detection.reason)
-    # The square is looked for at every lattice site near the array's centre, detected or not, and read at several
-    # sizes (tracker F15): the matched filter finds round nanowells, and a square of another size is not one.
-    near = detection.boundary_centre_um
-    if near is None and len(detection.points_um):
-        near = np.median(np.asarray(detection.points_um, dtype=float), axis=0)
-    search = (detection.points_um if near is None or not detection.fit.ok else
-              square_search_points(detection.fit, detection.points_um, near, 2.2 * lattice_pitch))
-    candidate, scores = score_fiducial(montage.image, montage.um_per_px, diameter, search,
-                                       centre_um=detection.boundary_centre_um, search_radius_um=2.2 * lattice_pitch,
-                                       pitch_um=lattice_pitch, size_factors=SQUARE_SIZE_FACTORS)
-    fiducial = describe_fiducial(candidate, scores, near_centre=detection.boundary_centre_um is not None)
-    fiducial["margin"], fiducial["ratio"] = FIDUCIAL_MARGIN, FIDUCIAL_RATIO
-    if fiducial["position_um"] is not None:
-        fiducial["position_um"] = [float(v) for v in _montage_to_common(fiducial["position_um"], montage)]
-    located.fiducial = fiducial
-    # Only a square that scored as one: with the central square hidden (a bubble over it) the best-scoring site
-    # is an ordinary circle, whose "orientation" is noise, and checking against it refused a timepoint the array
-    # centre could anchor (roll-up review X21). The square's measured edge angle is kept either way, against the
-    # lattice row the fit chose, so a real plate can confirm the square's cut (tracker F19, Q11).
-    if candidate is not None and scores:
-        square = max(scores, key=lambda s: s.coherence)
-        orientation = check_orientation(detection.fit, square.orientation_deg,
-                                        square_to_axis_deg=settings.square_edge_deg)
-        fiducial.update(edge_deg=orientation.observed_deg, edge_expected_deg=orientation.expected_deg,
-                        edge_discrepancy_deg=orientation.discrepancy_deg)
-        if not orientation.ok:
-            return refuse(ORIENTATION_REFUSED, orientation.reason if hasattr(orientation, "reason") else
-                          "The square's edges disagree with the fitted lattice axis", fiducial=fiducial)
     manual = (None if located.manual_anchor_um is None
               else np.subtract(located.manual_anchor_um, montage.origin_um))       # well frame -> montage frame
+    candidate, fiducial, folded = _find_square(montage, detection, diameter, lattice_pitch, settings, manual)
+    located.fiducial = fiducial
+    if folded is not None:
+        return refuse(ORIENTATION_REFUSED, folded, fiducial=fiducial)
     resolved = resolve_origin(detection.fit, fiducial=candidate, array_centre=detection.boundary_centre_um,
                               plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN, fiducial_ratio=FIDUCIAL_RATIO,
                               fiducial_refusal=fiducial["reason"], manual=manual, detected=detection.points_um)
@@ -732,22 +750,18 @@ def _roster_positions(located: Located, radius_um: float | None, sites=None):
     return addresses, points
 
 
-def _unaddressed_positions(located: Located, radius_um: float | None,
-                           settings: NanowellSettings | None = None) -> np.ndarray:
+def _unaddressed_positions(located: Located, radius_um: float | None, settings: NanowellSettings) -> np.ndarray:
     """Every lattice site of an unaddressed timepoint's array, montage frame (tracker F8).
 
     An address needs the origin; a position does not. The lattice and the array's outline place every nanowell,
     including one a bubble hides, and §1.1's rule is that no nanowell's position is ever skipped. An inferred array
-    has its sites already (``array_sites``); a circle has the lattice sites within *radius_um* (the well's shared
-    radius) of its fitted centre, with the same quarter-pitch allowance :func:`nanowell_lattice.roster` gives an
-    anchored one. Only with neither (no outline was fitted) are the sites found all there is.
-
-    With *settings*, the circle's sites are the ones the evidence supports (:func:`_evidence_roster`, as for an
-    anchored timepoint), counted from the site nearest the outline's centre as a provisional origin that decides
-    positions only — no row takes an address from it. The disk alone added the ring beyond the rim when the fitted
-    radius ran large: 18 rows of floor on a rendered 265-site array (review F20f).
+    has its sites already (``array_sites``); a circle has the sites the evidence supports within the well's shared
+    *radius_um* (:func:`_evidence_roster`, as for an anchored timepoint), counted from the site nearest the fitted
+    outline's centre as a provisional origin that decides positions only — no row takes an address from it. The disk
+    alone added the ring beyond the rim when the fitted radius ran large: 18 rows of floor on a rendered 265-site
+    array (review F20f). Only with no outline fitted are the sites found all there is.
     """
-    from pipeline.nanowell_lattice import nearest_site as lattice_snap
+    from pipeline.nanowell_lattice import index_points, nearest_site as lattice_snap
 
     montage = located.montage
     detected = located.detected_common - np.asarray(montage.origin_um)
@@ -759,24 +773,15 @@ def _unaddressed_positions(located: Located, radius_um: float | None,
     centre = np.asarray(located.boundary["centre_um"], dtype=float) - np.asarray(montage.origin_um)
     basis = np.column_stack((fit.a1, fit.a2))
     phase = np.asarray(fit.phase_origin, dtype=float)
-    limit = radius_um + fit.pitch / 4
-    # The array's centre is a site (the square sits there), so the disk is drawn about the site nearest the fitted
+    # The array's centre is a site (the square sits there), so the roster is counted from the site nearest the fitted
     # outline's centre rather than the centre itself: a circle fitted to the rim was 31 um (a fifth of a pitch) off on
     # a rendered plate, which swapped five rim sites for five outside the array.
     _, middle = lattice_snap(fit, centre)
     site = phase + basis @ np.asarray(middle, dtype=float)
-    if settings is not None:
-        from pipeline.nanowell_lattice import index_points
-
-        provisional = replace(located, origin_montage=tuple(site),
-                              indexed=index_points(detected, fit, tuple(site)))
-        supported = _evidence_roster({located.timepoint: provisional}, [located.timepoint], radius_um, settings)
-        return np.array([site + basis @ np.asarray(a, dtype=float) for a in sorted(supported.roster)],
-                        dtype=float).reshape(-1, 2)
-    reach = math.ceil(limit / np.linalg.svd(basis, compute_uv=False).min()) + 1
-    steps = np.array([(q, r) for q in range(-reach, reach + 1) for r in range(-reach, reach + 1)], dtype=float)
-    sites = phase + (np.asarray(middle, dtype=float) + steps) @ basis.T
-    return sites[np.hypot(*(sites - site).T) <= limit]
+    provisional = replace(located, origin_montage=tuple(site), indexed=index_points(detected, fit, tuple(site)))
+    supported = _evidence_roster({located.timepoint: provisional}, [located.timepoint], radius_um, settings)
+    return np.array([site + basis @ np.asarray(a, dtype=float) for a in sorted(supported.roster)],
+                    dtype=float).reshape(-1, 2)
 
 
 def _initial_sites(located: Located, points_montage: np.ndarray, pitch_um: float):
@@ -1726,16 +1731,18 @@ def _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts) -
     """What a timepoint's checkpoint must match to be taken back: everything its rows depend on beyond the settings
     the store is keyed on — the radius, the record, how it was located, and the roster: for an inferred well with the
     step its addresses were moved by and the diameter (X35-R1, R5, R14); for a default well with its rule, so a
-    disk-rule checkpoint is never taken back into an evidence-rule well (X35a)."""
+    disk-rule checkpoint is never taken back into an evidence-rule well (X35a). The well's diameter joins it whatever
+    the geometry: every geometry now measures at the median over the well's timepoints, which a resumed run over
+    another set of timepoints can move (review F21b)."""
     from pipeline.nanowell_measure import MEASURE_VERSION
 
     key = {"radius_um": radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
-           "located": [located.status, located.origin_method], "measure_version": MEASURE_VERSION}
+           "located": [located.status, located.origin_method], "measure_version": MEASURE_VERSION,
+           "diameter_used_um": outcome.radius.get("diameter_used_um")}
     if located.manual_anchor_um is not None:
         key["manual_anchor_um"] = list(located.manual_anchor_um)      # another click may be another site
     if roster is not None and settings.infer:
-        key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))),
-                   diameter_used_um=outcome.radius["diameter_used_um"])
+        key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))))
     elif roster is not None:
         key.update(roster=outcome.radius["roster"], roster_rule=ROSTER_RULE_EVIDENCE)
     return key

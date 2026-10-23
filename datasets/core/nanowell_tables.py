@@ -175,12 +175,16 @@ def _carry_template(src: Path, dest: Path, kept_timepoints: set) -> None:
 
 def carried_nanowell_block(block):
     """The sidecar's ``nanowell`` block for a destination a tool wrote: the analysis's scheme, settings and
-    conventions, without ``reanchor`` — the record of what one run's end-of-run pass did to that run's plate,
-    keyed on its wells, which a subset, a merge or a concatenation would leave naming wells it no longer
-    describes. The next Analyze run writes its own."""
+    conventions, without ``reanchor`` or ``plate_diameters`` — the records of what one run's end-of-run pass found on
+    that run's plate, keyed on its wells, which a subset, a merge or a concatenation would leave naming wells it no
+    longer describes (review F21c). The next Analyze run writes its own."""
     if not isinstance(block, dict):
         return block
-    return {k: v for k, v in block.items() if k != "reanchor"}
+    return {k: v for k, v in block.items() if k not in _PER_RUN_KEYS}
+
+
+#: The ``nanowell`` sidecar keys that describe one run's plate, well by well, and are not carried to a tool's output.
+_PER_RUN_KEYS = ("reanchor", "plate_diameters")
 
 
 def well_roster_rules(out_dir) -> dict:

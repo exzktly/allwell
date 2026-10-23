@@ -1,9 +1,10 @@
 """A nanowell is drawn one way before a run and after it (``ui/nanowell_sites.py``).
 
-Analyze's Test detection window and Review's Full montage window draw the same nanowells over the same kind of
-montage, a person comparing the one against the other. Each carried its own palette, label threshold and outline
-painter, and they had drifted: the Full montage window drew no fused site differently from any other. Held here: the
-shared pieces behave as stated, both windows draw through them, and neither grows a private copy again.
+Analyze's Test detection window and the Array view of Review's Nanowells page draw the same nanowells over the
+same kind of montage, a person comparing the one against the other. Each carried its own palette, label
+threshold and outline painter, and they had drifted: Review's full-resolution window drew no fused site
+differently from any other. Held here: the shared pieces behave as stated, both views draw with them, and neither
+grows a private copy again.
 """
 
 from __future__ import annotations
@@ -33,20 +34,31 @@ def test_the_address_text_is_the_integers_and_nothing_for_a_site_without_one(q, 
     assert coordinate_text(q, r) == text
 
 
-def test_the_full_montage_s_sites_carry_the_address_and_the_fused_flag_from_the_table():
-    from review.features.nanowell.full_montage_compute import site_overlays
-
-    metrics = pd.DataFrame({
-        "well": ["A01"] * 4, "timepoint": ["0h"] * 4,
-        "well_x_um": [10.0, 20.0, 30.0, 40.0], "well_y_um": [1.0, 2.0, 3.0, 4.0], "radius_um": [50.0] * 4,
+def _metrics():
+    return pd.DataFrame({
+        "well": ["A01"] * 4, "timepoint": ["0h"] * 4, "reason": [""] * 4, "n": [1.0, math.nan, 0.0, 2.0],
+        "well_x_um": [100.0, 300.0, 500.0, 700.0], "well_y_um": [100.0] * 4, "radius_um": [50.0] * 4,
         "nw_q": [1.0, math.nan, 0.0, 2.0], "nw_r": [2.0, math.nan, 0.0, -1.0],
-        "state": ["measured", "unaddressed", "empty", "empty"],
+        "state": ["measured", "unaddressed", "empty", "occluded"],
         # As ``collect._bool`` leaves the column: object dtype holding True / False / NaN.
         "fused": pd.Series([True, math.nan, False, np.True_], dtype="object"),
     })
-    sites = site_overlays(metrics, "A01", "0h")
-    assert [(s.label, s.state, s.fused) for s in sites] == [
-        ("1,2", "measured", True), ("", "unaddressed", False), ("0,0", "empty", False), ("2,-1", "empty", True)]
+
+
+def _data():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(grids={}, acquisition={}, in_dir=None)
+
+
+def test_the_array_view_s_sites_carry_the_address_and_the_fused_flag_from_the_table():
+    from review.features.nanowell.array_compute import array_scene
+
+    scene = array_scene(_metrics(), _data(), "A01", "0h", "n", positions="measured", anchors=False)
+    sites = scene.sites
+    assert list(zip(sites.labels, sites.state, sites.fused)) == [
+        ("1,2", "measured", True), ("", "unaddressed", False), ("0,0", "empty", False), ("2,-1", "occluded", True)]
+    assert sites.sites == [("A01", 1, 2), ("A01", None, None), ("A01", 0, 0), ("A01", 2, -1)]
 
 
 # ── the painter ──────────────────────────────────────────────────────────────
@@ -91,7 +103,7 @@ def test_the_address_is_written_only_where_the_outline_has_room_for_it(qapp):
     assert _paint(qapp, radius=roomy, label="12,3", show_label=False) == _paint(qapp, radius=roomy)
 
 
-# ── both windows draw through it ─────────────────────────────────────────────
+# ── both views draw with it ─────────────────────────────────────────────
 def test_test_detection_draws_a_fused_site_in_the_fused_colour(qapp):
     from PySide6.QtGui import QColor
 
@@ -106,26 +118,50 @@ def test_test_detection_draws_a_fused_site_in_the_fused_colour(qapp):
     assert QColor(FUSED_COLOUR).rgb() in _colours(image)
 
 
-def test_the_full_montage_window_hands_every_site_to_the_shared_painter(qapp, monkeypatch):
-    from PySide6.QtGui import QImage, QPainter
+def _array_figure(*, colour: str, px_per_um: float):
+    """The Array view of :func:`_metrics`, drawn by state or by metric with addresses, at *px_per_um*."""
+    from matplotlib.figure import Figure
 
-    from review.features.nanowell import full_montage_view as fmv
-    from review.features.nanowell.full_montage_compute import SiteOverlay
+    from review.features.nanowell.array_compute import array_scene
+    from review.features.nanowell.renderer import render_array
+    from review.features.nanowell.state import ArrayLayers
 
-    calls = []
-    monkeypatch.setattr(fmv, "paint_site", lambda painter, centre, radius, state, label, *, fused:
-                        calls.append((round(centre.x()), round(centre.y()), radius, state, label, fused)))
-    canvas = fmv.MontageCanvas()
-    canvas.resize(400, 300)
-    canvas.region = (0.0, 0.0, 800.0, 600.0)                          # 2 µm per screen pixel
-    canvas.sites = [SiteOverlay(100.0, 60.0, 40.0, "1,2", "measured", fused=True),
-                    SiteOverlay(300.0, 200.0, 40.0, "", "clipped")]
-    image = QImage(400, 300, QImage.Format_RGB32)
-    painter = QPainter(image)
-    canvas._draw_sites(painter)
-    painter.end()
-    assert calls == [(50, 30, 20.0, "measured", "1,2", True), (150, 100, 20.0, "clipped", "", False)]
-    canvas.deleteLater()
+    fig = Figure(figsize=(8.0, 6.0), dpi=100)
+    scene = array_scene(_metrics(), _data(), "A01", "0h", "n", positions="measured", anchors=False)
+    drawn = render_array(fig, scene, ArrayLayers(image="off", colour=colour, addresses=True), label="Cell count")
+    width = drawn.size_px[0] / px_per_um
+    centre = 400.0
+    return fig, render_array(fig, scene, ArrayLayers(image="off", colour=colour, addresses=True), label="Cell count",
+                             region=(centre - width / 2, 0.0, centre + width / 2, 200.0))
+
+
+def test_the_array_view_outlines_by_state_dashes_a_fused_site_and_labels_where_there_is_room():
+    from matplotlib.colors import to_hex
+
+    from ui.nanowell_sites import FUSED_COLOUR, LABEL_COLOUR, MIN_LABEL_DIAMETER_PX, state_colour
+
+    roomy = (MIN_LABEL_DIAMETER_PX + 2) / 100.0                       # px per µm: a 100 µm nanowell just fits it
+    fig, drawn = _array_figure(colour="state", px_per_um=roomy)
+    plain, fused = drawn.ax.collections
+    assert [to_hex(c) for c in plain.get_edgecolors()] == [to_hex(state_colour(s)) for s in ("unaddressed", "empty")]
+    assert [to_hex(c) for c in fused.get_edgecolors()] == [to_hex(FUSED_COLOUR)]
+    assert fused.get_linestyle()[0][1] is not None                     # dashed
+    labels = [t for t in drawn.ax.texts if t.get_gid() == "nw-array-address"]
+    assert [t.get_text() for t in labels] == ["1,2", "0,0", "2,-1"]    # the unaddressed site has nothing to write
+    assert {to_hex(t.get_color()) for t in labels} == {to_hex(LABEL_COLOUR)}
+    _fig, cramped = _array_figure(colour="state", px_per_um=(MIN_LABEL_DIAMETER_PX - 2) / 100.0)
+    assert not [t for t in cramped.ax.texts if t.get_gid() == "nw-array-address"]
+
+
+def test_filled_by_the_metric_a_fused_site_is_still_dashed_in_the_fused_colour():
+    from matplotlib.colors import to_hex
+
+    from ui.nanowell_sites import FUSED_COLOUR
+
+    _fig, drawn = _array_figure(colour="metric", px_per_um=0.5)
+    dashed = [c for c in drawn.ax.collections if c.get_array() is None and len(c.get_edgecolors())
+              and to_hex(c.get_edgecolors()[0]) == to_hex(FUSED_COLOUR)]
+    assert len(dashed) == 1 and len(dashed[0].get_offsets()) == 2
 
 
 # ── and neither keeps a copy of its own ──────────────────────────────────────

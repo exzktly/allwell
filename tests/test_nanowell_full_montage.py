@@ -1,12 +1,14 @@
-"""The Full montage window: a well's registered montage at full resolution, and the anchor set by clicking it.
+"""The Array view at full resolution: a well's registered montage drawn from the raw tiles, panned and zoomed,
+and the anchor set by clicking it.
 
-Asked for alongside the anchor: "a way to render the full montage for the registered/aligned well". The fixture
-is four 256-px tiles, each a different constant (so a pixel says which tile it came from), placed with an 8 µm
-overlap (so the order they are drawn in shows), and one bright pixel in the first tile that only full
-resolution resolves (so the level drawn shows). Values are asserted, not properties of them (CLAUDE.md §7.8).
+Asked for alongside the anchor: "a way to render the full montage for the registered/aligned well" — once a window
+of its own, now the Array view's *Image: Full resolution* layer. The fixture is four 256-px tiles, each a
+different constant (so a pixel says which tile it came from), placed with an 8 µm overlap (so the order they are
+drawn in shows), and one bright pixel in the first tile that only full resolution resolves (so the level drawn
+shows). Values are asserted, not properties of them (CLAUDE.md §7.8).
 
-The window tests go through the real page: the Nanowells tab built by ``build_nanowell_tab``, its **Full
-montage…** button pressed, the canvas clicked.
+The page tests go through the real page: the Nanowells tab built by ``build_nanowell_tab``, its Image combo and
+Layers menu chosen, its canvas clicked, dragged and scrolled, its anchor buttons pressed.
 """
 
 from __future__ import annotations
@@ -184,7 +186,7 @@ def test_the_view_maps_a_pixel_to_the_well_and_back():
     assert zoomed == (125.0, 62.5, 225.0, 112.5)             # the point under the pointer stays put
 
 
-# ── the window, through the real page ────────────────────────────────────────
+# ── the page, at full resolution ─────────────────────────────────────────────
 pytest.importorskip("PySide6")
 
 
@@ -209,107 +211,184 @@ def montage_page(qtbot, tmp_path):
     _loaded(qtbot, ctx)
     from review.features.nanowell import controller as nwc
 
-    nwc.set_view(ctx, "array_qc")
+    nwc.set_view(ctx, "array")
     nwc.set_timepoint(ctx, "t_a")
     return ctx, out.parent / "in"
 
 
-def _open(qtbot, ctx):
-    from PySide6.QtCore import Qt
+def _full(qtbot, ctx):
+    """Choose *Full resolution* as a user does, and wait for every tile's coarse levels."""
+    image_cb = ctx.widgets.get("_nw_image_cb")
+    assert image_cb.isVisible()
+    image_cb.setCurrentIndex(image_cb.findData("tiles"))
+    st = ctx.state.feature_slice("nanowell")
+    qtbot.waitUntil(lambda: st.tile_store is not None and st.tile_store.loaded() == len(VALUES)
+                    and not st.tile_pending, timeout=20000)
+    return st
 
-    button = ctx.widgets.get("_nw_montage_btn")
-    assert button.isVisible() and button.isEnabled()
-    qtbot.mouseClick(button, Qt.LeftButton)
-    window = ctx.widgets.get("_nw_full_montage")
-    qtbot.waitUntil(lambda: window.store is not None and window.store.loaded() == len(VALUES), timeout=20000)
-    return window
+
+def _footer(ctx):
+    from tests.test_nanowell_page import _texts
+
+    return _texts(ctx, "nw-array-footer")
 
 
-def test_the_button_opens_the_well_and_timepoint_array_qc_shows_and_says_why_it_is_unaddressed(montage_page, qtbot):
+def _shade_at(st, x_um, y_um):
+    """The shade drawn at the well-frame point, read from the image on the figure."""
+    image = st.drawn.ax.images[0]
+    left, right, bottom, top = image.get_extent()
+    pixels = image.get_array()
+    rows, cols = pixels.shape[:2]
+    return int(pixels[int((y_um - top) / (bottom - top) * rows), int((x_um - left) / (right - left) * cols)])
+
+
+def _widget_point(ctx, st, x_um, y_um):
+    from PySide6.QtCore import QPoint
+
+    canvas = ctx.widgets.get("_nw_canvas")
+    px, py = st.drawn.ax.transData.transform((x_um, y_um))
+    ratio = canvas.devicePixelRatioF()
+    return canvas, QPoint(int(round(px / ratio)), int(round(canvas.height() - py / ratio)))
+
+
+def test_full_resolution_draws_each_tile_where_it_was_placed_and_says_why_the_timepoint_is_unaddressed(
+        montage_page, qtbot):
     ctx, _in_dir = montage_page
-    window = _open(qtbot, ctx)
-    assert window.windowTitle() == "Full montage — A01" and window.timepoint == "t_a"
-    text = window.status.text()
-    assert text.startswith("A01 at t_a: unaddressed. No accepted fiducial")
-    assert "Turn on Set anchor and click the central square" in text
-    assert not window.clear_btn.isEnabled() and window.anchor_btn.isEnabled()
+    st = _full(qtbot, ctx)
+    for tile, (x, y) in LEFT_TOP.items():
+        assert _shade_at(st, x + 60, y + 60) == SHADE[tile], tile
+    footer = _footer(ctx)
+    assert "Full resolution, from the raw tiles in A01.zip." in footer
+    assert "A01 at t_a: unaddressed. No accepted fiducial, array centre, or plate-rigid prediction" in footer
+    assert any(line.startswith("Turn on Set anchor and click the central square") for line in footer)
+    assert ctx.widgets.get("_nw_anchor_btn").isEnabled() and not ctx.widgets.get("_nw_clear_anchor_btn").isEnabled()
 
 
 def test_a_click_with_set_anchor_on_writes_the_anchor_where_it_landed_and_clear_removes_it(montage_page, qtbot):
-    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
 
     from util.nanowell_anchors import anchors_path, read_anchors
 
     ctx, in_dir = montage_page
-    window = _open(qtbot, ctx)
-    canvas = window.canvas
-    qtbot.mouseClick(canvas, Qt.LeftButton, pos=QPoint(40, 40))           # Set anchor off: a click sets nothing
+    st = _full(qtbot, ctx)
+    canvas, at = _widget_point(ctx, st, 30.0, 40.0)
+    QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier, at)          # Set anchor off: a click sets nothing
     assert not anchors_path(in_dir).exists()
-    qtbot.mouseClick(window.anchor_btn, Qt.LeftButton)
-    qtbot.mouseClick(canvas, Qt.LeftButton, pos=QPoint(40, 40))
-    expected = fmc.to_well(canvas.region, canvas.width(), canvas.height(), 40, 40)
+    qtbot.mouseClick(ctx.widgets.get("_nw_anchor_btn"), Qt.LeftButton)
+    assert st.anchor_mode
+    QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier, at)
     anchors = read_anchors(anchors_path(in_dir))
     assert list(anchors) == [("A01", "t_a")]
-    assert anchors[("A01", "t_a")].position() == pytest.approx(expected, abs=0.01)
-    assert canvas.anchor == pytest.approx(expected, abs=0.01)
-    assert "not used yet: re-run the well in Analyze" in window.status.text()
-    qtbot.mouseClick(window.clear_btn, Qt.LeftButton)
-    assert not anchors_path(in_dir).exists() and canvas.anchor is None
+    assert anchors[("A01", "t_a")].position() == pytest.approx((30.0, 40.0), abs=1.0)    # one pixel of the view
+    anchor = [line for line in st.drawn.ax.lines if line.get_gid() == "nw-array-anchor"]
+    assert len(anchor) == 2 and anchor[0].get_xydata().mean(axis=0) == pytest.approx((30.0, 40.0), abs=1.0)
+    assert any("not used yet: re-run the well in Analyze" in line for line in _footer(ctx))
+    qtbot.mouseClick(ctx.widgets.get("_nw_clear_anchor_btn"), Qt.LeftButton)
+    assert not anchors_path(in_dir).exists()
+    assert not [line for line in st.drawn.ax.lines if line.get_gid() == "nw-array-anchor"]
 
 
 def test_re_run_opens_analyze_limited_to_the_anchored_wells_each_forced(montage_page, qtbot, monkeypatch):
     from PySide6.QtCore import Qt
 
     import review.core.analyze_handoff as handoff
+    from review.features.nanowell import controller as nwc
     from util.nanowell_anchors import anchors_path, set_anchor
 
     ctx, in_dir = montage_page
-    window = _open(qtbot, ctx)
-    assert not window.rerun_btn.isEnabled()                   # nothing anchored yet
+    _full(qtbot, ctx)
+    rerun = ctx.widgets.get("_nw_rerun_btn")
+    assert not rerun.isEnabled()                              # nothing anchored yet
     set_anchor(anchors_path(in_dir), "A01", "t_a", (60.0, 60.0))
-    window._refresh_status()
+    nwc.redraw(ctx)
     calls = []
     monkeypatch.setattr(handoff, "open_in_analyze", lambda ctx, **kw: calls.append(kw) or True)
-    qtbot.mouseClick(window.rerun_btn, Qt.LeftButton)
+    qtbot.mouseClick(rerun, Qt.LeftButton)
     # Incremental off: every well is forced anyway, and a remote nanowell run refuses Incremental.
     assert calls == [{"force_wells": ["A01"], "only_wells": ["A01"], "incremental": False}]
 
 
-def test_the_view_keeps_square_pixels_through_a_resize_before_and_after_the_user_moves_it(montage_page, qtbot):
+def test_a_drag_pans_the_wheel_zooms_about_the_pointer_and_1_1_shows_one_image_pixel_per_figure_pixel(
+        montage_page, qtbot):
+    from matplotlib.backend_bases import MouseEvent
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
     ctx, _in_dir = montage_page
-    window = _open(qtbot, ctx)
-    canvas = window.canvas
+    st = _full(qtbot, ctx)
+    left, top, right, bottom = st.drawn.region
+    canvas, start = _widget_point(ctx, st, 100.0, 100.0)
+    _canvas, end = _widget_point(ctx, st, 150.0, 120.0)
+    QTest.mousePress(canvas, Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(canvas, end)
+    QTest.mouseRelease(canvas, Qt.LeftButton, Qt.NoModifier, end)
+    # The point pressed is under the pointer where it was released: the view moved by 50 µm left, 20 µm up.
+    assert st.region == pytest.approx((left - 50.0, top - 20.0, right - 50.0, bottom - 20.0), abs=0.5)
+    assert st.drawn.region == pytest.approx(st.region, abs=0.5)
+    assert st.selected_sites == []                             # a drag selects nothing
+    x, y = st.drawn.ax.transData.transform((60.0, 70.0))
+    canvas.callbacks.process("scroll_event", MouseEvent("scroll_event", canvas, x, y, step=1))
+    zoomed = st.drawn.region
+    width = zoomed[2] - zoomed[0]
+    assert width == pytest.approx(0.8 * (right - left), rel=0.01)
+    assert (60.0 - zoomed[0]) / width == pytest.approx((60.0 - (left - 50.0)) / (right - left), abs=0.01)
+    qtbot.mouseClick(ctx.widgets.get("_nw_one_btn"), Qt.LeftButton)
+    w_px, _h_px = st.drawn.size_px
+    assert (st.drawn.region[2] - st.drawn.region[0]) / w_px == pytest.approx(PX, rel=0.01)
+    qtbot.waitUntil(lambda: not st.tile_pending, timeout=20000)      # what 1:1 asked for has been read
+    x, y = (MARK[1] + 0.5) * PX, (MARK[0] + 0.5) * PX
+    nwc_region = (x - 10.0, y - 10.0, x + 10.0, y + 10.0)
+    st.region = nwc_region
+    from review.features.nanowell import controller as nwc
 
-    def scales():
-        left, top, right, bottom = canvas.region
-        return (right - left) / canvas.width(), (bottom - top) / canvas.height()
-
-    window.resize(900, 500)
-    qtbot.waitUntil(lambda: canvas.width() > 700)
-    sx, sy = scales()
-    assert sx == pytest.approx(sy)                            # refitted, not stretched to the new shape
-    canvas.zoom(0.5)
-    before = scales()
-    window.resize(600, 700)
-    qtbot.waitUntil(lambda: canvas.height() > 550)
-    assert scales() == pytest.approx(before)                  # the zoom the user chose survives the resize
+    nwc.redraw(ctx)
+    qtbot.waitUntil(lambda: not st.tile_pending, timeout=20000)
+    nwc.redraw(ctx)
+    assert _shade_at(st, x, y) == 255                          # only full resolution resolves the one bright pixel
+    qtbot.mouseClick(ctx.widgets.get("_nw_fit_btn"), Qt.LeftButton)
+    assert st.region is None and st.drawn.region[0] < 0.0 < 248.0 < st.drawn.region[2]
 
 
 def test_set_anchor_is_offered_only_where_an_anchor_can_change_the_result(montage_page, qtbot):
+    from review.features.nanowell import controller as nwc
+
     ctx, _in_dir = montage_page
-    window = _open(qtbot, ctx)
-    assert window.anchor_btn.isEnabled()                      # unaddressed
-    window.source = SimpleNamespace(**{**window.source.__dict__, "status": "no_lattice"})
-    window._refresh_status()
-    assert not window.anchor_btn.isEnabled()                  # no lattice: no origin is chosen at all
+    st = _full(qtbot, ctx)
+    assert ctx.widgets.get("_nw_anchor_btn").isEnabled()           # unaddressed
+    st.data.grids["A01"]["t_a"] = {**st.data.grids["A01"]["t_a"], "status": "no_lattice"}
+    nwc.redraw(ctx)
+    assert not ctx.widgets.get("_nw_anchor_btn").isEnabled()       # no lattice: no origin is chosen at all
+    nwc.set_anchor_mode(ctx, True)
+    assert not st.anchor_mode
 
 
-def test_moving_to_another_timepoint_stops_the_old_reads_and_closing_lets_the_tiles_go(montage_page, qtbot):
+def test_moving_to_another_timepoint_stops_the_old_reads_and_turning_the_image_off_lets_the_tiles_go(
+        montage_page, qtbot):
     ctx, _in_dir = montage_page
-    window = _open(qtbot, ctx)
-    first = window.store
-    window.tp_cb.setCurrentIndex(window.tp_cb.findData("t_c"))
-    assert first.cancelled and window.store is not first
-    second = window.store
-    window.close()
-    assert second.cancelled and window.store is None and window.canvas.store is None
+    st = _full(qtbot, ctx)
+    first = st.tile_store
+    slider = ctx.widgets.get("_nw_tp_slider")
+    slider.setValue([slider.value() - 1, slider.value() + 1][slider.value() == 0])
+    assert st.timepoint == "t_c" and first.cancelled and st.tile_store is not first
+    second = st.tile_store
+    image_cb = ctx.widgets.get("_nw_image_cb")
+    image_cb.setCurrentIndex(image_cb.findData("off"))
+    assert second.cancelled and st.tile_store is None and not st.drawn.ax.images
+
+
+def test_on_lattice_positions_the_well_frame_layers_are_greyed_and_not_drawn(montage_page, qtbot):
+    ctx, _in_dir = montage_page
+    st = _full(qtbot, ctx)
+    ctx.widgets.get("_nw_positions_seg").setCurrentIndex(1)            # Lattice
+    assert st.layers.positions == "lattice" and st.tile_store is None
+    assert not ctx.widgets.get("_nw_image_cb").isEnabled()
+    assert not ctx.widgets.get("_nw_layer_tiles").isEnabled() and not ctx.widgets.get("_nw_layer_anchor").isEnabled()
+    assert not ctx.widgets.get("_nw_anchor_btn").isVisible()
+    from tests.test_nanowell_page import _texts
+
+    # This dataset's grid records give no pitch, so nothing has a lattice place either; the figure says both.
+    assert _texts(ctx, "nw-array-missing") == [
+        "A01 at t_a has no addressed nanowells and no measured pitch to place them on, so there is nothing to draw. "
+        "The image, the tiles and the anchor are in the well frame, not on the lattice: switch Positions to Measured "
+        "to draw them."]

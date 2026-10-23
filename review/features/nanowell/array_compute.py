@@ -1,0 +1,237 @@
+"""The Array view as data: one well at one timepoint, and every element the view can draw over it.
+
+The Nanowells page used to show one well's array three ways, each with its own code: the **Array map** (the
+nanowells at their lattice places, coloured by the metric), **Array QC** (the run's montage, the tiles by how
+they were placed, the nanowells marked by state, the grid record) and the **Full montage** window (the raw tiles
+at full resolution, the nanowells with their addresses, the anchor). Each drew the same nanowells differently —
+the map in grey styles, Array QC only its occluded and clipped ones, the window in the state palette — and only
+the map could be clicked, only the window zoomed. They are now one view whose elements are switched on and off
+(``state.ArrayLayers``), drawn by one renderer (``renderer.render_array``) from one scene, built here.
+
+**Two frames.** A nanowell is drawn either where the run *measured* it, in the well frame (µm, y down) the
+montage, the tiles and the anchor are in, or where its address puts it on an ideal *lattice* of the well's pitch
+(``views_compute.lattice_xy``; decision U4), where it keeps its place from one timepoint to the next even when the
+plate was put back rotated. The image, the tiles and the anchor have no place on the lattice, so in that frame
+they are not drawn, and the figure says so rather than drawing them somewhere wrong.
+
+Qt-free.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from review.features.nanowell import full_montage_compute as fmc
+from review.features.nanowell import views_compute as vc
+from review.features.nanowell.collect import MEASURABLE
+from review.features.nanowell.image_compute import tile_boxes
+
+#: The states with a nanowell seen at its place, whatever its number: a timepoint with none of them has no
+#: addresses, and the figure says why.
+_SEEN = MEASURABLE | {"occluded", "clipped"}
+
+
+@dataclass
+class ArraySites:
+    """The nanowells drawn, one entry each, in the scene's frame."""
+    x: np.ndarray
+    y: np.ndarray
+    radius: np.ndarray                  # µm, per nanowell
+    values: np.ndarray                  # the metric; NaN where undefined
+    state: list
+    fused: np.ndarray
+    sites: list                         # (well, q, r)
+    labels: list                        # ``q,r`` (``util.nanowell_address.coordinate_text``), "" without an address
+
+    def __len__(self) -> int:
+        return len(self.x)
+
+
+@dataclass
+class ArrayScene:
+    """One well at one timepoint: the nanowells in :attr:`frame`, and — in the well frame — the tiles, the anchor
+    and what the grid record says."""
+    well: str
+    timepoint: str
+    frame: str                          # "well" (measured positions) or "lattice"
+    sites: ArraySites
+    roster: int                         # nanowells of the roster at this timepoint
+    unplaced: int                       # of those, not drawn: no measured position (well frame only)
+    counts: dict                        # state -> nanowells of the roster
+    pitch_um: float | None
+    reason: str = ""                    # why the timepoint has no addressed nanowells, when it has none
+    no_places: str = ""                 # why no nanowell has a place in this frame, when none has
+    tiles: list = field(default_factory=list)          # image_compute.TileBox, well frame
+    status: str = ""                    # the grid record's status at this timepoint
+    anchor: tuple | None = None         # the anchor set by hand, well-frame µm
+    anchor_text: str = ""               # how the timepoint was addressed and what its anchor does
+    anchorable: bool = False            # an anchor can change this timepoint's result (``ANCHORABLE``)
+    record: list = field(default_factory=list)         # (text, kind): the grid record, kind head / flag / plain
+
+    def centre(self) -> int | None:
+        """The index of the central nanowell, address ``(0, 0)``, among those drawn."""
+        for k, (_w, q, r) in enumerate(self.sites.sites):
+            if q == 0 and r == 0:
+                return k
+        return None
+
+    def extent(self) -> tuple[float, float, float, float] | None:
+        """``(left, top, right, bottom)`` of the nanowells and tiles drawn, or ``None`` when there are none."""
+        xs, ys = [], []
+        if len(self.sites):
+            r = self.sites.radius
+            xs += [float(np.min(self.sites.x - r)), float(np.max(self.sites.x + r))]
+            ys += [float(np.min(self.sites.y - r)), float(np.max(self.sites.y + r))]
+        for box in self.tiles if self.frame == "well" else ():
+            xs += [box.left_um, box.left_um + (box.width_um or 0.0)]
+            ys += [box.top_um, box.top_um + (box.height_um or 0.0)]
+        if not xs:
+            return None
+        return min(xs), min(ys), max(xs), max(ys)
+
+
+def _empty_sites() -> ArraySites:
+    nothing = np.zeros(0)
+    return ArraySites(nothing, nothing, nothing, nothing, [], np.zeros(0, dtype=bool), [], [])
+
+
+def _labels(qs, rs) -> list[str]:
+    from util.nanowell_address import coordinate_text
+
+    return [coordinate_text(q, r) or "" for q, r in zip(qs, rs)]
+
+
+def array_scene(metrics, data, well: str, timepoint: str, column: str, *, positions: str = "measured",
+                anchors: bool = True) -> ArrayScene:
+    """The Array view of *well* at *timepoint*, coloured by *column*, with its nanowells at their *positions*
+    (``"measured"`` or ``"lattice"``). *anchors* off skips reading the anchors file (a batch figure, which draws
+    no anchor)."""
+    rows = metrics[(metrics["well"] == well) & (metrics["timepoint"] == timepoint)]
+    states = [str(s) for s in rows["state"]]
+    counts: dict[str, int] = {}
+    for s in states:
+        counts[s] = counts.get(s, 0) + 1
+    reason = ""
+    if len(rows) and all(s not in _SEEN for s in states):
+        reason = next((r for r in rows["reason"] if r), "this timepoint has no addressed nanowells")
+    pitch = vc.well_pitch(data, well)
+    frame = "lattice" if positions == "lattice" else "well"
+    scene = ArrayScene(well, timepoint, frame, _empty_sites(), len(rows), 0, counts, pitch, reason)
+    if frame == "lattice":
+        model = vc.map_model(metrics, data, well, timepoint, column)
+        if model is None:
+            scene.no_places = ("no addressed nanowells and no measured pitch to place them on" if len(rows)
+                               else "no addressed nanowells")
+        else:
+            n = len(model.x)
+            scene.sites = ArraySites(model.x, model.y, np.full(n, model.radius_um), model.values, list(model.state),
+                                     np.asarray(model.fused, dtype=bool), list(model.sites),
+                                     _labels([s[1] for s in model.sites], [s[2] for s in model.sites]))
+    else:
+        placed = rows[rows["well_x_um"].notna() & rows["well_y_um"].notna()]
+        scene.unplaced = len(rows) - len(placed)
+        if len(placed):
+            radius = placed["radius_um"].astype(float)
+            fallback = float(radius.median()) if radius.notna().any() else (pitch or 0.0) * 0.3
+            scene.sites = ArraySites(
+                placed["well_x_um"].to_numpy(dtype=float), placed["well_y_um"].to_numpy(dtype=float),
+                radius.fillna(fallback).to_numpy(dtype=float),
+                vc.numeric_values(placed, column).to_numpy(dtype=float), [str(s) for s in placed["state"]],
+                placed["fused"].eq(True).to_numpy(),
+                # Built as a list, not with ``Series.map``: pandas reads a ``None`` back as NaN and every address
+                # as a float, and a NaN address would pass the hit map's "has an address" test.
+                [(w, _int(q), _int(r)) for w, q, r in zip(placed["well"], placed["nw_q"], placed["nw_r"])],
+                _labels(placed["nw_q"], placed["nw_r"]))
+        else:
+            scene.no_places = ("no nanowell with a measured position at this timepoint" if len(rows)
+                               else "no addressed nanowells")
+        scene.tiles = tile_boxes(data, well, timepoint)
+    block = (data.grids.get(well) or {}).get(timepoint) or {}
+    scene.status = str(block.get("status") or "")
+    scene.record = record_lines(data.grids.get(well) or {}, timepoint)
+    if frame == "well" and anchors:
+        _anchor_into(scene, data, block)
+    return scene
+
+
+def _int(value):
+    """An address component as an integer, or ``None`` for a nanowell without an address."""
+    return int(value) if value is not None and not (isinstance(value, float) and math.isnan(value)) else None
+
+
+def _anchor_into(scene: ArrayScene, data, block: dict) -> None:
+    anchor, problem = fmc.read_well_anchor(data, scene.well, scene.timepoint)
+    scene.anchor = anchor
+    scene.anchorable = fmc.anchors_file(data) is not None and scene.status in fmc.ANCHORABLE
+    scene.anchor_text = fmc.status_text(scene.well, scene.timepoint, scene.status, str(block.get("reason") or ""),
+                                        block.get("origin_method"), anchor, problem)
+
+
+# ── the grid record, beside the figure ──────────────────────────────────────
+#: Lines of the grid record written beside the figure at most.
+RECORD_LINES = 24
+
+
+def record_lines(grid_blocks: dict, timepoint: str) -> list[tuple[str, str]]:
+    """The grid record of *timepoint* in full, then one line for every other timepoint: ``(text, kind)``, kind
+    ``head`` for the timepoint drawn, ``flag`` for a line that warns, ``plain`` otherwise."""
+    from util.nanowell_anchors import origin_phrase
+
+    block = grid_blocks.get(timepoint) or {}
+    head = [f"{timepoint}: {block.get('status', 'no record')}"
+            + (f" — origin from {origin_phrase(block.get('origin_method'))}"
+               f" ({block.get('origin_agreement') or 'single source'})" if block.get("origin_method") else ""),
+            f"pitch {_num(block.get('pitch_um'), 1)} µm · angle {_num(block.get('angle_deg'), 2)}° · "
+            f"overlap {_overlap(block.get('overlap_um'))} · {block.get('n_detected', '?')} detected of "
+            f"{block.get('roster_size', '?')}"]
+    rest = [template_line(block.get("template"))]
+    rest += [f"{tp}: {b.get('status', '?')}" + (f" — {b.get('reason')}" if b.get("reason") else "")
+             + (" — template suspect" if (b.get("template") or {}).get("suspect") else "")
+             for tp, b in grid_blocks.items() if tp != timepoint and isinstance(b, dict)]
+    out = [(text, "head") for text in head]
+    out += [(text, "flag" if "template suspect" in text or "floor moved" in text else "plain") for text in rest if text]
+    return out[:RECORD_LINES]
+
+
+def template_line(template) -> str:
+    """The grid record's empty-nanowell template, for a status line; a template flagged by the run says so."""
+    if not isinstance(template, dict) or not template.get("source"):
+        return ""
+    line = f"template: {template['source']}, {template.get('n_sites', '?')} of {template.get('candidates', '?')} sites"
+    drift = template.get("drift_vs_earliest")
+    if template.get("suspect") and isinstance(drift, (int, float)):
+        earliest = template.get("earliest_timepoint") or "the earliest timepoint"
+        line += (f" — its floor moved {math.exp(drift):.1f}-fold against {earliest}'s: most nanowells may hold "
+                 "cells, so counts and confluence here may be biased")
+    return line
+
+
+def _overlap(value) -> str:
+    """The grid record's tile overlap — ``[x, y]`` µm as the pipeline writes it, or one number — for a status line."""
+    parts = value if isinstance(value, (list, tuple)) else [value]
+    shown = [_num(v, 1) for v in parts]
+    if all(v == "?" for v in shown):
+        return "?"
+    return (shown[0] if len(set(shown)) == 1 else " × ".join(shown)) + " µm"
+
+
+def _num(value, places: int) -> str:
+    """A grid record's number for the status lines, or ``?`` where the record has none."""
+    return f"{value:.{places}f}" if isinstance(value, (int, float)) and not isinstance(value, bool) else "?"
+
+
+# ── where the view looks ─────────────────────────────────────────────────────
+def one_to_one(region, width_px: int, height_px: int, um_per_px: float) -> tuple[float, float, float, float]:
+    """*region* re-scaled about its centre to one image pixel (*um_per_px*) per figure pixel."""
+    left, top, right, bottom = region
+    cx, cy = (left + right) / 2, (top + bottom) / 2
+    half_w, half_h = width_px * um_per_px / 2, height_px * um_per_px / 2
+    return cx - half_w, cy - half_h, cx + half_w, cy + half_h
+
+
+def padded(extent, pad: float) -> tuple[float, float, float, float]:
+    left, top, right, bottom = extent
+    return left - pad, top - pad, right + pad, bottom + pad

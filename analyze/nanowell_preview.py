@@ -7,8 +7,8 @@ module is the window around it and the marks drawn on the montage.
 
 What is drawn comes from :func:`site_marks`, a pure function of the result, so the colours and what is
 labelled can be tested without a screen. How a mark becomes pixels — the state palette, the outline, the address
-and when there is room for it — is :mod:`ui.nanowell_sites`, shared with Review's Full montage window and Array QC
-figure, so a nanowell checked here before a run reads the same there after it.
+and when there is room for it — is :mod:`ui.nanowell_sites`, shared with the Array view of Review's
+Nanowells page, so a nanowell checked here before a run reads the same there after it.
 """
 
 from __future__ import annotations

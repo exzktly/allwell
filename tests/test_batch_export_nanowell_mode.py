@@ -86,11 +86,15 @@ def test_each_metric_is_the_page_s_figure_of_the_group_and_the_csv_holds_the_pag
 def test_the_array_map_writes_one_figure_per_well(panel, tmp_path, monkeypatch):
     p, _ctx = panel
     calls = _drawn(monkeypatch)
-    p._view_cb.setCurrentIndex(p._view_cb.findData("array_map"))
+    p._view_cb.setCurrentIndex(p._view_cb.findData("array"))
     p._run_batch()
     assert sorted(f.name for f in (tmp_path / "export").glob("*.png")) == [
         "nanowell_Drug_A_c_A01.png", "nanowell_Drug_A_n_A01.png"]
-    assert [(c["view"], c["well"]) for c in calls] == [("array_map", "A01"), ("array_map", "A01")]
+    assert [(c["view"], c["well"]) for c in calls] == [("array", "A01"), ("array", "A01")]
+    # Drawn as the lattice map, and its gallery record restores those layers, not whatever the page was left on.
+    from review.features.nanowell.state import ArrayLayers
+
+    assert p._figure_view.get("layers") == ArrayLayers.preset("map")
 
 
 def test_a_group_with_no_nanowell_table_is_skipped_and_says_so(panel, tmp_path):
@@ -105,12 +109,16 @@ def test_a_gallery_record_restores_the_figure_s_view_and_the_page_is_not_moved(p
     p, ctx = panel
     st = ctx.state.feature_slice("nanowell")
     st.view, st.metric = "distribution", "n"
-    p._figure_view = {"view": "array_map", "metric": "c", "axis": "time", "baseline": "earliest",
-                      "cohort": True, "well": "A01", "timepoint": "0h"}
+    from review.features.nanowell.state import ArrayLayers
+
+    page_layers = st.layers
+    p._figure_view = {"view": "array", "metric": "c", "axis": "time", "baseline": "earliest",
+                      "cohort": True, "well": "A01", "timepoint": "0h", "layers": ArrayLayers.preset("map")}
     seen = {}
 
     def capture(ctx_, tab):
-        seen.update(view=st.view, metric=st.metric, cohort=st.cohort, well=st.well, tab=tab)
+        seen.update(view=st.view, metric=st.metric, cohort=st.cohort, well=st.well, tab=tab,
+                    positions=st.layers.positions)
         return {}, {}
 
     import review.features.batch_export.base_panel as base
@@ -121,8 +129,9 @@ def test_a_gallery_record_restores_the_figure_s_view_and_the_page_is_not_moved(p
         p._capture_group_params(p._groups[0], None)
     finally:
         base._capture_params = original
-    assert seen == {"view": "array_map", "metric": "c", "cohort": True, "well": "A01", "tab": "Nanowells"}
-    assert (st.view, st.metric, st.cohort) == ("distribution", "n", False)
+    assert seen == {"view": "array", "metric": "c", "cohort": True, "well": "A01", "tab": "Nanowells",
+                    "positions": "lattice"}
+    assert (st.view, st.metric, st.cohort, st.layers) == ("distribution", "n", False, page_layers)
 
 
 def test_a_group_s_replicate_sets_stay_sets_and_its_solo_wells_stand_alone():
@@ -145,7 +154,7 @@ def test_an_array_map_at_a_timepoint_the_well_lacks_says_so(panel, tmp_path, mon
     calls = _drawn(monkeypatch)
     messages = []
     monkeypatch.setattr(nanowell_panel, "_render_message", lambda fig, text, gid: messages.append(text))
-    p._view_cb.setCurrentIndex(p._view_cb.findData("array_map"))
+    p._view_cb.setCurrentIndex(p._view_cb.findData("array"))
     p._tp_cb.addItem("48h", "48h")
     p._tp_cb.setCurrentIndex(p._tp_cb.findData("48h"))
     p._run_batch()

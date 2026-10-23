@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,13 +21,14 @@ from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
     METRICS, PER_NANOWELL, distribution_model, match_channel, metric_column,
 )
-from review.features.nanowell.full_montage_view import FullMontageWindow
-from review.features.nanowell.full_montage_view import open_full_montage as open_window
-from review.features.nanowell.image_compute import Crop, read_montage, site_crops, tile_boxes
+from review.features.nanowell import full_montage_compute as fmc
+from review.features.nanowell.array_compute import array_scene, one_to_one
+from review.features.nanowell.image_compute import Crop, read_montage, site_crops
 from review.features.nanowell.renderer import (
-    render_array_map, render_array_qc, render_distribution, render_message, render_position, render_site_detail,
+    ArrayDrawn, render_array, render_distribution, render_message, render_position, render_site_detail,
     render_trajectories,
 )
+from review.features.nanowell.state import IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS
 from review.features.nanowell.series_compute import long_format, site_metrics, site_series
 
 log = logging.getLogger("review")
@@ -256,23 +258,30 @@ def redraw(ctx) -> None:
         return
     if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
         return                                           # the right metrics are on their way
-    if st.view == "array_qc":
-        _draw_qc(ctx, st, fig, page_well(ctx))
-        st.hits = None
-    else:
-        metric, channel, note = resolve_metric(st.view, st.metric, ctx.state.channel.active_channel,
-                                               st.data.channels)
-        well = page_well(ctx)
-        tableless = [w for w in active_wells(ctx) if w not in set(st.data.wells)]
-        st.hits, model = draw_view(
-            fig, st.view, st.metrics, st.data, groups=page_groups(ctx), metric=metric, channel=channel,
-            axis=st.axis, timepoint=shown_timepoint(ctx)[1] if st.view == "position" else st.timepoint,
-            control=st.control, baseline=st.baseline, cohort=st.cohort, well=well,
-            well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
-            selected=[tuple(s) for s in st.selected_sites],
-            responding_above=st.thresholds.get(metric_column(metric, channel)))
-        if model is not None:
-            st.model = model
+    metric, channel, note = resolve_metric(st.view, st.metric, ctx.state.channel.active_channel, st.data.channels)
+    well = page_well(ctx)
+    tableless = [w for w in active_wells(ctx) if w not in set(st.data.wells)]
+    array = {}
+    if st.view == "array":
+        timepoint = page_timepoint(ctx, well)
+        if st.region_for != (well, st.layers.positions):         # another well, or the other frame: fit it
+            st.region, st.region_for = None, (well, st.layers.positions)
+        image, image_note = _array_image(ctx, st, well, timepoint)
+        array = {"layers": st.layers, "image": image, "image_note": image_note, "region": st.region}
+        note = " ".join(filter(None, [st.array_message, note]))
+    st.hits, model = draw_view(
+        fig, st.view, st.metrics, st.data, groups=page_groups(ctx), metric=metric, channel=channel,
+        axis=st.axis, timepoint=shown_timepoint(ctx)[1] if st.view == "position" else st.timepoint,
+        control=st.control, baseline=st.baseline, cohort=st.cohort, well=well,
+        well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
+        selected=[tuple(s) for s in st.selected_sites],
+        responding_above=st.thresholds.get(metric_column(metric, channel)), **array)
+    if isinstance(model, ArrayDrawn) or st.view == "array":
+        st.drawn = model
+        if model is not None and model.rendered is not None:
+            _want_tiles(ctx, {(tile, None) for tile in model.rendered.unread} | set(model.rendered.wants))
+    elif model is not None:
+        st.model = model
     from review.core.plot_style import apply_export_style_to_current
 
     apply_export_style_to_current(ctx, fig, canvas)
@@ -299,14 +308,17 @@ def resolve_metric(view: str, metric: str, active_channel, channels) -> tuple[st
 
 def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
-              note: str = "", tableless=(), selected=(),
-              responding_above: float | None = None) -> tuple[object, object]:
-    """Draw *view* (Distribution, Array map, Trajectories or Position) into *fig*: ``(hit map, model)``.
+              note: str = "", tableless=(), selected=(), responding_above: float | None = None,
+              layers: ArrayLayers | None = None, image=None, image_note: str = "",
+              region=None) -> tuple[object, object]:
+    """Draw *view* (Distribution, Array, Trajectories or Position) into *fig*: ``(hit map, model)``.
 
     **The one composition of each view**, called by the page and by Batch Export's Nanowells mode (tracker I4),
     so a saved batch figure is the page's figure for the same choices — the notes, the exclusions and the
     empty states included — and fixing one fixes both. *groups* is ``group -> wells``; *timepoint* is the
-    timepoint Position and *Along x: Wells* compare at; *well* and *well_timepoint* are what the Array map shows.
+    timepoint Position and *Along x: Wells* compare at; *well* and *well_timepoint* are what the Array view shows,
+    with *layers* (the lattice map when none are given — a batch figure), *image* under it and *region* where it
+    looks (:func:`draw_array`); its model is the ``renderer.ArrayDrawn``.
     The hit map is ``None`` for views with nothing to click. *responding_above* is the user's cut for *metric*
     (tracker I9), which the Distribution view states the fraction responding at.
     """
@@ -319,14 +331,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if again:
         note = " ".join(filter(None, [note, f"{', '.join(again)}: analysed again over every timepoint when a timepoint "
                                             "was added, so their earlier timepoints' numbers were rewritten."]))
-    if view == "array_map":
-        model = vc.map_model(metrics, data, well, well_timepoint, metric_column(metric, channel))
-        if model is None:
-            render_message(fig, f"{well or 'No well'} has no addressed nanowells and no measured pitch to place "
-                                f"them on, so there is no map to draw." if well else
-                           "Select a well with a nanowell table.", gid="nw-map-missing")
-            return None, None
-        return render_array_map(fig, model, label=_label(metric, channel), selected=selected, note=note), None
+    if view == "array":
+        drawn = draw_array(fig, metrics, data, well=well, timepoint=well_timepoint, metric=metric, channel=channel,
+                           layers=layers, image=image, image_note=image_note, region=region, selected=selected,
+                           note=note)
+        return (drawn.hits if drawn is not None else None), drawn
     if view == "trajectories":
         render_trajectories(fig, vc.trajectory_panels(metrics, wells, metric_column(metric, channel), cohort=cohort),
                             cohort=cohort, label=_label(metric, channel), time_source=data.time_source, note=note)
@@ -355,19 +364,19 @@ def _label(metric: str, channel: str | None) -> str:
 
 
 def page_wells(ctx) -> list[str]:
-    """The wells the page draws, in group order: the wells the Array map and Array QC can show."""
+    """The wells the page draws, in group order: the wells the Array view can show."""
     return [w for members in page_groups(ctx).values() for w in members]
 
 
 def page_well(ctx) -> str:
-    """The one well the Array map and Array QC show: the page's choice if it is drawn, else the first."""
+    """The one well the Array view shows: the page's choice if it is drawn, else the first."""
     st = _state(ctx)
     wells = page_wells(ctx)
     return st.well if st is not None and st.well in wells else (wells[0] if wells else "")
 
 
 def page_timepoint(ctx, well: str) -> str:
-    """The timepoint the Array map and Array QC show: the page's choice if the well has it, else its first."""
+    """The timepoint the Array view shows: the page's choice if the well has it, else its first."""
     st = _state(ctx)
     tps = st.data.timepoints(well) if st is not None and st.data is not None else []
     return st.timepoint if st.timepoint in tps else (tps[0] if tps else "")
@@ -376,7 +385,7 @@ def page_timepoint(ctx, well: str) -> str:
 def shown_timepoint(ctx) -> tuple[list, str]:
     """The timepoints the page's timepoint control offers for the current view, in order, and the one drawn.
 
-    The Array map and Array QC show one well, so they offer that well's timepoints and start at its first
+    The Array view shows one well, so it offers that well's timepoints and starts at its first
     (the seeding); Position and *Along x: Wells* compare wells at one timepoint, so they offer every
     timepoint and start at the latest (U13). One ``timepoint`` on the state serves all of them, so a choice
     made on one view carries to the next wherever that timepoint exists.
@@ -384,7 +393,7 @@ def shown_timepoint(ctx) -> tuple[list, str]:
     st = _state(ctx)
     if st is None or st.data is None:
         return [], ""
-    if st.view in ("array_map", "array_qc"):
+    if st.view == "array":
         well = page_well(ctx)
         return list(st.data.timepoints(well)), page_timepoint(ctx, well)
     tps = list(st.data.timepoints())
@@ -396,28 +405,327 @@ def shown_timepoint(ctx) -> tuple[list, str]:
     return tps, st.timepoint if st.timepoint in tps else (tps[-1] if tps else "")
 
 
-def _draw_qc(ctx, st, fig, well: str) -> None:
-    tp = page_timepoint(ctx, well)
-    if (well, tp) in st.montages:
-        montage, why = st.montages[(well, tp)]
-    else:
+# ── the Array view ───────────────────────────────────────────────────────────
+def batch_array_layers() -> ArrayLayers:
+    """The layers a figure drawn without the page's own is drawn with — a Batch Export figure: the lattice map,
+    with no image, since the image layers read a montage or the raw tiles per acquisition."""
+    return ArrayLayers.preset("map")
+
+
+def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, channel: str | None,
+               layers: ArrayLayers | None = None, image=None, image_note: str = "", region=None, selected=(),
+               note: str = "") -> ArrayDrawn | None:
+    """**The one composition of the Array view**, for the page and for Batch Export (through :func:`draw_view`).
+
+    *layers* says what is drawn (the lattice map when none are given); *image* is the run montage or the tile
+    store the caller holds for the well frame, *image_note* what it says about it (still reading, or why there is
+    none). ``None`` when there is nothing at all to draw, and the figure then says why.
+    """
+    layers = layers or batch_array_layers()
+    if not well:
+        render_message(fig, "Select a well with a nanowell table.", gid="nw-array-missing")
+        return None
+    scene = array_scene(metrics, data, well, timepoint, metric_column(metric, channel), positions=layers.positions,
+                        anchors=layers.anchor)
+    if scene.frame == "well" and image is not None and hasattr(image, "source"):
+        # A plate placed from a scan pattern records no tile size; the tile store read it from the first image.
+        width, height = image.source.tile_size_um
+        scene.tiles = [t if t.width_um and t.height_um else replace(t, width_um=width, height_um=height)
+                       for t in scene.tiles]
+    in_well = scene.frame == "well"
+    if not len(scene.sites) and not (in_well and ((layers.tiles and scene.tiles) or image is not None)):
+        says = f"{well} at {timepoint} has {scene.no_places}, so there is nothing to draw."
+        if in_well and layers.image != "off" and image_note:
+            says += f" {image_note}"
+        if not in_well and (layers.image != "off" or layers.tiles or layers.anchor):
+            says += (" The image, the tiles and the anchor are in the well frame, not on the lattice: switch "
+                     "Positions to Measured to draw them.")
+        render_message(fig, says, gid="nw-array-missing")
+        return None
+    return render_array(fig, scene, layers, label=_label(metric, channel), image=image, image_note=image_note,
+                        selected=selected, region=region, note=note)
+
+
+def _array_image(ctx, st, well: str, timepoint: str) -> tuple[object, str]:
+    """``(image, what to say about it)`` for the Array view's image layer at (*well*, *timepoint*): the run's
+    montage, read on a worker once; or the raw tiles, held in a store whose tiles are read as the view asks."""
+    kind = st.layers.image if not st.layers.lattice() else "off"
+    if kind != "tiles" or st.tile_key != (well, timepoint):
+        st.release_tiles()                               # another well or timepoint, or no tiles: let them go
+    if kind == "off":
+        return None, ""
+    if kind == "montage":
+        if (well, timepoint) in st.montages:
+            montage, why = st.montages[(well, timepoint)]
+            return montage, ("" if montage is not None else why)
         # The montage is a PNG of up to 4096 px in a zip: read it on a worker, and draw it when it arrives.
         data = st.data
-        _fetch(ctx, "montages", (well, tp), lambda: read_montage(data, well, tp),
+        _fetch(ctx, "montages", (well, timepoint), lambda: read_montage(data, well, timepoint),
                failed=lambda message: (None, f"The montage could not be read: {message}"))
-        montage, why = None, "Reading the montage…"
-    sites = st.metrics[(st.metrics["well"] == well) & (st.metrics["timepoint"] == tp)]
-    render_array_qc(fig, montage, tile_boxes(st.data, well, tp), sites, st.data.grids.get(well) or {},
-                    timepoint=tp, why=why, show_montage=st.qc_montage, show_overlay=st.qc_overlay)
+        return None, "Reading the montage…"
+    if st.tile_key is None:
+        st.tile_key = (well, timepoint)
+        source, st.tile_why = fmc.montage_source(st.data, well, timepoint)
+        st.tile_store = fmc.TileStore(source) if source is not None else None
+        if source is not None:
+            _load_tiles(ctx, [t.tile for t in source.tiles], level=None)
+    store = st.tile_store
+    if store is None:
+        return None, st.tile_why
+    source, failed = store.source, dict(store.failed)
+    total, read = len(source.tiles), store.loaded()
+    said = [f"Full resolution, from the raw tiles in {source.archive.name}."]
+    if read + len(failed) < total:
+        said.append(f"Reading tiles: {read} of {total}…")
+    placed = {str(t.get("tile")) for t in ((st.data.grids.get(well) or {}).get(timepoint) or {}).get("tiles") or []}
+    unfound = sorted(placed - {t.tile for t in source.tiles})
+    if unfound:
+        said.append(f"{len(unfound)} tile(s) have no image in {source.archive.name} and are not drawn: "
+                    f"{', '.join(unfound)}.")
+    if failed:
+        said.append(f"{len(failed)} tile(s) could not be read and are not drawn: "
+                    + "; ".join(f"{tile} ({why})" for tile, why in sorted(failed.items())))
+    return store, " ".join(said)
 
 
-def open_full_montage(ctx) -> FullMontageWindow | None:
-    """Open the Full montage window on the well and timepoint Array QC shows; ``None`` with nothing loaded."""
+def _want_tiles(ctx, wanted) -> None:
+    """Read what the view asked for, once: a read already on its way is not sent again."""
     st = _state(ctx)
-    well = page_well(ctx) if st is not None and st.data is not None else ""
-    if not well:
+    by_level: dict = {}
+    for tile, level in set(wanted) - st.tile_pending:
+        by_level.setdefault(level, []).append(tile)
+    for level, names in by_level.items():
+        _load_tiles(ctx, sorted(names), level=level)
+
+
+def _load_tiles(ctx, names, *, level) -> None:
+    """Read *names* into the tile store on a worker — their coarse levels, and *level* when it is finer — and
+    draw again when they arrive. A store moved away from since (another well, timepoint or dataset) is cancelled
+    at its next tile, and its result delivers to nothing."""
+    from core.worker_bridge import run_off_thread
+
+    st = _state(ctx)
+    store = st.tile_store
+    if store is None:
+        return
+    keys = {(name, level) for name in names}
+    st.tile_pending |= keys
+    total = len(names)
+
+    def job(reporter):
+        for k, name in enumerate(names, 1):
+            store.load([name], level=level)
+            reporter.progress(k, total)
+        return names
+
+    def done(_names) -> None:
+        if st.tile_store is store:
+            st.tile_pending -= keys
+            redraw(ctx)
+
+    def failed(message) -> None:
+        log.warning("Nanowells: tiles of %s could not be read: %s", store.source.well, message)
+        if st.tile_store is store:
+            st.tile_pending -= keys
+            st.tile_why = f"Some tiles could not be read: {message}"
+            redraw(ctx)
+
+    def progress(done_count, of) -> None:
+        # The first read of a whole well says how far it has got, a tenth at a time.
+        if level is None and st.tile_store is store and done_count < of and done_count % max(of // 10, 1) == 0:
+            redraw(ctx)
+
+    st.tile_bridges = st.tile_bridges[-8:] + [run_off_thread(job, on_done=done, on_failed=failed,
+                                                             on_progress=progress)]
+
+
+# ── the Array view's layers ──────────────────────────────────────────────────
+def set_layer(ctx, name: str, value) -> None:
+    """Turn one of the Array view's layers on or off, or choose its image, positions or colouring."""
+    st = _state(ctx)
+    allowed = {"image": IMAGES, "positions": POSITIONS, "colour": COLOURINGS}
+    if st is None or (name in allowed and value not in allowed[name]) or (
+            name not in allowed and name not in LAYER_SWITCHES) or getattr(st.layers, name) == value:
+        return
+    setattr(st.layers, name, value if name in allowed else bool(value))
+    if name == "positions" or (name == "anchor" and not value):
+        st.anchor_mode = False
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
+
+
+def apply_array_preset(ctx, name: str) -> None:
+    """Set every layer at once to one of the views the Array view replaced (``ArrayLayers.preset``)."""
+    st = _state(ctx)
+    if st is None or name not in ArrayLayers.PRESETS:
+        return
+    st.layers = ArrayLayers.preset(name)
+    st.region, st.anchor_mode = None, False
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
+
+
+def array_fit(ctx) -> None:
+    """Show everything drawn."""
+    st = _state(ctx)
+    if st is not None:
+        st.region = None
+        redraw(ctx)
+
+
+def array_um_per_px(ctx) -> float | None:
+    """The image's own pixel size, for *1:1*: the raw tiles' or the run montage's; ``None`` without an image."""
+    st = _state(ctx)
+    drawn = st.drawn if st is not None else None
+    if drawn is None or drawn.frame != "well":
         return None
-    return open_window(ctx, st.data, st.metrics, well, list(st.data.timepoints(well)), page_timepoint(ctx, well))
+    if st.layers.image == "tiles" and st.tile_store is not None:
+        return st.tile_store.source.pixel_size_um
+    montage = st.montages.get((page_well(ctx), page_timepoint(ctx, page_well(ctx))), (None, ""))[0]
+    return montage.um_per_px if st.layers.image == "montage" and montage is not None else None
+
+
+def array_one_to_one(ctx) -> None:
+    """One image pixel per figure pixel, about the centre of the view."""
+    st, um = _state(ctx), array_um_per_px(ctx)
+    if um is None or st.drawn is None:
+        return
+    st.region = one_to_one(st.drawn.region, *st.drawn.size_px, um)
+    redraw(ctx)
+
+
+#: A press that moves less than this many pixels before it is released is a click, not a drag.
+CLICK_SLOP_PX = 4
+#: One wheel notch zooms by this factor.
+WHEEL_STEP = 0.8
+
+
+def _array_press(st, event) -> None:
+    drawn = st.drawn
+    if drawn is None or event.button != 1 or event.inaxes is not drawn.ax:
+        return
+    ax = drawn.ax
+    st.press = (event.x, event.y, ax.get_xlim(), ax.get_ylim(), ax.transData.inverted().frozen(), _adding(event))
+
+
+def on_motion(ctx, event) -> None:
+    """A drag on the Array view pans it; the pixels follow at once and the image is drawn again on release."""
+    st = _state(ctx)
+    if st is None or st.press is None or st.view != "array" or st.drawn is None or event.x is None:
+        return
+    x, y, xlim, ylim, inverse, _adding_ = st.press
+    (px, py), (cx, cy) = inverse.transform((x, y)), inverse.transform((event.x, event.y))
+    st.drawn.ax.set_xlim(xlim[0] + px - cx, xlim[1] + px - cx)
+    st.drawn.ax.set_ylim(ylim[0] + py - cy, ylim[1] + py - cy)
+    canvas = ctx.widgets.get_or_none("_nw_canvas")
+    if canvas is not None:
+        canvas.draw_idle()
+
+
+def on_release(ctx, event) -> None:
+    """The end of a press on the Array view: a drag keeps where it panned to; a click sets the anchor (with *Set
+    anchor* on) or selects the nanowell under it, as on the Distribution figure."""
+    st = _state(ctx)
+    press = st.press if st is not None else None
+    if press is None:
+        return
+    st.press = None
+    if st.view != "array" or st.drawn is None or event.button != 1:
+        return
+    x, y, _xlim, _ylim, inverse, adding = press
+    ex, ey = (x, y) if event.x is None else (event.x, event.y)
+    if abs(ex - x) + abs(ey - y) > CLICK_SLOP_PX:
+        (x0, x1), (y1, y0) = st.drawn.ax.get_xlim(), st.drawn.ax.get_ylim()
+        st.region = (x0, y0, x1, y1)
+        redraw(ctx)
+        return
+    if st.anchor_mode and st.drawn.frame == "well":
+        set_anchor_at(ctx, *inverse.transform((x, y)))
+        return
+    _select(ctx, st.hits.nearest(st.drawn.ax, x, y, CLICK_RADIUS_PX) if st.hits is not None else None, adding)
+
+
+def on_scroll(ctx, event) -> None:
+    """The wheel zooms the Array view about the pointer."""
+    st = _state(ctx)
+    drawn = st.drawn if st is not None and st.view == "array" else None
+    if drawn is None or event.inaxes is not drawn.ax or event.xdata is None or not event.step:
+        return
+    st.region = fmc.zoom_region(drawn.region, WHEEL_STEP ** event.step, (event.xdata, event.ydata))
+    redraw(ctx)
+
+
+# ── the anchor ───────────────────────────────────────────────────────────────
+def anchor_controls(ctx) -> tuple[bool, bool, bool]:
+    """Whether *Set anchor*, *Clear anchor* and *Re-run anchored wells…* can do anything now: an anchor is set only
+    in the well frame, with the anchor layer on, where it can change the result (``ANCHORABLE``)."""
+    st = _state(ctx)
+    if st is None or st.data is None or st.view != "array":
+        return False, False, False
+    well = page_well(ctx)
+    timepoint = page_timepoint(ctx, well)
+    status = ((st.data.grids.get(well) or {}).get(timepoint) or {}).get("status")
+    can = (bool(well) and st.layers.anchor and not st.layers.lattice() and fmc.anchors_file(st.data) is not None
+           and status in fmc.ANCHORABLE)
+    anchor, _problem = fmc.read_well_anchor(st.data, well, timepoint) if can else (None, "")
+    return can, can and anchor is not None, bool(fmc.anchored_wells(st.data))
+
+
+def set_anchor_mode(ctx, on: bool) -> None:
+    """*Set anchor*: while on, a click on the Array view anchors the well there; a drag still pans."""
+    st = _state(ctx)
+    if st is not None:
+        st.anchor_mode = bool(on) and anchor_controls(ctx)[0]
+        _call(ctx, "_nw_refresh_controls")
+
+
+def _anchor_change(ctx, change, failure: str) -> None:
+    from util.nanowell_anchors import AnchorsFileError
+
+    st = _state(ctx)
+    path = fmc.anchors_file(st.data) if st is not None and st.data is not None else None
+    if path is None:
+        return
+    well = page_well(ctx)
+    try:
+        change(path, well, page_timepoint(ctx, well))
+        st.array_message = ""
+    except (AnchorsFileError, OSError) as exc:
+        st.array_message = f"{failure}: {exc}"
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
+
+
+def set_anchor_at(ctx, x_um: float, y_um: float) -> None:
+    """Anchor the shown well at the shown timepoint at the well-frame point clicked (``in/nanowell_anchors.json``):
+    the run snaps it to the nearest nanowell, so it need only land on the central square."""
+    from util.nanowell_anchors import set_anchor
+
+    _anchor_change(ctx, lambda path, well, tp: set_anchor(path, well, tp, (float(x_um), float(y_um))),
+                   "The anchor could not be saved")
+
+
+def clear_anchor(ctx) -> None:
+    from util.nanowell_anchors import clear_anchor as clear
+
+    _anchor_change(ctx, clear, "The anchor could not be removed")
+
+
+def rerun_anchored(ctx) -> bool:
+    """Open Analyze on this dataset limited to the anchored wells, each forced so every timepoint is located again
+    with its anchor (Incremental off: every well is forced anyway, and a remote nanowell run refuses it)."""
+    from review.core.analyze_handoff import open_in_analyze
+
+    st = _state(ctx)
+    wells = fmc.anchored_wells(st.data) if st is not None and st.data is not None else []
+    if wells and open_in_analyze(ctx, force_wells=wells, only_wells=wells, incremental=False):
+        return True
+    if st is not None:
+        st.array_message = "Analyze could not be opened on this dataset from here."
+        redraw(ctx)
+    return False
 
 
 def redraw_detail(ctx) -> None:
@@ -490,13 +798,21 @@ def _fetch(ctx, kind: str, key, job, *, failed) -> None:
 
 
 def on_click(ctx, event) -> None:
-    """A click on the Distribution figure: select the nanowell under it, add it with Shift (or ⌘/Ctrl), or
-    clear the selection on empty space. The plate selection is never touched."""
+    """A press on the figure. On the Distribution figure: select the nanowell under it, add it with Shift (or
+    ⌘/Ctrl), or clear the selection on empty space. On the Array view a press starts a drag or a click, which
+    :func:`on_release` tells apart. The plate selection is never touched."""
     st = _state(ctx)
+    if st is not None and st.view == "array":
+        _array_press(st, event)
+        return
     if st is None or st.hits is None or event.inaxes is None or event.button != 1:
         return
-    site = st.hits.nearest(event.inaxes, event.x, event.y, CLICK_RADIUS_PX)
-    adding = _adding(event)
+    _select(ctx, st.hits.nearest(event.inaxes, event.x, event.y, CLICK_RADIUS_PX), _adding(event))
+
+
+def _select(ctx, site, adding: bool) -> None:
+    """Select *site* (``None``: empty space), or with *adding* add it to the selection or take it out."""
+    st = _state(ctx)
     current = [list(s) for s in st.selected_sites]
     if site is None:
         if adding:
@@ -591,14 +907,6 @@ def set_view(ctx, view: str) -> None:
 
 def set_cohort(ctx, on: bool) -> None:
     _set(ctx, "cohort", bool(on))
-
-
-def set_qc_montage(ctx, on: bool) -> None:
-    _set(ctx, "qc_montage", bool(on))
-
-
-def set_qc_overlay(ctx, on: bool) -> None:
-    _set(ctx, "qc_overlay", bool(on))
 
 
 def set_metric(ctx, metric: str) -> None:

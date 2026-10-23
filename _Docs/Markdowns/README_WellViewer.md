@@ -240,7 +240,7 @@ grid record says why; one whose lattice is a different kind from the well's othe
 earlier run kept, when it is added incrementally — is refused by name. A
 square lattice must sit within 40° of the image's axes: turned nearer 45° its axis cannot be told and the timepoint
 is refused with the angle. On a square lattice a nanowell's ring is the number of lattice steps along the larger of
-its two coordinates, and the Nanowells page lays each timepoint's array map out on the lattice its record names.
+its two coordinates, and the Nanowells page's Array view lays each timepoint's nanowells out on the lattice its record names.
 While the mode is on, the segmentation method is set to label-free and locked (your choice returns when the mode
 is switched off). Run refuses to start, naming the fix, when a number is out of range or the Phase channel is
 unmarked (unless channel auto-detection will name it), and, for a single run with auto-detection off, when
@@ -365,8 +365,9 @@ with the rest of its plate's and names, in the run log, any well more than 5 % o
 such a well's measurement deserves a look.
 
 **Setting the anchor by hand.** When the run cannot find a well's central square, you can point at it. In
-Review, open the Nanowells page, choose *Array QC*, pick the well and timepoint, and press **Full montage…**.
-Zoom to the square, turn on **Set anchor**, and click it. The click is saved in `in/nanowell_anchors.json`
+Review, open the Nanowells page, choose the *Array* view, pick the well and timepoint, and set **Image** to
+*Full resolution* (or choose *Layers → Show as → Full montage*). Zoom to the square, turn on **Set anchor**, and
+click it. The click is saved in `in/nanowell_anchors.json`
 beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
 Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
 run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
@@ -4831,8 +4832,8 @@ use them.
 
 **Controls**
 
-- **View** — *Distribution* (the beeswarm, described below), *Array map*, *Trajectories*, *Position* and
-  *Array QC*. Each view shows only the controls it uses.
+- **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories* and *Position*. Each view
+  shows only the controls it uses.
 - **Metric** — what each dot is: cell count, confluence, brightness (mean per-cell intensity), site signal
   (integrated intensity above the empty nanowells' background), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
@@ -4856,8 +4857,8 @@ use them.
   draws it as a dashed line and states each group's fraction responding — the mean of its wells' fractions —
   at the latest timepoint, or at the timepoint drawn along wells. With the field empty no fraction is
   computed, and the footer says so: there is no default.
-- **Well** and the **Timepoint** slider (on *Array map* and *Array QC*) — the one well drawn, from the wells
-  selected, and its timepoint; these views start at the well's first timepoint. One timepoint is shared by
+- **Well** and the **Timepoint** slider (on *Array*) — the one well drawn, from the wells selected, and its
+  timepoint; the view starts at the well's first timepoint. One timepoint is shared by
   every view, so a timepoint chosen on one carries to the next wherever it exists.
 
 **Reading the figure**
@@ -4886,12 +4887,6 @@ use them.
 
 **The other views**
 
-- **Array map** — one well at one timepoint, every nanowell of the array in its place on the lattice, coloured
-  by the metric (the colour bar names it). Nanowells keep their place as you move the slider, even if the
-  plate went back on the stage rotated. A nanowell without a value is a grey outline, never a colour: hatched
-  where it was occluded, dashed where clipped, dotted where it was not seen; a cross marks a fused nanowell and
-  the square marks the central one. The footer counts the nanowells by state. Click a nanowell to open its
-  site detail, as on the beeswarm. A well whose grid record has no pitch says so instead of drawing a map.
 - **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
   its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
   a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.
@@ -4899,25 +4894,42 @@ use them.
   interquartile band, and below it the share of each ring's nanowells without a value — including those not
   seen at that timepoint. It checks for an edge effect, and makes no test. A selected well with no addressed
   nanowells at the timepoint is named in the footer.
-- **Array QC** — the well's stitched phase montage at the chosen timepoint, each tile's outline coloured by how
-  it was placed (green on the lattice, blue by overlap, amber where the acquisition record put it), with its
-  registration residual. Occluded and clipped nanowells are outlined at their measured positions. Beside the
-  image are the grid record of this timepoint (status, how the origin was found, pitch, angle, overlap,
-  nanowells detected of the roster), the empty-nanowell template the counts were divided by, and the status of
-  every other timepoint. A template the run found far from the well's earliest one is shown in amber: most
-  nanowells there may hold cells, and that timepoint's counts and confluence may be biased. A tile whose size the acquisition
-  record does not give is marked at its corner, and the figure says so. The montage is read in the
-  background; the figure says *Reading the montage…* meanwhile.
-  **Show: Montage / Overlay** turn the image and the drawn layer (tile outlines, their labels, the nanowell
-  marks) on and off separately: the overlay alone on an empty frame, or the image with nothing over it. Both
-  start on, and the page remembers the choice with its other settings.
-  **Full montage…** opens the same well at full resolution in a window of its own, drawn from the raw images
-  where the run placed each tile, with the tile outlines, every nanowell outlined in the same colours Test
-  detection uses (dashed purple on a seam) with its address once you zoom in far enough, and the anchor set by hand.
-  Drag to pan, scroll to zoom, *Fit* for the whole well, *1:1* for one image pixel per screen pixel; the detail
-  sharpens as the tiles in view are read. Where tiles overlap, the later tile is shown, not a blend. **Set
-  anchor**, **Clear anchor** and **Re-run anchored wells…** are described under *Setting the anchor by hand*
-  above. It needs the dataset's `in/` folder beside its results.
+- **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
+  a QC picture and a full-resolution montage each did:
+  - **Image** — what is drawn under the nanowells: *Off*; *Run montage*, the downsampled stitched phase
+    montage the run kept (read in the background: the footer says *Reading the montage…* meanwhile); or *Full
+    resolution*, drawn from the raw images in `in/` where the run placed each tile, sharpening as the tiles in
+    view are read (the footer says how many are read, and names any that could not be). Where tiles overlap,
+    the later tile is shown, not a blend. Full resolution needs the dataset's `in/` folder beside its results.
+  - **Positions** — *Measured*: each nanowell where the run found it, over the image. *Lattice*: each
+    nanowell in its place on an ideal lattice of the well's pitch, so it keeps its place as you move the
+    slider, even if the plate went back on the stage rotated. The image, the tiles and the anchor have no
+    place on the lattice, so they are greyed there, and the figure says so. A well whose grid record has no
+    pitch says so instead of drawing a lattice.
+  - **Layers** — *Nanowells*, either *filled by the metric* (the colour bar names it; a nanowell without a
+    value is a grey outline, never a colour: hatched where it was occluded, dashed where clipped, dotted where
+    it was not seen) or *outlined by state* in the colours Test detection uses (blue measured, green empty,
+    amber occluded, red clipped, grey not seen). Either way a nanowell on a tile seam is dashed in purple and
+    the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
+    large enough. *Tiles* outlines each tile, coloured by how it was placed (green on the lattice, blue by
+    overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
+    record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
+    hand and says how the timepoint was addressed (and, where it was not, how to anchor it), and offers **Set
+    anchor**, **Clear anchor** and **Re-run anchored wells…** (see *Setting the anchor by hand* above). *Run
+    record* lists beside the figure the grid record of this timepoint (status, how the origin was found,
+    pitch, angle, overlap, nanowells detected of the roster), the empty-nanowell template the counts were
+    divided by, and the status of every other timepoint; a template the run found far from the well's
+    earliest one is shown in amber: most nanowells there may hold cells, and that timepoint's counts and
+    confluence may be biased.
+  - **Layers → Show as** sets every layer at once: *Array map* (lattice places filled by the metric), *Array
+    QC* (the run montage, the tiles and the nanowells by state, with the run record) or *Full montage* (full
+    resolution, nanowells by state with their addresses, and the anchor).
+
+  Drag to pan, scroll to zoom about the pointer, **Fit** for the whole well, **1:1** for one image pixel per
+  screen pixel. Click a nanowell to open its site detail, as on the beeswarm (with **Set anchor** on, a click
+  sets the anchor instead). The footer counts the nanowells by state. The page remembers the layers with its
+  other settings; a page saved on the old *Array map* or *Array QC* view opens on the Array view with the
+  layers that view drew.
 
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
 brightness and site signal against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
@@ -5742,7 +5754,8 @@ dataset's) and **Fixed cohort** as on the page — each greyed where it does not
 reach the view. **Responding above** asks for a number for each ticked metric,
 filled in from the page's where you set one there, and the run will not start
 while any is empty. Each group writes one figure per metric, drawn exactly as the
-page draws it (the Array map, which shows one well, writes one figure per well),
+page draws it (the Array map — the page's Array view as *Show as → Array map* draws it, with no image —
+shows one well, so it writes one figure per well),
 and one summary CSV: for each metric, well and timepoint the median, quartiles,
 the fraction responding above that metric's number (and the number itself),
 the fraction occupied, the nanowells used, and those excluded by reason. A metric

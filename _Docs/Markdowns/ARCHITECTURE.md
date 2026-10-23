@@ -958,9 +958,9 @@ allwell/
 │   ├── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
 │   ├── nanowell_sites.py       ← how a nanowell is drawn over a montage: the state palette, the
 │   │                              fused colour, the outline and its address, the greyscale image.
-│   │                              Analyze's Test detection and Review's Full montage window both
-│   │                              paint through it (Array QC takes its colours), so a site reads
-│   │                              the same before a run and after it. Part of the removable
+│   │                              Analyze's Test detection paints through it and the Nanowells
+│   │                              page's Array view draws with its colours, widths and label
+│   │                              rule, so a site reads the same before a run and after it. Part of the removable
 │   │                              Nanowells feature
 │   ├── local_storage_view.py   ← StorageDialog, behind the title bar's hard-drive button: the
 │   │                              view over core/local_storage.py, split as phone layout is
@@ -4142,10 +4142,12 @@ CSV.
 
 **Nanowells mode** (`nanowell_panel.py`) draws each figure through the
 Nanowells page's own composition, `nanowell/controller.draw_view` — the one
-function the page's redraw calls for Distribution, Array map, Trajectories and
+function the page's redraw calls for Distribution, Array, Trajectories and
 Position, notes and empty states included — and `resolve_metric` for the
 channel and per-nanowell fallbacks. Per export group it writes the chosen view
-for each ticked metric (the Array map, which draws one well, once per well) and
+for each ticked metric (the Array view, which draws one well, once per well, as
+its lattice map — `ArrayLayers.preset("map")`, no image, since the image layers read
+a montage or the raw tiles per acquisition) and
 one CSV of `distribution_compute.wells_summary`, the per-well summary prepared as
 the Distribution view prepares it (per-nanowell metrics at each well's first
 timepoint, the fixed cohort when ticked), with the exclusions spelled out by
@@ -5041,7 +5043,7 @@ Cross-cutting controllers (in `review/core/`):
 | `core/tab_controller.py` | `on_tab_change` dispatch, tab history, scope flush, and the repaint that follows a restore. That last one is a seam worth naming: `on_tab_change` draws the tab and **then** drains any view-state pending for it — deliberately, because the apply step validates its values against combo items the draw has populated — which leaves the figure drawn from pre-restore defaults, one step behind controls that have already moved. `redraw_after_restore` closes that gap, and it resolves the tab through the feature registry rather than from a list: it was an `if/elif` over three tab names while six tabs own a block, and the three it did not name were simply not repainted. Response Curves was one — its Series button came back naming the split the user had saved, over curves drawn as a single undivided set, and the first thing that reached a redraw was the user toggling a series off and on. Heat Map was another. Distribution still goes through `redraw_app`, the call the rest of the app makes for that scope, and the Image Table is still not repainted (it reads images off disk and renders only on *Generate*; the restore marks it stale instead) — both rows with the reason written down rather than absences, and `tests/test_restore_repaints_the_tab_it_restored.py` states the rule against the registry. |
 | `core/channel_state_controller.py` | Channel-state machinery: `recalculate_threshold`, `set_active_channel`, `update_channel_selector`, `refresh_metric_combo_for_channel`. **Ordering contract:** `recalculate_threshold` publishes the freshly-detected `smfish_channels` set *before* it calls `update_channel_selector`, because that call ends in the Property-combo refresh and the combo reads the set to decide whether `smFISH Count` is selectable — publishing it afterwards leaves the item greyed out against count columns that already exist. Every combo asks that question through `domain/metric_registry.channel_supports_smfish`, which case-folds both sides: the global combo passes the normalised token (`gfp`) while the scatter, stats, and batch-export combos pass the displayed label (`GFP`), and a raw membership test disabled the item permanently on the upper-case side. **No plate-wide range is computed.** `ChannelState` holds no min / max of the active column, and `_recalculate_threshold` scans no column for one: such a scan is a read of every well the row cache does not hold, on every open and channel switch, and nothing in the app would read its answer (the threshold slider takes its range elsewhere). The gating hydration and `cell_gating.load_cell_areas` in `_recalculate_threshold` run whether or not the column has values. |
 | `core/selection_controller.py::note_group_visibility_changed` | Showing or hiding a replicate set changes which computed results are *drawn*, not what any of them is — ``active_replicate_sets`` filters hidden sets out before anything is computed, and no cache key carries ``hidden``. So a visibility toggle keeps the plate's statistics instead of discarding them, which on twelve groups is 312 cached entries kept per toggle rather than recomputed. It is reached through ``rebuild_all(ctx, invalidate=False)`` rather than beside it: the toggle still needs the Replicates panel, the plate map and the visible redraws that ``rebuild_all`` performs, and an earlier version that notified and then called ``rebuild_all()`` separately had its statistics thrown away by that call's first line — the change bought nothing while its test, which drove the notifier rather than the toggle, stayed green. The refresh has to *know* not to invalidate; being told separately is not the same thing. |
-| `core/analyze_handoff.py` | `open_in_analyze` — Review's one door into the Analyze pane: hand the shell the loaded dataset's root (`dataset_root`, one level above the `out/` Review loads), its recorded settings, *Incremental*, and the wells to force and to limit the run to. Reached through the top-level window's duck-typed `_open_dataset_in_analyze`, so a build without an Analyze pane does nothing. In `core/` because three features use it — Home's *Finish this run*, QC triage's *Re-run wells*, the Nanowells Full montage's *Re-run anchored wells* — and a feature may not import another. |
+| `core/analyze_handoff.py` | `open_in_analyze` — Review's one door into the Analyze pane: hand the shell the loaded dataset's root (`dataset_root`, one level above the `out/` Review loads), its recorded settings, *Incremental*, and the wells to force and to limit the run to. Reached through the top-level window's duck-typed `_open_dataset_in_analyze`, so a build without an Analyze pane does nothing. In `core/` because three features use it — Home's *Finish this run*, QC triage's *Re-run wells*, the Nanowells Array view's *Re-run anchored wells* — and a feature may not import another. |
 | `core/record_sync.py` | `resync_run_check` — re-read the sidecar's `run_check` block, the one part of a loaded dataset's sidecar Review does not own (the pipeline writes it at the end of a run, the Datasets **Validate & Repair** tool at the end of every scan). It takes that key and nothing else, because the rest of the sidecar holds user-side blocks whose in-memory copy may carry unsaved edits, and it returns whether the record changed so a caller repaints only when something arrived. In `core/` rather than in Home, the page that reports the record: what it re-reads is dataset state, and its second caller is `tab_controller`'s pane handler, which cannot import a feature. A sidecar that has gone unreadable keeps the record already loaded; one that is readable and no longer carries the block drops it, since reporting a stale record as current is the failure this exists to avoid. |
 | `core/csv_export.py` | **The one CSV Save-As dialog**, plus the plain writer beside it. `ask_save_csv` roots the picker at the open dataset, parents it to the window and offers one filter; `write_csv_rows` is the open / write / status / `OSError` block that four export paths had each written out with their own wording. In `core/` because it knows nothing about plots, batches or metrics, so a feature wanting to save a table need not import another feature at module scope. **Every CSV export in the app goes through it** — the export service's seven, the Spatial summary and the Multivariate feature matrix — and that is the point rather than a detail: while those kept private copies there were two "all files" filters (`(*)` here, the DOS-era `(*.*)` in the service, which Qt honours literally on some platforms and which then hides every extensionless name behind a label saying it shows everything), two answers to whether the picker starts beside the dataset, and two to whether it suggests a filename. Only the *writers* stay with their callers, because a dict-writer's schema is its field names. `tests/test_one_csv_save_dialog.py` fails on a second CSV `getSaveFileName` anywhere else; it resolves module-level string constants, because its first version read only the literals inside each call and walked past the one site that held its filter in a constant — the site that had actually shipped. |
 | `core/plot_orchestrator.py` | Default-scope fan-out (line + distribution + heat map). Per-tab scopes (bar / scatter / scatter-agg) have their own entry points that consume scope-specific state. Line, Distribution and Heat Map are drawn only when their tab is **on screen**, resolved through `fold_change_scopes.known_visible_scopes` so the unfocused pane of a Split View still counts as visible. A hidden figure is added to `PlotState.fc_dirty_scopes` — the set `flush_dirty_scopes` already drains from the tab-change handler — rather than to a second flag of its own; all three are registered redraw scopes with `on_activate` hooks that re-enter this fan-out on show, so there are two routes to the repaint and one record of whether it is owed. Drawing the line plot whatever is in front would, with Home in front after a load, be a pass over every well for a figure nobody sees (measured at 17 s of a 32 s open of an 8-well plate of large wells). The visibility test **fails open**: `known_visible_scopes` answers `None` when the tab on screen cannot be told (a lookup that throws, an unpopulated scope registry) and an empty set only when a known non-plot tab is in front — `visible_scope_names` returns an empty set for both, which is why it is not the one consulted. Unknown draws everything built: a redundant redraw costs time, a skipped one a stale figure. `redraw_scopes_after_load` leaves the default scope's mark as this fan-out set it. Note that ``redraw_scopes_after_load`` matches the default scope **by name**: ``line``, ``distribution`` and ``heatmap`` all register the same ``_redraw_app_scope`` callable, so an identity test on ``scope.redraw`` cleared the dirty marks of the two hidden ones and left them neither drawn nor owed. |
@@ -9861,7 +9863,7 @@ the task after an incremental run merges its kept timepoints — takes the first
 its own as the earliest, whichever run measured it, and records each later timepoint's `drift_vs_earliest` (`|ln|` of
 the ratio of ratios) and `earliest_timepoint`. Beyond a factor of two (`TEMPLATE_DRIFT_LIMIT`; a 1.6x exposure moved
 it 0.002, noise up to 0.15 at most 0.009, a 2.5 px defocus 0.17) it is `suspect`, a note says the counts may be
-biased, and Array QC shows it. The pass is recomputed whole each time, so a kept block is never flagged twice or
+biased, and the Array view's run record shows it. The pass is recomputed whole each time, so a kept block is never flagged twice or
 against a stale earliest. The measurement itself is not changed.
 
 **Bringing a site to the template's levels.** Before a site is divided, its pixels are taken as
@@ -9984,7 +9986,7 @@ one image header (`nanowell_task._pattern_record`). The run places such a record
 line short — or one whose surplus fields fell below the grid — would be measured as a smaller complete grid. A
 well short of the grid is `incomplete_grid`, one with more fields than it holds `bad_grid`. Nothing is written into the input folder; registration corrects the nominal positions as it does recorded ones;
 there are no acquisition times, so Review times timepoints from their labels, and `collect` gives each timepoint
-the pattern's pixel size (no tile size, so Array QC marks corners). `--nanowell_format custom` takes
+the pattern's pixel size (no tile size, so the Array view's tiles layer marks corners). `--nanowell_format custom` takes
 `--nanowell_diameter_um` and `--nanowell_pitch_um` (`NanowellSettings.custom`); only a custom format adds them to
 `NanowellSettings.key()`, so a known format's grid-record key is unchanged. The `pattern` option is added only
 when given, for the same reason. All six options are in `util.settings_digest.KEYED_ON`, so a re-run with a
@@ -10197,7 +10199,7 @@ form shows the diameter and pitch rows only for Custom) and **warnings** are log
 expected seam-site count from `ownership_report` laid over an ideal lattice at several phases; an upper
 bound, since the array may be smaller than the tiles). **Test detection** opens a non-modal window that
 runs `pipeline.nanowell_preview.preview_timepoint` off the GUI thread through `core.worker_bridge.run_off_thread`,
-the bridge Review's Full montage window reads its tiles through — and, from that thread, in a **child process**
+the bridge Review's Array view reads its full-resolution tiles through — and, from that thread, in a **child process**
 (`services/nanowell_preview_job.run_preview`), never in the app's own. Counting cells loads Cellpose and Torch, and
 on a Windows install whose Torch DLLs clash with libraries already loaded, `import torch` kills the process
 natively (`0xC0000138`, *ordinal not found*) where no `except` can catch it. From source the child is the module
@@ -10228,7 +10230,7 @@ rather than the "cells" one. A segmenter that loads and then fails is still a me
 location and drops the sites. What is drawn is `site_marks` of the result, a pure function in continuous
 micrometre/pixel-size coordinates; the pixels are painted by `ui/nanowell_sites.paint_site` (see *Drawing a
 nanowell* below), the pixmap side is capped and "Fit" follows the window. Each site's `q,r` text is
-`util.nanowell_address.coordinate_text`, which Review's Full montage window writes too. The square's edge angle and the two thresholds are
+`util.nanowell_address.coordinate_text`, which Review's Array view writes too. The square's edge angle and the two thresholds are
 read by the analysis (`check_orientation`'s `square_to_axis_deg`, `site_state`'s cut-offs), not only
 validated and keyed.
 
@@ -10410,11 +10412,8 @@ not guessed for the well): `q`
 east, `r` 60° (90° on a square lattice) counter-clockwise from east on screen with y down, the central site at
 the origin — the pipeline's convention, which `tests/test_nanowell_page_views.py` checks against a real run by fitting a
 rotation from the lattice positions to the measured ones (no reflection, the grid record's angle, residuals of
-localisation size). The **Array map** (`map_model`, `render_array_map`) draws lattice positions rather than
-measured ones (U4), so a nanowell keeps its place as the timepoint moves even when the plate was put back
-rotated; measured positions belong to Array QC. A nanowell without a value is a grey outline styled by its
-state (`_STATE_STYLE`), never a colour of the scale; the map's `HitMap` makes it clickable like the beeswarm,
-and a well whose grid record has no pitch is a `render_message` figure saying so. **Trajectories**
+localisation size). `map_model` places one well's roster at one timepoint on that lattice, for the Array view's
+*Lattice* positions; a well whose grid record has no pitch has none. **Trajectories**
 (`trajectory_panels`) are a line per nanowell over time and a median per occupancy class at baseline; a metric
 with one value per nanowell is greyed in the Metric list there, and a saved one is drawn as cell count with a
 footer line saying so. **Position** (`position_series`) is the metric's median and interquartile range by ring,
@@ -10424,57 +10423,93 @@ one, each well's kind at the timepoint passed by `controller.draw_view`), not fr
 for a roster nanowell not seen at a timepoint carry the address and no ring — reading the column dropped them,
 so a ring nobody saw vanished instead of reading as wholly excluded. A drawn well with no addressed nanowell at
 the timepoint is named in the footer. `numeric_values` reads the
-occupancy class as its lower bound (3+ as 3) for all three. **Array QC** (`render_array_qc`) draws
-`image_compute.read_montage` — the run's downsampled phase montage, `<well>_<timepoint>_montage.png` in
-`<well>_out.zip`, placed by the grid record's `montage_origin_um` and `montage_um_per_px` — with
-`tile_boxes`, each tile's placement coloured by its `source` (lattice, overlap, recorded) and labelled with
-its residual. A tile size comes from the acquisition record's `tile_size_px` and `pixel_size_um`; without them
-the tile's corner is marked and the figure says the outline is unknown, never a guessed rectangle. The grid
-record of every timepoint is listed beside the image. The montage (a PNG of up to 4096 px) is read on a
-worker; the figure says *Reading the montage…* until it arrives, and the last `MONTAGES_KEPT` are kept.
-*Show: Montage / Overlay* (`state.qc_montage`, `qc_overlay`, persisted with the page's settings and on unless
-saved off) pass `show_montage` / `show_overlay` to the renderer: without the montage the axes keep its extent, so
-the overlay sits where it would over the image (`tests/test_array_qc_toggles.py`).
+occupancy class as its lower bound (3+ as 3) for all three.
 
-**Full montage.** Array QC's **Full montage…** button (`controller.open_full_montage`) opens a non-modal window
-(`full_montage_view.FullMontageWindow`, registered as `_nw_full_montage`, one at a time) on the well and
-timepoint the page shows. It draws the registered montage at any resolution from the raw tiles
-(`full_montage_compute`, Qt-free): every tile from `in/<well>.zip` (the member `image_compute._member_for`
-finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the record's order with a later tile
-covering an earlier one in the overlap — no blending, so every pixel is a pixel of one real image — under one
-well-wide stretch (1st–99.5th percentile, as `build_montage` stretches). Each tile is held as a pyramid of 2×
-means: the levels at a quarter resolution and coarser for every tile once read, the two finest only within
-`FINE_BYTES_KEPT` bytes, each (tile, level) apart and never one the current view draws (evicting it would have the view ask for it again, trading tiles for ever), so a hundred-tile well is not held whole. `TileStore.render` draws each output pixel
-from the finest held level no finer than one output pixel and reports the tiles it wants finer (`wants`) or has
-never read (`unread`); the canvas asks the window to read those on a worker (`core.worker_bridge`) and draws
-again when they arrive, so painting never waits on a read, and a result that arrives after the window is gone
-delivers to nothing. Tiles are read one at a time: one that cannot be read is recorded in `TileStore.failed`,
-named in the status line, not drawn and never asked for again, and the rest are still read. A plate placed from a
-scan pattern has no recorded tile size, so it is read from the first tile's TIFF header. Moving to another
-timepoint or closing the window cancels the store's reads at their next tile and lets its pixels go. *Set anchor*
-is offered only where an anchor can change the result (`ANCHORABLE`: `ok` or `unaddressed`). Over the pixels: tile outlines, each nanowell at its measured position drawn by
-`ui/nanowell_sites.paint_site` — coloured by state, dashed in the fused colour where the run recorded it fused
-(`SiteOverlay.fused`, from the table's `fused` column), with its `q,r` address where it is drawn large
-enough — and the anchor. Drag pans, the wheel zooms about the
-pointer, *Fit* and *1:1*. With *Set anchor* on, a click (not a drag) writes the well's anchor at this timepoint;
-*Clear anchor* removes it; *Re-run anchored wells…* hands the dataset to Analyze limited to the anchored wells,
-each forced and with Incremental off (a remote nanowell run refuses Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one door into Analyze, shared by
-Home's *Finish this run*, QC triage and this window. The status line states the timepoint's grid status, its
-reason, how it was anchored, and whether the anchor set has been used yet. `tests/test_nanowell_full_montage.py`
-asserts pixel values on four constant-valued tiles with one bright pixel only full resolution shows, and drives
-the real page's button, canvas click and re-run.
+**The Array view** is one well at one timepoint, every element of it a layer that is on or off, drawn by one
+renderer whatever is on, so a nanowell reads the same — and is clickable, pannable and zoomable — under every
+combination. Three presets set every layer at once (`state.ArrayLayers.preset`): `map` (lattice places filled by
+the metric, no image), `qc` (the run montage, the tiles, the nanowells by state, the run record) and `full` (the
+raw tiles at full resolution, the nanowells by state with their addresses, the anchor). A saved page whose view
+is one of the older keys `array_map` or `array_qc` opens on `array` with the matching preset
+(`state._layers_from`, which carries a saved `qc_montage` / `qc_overlay` into `image` and `tiles` /
+`nanowells`).
 
-**Drawing a nanowell.** Test detection (before a run) and the Full montage window (after it) show the same
-nanowells over the same kind of montage, and a person checks one against the other, so both paint through
-`ui/nanowell_sites.py` and Array QC's figure takes its colours from it. `STATE_COLOURS` is keyed on the state the
+- **What is on.** `ArrayLayers` (persisted with the page's settings as `layers`; `from_config` takes only
+  values it knows): `image` — `off`, `montage` (the run's downsampled phase montage, `image_compute.read_montage`:
+  `<well>_<timepoint>_montage.png` in `<well>_out.zip`, placed by the grid record's `montage_origin_um` and
+  `montage_um_per_px`, read on a worker, the last `MONTAGES_KEPT` kept) or `tiles` (full resolution, below);
+  `positions` — `measured` (the well frame, where the run found each nanowell) or `lattice` (`map_model`'s
+  places, U4); `colour` — `metric` or `state`; and the switches `nanowells`, `addresses`, `tiles`, `anchor`,
+  `record`. The image, the tiles and the anchor are in the well frame and have no place on the lattice, so on
+  *Lattice* they are greyed in the controls, not drawn, and the footer (or the empty-state message) says so.
+- **One scene, one renderer.** `array_compute.array_scene` builds the `ArrayScene` — the nanowells drawn
+  (`ArraySites`: position, radius, value, state, fused flag, `(well, q, r)`, the `q,r` text from
+  `util.nanowell_address.coordinate_text`; an unaddressed nanowell carries `None` and is drawn but never
+  clickable), the roster's counts by state, the nanowells with no measured position (counted, not drawn), why a
+  timepoint has no addresses, the tiles (`image_compute.tile_boxes`), the grid status, the anchor and its status
+  text (`full_montage_compute.status_text`) and the run record (`record_lines`, with `template_line`). One
+  renderer draws it, `renderer.render_array`: the region is widened to the axes' shape (`fit_region`), so pixels
+  stay square; the image is drawn for exactly that region and those pixels; the nanowells are filled by the
+  metric (`MAP_CMAP`, with a colour bar; a nanowell without a value is a grey outline styled by its state,
+  `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour`, a fused one
+  dashed in `FUSED_COLOUR` either way, at `OUTLINE_WIDTH_PX`, the central nanowell boxed; addresses in
+  `LABEL_COLOUR` only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most
+  `MAX_ADDRESSES` of them (beyond, the footer asks for a zoom); tiles coloured by their placement `source`
+  (lattice, overlap, recorded) with the residual, or — with no tile size in the acquisition record — their corner
+  marked and the figure saying the outline is unknown, never a guessed rectangle; the anchor as a crosshair;
+  the run record beside the axes, a suspect template in amber. `array_footer` writes what is drawn and how to
+  read it, the image's state and the anchor's status. It returns an `ArrayDrawn` (the hit map, the axes, the
+  region shown and its size in pixels, and the tiles' `Rendered`), which the page keeps on `state.drawn`.
+- **Full resolution** (`full_montage_compute`, Qt-free): every tile from `in/<well>.zip` (the member
+  `image_compute._member_for` finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the
+  record's order with a later tile covering an earlier one in the overlap — no blending, so every pixel is a
+  pixel of one real image — under one well-wide stretch (1st–99.5th percentile, as `build_montage` stretches).
+  Each tile is held as a pyramid of 2× means: the levels at a quarter resolution and coarser for every tile once
+  read, the two finest only within `FINE_BYTES_KEPT` bytes, each (tile, level) apart and never one the current
+  view draws (evicting it would have the view ask for it again, trading tiles for ever), so a hundred-tile well is
+  not held whole. `TileStore.render` draws each output pixel from the finest held level no finer than one output
+  pixel and reports the tiles it wants finer (`wants`) or has never read (`unread`); after each draw the
+  controller reads those on a worker (`_want_tiles` / `_load_tiles`, at most once per (tile, level) in flight,
+  `state.tile_pending`) and draws again when they arrive, so drawing never waits on a read. Tiles are read one at
+  a time: one that cannot be read is recorded in `TileStore.failed`, named in the footer, not drawn and never
+  asked for again. A plate placed from a scan pattern has no recorded tile size, so it is read from the first
+  tile's TIFF header, and the tiles layer takes it from there. Moving to another well or timepoint, turning the
+  image off or loading another dataset cancels the store's reads at their next tile and lets its pixels go
+  (`state.release_tiles`).
+- **Moving around and clicking** (`controller.on_click` / `on_motion` / `on_release` / `on_scroll`, connected on
+  the page's canvas). A press records where it started; a drag pans the axes at once and, on release, keeps the
+  region (`state.region`, for the `(well, positions)` in `region_for`, so another well or frame fits afresh) and
+  draws again, which renders the tiles for it; the wheel zooms about the pointer (`fit_region` /
+  `zoom_region`); *Fit* clears the region, *1:1* sets one image pixel (the tiles' or the montage's) per figure
+  pixel. A release within `CLICK_SLOP_PX` of its press is a click: with *Set anchor* on it writes the well's
+  anchor at this timepoint (`util.nanowell_anchors.set_anchor`, in `in/nanowell_anchors.json`), otherwise it
+  selects the nearest nanowell within 6 px, as on the beeswarm.
+- **The anchor.** *Set anchor* is offered only with the anchor layer on, on measured positions, with an `in/`
+  folder to keep the file in, and where an anchor can change the result (`ANCHORABLE`: `ok` or `unaddressed`) —
+  `controller.anchor_controls`. *Clear anchor* removes it; *Re-run anchored wells…* hands the dataset to Analyze
+  limited to the anchored wells, each forced and with Incremental off (a remote nanowell run refuses
+  Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one
+  door into Analyze, shared by Home's *Finish this run*, QC triage and this view. A file that cannot be written
+  is said on the figure (`state.array_message`).
+
+`tests/test_nanowell_page_array_layers.py` turns each layer off and on through the real controls and reads the
+figure, checks the colourings, the presets and the saved-settings migration;
+`tests/test_nanowell_full_montage.py` asserts pixel values on four constant-valued tiles with one bright pixel
+only full resolution shows, and drives the real canvas's drag, wheel, *1:1*, anchor click, clear and re-run;
+`tests/test_nanowell_page_views_ui.py` drives the map click and the QC preset's tiles and run record.
+
+**Drawing a nanowell.** Test detection (before a run) and the Array view (after it) show the same nanowells over
+the same kind of montage, and a person checks one against the other, so both draw from `ui/nanowell_sites.py`:
+Test detection paints through `paint_site`, and `render_array` takes the same colours, outline width, fused dash,
+label colour and label threshold. `STATE_COLOURS` is keyed on the state the
 pipeline records, plus Test detection's own `unaddressed` and `uncounted`; `state_colour` draws any other state
 (`absent`, `not_located`) muted. `paint_site` outlines a site in its state's colour — dashed in `FUSED_COLOUR`
 when it is fused, whatever its state — and writes its address in `LABEL_COLOUR` only inside an outline at least
 `MIN_LABEL_DIAMETER_PX` across; `gray_qimage` turns an 8-bit montage into a `QImage` that owns its pixels. The
 module lives in `ui/` because two panes use it, and is listed under the removable Nanowells feature in
 `profiles/full.toml`, since only that feature's modules import it. `tests/test_nanowell_sites_are_drawn_one_way.py`
-holds the painter's colours and label threshold at the pixels, that both windows draw through it, and that no
-other module assigns `STATE_COLOURS`, `FUSED_COLOUR` or `MIN_LABEL_DIAMETER_PX`.
+holds the painter's colours and label threshold at the pixels, the Array view's colours, dash and label rule on
+its artists, and that no other module assigns `STATE_COLOURS`, `FUSED_COLOUR` or `MIN_LABEL_DIAMETER_PX`.
 
 **Crops.** `image_compute.site_crops` cuts a nanowell at each timepoint from its **owner tile**, read from
 the input archive the run segmented (`in/<well>.zip`; the member found by the run's filename schema, separator
@@ -10492,11 +10527,15 @@ result goes on the state and the figure is redrawn; a failure stores a value say
 and the read is not relaunched on every redraw; a result for a dataset loaded since is dropped without touching
 the new dataset's bookkeeping; each worker bridge is kept on the state until it delivers, then released.
 
-**The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (the five
+**The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (the four
 views, U3), Metric, Along x, Baseline, Timepoint and *vs* (both shown on *Along x: Wells*), Well and a
-timepoint slider (on the one-well views, `ONE_WELL_VIEWS`), Save and Properties; `refresh_controls` shows each
-view only the controls it uses. One `timepoint` on the state serves every view: `shown_timepoint` gives the
-timepoints a view offers and the one it draws — the one-well views offer their well's timepoints and start at
+timepoint slider (on the one-well view, `ONE_WELL_VIEWS`), the Array view's Image combo, Positions switch,
+*Layers* menu (each switch, the colouring, and *Show as* for the presets), *Fit* / *1:1* and the anchor's
+three buttons, Save and Properties; `refresh_controls` shows each view only the controls it uses (Metric and
+Baseline leave the Array view when nothing is filled by the metric). The *Show as* submenu is built from Python
+with its parent (`QMenu(title, menu)`), never by `addMenu(title)`: a menu Qt creates is a top-level widget whose
+owner the binding does not know, and deleting the page and then it crashed the test harness's widget reaper. One `timepoint` on the state serves every view: `shown_timepoint` gives the
+timepoints a view offers and the one it draws — the Array view offers its well's timepoints and starts at
 the first, Position and *Along x: Wells* offer every timepoint and start at the latest (U13) — so the combo,
 the slider and the figure always agree. `page_well` is the chosen well when it is drawn, else the first drawn
 well. Wells are what `data_loading.plot_group_well_lists(ctx, fallback_to_all=False)` says every plotting tab

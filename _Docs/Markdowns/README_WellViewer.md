@@ -4893,7 +4893,8 @@ use them.
   marks) on and off separately: the overlay alone on an empty frame, or the image with nothing over it. Both
   start on, and the page remembers the choice with its other settings.
   **Full montage…** opens the same well at full resolution in a window of its own, drawn from the raw images
-  where the run placed each tile, with the tile outlines, every nanowell's address, and the anchor set by hand.
+  where the run placed each tile, with the tile outlines, every nanowell outlined in the same colours Test
+  detection uses (dashed purple on a seam) with its address once you zoom in far enough, and the anchor set by hand.
   Drag to pan, scroll to zoom, *Fit* for the whole well, *1:1* for one image pixel per screen pixel; the detail
   sharpens as the tiles in view are read. Where tiles overlap, the later tile is shown, not a blend. **Set
   anchor**, **Clear anchor** and **Re-run anchored wells…** are described under *Setting the anchor by hand*

@@ -956,6 +956,12 @@ allwell/
 │   │                              alongside domain/well_palette.py, whose 96 rank colours
 │   │                              this module re-exports)
 │   ├── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
+│   ├── nanowell_sites.py       ← how a nanowell is drawn over a montage: the state palette, the
+│   │                              fused colour, the outline and its address, the greyscale image.
+│   │                              Analyze's Test detection and Review's Full montage window both
+│   │                              paint through it (Array QC takes its colours), so a site reads
+│   │                              the same before a run and after it. Part of the removable
+│   │                              Nanowells feature
 │   ├── local_storage_view.py   ← StorageDialog, behind the title bar's hard-drive button: the
 │   │                              view over core/local_storage.py, split as phone layout is
 │   ├── phone_drawer.py         ← phone layout's side rail (RailDrawer): lends each pane's left
@@ -10165,8 +10171,10 @@ custom format's diameter and pitch, and the tile grid's fields, are checked in `
 form shows the diameter and pitch rows only for Custom) and **warnings** are logged and the run goes on (an overlap shorter than a nanowell needs, with the
 expected seam-site count from `ownership_report` laid over an ideal lattice at several phases; an upper
 bound, since the array may be smaller than the tiles). **Test detection** opens a non-modal window that
-runs `pipeline.nanowell_preview.preview_timepoint` on a parentless `QThread` held in a module-level set until it
-finishes (a window or tab closed mid-run cannot destroy a running thread; `aboutToQuit` waits for it): the same locate-and-measure the run does for
+runs `pipeline.nanowell_preview.preview_timepoint` off the GUI thread through `core.worker_bridge.run_off_thread`,
+the bridge Review's Full montage window reads its tiles through; the window or the whole tab can be closed and
+deleted mid-run, and the result then arriving is dropped (`NanowellPreviewWindow._delivered` checks the window
+still exists) rather than drawn into a deleted widget. The analysis is the same locate-and-measure the run does for
 one (well, timepoint), returning the montage, every site with its address, state and fused flag, the origin
 method, the measured overlap against the needed one, and a few rim-suppressed crops beside their
 segmentation. When the segmenter cannot be loaded — an `ImportError` anywhere in the measuring exception's chain
@@ -10176,9 +10184,10 @@ fluorescence and carries `n_cells` `None` (so a seen site is `measured` with no 
 rows are made and no crops are cut. `PreviewResult.counted` is then `False`, its first note names the import
 failure, `counts()` reports the seen sites as `not counted` and `site_marks` draws them in the `uncounted` colour
 rather than the "cells" one. A segmenter that loads and then fails is still a measuring failure, which keeps the
-location and drops the sites. What is drawn is `site_marks` of the result, a pure function in continuous micrometre/pixel-size coordinates, coloured
-from `ui.theme.Colors`; the pixmap side is capped and "Fit" follows the window; addresses are written only
-where a nanowell is drawn at least 34 pixels across. The square's edge angle and the two thresholds are
+location and drops the sites. What is drawn is `site_marks` of the result, a pure function in continuous
+micrometre/pixel-size coordinates; the pixels are painted by `ui/nanowell_sites.paint_site` (see *Drawing a
+nanowell* below), the pixmap side is capped and "Fit" follows the window. Each site's `q,r` text is
+`util.nanowell_address.coordinate_text`, which Review's Full montage window writes too. The square's edge angle and the two thresholds are
 read by the analysis (`check_orientation`'s `square_to_axis_deg`, `site_state`'s cut-offs), not only
 validated and keyed.
 
@@ -10402,8 +10411,10 @@ delivers to nothing. Tiles are read one at a time: one that cannot be read is re
 named in the status line, not drawn and never asked for again, and the rest are still read. A plate placed from a
 scan pattern has no recorded tile size, so it is read from the first tile's TIFF header. Moving to another
 timepoint or closing the window cancels the store's reads at their next tile and lets its pixels go. *Set anchor*
-is offered only where an anchor can change the result (`ANCHORABLE`: `ok` or `unaddressed`). Over the pixels: tile outlines, each nanowell at its measured position coloured by state
-with its `q,r` address where it is drawn large enough, and the anchor. Drag pans, the wheel zooms about the
+is offered only where an anchor can change the result (`ANCHORABLE`: `ok` or `unaddressed`). Over the pixels: tile outlines, each nanowell at its measured position drawn by
+`ui/nanowell_sites.paint_site` — coloured by state, dashed in the fused colour where the run recorded it fused
+(`SiteOverlay.fused`, from the table's `fused` column), with its `q,r` address where it is drawn large
+enough — and the anchor. Drag pans, the wheel zooms about the
 pointer, *Fit* and *1:1*. With *Set anchor* on, a click (not a drag) writes the well's anchor at this timepoint;
 *Clear anchor* removes it; *Re-run anchored wells…* hands the dataset to Analyze limited to the anchored wells,
 each forced and with Incremental off (a remote nanowell run refuses Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one door into Analyze, shared by
@@ -10411,6 +10422,18 @@ Home's *Finish this run*, QC triage and this window. The status line states the 
 reason, how it was anchored, and whether the anchor set has been used yet. `tests/test_nanowell_full_montage.py`
 asserts pixel values on four constant-valued tiles with one bright pixel only full resolution shows, and drives
 the real page's button, canvas click and re-run.
+
+**Drawing a nanowell.** Test detection (before a run) and the Full montage window (after it) show the same
+nanowells over the same kind of montage, and a person checks one against the other, so both paint through
+`ui/nanowell_sites.py` and Array QC's figure takes its colours from it. `STATE_COLOURS` is keyed on the state the
+pipeline records, plus Test detection's own `unaddressed` and `uncounted`; `state_colour` draws any other state
+(`absent`, `not_located`) muted. `paint_site` outlines a site in its state's colour — dashed in `FUSED_COLOUR`
+when it is fused, whatever its state — and writes its address in `LABEL_COLOUR` only inside an outline at least
+`MIN_LABEL_DIAMETER_PX` across; `gray_qimage` turns an 8-bit montage into a `QImage` that owns its pixels. The
+module lives in `ui/` because two panes use it, and is listed under the removable Nanowells feature in
+`profiles/full.toml`, since only that feature's modules import it. `tests/test_nanowell_sites_are_drawn_one_way.py`
+holds the painter's colours and label threshold at the pixels, that both windows draw through it, and that no
+other module assigns `STATE_COLOURS`, `FUSED_COLOUR` or `MIN_LABEL_DIAMETER_PX`.
 
 **Crops.** `image_compute.site_crops` cuts a nanowell at each timepoint from its **owner tile**, read from
 the input archive the run segmented (`in/<well>.zip`; the member found by the run's filename schema, separator

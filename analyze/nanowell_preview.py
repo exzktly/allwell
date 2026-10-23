@@ -1,11 +1,14 @@
 """The Test detection window: one well at one timepoint, with every nanowell's address drawn on the montage.
 
 Nobody should start a plate-wide run without seeing the addresses land. The analysis is
-:func:`pipeline.nanowell_preview.preview_timepoint`, run on a worker thread because registration and detection
-on a real well take a while; this module is the window around it and the marks drawn on the montage.
+:func:`pipeline.nanowell_preview.preview_timepoint`, run off the GUI thread through the app's one worker bridge
+(:func:`core.worker_bridge.run_off_thread`) because registration and detection on a real well take a while; this
+module is the window around it and the marks drawn on the montage.
 
 What is drawn comes from :func:`site_marks`, a pure function of the result, so the colours and what is
-labelled can be tested without a screen. The painter only turns marks into pixels.
+labelled can be tested without a screen. How a mark becomes pixels — the state palette, the outline, the address
+and when there is room for it — is :mod:`ui.nanowell_sites`, shared with Review's Full montage window and Array QC
+figure, so a nanowell checked here before a run reads the same there after it.
 """
 
 from __future__ import annotations
@@ -13,23 +16,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QThread, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QFont, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
-from ui.theme import Colors
+from core.worker_bridge import run_off_thread
+from ui.nanowell_sites import FUSED_COLOUR, MIN_LABEL_DIAMETER_PX, STATE_COLOURS, gray_qimage, paint_site
 from util.nanowell_anchors import origin_phrase
 
-#: A site's outline colour by what the run would record for it. Fused is drawn dashed over whichever applies.
-STATE_COLOURS = {"empty": Colors.success, "measured": Colors.accent, "occluded": Colors.warn,
-                 "clipped": Colors.danger, "unaddressed": Colors.text_muted, "uncounted": Colors.text_secondary}
-#: The dashed outline of a fused site (on a seam, measured from a blended crop).
-FUSED_COLOUR = Colors.accent2
-#: Zoom steps offered; addresses are written only where a nanowell is drawn at least this many screen pixels across.
+#: Zoom steps offered. Addresses are written only where there is room (``ui.nanowell_sites.MIN_LABEL_DIAMETER_PX``).
 ZOOMS = (("Fit", 0.0), ("50 %", 0.5), ("100 %", 1.0), ("200 %", 2.0), ("400 %", 4.0))
-MIN_LABEL_DIAMETER_PX = 34
 #: The longest side the montage is drawn at; a larger zoom of a large montage would ask Qt for a pixmap it cannot make.
 MAX_PIXMAP_SIDE = 12000
 
@@ -88,16 +86,10 @@ def summary_text(result) -> str:
     return "\n".join(lines)
 
 
-def _montage_image(result) -> QImage:
-    height, width = result.montage.shape
-    image = QImage(result.montage.data, width, height, width, QImage.Format_Grayscale8)
-    return image.copy()                                   # own the pixels: the array may go away with the result
-
-
 def render_montage(result, zoom: float, *, show_addresses: bool = True, show_sites: bool = True) -> QPixmap:
     """The montage at *zoom* (screen pixels per montage pixel) with every site outlined and, where room allows, labelled.
     With *show_sites* off, the montage alone: the outlines cover the very edges a person checks them against."""
-    image = _montage_image(result)
+    image = gray_qimage(result.montage)
     pixmap = QPixmap.fromImage(image.scaled(max(int(image.width() * zoom), 1), max(int(image.height() * zoom), 1),
                                             Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
     painter = QPainter(pixmap)
@@ -106,17 +98,8 @@ def render_montage(result, zoom: float, *, show_addresses: bool = True, show_sit
     font.setPixelSize(max(int(MIN_LABEL_DIAMETER_PX * 0.3), 8))
     painter.setFont(font)
     for mark in site_marks(result) if show_sites else ():
-        pen = QPen(QColor(STATE_COLOURS[mark.colour]))
-        pen.setWidthF(1.5)
-        if mark.fused:
-            pen.setStyle(Qt.DashLine)
-            pen.setColor(QColor(FUSED_COLOUR))
-        painter.setPen(pen)
-        cx, cy, r = mark.x * zoom, mark.y * zoom, mark.radius * zoom
-        painter.drawEllipse(int(cx - r), int(cy - r), int(2 * r), int(2 * r))
-        if show_addresses and mark.text and 2 * r >= MIN_LABEL_DIAMETER_PX:
-            painter.setPen(QColor(Colors.brand_fg))
-            painter.drawText(int(cx - r), int(cy - r), int(2 * r), int(2 * r), Qt.AlignCenter, mark.text)
+        paint_site(painter, QPointF(mark.x * zoom, mark.y * zoom), mark.radius * zoom, mark.colour, mark.text,
+                   fused=mark.fused, show_label=show_addresses)
     painter.end()
     return pixmap
 
@@ -138,53 +121,28 @@ def render_crop(crop: dict, size: int = 160) -> QPixmap:
     return QPixmap.fromImage(image.scaled(size, size, Qt.KeepAspectRatio, Qt.FastTransformation))
 
 
-#: Running workers. A QThread destroyed while running aborts the process, and the window (or the whole tab) can be
-#: closed mid-run, so a worker is owned here until it finishes rather than by the widget that started it.
-_RUNNING: set = set()
+class _PreviewFailed(Exception):
+    """The preview raised; its message names the original exception's type, which the bridge would otherwise drop."""
 
 
-def _hold(worker: QThread) -> None:
-    if not _RUNNING:
-        app = QCoreApplication.instance()
-        if app is not None:
-            app.aboutToQuit.connect(_wait_for_workers)    # the interpreter must not exit under a running thread
-    _RUNNING.add(worker)
-    worker.finished.connect(lambda: _RUNNING.discard(worker))
+def _run_preview(job: dict):
+    """The analysis, on the worker thread. Touches no widget: the result comes back through the bridge's signal."""
+    import process_microscopy as pm
+    import tempfile
 
+    from pipeline.nanowell_preview import preview_timepoint
+    from util.schema import parse_schema
 
-def _wait_for_workers() -> None:
-    for worker in list(_RUNNING):
-        worker.wait(5000)
-
-
-class _PreviewWorker(QThread):
-    """Runs the analysis off the GUI thread. A QThread subclass, not a Python thread: the result comes back by signal."""
-
-    done = Signal(object)
-    failed = Signal(str)
-
-    def __init__(self, job: dict):
-        super().__init__()                  # no parent: its lifetime is _RUNNING's, not a widget's
-        self._job = job
-
-    def run(self) -> None:
-        try:
-            import process_microscopy as pm
-            import tempfile
-
-            from pipeline.nanowell_preview import preview_timepoint
-            from util.schema import parse_schema
-
-            job = self._job
-            with tempfile.TemporaryDirectory(prefix="allwell-preview-") as scratch:
-                result = preview_timepoint(
-                    job["zip"], job["well"], job["timepoint"], job["settings"], grouper=pm.find_image_groups_in_zip,
-                    parse=pm.parse_filename, schema=parse_schema(job["schema"]), sep=job["sep"],
-                    phase_token=job["phase_token"], scratch=Path(scratch), pattern=job.get("pattern"))
-        except Exception as exc:          # a worker has no event loop to raise into; the window says what happened
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
-        else:
-            self.done.emit(result)
+    try:
+        with tempfile.TemporaryDirectory(prefix="allwell-preview-") as scratch:
+            return preview_timepoint(
+                job["zip"], job["well"], job["timepoint"], job["settings"], grouper=pm.find_image_groups_in_zip,
+                parse=pm.parse_filename, schema=parse_schema(job["schema"]), sep=job["sep"],
+                phase_token=job["phase_token"], scratch=Path(scratch), pattern=job.get("pattern"))
+    except Exception as exc:
+        # The bridge reports ``str(exc)`` alone; "RuntimeError: …" says more than "…" about a failure in a
+        # registration or segmentation library the person did not write.
+        raise _PreviewFailed(f"{type(exc).__name__}: {exc}") from exc
 
 
 class NanowellPreviewWindow(QWidget):
@@ -195,7 +153,8 @@ class NanowellPreviewWindow(QWidget):
         self.setWindowTitle("Test detection")
         self.resize(980, 760)
         self._tab, self._wells, self._timepoints = tab, wells, timepoints
-        self._worker: _PreviewWorker | None = None
+        #: The bridge of the preview running, ``None`` when none is. Kept so it is not collected before it delivers.
+        self._bridge = None
         self._result = None
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
@@ -277,7 +236,7 @@ class NanowellPreviewWindow(QWidget):
                 "sep": self._tab._schema_picker.separator(), "phase_token": self._tab._phase_token()}
 
     def run(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
+        if self._bridge is not None:
             return
         try:
             job = self._job()
@@ -290,16 +249,22 @@ class NanowellPreviewWindow(QWidget):
             return
         self._run_btn.setEnabled(False)
         self._summary.setText("Running registration and detection…")
-        worker = _PreviewWorker(job)
-        self._worker = worker
-        worker.done.connect(self._on_done)
-        worker.failed.connect(self._on_failed)
-        worker.finished.connect(self._on_finished)      # a bound slot: dropped with the window, unlike a lambda
-        _hold(worker)
-        worker.start()
+        self._bridge = run_off_thread(lambda: _run_preview(job), on_done=self._delivered(self._on_done),
+                                      on_failed=self._delivered(self._on_failed))
 
-    def _on_finished(self) -> None:
-        self._run_btn.setEnabled(True)
+    def _delivered(self, handler):
+        """*handler*, called only while this window still exists. The window (or the whole tab) can be closed and
+        deleted while a preview runs, and the result then arrives for nothing: it is dropped, never drawn into a
+        deleted widget."""
+        from shiboken6 import isValid
+
+        def deliver(value) -> None:
+            if not isValid(self):
+                return
+            self._bridge = None
+            self._run_btn.setEnabled(True)
+            handler(value)
+        return deliver
 
     def _on_failed(self, message: str) -> None:
         self._result = None

@@ -16,6 +16,7 @@ import numpy as np
 
 from pipeline import nanowell_run as nr
 from pipeline import nanowell_task as nt
+from util.nanowell_address import coordinate_text
 
 log = logging.getLogger(__name__)
 
@@ -181,8 +182,7 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
                             "over all of the well's timepoints, and adding to an analysed dataset keeps its roster")
     index_of = {}                                  # a result site -> its index in the timepoint's sites
     for i, row in enumerate(measured.sites):
-        q, r = row["nw_q"], row["nw_r"]
-        result.sites.append({**row, "address": None if q is None else f"{q},{r}"})
+        result.sites.append({**row, "address": coordinate_text(row["nw_q"], row["nw_r"])})
         index_of[id(result.sites[-1])] = i
     template = measured.template.get("_object")
     ranked = sorted((s for s in result.sites if s["state"] == "measured" and (s["n_cells"] or 0) > 0 and not s["fused"]),

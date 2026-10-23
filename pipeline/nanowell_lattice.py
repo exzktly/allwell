@@ -464,6 +464,13 @@ class OriginResolution:
     reason: str
 
 
+def nearest_site(fit, position) -> tuple[float, tuple[int, int]]:
+    """``(distance, (q, r))``: the lattice site of *fit* nearest *position*, counted from the fit's phase origin."""
+    basis = np.column_stack((fit.a1, fit.a2))
+    indices, residuals = _nearest_sites(_coordinate(position)[None, :], basis, np.asarray(fit.phase_origin))
+    return float(residuals[0]), (int(indices[0][0]), int(indices[0][1]))
+
+
 def _snap_origin(fit, position):
     """The lattice site nearest *position*, and how far *position* was from it."""
     basis = np.column_stack((fit.a1, fit.a2))
@@ -476,7 +483,8 @@ MANUAL_REACH_PITCHES = 1.5
 
 
 def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
-                   plate_rigid=None, fiducial_margin, manual=None, detected=None) -> OriginResolution:
+                   plate_rigid=None, fiducial_margin, fiducial_refusal: str = "",
+                   fiducial_ratio: float = 1.0, manual=None, detected=None) -> OriginResolution:
     """Resolve independent evidence in priority order, with explicit conflicts.
 
     *manual* is an anchor a person set by hand (``util.nanowell_anchors``), in the montage frame. It comes first:
@@ -494,6 +502,13 @@ def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
     target's true origin (``uncertainty_with_site``), not only of the transform.
     Every accepted position is snapped to a site, and a fiducial or array centre
     farther than a quarter pitch from every site is refused instead of snapped.
+
+    A square is accepted when it leads the runner-up by more than *fiducial_margin*
+    and scores at least *fiducial_ratio* times it (tracker F14; 1 asks nothing
+    beyond the lead). Every source that was offered and refused is named in the
+    reason (tracker F1): a square short of either says which, with both scores,
+    and *fiducial_refusal* is the caller's sentence for a square that was never a
+    candidate (``nanowell_detect.describe_fiducial``).
     """
     if not math.isfinite(fiducial_margin) or fiducial_margin < 0:
         raise ValueError("fiducial_margin must be finite and non-negative")
@@ -530,8 +545,17 @@ def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
         candidates.append(("manual", site))
     if fiducial is not None:
         scores = (fiducial.score, fiducial.runner_up_score)
-        if all(math.isfinite(v) for v in scores) and scores[0] - scores[1] > fiducial_margin:
+        finite = all(math.isfinite(v) for v in scores)
+        if finite and scores[0] - scores[1] > fiducial_margin and scores[0] >= fiducial_ratio * scores[1]:
             offer("fiducial", fiducial.position)
+        elif finite and scores[0] - scores[1] > fiducial_margin:
+            rejected.append(f"the most square outline reads {scores[0]:.2f} and the next {scores[1]:.2f}, "
+                            f"{scores[0] / scores[1]:.1f} times it where a central square needs {fiducial_ratio:g}")
+        else:
+            rejected.append(f"the most square outline reads {scores[0]:.2f} and the next {scores[1]:.2f}, a lead "
+                            f"of {scores[0] - scores[1]:.2f} under the {fiducial_margin:g} a central square needs")
+    elif fiducial_refusal:
+        rejected.append(fiducial_refusal)
     if array_centre is not None:
         offer("array_centre", array_centre)
     if (plate_rigid is not None and plate_rigid.ok and plate_rigid.uncertainty is not None

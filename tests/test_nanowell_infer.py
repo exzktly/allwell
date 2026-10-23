@@ -435,10 +435,12 @@ def test_an_incremental_timepoint_of_another_kind_than_the_kept_run_is_refused()
     assert not second.sites
 
 
-def test_a_format_too_wide_for_the_measured_pitch_is_a_note_on_an_inferred_geometry_not_a_refusal():
-    """Review X35-R3: 80 um nanowells on a 105 um pitch, run as the 100 um format. The diameter is within the 25 %
-    the threshold is trusted to, so the setting's 100 um is kept — and it nearly fills the pitch, which the format
-    check refuses. An inferred geometry measured the plate itself: it addresses it and says what was wrong."""
+def test_a_format_too_wide_for_the_measured_pitch_is_measured_not_refused_in_either_geometry():
+    """Review X35-R3: 80 um nanowells on a 105 um pitch, run as the 100 um format, whose 100 um nanowells would nearly
+    fill the pitch. The format check once refused the hexagonal geometry and kept the setting's 100 um in the
+    inferred one (within the 25 % that decided which was used). Both now measure the plate's 80 um and address it
+    (tracker F2, F4); the format's diameter is still checked against the pitch, and its failure is a note
+    (review F20d)."""
     plan = TilePlan(2, 2, (700, 700), 0.1, 2.0)
     extent = plan.step_um[0] + plan.extent_um[0]
     rendered = render_tiles(plan, pitch_um=105.0, diameter_um=80.0, radius_um=0.26 * extent, rotation_deg=7.0,
@@ -446,18 +448,20 @@ def test_a_format_too_wide_for_the_measured_pitch_is_a_note_on_an_inferred_geome
     record = record_for(rendered)
     run = lambda settings: nr.run_well("A01", record, ["T0"], lambda tp, tile: rendered.images.get(tile),  # noqa: E731
                                        settings, segmenter=threshold_segmenter())
-    assert run(nr.NanowellSettings("100um")).timepoints["T0"]["status"] == nr.FORMAT_MISMATCH
-    outcome = run(INFER)
-    block = outcome.timepoints["T0"]
-    assert block["status"] == nr.OK and block["geometry"]["diameter_check"]["agrees"] is True
-    assert {(r["nw_q"], r["nw_r"]) for r in outcome.sites} == set(rendered.array.addresses)
-    assert any("neighbouring nanowells would touch" in n and "addresses the plate as measured" in n
-               for n in block["notes"])
+    for settings in (nr.NanowellSettings("100um"), INFER):
+        outcome = run(settings)
+        block = outcome.timepoints["T0"]
+        assert block["status"] == nr.OK and block["geometry"]["diameter_check"]["agrees"] is True
+        assert block["geometry"]["diameter_used_um"] == pytest.approx(80.0, rel=0.02)
+        assert {(r["nw_q"], r["nw_r"]) for r in outcome.sites} == set(rendered.array.addresses)
+        # The format's own 100 um would fill the pitch, and that is said; the plate is still addressed as measured.
+        assert any("neighbouring nanowells would touch" in n and "addressed as measured" in n for n in block["notes"])
 
 
 def test_a_format_whose_nanowells_are_the_wrong_size_is_measured_at_the_measured_size_and_says_so():
-    """Review X35-R3: a plate of 50 um nanowells on an 86 um pitch run as the 100 um format. The format's own
-    geometry refuses it; an inferred one addresses it, fits the sites at the diameter it measured, and says so."""
+    """Review X35-R3: a plate of 50 um nanowells on an 86 um pitch run as the 100 um format. Either geometry measures
+    the plate (tracker F2), addresses it, fits the sites at the diameter it measured, and says so; the hexagonal one
+    once refused it as a format mismatch."""
     plan = TilePlan(2, 2, (700, 700), 0.1, 2.0)
     extent = plan.step_um[0] + plan.extent_um[0]
     rendered = render_tiles(plan, pitch_um=86.0, diameter_um=50.0, radius_um=0.26 * extent, rotation_deg=7.0,
@@ -465,15 +469,15 @@ def test_a_format_whose_nanowells_are_the_wrong_size_is_measured_at_the_measured
     record = record_for(rendered)
     run = lambda settings: nr.run_well("A01", record, ["T0"], lambda tp, tile: rendered.images.get(tile),  # noqa: E731
                                        settings, segmenter=threshold_segmenter())
-    assert run(nr.NanowellSettings("100um")).timepoints["T0"]["status"] == nr.FORMAT_MISMATCH
-    outcome = run(INFER)
-    block = outcome.timepoints["T0"]
-    assert block["status"] == nr.OK
-    assert {(r["nw_q"], r["nw_r"]) for r in outcome.sites} == set(rendered.array.addresses)
-    assert np.median([r["radius_um"] for r in outcome.sites]) == pytest.approx(25.0, rel=0.1)
-    assert sum(r["geometry"] == "fitted" for r in outcome.sites) > 0.9 * len(outcome.sites)
-    assert any("measured at the measured diameter" in n for n in block["notes"])
-    assert not any("addresses use the measured nanowell diameter" in n for n in block["notes"])
+    for settings in (nr.NanowellSettings("100um"), INFER):
+        outcome = run(settings)
+        block = outcome.timepoints["T0"]
+        assert block["status"] == nr.OK
+        assert {(r["nw_q"], r["nw_r"]) for r in outcome.sites} == set(rendered.array.addresses)
+        assert np.median([r["radius_um"] for r in outcome.sites]) == pytest.approx(25.0, rel=0.1)
+        assert sum(r["geometry"] == "fitted" for r in outcome.sites) > 0.9 * len(outcome.sites)
+        assert any("measured at the measured diameter" in n for n in block["notes"])
+        assert not any("addresses use the measured nanowell diameter" in n for n in block["notes"])
 
 
 # ── review X35-R2: the montage path, beyond one 900 px tile ──────────────────

@@ -39,11 +39,10 @@ def _run(monkeypatch, plate, blind=frozenset({("B02", "0h"), ("B02", "24h")})):
         state["blind"] = (well, tp) in blind
         return real_locate(tp, record, well, *args, **kwargs)
 
-    def resolve(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin, manual=None, detected=None):
+    def resolve(fit, *, fiducial=None, array_centre=None, plate_rigid=None, **rest):
         if state["blind"]:
             fiducial = array_centre = None
-        return real_resolve(fit, fiducial=fiducial, array_centre=array_centre, plate_rigid=plate_rigid,
-                            fiducial_margin=fiducial_margin, manual=manual, detected=detected)
+        return real_resolve(fit, fiducial=fiducial, array_centre=array_centre, plate_rigid=plate_rigid, **rest)
 
     def serial(*, well_zips, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix, schema, sep,
                incremental, incremental_prior_dir, settings_key, force, force_wells=None, **_ignored):
@@ -130,8 +129,8 @@ def test_the_anchor_is_read_in_the_well_frame_where_tiles_sit_far_from_its_origi
 
     real_resolve = lattice.resolve_origin
 
-    def blind(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin, manual=None, detected=None):
-        return real_resolve(fit, plate_rigid=plate_rigid, fiducial_margin=fiducial_margin, manual=manual, detected=detected)
+    def blind(fit, *, fiducial=None, array_centre=None, plate_rigid=None, **rest):
+        return real_resolve(fit, plate_rigid=plate_rigid, **rest)
 
     monkeypatch.setattr(lattice, "resolve_origin", blind)
     assert nr.locate_timepoint("T0", record, "A01", rendered.images, settings).status == nr.UNADDRESSED

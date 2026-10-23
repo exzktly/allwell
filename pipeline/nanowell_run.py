@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+import math
 from pathlib import Path
 from types import MappingProxyType
 
@@ -49,8 +50,13 @@ LATTICE_KIND_MISMATCH = "lattice_kind_mismatch"
 TERMINAL_WITHOUT_ROWS = (INCOMPLETE_GRID, BAD_GRID, NO_RECORD, NO_LATTICE, FORMAT_MISMATCH,
                          ORIENTATION_REFUSED, NO_IMAGES, LATTICE_KIND_MISMATCH)
 
-#: How far a fiducial's score must clear the runner-up's to anchor an address (assumed; Q-row in the tracker).
-FIDUCIAL_MARGIN = 0.3
+#: How far a fiducial's score must clear the runner-up's to anchor an address, and how many times the runner-up's it
+#: must be (tracker F14). Both are needed: a lead alone accepts a square under the floor's noise when everything
+#: reads high (cells, debris), a ratio alone accepts 0.05 against 0.01. Rendered squares under defocus, halo and
+#: rounding read 0.34 to 0.65 against runner-ups of 0.02 to 0.13; a blur that leaves them 0.21 against 0.10 is
+#: refused as ambiguous. Assumed, not calibrated on a real plate (tracker F6).
+FIDUCIAL_MARGIN = 0.15
+FIDUCIAL_RATIO = 3.0
 
 
 #: The plate format whose pitch and diameter the run is given rather than knowing (tracker A7).
@@ -148,6 +154,9 @@ class Located:
     diameter_um: float | None = None                      # inferred only: the diameter sites are measured at
     array_found: np.ndarray | None = None                 # inferred only: per array site, a light nanowell was found
     notes: list = field(default_factory=list)             # findings of the locating stage that are not refusals
+    #: The central square's search: sites scored, best and runner-up squareness, the thresholds, where it was (well
+    #: frame) and why none was taken (``nanowell_detect.describe_fiducial``; tracker F1). ``None`` before the search.
+    fiducial: dict | None = None
 
 
 def stage_offset(record: dict, well: str, timepoint: str, positions: dict,
@@ -179,11 +188,15 @@ def stage_offset(record: dict, well: str, timepoint: str, positions: dict,
 
 
 def _tile_fit(image, pixel_size_um: float, settings: NanowellSettings, pitch_um: float | None = None,
-              kind: str = "auto"):
+              kind: str = "auto", diameter_um: float | None = None):
     """The lattice fitted to one tile alone (tile-local um), or ``None`` when it has too few sites to fit.
 
     Registration's lattice-phase constraint needs it; a tile of bare floor or a wholly occluded one
-    simply contributes the other two sources. *pitch_um* is the working pitch (the nominal one by default).
+    simply contributes the other two sources. *pitch_um* is the working pitch (the nominal one by default);
+    *diameter_um* the plate's measured diameter (the format's by default). A matched filter smaller than the
+    nanowells has a flat-topped response whose peak wanders: at 100 um on 125.8 um wells one tile's fit had an rms
+    of 13 um and its pitch 0.7 % short, which the lattice-phase steps between tiles multiplied into tiles 33 um off
+    (tracker F13).
     """
     from pipeline.nanowell_detect import detect_sites
 
@@ -191,7 +204,8 @@ def _tile_fit(image, pixel_size_um: float, settings: NanowellSettings, pitch_um:
         from pipeline.nanowell_infer import contrast_fit
 
         return contrast_fit(image, pixel_size_um, expected_pitch_um=pitch_um, kind=kind)
-    found = detect_sites(image, pixel_size_um, settings.diameter_um, expected_pitch_um=pitch_um or settings.pitch_um)
+    found = detect_sites(image, pixel_size_um, diameter_um or settings.diameter_um,
+                         expected_pitch_um=pitch_um or settings.pitch_um)
     return found.fit if found.ok else None
 
 
@@ -250,7 +264,7 @@ def _montage_to_common(point, montage) -> np.ndarray:
 #: The version of the registration step's algorithm (``tile_register`` and the per-tile lattice fits that feed it).
 #: It joins :func:`registration_key`, so positions an older algorithm solved are never taken for this one's. Raise it
 #: whenever a change there could move a tile.
-REGISTRATION_SCHEME = 1
+REGISTRATION_SCHEME = 2
 
 
 @dataclass(frozen=True)
@@ -273,7 +287,7 @@ class Placement:
 
 
 def registration_key(record: dict, well: str, timepoint: str, images: dict, settings: NanowellSettings,
-                     pitch_um: float, kind: str) -> str:
+                     pitch_um: float, kind: str, diameter_um: float | None = None) -> str:
     """A digest of everything registration's result depends on, so stored positions are reused only when
     registering again would produce exactly them.
 
@@ -284,7 +298,8 @@ def registration_key(record: dict, well: str, timepoint: str, images: dict, sett
       solve and bound its search;
     * every tile's pixels (shape, type and bytes): overlap correlation and the per-tile lattice fits read them, and a
       plate re-exported with corrected images keeps its record but not its registration;
-    * the geometry, nominal pitch and diameter: how each tile's lattice is fitted (:func:`_tile_fit`);
+    * the geometry, nominal pitch and diameter, and the diameter measured on the tiles: how each tile's lattice is
+      fitted (:func:`_tile_fit`);
     * the working pitch and lattice kind measured on this timepoint: the fits' seed and the search window.
 
     Nothing about measurement or segmentation is in it (cell diameter, margin, occlusion and clipping thresholds,
@@ -299,7 +314,8 @@ def registration_key(record: dict, well: str, timepoint: str, images: dict, sett
         pixels.update(json.dumps([tile, list(image.shape), image.dtype.str]).encode())
         pixels.update(image.tobytes())
     payload = json.dumps([REGISTRATION_SCHEME, record_digest(record, well, timepoint), pixels.hexdigest(),
-                          settings.geometry, settings.pitch_um, settings.diameter_um, float(pitch_um), kind])
+                          settings.geometry, settings.pitch_um, settings.diameter_um, float(pitch_um), kind,
+                          None if diameter_um is None else float(diameter_um)])
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -359,7 +375,10 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     ``(folder, grid block)`` pairs for this timepoint from earlier runs: a placement among them solved under this
     timepoint's :func:`registration_key` is taken instead of registering the tiles again (:func:`stored_placement`).
     """
-    from pipeline.nanowell_detect import check_orientation, detect_sites, estimate_lattice_fft, score_fiducial
+    from pipeline.nanowell_detect import (
+        SQUARE_SIZE_FACTORS, check_orientation, describe_fiducial, detect_sites, estimate_lattice_fft, score_fiducial,
+        square_search_points,
+    )
     from pipeline.nanowell_lattice import index_points, resolve_origin
     from pipeline.nanowell_sites import check_format
     from pipeline.tile_grid import OK as GRID_OK, place_from_record, tiles_from_record
@@ -379,16 +398,20 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         return Located(timepoint, NO_IMAGES, f"No image for tile(s) {', '.join(absent)}",
                        _grid_block(plan, None, {"status": NO_IMAGES}), plan)
     px = float(pixel_size["x"])
+    # The plate's own diameter, measured on the tiles before anything is sized from one (tracker F2, F13): the
+    # per-tile fits registration rests on, the matched filter, the square's scoring ring, the site fits and the
+    # template all follow it, and the format only checks it.
     probe = _contrast_lattice(images, plan, px) if settings.infer else None
     if probe is not None:
         (pitch, kind), pitch_source = probe, "contrast"
     else:
         (pitch, pitch_source), kind = working_pitch(images, plan, px, settings), "auto"
-    key = registration_key(record, well, timepoint, images, settings, pitch, kind)
+    tile_diameter, diameter_info = _tile_diameter(images, plan, px, pitch)
+    key = registration_key(record, well, timepoint, images, settings, pitch, kind, tile_diameter)
     registration = stored_placement(stored, key, [p.tile_id for p in plan.placements])
     if registration is None:
         observations = [TileObservation(p.tile_id, (p.left_um, p.top_um), (p.width_um, p.height_um),
-                                        _tile_fit(images[p.tile_id], px, settings, pitch, kind))
+                                        _tile_fit(images[p.tile_id], px, settings, pitch, kind, tile_diameter))
                         for p in plan.placements]
         registration = _solved_placement(
             register_tiles(observations, images=images, pixel_size_um=px, pitch_um=pitch), key,
@@ -414,50 +437,74 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
                                    warnings)
         return located
 
-    diameter = settings.diameter_um
     if settings.infer:
-        detection, inferred, seed["geometry"] = _detect_by_contrast(montage, settings)
+        detection, inferred, seed["geometry"] = _detect_by_contrast(montage, settings, tile_diameter, diameter_info)
         if not detection.ok:
             return refuse(NO_LATTICE, detection.reason)
         lattice_pitch = float(detection.fit.pitch)
-        diameter = located.diameter_um = seed["geometry"]["diameter_used_um"]
     else:
         estimate = estimate_lattice_fft(montage.image, montage.um_per_px, expected_pitch_um=pitch)
         if not estimate.ok:
             return refuse(NO_LATTICE, estimate.reason)
         lattice_pitch = float(estimate.pitch_um)
-    fmt = check_format(lattice_pitch, diameter)
+        info = {k: v for k, v in diameter_info.items() if k != "why_not"}
+        seed["geometry"] = _diameter_block({"method": "matched_filter", "notes": [], **info}, tile_diameter,
+                                           settings, diameter_info["why_not"])
+    diameter = located.diameter_um = seed["geometry"]["diameter_used_um"]
+    measured = seed["geometry"]["diameter_check"]["measured_um"] is not None
+    if measured and check_format(lattice_pitch, diameter).status == "format_mismatch":
+        # Both numbers were read off this plate, and they cannot both be right: nanowells as wide as the pitch would
+        # overlap. A lattice read on a harmonic (a pitch the square root of three or two times short) does this, and
+        # addressing on it would be wrong at every site (review F20d).
+        return refuse(NO_LATTICE, f"The nanowells measure {diameter:.1f} um across but the lattice's pitch reads "
+                                  f"{lattice_pitch:.1f} um, so neighbouring nanowells would overlap: the pitch or the "
+                                  "diameter was misread")
+    fmt = check_format(lattice_pitch, settings.diameter_um)
     if fmt.status == "format_mismatch":
         reason = (fmt.reason if hasattr(fmt, "reason") else
                   f"The lattice pitch {lattice_pitch:.1f} um is not the {settings.plate_format} format's")
-        if not settings.infer:
+        if not (settings.infer or measured):
             return refuse(FORMAT_MISMATCH, reason)
-        # An inferred geometry measured the plate itself: the format is a statement to check, not a reason to
-        # write nothing (review X35-R3).
-        seed["geometry"]["notes"].append(f"{reason}. The inferred geometry addresses the plate as measured")
+        # A measured geometry is the plate itself: the format is a statement to check, not a reason to write
+        # nothing (review X35-R3).
+        seed["geometry"]["notes"].append(f"{reason}. The plate is addressed as measured")
     if not settings.infer:
-        detection = detect_sites(montage.image, montage.um_per_px, settings.diameter_um,
-                                 expected_pitch_um=lattice_pitch)
+        detection = detect_sites(montage.image, montage.um_per_px, diameter, expected_pitch_um=lattice_pitch)
         if not detection.ok:
             return refuse(NO_LATTICE, detection.reason)
-    candidate, scores = score_fiducial(montage.image, montage.um_per_px, diameter,
-                                       detection.points_um, centre_um=detection.boundary_centre_um,
-                                       search_radius_um=2.2 * lattice_pitch)
+    # The square is looked for at every lattice site near the array's centre, detected or not, and read at several
+    # sizes (tracker F15): the matched filter finds round nanowells, and a square of another size is not one.
+    near = detection.boundary_centre_um
+    if near is None and len(detection.points_um):
+        near = np.median(np.asarray(detection.points_um, dtype=float), axis=0)
+    search = (detection.points_um if near is None or not detection.fit.ok else
+              square_search_points(detection.fit, detection.points_um, near, 2.2 * lattice_pitch))
+    candidate, scores = score_fiducial(montage.image, montage.um_per_px, diameter, search,
+                                       centre_um=detection.boundary_centre_um, search_radius_um=2.2 * lattice_pitch,
+                                       pitch_um=lattice_pitch, size_factors=SQUARE_SIZE_FACTORS)
+    fiducial = describe_fiducial(candidate, scores, near_centre=detection.boundary_centre_um is not None)
+    fiducial["margin"], fiducial["ratio"] = FIDUCIAL_MARGIN, FIDUCIAL_RATIO
+    if fiducial["position_um"] is not None:
+        fiducial["position_um"] = [float(v) for v in _montage_to_common(fiducial["position_um"], montage)]
+    located.fiducial = fiducial
     # Only a square that scored as one: with the central square hidden (a bubble over it) the best-scoring site
     # is an ordinary circle, whose "orientation" is noise, and checking against it refused a timepoint the array
-    # centre could anchor (roll-up review X21).
+    # centre could anchor (roll-up review X21). The square's measured edge angle is kept either way, against the
+    # lattice row the fit chose, so a real plate can confirm the square's cut (tracker F19, Q11).
     if candidate is not None and scores:
         square = max(scores, key=lambda s: s.coherence)
         orientation = check_orientation(detection.fit, square.orientation_deg,
                                         square_to_axis_deg=settings.square_edge_deg)
+        fiducial.update(edge_deg=orientation.observed_deg, edge_expected_deg=orientation.expected_deg,
+                        edge_discrepancy_deg=orientation.discrepancy_deg)
         if not orientation.ok:
             return refuse(ORIENTATION_REFUSED, orientation.reason if hasattr(orientation, "reason") else
-                          "The square's edges disagree with the fitted lattice axis")
+                          "The square's edges disagree with the fitted lattice axis", fiducial=fiducial)
     manual = (None if located.manual_anchor_um is None
               else np.subtract(located.manual_anchor_um, montage.origin_um))       # well frame -> montage frame
     resolved = resolve_origin(detection.fit, fiducial=candidate, array_centre=detection.boundary_centre_um,
-                              plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN, manual=manual,
-                              detected=detection.points_um)
+                              plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN, fiducial_ratio=FIDUCIAL_RATIO,
+                              fiducial_refusal=fiducial["reason"], manual=manual, detected=detection.points_um)
     located.fit = detection.fit
     located.pitch_um = float(detection.fit.pitch)
     located.mirrored = bool(detection.fit.mirrored)
@@ -466,10 +513,10 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     located.boundary = None if detection.boundary_radius_um is None else {
         "centre_um": tuple(_montage_to_common(detection.boundary_centre_um, montage)),
         "radius_um": detection.boundary_radius_um}
+    located.notes = list(seed["geometry"]["notes"])
     if settings.infer:
         located.array_sites, located.array_shape = inferred.roster_um, inferred.shape
         located.array_found = np.asarray(inferred.found, dtype=bool)
-        located.notes = list(seed["geometry"]["notes"])
     if resolved.status != "anchored":
         located.status, located.reason = UNADDRESSED, resolved.reason
         located.grid = _grid_block(plan, registration,
@@ -483,7 +530,103 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     return located
 
 
-def _detect_by_contrast(montage, settings: NanowellSettings):
+#: The fewest nanowells fitted at full resolution whose median may stand for the plate's diameter (tracker F2).
+MIN_DIAMETER_FITS = 6
+
+
+def fitted_diameter(images: dict, positions: dict, px: float, sites_common, rough_um: float,
+                     pitch_um: float | None = None) -> tuple[float | None, int, str | None]:
+    """``(diameter, fits, tile)``: the median diameter of the nanowells fitted at full resolution on one tile.
+
+    The montage is block-averaged, so a diameter read from it is rough (the contrast finder read 125.8 um wells as
+    111 to 117 um on rendered plates); a site's edge fitted on its own tile reads them within a few tenths of a
+    micrometre. One tile is enough for a median and costs a tenth of a second: the one holding the most sites wholly
+    inside it, which is the array's middle unless a bubble covers it. *rough_um* seeds the fit, which keeps only
+    radii within 30 % of it. ``None`` with fewer than ``MIN_DIAMETER_FITS`` fitted.
+    """
+    from pipeline.nanowell_detect import FITTED, MIN_REFINE_RADIUS_PX, refine_sites
+
+    if not rough_um > 0 or rough_um / 2 / px < MIN_REFINE_RADIUS_PX:
+        return None, 0, None
+    sites = np.asarray(sites_common, dtype=float).reshape(-1, 2)
+    best, best_local = None, np.empty((0, 2))
+    for name, (left, top) in positions.items():
+        h, w = np.asarray(images[name]).shape
+        local = sites - (left, top)
+        reach = 0.8 * rough_um
+        inside = ((local[:, 0] > reach) & (local[:, 0] < w * px - reach)
+                  & (local[:, 1] > reach) & (local[:, 1] < h * px - reach))
+        if inside.sum() > len(best_local):
+            best, best_local = name, local[inside]
+    if best is None:
+        return None, 0, None
+    radii = [g.radius_um for g in refine_sites(images[best], px, best_local, rough_um, pitch_um=pitch_um)
+             if g.geometry == FITTED]
+    if len(radii) < MIN_DIAMETER_FITS:
+        return None, len(radii), best
+    return 2.0 * float(np.median(radii)), len(radii), best
+
+
+def _diameter_block(block: dict, measured: float | None, settings: NanowellSettings, why_not: str) -> dict:
+    """The diameter check and the diameter used, in a geometry block: the measured one whenever there is one.
+
+    The format's diameter is used only when nothing could be measured, and that is said; a measured diameter
+    beyond ``DIAMETER_AGREEMENT`` of the format's is reported, not acted on, because the measured one is used
+    either way (tracker F4: the tolerance once decided *which* diameter was used, and the first real plate, at
+    +25.8 %, sat on it).
+    """
+    from pipeline.nanowell_infer import DIAMETER_AGREEMENT, compare_given
+
+    block["diameter_check"] = compare_given(measured, settings.diameter_um, DIAMETER_AGREEMENT, "nanowell diameter",
+                                            "nanowells are found, fitted, owned and measured at the measured "
+                                            "diameter")
+    block["diameter_used_um"] = settings.diameter_um if measured is None else float(measured)
+    if block["diameter_check"]["note"]:
+        block["notes"].append(block["diameter_check"]["note"])
+    if measured is None:
+        block["notes"].append(f"The nanowell diameter could not be measured ({why_not}): the plate format's "
+                              f"{settings.diameter_um:g} um is used")
+    return block
+
+
+#: The long side, in pixels, a tile is block-averaged to for the rough diameter: enough for a nanowell of any format
+#: at 10x to span tens of pixels, and a fraction of the full tile's cost.
+_ROUGH_SIDE_PX = 1024
+
+
+def _tile_diameter(images: dict, plan, px: float, pitch_um: float | None = None) -> tuple[float | None, dict]:
+    """``(diameter or None, info)``: the nanowell diameter measured on the tiles nearest the grid's centre.
+
+    Rough from the light blobs of a block-averaged copy of the tile (``nanowell_infer.find_wells_by_contrast``),
+    then fitted at full resolution on that tile (:func:`fitted_diameter`); the first centre tile that gives one
+    decides. *info* carries the rough diameter, the number of fits and the tile, and ``why_not`` names the reason
+    when none measured. Measured before registration, because registration's per-tile fits need it (tracker F13).
+    """
+    from pipeline.nanowell_infer import find_wells_by_contrast
+
+    info = {"diameter_rough_um": None, "diameter_fits": 0, "diameter_tile": None, "why_not": ""}
+    reasons = []
+    for tile in _centre_tiles(plan):
+        image = np.asarray(images[tile], dtype=np.float32)
+        factor = max(1, int(math.ceil(max(image.shape) / _ROUGH_SIDE_PX)))
+        h, w = (image.shape[0] // factor) * factor, (image.shape[1] // factor) * factor
+        small = image[:h, :w].reshape(h // factor, factor, w // factor, factor).mean(axis=(1, 3))
+        wells = find_wells_by_contrast(small, px * factor)
+        if not wells.ok:
+            reasons.append(f"{tile}: no nanowells stood out by their contrast ({wells.reason})")
+            continue
+        fitted, fits, _ = fitted_diameter({tile: image}, {tile: (0.0, 0.0)}, px, wells.points_um, wells.diameter_um,
+                                           pitch_um)
+        info.update(diameter_rough_um=float(wells.diameter_um), diameter_fits=fits, diameter_tile=tile)
+        if fitted is not None:
+            return fitted, info
+        reasons.append(f"{tile}: {fits} nanowell(s) fitted at full resolution, {MIN_DIAMETER_FITS} needed")
+    info["why_not"] = "; ".join(reasons) or "no tile to measure it on"
+    return None, info
+
+
+def _detect_by_contrast(montage, settings: NanowellSettings, tile_diameter: float | None = None,
+                        diameter_info: dict | None = None):
     """``(detection, ArrayGeometry or None, geometry block)`` for an inferred geometry: the wells found by contrast on the montage, the
     lattice and array they imply, and how the measured pitch and diameter compare with the settings' (tracker X35).
 
@@ -494,7 +637,7 @@ def _detect_by_contrast(montage, settings: NanowellSettings):
     """
     from pipeline.nanowell_detect import SiteDetection
     from pipeline.nanowell_infer import (
-        ARRAY_CIRCLE, ARRAY_POLYGON, DIAMETER_AGREEMENT, PITCH_AGREEMENT, compare_given, find_wells_by_contrast,
+        ARRAY_CIRCLE, ARRAY_POLYGON, PITCH_AGREEMENT, compare_given, find_wells_by_contrast,
         infer_array,
     )
 
@@ -510,13 +653,18 @@ def _detect_by_contrast(montage, settings: NanowellSettings):
     block.update(geometry.summary())
     block["pitch_check"] = compare_given(geometry.fit.pitch, settings.pitch_um, PITCH_AGREEMENT, "pitch",
                                          "addresses use the measured pitch")
-    block["diameter_check"] = compare_given(wells.diameter_um, settings.diameter_um, DIAMETER_AGREEMENT,
-                                            "nanowell diameter", "nanowells are fitted, owned and measured at the "
-                                            "measured diameter")
-    # The diameter sites are measured at: the setting's, unless the image shows it is wrong (review X35-R3).
-    block["diameter_used_um"] = (settings.diameter_um if block["diameter_check"]["agrees"] is not False
-                                 else float(wells.diameter_um))
-    block["notes"] = [c["note"] for c in (block["pitch_check"], block["diameter_check"]) if c["note"]]
+    block["notes"] = [block["pitch_check"]["note"]] if block["pitch_check"]["note"] else []
+    # The diameter sites are measured at: the plate's, fitted at full resolution on the tiles (tracker F2, F13), else
+    # the montage's light blobs' (tracker F4).
+    block.update({k: v for k, v in (diameter_info or {}).items() if k != "why_not"})
+    _diameter_block(block, float(wells.diameter_um) if tile_diameter is None else tile_diameter, settings, "")
+    if tile_diameter is None:
+        # Only the montage's light blobs measured it: say so, and keep it out of the fitted ones (review F20c).
+        block["diameter_rough_only"] = True
+        block["notes"].append(
+            f"The nanowell diameter ({wells.diameter_um:.1f} um) was read only from the montage's light blobs, which "
+            "read nanowells up to about a tenth small, because none could be fitted at full resolution ("
+            f"{(diameter_info or {}).get('why_not') or 'no tile measured'})")
     if geometry.missing:
         block["notes"].append(f"{geometry.missing} of the array's {len(geometry.found)} lattice sites showed no "
                               "light nanowell (a bubble, or not detected): each keeps its address and is measured "
@@ -540,7 +688,8 @@ def _lattice_block(located: Located, status: str, reason: str) -> dict:
             "angle_deg": fit.angle_deg, "mirrored": located.mirrored,
             "origin_method": located.origin_method, "origin_agreement": located.origin_agreement,
             "array_boundary": located.boundary, "montage_um_per_px": located.montage.um_per_px,
-            "n_detected": 0 if located.detected_common is None else len(located.detected_common)}
+            "n_detected": 0 if located.detected_common is None else len(located.detected_common),
+            "fiducial": located.fiducial}
 
 
 def hex_ring(q: int | None, r: int | None) -> int | None:
@@ -583,6 +732,53 @@ def _roster_positions(located: Located, radius_um: float | None, sites=None):
     return addresses, points
 
 
+def _unaddressed_positions(located: Located, radius_um: float | None,
+                           settings: NanowellSettings | None = None) -> np.ndarray:
+    """Every lattice site of an unaddressed timepoint's array, montage frame (tracker F8).
+
+    An address needs the origin; a position does not. The lattice and the array's outline place every nanowell,
+    including one a bubble hides, and §1.1's rule is that no nanowell's position is ever skipped. An inferred array
+    has its sites already (``array_sites``); a circle has the lattice sites within *radius_um* (the well's shared
+    radius) of its fitted centre, with the same quarter-pitch allowance :func:`nanowell_lattice.roster` gives an
+    anchored one. Only with neither (no outline was fitted) are the sites found all there is.
+
+    With *settings*, the circle's sites are the ones the evidence supports (:func:`_evidence_roster`, as for an
+    anchored timepoint), counted from the site nearest the outline's centre as a provisional origin that decides
+    positions only — no row takes an address from it. The disk alone added the ring beyond the rim when the fitted
+    radius ran large: 18 rows of floor on a rendered 265-site array (review F20f).
+    """
+    from pipeline.nanowell_lattice import nearest_site as lattice_snap
+
+    montage = located.montage
+    detected = located.detected_common - np.asarray(montage.origin_um)
+    if located.array_sites is not None:
+        return np.asarray(located.array_sites, dtype=float).reshape(-1, 2)
+    fit = located.fit
+    if located.boundary is None or radius_um is None or fit is None or not fit.ok or fit.phase_origin is None:
+        return detected
+    centre = np.asarray(located.boundary["centre_um"], dtype=float) - np.asarray(montage.origin_um)
+    basis = np.column_stack((fit.a1, fit.a2))
+    phase = np.asarray(fit.phase_origin, dtype=float)
+    limit = radius_um + fit.pitch / 4
+    # The array's centre is a site (the square sits there), so the disk is drawn about the site nearest the fitted
+    # outline's centre rather than the centre itself: a circle fitted to the rim was 31 um (a fifth of a pitch) off on
+    # a rendered plate, which swapped five rim sites for five outside the array.
+    _, middle = lattice_snap(fit, centre)
+    site = phase + basis @ np.asarray(middle, dtype=float)
+    if settings is not None:
+        from pipeline.nanowell_lattice import index_points
+
+        provisional = replace(located, origin_montage=tuple(site),
+                              indexed=index_points(detected, fit, tuple(site)))
+        supported = _evidence_roster({located.timepoint: provisional}, [located.timepoint], radius_um, settings)
+        return np.array([site + basis @ np.asarray(a, dtype=float) for a in sorted(supported.roster)],
+                        dtype=float).reshape(-1, 2)
+    reach = math.ceil(limit / np.linalg.svd(basis, compute_uv=False).min()) + 1
+    steps = np.array([(q, r) for q in range(-reach, reach + 1) for r in range(-reach, reach + 1)], dtype=float)
+    sites = phase + (np.asarray(middle, dtype=float) + steps) @ basis.T
+    return sites[np.hypot(*(sites - site).T) <= limit]
+
+
 def _initial_sites(located: Located, points_montage: np.ndarray, pitch_um: float):
     """Each roster site's starting centre (common frame): the detected one if it is near, else the lattice's."""
     common = points_montage + np.asarray(located.montage.origin_um)
@@ -596,7 +792,8 @@ def _initial_sites(located: Located, points_montage: np.ndarray, pitch_um: float
     return out, was_detected
 
 
-def _fit_geometry(image, px: float, centres_local: np.ndarray, indices, diameter_um: float, offset):
+def _fit_geometry(image, px: float, centres_local: np.ndarray, indices, diameter_um: float, offset,
+                  pitch_um: float | None = None):
     """``SiteGeometry`` per site, fitted on *image* and returned in the common frame with global indices.
 
     A fit needs a nanowell at least ``MIN_REFINE_RADIUS_PX`` across; at a coarser pixel size every site
@@ -605,7 +802,7 @@ def _fit_geometry(image, px: float, centres_local: np.ndarray, indices, diameter
     from pipeline.nanowell_detect import PREDICTED, SiteGeometry, refine_sites
 
     try:
-        fitted = refine_sites(image, px, centres_local, diameter_um)
+        fitted = refine_sites(image, px, centres_local, diameter_um, pitch_um=pitch_um)
     except ValueError:
         fitted = [SiteGeometry(i, tuple(c), diameter_um / 2, PREDICTED) for i, c in enumerate(centres_local)]
     shift = np.asarray(offset, dtype=float)
@@ -624,11 +821,11 @@ def _owned_geometries(located: Located, images: dict, settings: NanowellSettings
         if owner is None:
             local = centres[indices] - np.asarray(montage.origin_um)
             fitted = _fit_geometry(montage.image, montage.um_per_px, local, indices, settings.diameter_um,
-                                   montage.origin_um)
+                                   montage.origin_um, located.pitch_um)
         else:
             left, top = located.positions[owner]
             fitted = _fit_geometry(images[owner], px, centres[indices] - (left, top), indices,
-                                   settings.diameter_um, (left, top))
+                                   settings.diameter_um, (left, top), located.pitch_um)
         geoms.update({g.index: g for g in fitted})
     return geoms, by_tile
 
@@ -892,22 +1089,23 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     carry no count (``n_cells`` ``None``, so a seen site is ``measured`` with no number, never ``empty``) — what
     Test detection shows when Cellpose cannot be loaded. *channels* maps a fluorescence channel name to
     ``f(tile_id) -> image | None``. A timepoint
-    that is not ``ok`` (no origin) is measured on the sites actually detected, with no address.
+    that is not ``ok`` (no origin) is measured on every site of its array, with no address
+    (:func:`_unaddressed_positions`).
     """
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_detect import FITTED, MIN_REFINE_RADIUS_PX
     from pipeline.nanowell_sites import check_format
     from pipeline.tile_grid import ownership_report
 
-    px, montage = located.pixel_size_um, located.montage
+    px = located.pixel_size_um
     if located.diameter_um is not None and located.diameter_um != settings.diameter_um:
         settings = replace(settings, diameter_override_um=located.diameter_um)
     addressed = located.status == OK
     if addressed:
         addresses, points_m = _roster_positions(located, array_radius_um, roster)
     else:
-        # No origin: only the sites actually detected, with no address (they cannot be joined over time).
-        points_m = located.detected_common - np.asarray(montage.origin_um)
+        # No origin: every site of the array, with no address (they cannot be joined over time) — tracker F8.
+        points_m = _unaddressed_positions(located, array_radius_um, settings)
         addresses = [None] * len(points_m)
     centres, detected = _initial_sites(located, points_m, located.pitch_um or settings.pitch_um)
     report = ownership_report(located.plan, centres, settings.diameter_um, settings.margin,
@@ -983,6 +1181,7 @@ class WellOutcome:
     notes: list = field(default_factory=list)
     earliest_template: tuple | None = None               # (timepoint, Template): the first own template in time
     roster_change: str = ""                              # a kept roster the new evidence changes (X35a-R1): why
+    diameter_source: str | None = None                   # where the well's one diameter came from (_settle_diameter)
 
 
 _DRIFT_NOTE = "The empty-nanowell template departs from the earliest timepoint's"
@@ -1322,27 +1521,37 @@ def _shared_roster(located: dict, anchored, fixed_roster) -> tuple[frozenset, di
 
 
 def _settle_diameter(outcome, measurable, settings: NanowellSettings, reference: dict | None) -> float:
-    """One diameter for the whole well's sites (review X35-R14): the earlier run's when it kept timepoints, else
-    the setting's unless the median of the timepoints' measured diameters disagrees with it beyond
-    ``DIAMETER_AGREEMENT``, then that median. Chosen per timepoint it flipped within a well (125 um at some
-    timepoints, the setting's 100 at others), so ownership, margins and templates differed between them and the
-    template-drift check compared nanowells of different sizes. Applied to every *measurable* timepoint, whose note
-    says so; the per-timepoint comparison stays in its grid record."""
+    """One diameter for the whole well's sites (review X35-R14, tracker F3): the earlier run's when it kept
+    timepoints, else the median of the timepoints' measured diameters, else the setting's. Chosen per timepoint it
+    flipped within a well (125 um at some timepoints, the setting's 100 at others), so ownership, margins and
+    templates differed between them and the template-drift check compared nanowells of different sizes. The median
+    is used whether or not it agrees with the setting (tracker F4); a disagreement beyond ``DIAMETER_AGREEMENT`` is
+    said. Applied to every *measurable* timepoint, whose note says so; the per-timepoint comparison stays in its
+    grid record. A diameter fitted at full resolution outranks one the inferred geometry read only from the
+    montage's light blobs (``diameter_rough_only``, about a tenth small). Where the diameter came from — ``measured``,
+    ``rough``, ``format`` (nothing could be measured) or an earlier run's source — is kept on the outcome and in every
+    timepoint's geometry block, so the plate's comparison counts only measured wells (review F20b, F20c)."""
     from pipeline.nanowell_infer import DIAMETER_AGREEMENT, compare_given
 
-    checks = [outcome.timepoints[tp].get("geometry", {}).get("diameter_check") or {} for tp in measurable]
-    measured = [c["measured_um"] for c in checks if c.get("measured_um")]
+    blocks = [outcome.timepoints[tp].get("geometry", {}) for tp in measurable]
+    fitted = [(b.get("diameter_check") or {}).get("measured_um") for b in blocks if not b.get("diameter_rough_only")]
+    rough = [(b.get("diameter_check") or {}).get("measured_um") for b in blocks if b.get("diameter_rough_only")]
+    measured = [d for d in fitted if d] or [d for d in rough if d]      # a fitted diameter outranks a rough one
     kept = (reference or {}).get("diameter_used_um")
     consequence = "nanowells are fitted, owned and measured at the measured diameter"
     note = ""
+    source = "format"
     if kept:
         used = float(kept)
+        # The earlier run's own source; a record written before sources were kept says only that it was kept.
+        source = (reference or {}).get("diameter_source") or "kept"
         if used != settings.diameter_um:
             note = f"Nanowells are fitted, owned and measured at {used:.1f} um, the diameter the earlier run kept"
     elif measured:
         check = compare_given(float(np.median(measured)), settings.diameter_um, DIAMETER_AGREEMENT,
                               "nanowell diameter (median over the well's timepoints)", consequence)
-        used, note = (settings.diameter_um, "") if check["agrees"] is not False else (check["measured_um"], check["note"])
+        used, note = check["measured_um"], check["note"]
+        source = "measured" if any(d for d in fitted) else "rough"
     else:
         used = settings.diameter_um
     for tp in measurable:
@@ -1350,7 +1559,8 @@ def _settle_diameter(outcome, measurable, settings: NanowellSettings, reference:
         located.notes = [n for n in located.notes if not n.startswith("The measured nanowell diameter")]
         located.notes += [note] if note else []
         located.diameter_um = used
-        outcome.timepoints[tp].setdefault("geometry", {})["diameter_used_um"] = used
+        outcome.timepoints[tp].setdefault("geometry", {}).update(diameter_used_um=used, diameter_source=source)
+    outcome.diameter_source = source
     return used
 
 
@@ -1638,11 +1848,14 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
             differences = outcome.radius["roster_differences"]
             reference_tp = min(anchored, key=lambda tp: (differences[tp], anchored.index(tp)))
         outcome.radius["diameter_used_um"] = _settle_diameter(outcome, anchored + unaddressed, settings, reference)
+        outcome.radius["diameter_source"] = outcome.diameter_source
         radius_um = None
     else:
+        used = _settle_diameter(outcome, anchored + unaddressed, settings, reference)
         shared = _shared_radius(outcome.located, anchored + unaddressed, settings, fixed_radius_um)
         outcome.radius = {"radius_um": shared.radius_um, "status": shared.status,
-                          "deviations_um": shared.deviations_um, "flags": shared.flags}
+                          "deviations_um": shared.deviations_um, "flags": shared.flags, "diameter_used_um": used,
+                          "diameter_source": outcome.diameter_source}
         radius_um = shared.radius_um
         if radius_um is None:
             # Unaddressed timepoints too: they are measured against the shared radius, so without one they have no
@@ -1651,7 +1864,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
                 outcome.timepoints[tp].update(status=NO_LATTICE, reason="No timepoint fitted an array boundary, so "
                                                                        "no roster radius could be shared")
             return outcome
-        roster, own, circle_reference = _circle_roster(outcome, anchored, radius_um, settings, fixed_roster,
+        roster, own, circle_reference = _circle_roster(outcome, anchored, radius_um,
+                                                       replace(settings, diameter_override_um=used), fixed_roster,
                                                        fixed_radius_um, kept_evidence)
         reference_tp = circle_reference or reference_tp
 

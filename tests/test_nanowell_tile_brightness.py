@@ -57,7 +57,7 @@ def test_every_seen_nanowell_has_a_confluence_and_it_does_not_depend_on_the_tile
     assert {k: (sites[k]["state"], sites[k]["n_cells"]) for k in seen} == \
         {k: (reference[k]["state"], reference[k]["n_cells"]) for k in seen}
     block = measured.template["normalisation"]
-    assert block["measure_version"] == 2 and block["offset"] == "measured" and block["tiles_without_gain"] == []
+    assert block["measure_version"] == 3 and block["offset"] == "measured" and block["tiles_without_gain"] == []
 
 
 def test_empty_nanowells_read_empty_and_loaded_ones_textured_on_every_tile(well):

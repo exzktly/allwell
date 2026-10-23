@@ -55,6 +55,17 @@ def test_a_100um_hexagonal_array_in_a_circle_is_the_format_s_own_geometry():
     assert len(s.roster_px) == sum(s.roster_found) == len(s.wells_px)
 
 
+def test_the_suggested_diameter_is_fitted_not_read_from_the_light_blobs():
+    """The light blobs read these 125.8 um nanowells as about 114 um; a run fits their edges, and the Playground
+    suggests what a run would measure (review F20e)."""
+    s = nc.suggest_from_image(_frame(pitch=152.6, diameter=125.8, radius=700.0, px=2.0, rotation_deg=7.0), 2.0)
+    fields = _fields(s)
+    assert fields["Plate format"] == "Custom size" and fields["Nanowell diameter (µm)"] == "125.8"
+    facts = dict(s.facts)
+    assert facts["Nanowell diameter"].startswith("125.8 µm (fitted on ") and facts["Nanowell diameter"].endswith(
+        f" of the {len(s.wells_px)} wells found)")
+
+
 def test_a_square_lattice_needs_the_inferred_geometry():
     fields = _fields(nc.suggest_from_image(_frame(lattice="square", array_shape="square", rotation_deg=-15.0,
                                                   square_centre=False), PX))

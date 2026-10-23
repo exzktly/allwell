@@ -60,8 +60,21 @@ def test_a_timepoint_the_record_does_not_hold_has_a_status_not_an_exception(well
     assert located.status == nr.NO_RECORD
 
 
-def test_the_wrong_plate_format_is_refused_by_name(well):
+def test_the_wrong_plate_format_is_measured_and_named(well):
+    """A 100 um plate run as the 50 um format: the plate's own diameter is measured and used, and the note names both
+    numbers (tracker F2). It was refused as a format mismatch while the format's diameter sized the detection."""
     rendered, record, _ = well
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, nr.NanowellSettings("50um"))
+    assert located.status == nr.OK and located.diameter_um == pytest.approx(100.0, rel=0.01)
+    assert located.notes == [f"The measured nanowell diameter ({located.diameter_um:.1f} um) disagrees with the 50 um "
+                             f"the settings give (by {(located.diameter_um / 50 - 1) * 100:+.0f} %, beyond 25 %): "
+                             "nanowells are found, fitted, owned and measured at the measured diameter; check the "
+                             "plate format"]
+
+
+def test_the_wrong_plate_format_is_still_refused_when_no_diameter_can_be_measured(well, monkeypatch):
+    rendered, record, _ = well
+    monkeypatch.setattr(nr, "MIN_DIAMETER_FITS", 10_000)
     located = nr.locate_timepoint("T0", record, "A01", rendered.images, nr.NanowellSettings("50um"))
     assert located.status in (nr.FORMAT_MISMATCH, nr.NO_LATTICE) and located.indexed == ()
 
@@ -350,12 +363,15 @@ def test_a_spilled_well_holds_its_montages_on_disk_and_measures_the_same(tmp_pat
 
 @pytest.mark.parametrize("diameter_um, finding", [
     (100.0, None),                                                     # the plate's own: nothing to say
-    (140.0, "The fitted nanowells measure 99.7 um across but the plate format sets 140 um"),
-    (150.0, "No nanowell was fitted, so only the pitch could be checked"),   # past the fit's 30 %: none fitted
+    (140.0, "The measured nanowell diameter (median over the well's timepoints) (99.6 um) disagrees with the 140 um"),
+    # Past the 30 % a site fit keeps around a seed: the seed is the plate's own, so the reading does not move with
+    # the setting (both read 99.6).
+    (150.0, "The measured nanowell diameter (median over the well's timepoints) (99.6 um) disagrees with the 150 um"),
 ])
 def test_the_format_s_diameter_is_checked_against_the_nanowells_fitted_at_full_resolution(diameter_um, finding):
-    """Roll-up review X25: the format check's diameter half never ran, because locating has no fitted nanowells.
-    It runs on the sites measuring fits at full resolution, and a finding is written on the timepoint."""
+    """Roll-up review X25: the format's diameter is checked against nanowells fitted at full resolution, and a
+    finding is written on the timepoint. The fitted diameter is the one used (tracker F2), so a setting far off it
+    still fits every site; it once left none fitted at 150 um."""
     from tests._nanowell_run_fixture import build_well
 
     rendered, record = build_well()
@@ -364,6 +380,8 @@ def test_the_format_s_diameter_is_checked_against_the_nanowells_fitted_at_full_r
                           segmenter=threshold_segmenter())
     notes = outcome.timepoints["T0"]["notes"]
     format_notes = [n for n in notes if "plate format" in n or "No nanowell was fitted" in n]
+    seen = [r for r in outcome.sites if r["state"] in ("empty", "measured")]
+    assert sum(r["geometry"] == "fitted" for r in seen) > 0.9 * len(seen)
     assert [n[:len(finding)] for n in format_notes] == ([] if finding is None else [finding])
 
 
@@ -378,9 +396,8 @@ def test_without_a_shared_radius_an_unaddressed_timepoint_is_a_failed_one_too(mo
     rendered, record = build_well()
     real_resolve = lattice.resolve_origin
 
-    def no_origin(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin, manual=None, detected=None):
-        return real_resolve(fit, fiducial=None, array_centre=None, plate_rigid=plate_rigid,
-                            fiducial_margin=fiducial_margin, manual=manual, detected=detected)
+    def no_origin(fit, *, fiducial=None, array_centre=None, plate_rigid=None, **rest):
+        return real_resolve(fit, fiducial=None, array_centre=None, plate_rigid=plate_rigid, **rest)
 
     monkeypatch.setattr(lattice, "resolve_origin", no_origin)
     monkeypatch.setattr(nr, "_shared_radius", lambda *a, **k: SimpleNamespace(

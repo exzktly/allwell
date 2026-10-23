@@ -423,7 +423,8 @@ def _reference_of(prior: dict | None) -> dict | None:
             # kind, and measured at the same diameter (review X35-R13, R14).
             return {"timepoint": tp, "pitch_um": block["pitch_um"], "angle_deg": block["angle_deg"],
                     "roster_size": block["roster_size"], "lattice_kind": block.get("lattice_kind"),
-                    "diameter_used_um": (block.get("geometry") or {}).get("diameter_used_um")}
+                    "diameter_used_um": (block.get("geometry") or {}).get("diameter_used_um"),
+                    "diameter_source": (block.get("geometry") or {}).get("diameter_source")}
     return None
 
 
@@ -788,6 +789,37 @@ def plates_of(grids: dict[str, dict]) -> dict:
     return plates
 
 
+#: How far a well's nanowell diameter may sit from its plate's median before the run says so (tracker F11). The wells
+#: of one plate share a mold, so they share a diameter; a fit on one tile reads it within a few tenths of a micrometre on
+#: rendered plates, so 5 % is far outside measurement and points at the well — debris over the tile the diameter was
+#: measured on, the wrong tile, or a well that is not this plate's.
+PLATE_DIAMETER_TOLERANCE = 0.05
+
+
+def plate_diameters(grids: dict[str, dict]) -> dict:
+    """``plate -> {"median_um", "wells", "outliers"}``: each well's diameter against its plate's median (tracker F11).
+
+    *grids* are grid records (:func:`_read_grids`). A well's diameter is the one its sites were measured at
+    (``array_radius.diameter_used_um``); a well without one, or whose diameter is the format's because none could be
+    measured (``diameter_source`` ``format``) or only roughly (``rough``, about a tenth small), is left out — counted, the format's value pulled the median toward
+    itself and flagged the wells that were measured (review F20b) — and a plate of fewer than three wells has
+    no median worth comparing against, so it lists its wells and flags none. ``outliers`` maps a well to its
+    signed fraction off the median.
+    """
+    out = {}
+    for plate, members in plates_of(grids).items():
+        wells = {well: float(d) for well, grid in members.items()
+                 if (d := (grid.get("array_radius") or {}).get("diameter_used_um")) is not None
+                 and (grid.get("array_radius") or {}).get("diameter_source") not in ("format", "rough")}
+        if not wells:
+            continue
+        median = float(np.median(list(wells.values()))) if len(wells) >= 3 else None
+        outliers = {} if median is None else {
+            well: d / median - 1.0 for well, d in sorted(wells.items()) if abs(d / median - 1.0) > PLATE_DIAMETER_TOLERANCE}
+        out[plate] = {"median_um": median, "wells": dict(sorted(wells.items())), "outliers": outliers}
+    return out
+
+
 def plan_reanchor(grids: dict[str, dict]) -> tuple[dict, dict]:
     """``(predictions, reasons)`` for every unaddressed (well, timepoint) the rest of the plate can anchor.
 
@@ -899,6 +931,30 @@ def nanowell_endgame(options, output_dir, well_zips, shared_kwargs_template, nuc
         for key, why in summary["remaining"].items():
             log.warning("Unaddressed %s: %s", key, why)
     _record_reanchor(Path(output_dir) / "pipeline_info.json", summary)
+    _check_plate_diameters(output_dir, settings_from_kwargs(shared_kwargs_template).key())
+
+
+def _check_plate_diameters(output_dir, settings: dict) -> None:
+    """Compare every well's nanowell diameter with its plate's median, log the wells far from it, and record the
+    comparison in ``pipeline_info.json`` as ``nanowell.plate_diameters`` (tracker F11). Only wells analysed under
+    *settings* (a ``NanowellSettings.key()``) take part, as in the re-anchoring pass."""
+    from pipeline.io import _safe_atomic_text_write
+    from pipeline.run_report import merge_into_pipeline_info
+
+    plates = plate_diameters(_read_grids(Path(output_dir), settings))
+    for plate, found in plates.items():
+        for well, off in found["outliers"].items():
+            log.warning("Well %s: its nanowells measure %.1f um, %+.0f %% off the %.1f um the plate%s's other wells "
+                        "share; check the tile its diameter was measured on.", well, found["wells"][well], off * 100,
+                        found["median_um"], f" {plate}" if plate else "")
+    info_path = Path(output_dir) / "pipeline_info.json"
+    try:
+        existing = json.loads(info_path.read_text(encoding="utf-8")) if info_path.exists() else {}
+        block = dict(existing.get("nanowell", {}))
+        block["plate_diameters"] = plates
+        merge_into_pipeline_info(info_path, {"nanowell": block}, atomic_writer=_safe_atomic_text_write)
+    except (OSError, ValueError) as exc:
+        log.warning("Could not record the plate's nanowell diameters in %s: %s", info_path, exc)
 
 
 def _record_reanchor(info_path: Path, summary: dict) -> None:

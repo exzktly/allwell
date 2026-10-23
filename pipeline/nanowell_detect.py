@@ -510,8 +510,28 @@ def _row_means(rows):
     return np.ascontiguousarray(rows, dtype=np.float64).mean(axis=1)
 
 
-def _edge_points(image, centre_px, radius_px, contrast):
-    """Edge position along each of _RAYS rays: where brightness falls fastest going outward."""
+def _zones(rhos, radius_px, wall_end_px):
+    """``(inner, outer)`` masks on *rhos*: inside the disk away from its rim, and the lattice just outside it.
+
+    The lattice is read from 1.3 to 1.7 radii, but never past the neighbouring nanowells' rims (*wall_end_px*, a pitch
+    less a radius): on a plate with thin walls (152.6 um pitch, 125.8 um wells: neighbours from 1.43 radii) the fixed
+    zone read the neighbour's bright interior, and with a halo no edge cleared the contrast (tracker F16). There the
+    zone is the outer part of the wall, from 0.4 of the way across it, which leaves a halo against the rim out.
+    """
+    inner = rhos <= 0.7 * radius_px
+    if wall_end_px is None or not math.isfinite(wall_end_px):
+        return inner, rhos >= 1.3 * radius_px
+    end = min(1.7 * radius_px, wall_end_px - 1.0)
+    start = min(1.3 * radius_px, radius_px + 0.4 * (wall_end_px - radius_px))
+    outer = (rhos >= start) & (rhos <= end)
+    return inner, (outer if outer.sum() >= 2 else rhos >= 1.3 * radius_px)
+
+
+def _edge_points(image, centre_px, radius_px, contrast, wall_end_px=None):
+    """Edge position along each of _RAYS rays: where brightness falls fastest going outward.
+
+    *wall_end_px* is where the neighbouring nanowells' rims begin (:func:`_zones`); ``None`` reads the lattice at
+    1.3 to 1.7 radii whatever lies there."""
     from scipy import ndimage
 
     angles = np.linspace(0, 2 * np.pi, _RAYS, endpoint=False)
@@ -523,8 +543,7 @@ def _edge_points(image, centre_px, radius_px, contrast):
     profile = ndimage.gaussian_filter1d(profile, 1.0 / step, axis=1)     # one pixel of smoothing
     slope = np.gradient(profile, rhos, axis=1)
     peak = np.argmin(slope, axis=1)                                  # steepest fall outward
-    inner_zone = rhos <= 0.7 * radius_px                              # inside the disk, away from its rim
-    outer_zone = rhos >= 1.3 * radius_px                              # the lattice just outside it
+    inner_zone, outer_zone = _zones(rhos, radius_px, wall_end_px)
     # Every ray at once: the same arithmetic as a per-ray loop, element for element, without
     # two small-array means per ray (refine_sites calls this up to three times per site, and
     # a plate has thousands of sites).
@@ -558,7 +577,7 @@ def _circle_fit(points):
 
 
 def refine_sites(image, pixel_size_um: float, sites_um, nominal_diameter_um: float, *,
-                 relaxed=(), contrast: float | None = None) -> list[SiteGeometry]:
+                 relaxed=(), contrast: float | None = None, pitch_um: float | None = None) -> list[SiteGeometry]:
     """Fit every site's centre and radius from its radial edge profile; never drop one.
 
     A site whose fit holds up (enough rays find an edge, the circle through them has small
@@ -567,7 +586,8 @@ def refine_sites(image, pixel_size_um: float, sites_um, nominal_diameter_um: flo
     median fitted radius and is ``predicted``: a bubble, debris or a clipped edge costs a
     site its measurement, not its row. *relaxed* lists sites whose outline is not a circle
     (the square) and may scatter more. *contrast* is the intensity drop an edge must show;
-    it defaults to 40 % of the image's own nanowell-to-lattice range.
+    it defaults to 40 % of the image's own nanowell-to-lattice range. *pitch_um* keeps the wall's zone short of the
+    neighbouring nanowells (:func:`_zones`).
     """
     image = np.asarray(image, dtype=np.float64)
     nominal_px = nominal_diameter_um / 2 / pixel_size_um
@@ -583,7 +603,8 @@ def refine_sites(image, pixel_size_um: float, sites_um, nominal_diameter_um: flo
         radius = nominal_px
         accepted = None
         for _ in range(3):
-            edges = _edge_points(image, centre, radius, contrast)
+            edges = _edge_points(image, centre, radius, contrast,
+                                 None if pitch_um is None else pitch_um / pixel_size_um - radius)
             if len(edges) < max(int(_MIN_RAY_FRACTION * _RAYS), 6):
                 break
             pts = np.array([(centre[0] + rho * math.cos(a), centre[1] + rho * math.sin(a))

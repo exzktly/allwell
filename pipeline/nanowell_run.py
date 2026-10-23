@@ -393,12 +393,12 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     # The plate's own diameter, measured on the tiles before anything is sized from one (tracker F2, F13): the
     # per-tile fits registration rests on, the matched filter, the square's scoring ring, the site fits and the
     # template all follow it, and the format only checks it.
-    tile_diameter, diameter_info = _tile_diameter(images, plan, px)
     probe = _contrast_lattice(images, plan, px) if settings.infer else None
     if probe is not None:
         (pitch, kind), pitch_source = probe, "contrast"
     else:
         (pitch, pitch_source), kind = working_pitch(images, plan, px, settings), "auto"
+    tile_diameter, diameter_info = _tile_diameter(images, plan, px, pitch)
     key = registration_key(record, well, timepoint, images, settings, pitch, kind, tile_diameter)
     registration = stored_placement(stored, key, [p.tile_id for p in plan.placements])
     if registration is None:
@@ -504,8 +504,8 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
 MIN_DIAMETER_FITS = 6
 
 
-def _fitted_diameter(images: dict, positions: dict, px: float, sites_common, rough_um: float
-                     ) -> tuple[float | None, int, str | None]:
+def _fitted_diameter(images: dict, positions: dict, px: float, sites_common, rough_um: float,
+                     pitch_um: float | None = None) -> tuple[float | None, int, str | None]:
     """``(diameter, fits, tile)``: the median diameter of the nanowells fitted at full resolution on one tile.
 
     The montage is block-averaged, so a diameter read from it is rough (the contrast finder read 125.8 um wells as
@@ -530,7 +530,8 @@ def _fitted_diameter(images: dict, positions: dict, px: float, sites_common, rou
             best, best_local = name, local[inside]
     if best is None:
         return None, 0, None
-    radii = [g.radius_um for g in refine_sites(images[best], px, best_local, rough_um) if g.geometry == FITTED]
+    radii = [g.radius_um for g in refine_sites(images[best], px, best_local, rough_um, pitch_um=pitch_um)
+             if g.geometry == FITTED]
     if len(radii) < MIN_DIAMETER_FITS:
         return None, len(radii), best
     return 2.0 * float(np.median(radii)), len(radii), best
@@ -563,7 +564,7 @@ def _diameter_block(block: dict, measured: float | None, settings: NanowellSetti
 _ROUGH_SIDE_PX = 1024
 
 
-def _tile_diameter(images: dict, plan, px: float) -> tuple[float | None, dict]:
+def _tile_diameter(images: dict, plan, px: float, pitch_um: float | None = None) -> tuple[float | None, dict]:
     """``(diameter or None, info)``: the nanowell diameter measured on the tiles nearest the grid's centre.
 
     Rough from the light blobs of a block-averaged copy of the tile (``nanowell_infer.find_wells_by_contrast``),
@@ -584,7 +585,8 @@ def _tile_diameter(images: dict, plan, px: float) -> tuple[float | None, dict]:
         if not wells.ok:
             reasons.append(f"{tile}: no nanowells stood out by their contrast ({wells.reason})")
             continue
-        fitted, fits, _ = _fitted_diameter({tile: image}, {tile: (0.0, 0.0)}, px, wells.points_um, wells.diameter_um)
+        fitted, fits, _ = _fitted_diameter({tile: image}, {tile: (0.0, 0.0)}, px, wells.points_um, wells.diameter_um,
+                                           pitch_um)
         info.update(diameter_rough_um=float(wells.diameter_um), diameter_fits=fits, diameter_tile=tile)
         if fitted is not None:
             return fitted, info
@@ -706,7 +708,8 @@ def _initial_sites(located: Located, points_montage: np.ndarray, pitch_um: float
     return out, was_detected
 
 
-def _fit_geometry(image, px: float, centres_local: np.ndarray, indices, diameter_um: float, offset):
+def _fit_geometry(image, px: float, centres_local: np.ndarray, indices, diameter_um: float, offset,
+                  pitch_um: float | None = None):
     """``SiteGeometry`` per site, fitted on *image* and returned in the common frame with global indices.
 
     A fit needs a nanowell at least ``MIN_REFINE_RADIUS_PX`` across; at a coarser pixel size every site
@@ -715,7 +718,7 @@ def _fit_geometry(image, px: float, centres_local: np.ndarray, indices, diameter
     from pipeline.nanowell_detect import PREDICTED, SiteGeometry, refine_sites
 
     try:
-        fitted = refine_sites(image, px, centres_local, diameter_um)
+        fitted = refine_sites(image, px, centres_local, diameter_um, pitch_um=pitch_um)
     except ValueError:
         fitted = [SiteGeometry(i, tuple(c), diameter_um / 2, PREDICTED) for i, c in enumerate(centres_local)]
     shift = np.asarray(offset, dtype=float)
@@ -734,11 +737,11 @@ def _owned_geometries(located: Located, images: dict, settings: NanowellSettings
         if owner is None:
             local = centres[indices] - np.asarray(montage.origin_um)
             fitted = _fit_geometry(montage.image, montage.um_per_px, local, indices, settings.diameter_um,
-                                   montage.origin_um)
+                                   montage.origin_um, located.pitch_um)
         else:
             left, top = located.positions[owner]
             fitted = _fit_geometry(images[owner], px, centres[indices] - (left, top), indices,
-                                   settings.diameter_um, (left, top))
+                                   settings.diameter_um, (left, top), located.pitch_um)
         geoms.update({g.index: g for g in fitted})
     return geoms, by_tile
 

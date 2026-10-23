@@ -9585,7 +9585,12 @@ rim's width beyond a sharp edge's (20 % for the square, named in `relaxed`), the
 within 30 % of nominal and the centre within a radius of where the lattice put it. An edge
 must show the disk's plateau over the lattice's, not a drop across two pixels: a defocused
 or haloed rim is soft and wide with the same plateaus, and the two-pixel form fitted none
-from a blur of 2.5 px. Below a 10 px radius the fit is refused (a `ValueError`) rather than
+from a blur of 2.5 px. The lattice's plateau is read from 1.3 to 1.7 radii but, given the pitch
+(which every caller in the run passes), never past where the neighbouring nanowells' rims begin;
+on thin walls it is the outer part of the wall, from 0.4 of the way across it (`_zones`). On the
+first real plate's geometry (152.6 µm pitch, 125.8 µm wells, neighbours from 1.43 radii) the fixed
+zone read the neighbour's interior, and with a phase halo no site fitted when seeded at the right
+diameter. Below a 10 px radius the fit is refused (a `ValueError`) rather than
 returning every site predicted: 8 % of sites fit at 5.8 px, 24 % at 7.1 px, and all but one
 of 313 at 11.6 px. At a 10x objective a 50 um nanowell is 38 px in radius, so this bites
 only on a heavily downsampled montage, which is not what refinement reads. Any other site keeps its lattice position, takes the well's

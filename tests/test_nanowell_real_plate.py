@@ -8,6 +8,7 @@ rendered one, and read what the run writes.
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from pipeline import nanowell_detect as nd
 from pipeline import nanowell_run as nr
@@ -172,3 +173,60 @@ def test_a_soft_square_under_the_old_floor_still_anchors_the_well(monkeypatch):
     assert 0.25 < block["best"] < 0.4 and block["best"] >= 3 * block["runner_up"]
     assert located.status == nr.OK and located.origin_method == "fiducial"
     assert (block["margin"], block["ratio"]) == (nr.FIDUCIAL_MARGIN, nr.FIDUCIAL_RATIO)
+
+
+# ── F16: site edges on thin walls with a phase halo ──────────────────────────
+def _haloed_patch(*, halo=0.0, inner_dark=0.0, px=0.69, size_um=700.0):
+    """A patch of the real plate's lattice at full resolution, with the rings phase contrast puts at a rim: a bright
+    halo just outside it and a dark ring just inside (the expert review's model). Returns the image and the centres
+    of the sites wholly inside it."""
+    import math
+
+    from scipy import ndimage
+
+    n = int(size_um / px)
+    centre = np.array([n * px / 2] * 2)
+    basis = np.array([[PLATE_PITCH, PLATE_PITCH / 2], [0.0, -math.sqrt(3) * PLATE_PITCH / 2]])
+    xs = (np.arange(n) + 0.5) * px
+    gx, gy = np.meshgrid(xs, xs)
+    pos = np.stack((gx, gy), -1) - centre
+    base = np.round(pos @ np.linalg.inv(basis).T)
+    nearest = np.full((n, n), np.inf)
+    for dq in (-1, 0, 1):
+        for dr in (-1, 0, 1):
+            nearest = np.minimum(nearest, np.linalg.norm(pos - (base + (dq, dr)) @ basis.T, axis=-1))
+    edge = nearest - PLATE_DIAMETER / 2                              # signed distance from the rim, um
+    image = 0.2 + 0.8 / (1 + np.exp(np.clip(edge / 0.7, -50, 50)))
+    image += halo * np.exp(-((edge - 3) / 2.5) ** 2) - inner_dark * np.exp(-((edge + 3) / 2.5) ** 2)
+    image = ndimage.gaussian_filter(image, 0.7 / px) + np.random.default_rng(0).normal(0, 0.03, image.shape)
+    sites = np.array([centre + basis @ (a, b) for a in range(-3, 4) for b in range(-3, 4)])
+    return image, sites[(sites.min(axis=1) > 100) & (sites.max(axis=1) < n * px - 100)]
+
+
+@pytest.mark.parametrize("halo, inner_dark, at_least", [(0.4, 0.0, 11), (0.4, 0.4, 9)])
+def test_a_haloed_rim_on_thin_walls_is_fitted_at_the_measured_diameter(halo, inner_dark, at_least):
+    """Seeded at the right diameter, the wall zone (1.3 to 1.7 radii) reached into the neighbour, whose rim is at 1.43
+    radii, and a halo left no edge clearing the contrast: 0 of 11 sites fitted with a halo, 3 to 7 with a halo and a
+    dark inner ring. Measurement seeds at the measured diameter since F2, so a haloed plate would have most sites
+    predicted rather than fitted."""
+    image, sites = _haloed_patch(halo=halo, inner_dark=inner_dark)
+    assert len(sites) == 11
+    fitted = [g.radius_um for g in nd.refine_sites(image, 0.69, sites, PLATE_DIAMETER, pitch_um=PLATE_PITCH)
+              if g.geometry == nd.FITTED]
+    assert len(fitted) >= at_least
+    assert abs(2 * float(np.median(fitted)) - PLATE_DIAMETER) < 2.0      # the halo biases the edge by about 1 um
+
+
+def test_measurement_fits_sites_with_the_plate_s_pitch(monkeypatch):
+    """The cap needs the pitch: the call that fits every site at full resolution must pass the one located."""
+    rendered, record = _plate()
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    seen = []
+    real = nd.refine_sites
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("pitch_um"))
+        return real(*args, **kwargs)
+    monkeypatch.setattr(nd, "refine_sites", spy)
+    nr.measure_timepoint(located, rendered.images, SETTINGS, 700.0, count_cells=False)
+    assert seen and set(seen) == {located.pitch_um}

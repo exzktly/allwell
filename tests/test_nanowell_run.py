@@ -396,9 +396,8 @@ def test_without_a_shared_radius_an_unaddressed_timepoint_is_a_failed_one_too(mo
     rendered, record = build_well()
     real_resolve = lattice.resolve_origin
 
-    def no_origin(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin, fiducial_refusal=""):
-        return real_resolve(fit, fiducial=None, array_centre=None, plate_rigid=plate_rigid,
-                            fiducial_margin=fiducial_margin)
+    def no_origin(fit, *, fiducial=None, array_centre=None, plate_rigid=None, **rest):
+        return real_resolve(fit, fiducial=None, array_centre=None, plate_rigid=plate_rigid, **rest)
 
     monkeypatch.setattr(lattice, "resolve_origin", no_origin)
     monkeypatch.setattr(nr, "_shared_radius", lambda *a, **k: SimpleNamespace(

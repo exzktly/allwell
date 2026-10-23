@@ -74,6 +74,7 @@ from datasets.core.member_names import is_os_junk_member
 from datasets.core.provenance import record_derivation
 from datasets.core.zip_passthrough import copy_member_raw, member_is_raw_copyable
 from util.acquisition_record import AcquisitionRecordError, read_record, record_path
+from util.nanowell_anchors import anchors_path
 from util.image_exts import is_run_input_member
 from util.aw_safe import swallowed
 from util.zip_append import AppendJournalError, AppendRun, recover
@@ -430,7 +431,8 @@ def append_in_place(
         _append_well(run, item, halt=lambda: stop.is_set() or cancelled(),
                      progress=WellFraction(sub_progress or _null, item.well, 1))
 
-    run = AppendRun(plan.ds1.in_dir, preserve=[record_path(plan.ds1.root)])
+    # The anchors file is rewritten with dataset 2's beside dataset 1's, so an undo restores it with the record.
+    run = AppendRun(plan.ds1.in_dir, preserve=[record_path(plan.ds1.root), anchors_path(plan.ds1.in_dir)])
     try:
         with run:
             with ThreadPoolExecutor(max_workers=pick_workers(workers, len(items))) as pool:

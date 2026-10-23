@@ -228,7 +228,7 @@ def test_pressing_test_detection_runs_a_worker_and_shows_the_addresses(tab, qtbo
     qtbot.waitUntil(lambda: window._result is not None, timeout=120000)
     result = window._result
     assert result.status == "ok" and result.origin_method == "fiducial"
-    assert "Origin found from the fiducial" in window._summary.text() and "Overlap between tiles" in window._summary.text()
+    assert "Origin found from the central square" in window._summary.text() and "Overlap between tiles" in window._summary.text()
     marks = site_marks(result)
     assert len(marks) > 200 and {m.text for m in marks if m.text} >= {"0,0", "1,2"}
     cell_site = next(m for m in marks if m.text == "1,2")
@@ -287,7 +287,7 @@ def test_a_refusal_is_summarised_with_its_reason_and_the_overlap_shortfall_is_na
                            overlap_um=(90.0, None), overlap_needed_um=120.0, tile_count=4)
     result.sites = [_site(0, 0, "empty", fused=True)]
     text = summary_text(result)
-    assert "array centre" in text and "90 × - µm against the 120 µm" in text and "too short" in text
+    assert "Origin found from the array's centre" in text and "90 × - µm against the 120 µm" in text and "too short" in text
     assert "1 empty" in text and "1 fused" in text
 
 

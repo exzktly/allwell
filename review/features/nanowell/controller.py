@@ -20,6 +20,8 @@ from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
     METRICS, PER_NANOWELL, distribution_model, match_channel, metric_column,
 )
+from review.features.nanowell.full_montage_view import FullMontageWindow
+from review.features.nanowell.full_montage_view import open_full_montage as open_window
 from review.features.nanowell.image_compute import Crop, read_montage, site_crops, tile_boxes
 from review.features.nanowell.renderer import (
     render_array_map, render_array_qc, render_distribution, render_message, render_position, render_site_detail,
@@ -406,7 +408,16 @@ def _draw_qc(ctx, st, fig, well: str) -> None:
         montage, why = None, "Reading the montage…"
     sites = st.metrics[(st.metrics["well"] == well) & (st.metrics["timepoint"] == tp)]
     render_array_qc(fig, montage, tile_boxes(st.data, well, tp), sites, st.data.grids.get(well) or {},
-                    timepoint=tp, why=why)
+                    timepoint=tp, why=why, show_montage=st.qc_montage, show_overlay=st.qc_overlay)
+
+
+def open_full_montage(ctx) -> FullMontageWindow | None:
+    """Open the Full montage window on the well and timepoint Array QC shows; ``None`` with nothing loaded."""
+    st = _state(ctx)
+    well = page_well(ctx) if st is not None and st.data is not None else ""
+    if not well:
+        return None
+    return open_window(ctx, st.data, st.metrics, well, list(st.data.timepoints(well)), page_timepoint(ctx, well))
 
 
 def redraw_detail(ctx) -> None:
@@ -580,6 +591,14 @@ def set_view(ctx, view: str) -> None:
 
 def set_cohort(ctx, on: bool) -> None:
     _set(ctx, "cohort", bool(on))
+
+
+def set_qc_montage(ctx, on: bool) -> None:
+    _set(ctx, "qc_montage", bool(on))
+
+
+def set_qc_overlay(ctx, on: bool) -> None:
+    _set(ctx, "qc_overlay", bool(on))
 
 
 def set_metric(ctx, metric: str) -> None:

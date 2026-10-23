@@ -471,9 +471,22 @@ def _snap_origin(fit, position):
     return tuple(np.asarray(fit.phase_origin) + basis @ indices[0]), float(residuals[0])
 
 
+#: A manual anchor's site must lie within this many pitches of a detected nanowell (:func:`resolve_origin`).
+MANUAL_REACH_PITCHES = 1.5
+
+
 def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
-                   plate_rigid=None, fiducial_margin) -> OriginResolution:
+                   plate_rigid=None, fiducial_margin, manual=None, detected=None) -> OriginResolution:
     """Resolve independent evidence in priority order, with explicit conflicts.
+
+    *manual* is an anchor a person set by hand (``util.nanowell_anchors``), in the montage frame. It comes first:
+    it is set exactly where the run could not decide. One that lies more than a quarter pitch from every site
+    leaves the timepoint unaddressed with the distance stated, rather than falling through to the other sources,
+    because a person who pointed at a well should not find it silently anchored somewhere else. With *detected* (the
+    nanowells found, same frame) the site must also lie within :data:`MANUAL_REACH_PITCHES` pitches of one of them:
+    the fit's lattice runs on for ever, so a click in an empty corner or outside the array snaps to a site too. The
+    site itself need not be detected — the central square is often exactly what detection missed — but the square
+    is surrounded by nanowells, so it is always one pitch from a found one.
 
     The caller supplies its score margin; it is not calibrated from synthetic
     data. Plate-rigid uncertainty is one-sigma radial: three sigma must be
@@ -499,6 +512,22 @@ def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
         else:
             candidates.append((method, site))
 
+    if manual is not None:
+        site, distance = _snap_origin(fit, manual)
+        if distance > fit.pitch / 4:
+            return OriginResolution(
+                "unaddressed", None, None, "single_source",
+                f"The anchor set by hand lies {distance:.1f} um from the nearest nanowell ({distance / fit.pitch * 100:.0f} % "
+                "of a pitch), so it is not on a nanowell of this lattice and was not used: set it again on the "
+                "central square")
+        if detected is not None and len(detected):
+            reach = float(np.min(np.hypot(*(np.asarray(detected, dtype=float) - np.asarray(site)).T)))
+            if reach > MANUAL_REACH_PITCHES * fit.pitch:
+                return OriginResolution(
+                    "unaddressed", None, None, "single_source",
+                    f"The anchor set by hand is {reach:.0f} um ({reach / fit.pitch:.1f} pitches) from the nearest "
+                    "nanowell found, so it is not on the array and was not used: set it again on the central square")
+        candidates.append(("manual", site))
     if fiducial is not None:
         scores = (fiducial.score, fiducial.runner_up_score)
         if all(math.isfinite(v) for v in scores) and scores[0] - scores[1] > fiducial_margin:

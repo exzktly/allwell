@@ -153,11 +153,11 @@ def _run_reanchoring(tmp_path, dark_rim=()):
         state["target"] = (well, tp) == ("B02", "24h")
         return real_locate(tp, record, well, *args, **kwargs)
 
-    def resolve(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin):
+    def resolve(fit, *, fiducial=None, array_centre=None, plate_rigid=None, fiducial_margin, manual=None, detected=None):
         if state["target"]:
             fiducial = array_centre = None                   # a well whose square and boundary give nothing
         return real_resolve(fit, fiducial=fiducial, array_centre=array_centre, plate_rigid=plate_rigid,
-                            fiducial_margin=fiducial_margin)
+                            fiducial_margin=fiducial_margin, manual=manual, detected=detected)
 
     def serial(*, well_zips, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix, schema, sep,
                incremental, incremental_prior_dir, settings_key, force, force_wells=None, **_ignored):

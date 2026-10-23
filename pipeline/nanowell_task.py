@@ -17,6 +17,7 @@ import json
 import logging
 import zipfile
 from pathlib import Path
+from types import MappingProxyType
 
 import numpy as np
 
@@ -65,7 +66,8 @@ def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
 
 
 def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
-                    template_path, staging_dir, settings_key, scratch_dir, expected_shape, stored_placements=None):
+                    template_path, staging_dir, settings_key, scratch_dir, expected_shape, stored_placements=None,
+                    manual_anchors=MappingProxyType({})):
     """``run_well`` over *todo* on what an earlier run kept (*prior*, or ``None``): ``(outcome, fixed radius,
     fixed roster, kept template)``. *expected_shape* is a described grid's shape: a well short of a whole row or
     column is incomplete, which a record's positions alone could not show."""
@@ -77,7 +79,8 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
                           checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key),
                           earliest_template=None if saved is None else saved[0],
                           spill_dir=Path(scratch_dir) / ".montages",     # removed with the scratch (X23)
-                          expected_shape=expected_shape, stored_placements=stored_placements)
+                          expected_shape=expected_shape, stored_placements=stored_placements,
+                          manual_anchors=manual_anchors)
     return outcome, fixed, fixed_roster, saved
 
 
@@ -316,12 +319,18 @@ def _json_default(value):
     raise TypeError(f"{type(value).__name__} is not JSON serialisable")
 
 
-def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, record) -> dict | None:
+def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, record,
+                 manual_anchors=None, anchors_digest: str = "") -> dict | None:
     """What an earlier run of this well left, if it is still valid for this one: ``(grid, site rows, cell rows)``.
 
     Valid means: the settings that produced it are this run's (the same check the per-field path makes),
     the scheme version is understood, and each timepoint kept is ``ok`` with the record digest unchanged
-    since. Anything else is recomputed, never reused. ``None`` when nothing can be reused.
+    since, and the anchor set by hand for it (*manual_anchors*, ``timepoint -> position``) the one it was located
+    with: a timepoint anchored by its fiducial, or by an earlier click, is recomputed when a click is set or moved.
+    A timepoint the end-of-run pass anchored from the rest of the plate (``plate_rigid``) is kept only under the
+    plate's anchors as they were then (*anchors_digest*): its origin was carried from another timepoint, or other
+    wells, any of which a moved or cleared click may have changed.
+    Anything else is recomputed, never reused. ``None`` when nothing can be reused.
     """
     from pipeline.settings_record import well_settings_allow_reuse
 
@@ -339,7 +348,10 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
         return None
     kept = {tp for tp in timepoints
             if grid.get("timepoints", {}).get(tp, {}).get("status") == nr.OK
-            and grid["timepoints"][tp].get("record_digest") == nr.record_digest(record, well_label, tp)}
+            and grid["timepoints"][tp].get("record_digest") == nr.record_digest(record, well_label, tp)
+            and grid["timepoints"][tp].get("manual_anchor_um") == _anchor_list((manual_anchors or {}).get(tp))
+            and (grid["timepoints"][tp].get("origin_method") != "plate_rigid"
+                 or grid["timepoints"][tp].get("anchors_digest", "") == anchors_digest)}
     if not kept:
         return None
     sites_path = Path(prior_dir) / NANOWELL_DIR / f"{well_label}.csv"
@@ -349,6 +361,11 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
     cells = [r for r in _read_rows(cells_path) if r["timepoint"] in kept]
     return {"grid": grid, "kept": kept, "sites": sites, "cells": cells,
             "order": {tp: k for k, tp in enumerate(timepoints)}}
+
+
+def _anchor_list(position) -> list | None:
+    """An anchor as the grid block records it (``locate_timepoint``), so a stored one compares equal."""
+    return None if position is None else [float(position[0]), float(position[1])]
 
 
 class TimepointCheckpoints:
@@ -468,6 +485,37 @@ def _reanalysis_reason(kept_radius: dict, radius: dict) -> str:
             "rewritten")
 
 
+def _well_manual_anchors(input_dir: Path, well_label: str) -> tuple[dict, str]:
+    """``(timepoint -> position, plate digest)``: the anchors set by hand for this well (``util.nanowell_anchors``),
+    and a digest of every well's, ``""`` without any — what a timepoint carried from the rest of the plate depends on.
+
+    An anchors file that cannot be used fails the well with the file's problem stated, rather than running it as
+    if no anchor had been set: the wells a person anchored would come out unaddressed with nothing to say why.
+    """
+    import hashlib
+
+    from util.nanowell_anchors import AnchorsFileError, anchors_path, anchors_payload, read_anchors, well_anchors
+
+    try:
+        anchors = read_anchors(anchors_path(input_dir))
+    except AnchorsFileError as exc:
+        raise NanowellInputError(f"The nanowell anchors cannot be used: {exc}") from None
+    found = well_anchors(anchors, well_label)
+    if found:
+        log.info("Well %s — anchor set by hand at %s.", well_label, ", ".join(sorted(found, key=_tp_rank)))
+    digest = (hashlib.sha256(json.dumps(anchors_payload(anchors), sort_keys=True).encode()).hexdigest()[:16]
+              if anchors else "")
+    return found, digest
+
+
+def _stamp_anchors(outcome, todo, digest: str) -> None:
+    """Record on each timepoint this run located the plate's anchors as they were (``_prior_state`` keeps a
+    ``plate_rigid`` timepoint only under the same digest)."""
+    for tp in todo:
+        if tp in outcome.timepoints:
+            outcome.timepoints[tp]["anchors_digest"] = digest
+
+
 def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
                      csv_prefix, schema, sep, *, grouper, parse, extract, scratch_dir, write_csv, segmenter=None,
                      incremental=False, prior_dir=None, settings_key="", staging_dir=None, plate_rigid=None):
@@ -498,8 +546,9 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         record = _pattern_record(well_label, zip_path, index, pattern)
     timepoints = timepoint_order(record, well_label)
     output_dir = Path(output_dir)
-    prior = (_prior_state(prior_dir or output_dir, well_label, csv_prefix, settings_key, timepoints, record)
-             if incremental else None)
+    manual, digest = _well_manual_anchors(Path(zip_path).parent, well_label)
+    prior = (_prior_state(prior_dir or output_dir, well_label, csv_prefix, settings_key, timepoints, record, manual,
+                          digest) if incremental else None)
     todo = [tp for tp in timepoints if prior is None or tp not in prior["kept"]]
     if not todo:
         log.info("Well %s — up to date (no new timepoints).", well_label)
@@ -516,7 +565,8 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         extract(zip_path, scratch_dir, members_to_extract=wanted & set(needed))
         return _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
                                Path(prior_dir or output_dir) / NANOWELL_DIR / template_path.name, staging_dir,
-                               settings_key, scratch_dir, tuple(pattern["grid"]) if described else None, placements)
+                               settings_key, scratch_dir, tuple(pattern["grid"]) if described else None, placements,
+                               manual)
 
     def load_phase(tp, tile) -> np.ndarray | None:
         found = index.get((tp, tile))
@@ -544,6 +594,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         outcome.radius["reanalysed_because"] = reason
         log.warning("Well %s — %s.", well_label, reason)
     _log_reused_registration(well_label, outcome, todo)
+    _stamp_anchors(outcome, todo, digest)
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)
@@ -692,7 +743,7 @@ def refuse_nanowell_without_zips(options, well_zips, error) -> None:
 
 # ── the end-of-run pass: addresses from the rest of the plate (tracker P3) ───
 #: Methods that anchored a timepoint on its own evidence; a plate-rigid anchor is not evidence for another well.
-_INDEPENDENT = ("fiducial", "array_centre")
+_INDEPENDENT = ("manual", "fiducial", "array_centre")
 
 
 def _tp_rank(token: str):

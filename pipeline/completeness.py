@@ -84,6 +84,10 @@ class WellCoverage:
     has_out_zip: bool
     has_out_folder: bool
     failed: tuple[str, ...] = ()
+    #: Nanowell wells only: ``(timepoint, status)`` for each timepoint the run located, registered and measured but
+    #: could not address (no central square found, say). Those are in *missing* too — an incremental run redoes
+    #: them — but they are not "never processed", and a reader told so would look for a run that did not happen.
+    not_addressed: tuple[tuple[str, str], ...] = ()
 
     @property
     def complete(self) -> bool:
@@ -293,6 +297,9 @@ def nanowell_coverage(well: str, *, in_members, grid_path: Path, sites_path: Pat
     except (OSError, ValueError):
         blocks = {}
     ok = {tp for tp, block in blocks.items() if block.get("status") == "ok"}
+    # Located and recorded with a reason, not addressed: the run reached these, which a timepoint with no block did not.
+    not_addressed = tuple(sorted((tp, str(block.get("status") or "")) for tp, block in blocks.items()
+                                 if tp in intent and block.get("status") != "ok"))
     state = "missing"
     try:
         with Path(sites_path).open(encoding="utf-8") as fh:
@@ -303,7 +310,7 @@ def nanowell_coverage(well: str, *, in_members, grid_path: Path, sites_path: Pat
         well=well, intent=len(intent), covered_csv=len(ok & intent), covered_any=len(ok & intent),
         missing=tuple(sorted(("", tp) for tp in intent - ok)), csv_state=state,
         has_in_container=in_members is not None, has_out_zip=has_out_zip, has_out_folder=False,
-        failed=tuple(failed))
+        failed=tuple(failed), not_addressed=not_addressed)
 
 
 # ── the end-of-run scan ─────────────────────────────────────────────────────
@@ -695,6 +702,8 @@ def well_record(cov: WellCoverage, *, max_missing: int = MAX_MISSING_PER_WELL) -
         "has_out_folder": cov.has_out_folder,
         "failed": list(cov.failed),
         "health": state,
+        "not_addressed_count": len(cov.not_addressed),
+        "not_addressed": [list(pair) for pair in cov.not_addressed[:max_missing]],
     }
 
 

@@ -239,7 +239,7 @@ def test_a_decision_key_does_not_move_when_its_detail_does(tmp_path):
 
 
 def test_rerun_hands_off_exactly_the_selected_wells(tmp_path, monkeypatch):
-    from review.features.home import controller as hc
+    import review.core.analyze_handoff as hc        # where the triage reaches it
     seen = {}
     monkeypatch.setattr(hc, "open_in_analyze",
                         lambda ctx, **kw: seen.update(kw) or True)
@@ -256,7 +256,7 @@ def test_rerun_hands_off_exactly_the_selected_wells(tmp_path, monkeypatch):
 def test_a_rerun_that_could_not_open_analyze_reports_nothing_queued(tmp_path, monkeypatch):
     """A build with no Analyze pane: the hand-off answers False, and the
     status line must not claim a rerun is set up."""
-    from review.features.home import controller as hc
+    import review.core.analyze_handoff as hc        # where the triage reaches it
     monkeypatch.setattr(hc, "open_in_analyze", lambda ctx, **kw: False)
     wells = {"A01": {"health": "missing", "covered_any": 3, "missing": [],
                      "missing_count": 0, "failed": []}}

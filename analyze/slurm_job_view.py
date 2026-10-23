@@ -4,9 +4,9 @@ A small server glyph: lit while the current run holds an open Slurm job,
 dimmed while its job is queued for a node, hidden otherwise. Its tooltip names
 the job and the node's specifications (``analyze.domain.slurm_job``).
 
-It sits in the run dashboard's header (``PlateProgress.add_header_widget``),
-beside the run status it qualifies, because that is what is on screen while a
-run is going — the *Run on:* row in the form, where it used to be, is not.
+It sits at the right end of the run dashboard's header
+(``PlateProgress.add_header_widget``), because that header is what is on screen
+while a run is going — the *Run on:* row in the form, where it used to be, is not.
 """
 
 from __future__ import annotations

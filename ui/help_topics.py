@@ -98,10 +98,8 @@ SECTION_BY_PAGE: dict[str, str] = {
 #: ``analyze/form.py``) -> manual heading. The manual's Analyze block is
 #: numbered in the order the form builds its sections, so these read in step.
 ANALYZE_SECTION_HELP: dict[str, str] = {
-    "Filename Schema": "1. Filename schema",
-    # The manual numbers Folders before Channel tokens; these follow the
-    # headings as written rather than the order the form happens to build in.
-    "Folders": "2. Folders",
+    "Folders": "1. Folders",
+    "Filename Schema": "2. Filename schema",
     "Channel Tokens": "3. Channel tokens",
     "Quality Control": "5. Quality control — field flatness & background correction",
     "Auto-threshold": '6. Auto-threshold — picking each channel\'s "on" cut',

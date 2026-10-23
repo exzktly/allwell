@@ -1453,6 +1453,40 @@ afterwards in Review.
 | F22 | Reported after #1033: Test detection still failed when Cellpose was not present. Reproduced: the fallback that measures without counting recognised only an `ImportError` in the chain, so a Cellpose whose import raised anything else (a Torch library that will not load: `OSError`) or whose model could not be built (weights not downloadable offline: `URLError`) ended as "Measuring failed (RuntimeError: Cellpose segmentation requires the 'cellpose' package …)" with no nanowell drawn | `pipeline/cellpose.py`, `pipeline/nanowell_preview.py` | `done` | `CellposeUnavailable` (a `RuntimeError`, marked `segmenter_unavailable`) for any import failure and any model-construction failure; `_missing_import` recognises it by the mark, so a build without `pipeline/cellpose.py` still works. With a package absent the fallback already worked (reproduced here, where Cellpose is not installed: 265 nanowells, not counted). `test_cellpose_that_cannot_be_loaded_for_any_reason_is_the_same_case` (a fake `cellpose` raising OSError on import; a fake whose model raises URLError), through the real default segmenter; both fail on the code before the fix with the reported message |
 | F23 | Reported after F22: the app crashed (closed, no error) during Test detection on Windows. The boot log's faulthandler dump: `Windows fatal exception: code 0xc0000138` (STATUS_ORDINAL_NOT_FOUND) at `torch/__init__.py` line 117, reached from `analyze/nanowell_preview._run_preview` on the worker-bridge thread → `preview_timepoint` → `measure_timepoint` → the Cellpose segmenter → `import cellpose` → `import torch`. A Torch DLL that does not match one already loaded into the GUI process kills the process natively, which no `except` can catch, so F22's fallback never ran. Test detection was the one place the GUI process measured a nanowell itself; a run is already a subprocess | `services/nanowell_preview_job.py`, `analyze/nanowell_preview.py`, `all_well_launcher.py` | `done` | Test detection runs in a child process (`run_preview`; from source the module by path, frozen the launcher's `--run-nanowell-preview` sentinel), job and result as pickles in a private temporary directory. A child that dies without a result is run once more with a segmenter that refuses to load (`CellposeUnavailable`), so the array is drawn uncounted with a note naming the exit status (`0xc0000138, STATUS_ORDINAL_NOT_FOUND`); a second death is reported as a crash in registration or detection, not Cellpose. `tests/test_nanowell_preview_job.py` (the runner with a stand-in child; the GUI module imports the runner and no analysis entry) and, in the nanowell lane, `test_nanowell_preview.py::test_a_real_child_process_finds_the_nanowells_and_hands_them_back` and `::test_a_child_killed_by_the_segmenter_s_crash_still_draws_the_nanowells_uncounted` (a real native crash, `faulthandler._sigsegv`, then the real child). Mutation: dropping the second run fails three of them with AssertionError. Not reproduced on Windows here: the crash itself is the reporter's, the containment is measured with a SIGSEGV on Linux |
 
+### Section H — Addressing an anchored well from its saved measurements
+
+Asked after #1035: setting an anchor in Review and pressing *Re-run anchored wells…* re-ran every anchored well in
+full — registration (reused when unchanged), detection, and Cellpose on every tile of every timepoint — although an
+unaddressed timepoint already holds every nanowell's measurements and cells, with only the addresses missing. The
+user's requirement: a full Analyze run must not be needed again.
+
+Measured on `test_nanowell_manual_anchor_run`'s four-well plate (B02 blind at both timepoints): the site rows of the
+blind run and of the run with the anchor are **identical in every measured column** at both 0 h and 24 h (73 rows
+each); only `nw_q`, `nw_r`, `nw_ring` and `consistency` differ. An unaddressed timepoint is measured on every site of
+its array, laid out from a provisional origin (the site nearest the fitted outline's centre,
+`nanowell_run._unaddressed_positions`), so when the anchor names that same site, the rows a full run would write
+are the rows already on disk.
+
+Design. A re-address reads only the output folder — the grid record, `nanowells/<well>.csv` and the per-cell CSV —
+plus `in/nanowell_anchors.json`. It refits the lattice to the timepoint's own rows, resolves the origin with the
+run's own `resolve_origin`, addresses every row and every cell (a cell to the nanowell it sits in), decides the
+well's rim with the run's own evidence rule, recomputes consistency, and rewrites the three files atomically. Where
+the saved rows cannot give exactly what a full run would, it refuses for that timepoint and says why, and the
+existing *Re-run* path remains for exactly those wells. Nothing is re-measured, so a re-addressed timepoint says so
+in its grid block.
+
+| ID | Item | Place | State | Evidence |
+|---|---|---|---|---|
+| H1 | Re-address one unaddressed timepoint from its saved rows: refit the lattice to the rows (common frame); `resolve_origin` with the anchor and the rows' detected nanowells; check the anchored site is the site the rows were laid out from; address the rows (quarter-pitch, unique) and the cells (nearest nanowell within half a pitch); rewrite the site CSV, the per-cell CSV and the grid block atomically | `pipeline/nanowell_readdress.py` | `todo` | |
+| H2 | The rim: decide the well's roster with the run's own evidence rule over the anchored timepoints' rows plus the new one (detected, seen whole, and band sites with no row, which the layout rule says were seen whole and empty), and the run's `_misanchored` check. Extract the decision out of `_evidence_roster` so both call one function; no behaviour change | `pipeline/nanowell_run.py`, `pipeline/nanowell_readdress.py` | `todo` | |
+| H3 | Refuse, naming why, whenever the rows cannot give a full run's answer: inferred geometry; a well analysed under the old disk rule; rows laid out from another site than the anchor's; a timepoint whose nanowells sit a step from the others'; a rim the new timepoint changes; a row or a cell that cannot be addressed; a timepoint that is not unaddressed; an unusable anchors file | `pipeline/nanowell_readdress.py` | `todo` | |
+| H4 | After the anchors, the end-of-run pass: `plan_reanchor` over the plate's grid records, and each unaddressed (well, timepoint) it can predict re-addressed from its rows through `resolve_origin`'s plate-rigid rule; `pipeline_info.json`'s `nanowell.reanchor` summary rewritten | `pipeline/nanowell_readdress.py` | `todo` | |
+| H5 | Parity: on the blind plate with cells drawn, a full run with the anchor and a blind run followed by the re-address agree on every site row, every cell row and each timepoint's status and origin, at 0 h (the anchor) and 24 h (carried by the plate) | `tests/` (nanowell lane) | `todo` | |
+| H6 | Review: the Full montage window applies the anchors itself (*Apply anchors*, on a worker), reloads the dataset, and says what was addressed and what was refused and why; *Re-run in Analyze…* remains, limited to the refused wells | `review/features/nanowell/` | `todo` | |
+| H7 | A later incremental run keeps a re-addressed timepoint rather than measuring it again (its `manual_anchor_um` and `anchors_digest` match) | `pipeline/nanowell_task.py` | `todo` | |
+| H8 | Provenance: a re-addressed timepoint's grid block records that it was addressed from saved measurements, and from which origin; ARCHITECTURE and README describe the step | `_Docs/Markdowns/` | `todo` | |
+| H9 | Self-review of the diff by a fresh reviewer; findings become rows | — | `todo` | |
+
 ## 6. What would make this plan wrong
 
 Each of these, if it turns out true, changes a section rather than a row.

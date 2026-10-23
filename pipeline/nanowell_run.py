@@ -363,6 +363,50 @@ def _grid_block(plan, placement: Placement | None, extra: dict, warnings=()) -> 
     return block
 
 
+def _find_square(montage, detection, diameter: float, lattice_pitch: float, settings: NanowellSettings, manual):
+    """``(candidate, fiducial block, refusal or None)``: the central square's search on the montage (montage frame).
+
+    The square is looked for at every lattice site near the array's centre, detected or not, and read at several
+    sizes (tracker F15): the matched filter finds round nanowells, and a square of another size is not one.
+
+    The orientation check guards against a lattice fit folded onto the wrong row (N3a), and only a square the origin
+    would take can say that: a circle's "orientation" is noise (roll-up review X21), and so is that of square-ish
+    debris ``resolve_origin`` refuses as ambiguous, which refused whole timepoints a hand-set anchor or the array
+    centre would have addressed (review F21). Nor does a candidate on another site than a hand-set anchor's (*manual*,
+    montage frame) name the square. The square's measured edge angle is kept either way, against the lattice row the
+    fit chose, so a real plate can confirm the square's cut (tracker F19, Q11). The refusal is the reason a folded fit
+    gives, or ``None``.
+    """
+    from pipeline.nanowell_detect import (
+        SQUARE_SIZE_FACTORS, check_orientation, describe_fiducial, score_fiducial, square_search_points,
+    )
+    from pipeline.nanowell_lattice import fiducial_accepted, nearest_site
+
+    near = detection.boundary_centre_um
+    if near is None and len(detection.points_um):
+        near = np.median(np.asarray(detection.points_um, dtype=float), axis=0)
+    search = (detection.points_um if near is None or not detection.fit.ok else
+              square_search_points(detection.fit, detection.points_um, near, 2.2 * lattice_pitch))
+    candidate, scores = score_fiducial(montage.image, montage.um_per_px, diameter, search,
+                                       centre_um=detection.boundary_centre_um, search_radius_um=2.2 * lattice_pitch,
+                                       pitch_um=lattice_pitch, size_factors=SQUARE_SIZE_FACTORS)
+    fiducial = describe_fiducial(candidate, scores, near_centre=detection.boundary_centre_um is not None)
+    fiducial["margin"], fiducial["ratio"] = FIDUCIAL_MARGIN, FIDUCIAL_RATIO
+    if fiducial["position_um"] is not None:
+        fiducial["position_um"] = [float(v) for v in _montage_to_common(fiducial["position_um"], montage)]
+    if candidate is None or not scores:
+        return candidate, fiducial, None
+    square = max(scores, key=lambda s: s.coherence)
+    orientation = check_orientation(detection.fit, square.orientation_deg, square_to_axis_deg=settings.square_edge_deg)
+    fiducial.update(edge_deg=orientation.observed_deg, edge_expected_deg=orientation.expected_deg,
+                    edge_discrepancy_deg=orientation.discrepancy_deg)
+    names_square = fiducial_accepted(candidate, FIDUCIAL_MARGIN, FIDUCIAL_RATIO) and (
+        manual is None or nearest_site(detection.fit, manual)[1] == nearest_site(detection.fit, candidate.position)[1])
+    if names_square and not orientation.ok:
+        return candidate, fiducial, (orientation.reason or "The square's edges disagree with the fitted lattice axis")
+    return candidate, fiducial, None
+
+
 def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, settings: NanowellSettings, *,
                      plate_rigid=None, expected_shape: tuple[int, int] | None = None, stored=None,
                      manual_anchor_um=None) -> Located:
@@ -376,11 +420,8 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     ``(folder, grid block)`` pairs for this timepoint from earlier runs: a placement among them solved under this
     timepoint's :func:`registration_key` is taken instead of registering the tiles again (:func:`stored_placement`).
     """
-    from pipeline.nanowell_detect import (
-        SQUARE_SIZE_FACTORS, check_orientation, describe_fiducial, detect_sites, estimate_lattice_fft, score_fiducial,
-        square_search_points,
-    )
-    from pipeline.nanowell_lattice import fiducial_accepted, index_points, nearest_site, resolve_origin
+    from pipeline.nanowell_detect import detect_sites, estimate_lattice_fft
+    from pipeline.nanowell_lattice import index_points, resolve_origin
     from pipeline.nanowell_sites import check_format
     from pipeline.tile_grid import OK as GRID_OK, place_from_record, tiles_from_record
     from pipeline.tile_register import TileObservation, build_montage, register_tiles
@@ -473,40 +514,12 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         detection = detect_sites(montage.image, montage.um_per_px, diameter, expected_pitch_um=lattice_pitch)
         if not detection.ok:
             return refuse(NO_LATTICE, detection.reason)
-    # The square is looked for at every lattice site near the array's centre, detected or not, and read at several
-    # sizes (tracker F15): the matched filter finds round nanowells, and a square of another size is not one.
-    near = detection.boundary_centre_um
-    if near is None and len(detection.points_um):
-        near = np.median(np.asarray(detection.points_um, dtype=float), axis=0)
-    search = (detection.points_um if near is None or not detection.fit.ok else
-              square_search_points(detection.fit, detection.points_um, near, 2.2 * lattice_pitch))
-    candidate, scores = score_fiducial(montage.image, montage.um_per_px, diameter, search,
-                                       centre_um=detection.boundary_centre_um, search_radius_um=2.2 * lattice_pitch,
-                                       pitch_um=lattice_pitch, size_factors=SQUARE_SIZE_FACTORS)
-    fiducial = describe_fiducial(candidate, scores, near_centre=detection.boundary_centre_um is not None)
-    fiducial["margin"], fiducial["ratio"] = FIDUCIAL_MARGIN, FIDUCIAL_RATIO
-    if fiducial["position_um"] is not None:
-        fiducial["position_um"] = [float(v) for v in _montage_to_common(fiducial["position_um"], montage)]
-    located.fiducial = fiducial
     manual = (None if located.manual_anchor_um is None
               else np.subtract(located.manual_anchor_um, montage.origin_um))       # well frame -> montage frame
-    # The orientation check guards against a lattice fit folded onto the wrong row (N3a), and only a square the origin
-    # would take can say that: a circle's "orientation" is noise (roll-up review X21), and so is that of square-ish
-    # debris resolve_origin refuses as ambiguous, which refused whole timepoints a hand-set anchor or the array centre
-    # would have addressed (review F21). Nor does a candidate on another site than a hand-set anchor's name the
-    # square. The square's measured edge angle is kept either way, against the lattice row the fit chose, so a real
-    # plate can confirm the square's cut (tracker F19, Q11).
-    if candidate is not None and scores:
-        square = max(scores, key=lambda s: s.coherence)
-        orientation = check_orientation(detection.fit, square.orientation_deg,
-                                        square_to_axis_deg=settings.square_edge_deg)
-        fiducial.update(edge_deg=orientation.observed_deg, edge_expected_deg=orientation.expected_deg,
-                        edge_discrepancy_deg=orientation.discrepancy_deg)
-        names_square = fiducial_accepted(candidate, FIDUCIAL_MARGIN, FIDUCIAL_RATIO) and (
-            manual is None or nearest_site(detection.fit, manual)[1] == nearest_site(detection.fit, candidate.position)[1])
-        if names_square and not orientation.ok:
-            return refuse(ORIENTATION_REFUSED, orientation.reason if hasattr(orientation, "reason") else
-                          "The square's edges disagree with the fitted lattice axis", fiducial=fiducial)
+    candidate, fiducial, folded = _find_square(montage, detection, diameter, lattice_pitch, settings, manual)
+    located.fiducial = fiducial
+    if folded is not None:
+        return refuse(ORIENTATION_REFUSED, folded, fiducial=fiducial)
     resolved = resolve_origin(detection.fit, fiducial=candidate, array_centre=detection.boundary_centre_um,
                               plate_rigid=plate_rigid, fiducial_margin=FIDUCIAL_MARGIN, fiducial_ratio=FIDUCIAL_RATIO,
                               fiducial_refusal=fiducial["reason"], manual=manual, detected=detection.points_um)

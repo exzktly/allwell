@@ -70,8 +70,9 @@ def summary_text(result) -> str:
     """The result as the few sentences a person checks: status, origin, overlap against what is needed, state counts."""
     if result.status != "ok" and not result.sites:
         return f"{result.status}: {result.reason}" if result.reason else result.status
+    diameter = "" if result.diameter_um is None else f"nanowells {result.diameter_um:.1f} µm across, "
     lines = [f"{result.well} at {result.timepoint}: {result.tile_count} tile(s), "
-             f"pitch {result.pitch_um:.1f} µm, lattice angle {result.angle_deg:.1f}°."]
+             f"pitch {result.pitch_um:.1f} µm, {diameter}lattice angle {result.angle_deg:.1f}°."]
     if result.status == "ok":
         lines.append(f"Origin found from {origin_phrase(result.origin_method)} "
                      f"({result.origin_agreement or 'single source'}).")

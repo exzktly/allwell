@@ -446,3 +446,31 @@ def test_an_unaddressed_timepoint_s_roster_survives_the_refused_centre_it_was_un
     rows = np.array([(r["well_x_um"], r["well_y_um"]) for r in measured.sites])
     truth = list(rendered.sites_um)
     assert all(np.hypot(*(rows - xy).T).min() < PITCH / 4 for xy in truth) and len(rows) == len(truth)
+
+
+# ── F21: only a square the origin would take is checked for orientation ─────
+_TILTED_DEBRIS = [((1, 0), 100.0, 100.0, 30.0, 0.05), ((0, 1), 100.0, 100.0, 30.0, 0.05)]
+
+
+def test_ambiguous_square_ish_debris_does_not_refuse_the_timepoint_on_orientation():
+    """Two dark squares of debris turned 30 degrees, no square: the best reads 0.43 against 0.40, which the origin
+    refuses as ambiguous, and its "orientation" refused the whole timepoint with no rows (review F21). The array
+    centre addresses it, as it did before the search widened."""
+    rendered, record = _plate(square=False)
+    _rectangles(rendered, _TILTED_DEBRIS)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert located.status == nr.OK and located.origin_method == "array_centre", located.reason
+    assert abs(abs(located.grid["fiducial"]["edge_discrepancy_deg"]) - 30.0) < 3.0      # still recorded
+
+
+def test_a_hand_set_anchor_is_not_overruled_by_debris_on_another_site():
+    """One tilted piece reads 0.40 against 0.04 and would be taken for the square, so on its own the timepoint is
+    refused on orientation (a folded fit and a wrong square both look like this, and neither may be addressed). A
+    hand-set anchor on the real centre names another site, so the debris names nothing and the anchor addresses it."""
+    rendered, record = _plate(square=False)
+    _rectangles(rendered, _TILTED_DEBRIS[:1])
+    alone = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert alone.status == nr.ORIENTATION_REFUSED
+    anchored = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS,
+                                   manual_anchor_um=tuple(np.asarray(rendered.array.origin, dtype=float)))
+    assert anchored.status == nr.OK and anchored.origin_method == "manual", anchored.reason

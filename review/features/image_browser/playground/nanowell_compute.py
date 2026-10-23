@@ -310,7 +310,8 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
     # fitted on the image itself, and the blobs' reading stands only when none can be (review F20e).
     fitted, fits, _ = fitted_diameter({"image": image}, {"image": (0.0, 0.0)}, um_per_px, wells.points_um, diameter,
                                       pitch)
-    how = (f"the median of {len(wells.points_um)} light blobs, none fitted" if fitted is None else
+    how = (f"the median of {len(wells.points_um)} light blobs: {fits} nanowell(s) fitted, too few to measure "
+           f"it" if fitted is None else
            f"fitted on {fits} of the {len(wells.points_um)} wells found")
     diameter = diameter if fitted is None else fitted
     out.roster_px, out.roster_found = to_px(geometry.roster_um), geometry.found

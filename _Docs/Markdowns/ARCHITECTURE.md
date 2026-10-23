@@ -9594,7 +9594,12 @@ source that was refused and why. `locate_timepoint` writes the block to the grid
 array search passes the same sentence. `check_orientation` (tracker N3a)
 compares the square's edge direction with the lattice axis the fit chose: a hexagonal
 array rotated 40 degrees is fitted at -20, inside the limit and wrong by a sixth of a
-turn, and the square still reads 40, so the well is refused with the reason. The angle
+turn, and the square still reads 40, so the well is refused with the reason. Only a square
+the origin would take is checked (`nanowell_lattice.fiducial_accepted`, the lead and ratio
+`resolve_origin` applies), and not one on another site than an anchor set by hand: square-ish
+debris the origin refuses as ambiguous has an orientation that is noise, and checking it refused
+whole timepoints the array centre or the hand-set anchor would have addressed. The measured edge
+angle is recorded either way (`edge_deg`, `edge_expected_deg`, `edge_discrepancy_deg`). The angle
 from the lattice axis to the square's edge on the mask is a parameter and its default
 of zero (edges parallel to a lattice row) is an assumption real data has to confirm
 (tracker Q11).
@@ -10118,7 +10123,8 @@ A file that cannot be used — not JSON, another version, a well that is not a w
 timepoint) — fails the well with the file's problem named, never runs it as if no anchor had been set.
 **Reuse is keyed on the anchor.** `_prior_state` keeps a timepoint only when its recorded `manual_anchor_um`
 is the current one, so an incremental run recomputes a timepoint whose anchor was set, moved or cleared, and
-the resume checkpoint key (`_checkpoint_key`) carries it too. A `plate_rigid` timepoint was carried from another
+the resume checkpoint key (`_checkpoint_key`) carries it too. That key also holds the well's diameter in every
+geometry, since a resumed run over another set of timepoints can move the median it is taken from. A `plate_rigid` timepoint was carried from another
 timepoint or other wells, any of which a click may have moved, so every located timepoint also records
 `anchors_digest` — a digest of the whole plate's anchors when it was located — and a `plate_rigid` one is kept
 only under the same digest. For a remote run, `acquisition_transport` uploads
@@ -10168,7 +10174,8 @@ bound, since the array may be smaller than the tiles). **Test detection** opens 
 runs `pipeline.nanowell_preview.preview_timepoint` on a parentless `QThread` held in a module-level set until it
 finishes (a window or tab closed mid-run cannot destroy a running thread; `aboutToQuit` waits for it): the same locate-and-measure the run does for
 one (well, timepoint), returning the montage, every site with its address, state and fused flag, the origin
-method, the measured overlap against the needed one, and a few rim-suppressed crops beside their
+method, the nanowell diameter the run measured, the measured overlap against the one a nanowell of that diameter
+needs, and a few rim-suppressed crops beside their
 segmentation. When the segmenter cannot be loaded — an `ImportError` anywhere in the measuring exception's chain
 (`_missing_import`), which is how `pipeline.cellpose` reports a missing or broken install — the timepoint is
 measured again with `measure_timepoint(..., count_cells=False)`: every site keeps its state, confluence and
@@ -10212,8 +10219,8 @@ timepoint writes nothing rather than an empty table. The well's kept earliest te
 (`<well>_template.npz`) goes with them when the timepoint it was built at is still in the destination. Every
 tool checks the tables at plan time, before anything is written (`refuse_unusable_tables`): each well needs
 both its grid record and its sites table, a grid record that reads, and one spelling. The sidecar's
-`nanowell` block is carried without its `reanchor` record (`carried_nanowell_block`), which describes one
-run's plate by its wells. **Subset** carries the tables of the wells it keeps, cut
+`nanowell` block is carried without its `reanchor` and `plate_diameters` records (`carried_nanowell_block`), which
+describe one run's plate by its wells. **Subset** carries the tables of the wells it keeps, cut
 by `subset_compute.timepoint_kept` — the same test its images are cut by — and refuses a field selection,
 because the tables are per well and measured over all of its tiles together. **Merge Plates** carries both
 plates' tables, dataset 2's through the well remap, and tags each well's grid record with its `plate`; it

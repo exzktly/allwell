@@ -177,6 +177,8 @@ def test_a_merged_sidecar_drops_the_re_anchoring_record_and_refuses_two_calibrat
     two = _dataset(tmp_path / "two", wells=("A01",))
     info = json.loads((two / "out" / "pipeline_info.json").read_text())
     info["nanowell"]["reanchor"] = {"anchored": ["A01/24h"], "remaining": {}}
+    # The end of a run's diameter comparison names that run's wells too (review F21c).
+    info["nanowell"]["plate_diameters"] = {"": {"median_um": None, "wells": {"A01": 125.8}, "outliers": {}}}
     (two / "out" / "pipeline_info.json").write_text(json.dumps(info))
     plan = build_plate_merge_plan(one, two, tmp_path / "dest", well_map={"A01": "C03"})
     assert plan.merged_info["nanowell"] == {"scheme_version": 1, "settings": SETTINGS,   # it named A01, now plate 1's

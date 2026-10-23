@@ -83,7 +83,8 @@ def test_a_square_that_leads_but_is_not_far_enough_above_the_next_is_named(fit):
     (0.344, 0.024, True),           # its rounded, haloed, defocused, noisy one
     (0.40, 0.14, False),            # leads by 0.26 but is under three times the next
     (0.30, 0.16, False),            # three times? no; leads? no
-    (0.45, 0.15, True),             # exactly three times
+    (0.75, 0.25, True),             # exactly three times: 3 x 0.25 is exact, so a strict comparison fails it
+    (0.74, 0.25, False),            # just under (review F21d: 3 x 0.15 is 0.44999..., which hid the boundary)
 ])
 def test_the_square_is_judged_by_how_far_it_stands_above_the_next(fit, best, runner_up, accepted):
     from pipeline.nanowell_run import FIDUCIAL_MARGIN, FIDUCIAL_RATIO

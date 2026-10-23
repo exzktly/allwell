@@ -482,6 +482,17 @@ def _snap_origin(fit, position):
 MANUAL_REACH_PITCHES = 1.5
 
 
+def fiducial_accepted(fiducial, margin: float, ratio: float = 1.0) -> bool:
+    """Whether a square candidate stands far enough above the runner-up to be the square: it leads by more than
+    *margin* and scores at least *ratio* times it (tracker F14). :func:`resolve_origin` and the run's orientation
+    check share this one rule (review F21)."""
+    if fiducial is None:
+        return False
+    best, runner_up = fiducial.score, fiducial.runner_up_score
+    return (math.isfinite(best) and math.isfinite(runner_up) and best - runner_up > margin
+            and best >= ratio * runner_up)
+
+
 def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
                    plate_rigid=None, fiducial_margin, fiducial_refusal: str = "",
                    fiducial_ratio: float = 1.0, manual=None, detected=None) -> OriginResolution:
@@ -546,7 +557,7 @@ def resolve_origin(fit: LatticeFit, *, fiducial=None, array_centre=None,
     if fiducial is not None:
         scores = (fiducial.score, fiducial.runner_up_score)
         finite = all(math.isfinite(v) for v in scores)
-        if finite and scores[0] - scores[1] > fiducial_margin and scores[0] >= fiducial_ratio * scores[1]:
+        if fiducial_accepted(fiducial, fiducial_margin, fiducial_ratio):
             offer("fiducial", fiducial.position)
         elif finite and scores[0] - scores[1] > fiducial_margin:
             rejected.append(f"the most square outline reads {scores[0]:.2f} and the next {scores[1]:.2f}, "

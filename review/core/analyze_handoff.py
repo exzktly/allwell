@@ -1,6 +1,6 @@
 """Review's one door into the Analyze pane: open Analyze on the loaded dataset, scoped to named wells.
 
-Home's *Finish this run*, QC triage's *Re-run wells* and the Nanowells page's Full montage (*Re-run anchored
+Home's *Finish this run*, QC triage's *Re-run wells* and the Nanowells page's Array view (*Re-run anchored
 wells*) all go through :func:`open_in_analyze`, so more than one feature uses it and it lives here rather than in
 any one of them. :func:`dataset_root` is the folder Datasets tools and Analyze want, one level above the ``out/``
 folder Review loads.
@@ -18,8 +18,8 @@ def open_in_analyze(ctx, *, force_wells, only_wells, incremental: bool = True) -
     through it with the record's own answer to which wells need work; QC
     triage's *Re-run wells* goes through it with the wells the user picked,
     both forced and limited, so nothing else on the plate is touched.
-    *incremental* off is for a caller whose wells are all forced anyway — the Full montage's *Re-run anchored
-    wells* — so a remote nanowell run, which refuses Incremental, is not refused for a setting it does not need.
+    *incremental* off is for a caller whose wells are all forced anyway — the Nanowells Array view's *Re-run
+    anchored wells* — so a remote nanowell run, which refuses Incremental, is not refused for a setting it does not need.
     Returns whether the hand-off happened — ``False`` in a build that mounts no
     Analyze pane, or for a folder that is not a dataset Analyze can open.
     """

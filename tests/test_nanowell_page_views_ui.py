@@ -1,4 +1,4 @@
-"""The Nanowells page's Array map, Trajectories, Position and Array QC views, driven through the real builder,
+"""The Nanowells page's Array, Trajectories and Position views, driven through the real builder,
 controls, worker and canvas in a minimal shell (tracker V2, V3a2, V3c, V4, V6, V7, V7a; CLAUDE.md §7.6, §7.8).
 
 Two datasets: the synthetic plate of ``test_nanowell_page`` (three wells, two timepoints, four nanowells each)
@@ -73,11 +73,14 @@ def _fig_texts(ctx, gid):
     return _texts(ctx, gid)
 
 
-def _choose_view(ctx, key):
+def _choose_view(ctx, key, preset=None):
+    """Choose *key* on the view switch, as a click does; on the Array view, then the Layers menu's *preset*."""
     from review.features.nanowell.tab_view import VIEWS
 
     seg = ctx.widgets.get("_nw_view_seg")
     seg.setCurrentIndex([k for k, _l in VIEWS].index(key))          # emits currentChanged, as a click does
+    if preset:
+        ctx.widgets.get(f"_nw_preset_{preset}").trigger()
 
 
 def _visible_scopes(ctx):
@@ -90,35 +93,35 @@ def _visible_scopes(ctx):
 def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(page, qtbot):
     _loaded(qtbot, page)
     seg = page.widgets.get("_nw_view_seg")
-    assert [seg.segmentText(i) for i in range(seg.count())] == [
-        "Distribution", "Array map", "Trajectories", "Position", "Array QC"]
+    assert [seg.segmentText(i) for i in range(seg.count())] == ["Distribution", "Array", "Trajectories", "Position"]
     assert _visible_scopes(page) == {"Metric", "Along x", "Baseline"}
-    _choose_view(page, "array_map")
+    _choose_view(page, "array")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Slider"}
+    # Outlined by state, the metric reaches nothing on the figure, so its controls go.
+    page.widgets.get("_nw_colour_state").trigger()
+    assert _visible_scopes(page) == {"Well", "Slider"}
     _choose_view(page, "trajectories")
     assert _visible_scopes(page) == {"Metric", "Baseline"}
     _choose_view(page, "position")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Timepoint"}
-    _choose_view(page, "array_qc")
-    assert _visible_scopes(page) == {"Well", "Slider"}
 
 
-# ── V2: the array map ────────────────────────────────────────────────────────
+# ── V2: the Array view as the lattice map ────────────────────────────────────
 def test_the_map_draws_the_chosen_well_and_the_slider_steps_its_timepoints(page, qtbot):
     _loaded(qtbot, page)
-    _choose_view(page, "array_map")
+    _choose_view(page, "array", "map")
     st = page.state.feature_slice("nanowell")
     title = [t.get_text() for ax in page.widgets.get("_nw_fig").axes for t in (ax.title, ax._left_title)]
     assert "A01 · t_c" in title                                       # the first well, at its first timepoint
-    footer = _fig_texts(page, "nw-map-footer")
-    assert footer[-1].startswith("4 nanowells in the roster · with a value 3 · measured 2 · empty 1 · occluded 1")
+    footer = _fig_texts(page, "nw-array-footer")
+    assert footer[0] == "4 nanowells in the roster · with a value 3 · measured 2 · empty 1 · occluded 1"
     slider = page.widgets.get("_nw_tp_slider")
     assert (slider.minimum(), slider.maximum(), slider.value()) == (0, 1, 0)
     slider.setValue(1)
     assert st.timepoint == "t_a"
     title = [ax._left_title.get_text() for ax in page.widgets.get("_nw_fig").axes]
     assert "A01 · t_a" in title
-    assert _fig_texts(page, "nw-map-footer")[-1].startswith("4 nanowells in the roster · with a value 4 ·")
+    assert _fig_texts(page, "nw-array-footer")[0].startswith("4 nanowells in the roster · with a value 4 ·")
     well_cb = page.widgets.get("_nw_well_cb")
     assert [well_cb.itemText(i) for i in range(well_cb.count())] == ["A01", "B01"]
     well_cb.setCurrentIndex(1)
@@ -130,9 +133,9 @@ def test_a_well_whose_grid_record_has_no_pitch_says_why_there_is_no_map(qtbot, t
     ctx = _page(qtbot, _write_nanowell_dataset(tmp_path))                 # grid records without a pitch
     ctx.state.selection.selected_wells = {"A01"}
     _loaded(qtbot, ctx)
-    _choose_view(ctx, "array_map")
-    assert _fig_texts(ctx, "nw-map-missing") == [
-        "A01 has no addressed nanowells and no measured pitch to place them on, so there is no map to draw."]
+    _choose_view(ctx, "array", "map")
+    assert _fig_texts(ctx, "nw-array-missing") == [
+        "A01 at t_c has no addressed nanowells and no measured pitch to place them on, so there is nothing to draw."]
 
 
 def _click_site(qtbot, ctx, site, modifier=Qt.NoModifier):
@@ -154,7 +157,7 @@ def _click_site(qtbot, ctx, site, modifier=Qt.NoModifier):
 
 def test_clicking_a_nanowell_on_the_map_selects_it_and_cuts_its_crop_from_the_montage(page, qtbot):
     _loaded(qtbot, page)
-    _choose_view(page, "array_map")
+    _choose_view(page, "array", "map")      # this fixture's nanowells share one measured position
     _click_site(qtbot, page, ("A01", 1, 0))
     st = page.state.feature_slice("nanowell")
     assert st.selected_sites == [["A01", 1, 0]]
@@ -185,7 +188,7 @@ def test_a_crop_job_that_fails_says_so_on_the_figure_and_is_not_relaunched(page,
 
     monkeypatch.setattr(nwc, "site_crops", broken)
     _loaded(qtbot, page)
-    _choose_view(page, "array_map")
+    _choose_view(page, "array", "map")      # this fixture's nanowells share one measured position
     _click_site(qtbot, page, ("A01", 1, 0))
     st = page.state.feature_slice("nanowell")
     qtbot.waitUntil(lambda: ("A01", 1, 0) in st.crops, timeout=20000)
@@ -240,37 +243,41 @@ def test_position_defaults_to_the_latest_timepoint_and_follows_the_combo(page, q
     assert heights == [0.0] * 7 + [1.0]
 
 
-# ── V7 / V7a: Array QC ───────────────────────────────────────────────────────
+# ── V7 / V7a: the Array view as Array QC ─────────────────────────────────────
+def _images(ctx):
+    return len(ctx.widgets.get("_nw_fig").axes[0].images)
+
+
 def test_array_qc_draws_the_montage_the_tiles_by_how_they_were_placed_and_the_status(page, qtbot):
     _loaded(qtbot, page)
-    _choose_view(page, "array_qc")
-    fig = page.widgets.get("_nw_fig")
+    _choose_view(page, "array", "qc")
     # The montage is read on a worker; until it arrives the figure says so.
     st = page.state.feature_slice("nanowell")
     if ("A01", "t_c") not in st.montages:
-        assert _fig_texts(page, "nw-qc-missing") == ["Reading the montage…"]
-    qtbot.waitUntil(lambda: len(page.widgets.get("_nw_fig").axes[0].images) == 1, timeout=20000)
-    assert sorted(_fig_texts(page, "nw-qc-tile")) == ["F0 · lattice · 0.4 µm", "F1 · recorded"]
+        assert "Reading the montage…" in _fig_texts(page, "nw-array-footer")
+    qtbot.waitUntil(lambda: _images(page) == 1, timeout=20000)
+    assert sorted(_fig_texts(page, "nw-array-tile")) == ["F0 · lattice · 0.4 µm", "F1 · recorded"]
     # This record states no tile size, so the corners are marked and the figure says so.
-    assert _fig_texts(page, "nw-qc-unsized") == [
+    assert _fig_texts(page, "nw-array-unsized") == [
         "2 tile(s) without a size in the acquisition record: their placed corner is marked (+), not an outline."]
-    status = _fig_texts(page, "nw-qc-status")
+    status = _fig_texts(page, "nw-array-record")
     assert status[:2] == ["t_c: ok", "pitch 143.0 µm · angle 0.50° · overlap 40.0 µm · 4 detected of 4"]
     assert status[2:] == ["template: own, 2 of 4 sites", "t_a: ok — template suspect"]
     page.widgets.get("_nw_tp_slider").setValue(1)
     qtbot.waitUntil(lambda: ("A01", "t_a") in page.state.feature_slice("nanowell").montages, timeout=20000)
-    assert _fig_texts(page, "nw-qc-status")[2] == (
+    assert _fig_texts(page, "nw-array-record")[2] == (
         "template: own, 1 of 4 sites — its floor moved 3.0-fold against t_c's: most nanowells may hold cells, so "
         "counts and confluence here may be biased")
 
 
-def test_array_qc_on_a_well_without_a_montage_says_why(page, qtbot):
+def test_array_qc_on_a_well_without_a_montage_says_why_and_still_draws_its_nanowells(page, qtbot):
     _loaded(qtbot, page)
     nwc.set_well(page, "B01")
-    _choose_view(page, "array_qc")
+    _choose_view(page, "array", "qc")
     st = page.state.feature_slice("nanowell")
     qtbot.waitUntil(lambda: ("B01", "t_c") in st.montages, timeout=20000)
-    assert _fig_texts(page, "nw-qc-missing") == ["The grid record has no montage for B01 at t_c (ok)."]
+    assert "The grid record has no montage for B01 at t_c (ok)." in _fig_texts(page, "nw-array-footer")
+    assert _images(page) == 0 and st.hits.entries and len(st.hits.entries[0][3]) == 4
 
 
 # ── a real run: the map click and the crop from the owner tile ───────────────
@@ -279,14 +286,15 @@ def test_on_a_real_run_the_map_click_selects_the_lit_nanowell_and_its_crop_is_fu
     ctx = _page(qtbot, run_with_a_cell)
     ctx.state.selection.selected_wells = {RUN_WELL}
     st = _loaded(qtbot, ctx)
-    _choose_view(ctx, "array_map")
+    _choose_view(ctx, "array", "map")
     _click_site(qtbot, ctx, (RUN_WELL, 1, 2))
     assert st.selected_sites == [[RUN_WELL, 1, 2]]
     qtbot.waitUntil(lambda: (RUN_WELL, 1, 2) in st.crops, timeout=20000)
     crop = st.crops[(RUN_WELL, 1, 2)]["0h"]
     assert (crop.source, crop.note.endswith("full resolution")) == ("tile", True)
-    _choose_view(ctx, "array_qc")
+    _choose_view(ctx, "array", "qc")
     qtbot.waitUntil(lambda: len(ctx.widgets.get("_nw_fig").axes[0].images) == 1, timeout=20000)
     fig = ctx.widgets.get("_nw_fig")
-    assert len(fig.axes[0].images) == 1 and len(fig.axes[0].patches) == 4       # four sized tile outlines
-    assert _texts(ctx, "nw-qc-unsized") == []
+    boxes = [p for p in fig.axes[0].patches if p.get_gid() == "nw-array-tile-box"]
+    assert len(fig.axes[0].images) == 1 and len(boxes) == 4                      # four sized tile outlines
+    assert _texts(ctx, "nw-array-unsized") == []

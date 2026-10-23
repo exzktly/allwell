@@ -527,7 +527,7 @@ def health_rows(ctx) -> list:
         count = sum(int(wells[w].get("not_addressed_count") or 0) for w in not_addressed)
         rows.append({"severity": "warn", "label": "Nanowell timepoints not addressed",
                      "value": f"{count} timepoint(s) were processed but their nanowells could not be told apart (no "
-                              "central square found, say); set an anchor in Nanowells → Array QC → Full montage, "
+                              "central square found, say); set an anchor in Nanowells → Array (Layers → Anchor, Set anchor), "
                               "then re-run those wells",
                      "wells": not_addressed})
 

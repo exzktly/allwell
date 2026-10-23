@@ -54,6 +54,7 @@ from widgets.separator import build_hline_separator
 # this module (the tab does not offer the mode there — ``tab_view._offered_modes``).
 _draw_view = _lazy("review.features.nanowell.controller", "draw_view")
 _resolve_metric = _lazy("review.features.nanowell.controller", "resolve_metric")
+_batch_array_layers = _lazy("review.features.nanowell.controller", "batch_array_layers")
 _wells_summary = _lazy("review.features.nanowell.distribution_compute", "wells_summary")
 _metric_labels = _lazy("review.features.nanowell.distribution_compute", "metric_labels")
 _metric_column = _lazy("review.features.nanowell.distribution_compute", "metric_column")
@@ -72,9 +73,10 @@ _METRIC_ROWS = 6
 #: The list's frame is drawn above its first row and below its last.
 _FRAME_EDGES = 2
 
-#: The views a batch run can draw, as the page names them. Array QC is the page's alone: it reads a montage per
-#: (well, timepoint) and is a check of one acquisition, not a figure for a folder.
-VIEWS = (("distribution", "Distribution"), ("array_map", "Array map"), ("trajectories", "Trajectories"),
+#: The views a batch run can draw, as the page names them. The Array view is drawn as its lattice map — the
+#: nanowells at their lattice places, filled by the metric (``ArrayLayers.preset("map")``): its image layers read a
+#: montage or the raw tiles per (well, timepoint) and are a check of one acquisition, not a figure for a folder.
+VIEWS = (("distribution", "Distribution"), ("array", "Array map"), ("trajectories", "Trajectories"),
          ("position", "Position"))
 AXES = (("time", "Time"), ("wells", "Wells"))
 BASELINES = (("earliest", "Earliest timepoint"), ("first_measurable", "First measurable"))
@@ -225,7 +227,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         view = self._view_cb.currentData()
         self._axis_cb.setEnabled(view == "distribution")
         self._cohort_box.setEnabled(view in ("distribution", "trajectories"))
-        self._tp_cb.setEnabled(view in ("distribution", "array_map", "position"))
+        self._tp_cb.setEnabled(view in ("distribution", "array", "position"))
 
     def _refresh_timepoints(self) -> None:
         """Latest and Earliest, then the dataset's own timepoints when the Nanowells page has read them."""
@@ -359,7 +361,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
             # The cut was set for the ticked metric. When another is drawn in its place (a channel metric with no
             # channel), applying it there would count against a number chosen for something else.
             cut = settings["thresholds"].get(metric) if drawn == metric else None
-            targets = wells if view == "array_map" else [None]
+            targets = wells if view == "array" else [None]
             for well in targets:
                 stem = f"{safe}_{metric}" + (f"_{well}" if well else "")
                 fig = self._new_figure()
@@ -370,7 +372,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
                         # one, so the figure says the well was not imaged then rather than drawing another, or
                         # the map's "no addressed nanowells" placeholder, which would be a different claim.
                         _render_message(fig, f"{well} has no timepoint {shown}: it was not imaged then, so there "
-                                             "is no map to draw.", gid="nw-map-missing")
+                                             "is no map to draw.", gid="nw-array-missing")
                     else:
                         _draw_view(fig, view, metrics, data, groups=groups, metric=drawn, channel=channel,
                                    axis=settings["axis"], timepoint=self._timepoint_for(data, wells, settings),
@@ -380,6 +382,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
                                          "well": well or "", "timepoint": shown}
+                    if view == "array":                  # a gallery record restores the layers it was drawn with
+                        self._figure_view["layers"] = _batch_array_layers()
                     self._save_figure(fig, self._out_path(write_dir, f"{stem}.{fmt}"), fmt, group=grp,
                                       title=f"{grp.name} — {labels[drawn]}" + (f" — {well}" if well else ""))
                 except Exception as exc:

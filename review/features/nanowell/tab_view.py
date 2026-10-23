@@ -11,8 +11,10 @@ a control that does not work (CLAUDE.md §7.6).
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QLabel, QLineEdit, QPushButton, QSlider, QSplitter, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QLabel, QLineEdit, QMenu, QPushButton, QSlider, QSplitter, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from review.features.export.service import export_cell_data_from
@@ -24,10 +26,24 @@ from review.features.nanowell.distribution_compute import (
 from widgets.control_band import ControlBand
 
 #: The views the page draws, in the order the switch lists them.
-VIEWS = (("distribution", "Distribution"), ("array_map", "Array map"), ("trajectories", "Trajectories"),
-         ("position", "Position"), ("array_qc", "Array QC"))
+VIEWS = (("distribution", "Distribution"), ("array", "Array"), ("trajectories", "Trajectories"),
+         ("position", "Position"))
 #: The views that show one well, and so offer the well picker and the timepoint slider.
-ONE_WELL_VIEWS = ("array_map", "array_qc")
+ONE_WELL_VIEWS = ("array",)
+#: The Array view's image layer, as its combo lists it.
+_IMAGES = (("off", "Off"), ("montage", "Run montage"), ("tiles", "Full resolution"))
+_POSITIONS = (("measured", "Measured"), ("lattice", "Lattice"))
+#: The Array view's switchable layers, in the order its Layers menu lists them, with what each draws.
+_LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or outlined by its state."),
+           ("addresses", "Addresses", "Each nanowell's q,r, wherever it is drawn large enough to hold it."),
+           ("tiles", "Tiles", "Each tile's placement, coloured by how the run placed it, with its residual."),
+           ("anchor", "Anchor", "The anchor set by hand, and what the grid record says about addressing this "
+                                "timepoint; with it on, Set anchor is offered."),
+           ("record", "Run record", "The grid record of this timepoint and a line for every other, beside the figure."))
+#: The Layers menu's presets: every layer at once, as the views this one replaced drew them.
+_PRESETS = (("map", "Array map — lattice places, filled by the metric"),
+            ("qc", "Array QC — montage, tiles and nanowell states, run record"),
+            ("full", "Full montage — raw tiles at full resolution, addresses, anchor"))
 _AXES = (("time", "Time"), ("wells", "Wells"))
 _BASELINES = (("earliest", "Earliest"), ("first_measurable", "First measurable"))
 _FIG_W, _FIG_H = 8.0, 6.4
@@ -35,15 +51,15 @@ _DETAIL_W, _DETAIL_H = 4.2, 6.4
 _METRIC_CB_MIN_W = 220
 
 _VIEW_TIP = ("Distribution: one dot per nanowell, per well and timepoint.\n"
-             "Array map: one well's nanowells in their lattice places, coloured by the metric.\n"
+             "Array: one well's nanowells over its montage or at their lattice places — every element a layer\n"
+             "you turn on or off (Image, Positions, Layers).\n"
              "Trajectories: each nanowell's metric over time, with the median of each occupancy class.\n"
-             "Position: the metric by ring from the central nanowell — an edge-effect check.\n"
-             "Array QC: the montage, how each tile was placed, and the grid record of every timepoint.")
+             "Position: the metric by ring from the central nanowell — an edge-effect check.")
 _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their well, so each line over time follows "
                "one set of nanowells. Off, each timepoint's median is over whichever nanowells could be measured "
                "then. The others are counted as outside the fixed cohort.")
-_WELL_TIP = "The well the Array map and Array QC show (one of the wells the page draws)."
-_SLIDER_TIP = "The timepoint the Array map and Array QC show; drag to step through the well's timepoints."
+_WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
+_SLIDER_TIP = "The timepoint the Array view shows; drag to step through the well's timepoints."
 _METRIC_TIP = ("What each dot is. Brightness and site signal use the channel chosen in the app's channel "
                "selector; they are greyed when that channel has no site intensities.")
 _AXIS_TIP = ("Time: one panel per well (or replicate set), timepoints along x, the well medians joined.\n"
@@ -57,8 +73,16 @@ _RESPONDING_TIP = ("A nanowell counts as responding when its value is above this
                    "a fold change, a count, a confluence, an intensity — and the figure states each group's fraction "
                    "responding at it; empty, no fraction is computed. Kept per metric and channel.")
 _RESPONDING_W = 90
-_MONTAGE_TIP = ("The well's registered montage at full resolution, drawn from the raw tiles, with every nanowell's "
-                "address — and where a well's central square was not found, the place to click it.")
+_IMAGE_TIP = ("What the Array view draws under the nanowells (measured positions only).\n"
+              "Run montage: the downsampled montage the run kept.\n"
+              "Full resolution: the raw tiles where the run placed them, read as you zoom in — drag to pan, the "
+              "wheel zooms.")
+_POSITIONS_TIP = ("Measured: where the run found each nanowell, over the image, tiles and anchor.\n"
+                  "Lattice: each nanowell at its address on an ideal lattice, so it keeps its place from one "
+                  "timepoint to the next even when the plate was put back rotated.")
+_LAYERS_TIP = "Turn the Array view's elements on and off, colour the nanowells, or set them all from a preset."
+_ANCHOR_TIP = ("On: click the central square to anchor this well at this timepoint. Drag still pans. Offered where "
+               "an anchor can change the result: a timepoint addressed or left unaddressed.")
 _CONTROL_TIP = "Compare each group's centre with this group's, computed the same way (× ratio, or a difference on log₂)."
 
 
@@ -134,15 +158,41 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_well_cb", well_cb)
     grp_well = band.add_scope("Well", well_cb)
 
-    qc_montage_box = QCheckBox("Montage")
-    qc_montage_box.setToolTip("Draw the montage image. Off, the outlines and marks stay on an empty frame.")
-    qc_montage_box.toggled.connect(lambda on: nwc.set_qc_montage(ctx, on))
-    reg.register("_nw_qc_montage_box", qc_montage_box)
-    qc_overlay_box = QCheckBox("Overlay")
-    qc_overlay_box.setToolTip("Draw the tile outlines and the nanowell marks over the montage. Off, the image alone.")
-    qc_overlay_box.toggled.connect(lambda on: nwc.set_qc_overlay(ctx, on))
-    reg.register("_nw_qc_overlay_box", qc_overlay_box)
-    grp_qc = band.add_scope("Show", qc_montage_box, qc_overlay_box)
+    image_cb = _combo(_IMAGES, _IMAGE_TIP)
+    image_cb.currentIndexChanged.connect(lambda _i: nwc.set_layer(ctx, "image", image_cb.currentData() or "off"))
+    reg.register("_nw_image_cb", image_cb)
+    grp_image = band.add_scope("Image", image_cb)
+
+    positions_seg = SegmentedControl()
+    for key, label in _POSITIONS:
+        positions_seg.addSegment(text=label, data=key)
+    positions_seg.setToolTip(_POSITIONS_TIP)
+    positions_seg.currentChanged.connect(lambda idx: nwc.set_layer(ctx, "positions", _POSITIONS[idx][0]))
+    reg.register("_nw_positions_seg", positions_seg)
+    grp_positions = band.add_scope("Positions", positions_seg)
+
+    layers_btn, layer_actions, colour_actions = _layers_button(ctx, band)
+    grp_layers = band.add_scope("", layers_btn)
+
+    fit_btn = _button("Fit", "Show everything drawn.", lambda: nwc.array_fit(ctx))
+    one_btn = _button("1:1", "One image pixel per screen pixel, about the centre of the view.",
+                      lambda: nwc.array_one_to_one(ctx))
+    reg.register("_nw_fit_btn", fit_btn)
+    reg.register("_nw_one_btn", one_btn)
+    grp_zoom = band.add_scope("", fit_btn, one_btn)
+
+    anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
+    anchor_btn.setCheckable(True)
+    anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
+    clear_anchor_btn = _button("Clear anchor", "Remove this well's anchor at this timepoint.",
+                               lambda: nwc.clear_anchor(ctx))
+    rerun_btn = _button("Re-run anchored wells…", "Open Analyze on this dataset, limited to the wells with an "
+                        "anchor, each run again in full so its timepoints are located with the anchor.",
+                        lambda: nwc.rerun_anchored(ctx))
+    reg.register("_nw_anchor_btn", anchor_btn)
+    reg.register("_nw_clear_anchor_btn", clear_anchor_btn)
+    reg.register("_nw_rerun_btn", rerun_btn)
+    grp_anchor = band.add_scope("Anchor", anchor_btn, clear_anchor_btn, rerun_btn)
 
     tp_slider = QSlider(Qt.Horizontal)
     tp_slider.setToolTip(_SLIDER_TIP)
@@ -182,12 +232,6 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         data_tooltip="Every nanowell, timepoint and metric of this dataset, one row each",
         cells_cb=lambda: export_cell_data_from(
             ctx, cell_scope, unavailable="Select wells with nanowell tables first."))
-    montage_btn = QPushButton("Full montage…")
-    montage_btn.setProperty("variant", "secondary")
-    montage_btn.setToolTip(_MONTAGE_TIP)
-    montage_btn.clicked.connect(lambda _=False: nwc.open_full_montage(ctx))
-    reg.register("_nw_montage_btn", montage_btn)
-    band.add_action(montage_btn)
     band.add_action(export_btn)
     band.add_action(make_properties_button(ctx, band, "nanowell"))
     layout.addWidget(band)
@@ -202,6 +246,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     apply_plot_card_decorators(ctx, card, "Nanowells")
     card.plotThemeChanged.connect(lambda _m: nwc.redraw(ctx))
     card.canvas.mpl_connect("button_press_event", lambda event: nwc.on_click(ctx, event))
+    card.canvas.mpl_connect("button_release_event", lambda event: nwc.on_release(ctx, event))
+    card.canvas.mpl_connect("motion_notify_event", lambda event: nwc.on_motion(ctx, event))
+    card.canvas.mpl_connect("scroll_event", lambda event: nwc.on_scroll(ctx, event))
     computing = QLabel("Computing…", card)
     computing.setObjectName("NanowellComputing")
     computing.setAlignment(Qt.AlignCenter)
@@ -243,7 +290,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
     controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box, responding_edit,
-                qc_montage_box, qc_overlay_box)
+                image_cb, positions_seg, anchor_btn, *layer_actions.values(), *colour_actions.values())
 
     def refresh_controls() -> None:
         channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None
@@ -290,13 +337,16 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             _select(control_cb, st.control)
             distribution = view == "distribution"
             wells_axis = distribution and (st.axis == "wells" or per_nanowell)
-            grp_metric.setVisible(view != "array_qc")
-            grp_baseline.setVisible(view != "array_qc")
+            array = view == "array"
+            # The metric reaches the Array view through its fill: without it, the metric controls do nothing there.
+            by_metric = not array or (st.layers.nanowells and st.layers.colour == "metric")
+            grp_metric.setVisible(by_metric)
+            grp_baseline.setVisible(by_metric)
             grp_axis.setVisible(distribution)
             cohort_box.setChecked(st.cohort)
-            qc_montage_box.setChecked(st.qc_montage)
-            qc_overlay_box.setChecked(st.qc_overlay)
-            grp_qc.setVisible(view == "array_qc")
+            _refresh_array_controls(ctx, st, array, image_cb, positions_seg, layer_actions, colour_actions,
+                                    (grp_image, grp_positions, grp_layers, grp_zoom, grp_anchor),
+                                    (one_btn, anchor_btn, clear_anchor_btn, rerun_btn))
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
             # applies to what it draws, so its box stays where it can be turned off.
@@ -309,8 +359,6 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position")
             grp_well.setVisible(view in ONE_WELL_VIEWS)
             grp_slider.setVisible(view in ONE_WELL_VIEWS)
-            montage_btn.setVisible(view == "array_qc")
-            montage_btn.setEnabled(bool(st.data and nwc.page_well(ctx)))
         finally:
             for w, b in zip(controls, blocked):
                 w.blockSignals(b)
@@ -320,6 +368,91 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_page_visible", page_visible)
     reg.register("_nw_refresh_controls", refresh_controls)
     refresh_controls()
+
+
+def _button(text: str, tip: str, on_click) -> QPushButton:
+    button = QPushButton(text)
+    button.setProperty("variant", "secondary")
+    button.setToolTip(tip)
+    if on_click is not None:
+        button.clicked.connect(lambda _=False: on_click())
+    return button
+
+
+def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
+    """The Array view's *Layers* menu: each switchable layer, the nanowells' colouring, and the presets."""
+    button = QToolButton(parent)
+    button.setText("Layers")
+    button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    button.setPopupMode(QToolButton.InstantPopup)
+    button.setToolTip(_LAYERS_TIP)
+    button.setProperty("variant", "secondary")
+    button.setProperty("hasMenu", True)
+    menu = QMenu(button)
+    button.setMenu(menu)
+    reg = ctx.widgets
+    layer_actions = {}
+    for key, label, tip in _LAYERS:
+        action = menu.addAction(label)
+        action.setCheckable(True)
+        action.setToolTip(tip)
+        action.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, key, on))
+        reg.register(f"_nw_layer_{key}", action)
+        layer_actions[key] = action
+    menu.addSeparator()
+    group = QActionGroup(menu)
+    colour_actions = {}
+    for key, label in (("metric", "Fill nanowells by the metric"), ("state", "Outline nanowells by state")):
+        action = menu.addAction(label)
+        action.setCheckable(True)
+        group.addAction(action)
+        action.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, "colour", key) if on else None)
+        reg.register(f"_nw_colour_{key}", action)
+        colour_actions[key] = action
+    menu.addSeparator()
+    # Built from Python with its parent, not by ``addMenu(title)``: a menu Qt creates is a top-level widget whose
+    # owner the binding does not know, so deleting the page's window and then the menu deletes it twice.
+    presets = QMenu("Show as", menu)
+    menu.addMenu(presets)
+    for key, label in _PRESETS:
+        action = presets.addAction(label)
+        action.triggered.connect(lambda _=False, key=key: nwc.apply_array_preset(ctx, key))
+        reg.register(f"_nw_preset_{key}", action)
+    reg.register("_nw_layers_btn", button)
+    return button, layer_actions, colour_actions
+
+
+def _refresh_array_controls(ctx, st, array: bool, image_cb, positions_seg, layer_actions, colour_actions, groups,
+                            buttons) -> None:
+    """The Array view's controls in step with its layers; shown only on that view. What the lattice frame cannot
+    draw (the image, the tiles, the anchor) is greyed there and says why."""
+    one_btn, anchor_btn, clear_anchor_btn, rerun_btn = buttons
+    layers = st.layers
+    lattice = layers.lattice()
+    _select(image_cb, layers.image)
+    image_cb.setEnabled(not lattice)
+    positions_seg.setCurrentByData(layers.positions)
+    for key, action in layer_actions.items():
+        action.setChecked(getattr(layers, key))
+        well_frame_only = key in ("tiles", "anchor")
+        action.setEnabled(not (lattice and well_frame_only))
+        action.setText(dict((k, label) for k, label, _t in _LAYERS)[key]
+                       + (" (measured positions only)" if lattice and well_frame_only else ""))
+    for key, action in colour_actions.items():
+        action.setChecked(layers.colour == key)
+        action.setEnabled(layers.nanowells)
+    for group in groups[:4]:
+        group.setVisible(array)
+    can_set, can_clear, can_rerun = nwc.anchor_controls(ctx)
+    groups[4].setVisible(array and layers.anchor and not lattice)
+    one_btn.setEnabled(nwc.array_um_per_px(ctx) is not None)
+    anchor_btn.setEnabled(can_set)
+    anchor_btn.setChecked(st.anchor_mode and can_set)
+    clear_anchor_btn.setEnabled(can_clear)
+    rerun_btn.setEnabled(can_rerun)
+    canvas = ctx.widgets.get_or_none("_nw_canvas")
+    if canvas is not None:
+        canvas.setCursor(Qt.CrossCursor if array and st.anchor_mode and can_set else Qt.ArrowCursor)
 
 
 def _clear_sites(ctx) -> None:

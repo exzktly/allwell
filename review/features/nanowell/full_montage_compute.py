@@ -1,4 +1,4 @@
-"""A well's registered montage at full resolution, drawn from the raw tiles: the Full montage window's pixels.
+"""A well's registered montage at full resolution, drawn from the raw tiles: the Array view's *Full resolution* image.
 
 The run keeps one montage per (well, timepoint), downsampled to 4,096 px on its long side (``image_compute``'s
 ``read_montage``). That is enough to see where the tiles went and not enough to see a cell, or to point at the
@@ -16,13 +16,13 @@ pyramid of 2× means: the levels at a quarter of the resolution and coarser are 
 (about 1/6 of a 16-bit tile's bytes), and the two finest only within a byte budget (:data:`FINE_BYTES_KEPT`), each level of
 each tile separately, never evicting a tile the current view draws.
 A view that needs finer levels than are held is drawn from the coarser ones and says which tiles it wants, and the
-window reads them on a worker and draws again (:class:`Rendered.wants`).
+page reads them on a worker and draws again (:class:`Rendered.wants`).
 
 **Contrast** is one stretch for the whole well (the 1st to 99.5th percentile of every tile's coarse level, as
 ``tile_register.build_montage`` stretches its montage), so one tile does not look brighter than its neighbour only
 because it was stretched alone.
 
-Qt-free; reading tiles is file work, so the window calls :meth:`TileStore.load` on a worker.
+Qt-free; reading tiles is file work, so the page's controller calls :meth:`TileStore.load` on a worker.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ class PlacedTile:
 
 @dataclass(frozen=True)
 class MontageSource:
-    """What the window needs to draw one (well, timepoint): the archive, the tiles and where they go."""
+    """What the Array view needs to draw one (well, timepoint): the archive, the tiles and where they go."""
     well: str
     timepoint: str
     archive: Path
@@ -174,9 +174,9 @@ class TileStore:
         self._in_view: set[str] = set()
         self._stretch: tuple[float, float] | None = None
         self._lock = threading.Lock()
-        #: Tiles that could not be read, with why: not drawn, never asked for again, and named by the window.
+        #: Tiles that could not be read, with why: not drawn, never asked for again, and named by the figure.
         self.failed: dict[str, str] = {}
-        #: Set when the window moves to another timepoint or closes: a read in flight stops at its next tile.
+        #: Set when the view moves to another well or timepoint, or the image is turned off: a read in flight stops at its next tile.
         self.cancelled = False
 
     def _read(self, tile: PlacedTile) -> np.ndarray:
@@ -332,33 +332,7 @@ def to_view(region, width: int, height: int, x_um: float, y_um: float) -> tuple[
     return (x_um - left) * width / (right - left), (y_um - top) * height / (bottom - top)
 
 
-# ── what is drawn over the pixels ────────────────────────────────────────────
-@dataclass(frozen=True)
-class SiteOverlay:
-    x_um: float
-    y_um: float
-    radius_um: float
-    label: str                 # ``q,r`` (``util.nanowell_address.coordinate_text``); "" for a site with no address
-    state: str
-    fused: bool = False        # on a tile seam, measured from a blended crop: drawn dashed, as Test detection draws it
-
-
-def site_overlays(metrics, well: str, timepoint: str) -> list[SiteOverlay]:
-    """The nanowells of *well* at *timepoint*, at their measured well-frame positions, from the page's metrics."""
-    if metrics is None or not len(metrics):
-        return []
-    rows = metrics[(metrics["well"] == well) & (metrics["timepoint"] == timepoint)]
-    rows = rows[rows["well_x_um"].notna() & rows["well_y_um"].notna()]
-    from util.nanowell_address import coordinate_text
-
-    out = []
-    for row in rows.itertuples(index=False):
-        label = coordinate_text(getattr(row, "nw_q", None), getattr(row, "nw_r", None)) or ""
-        out.append(SiteOverlay(float(row.well_x_um), float(row.well_y_um), float(getattr(row, "radius_um", 0) or 0),
-                               label, str(getattr(row, "state", "") or ""), str(getattr(row, "fused", "")).lower() == "true"))
-    return out
-
-
+# ── the anchor ──────────────────────────────────────────────────────────────
 def anchors_file(data) -> Path | None:
     """The dataset's anchors file (``util.nanowell_anchors``), or ``None`` without an ``in/`` folder to keep it in."""
     from util.nanowell_anchors import anchors_path
@@ -396,25 +370,27 @@ def anchored_wells(data) -> list[str]:
 ANCHORABLE = ("ok", "unaddressed")
 
 
-def status_text(source: MontageSource, anchor, anchor_problem: str = "") -> str:
-    """What the window says about this timepoint: how it was addressed (or why not) and its anchor."""
+def status_text(well: str, timepoint: str, status: str, reason: str, origin_method, anchor,
+                anchor_problem: str = "") -> str:
+    """What the Array view says about this timepoint when its anchor is shown: how it was addressed (or why not),
+    and what its anchor does — set and used, set and not yet used, or how to set one."""
     from util.nanowell_anchors import origin_phrase
 
-    head = f"{source.well} at {source.timepoint}: {source.status or 'no status'}"
-    if source.origin_method:
-        head += f", origin from {origin_phrase(source.origin_method)}"
-    lines = [head + (f". {source.reason}" if source.reason else ".")]
+    head = f"{well} at {timepoint}: {status or 'no status'}"
+    if origin_method:
+        head += f", origin from {origin_phrase(origin_method)}"
+    lines = [head + (f". {reason}" if reason else ".")]
     if anchor_problem:
         lines.append(f"The anchors file cannot be used: {anchor_problem}")
     elif anchor is not None:
         where = f"Anchor set by hand at ({anchor[0]:.1f}, {anchor[1]:.1f}) µm"
-        if source.origin_method == "manual":
+        if origin_method == "manual":
             lines.append(where + "; this run used it.")
-        elif source.reason.startswith("The anchor set by hand"):
+        elif reason.startswith("The anchor set by hand"):
             lines.append(where + "; the last run did not use it (above): set it again on the central square.")
         else:
             lines.append(where + "; not used yet: re-run the well in Analyze to address it from the anchor.")
-    elif source.status == "unaddressed":
+    elif status == "unaddressed":
         lines.append("Turn on Set anchor and click the central square to anchor this well; the other timepoints "
                      "are then addressed from it, through the rest of the plate, when the well is re-run.")
     return "\n".join(lines)

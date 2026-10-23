@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 import process_microscopy as pm
@@ -179,8 +181,116 @@ def test_the_real_default_segmenter_without_cellpose_installed_is_the_same_case(
     assert result.notes[0].startswith("Cells were not counted: Cellpose could not be loaded (")
 
 
+def _installed_as(root, files: dict):
+    """Write a fake package tree under *root* (``{"cellpose/__init__.py": source, ...}``) to put on the import path."""
+    for name, source in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    return root
+
+
+_FAKE_TORCH = {"torch/__init__.py": (
+    "class _Cuda:\n    @staticmethod\n    def is_available():\n        return False\n"
+    "cuda = _Cuda()\nclass version:\n    cuda = None\n__version__ = '0'\n"
+    "class device:\n    def __init__(self, kind):\n        self.type = kind\n")}
+
+
+@pytest.mark.parametrize("label, files, cause", [
+    # A Torch library that will not load: the import raises OSError, not ImportError (reported: Test detection
+    # still failed without Cellpose, drawing no nanowell, with "Measuring failed (RuntimeError: Cellpose
+    # segmentation requires the 'cellpose' package ...").
+    ("a broken install", {"cellpose/__init__.py": "raise OSError('dlopen(libtorch_cpu.dylib): image not found')\n"},
+     "OSError: dlopen(libtorch_cpu.dylib): image not found"),
+    # Installed, but its model's weights cannot be fetched on first use (offline).
+    ("an offline first use", {"cellpose/__init__.py": "", "cellpose/models.py": (
+        "import urllib.error\nclass CellposeModel:\n    def __init__(self, *a, **k):\n"
+        "        raise urllib.error.URLError('cannot download cyto3')\n"), **_FAKE_TORCH},
+     "URLError: <urlopen error cannot download cyto3>"),
+])
+def test_cellpose_that_cannot_be_loaded_for_any_reason_is_the_same_case(plate, tmp_path, monkeypatch, label, files,
+                                                                        cause):
+    """Not only a missing package: whatever stops Cellpose loading leaves the nanowells found and uncounted, through
+    the real default segmenter."""
+    import sys
+
+    from pipeline import cellpose as pc
+
+    for name in [m for m in sys.modules if m == "cellpose" or m.startswith(("cellpose.", "torch"))]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.syspath_prepend(str(_installed_as(tmp_path / "site", files)))
+    monkeypatch.setattr(pc, "_CELLPOSE_MODELS", {})
+    result = preview_timepoint(plate[0], WELL, "0h", SETTINGS, grouper=pm.find_image_groups_in_zip,
+                               parse=pm.parse_filename, schema=SCHEMA, sep="_", phase_token="PHASE",
+                               scratch=_scratch(tmp_path))
+    assert result.counted is False and len([s for s in result.sites if s["address"]]) > 200, label
+    assert result.notes[0].startswith(f"Cells were not counted: Cellpose could not be loaded ({cause})")
+
+
 def test_a_counted_preview_keeps_its_fused_sites_measured(plate, tmp_path):
     """A fused site has no count in an ordinary preview too; it stays "measured", not "not counted"."""
     result = _preview(plate, tmp_path)
     assert result.counted is True and "not counted" not in result.counts()
     assert any(s["fused"] and s["state"] == "measured" and s["n_cells"] is None for s in result.sites)
+
+
+# ── in a child process (tracker F23) ────────────────────────────────────────
+def _job(plate):
+    zip_path, _ = plate
+    return {"zip": zip_path, "well": WELL, "timepoint": "0h", "settings": SETTINGS, "pattern": None,
+            "schema": ":".join(SCHEMA), "sep": "_", "phase_token": "PHASE"}
+
+
+def test_a_real_child_process_finds_the_nanowells_and_hands_them_back(plate, monkeypatch):
+    """The source-tree child, spawned by path: its ``sys.path`` repair, the pickles both ways, and the analysis."""
+    import subprocess
+
+    import services.nanowell_preview_job as job_mod
+
+    commands = []
+
+    def runner(argv, **kwargs):
+        commands.append(argv)
+        return subprocess.run(argv, **kwargs)
+
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    result = job_mod.run_preview(_job(plate), runner=runner)
+    assert len(commands) == 1 and commands[0][1].endswith("nanowell_preview_job.py")
+    assert result.status == nr.OK and result.origin_method == "fiducial" and result.well == WELL
+    assert len([s for s in result.sites if s["address"]]) > 200
+    # Cellpose is not part of the test stack: without it the child says so and draws the array uncounted.
+    assert result.counted is _cellpose_installed()
+
+
+def test_a_child_killed_by_the_segmenter_s_crash_still_draws_the_nanowells_uncounted(plate, monkeypatch):
+    """The first child dies natively, as ``import torch`` does on the reporter's Windows install (0xC0000138); the
+    second is the real child with the segmenter refused, and the app's process loaded neither."""
+    import subprocess
+
+    import services.nanowell_preview_job as job_mod
+
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append(argv)
+        if len(calls) == 1:                        # a real native crash, with nothing written
+            argv = [sys.executable, "-c", "import faulthandler; faulthandler._sigsegv()"]
+        return subprocess.run(argv, **kwargs)
+
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    result = job_mod.run_preview(_job(plate), runner=runner)
+    assert len(calls) == 2
+    assert result.status == nr.OK and result.counted is False
+    assert len([s for s in result.sites if s["address"]]) > 200
+    note = result.notes[0]
+    assert note.startswith("Cells were not counted") and "the process that loaded it crashed" in note
+    assert "the app was not affected" in note
+
+
+def _cellpose_installed() -> bool:
+    """Asked of a fresh interpreter, as the child is one: this process may hold a stand-in ``cellpose`` another
+    test left in ``sys.modules``."""
+    import subprocess
+
+    probe = "import importlib.util, sys; sys.exit(importlib.util.find_spec('cellpose') is None)"
+    return subprocess.run([sys.executable, "-c", probe], check=False).returncode == 0

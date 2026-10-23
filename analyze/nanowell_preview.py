@@ -127,19 +127,17 @@ class _PreviewFailed(Exception):
 
 
 def _run_preview(job: dict):
-    """The analysis, on the worker thread. Touches no widget: the result comes back through the bridge's signal."""
-    import process_microscopy as pm
-    import tempfile
+    """The analysis, on the worker thread. Touches no widget: the result comes back through the bridge's signal.
 
-    from pipeline.nanowell_preview import preview_timepoint
-    from util.schema import parse_schema
+    It runs in a child process (:mod:`services.nanowell_preview_job`), never in this one: counting cells loads
+    Cellpose and Torch, and a Torch that cannot load on Windows kills the process that imports it outright.
+    """
+    from services.nanowell_preview_job import PreviewFailed, run_preview
 
     try:
-        with tempfile.TemporaryDirectory(prefix="allwell-preview-") as scratch:
-            return preview_timepoint(
-                job["zip"], job["well"], job["timepoint"], job["settings"], grouper=pm.find_image_groups_in_zip,
-                parse=pm.parse_filename, schema=parse_schema(job["schema"]), sep=job["sep"],
-                phase_token=job["phase_token"], scratch=Path(scratch), pattern=job.get("pattern"))
+        return run_preview(job)
+    except PreviewFailed as exc:          # already "Type: message", from the child
+        raise _PreviewFailed(str(exc)) from exc
     except Exception as exc:
         # The bridge reports ``str(exc)`` alone; "RuntimeError: …" says more than "…" about a failure in a
         # registration or segmentation library the person did not write.

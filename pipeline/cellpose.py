@@ -22,6 +22,15 @@ import numpy as np
 
 log = logging.getLogger("process_microscopy")
 
+class CellposeUnavailable(RuntimeError):
+    """Cellpose could not be loaded at all: the package or Torch would not import, or the model could not be built
+    (its weights not downloadable, say). Distinct from a segmentation that loaded and then failed on an image, so a
+    caller that can do without counting (Test detection) can tell the two apart; it says so by the attribute below
+    rather than by import, because a feature-subset build may not ship this module at all."""
+
+    segmenter_unavailable = True
+
+
 # Per-worker Cellpose models, keyed by model type (cyto3/cyto2/cyto/nuclei), so a
 # run can choose a model without silently reusing another type's cache. Lazy.
 _CELLPOSE_MODELS: dict[str, object] = {}
@@ -38,13 +47,20 @@ def _cellpose_model(model_type: str = "cyto3"):
         try:
             from cellpose import models as _cp_models
         except Exception as exc:  # pragma: no cover - depends on optional dep
-            raise RuntimeError(
+            # Any failure, not only an ImportError: a Torch library that will not load raises OSError, and that is
+            # as much "Cellpose is not available" as a missing package.
+            raise CellposeUnavailable(
                 "Cellpose segmentation requires the 'cellpose' package. Install "
-                f"it (see requirements) — import failed: {exc}"
+                f"it (see requirements) — import failed: {type(exc).__name__}: {exc}"
             ) from exc
-        device, where = _cellpose_device()
-        model = _cp_models.CellposeModel(
-            model_type=key, gpu=device.type == "cuda", device=device)
+        try:
+            device, where = _cellpose_device()
+            model = _cp_models.CellposeModel(
+                model_type=key, gpu=device.type == "cuda", device=device)
+        except Exception as exc:  # pragma: no cover - depends on optional dep
+            # The model's weights are fetched on first use: offline, that fails here, before any image is seen.
+            raise CellposeUnavailable(
+                f"Cellpose's {key} model could not be loaded — {type(exc).__name__}: {exc}") from exc
         # Said once per worker and model, because it is the only place the run
         # states where segmentation actually happened: the main process can
         # count GPUs, but only Torch in the worker knows whether it can use one.

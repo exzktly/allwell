@@ -279,7 +279,9 @@ neither re-runs the detection. Use it before a plate-wide run: if the addresses 
 land on the right nanowells, the run would not either. Finding the nanowells does not need Cellpose; only counting
 the cells in them does. Without it Test detection still draws every nanowell with its address and state, outlines
 the ones it could see in grey as *not counted*, shows no crops, and says at the top of its notes that Cellpose
-could not be loaded. A run needs Cellpose, so install it before starting one.
+could not be loaded. A run needs Cellpose, so install it before starting one. Test detection runs in a separate process, as an analysis
+does, so a Cellpose or Torch that crashes outright when it loads cannot close the app: the nanowells are drawn
+uncounted, and the note names the crash (on Windows, an exit code such as `0xc0000138`).
 
 The same run from the command line:
 

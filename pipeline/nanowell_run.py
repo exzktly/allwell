@@ -963,6 +963,26 @@ def _plausible(contrasts, owners) -> list:
     return out.tolist()
 
 
+def _smoothed_offsets(levels: dict, order, owner_of, centres, nanowells: set, radius_um: float) -> dict:
+    """*levels* with each site's offset replaced by the median of the offsets within *radius_um* of it on its own
+    tile, read from nanowells only (``nanowell_measure.neighbourhood_median``); its gain is left as it is.
+
+    A site's offset comes from its own surround, the lattice ring just outside it, and one ring misread — debris on
+    the lattice, the phase halo beside a wall, a crop corner off the tile — moved that one nanowell's floor and
+    nothing else: a surround read 0.12 too bright put a nanowell's floor below the flat level between sites while
+    its neighbour's stayed put, and one read 0.08 too dark lost 6 of its 20 cells with no other site changed. Light
+    added across a well changes over many nanowells, so the median over the six neighbours still follows it and
+    outvotes up to three wrong readings, as it does for the gain. Bare floor outside the array (a site not in
+    *nanowells*) lends no offset but takes its neighbours'. A site with fewer than three offsets in reach takes its
+    tile's median, as its gain does; only a tile with no nanowell offset at all leaves each site its own."""
+    from pipeline import nanowell_measure as nm
+
+    offsets = [levels[i][0] if levels.get(i) is not None and i in nanowells else math.nan for i in order]
+    smoothed = nm.neighbourhood_median(centres, offsets, radius_um, groups=owner_of)
+    return {i: None if levels.get(i) is None else
+            ((float(o) if math.isfinite(o) else levels[i][0]), levels[i][1]) for i, o in zip(order, smoothed)}
+
+
 def _site_levels(located, images, template, fitted: dict, geoms, pitch_um: float, identifiable: bool):
     """``(site index -> (offset, gain), tiles none of whose sites gave a level, the sites whose own contrast is a
     nanowell's)`` for :func:`_normalise`.
@@ -988,9 +1008,11 @@ def _site_levels(located, images, template, fitted: dict, geoms, pitch_um: float
     if identifiable and order:
         plausible = _plausible(contrasts, owner_of)
         nanowells = {i for i, c in zip(order, plausible) if math.isfinite(c)}
-        smoothed = nm.neighbourhood_median([geoms[i].centre_um for i in order], plausible,
-                                           CONTRAST_NEIGHBOURHOOD_PITCHES * pitch_um, groups=owner_of)
+        centres = [geoms[i].centre_um for i in order]
+        radius = CONTRAST_NEIGHBOURHOOD_PITCHES * pitch_um
+        smoothed = nm.neighbourhood_median(centres, plausible, radius, groups=owner_of)
         levels = {i: nm.site_level(s, c, template) for i, s, c in zip(order, surrounds, smoothed)}
+        levels = _smoothed_offsets(levels, order, owner_of, centres, nanowells, radius)
     else:                                                       # brightness alone: the surround sets the gain
         levels = {}
         for i, surround in zip(order, surrounds):
@@ -1011,14 +1033,15 @@ def _site_levels(located, images, template, fitted: dict, geoms, pitch_um: float
 
 def _normalise(located, images, template, by_tile, geoms, channels, pitch_um: float) -> Normalisation:
     """Each site's ``(offset, gain)``, the timepoint's texture threshold and fluorescence backgrounds (``MEASURE_VERSION``
-    4), none of which needs an empty nanowell (tracker L1).
+    5), none of which needs an empty nanowell (tracker L1).
 
     Each site's gain comes from its floor-to-surround contrast (its floor is its modal level, the bare floor's under
     its cells), taken as the median over the sites within ``CONTRAST_NEIGHBOURHOOD_PITCHES`` of it on the same tile
     (``nanowell_measure.neighbourhood_median``), so one nanowell whose floor is lost under cells does not set its own;
-    its offset then comes from its own surround (``nanowell_measure.site_level``). Light added unevenly across the
-    well cancels from a contrast and is carried by each nanowell's own surround, which one offset per tile could not
-    follow. Where the template's floor and surround are too alike to tell an offset from a gain, every site is
+    its offset then comes from its own surround (``nanowell_measure.site_level``) and is replaced by the median of its
+    same-tile neighbours' (:func:`_smoothed_offsets`), so one misread surround does not move one nanowell alone. Light
+    added unevenly across the well cancels from a contrast and is carried by the nanowells' surrounds, which one
+    offset per tile could not follow and a median over six neighbours still does. Where the template's floor and surround are too alike to tell an offset from a gain, every site is
     corrected for brightness alone. Divided by the template after that, the bare floor reads 1 on every tile, so one
     texture threshold, from every site's interior with the cells clipped away, serves the whole timepoint. A
     fluorescence channel's background is each tile's median floor level.

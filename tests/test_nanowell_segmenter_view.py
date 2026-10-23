@@ -127,3 +127,44 @@ def test_a_test_detection_crop_is_drawn_on_its_tile_s_scale(qtbot):
     assert grey((1.0, 1.1)) == 255                    # the crop spans its tile's range: its cell is white
     assert grey((1.0, 3.0)) == int(0.05 * 255)        # a brighter tile: the same cell is near black
     assert grey(None) == 255                          # no scale: stretched to its own range, as before
+
+
+# ── the offset is its neighbours' (MEASURE_VERSION 5) ────────────────────────
+def _hex(pitch=172.0):
+    """A centre site and its six neighbours, then a site two pitches away with none of them in reach."""
+    angles = np.radians(np.arange(6) * 60.0)
+    return [(0.0, 0.0)] + [(pitch * np.cos(a), pitch * np.sin(a)) for a in angles] + [(0.0, 3 * pitch)]
+
+
+def test_one_nanowell_s_misread_offset_is_outvoted_by_its_neighbours_and_its_gain_is_kept():
+    centres = _hex()
+    order = list(range(8))
+    levels = {i: (0.01 * i, 1.0 + 0.1 * i) for i in order}
+    levels[0] = (0.12, 0.5)                                   # the centre's surround misread
+    out = nr._smoothed_offsets(levels, order, ["F0"] * 8, centres, set(order), 1.5 * 172.0)
+    assert out[0] == pytest.approx((0.04, 0.5))               # median of 0.12 and 0.01 .. 0.06; its own gain
+    assert out[1] == pytest.approx((0.04, 1.1))               # 0.01 with 0.12, 0.02, 0.06 and itself: median 0.04
+    # Fewer than three in reach: the tile's median offset (0.045), as a gain is.
+    assert out[7] == pytest.approx((0.045, 1.7))
+
+
+def test_bare_floor_lends_no_offset_but_takes_its_neighbours_and_an_unlevelled_site_stays_unlevelled():
+    centres = _hex()
+    order = list(range(8))
+    levels = {i: (0.02, 1.0) for i in order}
+    bare = {3, 4, 5, 6}                                       # four of the centre's seven: they would win a vote
+    levels.update({i: (5.0, 1.0) for i in bare})
+    levels[7] = None                                          # no level at all
+    out = nr._smoothed_offsets(levels, order, ["F0"] * 8, centres, set(order) - bare, 1.5 * 172.0)
+    assert out[0] == pytest.approx((0.02, 1.0))               # the bare floor did not vote
+    assert out[4] == pytest.approx((0.02, 1.0))               # and took its neighbours'
+    assert out[7] is None
+
+
+def test_a_tile_with_no_nanowell_offset_keeps_each_site_s_own_and_tiles_do_not_mix():
+    centres = _hex()[:4]
+    order = [0, 1, 2, 3]
+    levels = {0: (0.3, 1.0), 1: (0.0, 1.0), 2: (0.0, 1.0), 3: (0.0, 1.0)}
+    owners = ["F1", "F0", "F0", "F0"]                         # the centre alone on its tile, its neighbours elsewhere
+    out = nr._smoothed_offsets(levels, order, owners, centres, {1, 2, 3}, 1.5 * 172.0)
+    assert out[0] == pytest.approx((0.3, 1.0))                # F1 has no nanowell offset: its own, not F0's

@@ -9943,9 +9943,14 @@ added to both cancels from, taken as the median over the sites within `CONTRAST_
 cells is outvoted by its six neighbours; a contrast more than twice or half its tile's median
 (`PLAUSIBLE_CONTRAST_FACTOR`, `_plausible`) is not a nanowell's — bare floor outside the array, a bubble — and has no
 vote at all (where such sites were most of a neighbourhood, its median once gave a gain of 0.003 and the noise there
-was segmented as a cell); its **offset** then comes from its own surround (`site_level`). Light added
+was segmented as a cell); its **offset** then comes from its own surround (`site_level`) and is replaced by the
+median of the offsets within the same 1.5 pitches on its tile, read from nanowells only (`_smoothed_offsets`; with fewer than three in reach, its tile's median, as for the
+gain; its own only on a tile with no nanowell offset at all). One misread surround — debris on the lattice, the phase halo
+beside a wall — otherwise moved that one nanowell's floor and nothing else: a ring read 0.12 too bright put a loaded
+nanowell's floor below the flat level between sites (its segmenter floor −0.11 against its neighbour's 0.75), and
+one read 0.08 too dark lost 6 of its 20 cells. Light added
 unevenly across a well — glare brighter toward its centre — is an offset that changes from nanowell to nanowell,
-which one offset per tile could not follow: the rest was taken as gain, and every cell where the light was added
+which one offset per tile could not follow, and which a median over six neighbours still does: the rest was taken as gain, and every cell where the light was added
 was flattened. The gain is not taken from the surround after subtracting an offset, because the lattice is dark: an
 offset a few hundredths wrong made the gain tens of per cent wrong (on a rendered well with glare, a cell's height
 in the segmenter's image ran 1.126 at the centre and 1.153 at the rim; from the contrast, 1.148 and 1.149). A site

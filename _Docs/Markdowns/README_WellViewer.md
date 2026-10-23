@@ -340,7 +340,8 @@ they agree on), and the same idea gives each nanowell's floor, the texture that 
 fluorescence channel's background. Tiles imaged at different brightness or with a different offset, and light that
 is brighter toward the middle of a well, are measured alike: each nanowell's brightness comes from the contrast
 between its floor and the lattice around it (taken over its neighbours on the same tile, so one nanowell covered in
-cells does not set its own), and its offset from the lattice around it. The grid record's `normalisation` block
+cells does not set its own), and its offset from the lattice around it, likewise taken over its neighbours, so
+debris or a halo on the lattice beside one nanowell cannot brighten or darken that nanowell alone. The grid record's `normalisation` block
 says how much light was added across the well (`offset_range`) and what share of the nanowells' floor read as
 cells (`cell_share`); over half is noted, because the texture threshold then reads low. One limit: where most
 nanowells hold a cell at the **same** place (cells gathered at the lowest point of a curved floor), that cell

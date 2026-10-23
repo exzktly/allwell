@@ -88,8 +88,9 @@ MIN_LEVEL_CONTRAST = 0.05
 #: level, its gain is its floor-to-surround contrast over its same-tile neighbours and its offset comes from its own
 #: surround (one offset per tile could not follow light added unevenly across a well), the texture threshold is the
 #: floor's texture over every site with the cells clipped away, and the fluorescence background is each tile's
-#: floor level.
-MEASURE_VERSION = 4
+#: floor level. 5: a site's offset is the median of its same-tile neighbours' offsets, read from nanowells only, as
+#: its gain already was (``nanowell_run._smoothed_offsets``): one misread surround moved one nanowell's floor alone.
+MEASURE_VERSION = 5
 #: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
 MIN_TEXTURE_THRESHOLD = 0.02
 #: A timepoint's template whose floor-to-surround ratio (:func:`floor_ratio`) has moved by more than a factor of two

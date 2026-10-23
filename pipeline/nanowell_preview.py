@@ -204,12 +204,21 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
                             "over all of the well's timepoints, and adding to an analysed dataset keeps its roster")
     for row in measured.sites:
         result.sites.append({**row, "address": coordinate_text(row["nw_q"], row["nw_r"])})
+    if segment is not None:
+        result.crops = _sample_crops(result.sites, measured, images, located, segment, px,
+                                     0.75 * settings.diameter_um, n_crops)
+    return result
+
+
+def _sample_crops(sites: list, measured, images: dict, located, segment, px: float, half_um: float,
+                  n_crops: int) -> list:
+    """Up to *n_crops* crops: the most loaded measured sites, then one empty one, each cut from its owner tile
+    segmented as the run segments it (:func:`_tile_segmented`)."""
     template = measured.template.get("_object")
-    ranked = sorted((s for s in result.sites if s["state"] == "measured" and (s["n_cells"] or 0) > 0 and not s["fused"]),
+    ranked = sorted((s for s in sites if s["state"] == "measured" and (s["n_cells"] or 0) > 0 and not s["fused"]),
                     key=lambda s: -(s["n_cells"] or 0))
-    chosen = ranked[:max(n_crops - 1, 0)]
-    empty = next((s for s in result.sites if s["state"] == "empty" and not s["fused"]), None)
-    wanted = (chosen + ([empty] if empty is not None and n_crops else [])) if segment is not None else []
+    empty = next((s for s in sites if s["state"] == "empty" and not s["fused"]), None)
+    wanted = ranked[:max(n_crops - 1, 0)] + ([empty] if empty is not None and n_crops else [])
     crops: dict = {}                               # id(site) -> its crop, so they keep the order chosen
     for owner in dict.fromkeys(s["owner"] for s in wanted):
         if owner is None or template is None or owner not in images:
@@ -218,7 +227,6 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
         # couple of hundred megabytes.
         tile = _tile_segmented(owner, measured, images, located, template, segment, px)
         for site in (s for s in wanted if s["owner"] == owner):
-            crops[id(site)] = _crop_for(site, tile, located, px, 0.75 * settings.diameter_um)
+            crops[id(site)] = _crop_for(site, tile, located, px, half_um)
         del tile
-    result.crops = [crops[id(s)] for s in wanted if crops.get(id(s)) is not None]
-    return result
+    return [crops[id(s)] for s in wanted if crops.get(id(s)) is not None]

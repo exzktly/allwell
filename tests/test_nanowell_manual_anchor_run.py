@@ -30,8 +30,9 @@ from util.nanowell_anchors import anchors_path, set_anchor
 CLICK_ERROR_UM = (8.0, -6.0)
 
 
-def _run(monkeypatch, plate, blind=frozenset({("B02", "0h"), ("B02", "24h")})):
-    """``main`` on *plate*, with every (well, timepoint) in *blind* given no square and no boundary."""
+def _run(monkeypatch, plate, blind=frozenset({("B02", "0h"), ("B02", "24h")}), extra=()):
+    """``main`` on *plate*, with every (well, timepoint) in *blind* given no square and no boundary; *extra* are more
+    command-line flags (``--incremental``)."""
     real_locate, real_resolve = nr.locate_timepoint, lattice.resolve_origin
     state = {"blind": False}
 
@@ -61,7 +62,7 @@ def _run(monkeypatch, plate, blind=frozenset({("B02", "0h"), ("B02", "24h")})):
         "process_microscopy.py", "--input_dir", str(plate / "in"), "--output_dir", str(plate / "out"),
         "--phase_token", "PHASE", "--fluor_tokens", "GFP", "--filename_schema", "experiment:channel:well:fov:timepoint",
         "--workers", "1", "--background", "none", "--flatfield", "none", "--no_auto_threshold", "--no_run_check",
-        "--nanowell_format", "100um"])
+        "--nanowell_format", "100um", *extra])
     pm.main()
     return plate / "out"
 

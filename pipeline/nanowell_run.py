@@ -700,7 +700,10 @@ def _lattice_block(located: Located, status: str, reason: str) -> dict:
     if located.origin_montage is not None and located.stage_offset_um is not None:
         common = _montage_to_common(located.origin_montage, located.montage)
         origin_stage = [float(common[0] + located.stage_offset_um[0]), float(common[1] + located.stage_offset_um[1])]
-    return {"status": status, "reason": reason, "lattice_kind": fit.kind, "pitch_um": fit.pitch,
+    # The fitted basis, so the re-address step decides the rim on this lattice rather than one refitted to the rows
+    # (tracker H1); a translation-free pair of vectors, the same in every frame.
+    basis = None if fit.a1 is None else [[float(v) for v in fit.a1], [float(v) for v in fit.a2]]
+    return {"status": status, "reason": reason, "lattice_kind": fit.kind, "pitch_um": fit.pitch, "basis_um": basis,
             "stage_offset_um": None if located.stage_offset_um is None else list(located.stage_offset_um),
             "origin_stage_um": origin_stage, "montage_origin_um": list(located.montage.origin_um),
             "angle_deg": fit.angle_deg, "mirrored": located.mirrored,
@@ -1626,6 +1629,40 @@ def _misanchored(detected: dict, kept=()) -> dict:
     return out
 
 
+@dataclass(frozen=True)
+class RimFrame:
+    """The sites a circular array's rim is decided over, measured on one lattice (tracker X35a): every site within the
+    shared radius plus a pitch (*candidates*), each one's distance from the origin, and the *band* within a quarter
+    pitch of the radius. :func:`_evidence_roster` builds it from the first anchored timepoint's fit, and the
+    re-address step (``pipeline.nanowell_readdress``) from the lattice of the saved rows, so both decide the rim with
+    the one rule in :meth:`supported` (tracker H2)."""
+    radius_um: float
+    pitch: float
+    candidates: tuple
+    distance: dict
+    band: frozenset
+
+    @classmethod
+    def of(cls, fit, origin, radius_um: float) -> "RimFrame":
+        from pipeline.nanowell_lattice import roster as disk_roster
+
+        pitch = float(fit.pitch)
+        candidates = disk_roster(fit, origin, radius_um + 0.75 * pitch)
+        basis = np.column_stack((fit.a1, fit.a2))
+        distance = {a: float(np.linalg.norm(basis @ np.asarray(a, dtype=float))) for a in candidates}
+        band = frozenset(a for a in candidates if radius_um - pitch / 4 < distance[a] <= radius_um + pitch / 4)
+        return cls(float(radius_um), pitch, tuple(candidates), distance, band)
+
+    def supported(self, detected, seen_whole) -> frozenset:
+        """The sites in the array: a quarter pitch inside the circle; or detected within a pitch of the rim; or in the
+        band and never seen whole (so nothing could have shown it absent)."""
+        r, p = self.radius_um, self.pitch
+        return frozenset(a for a in self.candidates
+                         if self.distance[a] <= r - p / 4
+                         or (a in detected and self.distance[a] <= r + p)
+                         or (a in self.band and a not in seen_whole))
+
+
 def _evidence_roster(located: dict, anchored, radius_um: float, settings: NanowellSettings,
                      kept: dict | None = None) -> CircleEvidence:
     """The sites of a circular array the evidence supports (tracker X35a), and each timepoint's own share of it.
@@ -1646,18 +1683,15 @@ def _evidence_roster(located: dict, anchored, radius_um: float, settings: Nanowe
     (``{"detected": sites, "imaged": sites}``, from its rows), so that an incremental run decides the roster a run
     over every timepoint would (review X35a-R1).
     """
-    from pipeline.nanowell_lattice import _disk_covered, roster as disk_roster
+    from pipeline.nanowell_lattice import _disk_covered
     from pipeline.nanowell_lattice import TileRectangle
 
     first = located[anchored[0]]
-    pitch = float(first.fit.pitch)
-    candidates = disk_roster(first.fit, first.origin_montage, radius_um + 0.75 * pitch)
-    basis = np.column_stack((first.fit.a1, first.fit.a2))
-    distance = {a: float(np.linalg.norm(basis @ np.asarray(a, dtype=float))) for a in candidates}
+    rim = RimFrame.of(first.fit, first.origin_montage, radius_um)
+    band = rim.band
     found = {tp: {(e.q, e.r) for e in located[tp].indexed if e.q is not None} for tp in anchored}
     kept = kept or {}
     misanchored = _misanchored(found, kept.get("detected", ())) if len(anchored) > 1 or kept.get("detected") else {}
-    band = {a for a in candidates if radius_um - pitch / 4 < distance[a] <= radius_um + pitch / 4}
     imaged = {tp: set() for tp in anchored}
     for tp in anchored:
         loc = located[tp]
@@ -1676,12 +1710,7 @@ def _evidence_roster(located: dict, anchored, radius_um: float, settings: Nanowe
     # well re-analysed it to the same roster with a reason that said it had grown (review X35a-R6).
     kept_out = band - set(map(tuple, kept["roster"])) if kept.get("roster") is not None else set()
 
-    def supported(detected, seen_whole):
-        return frozenset(a for a in candidates
-                         if distance[a] <= radius_um - pitch / 4
-                         or (a in detected and distance[a] <= radius_um + pitch)
-                         or (a in band and a not in seen_whole))
-
+    supported = rim.supported
     trusted = [tp for tp in anchored if tp not in misanchored]
     detected = set(kept.get("detected", ())).union(*(found[tp] for tp in trusted))
     seen_whole = set(kept.get("imaged", ())).union(kept_out, *(imaged[tp] for tp in trusted))

@@ -18,7 +18,7 @@ import process_microscopy as pm
 from pipeline import nanowell_measure as nm
 from pipeline import nanowell_run as nr
 from pipeline import nanowell_task as nt
-from tests._nanowell_run_fixture import PX, build_well, threshold_segmenter
+from tests._nanowell_run_fixture import PX, build_well, paint_cell, threshold_segmenter
 from tests._nanowell_synth import _screen_rotation
 from util.acquisition_record import write_record_file
 
@@ -88,9 +88,10 @@ def test_an_anchor_that_itself_came_from_the_plate_is_not_evidence_for_another_w
 
 
 # ── end to end ───────────────────────────────────────────────────────────────
-def _write_plate(tmp_path, dark_rim=()):
+def _write_plate(tmp_path, dark_rim=(), b02_cells=()):
     """Four 1-tile wells imaged twice; between the timepoints the plate turns by THETA and shifts. *dark_rim* are
-    sites of B02 drawn dark at 0h (a bubble along its rim)."""
+    sites of B02 drawn dark at 0h (a bubble along its rim); *b02_cells* are ``(address, dx_um)`` cells drawn in B02's
+    nanowells at both timepoints."""
     plate = tmp_path / "plate"
     (plate / "in").mkdir(parents=True)
     rotation = _screen_rotation(THETA)
@@ -105,6 +106,9 @@ def _write_plate(tmp_path, dark_rim=()):
                                  dark_sites=dark_rim if well == "B02" else ())
         second, rec1 = build_well(rows=1, cols=1, tile=TILE, well=well, timepoint="24h", seed=12,
                                   rotation=7.0 + THETA, array_shift_um=tuple(s1 - camera1 - UNION), radius_fraction=0.26)
+        for rendered in ((first, second) if well == "B02" else ()):
+            for address, dx_um in b02_cells:
+                paint_cell(rendered, rendered.sites_um[rendered.array.addresses.index(address)], dx_um=dx_um)
         for rec, camera in ((rec0, np.array(q)), (rec1, camera1)):
             for tile in rec["tiles"]:
                 tile["stage_xy_um"] = list(camera + np.array(tile["mosaic_xy_px"]) * PX)

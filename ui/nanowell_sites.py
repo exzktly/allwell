@@ -1,13 +1,14 @@
 """How a nanowell is drawn over a montage: the colour of each state, and its outline with its address.
 
-Three views draw the nanowells of one well over its montage, at two moments of the same work. Analyze's **Test
+Two views draw the nanowells of one well over its montage, at two moments of the same work. Analyze's **Test
 detection** window (``analyze/nanowell_preview.py``) draws them before a run, from one timepoint analysed on the
-spot; Review's **Full montage** window (``review/features/nanowell/full_montage_view.py``) and its **Array QC**
-figure (``review/features/nanowell/renderer.render_array_qc``) draw them after one, from what the run recorded. A
-person checks the first against the second, so a state has to read the same in all three. Each used to carry its
-own palette, label threshold and outline painter, and they had already drifted: the Full montage window had no
-colour for a fused site at all, drew outlines a third thinner, and wrote addresses in the state's colour rather
-than the one Test detection had chosen to stay legible over a dark montage.
+spot, painting each with :func:`paint_site`; the **Array view** of Review's Nanowells page
+(``review/features/nanowell/renderer.render_array``) draws them after one, from what the run recorded, in
+matplotlib with the same colours, outline width, fused dash, label colour and label threshold. A person checks
+the first against the second, so a state has to read the same in both. Each view used to carry its own palette,
+label threshold and outline painter, and they had already drifted: Review's full-resolution window had no colour
+for a fused site at all, drew outlines a third thinner, and wrote addresses in the state's colour rather than the
+one Test detection had chosen to stay legible over a dark montage.
 
 This module is the one copy. :data:`STATE_COLOURS` is keyed on the ``state`` the pipeline records for a site
 (``pipeline/nanowell_run.py``), plus the two the Test detection window derives for itself — ``unaddressed`` (a

@@ -1034,13 +1034,16 @@ def _normalise(located, images, template, by_tile, geoms, channels, pitch_um: fl
     departures, floors = [], {c: {} for c in (channels or {})}
     for owner in tiles:
         mine = [g for g in fitted[owner] if g.index in out.levels]
-        if not mine:
+        # The floor's texture and level are read from nanowells only: bare floor outside the array divided by the
+        # template is no nanowell's floor (every site, when no contrast could be judged).
+        floor_sites = [g for g in mine if not nanowells or g.index in nanowells]
+        if not floor_sites:
             continue
         rim = nm.rim_suppress(images[owner], px, template, mine, levels=out.levels)
-        departures += nm.site_departures(rim, px, mine, stride=THRESHOLD_STRIDE)
+        departures += nm.site_departures(rim, px, floor_sites, stride=THRESHOLD_STRIDE)
         for channel, load in (channels or {}).items():
             image = load(owner)
-            levels = {} if image is None else nm.site_floor_levels(image, px, mine)
+            levels = {} if image is None else nm.site_floor_levels(image, px, floor_sites)
             if levels:
                 floors[channel][owner] = float(np.median(list(levels.values())))
     out.threshold, cell_share = nm.threshold_from_departures(departures)

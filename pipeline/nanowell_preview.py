@@ -209,12 +209,16 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
                     key=lambda s: -(s["n_cells"] or 0))
     chosen = ranked[:max(n_crops - 1, 0)]
     empty = next((s for s in result.sites if s["state"] == "empty" and not s["fused"]), None)
-    tiles: dict = {}                               # owner -> its (rim, labels), segmented once however many crops
-    for site in (chosen + ([empty] if empty is not None and n_crops else [])) if segment is not None else []:
-        owner = site["owner"]
-        if owner is not None and owner not in tiles and template is not None and owner in images:
-            tiles[owner] = _tile_segmented(owner, measured, images, located, template, segment, px)
-        crop = _crop_for(site, tiles.get(owner), located, px, 0.75 * settings.diameter_um)
-        if crop is not None:
-            result.crops.append(crop)
+    wanted = (chosen + ([empty] if empty is not None and n_crops else [])) if segment is not None else []
+    crops: dict = {}                               # id(site) -> its crop, so they keep the order chosen
+    for owner in dict.fromkeys(s["owner"] for s in wanted):
+        if owner is None or template is None or owner not in images:
+            continue
+        # One tile segmented at a time and dropped once its crops are cut: a full sensor's tile and labels are a
+        # couple of hundred megabytes.
+        tile = _tile_segmented(owner, measured, images, located, template, segment, px)
+        for site in (s for s in wanted if s["owner"] == owner):
+            crops[id(site)] = _crop_for(site, tile, located, px, 0.75 * settings.diameter_um)
+        del tile
+    result.crops = [crops[id(s)] for s in wanted if crops.get(id(s)) is not None]
     return result

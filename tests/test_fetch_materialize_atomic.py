@@ -62,13 +62,17 @@ def test_materialize_csv_only_is_noop_true(tmp_path):
 def test_bad_scratch_override_warns_and_falls_back(tmp_path, monkeypatch, caplog):
     """An unusable override degrades to the default, loudly.
 
-    The default is ``~/.allwell/scratch`` — the same one ``pipeline.io`` uses.
-    The OS temp dir is only the last resort below that, for an unwritable home.
+    The default is the app folder's ``scratch/`` — ``~/.allwell/scratch`` on
+    this POSIX layout, the same one ``pipeline.io`` uses. The OS temp dir is
+    only the last resort below that, for an unwritable app folder.
     """
+    from util import state_dir
     a_file = tmp_path / "afile"; a_file.write_text("x")
     bad = a_file / "sub"                    # parent is a file → mkdir fails
     home = tmp_path / "home"; home.mkdir()
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv(state_dir.STATE_DIR_ENV, raising=False)
+    monkeypatch.setattr(state_dir, "is_windows", lambda: False)
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(bad))
     # The logger is `services.remote_scratch`, where `_scratch_dir` lives.
     # Naming the wrong logger

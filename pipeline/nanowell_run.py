@@ -467,21 +467,24 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     candidate, scores = score_fiducial(montage.image, montage.um_per_px, diameter,
                                        detection.points_um, centre_um=detection.boundary_centre_um,
                                        search_radius_um=2.2 * lattice_pitch, pitch_um=lattice_pitch)
-    # Only a square that scored as one: with the central square hidden (a bubble over it) the best-scoring site
-    # is an ordinary circle, whose "orientation" is noise, and checking against it refused a timepoint the array
-    # centre could anchor (roll-up review X21).
-    if candidate is not None and scores:
-        square = max(scores, key=lambda s: s.coherence)
-        orientation = check_orientation(detection.fit, square.orientation_deg,
-                                        square_to_axis_deg=settings.square_edge_deg)
-        if not orientation.ok:
-            return refuse(ORIENTATION_REFUSED, orientation.reason if hasattr(orientation, "reason") else
-                          "The square's edges disagree with the fitted lattice axis")
     fiducial = describe_fiducial(candidate, scores, near_centre=detection.boundary_centre_um is not None)
     fiducial["margin"], fiducial["ratio"] = FIDUCIAL_MARGIN, FIDUCIAL_RATIO
     if fiducial["position_um"] is not None:
         fiducial["position_um"] = [float(v) for v in _montage_to_common(fiducial["position_um"], montage)]
     located.fiducial = fiducial
+    # Only a square that scored as one: with the central square hidden (a bubble over it) the best-scoring site
+    # is an ordinary circle, whose "orientation" is noise, and checking against it refused a timepoint the array
+    # centre could anchor (roll-up review X21). The square's measured edge angle is kept either way, against the
+    # lattice row the fit chose, so a real plate can confirm the square's cut (tracker F19, Q11).
+    if candidate is not None and scores:
+        square = max(scores, key=lambda s: s.coherence)
+        orientation = check_orientation(detection.fit, square.orientation_deg,
+                                        square_to_axis_deg=settings.square_edge_deg)
+        fiducial.update(edge_deg=orientation.observed_deg, edge_expected_deg=orientation.expected_deg,
+                        edge_discrepancy_deg=orientation.discrepancy_deg)
+        if not orientation.ok:
+            return refuse(ORIENTATION_REFUSED, orientation.reason if hasattr(orientation, "reason") else
+                          "The square's edges disagree with the fitted lattice axis", fiducial=fiducial)
     manual = (None if located.manual_anchor_um is None
               else np.subtract(located.manual_anchor_um, montage.origin_um))       # well frame -> montage frame
     resolved = resolve_origin(detection.fit, fiducial=candidate, array_centre=detection.boundary_centre_um,

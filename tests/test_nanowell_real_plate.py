@@ -230,3 +230,21 @@ def test_measurement_fits_sites_with_the_plate_s_pitch(monkeypatch):
     monkeypatch.setattr(nd, "refine_sites", spy)
     nr.measure_timepoint(located, rendered.images, SETTINGS, 700.0, count_cells=False)
     assert seen and set(seen) == {located.pitch_um}
+
+
+# ── F19: the square's edge angle is recorded, refused or not ─────────────────
+def test_the_square_s_edge_angle_is_recorded_whether_the_timepoint_is_kept_or_refused():
+    """The orientation check stays a refusal (it catches a lattice fit folded onto the wrong row, and the user
+    confirmed the square's edges run along the plate's: Q11). What a real plate needs to confirm that is the angle
+    the square was measured at against the row the fit chose, on the grid record either way."""
+    rendered, record = build_well(rows=1, cols=1, tile=(900, 900))
+    kept = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    block = kept.grid["fiducial"]
+    assert kept.status == nr.OK and abs(block["edge_discrepancy_deg"]) < 3.0
+    assert block["edge_deg"] == pytest.approx(block["edge_expected_deg"] + block["edge_discrepancy_deg"], abs=1e-6)
+    refused = nr.locate_timepoint("T0", record, "A01", rendered.images,
+                                  nr.NanowellSettings("100um", square_edge_deg=30.0))
+    assert refused.status == nr.ORIENTATION_REFUSED
+    again = refused.grid["fiducial"]
+    assert again["edge_deg"] == pytest.approx(block["edge_deg"])
+    assert abs(abs(again["edge_discrepancy_deg"]) - 30.0) < 3.0

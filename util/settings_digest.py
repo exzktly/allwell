@@ -122,6 +122,7 @@ KEYED_ON: dict[str, str] = {
     "nanowell_geometry":           "whether the array is found as a hexagonal lattice in a circle or by "
                                    "its contrast with the geometry inferred, so which sites exist and "
                                    "every address",
+    "nanowell_cellpose_model":     "the model the label-free count segments with, so every count",
     "nanowell_grid":               "the described grid a dataset without an acquisition record is "
                                    "placed from, so where every tile and nanowell sits",
     "nanowell_scan":               "the order the described grid's fields were taken in, the same",

@@ -53,7 +53,8 @@ def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
     return nr.NanowellSettings(spec["plate_format"], spec.get("margin_um"), spec.get("cell_diameter_um", 15.0),
                                spec.get("square_edge_deg", 0.0), spec.get("occluded_below", 0.5),
                                spec.get("clipped_below", 0.5), custom,
-                               spec.get("geometry") or nr.GEOMETRY_HEX_CIRCLE)
+                               spec.get("geometry") or nr.GEOMETRY_HEX_CIRCLE,
+                               spec.get("cellpose_model") or nr.CELLPOSE_MODELS[0])
 
 
 def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:

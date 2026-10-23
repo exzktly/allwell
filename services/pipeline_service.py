@@ -67,6 +67,9 @@ def _emit_nanowell_flags(args: list[str], opts: dict) -> None:
         _emit_num_flag(args, opts, key, f"--{key}", float)
     if str(opts.get("nanowell_geometry") or "").strip() == "infer":   # the default sends nothing (tracker X35)
         args += ["--nanowell_geometry", "infer"]
+    model = str(opts.get("nanowell_cellpose_model") or "").strip()
+    if model and model != "cyto3":                   # the default sends nothing, so earlier runs' argv is unchanged
+        args += ["--nanowell_cellpose_model", model]
     if plate_format == "custom":                     # a known format's geometry is its own, never sent
         for key in ("nanowell_diameter_um", "nanowell_pitch_um"):
             _emit_num_flag(args, opts, key, f"--{key}", float)

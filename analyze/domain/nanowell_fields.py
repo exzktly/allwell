@@ -25,6 +25,10 @@ PLATE_FORMAT_CHOICES = (("100um", "100 µm nanowells"), ("50um", "50 µm nanowel
 #: and sends no flag, so a run that does not choose keeps the settings (and reuse key) it always had (tracker X35).
 GEOMETRY_CHOICES = (("hex_circle", "Hexagonal lattice in a circle"), ("infer", "Infer from the image"))
 
+#: The Cellpose models the count may use (``pipeline.nanowell_run.CELLPOSE_MODELS``), as (option value, label), restated
+#: like the formats and held together by a test; the first is the default and sends no flag (tracker L2).
+CELLPOSE_MODEL_CHOICES = (("cyto3", "cyto3 (generalist)"), ("livecell_cp3", "livecell_cp3 (phase contrast)"))
+
 #: ``--nanowell_scan`` spellings (``pipeline.nanowell_pattern_record.parse_scan``), the first the default.
 SCAN_CHOICES = tuple(f"{corner}-{major}{'-serpentine' if serpentine else ''}"
                      for corner in ("top-left", "top-right", "bottom-left", "bottom-right")
@@ -161,6 +165,9 @@ def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]
     geometry = str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]).strip()
     if geometry not in {value for value, _label in GEOMETRY_CHOICES}:
         errors.append(f"Nanowell geometry {geometry!r} is not one this version knows.")
+    model = str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]).strip()
+    if model not in {value for value, _label in CELLPOSE_MODEL_CHOICES}:
+        errors.append(f"Nanowell Cellpose model {model!r} is not one this version knows.")
     source = registration_from_error(str(opts.get(REGISTRATION_FROM_KEY) or ""))
     if source:
         errors.append(source)

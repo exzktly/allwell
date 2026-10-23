@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from analyze.domain.nanowell_fields import (
-    CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, PLATE_FORMAT_CHOICES, REGISTRATION_FROM_KEY, SCAN_CHOICES,
+    CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, PLATE_FORMAT_CHOICES, REGISTRATION_FROM_KEY,
+    SCAN_CHOICES,
     nanowell_enabled, nanowell_option_errors,
 )
 
@@ -85,7 +86,8 @@ def settings_from_opts(opts: dict):
         plate_format, number("nanowell_margin_um", None), number("nanowell_cell_diameter_um", 15.0),
         number("nanowell_square_edge_deg", 0.0), number("nanowell_occluded_below", 0.5),
         number("nanowell_clipped_below", 0.5), custom,
-        str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]))
+        str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]),
+        str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]))
 
 
 class AnalyzeNanowellSectionMixin:
@@ -127,6 +129,18 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_geometry_cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self._nanowell_geometry_cb.setMinimumContentsLength(12)
         row.layout().addWidget(self._nanowell_geometry_cb)
+        row.layout().addStretch(1)
+        self._nanowell_field_rows.append(row.parentWidget())
+        row = self._row(sec, "Cellpose model", tooltip=(
+            "The model the cell count segments with. cyto3: Cellpose 3's generalist. livecell_cp3: the Cellpose 3 "
+            "model trained on phase-contrast images of eight cell lines (LIVECell). Compare them on your plate with "
+            "Test detection, whose crops show the run's own segmentation. Weights download on first use."))
+        self._nanowell_model_cb = QComboBox(row)
+        for value, label in CELLPOSE_MODEL_CHOICES:
+            self._nanowell_model_cb.addItem(label, userData=value)
+        self._nanowell_model_cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._nanowell_model_cb.setMinimumContentsLength(12)
+        row.layout().addWidget(self._nanowell_model_cb)
         row.layout().addStretch(1)
         self._nanowell_field_rows.append(row.parentWidget())
         self._nanowell_custom_rows = []
@@ -218,6 +232,7 @@ class AnalyzeNanowellSectionMixin:
         on = self._nanowell_cb.isChecked()
         self._nanowell_format_cb.setEnabled(on)
         self._nanowell_geometry_cb.setEnabled(on)
+        self._nanowell_model_cb.setEnabled(on)
         for _key, _label, attr, _tip in _FIELDS + _CUSTOM_FIELDS + _GRID_FIELDS:
             getattr(self, attr).setEnabled(on)
         self._nanowell_scan_cb.setEnabled(on)
@@ -256,6 +271,7 @@ class AnalyzeNanowellSectionMixin:
             out[key] = getattr(self, attr).text().strip()
         out["nanowell_scan"] = self._nanowell_scan_cb.currentData() or SCAN_CHOICES[0]
         out["nanowell_geometry"] = self._nanowell_geometry_cb.currentData() or GEOMETRY_CHOICES[0][0]
+        out["nanowell_cellpose_model"] = self._nanowell_model_cb.currentData() or CELLPOSE_MODEL_CHOICES[0][0]
         out[REGISTRATION_FROM_KEY] = self._nanowell_registration_edit.text().strip()
         return out
 
@@ -295,6 +311,8 @@ class AnalyzeNanowellSectionMixin:
         # Absent or None is a run that did not choose: the format's hexagonal lattice in a circle.
         geometry = self._nanowell_geometry_cb.findData(str(d.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]))
         self._nanowell_geometry_cb.setCurrentIndex(max(geometry, 0))
+        model = self._nanowell_model_cb.findData(str(d.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]))
+        self._nanowell_model_cb.setCurrentIndex(max(model, 0))
         self._nanowell_registration_edit.setText(str(d.get(REGISTRATION_FROM_KEY) or ""))
         self._refresh_nanowell_custom()
 

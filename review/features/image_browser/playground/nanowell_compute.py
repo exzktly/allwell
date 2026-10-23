@@ -274,7 +274,9 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
     *covered* marks the pixels that hold image (a montage's coverage); *record_places_tiles* says an acquisition
     record placed the tiles, which is what leaves the tile-grid fields blank rather than unknown.
     """
-    from pipeline.nanowell_detect import MIN_SQUARENESS, describe_fiducial, score_fiducial
+    from pipeline.nanowell_detect import (
+        MIN_SQUARENESS, SQUARE_SIZE_FACTORS, describe_fiducial, score_fiducial, square_search_points,
+    )
     from pipeline.nanowell_infer import ARRAY_CIRCLE, find_wells_by_contrast, infer_array
     from pipeline.nanowell_lattice import index_points, resolve_origin
     from pipeline.nanowell_run import FIDUCIAL_MARGIN, FIDUCIAL_RATIO
@@ -316,8 +318,12 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
 
     # The central square and the origin, as a run resolves them: the square when it clears its margin, else
     # the array's centre (a circle's, or the middle site of a whole polygon).
-    candidate, scores = score_fiducial(image, um_per_px, diameter, wells.points_um, centre_um=centre_um,
+    # As a run looks for it (tracker F15): every lattice site near the centre, found or not, at several sizes.
+    search = (wells.points_um if centre_um is None else
+              square_search_points(fit, wells.points_um, centre_um, 2.2 * pitch))
+    candidate, scores = score_fiducial(image, um_per_px, diameter, search, centre_um=centre_um,
                                        search_radius_um=2.2 * pitch if centre_um is not None else None,
+                                       size_factors=SQUARE_SIZE_FACTORS,
                                        pitch_um=pitch)
     square = max(scores, key=lambda s: s.coherence) if candidate is not None and scores else None
     if square is not None:

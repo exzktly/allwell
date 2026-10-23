@@ -278,3 +278,50 @@ def test_an_unaddressed_timepoint_measures_every_nanowell_of_its_array_without_a
     for address in hidden:
         row = measured.sites[row_at(truth[address])]
         assert row["detected"] is False and row["state"] == "occluded"
+
+
+# ── F15: a square of another size than the nanowells ────────────────────────
+def _square_of_side(rendered, side_um, rotation_deg=7.0):
+    """Redraw the central site of *rendered* (``build_well``'s plate) as a bright square *side_um* across, edges along
+    the lattice's rows: the renderer draws it exactly one nanowell across, and a real mold need not."""
+    from scipy import ndimage
+
+    from tests._nanowell_synth import _BACKGROUND, _FLOOR, _NANOWELL, _screen_rotation
+
+    del _BACKGROUND
+    pose = _screen_rotation(rotation_deg)
+    origin = np.asarray(rendered.array.origin, dtype=float)
+    px = rendered.plan.pixel_size_um
+    for name, image in rendered.images.items():
+        left, top = rendered.true_left_top_um[name]
+        h, w = image.shape
+        gx, gy = np.meshgrid(left + (np.arange(w) + 0.5) * px, top + (np.arange(h) + 0.5) * px)
+        local = np.stack((gx, gy), axis=-1) - origin
+        cell = np.hypot(local[..., 0], local[..., 1]) < 0.5 * PITCH
+        if not cell.any():
+            continue
+        square = 1 / (1 + np.exp(np.clip(-(side_um / 2 - np.abs(local @ pose).max(axis=-1)) / max(px, 1.0), -50, 50)))
+        drawn = ndimage.gaussian_filter(_FLOOR + (_NANOWELL - _FLOOR) * square, 1.0)
+        image[cell] = drawn[cell].astype(image.dtype)
+
+
+@pytest.mark.parametrize("side_um, read_at", [(60.0, (0.45, 0.6)), (150.0, (1.0, 1.2))])
+def test_a_square_of_another_size_than_the_nanowells_still_anchors_the_well(monkeypatch, side_um, read_at):
+    """The square was only ever scored where the round-nanowell filter had found a site, and only read at the
+    nanowell's size: a 60 or 150 um square among 100 um wells was not a site at all, and the well fell to its array
+    centre (here put half a pitch off, so that it cannot)."""
+    rendered, record = build_well()
+    _square_of_side(rendered, side_um)
+    _centre_off_site(monkeypatch)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert located.status == nr.OK and located.origin_method == "fiducial", located.reason
+    block = located.grid["fiducial"]
+    assert np.hypot(*(np.asarray(block["position_um"]) - rendered.array.origin)) < PITCH / 10
+    # Read at its own size: a small square by a small ring; a large one as large as its neighbours leave room for.
+    assert block["size_factor"] in read_at
+
+
+def test_no_square_drawn_is_no_square_found_at_any_size():
+    rendered, record = build_well(square_centre=False)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert located.origin_method == "array_centre" and located.grid["fiducial"]["best"] < nd.MIN_SQUARENESS

@@ -376,7 +376,8 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     timepoint's :func:`registration_key` is taken instead of registering the tiles again (:func:`stored_placement`).
     """
     from pipeline.nanowell_detect import (
-        check_orientation, describe_fiducial, detect_sites, estimate_lattice_fft, score_fiducial,
+        SQUARE_SIZE_FACTORS, check_orientation, describe_fiducial, detect_sites, estimate_lattice_fft, score_fiducial,
+        square_search_points,
     )
     from pipeline.nanowell_lattice import index_points, resolve_origin
     from pipeline.nanowell_sites import check_format
@@ -464,9 +465,16 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
         detection = detect_sites(montage.image, montage.um_per_px, diameter, expected_pitch_um=lattice_pitch)
         if not detection.ok:
             return refuse(NO_LATTICE, detection.reason)
-    candidate, scores = score_fiducial(montage.image, montage.um_per_px, diameter,
-                                       detection.points_um, centre_um=detection.boundary_centre_um,
-                                       search_radius_um=2.2 * lattice_pitch, pitch_um=lattice_pitch)
+    # The square is looked for at every lattice site near the array's centre, detected or not, and read at several
+    # sizes (tracker F15): the matched filter finds round nanowells, and a square of another size is not one.
+    near = detection.boundary_centre_um
+    if near is None and len(detection.points_um):
+        near = np.median(np.asarray(detection.points_um, dtype=float), axis=0)
+    search = (detection.points_um if near is None or not detection.fit.ok else
+              square_search_points(detection.fit, detection.points_um, near, 2.2 * lattice_pitch))
+    candidate, scores = score_fiducial(montage.image, montage.um_per_px, diameter, search,
+                                       centre_um=detection.boundary_centre_um, search_radius_um=2.2 * lattice_pitch,
+                                       pitch_um=lattice_pitch, size_factors=SQUARE_SIZE_FACTORS)
     fiducial = describe_fiducial(candidate, scores, near_centre=detection.boundary_centre_um is not None)
     fiducial["margin"], fiducial["ratio"] = FIDUCIAL_MARGIN, FIDUCIAL_RATIO
     if fiducial["position_um"] is not None:

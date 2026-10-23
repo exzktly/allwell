@@ -9557,7 +9557,16 @@ gradient magnitude, so a circle (all directions) cancels toward zero and a squar
 directions 90 degrees apart) adds toward one, and the argument of the sum is four times
 the edge direction, so the same number is the orientation. `score_fiducial` scores the
 sites near the array centre and returns a `FiducialCandidate` carrying the best score
-and the runner-up's for `resolve_origin`'s margin test; the margin is the caller's. With
+and the runner-up's for `resolve_origin`'s margin test; the margin is the caller's. The
+sites it is handed are every lattice site within 2.2 pitches of the array's centre
+(`square_search_points`), at their lattice positions, whether or not detection found a
+nanowell there — the matched filter finds round nanowells, and a square of another size is
+not one — and each is read at the sizes in `SQUARE_SIZE_FACTORS` (0.45 to 1.2 nanowell
+diameters), keeping its best: a 60, 75 or 150 µm square among 125.8 µm wells was no site at
+all before, and reads 0.59 to 0.77 at its own size against circles at no more than 0.08 at
+any. The size read is recorded (`size_factor`). The score reads edge directions modulo 90°,
+so it does not depend on polarity; a square as dark as the lattice around it has no edges to
+read, which is the bubble case the plate and an anchor set by hand are for. With
 the square under a bubble no site is square, `score_fiducial` returns no candidate, and
 the array centre anchors the well, giving the same addresses. The score is the four-fold
 sum minus the two-fold one: a bubble's rim crossing a circle concentrates its gradients in

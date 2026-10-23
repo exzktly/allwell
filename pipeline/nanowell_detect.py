@@ -28,7 +28,7 @@ index is ``position / pixel_size - 0.5``. Mixing the two is a half-pixel shift.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 
 import numpy as np
@@ -336,6 +336,7 @@ class SquareScore:
     coherence: float                    # squareness: near 0 for a circle or a single straight edge, near 1 for a square
     orientation_deg: float              # edge direction modulo 90, in (-45, 45], geometry convention
     straightness: float = 0.0           # the two-fold sum: high where one edge direction dominates
+    size_factor: float = 1.0            # the outline was read as a square this many nanowell diameters across
 
 
 def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, position_um, *,
@@ -395,22 +396,55 @@ def square_score(image, pixel_size_um: float, nanowell_diameter_um: float, posit
 MIN_SQUARENESS = 0.25
 
 
+#: The sizes, as fractions of the nanowell diameter, a site's outline is read at for squareness (tracker F15). The
+#: square is not necessarily a nanowell's size, and an outline read at the wrong size finds no edges in its ring: a
+#: 60, 75 or 150 um square among 125.8 um wells read 0.02 at the wells' size and 0.59 to 0.77 at its own, while no
+#: circle read above 0.08 at any of them on rendered plates.
+SQUARE_SIZE_FACTORS = (0.45, 0.6, 0.8, 1.0, 1.2)
+
+
+def square_search_points(fit: LatticeFit, detected_um, centre_um, radius_um: float) -> np.ndarray:
+    """Where to look for the central square: every lattice site within *radius_um* of *centre_um*, detected or not.
+
+    The square is often what detection missed (a matched filter for a round nanowell does not respond to a square of
+    another size, and its dark annulus rejects a larger one), so the sites come from the lattice, not from what was
+    found, and each is read at its lattice position. Not at a detected point near it: a matched filter's peak inside a
+    square larger than a nanowell sat 38 um from its centre on a rendered plate. One position per site also means no
+    outline is scored twice and made its own runner-up. *detected_um* is accepted for the callers' symmetry and not
+    otherwise used.
+    """
+    basis = np.column_stack((fit.a1, fit.a2))
+    phase = np.asarray(fit.phase_origin, dtype=float)
+    centre = np.asarray(centre_um, dtype=float)
+    middle = np.rint(np.linalg.solve(basis, centre - phase))
+    reach = math.ceil(radius_um / np.linalg.svd(basis, compute_uv=False).min()) + 1
+    steps = np.array([(q, r) for q in range(-reach, reach + 1) for r in range(-reach, reach + 1)], dtype=float)
+    sites = phase + (middle + steps) @ basis.T
+    return sites[np.hypot(*(sites - centre).T) <= radius_um]
+
+
 def score_fiducial(image, pixel_size_um: float, nanowell_diameter_um: float, points_um, *,
                    centre_um=None, search_radius_um: float | None = None, pitch_um: float | None = None,
+                   size_factors=(1.0,),
                    min_squareness: float = MIN_SQUARENESS
                    ) -> tuple[FiducialCandidate | None, list[SquareScore]]:
     """Square-versus-circle score of every candidate near the array centre, and the best one.
 
     Returns ``(candidate, scores)``. The candidate carries the best site's score and the
     runner-up's, for ``resolve_origin``'s margin test; the margin is the caller's, not
-    calibrated here. ``None`` with fewer than two scorable sites, because a margin over
+    calibrated here. Each site is read at every one of *size_factors* (fractions of the nanowell diameter) and keeps
+    its best. ``None`` with fewer than two scorable sites, because a margin over
     nothing is not a margin, and ``None`` when even the best is under *min_squareness*. Every score is returned so that it can be recorded.
     """
     points = np.asarray(points_um, dtype=float)
     if centre_um is not None and search_radius_um is not None:
         points = points[np.hypot(points[:, 0] - centre_um[0], points[:, 1] - centre_um[1]) <= search_radius_um]
-    scores = [s for p in points
-              if (s := square_score(image, pixel_size_um, nanowell_diameter_um, p, pitch_um=pitch_um)) is not None]
+    scores = []
+    for p in points:
+        read = [replace(s, size_factor=float(f)) for f in size_factors
+                if (s := square_score(image, pixel_size_um, nanowell_diameter_um * f, p, pitch_um=pitch_um)) is not None]
+        if read:
+            scores.append(max(read, key=lambda s: s.coherence))         # each site at the size that reads it best
     if len(scores) < 2:
         return None, scores
     ranked = sorted(scores, key=lambda s: s.coherence, reverse=True)
@@ -432,7 +466,8 @@ def describe_fiducial(candidate: FiducialCandidate | None, scores, *, min_square
     where = "near the array centre" if near_centre else "in the montage"
     block = {"scored": len(ranked), "best": ranked[0] if ranked else None,
              "runner_up": ranked[1] if len(ranked) > 1 else None, "min_squareness": min_squareness,
-             "position_um": None if candidate is None else [float(v) for v in candidate.position], "reason": ""}
+             "position_um": None if candidate is None else [float(v) for v in candidate.position], "reason": "",
+             "size_factor": max(scores, key=lambda s: s.coherence).size_factor if scores else None}
     if candidate is not None:
         return block
     if not ranked:

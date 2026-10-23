@@ -131,6 +131,7 @@ def test_one_diameter_serves_every_timepoint_of_a_well():
     assert own[0] != own[1]
     used = {outcome.timepoints[tp]["geometry"]["diameter_used_um"] for tp in ("T0", "T1")}
     assert used == {float(np.median(own))} == {outcome.radius["diameter_used_um"]}
+    assert outcome.radius["diameter_source"] == "measured"
     assert not [n for tp in ("T0", "T1") for n in outcome.timepoints[tp].get("notes", []) if "exceed the template" in n]
 
 
@@ -163,12 +164,15 @@ def test_tiles_are_registered_at_the_plate_s_diameter():
 
 # ── F14: the square is judged by how far it stands above the rest ───────────
 def test_a_soft_square_under_the_old_floor_still_anchors_the_well(monkeypatch):
-    """Defocus takes a rendered square to 0.37 against a runner-up of 0.06: it stands six times above every circle,
+    """Defocus takes a rendered square to 0.33 against a runner-up of 0.04: it stands eight times above every circle,
     and the old absolute floor of 0.4 refused it. The array centre is put half a pitch off, so only the square can
-    anchor the well."""
-    rendered, record = _plate(blur=4.0)
+    anchor the well. (On 2 um pixels: the 4.3 um fixture's runner-ups sit near 0.13, where no square under 0.4 clears
+    three times them.)"""
+    plan = TilePlan(3, 3, (705, 520), 0.1, 2.0)
+    rendered = render_tiles(plan, pitch_um=PLATE_PITCH, diameter_um=PLATE_DIAMETER, radius_um=2000.0,
+                            rotation_deg=-0.3, noise_sigma=0.05, blur_px=7.0, seed=1)
     _centre_off_site(monkeypatch)
-    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    located = nr.locate_timepoint("T0", record_for(rendered), "A01", rendered.images, SETTINGS)
     block = located.grid["fiducial"]
     assert 0.25 < block["best"] < 0.4 and block["best"] >= 3 * block["runner_up"]
     assert located.status == nr.OK and located.origin_method == "fiducial"
@@ -375,3 +379,70 @@ def test_a_ring_read_larger_than_a_nanowell_stops_at_the_neighbours_on_a_square_
     site = (4 * PLATE_PITCH, 4 * PLATE_PITCH)
     _, scores = nd.score_fiducial(image, px, PLATE_DIAMETER, [site], pitch_um=PLATE_PITCH, size_factors=(1.2,))
     assert all(s.coherence < 0.06 for s in scores)              # 0.116 with the ring reaching the neighbours
+
+
+def test_a_well_whose_diameter_could_not_be_measured_says_it_used_the_format_s(monkeypatch):
+    rendered, record = build_well()
+    monkeypatch.setattr(nr, "MIN_DIAMETER_FITS", 10_000)
+    outcome = nr.run_well("A01", record, ["T0"], lambda tp, tile: rendered.images.get(tile), SETTINGS,
+                          segmenter=threshold_segmenter())
+    assert outcome.radius["diameter_used_um"] == SETTINGS.diameter_um
+    assert outcome.radius["diameter_source"] == "format"
+    assert outcome.timepoints["T0"]["geometry"]["diameter_source"] == "format"
+
+
+def test_an_inferred_geometry_that_could_only_read_the_diameter_roughly_says_so(monkeypatch):
+    """With no nanowell fitted at full resolution the inferred geometry took the montage's light blobs' diameter,
+    which reads about a tenth small, as measured, and said nothing (review F20c)."""
+    rendered, record = build_well()
+    monkeypatch.setattr(nr, "MIN_DIAMETER_FITS", 10_000)
+    infer = nr.NanowellSettings("100um", geometry=nr.GEOMETRY_INFER)
+    outcome = nr.run_well("A01", record, ["T0"], lambda tp, tile: rendered.images.get(tile), infer,
+                          segmenter=threshold_segmenter())
+    geometry = outcome.timepoints["T0"]["geometry"]
+    assert geometry["diameter_rough_only"] is True and outcome.radius["diameter_source"] == "rough"
+    assert any(n.startswith("The nanowell diameter (") and "read only from the montage's light blobs" in n
+               for n in outcome.timepoints["T0"]["notes"])
+
+
+def test_a_lattice_read_on_a_harmonic_is_refused_not_addressed(monkeypatch):
+    """With the measured diameter in place of the format's, the check that nanowells cannot fill the pitch compared
+    the plate's own two numbers and, the diameter being measured, only made a note: a pitch read on the lattice's
+    square-root-of-three harmonic (88 um here, within the half-to-twice search) was addressed (review F20d)."""
+    from dataclasses import replace as replace_estimate
+    import math
+
+    real = nd.estimate_lattice_fft
+
+    def harmonic(*args, **kwargs):
+        found = real(*args, **kwargs)
+        return replace_estimate(found, pitch_um=found.pitch_um / math.sqrt(3)) if found.ok else found
+    monkeypatch.setattr(nd, "estimate_lattice_fft", harmonic)
+    rendered, record = _plate()
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert located.status == nr.NO_LATTICE and located.indexed == ()
+    assert located.reason.startswith(f"The nanowells measure {located.diameter_um:.1f} um across but the lattice's "
+                                     "pitch reads ")
+
+
+def test_an_unaddressed_timepoint_s_roster_survives_the_refused_centre_it_was_unaddressed_by(monkeypatch):
+    """The realistic route to unaddressed: no square, and an outline whose centre lies 0.4 of a pitch from the nearest
+    site (D07's lay at 0.47), which the array-centre check refuses. The roster is drawn about the site nearest that
+    same refused centre, so it must still be the array's own (review F20f)."""
+    real = nd.detect_sites
+
+    def off(*args, **kwargs):
+        found = real(*args, **kwargs)
+        if not found.ok or found.boundary_centre_um is None:
+            return found
+        shift = 0.4 * np.asarray(found.fit.a1, dtype=float)
+        return replace(found, boundary_centre_um=tuple(np.asarray(found.boundary_centre_um) + shift))
+    monkeypatch.setattr(nd, "detect_sites", off)
+    rendered, record = build_well(square_centre=False, dark_sites=[(1, 0), (0, 1)])
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert located.status == nr.UNADDRESSED and "the array_centre lies" in located.reason
+    measured = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
+                                    count_cells=False)
+    rows = np.array([(r["well_x_um"], r["well_y_um"]) for r in measured.sites])
+    truth = list(rendered.sites_um)
+    assert all(np.hypot(*(rows - xy).T).min() < PITCH / 4 for xy in truth) and len(rows) == len(truth)

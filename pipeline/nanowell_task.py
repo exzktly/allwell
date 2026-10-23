@@ -423,7 +423,8 @@ def _reference_of(prior: dict | None) -> dict | None:
             # kind, and measured at the same diameter (review X35-R13, R14).
             return {"timepoint": tp, "pitch_um": block["pitch_um"], "angle_deg": block["angle_deg"],
                     "roster_size": block["roster_size"], "lattice_kind": block.get("lattice_kind"),
-                    "diameter_used_um": (block.get("geometry") or {}).get("diameter_used_um")}
+                    "diameter_used_um": (block.get("geometry") or {}).get("diameter_used_um"),
+                    "diameter_source": (block.get("geometry") or {}).get("diameter_source")}
     return None
 
 
@@ -799,14 +800,17 @@ def plate_diameters(grids: dict[str, dict]) -> dict:
     """``plate -> {"median_um", "wells", "outliers"}``: each well's diameter against its plate's median (tracker F11).
 
     *grids* are grid records (:func:`_read_grids`). A well's diameter is the one its sites were measured at
-    (``array_radius.diameter_used_um``); a well without one is left out, and a plate of fewer than three wells has
+    (``array_radius.diameter_used_um``); a well without one, or whose diameter is the format's because none could be
+    measured (``diameter_source`` ``format``) or only roughly (``rough``, about a tenth small), is left out — counted, the format's value pulled the median toward
+    itself and flagged the wells that were measured (review F20b) — and a plate of fewer than three wells has
     no median worth comparing against, so it lists its wells and flags none. ``outliers`` maps a well to its
     signed fraction off the median.
     """
     out = {}
     for plate, members in plates_of(grids).items():
         wells = {well: float(d) for well, grid in members.items()
-                 if (d := (grid.get("array_radius") or {}).get("diameter_used_um")) is not None}
+                 if (d := (grid.get("array_radius") or {}).get("diameter_used_um")) is not None
+                 and (grid.get("array_radius") or {}).get("diameter_source") not in ("format", "rough")}
         if not wells:
             continue
         median = float(np.median(list(wells.values()))) if len(wells) >= 3 else None

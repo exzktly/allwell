@@ -14,8 +14,8 @@ from pipeline import nanowell_run as nr
 from pipeline import nanowell_task as nt
 
 
-def _grid(diameter, plate=None):
-    grid = {"array_radius": {} if diameter is None else {"diameter_used_um": diameter}}
+def _grid(diameter, plate=None, source="measured"):
+    grid = {"array_radius": {} if diameter is None else {"diameter_used_um": diameter, "diameter_source": source}}
     if plate:
         grid["plate"] = plate
     return grid
@@ -34,6 +34,21 @@ def test_a_well_far_from_its_plate_s_median_is_named_with_how_far():
 def test_a_well_inside_the_tolerance_is_not_named():
     found = nt.plate_diameters({"B02": _grid(100.0), "B03": _grid(104.9), "B04": _grid(100.0)})
     assert found[""]["outliers"] == {}
+
+
+def test_a_well_whose_diameter_is_the_format_s_is_left_out_and_blames_nobody():
+    """A well where nothing could be measured carries the format's diameter. Counted, two such wells at 100 against
+    two measured at 125.8 and 125.6 made a median of 112.8 and flagged all four; with one measured well, it alone
+    was flagged, at +25.8 % (review F20b)."""
+    found = nt.plate_diameters({"B02": _grid(125.8), "B03": _grid(100.0, source="format"), "B04": _grid(125.6),
+                                "B05": _grid(100.0, source="format"), "B06": _grid(126.0)})
+    assert found[""]["wells"] == {"B02": 125.8, "B04": 125.6, "B06": 126.0} and found[""]["outliers"] == {}
+    rough = nt.plate_diameters({"B02": _grid(125.8), "B03": _grid(114.0, source="rough"), "B04": _grid(125.6),
+                                "B05": _grid(126.0)})
+    assert "B03" not in rough[""]["wells"] and rough[""]["outliers"] == {}     # read about a tenth small, by design
+    alone = nt.plate_diameters({"B02": _grid(125.8), "B03": _grid(100.0, source="format"),
+                                "B04": _grid(100.0, source="format")})
+    assert alone[""]["outliers"] == {}
 
 
 def test_a_plate_of_two_wells_has_no_median_to_compare_against():

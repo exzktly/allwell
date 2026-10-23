@@ -279,7 +279,7 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
     )
     from pipeline.nanowell_infer import ARRAY_CIRCLE, find_wells_by_contrast, infer_array
     from pipeline.nanowell_lattice import index_points, resolve_origin
-    from pipeline.nanowell_run import FIDUCIAL_MARGIN, FIDUCIAL_RATIO
+    from pipeline.nanowell_run import FIDUCIAL_MARGIN, FIDUCIAL_RATIO, fitted_diameter
     from util.nanowell_address import NanowellAddress
 
     image = np.asarray(image, dtype=np.float32)
@@ -306,6 +306,13 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
         return out
     fit = geometry.fit
     pitch, diameter = float(fit.pitch), float(wells.diameter_um)
+    # The diameter as a run measures it: the light blobs read nanowells up to a tenth small, so the sites' edges are
+    # fitted on the image itself, and the blobs' reading stands only when none can be (review F20e).
+    fitted, fits, _ = fitted_diameter({"image": image}, {"image": (0.0, 0.0)}, um_per_px, wells.points_um, diameter,
+                                      pitch)
+    how = (f"the median of {len(wells.points_um)} light blobs, none fitted" if fitted is None else
+           f"fitted on {fits} of the {len(wells.points_um)} wells found")
+    diameter = diameter if fitted is None else fitted
     out.roster_px, out.roster_found = to_px(geometry.roster_um), geometry.found
     # A tile that shows wells to every edge it has never shows the rim, and the only outline there is to fit is
     # the image's own: its circle, centre and ring count would change with where the tile sat (review M14).
@@ -318,12 +325,14 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
 
     # The central square and the origin, as a run resolves them: the square when it clears its margin, else
     # the array's centre (a circle's, or the middle site of a whole polygon).
-    # As a run looks for it (tracker F15): every lattice site near the centre, found or not, at several sizes.
+    # As a run looks for it (tracker F15): every lattice site near the centre, found or not, at several sizes. With
+    # no centre to search around, every well in the image is a candidate, and reading each at five sizes would only
+    # multiply the chances of a false square: those are read at the nanowells' size (review F20e).
     search = (wells.points_um if centre_um is None else
               square_search_points(fit, wells.points_um, centre_um, 2.2 * pitch))
     candidate, scores = score_fiducial(image, um_per_px, diameter, search, centre_um=centre_um,
                                        search_radius_um=2.2 * pitch if centre_um is not None else None,
-                                       size_factors=SQUARE_SIZE_FACTORS,
+                                       size_factors=SQUARE_SIZE_FACTORS if centre_um is not None else (1.0,),
                                        pitch_um=pitch)
     square = max(scores, key=lambda s: s.coherence) if candidate is not None and scores else None
     if square is not None:
@@ -342,7 +351,7 @@ def suggest_from_image(image, um_per_px: float, *, covered=None, source: str = "
     kind = "hexagonal" if fit.kind == "hex" else "square"
     out.facts = [
         ("Lattice", f"{kind}, pitch {pitch:.1f} µm, row angle {fit.angle_deg:+.1f}°"),
-        ("Nanowell diameter", f"{diameter:.1f} µm (median of {len(wells.points_um)} wells found)"),
+        ("Nanowell diameter", f"{diameter:.1f} µm ({how})"),
         ("Array outline", "not in view (the array runs off the image on every side it shows)" if not rim_seen else
                           (f"circle, radius {geometry.radius_um:.0f} µm" if geometry.shape == ARRAY_CIRCLE
                            else "polygon (the hull of the wells found)") + (", runs off the image" if geometry.clipped

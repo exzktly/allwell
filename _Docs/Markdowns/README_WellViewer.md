@@ -352,10 +352,18 @@ such a well's measurement deserves a look.
 Review, open the Nanowells page, choose *Array QC*, pick the well and timepoint, and press **Full montage…**.
 Zoom to the square, turn on **Set anchor**, and click it. The click is saved in `in/nanowell_anchors.json`
 beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
-Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
-run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
-addressed from it at the end of the run, through the plate's other wells. A timepoint that still cannot be
-addressed says so, and takes a click of its own. A click that is not on a nanowell (more than a quarter of the
+Then press **Apply anchors**. The run already measured every nanowell and counted every cell at an unaddressed
+timepoint; only the addresses were missing, so Apply anchors gives them from the click without running anything
+again — no image is read and no cell is counted twice. It takes a few seconds, says which wells and timepoints
+it addressed, and reloads the dataset so every page shows the new addresses. One click per well is enough when
+the rest of the plate is anchored: the well's other timepoints are addressed from it through the plate's other
+wells, as at the end of a run. A timepoint that still cannot be addressed says so, and takes a click of its own.
+
+Apply anchors writes only what a run with the click would have written. When it cannot be sure of that it leaves
+the timepoint unaddressed and says why — for example when the click is on a different nanowell from the one the
+run centred its measurements on, or when the timepoint's nanowells would change which ones count as the array's
+edge for the well's other timepoints. Those wells can still be run again: **Re-run in Analyze…** opens Analyze on
+the dataset limited to exactly those wells. A click that is not on a nanowell (more than a quarter of the
 spacing from every one), or that is off the array (more than one and a half spacings from every nanowell
 found), is not used, and the well's record says how far off it was. On a remote host, a run
 limited to a few wells sees only those wells at its end, so it can carry a click to other timepoints only when
@@ -4900,8 +4908,8 @@ use them.
   detection uses (dashed purple on a seam) with its address once you zoom in far enough, and the anchor set by hand.
   Drag to pan, scroll to zoom, *Fit* for the whole well, *1:1* for one image pixel per screen pixel; the detail
   sharpens as the tiles in view are read. Where tiles overlap, the later tile is shown, not a blend. **Set
-  anchor**, **Clear anchor** and **Re-run anchored wells…** are described under *Setting the anchor by hand*
-  above. It needs the dataset's `in/` folder beside its results.
+  anchor**, **Clear anchor**, **Apply anchors** and **Re-run in Analyze…** are described under *Setting the
+  anchor by hand* above. It needs the dataset's `in/` folder beside its results.
 
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
 brightness and site signal against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to

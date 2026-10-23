@@ -70,6 +70,7 @@ class MontageSource:
     status: str                                # the grid record's status for this timepoint
     reason: str                                # and its reason, when it has one
     origin_method: str | None
+    readdressed: bool = False                  # addressed from the saved measurements, not by a run (tracker H8)
 
     def extent_um(self) -> tuple[float, float, float, float]:
         """``(left, top, right, bottom)`` of every tile together, in the well frame."""
@@ -125,7 +126,8 @@ def montage_source(data, well: str, timepoint: str) -> tuple[MontageSource | Non
             if unfound else "")
     return MontageSource(well, timepoint, archive, px, tuple(tiles),
                          (float(size["x"]) * px, float(size["y"]) * px), str(block.get("status") or ""),
-                         str(block.get("reason") or "") + note, block.get("origin_method")), ""
+                         str(block.get("reason") or "") + note, block.get("origin_method"),
+                         bool(block.get("readdressed"))), ""
 
 
 def _tile_shape(archive: Path, member: str) -> tuple[int, int] | None:
@@ -409,12 +411,41 @@ def status_text(source: MontageSource, anchor, anchor_problem: str = "") -> str:
     elif anchor is not None:
         where = f"Anchor set by hand at ({anchor[0]:.1f}, {anchor[1]:.1f}) µm"
         if source.origin_method == "manual":
-            lines.append(where + "; this run used it.")
+            lines.append(where + ("; applied to the run's saved measurements." if source.readdressed
+                                  else "; this run used it."))
         elif source.reason.startswith("The anchor set by hand"):
-            lines.append(where + "; the last run did not use it (above): set it again on the central square.")
+            lines.append(where + "; it was not used (above): set it again on the central square.")
         else:
-            lines.append(where + "; not used yet: re-run the well in Analyze to address it from the anchor.")
+            lines.append(where + "; not used yet: Apply anchors addresses the well from it.")
     elif source.status == "unaddressed":
-        lines.append("Turn on Set anchor and click the central square to anchor this well; the other timepoints "
-                     "are then addressed from it, through the rest of the plate, when the well is re-run.")
+        lines.append("Turn on Set anchor and click the central square to anchor this well, then Apply anchors: the "
+                     "well is addressed from the measurements the run saved, and its other timepoints through the "
+                     "rest of the plate.")
     return "\n".join(lines)
+
+
+def readdress_text(summary: dict) -> str:
+    """What *Apply anchors* did (``pipeline.nanowell_readdress.Summary.as_dict``), for the window's status line."""
+    from util.nanowell_anchors import origin_phrase
+
+    def where(key: str) -> str:
+        well, _, timepoint = key.partition("/")
+        return f"{well} at {timepoint}"
+
+    addressed, refused = summary.get("addressed") or {}, summary.get("refused") or {}
+    if not addressed and not refused:
+        return "Nothing to apply: every anchor is already in use."
+    lines = []
+    if addressed:
+        lines.append("Addressed from the run's saved measurements, with nothing measured again: " + "; ".join(
+            f"{where(k)} (origin from {origin_phrase(m)})" for k, m in sorted(addressed.items())) + ".")
+    for key, why in sorted(refused.items()):
+        lines.append(f"Not addressed: {where(key)}: {why}.")
+    if refused:
+        lines.append("Re-run in Analyze… runs only those wells again, measuring them with the anchor.")
+    return "\n".join(lines)
+
+
+def refused_wells(summary: dict) -> list[str]:
+    """The wells *Apply anchors* could not address at some timepoint: what *Re-run in Analyze…* is limited to."""
+    return sorted({key.partition("/")[0] for key in (summary.get("refused") or {})})

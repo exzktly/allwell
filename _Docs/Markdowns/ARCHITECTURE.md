@@ -5041,7 +5041,7 @@ Cross-cutting controllers (in `review/core/`):
 | `core/tab_controller.py` | `on_tab_change` dispatch, tab history, scope flush, and the repaint that follows a restore. That last one is a seam worth naming: `on_tab_change` draws the tab and **then** drains any view-state pending for it — deliberately, because the apply step validates its values against combo items the draw has populated — which leaves the figure drawn from pre-restore defaults, one step behind controls that have already moved. `redraw_after_restore` closes that gap, and it resolves the tab through the feature registry rather than from a list: it was an `if/elif` over three tab names while six tabs own a block, and the three it did not name were simply not repainted. Response Curves was one — its Series button came back naming the split the user had saved, over curves drawn as a single undivided set, and the first thing that reached a redraw was the user toggling a series off and on. Heat Map was another. Distribution still goes through `redraw_app`, the call the rest of the app makes for that scope, and the Image Table is still not repainted (it reads images off disk and renders only on *Generate*; the restore marks it stale instead) — both rows with the reason written down rather than absences, and `tests/test_restore_repaints_the_tab_it_restored.py` states the rule against the registry. |
 | `core/channel_state_controller.py` | Channel-state machinery: `recalculate_threshold`, `set_active_channel`, `update_channel_selector`, `refresh_metric_combo_for_channel`. **Ordering contract:** `recalculate_threshold` publishes the freshly-detected `smfish_channels` set *before* it calls `update_channel_selector`, because that call ends in the Property-combo refresh and the combo reads the set to decide whether `smFISH Count` is selectable — publishing it afterwards leaves the item greyed out against count columns that already exist. Every combo asks that question through `domain/metric_registry.channel_supports_smfish`, which case-folds both sides: the global combo passes the normalised token (`gfp`) while the scatter, stats, and batch-export combos pass the displayed label (`GFP`), and a raw membership test disabled the item permanently on the upper-case side. **No plate-wide range is computed.** `ChannelState` holds no min / max of the active column, and `_recalculate_threshold` scans no column for one: such a scan is a read of every well the row cache does not hold, on every open and channel switch, and nothing in the app would read its answer (the threshold slider takes its range elsewhere). The gating hydration and `cell_gating.load_cell_areas` in `_recalculate_threshold` run whether or not the column has values. |
 | `core/selection_controller.py::note_group_visibility_changed` | Showing or hiding a replicate set changes which computed results are *drawn*, not what any of them is — ``active_replicate_sets`` filters hidden sets out before anything is computed, and no cache key carries ``hidden``. So a visibility toggle keeps the plate's statistics instead of discarding them, which on twelve groups is 312 cached entries kept per toggle rather than recomputed. It is reached through ``rebuild_all(ctx, invalidate=False)`` rather than beside it: the toggle still needs the Replicates panel, the plate map and the visible redraws that ``rebuild_all`` performs, and an earlier version that notified and then called ``rebuild_all()`` separately had its statistics thrown away by that call's first line — the change bought nothing while its test, which drove the notifier rather than the toggle, stayed green. The refresh has to *know* not to invalidate; being told separately is not the same thing. |
-| `core/analyze_handoff.py` | `open_in_analyze` — Review's one door into the Analyze pane: hand the shell the loaded dataset's root (`dataset_root`, one level above the `out/` Review loads), its recorded settings, *Incremental*, and the wells to force and to limit the run to. Reached through the top-level window's duck-typed `_open_dataset_in_analyze`, so a build without an Analyze pane does nothing. In `core/` because three features use it — Home's *Finish this run*, QC triage's *Re-run wells*, the Nanowells Full montage's *Re-run anchored wells* — and a feature may not import another. |
+| `core/analyze_handoff.py` | `open_in_analyze` — Review's one door into the Analyze pane: hand the shell the loaded dataset's root (`dataset_root`, one level above the `out/` Review loads), its recorded settings, *Incremental*, and the wells to force and to limit the run to. Reached through the top-level window's duck-typed `_open_dataset_in_analyze`, so a build without an Analyze pane does nothing. In `core/` because three features use it — Home's *Finish this run*, QC triage's *Re-run wells*, the Nanowells Full montage's *Re-run in Analyze…* — and a feature may not import another. `reload_dataset` reopens the loaded dataset's root through the Review window's `_load_path`, deferred as every open is, after a tool has rewritten its files (the Full montage's *Apply anchors*). |
 | `core/record_sync.py` | `resync_run_check` — re-read the sidecar's `run_check` block, the one part of a loaded dataset's sidecar Review does not own (the pipeline writes it at the end of a run, the Datasets **Validate & Repair** tool at the end of every scan). It takes that key and nothing else, because the rest of the sidecar holds user-side blocks whose in-memory copy may carry unsaved edits, and it returns whether the record changed so a caller repaints only when something arrived. In `core/` rather than in Home, the page that reports the record: what it re-reads is dataset state, and its second caller is `tab_controller`'s pane handler, which cannot import a feature. A sidecar that has gone unreadable keeps the record already loaded; one that is readable and no longer carries the block drops it, since reporting a stale record as current is the failure this exists to avoid. |
 | `core/csv_export.py` | **The one CSV Save-As dialog**, plus the plain writer beside it. `ask_save_csv` roots the picker at the open dataset, parents it to the window and offers one filter; `write_csv_rows` is the open / write / status / `OSError` block that four export paths had each written out with their own wording. In `core/` because it knows nothing about plots, batches or metrics, so a feature wanting to save a table need not import another feature at module scope. **Every CSV export in the app goes through it** — the export service's seven, the Spatial summary and the Multivariate feature matrix — and that is the point rather than a detail: while those kept private copies there were two "all files" filters (`(*)` here, the DOS-era `(*.*)` in the service, which Qt honours literally on some platforms and which then hides every extensionless name behind a label saying it shows everything), two answers to whether the picker starts beside the dataset, and two to whether it suggests a filename. Only the *writers* stay with their callers, because a dict-writer's schema is its field names. `tests/test_one_csv_save_dialog.py` fails on a second CSV `getSaveFileName` anywhere else; it resolves module-level string constants, because its first version read only the literals inside each call and walked past the one site that held its filter in a constant — the site that had actually shipped. |
 | `core/plot_orchestrator.py` | Default-scope fan-out (line + distribution + heat map). Per-tab scopes (bar / scatter / scatter-agg) have their own entry points that consume scope-specific state. Line, Distribution and Heat Map are drawn only when their tab is **on screen**, resolved through `fold_change_scopes.known_visible_scopes` so the unfocused pane of a Split View still counts as visible. A hidden figure is added to `PlotState.fc_dirty_scopes` — the set `flush_dirty_scopes` already drains from the tab-change handler — rather than to a second flag of its own; all three are registered redraw scopes with `on_activate` hooks that re-enter this fan-out on show, so there are two routes to the repaint and one record of whether it is owed. Drawing the line plot whatever is in front would, with Home in front after a load, be a pass over every well for a figure nobody sees (measured at 17 s of a 32 s open of an 8-well plate of large wells). The visibility test **fails open**: `known_visible_scopes` answers `None` when the tab on screen cannot be told (a lookup that throws, an unpopulated scope registry) and an empty set only when a known non-plot tab is in front — `visible_scope_names` returns an empty set for both, which is why it is not the one consulted. Unknown draws everything built: a redundant redraw costs time, a skipped one a stale figure. `redraw_scopes_after_load` leaves the default scope's mark as this fan-out set it. Note that ``redraw_scopes_after_load`` matches the default scope **by name**: ``line``, ``distribution`` and ``heatmap`` all register the same ``_redraw_app_scope`` callable, so an identity test on ``scope.redraw`` cleared the dirty marks of the two hidden ones and left them neither drawn nor owed. |
@@ -10147,6 +10147,49 @@ anchor one destination well at one timepoint differently are refused. Pinned by
 addresses a blind well at both timepoints, every address checked against the drawn plate),
 `test_acquisition_remote_transport.py` and `test_nanowell_anchors_follow_the_dataset_tools.py`.
 
+**Applying an anchor from the saved measurements (`pipeline/nanowell_readdress.py`).** An unaddressed timepoint is
+measured in full — every nanowell of its array has a row with its position, state, count and fluorescence, and
+every counted cell a row — with only the addresses blank. So an anchor set after a run is applied to the output
+folder, not by running the well again: `readdress_dataset(out_dir, in_dir)` reads each anchored well's grid record,
+`nanowells/<well>.csv` and per-cell CSV, and for each anchored, unaddressed timepoint (`plan_timepoint`, which
+decides everything before `apply_plan` changes anything):
+
+- places the lattice its rows sit on — the run's own basis where the grid block keeps it (`basis_um`, written by
+  `_lattice_block`), else one fitted to the rows with `fit_lattice`'s nearest-east convention, so the same axes;
+- resolves the origin with `resolve_origin` (the anchor, and the rows' detected nanowells for its reach check);
+- addresses every row (`index_points`: a quarter pitch, one row per site) and every cell, through the nearest
+  nanowell within half a pitch;
+- decides the well's rim with the run's own rule, `nanowell_run.RimFrame` — the candidates, distances and band
+  `_evidence_roster` also builds, and the one `supported` predicate — over the other anchored timepoints' rows
+  (read as `_kept_evidence` reads them) and the new timepoint's;
+- recomputes the anchored timepoints' consistency as `_consistency` does;
+- writes the site CSV and the per-cell CSV, then the grid record last (`WellFiles.save`), so a write cut short
+  leaves the timepoint unaddressed and applying again starts from the same rows.
+
+Then the end-of-run pass runs on the saved grid records (`_plate_pass`: `plan_reanchor` per settings and plate,
+predictions moved from the montage frame to the common frame, `resolve_origin`'s plate-rigid rule), and
+`pipeline_info.json` gains `nanowell.readdress` (what was addressed and refused) with `nanowell.reanchor` brought up
+to date. No image is read and no cell is segmented.
+
+The rows on disk are exactly a run's only under two conditions, and the step refuses, naming why, when either
+fails. The anchor must name the site the rows were laid out from — `_unaddressed_positions` lays an unaddressed
+timepoint out from the site nearest its outline's centre — because only then is a rim-band site with no row known
+to have been seen whole and empty. And the timepoint's evidence must leave the well's rim as it was, since the
+other timepoints have rows only for the kept roster. It also refuses inferred geometry, a well whose rim was
+decided by the older disk rule, nanowells a lattice step from the other timepoints' (`_misanchored`), and cells
+that do not add up to each nanowell's `n_cells`. A refused timepoint stays unaddressed; running the well again in
+Analyze remains the way to address it. An anchor on a timepoint the run already addressed is recorded as a run
+records it when it names the same site (`confirm_timepoint`: origin from the anchor, agreeing), and refused
+otherwise.
+
+A re-addressed timepoint's block carries `readdressed` (the origin and its method) and the `manual_anchor_um` and
+`anchors_digest` a run stamps, so a later incremental run keeps it (`_prior_state`). Pinned by
+`tests/test_nanowell_readdress.py` (nanowell lane): the four-well plate run twice through `process_microscopy.main`,
+with B02 blind and with its anchor set, and the re-address of the blind output reproduces the anchored run's site
+CSV byte for byte, its per-cell rows, its grid statuses, origins and roster, and its re-anchoring summary, at 0 h
+(the anchor) and 24 h (carried by the plate). The same file covers idempotence, the later incremental run and the
+refusals. `test_nanowell_readdress_rules.py` pins the rim-change and step-off refusals on an ideal lattice.
+
 **The Analyze form.** The section ships with the removable Nanowells feature: `profiles/full.toml` lists
 `analyze/nanowell_section.py`, `nanowell_preview.py`, `nanowell_preflight.py` and `domain/nanowell_fields.py` under
 it beside Review's page, and the form reaches them only through `analyze/nanowell_hook.py`, which picks the real
@@ -10435,12 +10478,19 @@ is offered only where an anchor can change the result (`ANCHORABLE`: `ok` or `un
 (`SiteOverlay.fused`, from the table's `fused` column), with its `q,r` address where it is drawn large
 enough — and the anchor. Drag pans, the wheel zooms about the
 pointer, *Fit* and *1:1*. With *Set anchor* on, a click (not a drag) writes the well's anchor at this timepoint;
-*Clear anchor* removes it; *Re-run anchored wells…* hands the dataset to Analyze limited to the anchored wells,
-each forced and with Incremental off (a remote nanowell run refuses Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one door into Analyze, shared by
-Home's *Finish this run*, QC triage and this window. The status line states the timepoint's grid status, its
-reason, how it was anchored, and whether the anchor set has been used yet. `tests/test_nanowell_full_montage.py`
-asserts pixel values on four constant-valued tiles with one bright pixel only full resolution shows, and drives
-the real page's button, canvas click and re-run.
+*Clear anchor* removes it. *Apply anchors* runs `pipeline.nanowell_readdress.readdress_dataset` on a worker,
+loads the page's tables again for the window, keeps what the step addressed and refused under the status line
+(`full_montage_compute.readdress_text`; the tile reads that follow redraw the status, so the outcome is held
+until an anchor changes), and reopens the dataset through `review/core/analyze_handoff.reload_dataset` — the
+window's `_load_path`, deferred like every open — so every page reads the new addresses. *Re-run in Analyze…* is
+enabled only for wells the step refused (`refused_wells`) and hands the dataset to Analyze limited to them, each
+forced and with Incremental off (a remote nanowell run refuses Incremental, and forcing makes it moot), through
+`analyze_handoff.open_in_analyze` — Review's one door into Analyze, shared by Home's *Finish this run*, QC triage
+and this window. The status line states the timepoint's grid status, its reason, how it was anchored, and whether
+the anchor set has been used yet, or applied to the saved measurements (`MontageSource.readdressed`).
+`tests/test_nanowell_full_montage.py` asserts pixel values on four constant-valued tiles with one bright pixel
+only full resolution shows, and drives the real page's button, canvas click, *Apply anchors* (the real step, which
+refuses this fixture's hand-written rows) and *Re-run in Analyze…*.
 
 **Drawing a nanowell.** Test detection (before a run) and the Full montage window (after it) show the same
 nanowells over the same kind of montage, and a person checks one against the other, so both paint through

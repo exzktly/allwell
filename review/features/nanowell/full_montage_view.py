@@ -12,8 +12,11 @@ is held, so it never waits on a read.
 **Setting the anchor.** With *Set anchor* on, a click (not a drag) sets this well's anchor at this timepoint to
 the point clicked, in ``in/nanowell_anchors.json`` (``util.nanowell_anchors``): the run snaps it to the nearest
 nanowell, so it need only land on the central square. *Clear anchor* removes it. The anchor is used when the well
-is run again; *Re-run anchored wells…* opens Analyze on this dataset limited to the wells that have one
-(``review.core.analyze_handoff.open_in_analyze``), each forced so all its timepoints are located again with it.
+is applied by *Apply anchors*, which addresses the anchored wells from the measurements the run already saved
+(``pipeline.nanowell_readdress``, on a worker): nothing is measured again, the window shows what was addressed and
+what was refused and why, and the dataset is reloaded so every page reads the new addresses. A well the step
+refuses can be run again in Analyze — *Re-run in Analyze…* opens it on this dataset limited to those wells
+(``review.core.analyze_handoff.open_in_analyze``), each forced so all its timepoints are located again.
 
 The window is not modal: it never blocks the app, and closing it changes nothing but the view.
 """
@@ -224,13 +227,22 @@ class FullMontageWindow(QWidget):
                                    "Drag still pans.")
         self.clear_btn = QPushButton("Clear anchor")
         self.clear_btn.setToolTip("Remove this well's anchor at this timepoint.")
-        self.rerun_btn = QPushButton("Re-run anchored wells…")
-        self.rerun_btn.setToolTip("Open Analyze on this dataset, limited to the wells with an anchor, each run "
-                                  "again in full so its timepoints are located with the anchor.")
+        self.apply_btn = QPushButton("Apply anchors")
+        self.apply_btn.setToolTip("Address every anchored well from the measurements the run saved: nothing is "
+                                  "measured again. The dataset is reloaded afterwards.")
+        self.rerun_btn = QPushButton("Re-run in Analyze…")
+        self.rerun_btn.setToolTip("Open Analyze on this dataset, limited to the wells Apply anchors could not "
+                                  "address, each run again in full with its anchor.")
+        self._refused: list[str] = []
+        self._applying = False
+        #: What the last *Apply anchors* did: kept under the status until an anchor changes, since the tile reads
+        #: that follow it redraw the status line and would otherwise wipe it.
+        self._outcome = ""
         bar = QHBoxLayout()
         for widget in (QLabel(f"Well {well}"), self.tp_cb, fit_btn, one_btn, self.anchor_btn, self.clear_btn):
             bar.addWidget(widget)
         bar.addStretch(1)
+        bar.addWidget(self.apply_btn)
         bar.addWidget(self.rerun_btn)
         self.status = QLabel("")
         self.status.setObjectName("FullMontageStatus")
@@ -246,6 +258,7 @@ class FullMontageWindow(QWidget):
         one_btn.clicked.connect(lambda _=False: self.canvas.one_to_one())
         self.anchor_btn.toggled.connect(self._anchor_mode)
         self.clear_btn.clicked.connect(lambda _=False: self.clear_anchor())
+        self.apply_btn.clicked.connect(lambda _=False: self.apply_anchors())
         self.rerun_btn.clicked.connect(lambda _=False: self.rerun())
         self.tp_cb.currentIndexChanged.connect(lambda _i: self.show_timepoint(self.tp_cb.currentData()))
         self.canvas.anchorClicked.connect(self.set_anchor)
@@ -296,7 +309,8 @@ class FullMontageWindow(QWidget):
         if failed:
             text += (f"\n{len(failed)} tile(s) could not be read and are not drawn: "
                      + "; ".join(f"{tile} ({why})" for tile, why in sorted(failed.items())))
-        self.status.setText(text + (f"\n{extra}" if extra else ""))
+        tail = "\n".join(t for t in (extra, self._outcome) if t)
+        self.status.setText(text + (f"\n{tail}" if tail else ""))
         self._refresh_anchor_controls(anchor)
         self.canvas.update()
 
@@ -305,7 +319,8 @@ class FullMontageWindow(QWidget):
                and self.source.status in fmc.ANCHORABLE)
         self.anchor_btn.setEnabled(can)
         self.clear_btn.setEnabled(can and anchor is not None)
-        self.rerun_btn.setEnabled(bool(fmc.anchored_wells(self.data)))
+        self.apply_btn.setEnabled(not self._applying and bool(fmc.anchored_wells(self.data)))
+        self.rerun_btn.setEnabled(not self._applying and bool(self._refused))
         if not can:
             self.anchor_btn.setChecked(False)
 
@@ -380,6 +395,7 @@ class FullMontageWindow(QWidget):
         except (AnchorsFileError, OSError) as exc:
             self._refresh_status(f"The anchor could not be saved: {exc}")
             return
+        self._outcome = ""
         self._refresh_status()
 
     def clear_anchor(self) -> None:
@@ -393,12 +409,59 @@ class FullMontageWindow(QWidget):
         except (AnchorsFileError, OSError) as exc:
             self._refresh_status(f"The anchor could not be removed: {exc}")
             return
+        self._outcome = ""
         self._refresh_status()
+
+    def apply_anchors(self) -> bool:
+        """Address the anchored wells from the saved measurements on a worker, then show what happened and reload."""
+        from core.worker_bridge import run_off_thread
+
+        out_dir, in_dir = self.data.out_dir, self.data.in_dir
+        if out_dir is None or in_dir is None or self._applying:
+            return False
+        baseline = getattr(self.ctx.state.feature_slice("nanowell"), "baseline", None)
+        self._applying = True
+        self._refresh_status("Applying the anchors to the run's saved measurements…")
+
+        def job():
+            from pipeline.nanowell_readdress import readdress_dataset
+            from review.features.nanowell.collect import load_nanowell_data
+            from review.features.nanowell.series_compute import site_metrics
+
+            summary = readdress_dataset(out_dir, in_dir).as_dict()
+            data = load_nanowell_data(out_dir)
+            return summary, data, (site_metrics(data, baseline) if data is not None and baseline else None)
+
+        def done(result) -> None:
+            if not self._alive():
+                return
+            summary, data, metrics = result
+            self._applying = False
+            self._refused = fmc.refused_wells(summary)
+            if data is not None:
+                self.data = data
+                self.metrics = metrics if metrics is not None else self.metrics
+            self._outcome = fmc.readdress_text(summary)
+            self.show_timepoint(self.timepoint)
+            from review.core.analyze_handoff import reload_dataset
+
+            reload_dataset(self.ctx)
+
+        def failed(message) -> None:
+            if not self._alive():
+                return
+            self._applying = False
+            self._outcome = f"The anchors could not be applied: {message}"
+            self._refresh_status()
+
+        self._bridges = [b for b in self._bridges if b is not None][-8:]
+        self._bridges.append(run_off_thread(job, on_done=done, on_failed=failed))
+        return True
 
     def rerun(self) -> bool:
         from review.core.analyze_handoff import open_in_analyze
 
-        wells = fmc.anchored_wells(self.data)
+        wells = list(self._refused)
         # Every well is forced, so Incremental adds nothing, and a remote nanowell run refuses it.
         if not wells or not open_in_analyze(self.ctx, force_wells=wells, only_wells=wells, incremental=False):
             self._refresh_status("Analyze could not be opened on this dataset from here.")

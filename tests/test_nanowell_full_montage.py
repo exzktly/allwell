@@ -252,12 +252,15 @@ def test_a_click_with_set_anchor_on_writes_the_anchor_where_it_landed_and_clear_
     assert list(anchors) == [("A01", "t_a")]
     assert anchors[("A01", "t_a")].position() == pytest.approx(expected, abs=0.01)
     assert canvas.anchor == pytest.approx(expected, abs=0.01)
-    assert "not used yet: re-run the well in Analyze" in window.status.text()
+    assert "not used yet: Apply anchors addresses the well from it" in window.status.text()
     qtbot.mouseClick(window.clear_btn, Qt.LeftButton)
     assert not anchors_path(in_dir).exists() and canvas.anchor is None
 
 
-def test_re_run_opens_analyze_limited_to_the_anchored_wells_each_forced(montage_page, qtbot, monkeypatch):
+def test_apply_anchors_runs_the_re_address_and_re_run_is_limited_to_the_wells_it_refused(montage_page, qtbot,
+                                                                                         monkeypatch):
+    """The real step on this page's dataset, whose rows a run did not write: it refuses A01 and says why, and
+    *Re-run in Analyze…* then opens Analyze on A01 alone, forced (tracker H6)."""
     from PySide6.QtCore import Qt
 
     import review.core.analyze_handoff as handoff
@@ -265,14 +268,57 @@ def test_re_run_opens_analyze_limited_to_the_anchored_wells_each_forced(montage_
 
     ctx, in_dir = montage_page
     window = _open(qtbot, ctx)
-    assert not window.rerun_btn.isEnabled()                   # nothing anchored yet
+    assert not window.apply_btn.isEnabled() and not window.rerun_btn.isEnabled()      # nothing anchored yet
     set_anchor(anchors_path(in_dir), "A01", "t_a", (60.0, 60.0))
     window._refresh_status()
-    calls = []
+    assert window.apply_btn.isEnabled() and not window.rerun_btn.isEnabled()
+    reloads, calls = [], []
+    monkeypatch.setattr(handoff, "reload_dataset", lambda ctx: reloads.append(ctx) or True)
     monkeypatch.setattr(handoff, "open_in_analyze", lambda ctx, **kw: calls.append(kw) or True)
+    qtbot.mouseClick(window.apply_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: "Not addressed: A01 at t_a" in window.status.text(), timeout=20000)
+    assert reloads == [ctx] and window.rerun_btn.isEnabled()
     qtbot.mouseClick(window.rerun_btn, Qt.LeftButton)
     # Incremental off: every well is forced anyway, and a remote nanowell run refuses Incremental.
     assert calls == [{"force_wells": ["A01"], "only_wells": ["A01"], "incremental": False}]
+
+
+def test_apply_anchors_says_what_it_addressed_and_shows_the_well_as_it_now_is(montage_page, qtbot, monkeypatch):
+    from PySide6.QtCore import Qt
+
+    import pipeline.nanowell_readdress as rd
+    import review.core.analyze_handoff as handoff
+    from util.nanowell_anchors import anchors_path, set_anchor
+
+    ctx, in_dir = montage_page
+    window = _open(qtbot, ctx)
+    set_anchor(anchors_path(in_dir), "A01", "t_a", (60.0, 60.0))
+    window._refresh_status()
+    grid_path = in_dir.parent / "out" / "nanowells" / "A01_grid.json"
+
+    def readdressed(out_dir, in_dir):
+        grid = json.loads(grid_path.read_text())
+        grid["timepoints"]["t_a"].update(status="ok", reason="", origin_method="manual",
+                                         readdressed={"origin_method": "manual"})
+        grid_path.write_text(json.dumps(grid))
+        # A well anchored elsewhere that the step refused: Re-run is limited to it, not to every anchored well.
+        return rd.Summary(addressed={"A01/t_a": "manual"}, refused={"B03/t_c": "its rows were laid out elsewhere"})
+
+    calls = []
+    monkeypatch.setattr(rd, "readdress_dataset", readdressed)
+    monkeypatch.setattr(handoff, "reload_dataset", lambda ctx: True)
+    monkeypatch.setattr(handoff, "open_in_analyze", lambda ctx, **kw: calls.append(kw) or True)
+    qtbot.mouseClick(window.apply_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: not window._applying and window.store is not None
+                    and window.store.loaded() == len(VALUES), timeout=20000)
+    qtbot.wait(200)                       # the tile reads' own status redraws, after which the outcome must remain
+    assert "Addressed from the run's saved measurements" in window.status.text()
+    text = window.status.text()
+    assert text.startswith("A01 at t_a: ok, origin from the anchor set by hand.")
+    assert "applied to the run's saved measurements" in text and "A01 at t_a (origin from the anchor set by hand)" in text
+    assert "Not addressed: B03 at t_c: its rows were laid out elsewhere." in text
+    qtbot.mouseClick(window.rerun_btn, Qt.LeftButton)
+    assert calls == [{"force_wells": ["B03"], "only_wells": ["B03"], "incremental": False}]
 
 
 def test_the_view_keeps_square_pixels_through_a_resize_before_and_after_the_user_moves_it(montage_page, qtbot):
@@ -313,3 +359,19 @@ def test_moving_to_another_timepoint_stops_the_old_reads_and_closing_lets_the_ti
     second = window.store
     window.close()
     assert second.cancelled and window.store is None and window.canvas.store is None
+
+
+def test_reload_dataset_reopens_the_dataset_root_by_the_route_an_open_takes(qtbot, tmp_path):
+    """After *Apply anchors* the dataset is opened again through the window's ``_load_path``, on the folder holding
+    ``in/`` and ``out/`` (``dataset_root``), deferred like every open."""
+    from types import SimpleNamespace
+
+    from review.core.analyze_handoff import reload_dataset
+
+    opened = []
+    window = SimpleNamespace(_load_path=opened.append)
+    ctx = SimpleNamespace(window=window, state=SimpleNamespace(dataset=SimpleNamespace(in_dir=tmp_path / "in",
+                                                                                      data_dir=tmp_path / "out")))
+    assert reload_dataset(ctx)
+    qtbot.waitUntil(lambda: opened == [tmp_path], timeout=2000)
+    assert not reload_dataset(SimpleNamespace(window=SimpleNamespace(), state=ctx.state))

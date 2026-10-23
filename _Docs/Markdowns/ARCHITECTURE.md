@@ -9958,8 +9958,11 @@ and only then
 (`spill_dir`, `<scratch>/.montages`), so a long time-course does not hold every montage in memory at once —
 `measure_timepoint`s each: owner-tile geometry at full resolution (fused sites on the montage),
 visibility on the montage, coverage from the registered rectangles, one template per timepoint pooled over
-the owner tiles, then `nanowell_measure` per tile. A timepoint with no origin is still measured on the sites
-detected, with no address. Consistency of pitch and roster across timepoints is a named status on each
+the owner tiles, then `nanowell_measure` per tile. A timepoint with no origin is still measured on every site of
+its array, with no address (`_unaddressed_positions`): an inferred array's own sites, or the lattice sites within the
+well's shared radius of the site nearest the fitted outline's centre — the array's centre is a site, and a circle fit
+to the rim was a fifth of a pitch off on a rendered plate — so a nanowell dark under a bubble has its row there too;
+only with no outline fitted is it the sites detected. Consistency of pitch and roster across timepoints is a named status on each
 timepoint; the lattice angle is not checked within one well, because the plate's rotation between timepoints
 is only measurable across wells.
 

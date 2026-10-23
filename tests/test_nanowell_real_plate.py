@@ -248,3 +248,33 @@ def test_the_square_s_edge_angle_is_recorded_whether_the_timepoint_is_kept_or_re
     again = refused.grid["fiducial"]
     assert again["edge_deg"] == pytest.approx(block["edge_deg"])
     assert abs(abs(again["edge_discrepancy_deg"]) - 30.0) < 3.0
+
+
+# ── F8: an unaddressed timepoint still has a row for every nanowell ──────────
+def test_an_unaddressed_timepoint_measures_every_nanowell_of_its_array_without_addresses(monkeypatch):
+    """Without an origin the rows were the sites detection found, so a nanowell dark under a bubble had no row at all,
+    against the rule that no nanowell's position is ever skipped. The lattice and the array's outline place every
+    one; only the address needs the origin."""
+    from pipeline import nanowell_lattice as lattice
+
+    hidden = [(1, 0), (0, 1), (-1, 1)]
+    rendered, record = build_well(dark_sites=hidden)
+    real_resolve = lattice.resolve_origin
+    monkeypatch.setattr(lattice, "resolve_origin", lambda fit, *, fiducial=None, array_centre=None, plate_rigid=None,
+                        **rest: real_resolve(fit, plate_rigid=plate_rigid, **rest))
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    assert located.status == nr.UNADDRESSED
+    radius = located.boundary["radius_um"]
+    measured = nr.measure_timepoint(located, rendered.images, SETTINGS, radius, count_cells=False)
+    assert all(r["nw_q"] is None and r["nw_r"] is None for r in measured.sites)
+    rows = np.array([(r["well_x_um"], r["well_y_um"]) for r in measured.sites])
+    truth = dict(zip(rendered.array.addresses, rendered.sites_um))
+
+    def row_at(xy):
+        d = np.hypot(*(rows - xy).T)
+        return int(np.argmin(d)) if d.min() < PITCH / 4 else None
+    assert all(row_at(xy) is not None for xy in truth.values())          # every drawn nanowell has a row
+    assert len(measured.sites) == len(truth)                             # and nothing beyond the array does
+    for address in hidden:
+        row = measured.sites[row_at(truth[address])]
+        assert row["detected"] is False and row["state"] == "occluded"

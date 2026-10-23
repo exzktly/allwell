@@ -710,6 +710,39 @@ def _roster_positions(located: Located, radius_um: float | None, sites=None):
     return addresses, points
 
 
+def _unaddressed_positions(located: Located, radius_um: float | None) -> np.ndarray:
+    """Every lattice site of an unaddressed timepoint's array, montage frame (tracker F8).
+
+    An address needs the origin; a position does not. The lattice and the array's outline place every nanowell,
+    including one a bubble hides, and §1.1's rule is that no nanowell's position is ever skipped. An inferred array
+    has its sites already (``array_sites``); a circle has the lattice sites within *radius_um* (the well's shared
+    radius) of its fitted centre, with the same quarter-pitch allowance :func:`nanowell_lattice.roster` gives an
+    anchored one. Only with neither (no outline was fitted) are the sites found all there is.
+    """
+    from pipeline.nanowell_lattice import nearest_site as lattice_snap
+
+    montage = located.montage
+    detected = located.detected_common - np.asarray(montage.origin_um)
+    if located.array_sites is not None:
+        return np.asarray(located.array_sites, dtype=float).reshape(-1, 2)
+    fit = located.fit
+    if located.boundary is None or radius_um is None or fit is None or not fit.ok or fit.phase_origin is None:
+        return detected
+    centre = np.asarray(located.boundary["centre_um"], dtype=float) - np.asarray(montage.origin_um)
+    basis = np.column_stack((fit.a1, fit.a2))
+    phase = np.asarray(fit.phase_origin, dtype=float)
+    limit = radius_um + fit.pitch / 4
+    # The array's centre is a site (the square sits there), so the disk is drawn about the site nearest the fitted
+    # outline's centre rather than the centre itself: a circle fitted to the rim was 31 um (a fifth of a pitch) off on
+    # a rendered plate, which swapped five rim sites for five outside the array.
+    _, middle = lattice_snap(fit, centre)
+    reach = math.ceil(limit / np.linalg.svd(basis, compute_uv=False).min()) + 1
+    steps = np.array([(q, r) for q in range(-reach, reach + 1) for r in range(-reach, reach + 1)], dtype=float)
+    sites = phase + (np.asarray(middle, dtype=float) + steps) @ basis.T
+    site = phase + basis @ np.asarray(middle, dtype=float)
+    return sites[np.hypot(*(sites - site).T) <= limit]
+
+
 def _initial_sites(located: Located, points_montage: np.ndarray, pitch_um: float):
     """Each roster site's starting centre (common frame): the detected one if it is near, else the lattice's."""
     common = points_montage + np.asarray(located.montage.origin_um)
@@ -1020,22 +1053,23 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     carry no count (``n_cells`` ``None``, so a seen site is ``measured`` with no number, never ``empty``) — what
     Test detection shows when Cellpose cannot be loaded. *channels* maps a fluorescence channel name to
     ``f(tile_id) -> image | None``. A timepoint
-    that is not ``ok`` (no origin) is measured on the sites actually detected, with no address.
+    that is not ``ok`` (no origin) is measured on every site of its array, with no address
+    (:func:`_unaddressed_positions`).
     """
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_detect import FITTED, MIN_REFINE_RADIUS_PX
     from pipeline.nanowell_sites import check_format
     from pipeline.tile_grid import ownership_report
 
-    px, montage = located.pixel_size_um, located.montage
+    px = located.pixel_size_um
     if located.diameter_um is not None and located.diameter_um != settings.diameter_um:
         settings = replace(settings, diameter_override_um=located.diameter_um)
     addressed = located.status == OK
     if addressed:
         addresses, points_m = _roster_positions(located, array_radius_um, roster)
     else:
-        # No origin: only the sites actually detected, with no address (they cannot be joined over time).
-        points_m = located.detected_common - np.asarray(montage.origin_um)
+        # No origin: every site of the array, with no address (they cannot be joined over time) — tracker F8.
+        points_m = _unaddressed_positions(located, array_radius_um)
         addresses = [None] * len(points_m)
     centres, detected = _initial_sites(located, points_m, located.pitch_um or settings.pitch_um)
     report = ownership_report(located.plan, centres, settings.diameter_um, settings.margin,

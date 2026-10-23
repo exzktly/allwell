@@ -333,7 +333,9 @@ nanowells it was analysed with when timepoints are added to it; Validate, Merge 
 wells whose sets two versions decided, since they count the rim differently. Test detection shows the rim one
 timepoint supports and says so. A timepoint that could not
 be placed, found or addressed is named in the grid record with the reason, and the other timepoints still run.
-An unaddressed timepoint's reason names every source it tried and why each was refused — for the central square,
+An unaddressed timepoint is still measured on every nanowell of its array — one a bubble hides included — with the
+address columns blank, until an anchor (the central square found, the rest of the plate, or one set by hand) names
+them. An unaddressed timepoint's reason names every source it tried and why each was refused — for the central square,
 whether no site could be scored, the most square outline read under the floor (with its score), or it did not
 stand far enough above the next most square, by its lead or by how many times the next one's score it is (with
 both scores) — and the grid record keeps those scores.

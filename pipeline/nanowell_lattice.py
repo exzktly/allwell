@@ -464,6 +464,13 @@ class OriginResolution:
     reason: str
 
 
+def nearest_site(fit, position) -> tuple[float, tuple[int, int]]:
+    """``(distance, (q, r))``: the lattice site of *fit* nearest *position*, counted from the fit's phase origin."""
+    basis = np.column_stack((fit.a1, fit.a2))
+    indices, residuals = _nearest_sites(_coordinate(position)[None, :], basis, np.asarray(fit.phase_origin))
+    return float(residuals[0]), (int(indices[0][0]), int(indices[0][1]))
+
+
 def _snap_origin(fit, position):
     """The lattice site nearest *position*, and how far *position* was from it."""
     basis = np.column_stack((fit.a1, fit.a2))

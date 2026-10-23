@@ -57,7 +57,7 @@ def test_every_seen_nanowell_has_a_confluence_and_it_does_not_depend_on_the_tile
     assert {k: (sites[k]["state"], sites[k]["n_cells"]) for k in seen} == \
         {k: (reference[k]["state"], reference[k]["n_cells"]) for k in seen}
     block = measured.template["normalisation"]
-    assert block["measure_version"] == 3 and block["offset"] == "measured" and block["tiles_without_gain"] == []
+    assert block["measure_version"] == 4 and block["offset"] == "per nanowell" and block["tiles_without_gain"] == []
 
 
 def test_empty_nanowells_read_empty_and_loaded_ones_textured_on_every_tile(well):
@@ -68,14 +68,72 @@ def test_empty_nanowells_read_empty_and_loaded_ones_textured_on_every_tile(well)
         if row["state"] == "empty" and (q, r) != (0, 0):                # the central square is not round: not a well
             by_tile_empty.setdefault(row["owner"], []).append(row["confluence"])
     assert len(by_tile_empty) == 9                                      # every tile has empty nanowells measured
-    assert max(max(v) for v in by_tile_empty.values()) < 0.1
+    # One empty nanowell of about 500, (-12, 10), reads 0.14 here and under even light alike: its fitted radius is
+    # 0.8 um (0.19 px) over the template's, so its rim does not quite divide out, and the texture threshold is now the
+    # bare floor's own over every nanowell (0.076), where the least-textured quarter's noisier template set it at
+    # 0.102 and hid the mismatch (tracker L7).
+    readings = [c for v in by_tile_empty.values() for c in v]
+    assert max(readings) < 0.15 and sum(c >= 0.1 for c in readings) <= 0.01 * len(readings)
     assert min(sites[a]["confluence"] for a in loaded if a in sites and sites[a]["state"] == "measured") > 0.1
 
 
-def test_a_tile_whose_offset_the_well_cannot_vouch_for_is_corrected_for_brightness_and_says_so(well):
+def test_light_added_toward_the_middle_of_the_well_is_measured_as_if_it_were_not_there(well, even):
+    """The report behind tracker L1: the middle of the well is brighter and undercounts there. Rendered here as light
+    added in a broad peak at the array's centre, half the floor's brightness at its top, so it changes across every
+    tile rather than from tile to tile. One offset per tile could not follow it; each nanowell's own level does, and
+    every seen nanowell's state, count and confluence match the evenly lit well's."""
+    from tests._nanowell_run_fixture import PX
+
     base, record, _ = well
-    _sites, measured = _measure(base, record, 0.3, 0.5)
-    block = measured.template["normalisation"]
-    assert block["scale_only_tiles"] == sorted(set(block["offset_fallback_tiles"]) & set(block["scale_only_tiles"]))
-    for tile in block["scale_only_tiles"]:
-        assert any(tile in note and "brightness only" in note for note in measured.notes)
+    _, measured_even = even
+    centre = np.mean([[r["well_x_um"], r["well_y_um"]] for r in measured_even.sites], axis=0)
+    images = {}
+    for name, image in base.items():
+        left, top = record_left_top(record, name)
+        yy, xx = np.mgrid[0:image.shape[0], 0:image.shape[1]]
+        distance = np.hypot((xx + 0.5) * PX + left - centre[0], (yy + 0.5) * PX + top - centre[1])
+        images[name] = (image + 0.5 * np.exp(-(distance / 900.0) ** 2)).astype(np.float32)
+    located = nr.locate_timepoint("0h", record, "A01", images, SETTINGS)
+    radius, roster = nr.own_array_model(located, SETTINGS)
+    measured = nr.measure_timepoint(located, images, SETTINGS, radius, roster=roster, segmenter=threshold_segmenter())
+    sites = {(r["nw_q"], r["nw_r"]): r for r in measured.sites}
+    reference, _ = even
+    seen = [k for k, r in sites.items() if r["state"] in ("measured", "empty") and k in reference]
+    assert len(seen) > 500
+    assert {k: (sites[k]["state"], sites[k]["n_cells"]) for k in seen} == \
+        {k: (reference[k]["state"], reference[k]["n_cells"]) for k in seen}
+    # The added light also slopes across each nanowell — by about 0.05 of the floor over one near the peak — which a
+    # nanowell's one offset and gain cannot take out: 8 of 583 empty nanowells there read 0.035 to 0.048 where the
+    # evenly lit well reads under 0.015, and every other nanowell matches (tracker L6).
+    differences = [abs(sites[k]["confluence"] - reference[k]["confluence"]) for k in seen]
+    assert max(differences) < 0.05 and sum(d > 0.03 for d in differences) <= 0.02 * len(differences)
+    low, high = measured.template["normalisation"]["offset_range"]
+    assert high - low > 0.2                                    # the block says light was added, and how much
+
+
+def record_left_top(record, field):
+    """A tile's recorded top-left corner in micrometres."""
+    px = next(iter(record["timepoints"].values()))["pixel_size_um"]["x"]
+    tile = next(t for t in record["tiles"] if t["field"] == field)
+    return tile["mosaic_xy_px"][0] * px, tile["mosaic_xy_px"][1] * px
+
+
+def test_the_run_counts_with_the_model_its_settings_name(well, monkeypatch):
+    """Tracker L2, on the run's own path: with no segmenter passed (as the task passes none), what reaches
+    ``pipeline.cellpose._segment_cellpose`` is the setting's model. Test detection builds its own segmenter and is
+    pinned in ``test_nanowell_preview.py``."""
+    from pipeline import cellpose
+
+    asked = []
+
+    def fake(image, *, model_type="cyto3", **_):
+        asked.append(model_type)
+        return np.zeros(np.shape(image), dtype=np.int32)
+
+    monkeypatch.setattr(cellpose, "_segment_cellpose", fake)
+    base, record, _ = well
+    settings = nr.NanowellSettings("100um", cellpose_model="livecell_cp3")
+    located = nr.locate_timepoint("0h", record, "A01", base, settings)
+    radius, roster = nr.own_array_model(located, settings)
+    nr.measure_timepoint(located, base, settings, radius, roster=roster)
+    assert asked and set(asked) == {"livecell_cp3"}

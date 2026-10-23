@@ -564,6 +564,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "alone (light wells on a dark lattice), and the lattice kind (hexagonal or square), pitch, "
                          "orientation and the array's outline are inferred from where they are; the format's pitch "
                          "and diameter are compared with what is measured and a disagreement is reported."))
+    p.add_argument("--nanowell_cellpose_model", choices=("cyto3", "livecell_cp3"), default=None,
+                   help=("The Cellpose model the label-free cell count segments with. cyto3 (the default): Cellpose "
+                         "3's generalist. livecell_cp3: the Cellpose 3 model trained on LIVECell's phase-contrast "
+                         "images of eight cell lines. Its weights are downloaded on first use, as cyto3's are."))
     p.add_argument("--nanowell_square_edge_deg", type=float, default=0.0,
                    help=("Angle of the central square nanowell's edges to a lattice row, degrees (assumed 0: the "
                          "square is cut parallel to a row). Used to refuse a lattice fitted a sixth of a turn off."))
@@ -611,6 +615,8 @@ def nanowell_options_from_args(args, error) -> dict | None:
     options.update(_custom_format(args, error))
     if args.nanowell_geometry == "infer":
         options["geometry"] = "infer"
+    if args.nanowell_cellpose_model not in (None, "cyto3"):     # the default sends nothing: the key stays as it was
+        options["cellpose_model"] = args.nanowell_cellpose_model
     pattern = _grid_pattern(args, error)
     if pattern:
         options["pattern"] = pattern

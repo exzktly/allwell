@@ -80,30 +80,40 @@ def _missing_import(exc: BaseException) -> str | None:
     return None
 
 
-def _crop_for(site: dict, images: dict, located, template, segment, px: float, half_um: float,
-              level: tuple | None = None) -> dict | None:
-    """A rim-suppressed crop of one site and its segmentation, from the tile that owns it."""
+def _tile_segmented(owner: str, measured, images: dict, located, template, segment, px: float):
+    """``(rim-suppressed tile, labels)`` for *owner* exactly as the run made them: every site the tile owns, at the
+    level the run brought it to, divided by the template, and the segmenter called once on the whole tile.
+
+    The crops are cut from this rather than segmented on their own, because Cellpose scales each image by its own
+    brightest and darkest pixels: a crop holding one nanowell is scaled differently from the tile holding a hundred,
+    so its outlines were not the run's, and a crop could outline a cell the run did not count (tracker L3)."""
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_detect import SiteGeometry
 
-    owner = site["owner"]
-    if owner is None or template is None or owner not in images:
-        return None
     left, top = located.positions[owner]
-    local = SiteGeometry(0, (site["well_x_um"] - left, site["well_y_um"] - top), site["radius_um"], site["geometry"])
-    fit, too_large = nm.fits_template(template, [local], pixel_size_um=px)
-    if too_large:
+    local = [SiteGeometry(i, (row["well_x_um"] - left, row["well_y_um"] - top), row["radius_um"], row["geometry"])
+             for i, row in enumerate(measured.sites) if row["owner"] == owner and i in measured.levels]
+    fit, _too_large = nm.fits_template(template, local, pixel_size_um=px)
+    rim = nm.rim_suppress(images[owner], px, template, fit, levels=measured.levels)
+    return rim, nm.segment_tile(rim, segment)
+
+
+def _crop_for(site: dict, tile, located, px: float, half_um: float) -> dict | None:
+    """A rim-suppressed crop of one site and the run's segmentation of it, cut from its owner tile's *tile*
+    (:func:`_tile_segmented`)."""
+    owner = site["owner"]
+    if owner is None or tile is None:
         return None
-    # The site's own level, as the run suppressed it (``nanowell_run.Measured.levels``).
-    rim = nm.rim_suppress(images[owner], px, template, fit, levels=None if level is None else {0: level})
-    cx, cy = local.centre_um[0] / px - 0.5, local.centre_um[1] / px - 0.5
+    rim, labels = tile
+    left, top = located.positions[owner]
+    cx, cy = (site["well_x_um"] - left) / px - 0.5, (site["well_y_um"] - top) / px - 0.5
     half = int(np.ceil(half_um / px))
     x0, y0 = max(int(round(cx)) - half, 0), max(int(round(cy)) - half, 0)
     window = rim[y0:y0 + 2 * half + 1, x0:x0 + 2 * half + 1]
     if window.size == 0:
         return None
-    labels = nm.segment_tile(window, segment)
-    return {"label": site["address"], "n_cells": site["n_cells"], "rim": window.astype(np.float32), "labels": labels}
+    return {"label": site["address"], "n_cells": site["n_cells"], "rim": window.astype(np.float32),
+            "labels": labels[y0:y0 + 2 * half + 1, x0:x0 + 2 * half + 1]}
 
 
 def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.NanowellSettings, *, grouper, parse, schema,
@@ -163,7 +173,7 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
     if located.status not in (nr.OK, nr.UNADDRESSED) or (located.boundary is None and located.array_sites is None):
         return result
     px = located.pixel_size_um
-    segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px)
+    segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px, model_type=settings.cellpose_model)
     missing = None
     try:
         radius, own = nr.own_array_model(located, settings)
@@ -192,18 +202,31 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
         # every timepoint, and a dataset analysed before keeps the roster it was analysed with.
         result.notes.append("The nanowells at the rim are the ones this timepoint's image supports; a run decides them "
                             "over all of the well's timepoints, and adding to an analysed dataset keeps its roster")
-    index_of = {}                                  # a result site -> its index in the timepoint's sites
-    for i, row in enumerate(measured.sites):
+    for row in measured.sites:
         result.sites.append({**row, "address": coordinate_text(row["nw_q"], row["nw_r"])})
-        index_of[id(result.sites[-1])] = i
-    template = measured.template.get("_object")
-    ranked = sorted((s for s in result.sites if s["state"] == "measured" and (s["n_cells"] or 0) > 0 and not s["fused"]),
-                    key=lambda s: -(s["n_cells"] or 0))
-    chosen = ranked[:max(n_crops - 1, 0)]
-    empty = next((s for s in result.sites if s["state"] == "empty" and not s["fused"]), None)
-    for site in (chosen + ([empty] if empty is not None and n_crops else [])) if segment is not None else []:
-        level = measured.levels.get(index_of.get(id(site)))
-        crop = _crop_for(site, images, located, template, segment, px, 0.75 * settings.diameter_um, level)
-        if crop is not None:
-            result.crops.append(crop)
+    if segment is not None:
+        result.crops = _sample_crops(result.sites, measured, images, located, segment, px,
+                                     0.75 * settings.diameter_um, n_crops)
     return result
+
+
+def _sample_crops(sites: list, measured, images: dict, located, segment, px: float, half_um: float,
+                  n_crops: int) -> list:
+    """Up to *n_crops* crops: the most loaded measured sites, then one empty one, each cut from its owner tile
+    segmented as the run segments it (:func:`_tile_segmented`)."""
+    template = measured.template.get("_object")
+    ranked = sorted((s for s in sites if s["state"] == "measured" and (s["n_cells"] or 0) > 0 and not s["fused"]),
+                    key=lambda s: -(s["n_cells"] or 0))
+    empty = next((s for s in sites if s["state"] == "empty" and not s["fused"]), None)
+    wanted = ranked[:max(n_crops - 1, 0)] + ([empty] if empty is not None and n_crops else [])
+    crops: dict = {}                               # id(site) -> its crop, so they keep the order chosen
+    for owner in dict.fromkeys(s["owner"] for s in wanted):
+        if owner is None or template is None or owner not in images:
+            continue
+        # One tile segmented at a time and dropped once its crops are cut: a full sensor's tile and labels are a
+        # couple of hundred megabytes.
+        tile = _tile_segmented(owner, measured, images, located, template, segment, px)
+        for site in (s for s in wanted if s["owner"] == owner):
+            crops[id(site)] = _crop_for(site, tile, located, px, half_um)
+        del tile
+    return [crops[id(s)] for s in wanted if crops.get(id(s)) is not None]

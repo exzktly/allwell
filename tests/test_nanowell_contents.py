@@ -26,7 +26,8 @@ def _geometries(centres):
 
 
 def _paint(centres, cells=None, *, size=190, seed=0, noise=0.004, shading=0.0):
-    """Nanowell lattice image; *cells* maps site index -> list of (dx, dy, radius) offsets in px."""
+    """Nanowell lattice image; *cells* maps site index -> list of (dx, dy, radius[, brightness]) in px, the brightness
+    over the floor ``CELL`` unless given."""
     rng = np.random.default_rng(seed)
     yy, xx = np.mgrid[0:size, 0:size]
     img = np.full((size, size), BACKGROUND)
@@ -36,8 +37,8 @@ def _paint(centres, cells=None, *, size=190, seed=0, noise=0.004, shading=0.0):
         img[(r <= RADIUS) & (r > RADIUS - 2.0)] = RIM
     for index, blobs in (cells or {}).items():
         x, y = centres[index]
-        for dx, dy, rad in blobs:
-            img[np.hypot(xx + 0.5 - x - dx, yy + 0.5 - y - dy) <= rad] += CELL
+        for dx, dy, rad, *amount in blobs:
+            img[np.hypot(xx + 0.5 - x - dx, yy + 0.5 - y - dy) <= rad] += amount[0] if amount else CELL
     from scipy import ndimage
 
     img = ndimage.gaussian_filter(img, 1.2)                  # optics: no real rim is a one-pixel step
@@ -66,30 +67,43 @@ def _crops(image, half=16):
 
 
 # ── C1 ──────────────────────────────────────────────────────────────────────
-def test_template_ignores_loaded_sites_that_a_plain_median_would_absorb():
-    # 12 of 16 sites are so full (5 cells of radius 5) that over half of each pixel's sites hold a
-    # cell: the plain median is then cell-coloured; the least-textured quarter is the 4 empty sites.
+def test_template_is_the_bare_floor_when_no_site_is_empty():
+    """Tracker L1. All 49 sites hold four cells, each of its own brightness, anywhere on the floor: no site is empty,
+    so the least-textured quarter the template was once taken from would have been a quarter of loaded sites, and
+    at 42 % of the interior's pixels most sites show a cell, so a plain median is cell-coloured there. Measured
+    against the template of the same lattice painted empty: the modal template is off by 0.009 on average, the
+    median by 0.076 (a cell is 0.3 to 0.9 over a 0.15 floor)."""
+    centres = _centres(n=7)
+    empty = nm.build_template(nm.site_crops(_paint(centres, size=300), PX, centres, 16),
+                              interior_radius_px=RADIUS, min_sites=2).array
     rng = np.random.default_rng(3)
-    cells = {i: [(rng.uniform(-6, 6), rng.uniform(-6, 6), 5) for _ in range(5)] for i in range(12)}
-    crops = _crops(_paint(CENTRES, cells))
+
+    def anywhere(reach):
+        angle, distance = rng.uniform(0, 2 * np.pi), reach * np.sqrt(rng.uniform())
+        return distance * np.cos(angle), distance * np.sin(angle)
+
+    cells = {i: [(*anywhere(RADIUS - 3), 3, rng.uniform(0.3, 0.9)) for _ in range(4)] for i in range(49)}
+    crops = nm.site_crops(_paint(centres, cells, size=300), PX, centres, 16)
     template = nm.build_template(crops, interior_radius_px=RADIUS, min_sites=2)
-    plain = np.median(crops, axis=0)
-    inside = nm._disk(template.half, 0.9 * RADIUS)
-    assert template.source == nm.SOURCE_OWN and template.n_sites == 4 and template.candidates == 16
-    assert np.abs(template.array[inside] - FLOOR).mean() < 0.15
-    assert np.abs(plain[inside] - FLOOR).mean() > 0.3
+    inside = nm._disk(template.half, RADIUS)
+    assert template.source == nm.SOURCE_OWN and template.n_sites == 49
+    assert np.mean((crops[:, inside] - empty[inside] > 0.05).mean(axis=0) > 0.5) > 0.4     # the hard case
+    assert np.abs(template.array[inside] - empty[inside]).mean() < 0.015
+    assert np.abs(np.median(crops, axis=0)[inside] - empty[inside]).mean() > 0.05
 
 
-def test_template_is_not_fooled_by_a_cell_at_the_same_place_in_every_loaded_site():
-    # Loaded sites all hold one cell dead centre: a majority-median reference would call THEM the template.
-    cells = {i: [(2, 2, 4)] for i in range(12)}
+def test_a_cell_at_the_same_place_in_a_minority_of_sites_does_not_colour_the_template():
+    """The modal template's limit, stated rather than hidden: it needs bare floor to be the largest single population
+    at each pixel. Six of sixteen sites with a cell at the same place leave the floor the larger; at the place where
+    most sites hold an identical cell the template would be that cell (``build_template`` says so)."""
+    cells = {i: [(2, 2, 4)] for i in range(6)}
     template = nm.build_template(_crops(_paint(CENTRES, cells)), interior_radius_px=RADIUS, min_sites=2)
     assert template.array[template.half + 2, template.half + 2] == pytest.approx(FLOOR, abs=0.03)
 
 
-def test_a_centred_round_cell_is_not_taken_for_an_empty_site():
-    # Radially symmetric, so the first (azimuthal) ranking cannot see it and puts it first; the second
-    # pass, against the template the others make, drops it for the next empty site.
+def test_a_centred_round_cell_does_not_colour_the_template():
+    """A cell dead centre is radially symmetric, which the texture ranking once could not see (it put that site
+    first among the empty ones). The modal level never ranked sites, and one such site among sixteen leaves no mark."""
     rng = np.random.default_rng(1)
     y, x = np.mgrid[-16:17, -16:17]
     base = np.where(np.hypot(x, y) <= 12, FLOOR, BACKGROUND)
@@ -98,18 +112,34 @@ def test_a_centred_round_cell_is_not_taken_for_an_empty_site():
     crops.insert(0, base + bump + rng.normal(0, 0.0003, base.shape))                          # index 0
     crops += [base + 0.4 * (np.hypot(x - 7, y + 5) <= 4) + rng.normal(0, 0.002, base.shape) for _ in range(10)]
     template = nm.build_template(np.array(crops), interior_radius_px=RADIUS, min_sites=2)
-    assert 0 not in template.used and set(template.used) <= set(range(1, 6)) and len(template.used) == 4
+    assert template.used == tuple(range(16))
+    # Where the centred cell is. (The ten others share one cell's place, which outnumbers the floor there, so the
+    # template takes that cell's colour at (7, -5): the stated limit, pinned by the test above this one.)
+    assert np.abs(template.array[np.hypot(x, y) <= 4] - FLOOR).max() < 0.01
+
+
+def test_the_modal_level_finds_the_floor_where_the_median_finds_the_cells():
+    floor = np.full(30, 0.15) + np.random.default_rng(0).normal(0, 0.002, 30)
+    cells = np.random.default_rng(1).uniform(0.4, 1.2, 50)                 # 62 % of the values, all different
+    values = np.concatenate([floor, cells])
+    assert nm.modal_level(values) == pytest.approx(0.15, abs=0.005)
+    assert np.median(values) > 0.4
+    assert np.isnan(nm.modal_level([np.nan, np.nan])) and nm.modal_level([2.0]) == 2.0
+    stack = np.stack([np.full((2, 2), v) for v in values])
+    stack[:, 0, 0] = np.nan                                               # a pixel no crop covers
+    out = nm.modal_stack(stack, min_values=2)
+    assert np.isnan(out[0, 0]) and out[1, 1] == pytest.approx(0.15, abs=0.005)
 
 
 def test_template_falls_back_to_the_earliest_and_says_so():
     crops = _crops(_paint(CENTRES))
     earliest = nm.build_template(crops, interior_radius_px=RADIUS, min_sites=2)
-    sparse = nm.build_template(crops[:6], interior_radius_px=RADIUS, earliest=earliest)      # 1 site in a quarter
+    sparse = nm.build_template(crops[:6], interior_radius_px=RADIUS, earliest=earliest)      # 6 crops, 8 needed
     # The earliest's pixels, saying so, and with none of its crop indices: they index another timepoint's crops.
     assert sparse.source == nm.SOURCE_EARLIEST and sparse.used == ()
     assert np.array_equal(sparse.array, earliest.array) and earliest.source == nm.SOURCE_OWN
     own = nm.build_template(crops[:6], interior_radius_px=RADIUS)
-    assert own.source == nm.SOURCE_OWN_SPARSE and own.n_sites == 1
+    assert own.source == nm.SOURCE_OWN_SPARSE and own.n_sites == 6
     assert nm.build_template(np.empty((0, 33, 33)), interior_radius_px=RADIUS) is None
 
 
@@ -155,8 +185,7 @@ def test_confluence_tracks_the_painted_coverage():
     image = _paint(CENTRES, big)
     template = nm.build_template(_crops(image), interior_radius_px=RADIUS, min_sites=2)
     rim = nm.rim_suppress(image, PX, template, GEOMS)
-    empties = [g for g in GEOMS if g.index not in big]
-    cut = nm.texture_threshold(rim, PX, empties)
+    cut = nm.texture_threshold(rim, PX, GEOMS)              # every site, the loaded ones too (tracker L1)
     conf = nm.site_confluence(rim, PX, GEOMS, cut)
     interior = np.pi * (0.9 * RADIUS) ** 2
     for index, rad in ((2, 4), (3, 6), (7, 8)):
@@ -167,7 +196,7 @@ def test_confluence_tracks_the_painted_coverage():
     assert all(conf[i] == 0.0 for i in range(16) if i not in big)       # 0.0 is a measurement
 
 
-def test_confluence_is_undefined_without_empties_or_without_interior():
+def test_confluence_is_undefined_without_sites_or_without_interior():
     rim = np.ones((190, 190))
     assert nm.texture_threshold(rim, PX, []) is None
     assert nm.site_confluence(rim, PX, GEOMS[:2], None) == [None, None]
@@ -282,18 +311,31 @@ def test_every_cell_s_mean_is_its_own_pixels_on_every_channel():
 
 
 # ── C7 ──────────────────────────────────────────────────────────────────────
-def test_fluorescence_is_over_the_empty_background_and_none_is_not_zero():
+def test_fluorescence_is_over_the_floor_s_level_and_none_is_not_zero():
+    """Tracker L1: the background is the floor's level, read from every site's modal interior level, so it holds
+    when no site is empty. Here every site holds cells over more than half its interior, each pixel of them its own
+    brightness (20 to 80 over the floor), so even a median of a site's interior is the cells'; the floor is 10."""
+    rng = np.random.default_rng(4)
     image = np.full((190, 190), 10.0)
-    x, y = CENTRES[3]
     yy, xx = np.mgrid[0:190, 0:190]
-    image[np.hypot(xx + 0.5 - x, yy + 0.5 - y) <= 6] += 50.0
-    result = nm.site_fluorescence(image, PX, GEOMS, empty_indices=[0, 1, 2])
-    by = {r.index: r for r in result}
-    assert by[0].background == 10.0 and by[0].mean_minus_background == pytest.approx(0.0)
-    assert by[3].integrated == pytest.approx(50.0 * np.pi * 36, rel=0.05)
-    assert all(r.integrated is None and r.background is None for r in nm.site_fluorescence(None, PX, GEOMS, [0]))
-    no_empty = nm.site_fluorescence(image, PX, GEOMS, [])
-    assert all(r.background is None and r.integrated is None for r in no_empty)
+    cells = np.zeros((190, 190), dtype=bool)
+    for x, y in CENTRES:
+        cells |= np.hypot(xx + 0.5 - x - 2, yy + 0.5 - y) <= 8               # 69 % of the interior
+        cells |= np.hypot(xx + 0.5 - x + 5, yy + 0.5 - y + 3) <= 6
+    image[cells] += rng.uniform(20.0, 80.0, int(cells.sum()))
+    interior = nm._interior_pixels(image.shape, PX, GEOMS[0], nm.INTERIOR_FRACTION)
+    assert np.median(image[interior]) > 20.0                                   # the case a median gets wrong
+    levels = nm.site_floor_levels(image, PX, GEOMS)
+    assert set(levels) == set(range(16)) and all(v == pytest.approx(10.0) for v in levels.values())
+    background = float(np.median(list(levels.values())))
+    by = {r.index: r for r in nm.site_fluorescence(image, PX, GEOMS, background=background)}
+    ys, xs = interior
+    assert by[0].background == 10.0
+    assert by[0].integrated == pytest.approx(float((image[ys, xs] - 10.0).sum()), rel=1e-9)
+    assert all(r.integrated is None and r.background is None
+               for r in nm.site_fluorescence(None, PX, GEOMS, background=10.0))
+    no_background = nm.site_fluorescence(image, PX, GEOMS, background=None)
+    assert all(r.background is None and r.integrated is None for r in no_background)
 
 
 # ── C8 ──────────────────────────────────────────────────────────────────────
@@ -379,16 +421,17 @@ def test_a_nan_pixel_in_the_interior_leaves_fluorescence_undefined_for_that_site
     image = np.full((190, 190), 10.0)
     x, y = CENTRES[3]
     image[int(y), int(x)] = np.nan
-    by = {r.index: r for r in nm.site_fluorescence(image, PX, GEOMS, [0, 1, 2])}
+    by = {r.index: r for r in nm.site_fluorescence(image, PX, GEOMS, background=10.0)}
     assert by[3].integrated is None and by[3].mean_minus_background is None
     assert by[4].integrated == pytest.approx(0.0) and by[4].background == 10.0
+    assert 3 not in nm.site_floor_levels(image, PX, GEOMS) and 4 in nm.site_floor_levels(image, PX, GEOMS)
 
 
 def test_a_site_mostly_off_the_image_is_not_measured():
     edge = [SiteGeometry(0, (0.5, 0.5), 10.0, FITTED), SiteGeometry(1, (95.0, 95.0), 10.0, FITTED)]
     rim = np.ones((190, 190))
     assert nm.site_confluence(rim, PX, edge, 0.1) == [None, 0.0]
-    fl = nm.site_fluorescence(np.full((190, 190), 5.0), PX, edge, [1])
+    fl = nm.site_fluorescence(np.full((190, 190), 5.0), PX, edge, background=5.0)
     assert fl[0].integrated is None and fl[1].integrated == pytest.approx(0.0)
 
 

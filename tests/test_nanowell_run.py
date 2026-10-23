@@ -201,8 +201,8 @@ def test_drift_is_measured_against_the_earliest_timepoint_in_time_not_the_first_
     assert late["drift_vs_earliest"] == pytest.approx(np.log(3.0))
     assert [n for n in blocks["48h"]["notes"] if n.startswith("The empty-nanowell template departs")] == [
         "The empty-nanowell template departs from the earliest timepoint's (0h): its floor against the surround "
-        "is 3.00x the earliest's (beyond a factor of two). Most nanowells here may hold cells, so the template may "
-        "be cell-coloured and this timepoint's counts and confluence biased"]
+        "is 3.00x the earliest's (beyond a factor of two). Cells may now cover most of most nanowells' floor, so the "
+        "template may be cell-coloured and this timepoint's counts and confluence biased"]
     assert blocks["48h"]["notes"][0] == "kept note"
     assert fine["drift_vs_earliest"] == pytest.approx(np.log(1.2)) and "suspect" not in fine
     assert "drift_vs_earliest" not in blocks["24h"]["template"] and "earliest_timepoint" not in blocks["0h"]["template"]

@@ -3,21 +3,33 @@
 Qt-free; numpy, scipy and scikit-image only. Phase contrast is always there and
 is the primary readout (tracker §3.6). Every nanowell in a well is the same molded
 shape, so the phase halo of its rim and the illumination inside it are nearly
-identical from site to site; dividing each site by the well's empty-nanowell
-template leaves cells on a flat floor instead of beside a bright ring, which is
-the main source of false cells along a rim.
+identical from site to site; dividing each site by the well's template of an
+empty nanowell leaves cells on a flat floor instead of beside a bright ring, which
+is the main source of false cells along a rim.
+
+**Nothing here needs an empty nanowell to exist** (tracker L1). A plate seeded at
+twenty cells per nanowell has none, and every quantity that was once read from
+"the empty ones" is read instead from the level the pixels *crowd around*
+(:func:`modal_level`): cells sit in different places in different nanowells and
+scatter on both sides of the floor's brightness, while the bare floor is one
+tight level, so the densest window of values is the floor's for as long as bare
+floor is the largest single population — it need not be the majority.
 
 The order of work:
 
-1. :func:`build_template` takes sub-pixel-aligned crops of the visible sites and
-   forms the template from the least-textured quarter (the empty ones), recording
-   where it came from; with too few such sites it falls back to the well's earliest
+1. :func:`build_template` takes sub-pixel-aligned crops of the visible sites, each
+   levelled by its own floor and surround (:func:`level_crops`), and forms the
+   template pixel by pixel from the level the crops crowd around
+   (:func:`modal_stack`); with too few crops it falls back to the well's earliest
    template and says so.
-2. :func:`rim_suppress` divides every site's pixels by the template and sets
-   everything outside the sites flat.
-3. :func:`texture_threshold` and :func:`site_confluence` say what fraction of a
-   site's interior holds cells, with no segmentation, from texture against the
-   empty sites' own texture.
+2. :func:`site_level` brings each site to the template's levels: a gain from its
+   floor-to-surround contrast (its floor is its modal level), the median over its
+   neighbours on the same tile (:func:`neighbourhood_median`), and an offset from
+   its own surround; :func:`rim_suppress` divides every site's pixels by the
+   template and sets everything outside the sites flat.
+3. :func:`threshold_from_departures` and :func:`site_confluence` say what fraction
+   of a site's interior holds cells, with no segmentation, from texture against the
+   bare floor's own texture, measured over every site with the cells clipped away.
 4. :func:`count_cells` keeps the cells a segmenter found whose centroid lies in an
    **owned** site's interior, so that a cell in the overlap of two tiles is counted
    once. The segmenter is passed in (production passes Cellpose's label-free path,
@@ -25,8 +37,8 @@ The order of work:
 5. :func:`area_estimate` stores a foreground-area count beside the segmented one and
    flags when they disagree: a clump segmented as one cell undercounts silently.
 6. :func:`cell_table` is the per-cell record with the address and the well-frame
-   position; :func:`site_fluorescence` the per-site intensity over the empty-site
-   background; :func:`site_state` the per-site state of tracker §3.5, in which an
+   position; :func:`site_fluorescence` the per-site intensity over the floor's
+   background (:func:`site_floor_levels`); :func:`site_state` the per-site state of tracker §3.5, in which an
    empty site (a count of zero) and an occluded one (no count) cannot be confused.
 
 Positions in micrometres are in the frame where pixel ``i`` covers
@@ -44,11 +56,15 @@ import numpy as np
 INTERIOR_FRACTION = 0.9
 #: The rim-suppressed tile is written over this multiple of the site radius (the rim itself is divided out).
 SUPPRESSION_RADIUS = 1.05
-#: The share of visible sites, least textured first, whose crops make the template.
-TEMPLATE_QUARTER = 0.25
-#: Fewer sites than this in that share and the earliest template is used instead.
+#: The share of a set of values the modal level is read over (:func:`modal_level`): the narrowest window holding
+#: this share of them. Small enough that bare floor need only be the largest population, not the majority.
+MODAL_SHARE = 0.25
+#: Fewer usable crops than this and the earliest template is used instead.
 MIN_TEMPLATE_SITES = 8
-#: Texture is called cell when it exceeds the empty sites' by this many robust standard deviations.
+#: At most this many crops make a template, taken evenly through the well (memory: a crop of a 125 um nanowell at
+#: 0.69 um per pixel is 247 px square, and every crop is held, sorted, at once).
+TEMPLATE_MAX_CROPS = 400
+#: Texture is called cell when it exceeds the bare floor's by this many robust standard deviations.
 TEXTURE_SIGMAS = 5.0
 #: The two counts disagree when they differ by more than this share of the larger, and by at least one cell.
 COUNT_DISAGREEMENT = 0.3
@@ -59,25 +75,28 @@ TEMPLATE_HEADROOM = 1.3
 #: nanowell's bottom) and the surround beyond the other (the lattice between nanowells, which never holds cells).
 FLOOR_RADIUS = 0.6
 SURROUND_RADIUS = 1.2
-#: The template's surround must differ from its floor by this share of the surround for a tile's offset to be
-#: measurable from its empty nanowells: two equal levels fix a scale but say nothing about an offset.
+#: The template's surround must differ from its floor by this share of the surround for an offset to be measurable
+#: from a site's floor and surround: two equal levels fix a scale but say nothing about an offset.
 MIN_LEVEL_CONTRAST = 0.05
 #: The version of how a timepoint is measured: rim suppression, the template, the texture threshold, confluence and
 #: counts. It is recorded on every grid record and in ``pipeline_info.json`` (``nanowell_task``), and reuse — an
 #: incremental run's kept timepoints, a resume checkpoint, Merge Plates — refuses to mix two. Raise it whenever a change
-#: here moves a measured number. 2: each site is brought to the template's levels before it is divided by it (a gain
-#: from its own surround, an offset per tile from its empty nanowells), the template is built from crops normalised by
-#: their own surround, and one texture threshold is taken per timepoint from every tile's empty nanowells. 3: every
-#: site is fitted, owned and measured at the plate's own nanowell diameter, measured on the image, rather than the
-#: format's whenever the two were within 25 % (``nanowell_run._tile_diameter``; nanowell tracker F2-F4).
-MEASURE_VERSION = 3
+#: here moves a measured number. 2: each site is brought to the template's levels before it is divided by it, and one
+#: texture threshold is taken per timepoint. 3: every site is fitted, owned and measured at the plate's own nanowell
+#: diameter, measured on the image (``nanowell_run._tile_diameter``; nanowell tracker F2-F4). 4: nothing is read from
+#: empty nanowells (tracker L1): the template is each pixel's modal level over every crop, a site's floor is its modal
+#: level, its gain is its floor-to-surround contrast over its same-tile neighbours and its offset comes from its own
+#: surround (one offset per tile could not follow light added unevenly across a well), the texture threshold is the
+#: floor's texture over every site with the cells clipped away, and the fluorescence background is each tile's
+#: floor level.
+MEASURE_VERSION = 4
 #: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
 MIN_TEXTURE_THRESHOLD = 0.02
 #: A timepoint's template whose floor-to-surround ratio (:func:`floor_ratio`) has moved by more than a factor of two
-#: from the earliest timepoint's is flagged (tracker C12). Measured as ``|ln|`` on rendered 40-site wells: 0.012 or
-#: less up to 34 loaded sites, 1.12 or more from 35, where the least-textured quarter is no longer empty; a 1.6x
-#: exposure change 0.002; noise up to 0.15 at most 0.009; a Gaussian defocus of 2.5 px (a fifth of the radius)
-#: 0.17 and of 4 px 0.41 — below the limit, though a defocus that severe is not a measurable timepoint anyway.
+#: from the earliest timepoint's is flagged (tracker C12): the template has taken on the cells' colour, which happens
+#: once cells, not bare floor, are what most crops show at most pixels (a confluent timepoint). Measured with the
+#: least-textured-quarter template this replaced: a 1.6x exposure change 0.002; noise up to 0.15 at most 0.009; a
+#: Gaussian defocus of 2.5 px (a fifth of the radius) 0.17 and of 4 px 0.41.
 TEMPLATE_DRIFT_LIMIT = math.log(2.0)
 
 EMPTY = "empty"
@@ -158,91 +177,103 @@ def _disk(half: int, radius: float) -> np.ndarray:
 
 @dataclass(frozen=True)
 class Template:
-    array: np.ndarray                   # (2h+1, 2h+1), the median empty crop, site-centred
+    array: np.ndarray                   # (2h+1, 2h+1), an empty nanowell, site-centred
     half: int
     source: str                         # SOURCE_OWN, SOURCE_EARLIEST or SOURCE_OWN_SPARSE
-    n_sites: int                        # crops the median was taken over
-    candidates: int                     # visible sites it was chosen from
-    texture_cut: float | None           # the largest residual texture among the sites used
-    used: tuple[int, ...] = ()          # which of the crops passed in the median was taken over
+    n_sites: int                        # crops the template was taken over
+    candidates: int                     # usable crops it was chosen from
+    texture_cut: float | None           # kept for templates saved before tracker L1; None for one built since
+    used: tuple[int, ...] = ()          # which of the crops passed in it was taken over
 
 
-def _azimuthal_texture(crops, half: int, radius: float) -> np.ndarray:
-    """Per crop, the RMS departure inside the disk from that crop's own radial mean.
+def modal_level(values, share: float = MODAL_SHARE) -> float:
+    """The level *values* crowd around: the median of the narrowest window holding *share* of them (a "shorth").
 
-    An empty nanowell is round, so it is its own radial average whatever fraction of the other
-    sites hold cells; a cell off the centre is a departure from it. Needs no reference, which is
-    why it can pick the empty sites when most of them are loaded.
+    A nanowell's bare floor is one tight level; cells add values on both sides of it, at different pixels in
+    different nanowells. So the densest window sits on the floor for as long as bare floor is the largest single
+    population — a median needs it to be the majority, which a nanowell holding twenty cells is not. Non-finite
+    values are ignored; NaN when none is left. Ties (quantised camera counts) take the lowest window.
     """
-    y, x = np.mgrid[-half:half + 1, -half:half + 1]
-    ring = np.rint(np.hypot(x, y)).astype(int)
-    disk = np.hypot(x, y) <= radius
-    residual = np.zeros(crops.shape[0])
-    for k in range(int(ring[disk].max()) + 1):
-        sel = disk & (ring == k)
-        if not sel.any():
+    v = np.asarray(values, dtype=np.float64).ravel()
+    v = np.sort(v[np.isfinite(v)])
+    n = len(v)
+    if n == 0:
+        return math.nan
+    m = max(int(math.ceil(share * n)), 1)
+    if m >= n:
+        return float(np.median(v))
+    start = int(np.argmin(v[m - 1:] - v[:n - m + 1]))
+    return float(np.median(v[start:start + m]))
+
+
+def modal_stack(stack, share: float = MODAL_SHARE, *, min_values: int = 1) -> np.ndarray:
+    """:func:`modal_level` at every pixel of a ``(n, h, w)`` stack, over the finite values there; NaN at a pixel with
+    fewer than *min_values* of them."""
+    stack = np.asarray(stack, dtype=np.float64)
+    ordered = np.sort(stack, axis=0)                     # NaN sorts last
+    valid = np.isfinite(stack).sum(axis=0)
+    out = np.full(stack.shape[1:], np.nan)
+    for n in np.unique(valid):
+        n = int(n)
+        if n < max(min_values, 1):
             continue
-        values = crops[:, sel]
-        residual += ((values - values.mean(axis=1, keepdims=True)) ** 2).sum(axis=1)
-    return np.sqrt(residual / disk.sum())
+        where = valid == n
+        values = ordered[:n, where]                      # (n, k)
+        m = max(int(math.ceil(share * n)), 1)
+        if m >= n:
+            out[where] = np.median(values, axis=0)
+            continue
+        start = np.argmin(values[m - 1:] - values[:n - m + 1], axis=0)
+        window = np.take_along_axis(values, start[None, :] + np.arange(m)[:, None], axis=0)
+        out[where] = np.median(window, axis=0)
+    return out
 
 
 def as_fallback(earliest: Template | None) -> Template | None:
     """*earliest* as this timepoint's template: the same pixels, ``source="earliest"`` and no ``used`` crops.
 
     Handing back the earliest template object unchanged left it saying ``own`` with the earliest timepoint's crop
-    indices, so the caller read them as this timepoint's empty nanowells — an ``IndexError`` when there were
-    fewer crops here, and the wrong nanowells silently otherwise (found with tracker C16).
+    indices, so the caller read them as this timepoint's — an ``IndexError`` when there were fewer crops here, and
+    the wrong nanowells silently otherwise (found with tracker C16).
     """
     from dataclasses import replace
 
     return None if earliest is None else replace(earliest, source=SOURCE_EARLIEST, used=())
 
 
-def build_template(crops, *, interior_radius_px: float, quarter: float = TEMPLATE_QUARTER,
-                   min_sites: int = MIN_TEMPLATE_SITES, earliest: Template | None = None) -> Template | None:
-    """The empty-nanowell template: the median of the least-textured quarter of the visible crops.
+def build_template(crops, *, interior_radius_px: float, min_sites: int = MIN_TEMPLATE_SITES,
+                   earliest: Template | None = None, max_crops: int = TEMPLATE_MAX_CROPS) -> Template | None:
+    """The empty-nanowell template: each pixel's modal level (:func:`modal_stack`) over every usable crop.
 
-    *crops* are from :func:`site_crops` for the sites that are visible and imaged (the caller
-    decides which; a site with NaN anywhere in the disk of *interior_radius_px* is skipped here,
-    so pass ``SUPPRESSION_RADIUS`` times the site radius: the template must cover what
-    :func:`rim_suppress` divides). Texture is the residual
-    departure inside the disk from the crop's own radial mean (reference-free, so it picks the
-    empty sites even when most are loaded), refined by a second pass against the template those
-    sites make; a site holding cells stands out and is left out. With fewer than
-    *min_sites* in the quarter (a confluent late timepoint, or the small format at high loading)
-    *earliest* is returned as it stands, ``source="earliest"``, and nothing is measured from this
-    timepoint's own crops; without one the quarter is used anyway and marked ``own_sparse``.
-    ``None`` when no crop is usable at all. The template is in site-centred coordinates, so it stays
-    valid after the plate is put back and the lattice has moved.
+    *crops* are levelled crops (:func:`level_crops`) of the sites that are visible and imaged (the caller decides
+    which); a crop with NaN anywhere in the disk of *interior_radius_px* is skipped here, so pass
+    ``SUPPRESSION_RADIUS`` times the site radius: the template must cover what :func:`rim_suppress` divides. No crop
+    has to be empty: at each pixel the crops showing bare floor agree and the ones showing a cell scatter, so the
+    densest window of values is the floor's as long as cells do not sit at the same place in most nanowells. Up to
+    *max_crops* crops are used, taken evenly through the list. With fewer than *min_sites* usable crops (most of the
+    well clipped or occluded) *earliest* is returned as it stands, ``source="earliest"``; without one the crops are
+    used anyway and marked ``own_sparse``. ``None`` when no crop is usable at all. The template is in site-centred
+    coordinates, so it stays valid after the plate is put back and the lattice has moved.
     """
     crops = np.asarray(crops, dtype=np.float64)
     if crops.ndim != 3 or len(crops) == 0:
         return as_fallback(earliest)
     half = crops.shape[1] // 2
     disk = _disk(half, interior_radius_px)
-    usable = ~np.isnan(crops[:, disk]).any(axis=1)
-    positions = np.flatnonzero(usable)
-    crops = crops[usable]
-    candidates = len(crops)
+    positions = np.flatnonzero(~np.isnan(crops[:, disk]).any(axis=1))
+    candidates = len(positions)
     if candidates == 0:
         return as_fallback(earliest)
-    texture = _azimuthal_texture(crops, half, interior_radius_px)
-    take = max(int(math.floor(quarter * candidates)), 1)
-    first = np.argsort(texture, kind="stable")[:take]
-    # Second pass: against the template those sites make, which a loaded majority cannot move.
-    reference = np.median(crops[first], axis=0)
-    texture = np.sqrt(np.mean((crops[:, disk] - reference[disk]) ** 2, axis=1))
-    take = max(int(math.floor(quarter * candidates)), 1)
-    order = np.argsort(texture, kind="stable")[:take]
-    if take < min_sites:
+    if candidates < min_sites:
         if earliest is not None:
             return as_fallback(earliest)
         source = SOURCE_OWN_SPARSE
     else:
         source = SOURCE_OWN
-    return Template(np.median(crops[order], axis=0), half, source, take, candidates, float(texture[order].max()),
-                    tuple(int(positions[k]) for k in sorted(order)))
+    if candidates > max_crops:
+        positions = positions[np.unique(np.linspace(0, candidates - 1, max_crops).round().astype(int))]
+    array = modal_stack(crops[positions], min_values=min(min_sites, len(positions)))
+    return Template(array, half, source, len(positions), candidates, None, tuple(int(k) for k in positions))
 
 
 def save_template(path, template: Template, timepoint: str) -> None:
@@ -300,9 +331,13 @@ def floor_ratio(template: Template) -> float | None:
 
 
 def crop_levels(crops, half: int) -> tuple[np.ndarray, np.ndarray]:
-    """Per crop, ``(floor, surround)``: the median inside ``FLOOR_RADIUS`` of the site radius and the median beyond
-    ``SURROUND_RADIUS`` (the crop's corners), NaN where a region has no number. The crop's half-width carries 30 %
-    headroom over 1.05 site radii, so the site radius is the half-width over 1.365."""
+    """Per crop, ``(floor, surround)``: the modal level (:func:`modal_level`) inside ``FLOOR_RADIUS`` of the site
+    radius and the median beyond ``SURROUND_RADIUS`` (the crop's corners), NaN where a region has no number.
+
+    The floor is the modal level, not the median, because a loaded nanowell's floor is mostly cells' pixels at
+    twenty cells to a nanowell, and its median is then the cells' level; the surround is the lattice between
+    nanowells, which holds no cells, so its median is its level. The crop's half-width carries 30 % headroom over
+    1.05 site radii, so the site radius is the half-width over 1.365."""
     crops = np.asarray(crops, dtype=np.float64).reshape(-1, 2 * half + 1, 2 * half + 1)
     yy, xx = np.mgrid[-half:half + 1, -half:half + 1]
     r = np.hypot(xx, yy)
@@ -312,16 +347,16 @@ def crop_levels(crops, half: int) -> tuple[np.ndarray, np.ndarray]:
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)                # an all-NaN region is a NaN level, by design
-        return np.nanmedian(floor, axis=1), np.nanmedian(surround, axis=1)
+        return np.array([modal_level(f) for f in floor]), np.nanmedian(surround, axis=1)
 
 
 def level_crops(crops, half: int) -> np.ndarray:
     """*crops* mapped onto one shared floor and surround: each crop's own floor to the crops' median floor-to-surround
     ratio and its surround to 1, so neither a tile's gain nor its offset changes how a crop compares with another.
 
-    Texture is then a property of the nanowell alone, which is what lets the least-textured quarter be chosen across
-    tiles of different brightness and offset (:func:`build_template`); a loaded crop's floor is not a floor, but its
-    texture leaves it out of that quarter anyway. Where the floor and surround are too alike to fix both
+    The template is then taken over crops that agree whatever tile they came from (:func:`build_template`); a
+    crop's floor is its modal level, the bare floor's even when cells cover much of it. Where the floor and surround
+    are too alike to fix both
     (``MIN_LEVEL_CONTRAST``), and for a crop whose levels are not numbers, each crop is scaled by its surround
     only. A crop with no surround on the image is NaN, and :func:`build_template` skips it.
     """
@@ -341,49 +376,77 @@ def level_crops(crops, half: int) -> np.ndarray:
     return out
 
 
-@dataclass(frozen=True)
-class TileOffsets:
-    """Each tile's additive offset, from its empty nanowells (:func:`tile_offsets`)."""
-    offsets: dict                       # tile -> offset
-    fallback: tuple                     # tiles with no usable empty nanowell, given the well-wide offset
-    identifiable: bool                  # False: the template's floor and surround are too alike to fix an offset
-
-
-def tile_offsets(empty_levels: dict, template: Template, tiles) -> TileOffsets:
-    """The additive offset of every tile in *tiles*, from the ``(floor, surround)`` of its empty nanowells.
-
-    An empty nanowell on a tile shows the template's floor ``F`` and surround ``S`` as ``g * F + o`` and
-    ``g * S + o``: two equations, so each gives its own gain ``g`` and the tile's offset ``o``, and the tile takes
-    the median offset over its empty nanowells. A tile with none takes the median over every tile's, and is named in
-    ``fallback``. When the template's floor and surround differ by less than ``MIN_LEVEL_CONTRAST`` of the surround
-    the offset cannot be told from a gain, and every tile's is 0 (a scale correction only).
-    """
+def template_levels(template: Template) -> tuple[float, float]:
+    """The template's own ``(floor, surround)``: what every site is brought to."""
     floors, surrounds = crop_levels(np.asarray(template.array, dtype=np.float64)[None], template.half)
-    f_t, s_t = float(floors[0]), float(surrounds[0])
-    tiles = list(tiles)
-    if not (math.isfinite(f_t) and math.isfinite(s_t)) or s_t <= 0 or abs(s_t - f_t) < MIN_LEVEL_CONTRAST * s_t:
-        return TileOffsets({t: 0.0 for t in tiles}, (), False)
-    own = {}
-    for tile, levels in empty_levels.items():
-        values = []
-        for floor, surround in levels:
-            if not (math.isfinite(floor) and math.isfinite(surround)):
-                continue
-            gain = (surround - floor) / (s_t - f_t)
-            if gain > 0:
-                values.append(surround - gain * s_t)
-        if values:
-            own[tile] = float(np.median(values))
-    if not own:
-        return TileOffsets({t: 0.0 for t in tiles}, tuple(sorted(tiles)), True)
-    pooled = float(np.median(list(own.values())))
-    return TileOffsets({t: own.get(t, pooled) for t in tiles}, tuple(sorted(t for t in tiles if t not in own)), True)
+    return float(floors[0]), float(surrounds[0])
+
+
+def offset_identifiable(template: Template) -> bool:
+    """Whether a site's floor and surround can tell an offset from a gain: the template's two levels must differ by
+    ``MIN_LEVEL_CONTRAST`` of its surround. Two equal levels fix a scale and say nothing about an offset."""
+    f_t, s_t = template_levels(template)
+    return math.isfinite(f_t) and math.isfinite(s_t) and s_t > 0 and abs(s_t - f_t) >= MIN_LEVEL_CONTRAST * s_t
+
+
+def site_contrast(floor: float, surround: float) -> float | None:
+    """A site's surround minus its floor: the template's contrast through the site's gain alone, since light added
+    to both cancels. The floor is the site's modal level (:func:`crop_levels`), the bare floor's whether or not the
+    nanowell holds cells; ``None`` when either level is not a number."""
+    if not (math.isfinite(floor) and math.isfinite(surround)):
+        return None
+    return float(surround - floor)
+
+
+def neighbourhood_median(centres_um, values, radius_um: float, groups=None, *, min_neighbours: int = 3) -> np.ndarray:
+    """Each site's value as the median of the finite values within *radius_um* of it (its own included), counting
+    only sites of its own group (its tile: one exposure, one image) when *groups* is given.
+
+    A site with fewer than *min_neighbours* such values takes the median of its group's; NaN where its group has
+    none. One nanowell can mislead — one whose floor is almost all cells has a modal level that is the cells' — but
+    the light a tile was taken with changes over many nanowells, so the median over the neighbourhood follows the
+    light and outvotes the odd one."""
+    from scipy.spatial import cKDTree
+
+    centres = np.asarray(centres_um, dtype=np.float64).reshape(-1, 2)
+    values = np.asarray(values, dtype=np.float64)
+    groups = np.zeros(len(values), dtype=int) if groups is None else np.asarray(list(groups), dtype=object)
+    out = np.full(len(values), np.nan)
+    for group in dict.fromkeys(groups.tolist()):
+        members = np.flatnonzero(groups == group)
+        known = members[np.isfinite(values[members])]
+        if not len(known):
+            continue
+        overall = float(np.median(values[known]))
+        tree = cKDTree(centres[known])
+        for k, near in zip(members, tree.query_ball_point(centres[members], radius_um)):
+            out[k] = float(np.median(values[known[near]])) if len(near) >= min_neighbours else overall
+    return out
+
+
+def site_level(surround: float, contrast: float, template: Template) -> tuple[float, float] | None:
+    """``(offset, gain)`` bringing a site to the template's levels, from its own *surround* and a floor-to-surround
+    *contrast* (its own, or its neighbourhood's: :func:`neighbourhood_median`); ``None`` when they give no positive
+    gain or the template cannot tell an offset from a gain (:func:`offset_identifiable`).
+
+    A site shows the template's floor ``F`` and surround ``S`` as ``g * F + o`` and ``g * S + o``. The contrast
+    ``g * (S - F)`` gives the gain whatever light was added, and the surround then gives the offset. The gain is
+    not taken from the surround after subtracting an offset: the lattice is dark, so an offset a few hundredths
+    wrong made the gain tens of per cent wrong and flattened every cell under added light (tracker L1, measured on
+    a rendered well with glare toward its centre)."""
+    f_t, s_t = template_levels(template)
+    if not all(math.isfinite(v) for v in (surround, contrast, f_t, s_t)) or abs(s_t - f_t) < MIN_LEVEL_CONTRAST * s_t:
+        return None
+    gain = contrast / (s_t - f_t)
+    if not (math.isfinite(gain) and gain > 0):
+        return None
+    return float(surround - gain * s_t), float(gain)
 
 
 def site_gain(surround: float, offset: float, template: Template) -> float | None:
-    """The gain that brings a site whose surround reads *surround*, on a tile with *offset*, to the template's
-    surround; ``None`` when it is not a positive number (no surround on the image, or an offset at or above it)."""
-    s_t = float(crop_levels(np.asarray(template.array, dtype=np.float64)[None], template.half)[1][0])
+    """The gain that brings a site whose surround reads *surround*, at *offset*, to the template's surround;
+    ``None`` when it is not a positive number (no surround on the image, or an offset at or above it)."""
+    s_t = template_levels(template)[1]
     if not (math.isfinite(surround) and math.isfinite(s_t)) or s_t <= 0:
         return None
     gain = (surround - offset) / s_t
@@ -509,44 +572,74 @@ def interior_imaged(shape, pixel_size_um: float, g, fraction: float = INTERIOR_F
     return min(len(_interior_pixels(shape, pixel_size_um, g, fraction)[0]) / nominal, 1.0) if nominal > 0 else 0.0
 
 
-def texture_threshold(rim_image, pixel_size_um: float, empty_geometries, *, sigmas: float = TEXTURE_SIGMAS,
+def texture_threshold(rim_image, pixel_size_um: float, geometries, *, sigmas: float = TEXTURE_SIGMAS,
                       fraction: float = INTERIOR_FRACTION) -> float | None:
-    """How much departure from the template is texture an empty nanowell shows by itself.
-
-    The departure (the smoothed absolute difference of the rim-suppressed image from 1) is
-    collected over the interiors of the sites known to be empty; the threshold is its median plus
-    *sigmas* robust standard deviations (1.4826 times the median absolute deviation), never under
-    ``MIN_TEXTURE_THRESHOLD``. Empty sites with a non-finite pixel in the interior are not used. ``None``
-    without any usable empty site: there is then nothing to call texture against.
-    """
-    return threshold_from_departures(empty_departures(rim_image, pixel_size_um, empty_geometries, fraction=fraction),
-                                     sigmas=sigmas)
+    """How much departure from the template is texture the bare floor shows by itself, over *geometries*' interiors
+    on one rim-suppressed tile (:func:`site_departures`, :func:`threshold_from_departures`). ``None`` without any
+    usable site: there is then nothing to call texture against."""
+    return threshold_from_departures(site_departures(rim_image, pixel_size_um, geometries, fraction=fraction),
+                                     sigmas=sigmas)[0]
 
 
-def empty_departures(rim_image, pixel_size_um: float, empty_geometries, *,
-                     fraction: float = INTERIOR_FRACTION) -> list[np.ndarray]:
-    """The departure values over the interiors of *empty_geometries* on one rim-suppressed tile, to be pooled across
-    the tiles of a timepoint (:func:`threshold_from_departures`). An empty site with a non-finite pixel in its
-    interior gives nothing: a site with a hole is not a calibration."""
+def site_departures(rim_image, pixel_size_um: float, geometries, *, fraction: float = INTERIOR_FRACTION,
+                    stride: int = 1) -> list[np.ndarray]:
+    """The departure values over the interiors of *geometries* on one rim-suppressed tile, to be pooled across the
+    tiles of a timepoint (:func:`threshold_from_departures`); every *stride*-th pixel of each, to bound the memory a
+    well of a thousand nanowells takes. A site with a non-finite pixel in its interior gives nothing: a site with a
+    hole is not a calibration."""
     departure = _departure(rim_image)
     values = []
-    for g in empty_geometries:
+    for g in geometries:
         if not _all_finite(rim_image, pixel_size_um, g, fraction):
             continue
         ys, xs = _interior_pixels(departure.shape, pixel_size_um, g, fraction)
-        values.append(departure[ys, xs])
+        values.append(departure[ys[::stride], xs[::stride]])
     return values
 
 
-def threshold_from_departures(values, *, sigmas: float = TEXTURE_SIGMAS) -> float | None:
-    """The texture threshold over pooled empty-site departures: their median plus *sigmas* robust standard deviations,
-    never under ``MIN_TEXTURE_THRESHOLD``; ``None`` with no value."""
+#: While the bare floor's texture is being separated from the cells', values beyond this many robust standard deviations
+#: are set aside; the threshold itself is then ``TEXTURE_SIGMAS`` over what is kept. Clipping at five let cells that
+#: covered 40 % of the floor pull the threshold to 1.7x the floor's own; three, from the densest values, to 1.16x.
+CLIP_SIGMAS = 3.0
+#: The most times the kept values are re-chosen (they settle in a handful).
+THRESHOLD_ITERATIONS = 50
+
+
+def threshold_from_departures(values, *, sigmas: float = TEXTURE_SIGMAS) -> tuple[float | None, float | None]:
+    """``(threshold, cell share)`` over pooled interior departures of every site: the bare floor's median plus
+    *sigmas* robust standard deviations, never under ``MIN_TEXTURE_THRESHOLD``; ``(None, None)`` with no value.
+
+    The values are every site's, cells included, and no site is assumed empty (tracker L1). The floor's departures
+    are the densest values near zero, so the search starts from the narrowest window holding a quarter of them
+    (:func:`modal_level`'s window, which begins at the floor) and grows: the values within ``CLIP_SIGMAS`` robust
+    standard deviations of what is kept are kept, until that stops changing. Cells lie further out and are never
+    taken in, so what is kept is the floor's own spread. Measured on a half-normal floor with cells uniform over
+    0.05-0.3 (floor sigma 0.03): 4 % above the floor-only threshold at a cell share of 20 %, 15 % at 40 %, 33 % at
+    50 %, 67 % at 55 % (where starting from every value instead of the densest gives 5.1x); at 60 % the cells' values
+    reach down into the floor's and the threshold is theirs. The *cell share* (the
+    fraction of values above the threshold) is returned for the caller to record; one above a half is noted.
+    """
     values = [v for v in values if len(v)]
     if not values:
-        return None
+        return None, None
     pooled = np.concatenate(values)
-    median = float(np.median(pooled))
-    return max(median + sigmas * 1.4826 * float(np.median(np.abs(pooled - median))), MIN_TEXTURE_THRESHOLD)
+    ordered = np.sort(pooled)
+    n = len(ordered)
+    m = max(int(math.ceil(MODAL_SHARE * n)), 1)
+    start = int(np.argmin(ordered[m - 1:] - ordered[:n - m + 1])) if m < n else 0
+    kept = ordered[:start + m]
+
+    def spread_above(sample, k):
+        median = float(np.median(sample))
+        return median + k * 1.4826 * float(np.median(np.abs(sample - median)))
+
+    for _ in range(THRESHOLD_ITERATIONS):
+        grown = ordered[:int(np.searchsorted(ordered, spread_above(kept, CLIP_SIGMAS), side="right"))]
+        if len(grown) == len(kept) or not len(grown):
+            break
+        kept = grown
+    threshold = max(spread_above(kept, sigmas), MIN_TEXTURE_THRESHOLD)
+    return threshold, float(np.mean(pooled > threshold))
 
 
 def site_confluence(rim_image, pixel_size_um: float, geometries, threshold: float | None, *,
@@ -580,7 +673,8 @@ def cellpose_segmenter(diameter_px: float = 0.0, **options):
     """A segmenter for :func:`segment_tile` that calls Cellpose's label-free path.
 
     Imports ``pipeline.cellpose`` (and so the heavy stack) only when called. ``diameter_px`` is the
-    cell size in pixels (0 lets Cellpose use its model's own scale).
+    cell size in pixels (0 lets Cellpose use its model's own scale); *options* go to
+    ``pipeline.cellpose._segment_cellpose`` (``model_type``: ``nanowell_run.CELLPOSE_MODELS``).
     """
     def segment(image):
         from pipeline.cellpose import _segment_cellpose
@@ -751,36 +845,41 @@ class SiteFluorescence:
     index: int
     integrated: float | None            # sum over the interior minus background x area
     mean_minus_background: float | None
-    background: float | None            # the empty sites' median interior mean
+    background: float | None            # the floor's level the numbers are taken over
 
 
-def site_fluorescence(image, pixel_size_um: float, geometries, empty_indices, *,
-                      fraction: float = INTERIOR_FRACTION, background: float | None = None) -> list[SiteFluorescence]:
-    """Per-site integrated and mean intensity over the interior, minus the empty sites' background.
+def site_floor_levels(image, pixel_size_um: float, geometries, *, fraction: float = INTERIOR_FRACTION) -> dict:
+    """Per site index, the modal level (:func:`modal_level`) of its interior on *image*: the floor's, with or without
+    cells on it. A site under half on the image, or with a non-finite pixel in its interior, is left out."""
+    image = np.asarray(image, dtype=np.float64)
+    out = {}
+    for g in geometries:
+        ys, xs = _interior_pixels(image.shape, pixel_size_um, g, fraction)
+        values = image[ys, xs]
+        if _covered(len(ys), pixel_size_um, g, fraction) and np.isfinite(values).all():
+            out[g.index] = modal_level(values)
+    return out
 
-    Defined wherever at least half the interior is on the image and every pixel of it is a number
-    (``None`` otherwise), with or without a segmentation. The
-    background is the median interior mean of the sites in *empty_indices*. With no image (a
-    timepoint without the channel) every number is ``None``, not zero; with no empty site the
-    background is *background* (the well's, from the other tiles' empty sites, which the caller names in its notes)
-    and, without one, it and everything derived from it are ``None``.
+
+def site_fluorescence(image, pixel_size_um: float, geometries, *, background: float | None,
+                      fraction: float = INTERIOR_FRACTION) -> list[SiteFluorescence]:
+    """Per-site integrated and mean intensity over the interior, minus *background*.
+
+    *background* is the floor's level on this tile: the median of its sites' :func:`site_floor_levels`, from the
+    caller, which needs no empty nanowell (tracker L1). Defined wherever at least half the interior is on the image
+    and every pixel of it is a number (``None`` otherwise), with or without a segmentation. With no image (a
+    timepoint without the channel) every number is ``None``, not zero; with no *background* it and everything
+    derived from it are ``None``.
     """
     if image is None:
         return [SiteFluorescence(g.index, None, None, None) for g in geometries]
     image = np.asarray(image, dtype=np.float64)
-    empty = set(empty_indices)
-    interior = {}
+    out = []
     for g in geometries:
         ys, xs = _interior_pixels(image.shape, pixel_size_um, g, fraction)
         values = image[ys, xs]
         usable = _covered(len(ys), pixel_size_um, g, fraction) and np.isfinite(values).all()
-        interior[g.index] = values if usable else None
-    backgrounds = [float(v.mean()) for i, v in interior.items() if i in empty and v is not None]
-    background = float(np.median(backgrounds)) if backgrounds else background
-    out = []
-    for g in geometries:
-        values = interior[g.index]
-        if values is None or background is None:
+        if not usable or background is None:
             out.append(SiteFluorescence(g.index, None, None, background))
         else:
             out.append(SiteFluorescence(g.index, float(values.sum() - background * len(values)),

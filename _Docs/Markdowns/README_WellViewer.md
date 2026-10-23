@@ -6046,6 +6046,15 @@ The dialog lists what can go, each with its size, and clears what you tick:
   folder. On Windows, an older version also kept Analyze's scratch in
   `C:\Users\<you>\.allwell\scratch`; it is listed here too, unless the
   *Scratch disk* field points at it. Nothing reads them any more.
+- **Analyze run scratch** — unticked to begin with, and marked with a warning.
+  The extracted images and per-field checkpoints Analyze runs keep in the
+  `scratch` folder inside the folder above. It can grow to many gigabytes. A
+  suspended or interrupted run resumes from these files, so clearing them makes
+  that run reprocess those wells from the beginning; results already in your
+  output folders are not affected. Clear asks you to confirm first (Cancel is
+  the default), and refuses while an Analyze run is going. Anything written to
+  in the last hour is skipped, and a *Scratch disk* folder you chose yourself in
+  the Analyze form is never touched.
 - **Row cache of the open dataset** — unticked to begin with. Fast copies of the
   dataset's CSVs, kept in `.aw_parquet` folders beside them. Clearing it frees
   that space but makes the next open of the dataset slower while the copies are

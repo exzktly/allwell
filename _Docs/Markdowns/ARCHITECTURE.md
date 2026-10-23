@@ -5705,6 +5705,18 @@ survey. The areas it lists, how each is measured and how each is cleared are
   folder, offered only when it is not, and does not overlap, the scratch now in
   use or the `ALLWELL_SCRATCH_DIR` override) and the folders in the system temp
   folder with a prefix in `SYSTEM_TEMP_PREFIXES`;
+- unticked by default, the run scratch (`SCRATCH_KEY`): the entries of
+  `util.state_dir.default_scratch_dir()` — the app folder's own `scratch/`, never
+  a *Scratch disk* the user chose — that no live `owner.pid` names and in which
+  nothing has been written within `UNOWNED_GRACE_S`, judged by the newest file
+  anywhere inside (`_newest_mtime`; a folder's own time moves only when its
+  direct entries change, so a run writing deep inside one would otherwise look
+  idle). It is the one area that carries `CacheArea.confirm` (`SCRATCH_WARNING`):
+  a suspended or interrupted run resumes from those checkpoints, so the dialog
+  shows the warning's first sentence in amber under the row, asks the whole of
+  it in a `QMessageBox.warning` whose default is Cancel (`StorageDialog._confirm`)
+  before clearing, and refuses outright while the shell's `run_active` callable
+  — the Analyze pane's `_running` — says a run is going;
 - unticked by default, the open dataset's `.aw_parquet` row caches, its own and
   its `out/` folder's (`ROW_CACHE_DIRNAME`, pinned to
   `review.data.parquet_cache.CACHE_DIRNAME` by a test, since `core/` may not
@@ -5723,8 +5735,8 @@ measuring, and removed as the link itself. Folders go through `shutil.rmtree`
 with an error handler that clears a read-only flag and retries once, and
 otherwise records the path in `ClearResult.failed` (a folder left only because a
 file inside it was is not listed a second time); the freed total is the size
-before less what remains. The pipeline's scratch and scan cache are never
-listed. `tests/test_local_storage.py` holds every rule, including what must
+before less what remains. The scan cache is never listed, and the scratch only
+as above. `tests/test_local_storage.py` holds every rule, including what must
 survive a clear, and `tests/test_storage_button_app.py` drives the real button.
 
 A scope names every storage **domain** it owns, and its `clear` is responsible

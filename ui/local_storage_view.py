@@ -20,7 +20,8 @@ from pathlib import Path
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout,
+    QWidget,
 )
 
 from core import local_storage as ls
@@ -42,13 +43,20 @@ class StorageDialog(QDialog):
     A plain path is accepted too. Nothing in use is offered for deletion; that
     rule is ``core.local_storage``'s, and it is applied again when Clear is
     pressed (``clear_now``).
+
+    An area carrying a ``confirm`` warning — the run scratch — shows it in
+    amber under its row and is cleared only once the user accepts it
+    (:meth:`_confirm`). *run_active* says whether an Analyze run is going; while
+    it is, such an area is not cleared at all, since the run is writing there.
     """
 
     def __init__(self, parent=None, *,
-                 dataset_dir: Callable[[], Path | None] | Path | None = None) -> None:
+                 dataset_dir: Callable[[], Path | None] | Path | None = None,
+                 run_active: Callable[[], bool] = lambda: False) -> None:
         super().__init__(parent)
         self.setWindowTitle("Storage")
         self._dataset_fn = dataset_dir if callable(dataset_dir) else (lambda: dataset_dir)
+        self._run_active = run_active
         #: The dataset folder the rows on screen describe.
         self._listed_dataset: Path | None = None
         #: The last clear's outcome, for the status line and for tests.
@@ -69,9 +77,8 @@ class StorageDialog(QDialog):
             f"Everything the app keeps on this computer is in "
             f"{gui_state_dir()}. Only the caches and leftovers below are "
             f"cleared here. Your images, CSVs and analysis are never touched, "
-            f"and neither are your settings, remote hosts, queued and "
-            f"suspended runs, the CZI scan cache, or the scratch folder where "
-            f"an Analyze run keeps its working files.",
+            f"and neither are your settings, remote hosts, the queue and the "
+            f"list of suspended runs, or the CZI scan cache.",
             self)
         where.setWordWrap(True)
         layout.addWidget(where)
@@ -149,6 +156,13 @@ class StorageDialog(QDialog):
             detail.setWordWrap(True)
             detail.setContentsMargins(_DETAIL_INDENT, 0, 0, 0)
             rl.addWidget(detail)
+            if area.confirm:
+                # The warning's first sentence; the whole of it is asked on Clear.
+                warn = QLabel(f"⚠ {area.confirm.split('. ')[0]}.", row)
+                warn.setObjectName("Warn")
+                warn.setWordWrap(True)
+                warn.setContentsMargins(_DETAIL_INDENT, 2, 0, 0)
+                rl.addWidget(warn)
             self._rows.addWidget(row)
             self._boxes[area.key] = box
 
@@ -196,11 +210,26 @@ class StorageDialog(QDialog):
                           "Check what is ticked and clear again.")
             self.refresh()
             return
+        risky = [a for a in self._areas if a.key in keys and a.confirm]
+        if risky and self._run_active():
+            self._note = ("An Analyze run is going and is writing to its scratch. "
+                          "Clear it once the run has finished or been stopped.")
+            self._status.setText(self._note)
+            return
+        if risky and not all(self._confirm(a) for a in risky):
+            return
         self._note = ""
         self._set_working(True, "Clearing…")
         self._bridge = run_off_thread(lambda: ls.clear_now(keys, dataset),
                                       on_done=self._on_cleared,
                                       on_failed=self._on_failed)
+
+    def _confirm(self, area: ls.CacheArea) -> bool:
+        """Ask the user to accept *area*'s warning; the safe answer is the default."""
+        answer = QMessageBox.warning(
+            self, f"Clear {area.label.lower()}?", area.confirm,
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+        return answer == QMessageBox.Yes
 
     def _on_cleared(self, result: ls.ClearResult) -> None:
         text = f"Freed {ls.format_bytes(result.freed)}."

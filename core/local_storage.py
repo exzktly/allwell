@@ -1,16 +1,25 @@
 """What the desktop app keeps on this machine, how big it is, and clearing it.
 
 The title bar's storage button (``ui/local_storage_view.py``) is built on this
-module. It knows the app's own working files only — the folder
+module. It knows the app's own working files — the folder
 :func:`util.state_dir.gui_state_dir` names, the app's files in the other places
 :func:`util.state_dir.legacy_gui_paths` and :data:`SYSTEM_TEMP_PREFIXES` cover,
-and the row cache of the dataset that is open — and never what
-runs and the user own, although it shares the folder: the run scratch
-(``scratch/``) and the CZI scan cache (``czi-scans/``) belong to runs,
-including ones that are suspended and will resume from what is there, and the
-records — ``settings.ini``, ``remotes.toml``, ``job_queue.json``,
-``run_index.json``, ``suspended_runs.json`` — are the user's. No area here
-reaches any of them. What the "legacy" area does offer is their old copies that
+and the row cache of the dataset that is open — and the run scratch, which is
+offered on its own terms (below). It never reaches the CZI scan cache
+(``czi-scans/``), which runs read, nor the records — ``settings.ini``,
+``remotes.toml``, ``job_queue.json``, ``run_index.json``,
+``suspended_runs.json`` — which are the user's.
+
+**The run scratch** (``scratch/``, :func:`util.state_dir.default_scratch_dir`)
+is the one area whose loss costs the user something beyond a rebuild: a
+suspended or interrupted Analyze run resumes from the extracted images and
+per-field checkpoints there, and loses that progress if they go. So it is
+offered unticked, with a :attr:`CacheArea.confirm` warning the dialog must have
+the user accept, and the dialog refuses it outright while an Analyze run is
+going. Entries written to within :data:`UNOWNED_GRACE_S` are skipped as in use
+— a run's staging folder gains a checkpoint file per field, so a live one is
+always young. Only the app folder's own scratch is offered: a scratch disk the
+user chose in the Analyze form is their folder, and may hold anything. What the "legacy" area does offer is their old copies that
 nothing reads any more: on Windows the ``~/.allwell/scratch`` an older version
 used (:func:`util.state_dir.legacy_scratch_dir`), and on every platform the
 scan cache left in ``~/.cache/allwell``.
@@ -57,6 +66,7 @@ from util.state_dir import (
     BOOTSTRAP_LOG_GLOB,
     FONT_CACHE_SUBDIR,
     TEMP_SUBDIR,
+    default_scratch_dir,
     gui_state_dir,
     legacy_gui_paths,
 )
@@ -81,6 +91,16 @@ UNOWNED_GRACE_S = 3600.0
 #: so it is not offered. The newest bootstrap log is never offered either.
 LIVE_LOG_GRACE_S = 3 * 3600.0
 
+#: The run scratch's area key, and the warning accepted before it is cleared.
+SCRATCH_KEY = "scratch"
+SCRATCH_WARNING = (
+    "Clearing the Analyze run scratch deletes the extracted images and "
+    "per-field checkpoints that suspended and interrupted runs resume from. "
+    "Those runs will reprocess the affected wells from the beginning, which "
+    "can take hours on a large plate.\n\n"
+    "Results already written to your output folders are not affected. "
+    "This cannot be undone.")
+
 #: Windows ``FILE_ATTRIBUTE_REPARSE_POINT``: set on symbolic links, directory
 #: junctions and mount points alike.
 _REPARSE_POINT = 0x400
@@ -97,6 +117,9 @@ class CacheArea:
     paths: tuple[Path, ...]
     #: Whether the dialog ticks it to begin with.
     default_on: bool = True
+    #: A warning the user must accept before this area is cleared; empty for
+    #: an area whose loss costs only a rebuild.
+    confirm: str = ""
 
 
 @dataclass
@@ -152,6 +175,50 @@ def _working_folders(root: Path, prefixes: Iterable[str] | None, *, now: float) 
         if is_link(entry):
             continue
         if entry.is_dir() and _in_use(entry, now=now):
+            continue
+        out.append(entry)
+    return out
+
+
+def _newest_mtime(path: Path) -> float:
+    """The latest modification time of *path* or anything under it.
+
+    A folder's own time moves only when an entry directly inside it is added or
+    removed, so a run writing deep inside a staging folder can leave the folder
+    itself looking hours old. Links are not entered; an unreadable part counts
+    as just written, so doubt keeps the entry.
+    """
+    try:
+        newest = os.lstat(path).st_mtime
+    except OSError:
+        return float("inf")
+    if is_link(path) or not path.is_dir():
+        return newest
+    for root, dirs, files in os.walk(path, followlinks=False):
+        dirs[:] = [d for d in dirs if not is_link(os.path.join(root, d))]
+        for name in (*dirs, *files):
+            try:
+                newest = max(newest, os.lstat(os.path.join(root, name)).st_mtime)
+            except OSError:
+                return float("inf")
+    return newest
+
+
+def _idle_entries(root: Path, *, now: float) -> list[Path]:
+    """Entries of the run scratch *root* that nothing has written to within
+    :data:`UNOWNED_GRACE_S`, judged by the newest file inside each, and not
+    named by a live ``owner.pid``. Links are never offered."""
+    out: list[Path] = []
+    try:
+        entries = sorted(root.iterdir())
+    except OSError:
+        return out
+    for entry in entries:
+        if is_link(entry):
+            continue
+        if entry.is_dir() and owner_alive(entry):
+            continue
+        if now - _newest_mtime(entry) < UNOWNED_GRACE_S:
             continue
         out.append(entry)
     return out
@@ -235,6 +302,16 @@ def cache_areas(dataset_dir: Path | None = None, *,
             + tuple(_working_folders(Path(tempfile.gettempdir()),
                                      SYSTEM_TEMP_PREFIXES, now=t))),
     ]
+    scratch = default_scratch_dir()
+    areas.append(CacheArea(
+        SCRATCH_KEY, "Analyze run scratch",
+        f"Extracted images and per-field checkpoints Analyze runs keep in "
+        f"{scratch if scratch is not None else 'the app folder'}. A suspended "
+        f"or interrupted run resumes from these; clearing them makes it start "
+        f"those wells over. Anything used in the last hour is skipped, and a "
+        f"scratch disk you chose in the Analyze form is never touched.",
+        tuple(_idle_entries(scratch, now=t)) if scratch is not None else (),
+        default_on=False, confirm=SCRATCH_WARNING))
     if dataset_dir is not None:
         areas.append(CacheArea(
             "rows", f"Row cache of the open dataset ({Path(dataset_dir).name})",

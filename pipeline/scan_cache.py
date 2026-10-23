@@ -51,7 +51,9 @@ from pathlib import Path
 from pipeline import czi_read
 from pipeline.timepoints import TimeScan
 from util.aw_safe import swallowed
-from util.state_dir import SCAN_CACHE_ENV, SCAN_CACHE_OFF, SCAN_CACHE_SUBDIR, gui_state_dir
+from util.state_dir import (
+    SCAN_CACHE_ENV, SCAN_CACHE_OFF, SCAN_CACHE_SUBDIR, candidate_dirs, gui_state_dir, on_the_desktop,
+)
 
 #: Bump when :func:`pipeline.czi_read.read_czi_layout` or
 #: :func:`~pipeline.czi_read.parse_plate_metadata` could produce a different
@@ -94,9 +96,13 @@ def cache_dir() -> "Path | None":
     ``czi-scans`` in the app's folder (:func:`util.state_dir.gui_state_dir`:
     ``~/.allwell`` on macOS, Linux and a remote worker,
     ``%LOCALAPPDATA%\\allwell`` on Windows), beside everything else All-Well
-    keeps on a machine. Earlier versions used ``~/.cache/allwell/czi-scans``;
-    that copy is not carried over — a cache rebuilds — and the storage button
-    offers it for deletion. ``None`` rather than an exception when nothing is
+    keeps on a machine — when this process is the desktop app or one it started
+    (:func:`util.state_dir.on_the_desktop`). Earlier desktop versions used
+    ``~/.cache/allwell/czi-scans``; that copy is not carried over — a cache
+    rebuilds — and the storage button offers it for deletion. Anywhere else,
+    and in particular when the pipeline runs on a remote host, it keeps its
+    previous rule: ``czi-scans`` in the first usable folder of
+    :func:`util.state_dir.candidate_dirs`, ``~/.cache/allwell`` first. ``None`` rather than an exception when nothing is
     writable: a scan that cannot be remembered is a slow scan, not a failed one.
     """
     raw = os.environ.get(_OVERRIDE, "").strip()
@@ -104,7 +110,15 @@ def cache_dir() -> "Path | None":
         return None
     if raw:
         return _usable(Path(raw).expanduser())
-    return _usable(gui_state_dir() / SCAN_CACHE_SUBDIR)
+    if on_the_desktop():
+        return _usable(gui_state_dir() / SCAN_CACHE_SUBDIR)
+    # Off the desktop — on a remote host above all — the rule it had before
+    # the app's folder existed, so nothing there moves.
+    for base in candidate_dirs():
+        found = _usable(base / SCAN_CACHE_SUBDIR)
+        if found is not None:
+            return found
+    return None
 
 
 def _usable(folder: Path) -> "Path | None":

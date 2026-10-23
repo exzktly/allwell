@@ -30,6 +30,11 @@ _boot_diag.boot(f"start pid={__import__('os').getpid()} python={sys.version.spli
 # whether the file exists, in its own log), so a crash log that is not where it
 # is expected can be traced from a file the user can find.
 __import__("os").environ["ALLWELL_BOOT_LOG"] = str(_boot_diag.log_path())
+# Marks this process, and every process it starts on this machine, as the
+# desktop app: only then do the pipeline's scratch and scan cache live in the
+# app's folder. A pipeline on a remote host never sees it and keeps its old
+# folders (util.state_dir.on_the_desktop).
+__import__("os").environ["ALLWELL_DESKTOP"] = "1"
 _boot_diag.boot(f"boot log: {_boot_diag.log_path()}")
 
 _boot_diag.boot("importing PySide6 (Qt DLLs) …")

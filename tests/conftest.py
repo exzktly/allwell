@@ -504,6 +504,25 @@ def _app_files_go_to_a_scratch_directory(_autouse_scratch_root):
         os.environ["ALLWELL_STATE_DIR"] = previous
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _the_suite_runs_as_the_desktop_app():
+    """Every test runs as the desktop app does (``ALLWELL_DESKTOP=1``,
+    ``util.state_dir.on_the_desktop``), from the first test on.
+
+    ``allwell.py`` sets the variable at import, so without this a worker's
+    answer to "where is the default scratch / scan cache" would change part-way
+    through the session, at whichever test first imported the app. A test about
+    the remote-host rules unsets it itself (``tests/test_one_app_folder.py``).
+    """
+    previous = os.environ.get("ALLWELL_DESKTOP")
+    os.environ["ALLWELL_DESKTOP"] = "1"
+    yield
+    if previous is None:
+        os.environ.pop("ALLWELL_DESKTOP", None)
+    else:
+        os.environ["ALLWELL_DESKTOP"] = previous
+
+
 @pytest.fixture(autouse=True)
 def _pipeline_scratch_goes_to_a_scratch_directory(_autouse_scratch_root, monkeypatch):
     """No test extracts a well into the developer's real ``~/.allwell/scratch``.

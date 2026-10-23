@@ -23,13 +23,22 @@ machine outside a dataset folder, in one fixed layout:
 =========================  ======================================================
 
 ``%LOCALAPPDATA%\\allwell`` on Windows — the folder Windows provides for exactly
-this, per-user and never roamed — and ``~/.allwell`` on macOS, Linux and a
-remote worker. Each falls back to the system temp folder when it cannot be
+this, per-user and never roamed — and ``~/.allwell`` on macOS and Linux. Each
+falls back to the system temp folder when it cannot be
 written (Windows tries ``~/.allwell`` first). ``ALLWELL_STATE_DIR``, when set,
 replaces all of that — the test harness points it at a per-worker scratch
 folder so no test writes into the real one. The app's caches are cleared from
 the title bar's storage button (``core.local_storage``); the scratch, the scan
 cache and the four records are never offered there.
+
+**A remote host keeps its own folders.** The scratch and the scan cache follow
+this layout only in the desktop app and the processes it starts on this machine
+(:func:`on_the_desktop`, the ``ALLWELL_DESKTOP`` mark ``allwell.py`` sets). The
+pipeline on a remote host runs the same code without the mark, and resolves
+them exactly as before the app's folder existed — ``~/.allwell/scratch`` (or
+the host's *Remote scratch dir*) and ``~/.cache/allwell/czi-scans`` — so
+nothing on a remote host moves. The records and settings are the desktop's
+alone and never resolved there.
 
 **One folder on every platform.** Earlier versions spread these over four
 trees: the run scratch in ``~/.allwell`` even on Windows, the scan cache in
@@ -107,6 +116,35 @@ def is_windows() -> bool:
 #: Overrides :func:`gui_state_dir` outright when set.
 STATE_DIR_ENV = "ALLWELL_STATE_DIR"
 
+#: Set to ``"1"`` by the desktop app (``allwell.py``) at import, and inherited
+#: by every process it starts on this machine. See :func:`on_the_desktop`.
+DESKTOP_ENV = "ALLWELL_DESKTOP"
+
+
+def on_the_desktop() -> bool:
+    """Whether this process is the desktop app or one it started on this machine.
+
+    Only then do the pipeline's own folders — the run scratch and the CZI scan
+    cache — follow the app's folder. Everywhere else, and above all when the
+    pipeline runs on a **remote host**, they keep the rules they had before the
+    app's folder existed (``~/.allwell/scratch``; ``~/.cache/allwell`` first for
+    the scan cache), so nothing on a remote host moves. The variable does not
+    travel to a remote host: ssh forwards no environment unless configured to,
+    and the remote command names none.
+    """
+    return os.environ.get(DESKTOP_ENV, "").strip() == "1"
+
+
+def candidate_dirs() -> list[Path]:
+    """The folders the CZI scan cache tries off the desktop, in order —
+    ``~/.cache/allwell`` first (``pipeline.scan_cache``)."""
+    out = [Path(os.path.expanduser("~/.cache")) / APP_DIRNAME]
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        out.append(Path(local) / APP_DIRNAME)
+    out.append(Path(tempfile.gettempdir()) / APP_DIRNAME)
+    return out
+
 
 def gui_candidate_dirs() -> list[Path]:
     """The folders :func:`gui_state_dir` tries, in order."""
@@ -150,6 +188,10 @@ def gui_temp_dir() -> Path:
 def default_scratch_dir() -> Path | None:
     """``scratch`` in the app's folder, created; ``None`` when it cannot be made.
 
+    Off the desktop (:func:`on_the_desktop` — a remote host, or the pipeline run
+    by hand), ``~/.allwell/scratch`` exactly as before the app's folder existed:
+    that folder, created, or ``None`` when it cannot be.
+
     The candidates are :func:`gui_candidate_dirs`, in the same order, so the
     scratch follows the app's folder wherever that resolves —
     ``ALLWELL_STATE_DIR`` included — but **not** to the system temp folder. A
@@ -162,6 +204,14 @@ def default_scratch_dir() -> Path | None:
     A home folder that cannot be resolved (``~`` left unexpanded) is skipped
     rather than created relative to the working directory.
     """
+    if not on_the_desktop():
+        try:
+            path = Path.home() / HOME_DIRNAME / SCRATCH_SUBDIR
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+        except (OSError, RuntimeError):
+            # RuntimeError: Path.home() cannot resolve a home folder at all.
+            return None
     temp_root = Path(tempfile.gettempdir()) / APP_DIRNAME
     for d in gui_candidate_dirs():
         if d == temp_root or not d.is_absolute():
@@ -185,6 +235,8 @@ def default_scratch_label() -> str:
     Windows. It names the first candidate — the folder used unless that one
     cannot be written.
     """
+    if not on_the_desktop():
+        return "~/" + (Path(HOME_DIRNAME) / SCRATCH_SUBDIR).as_posix()
     path = gui_candidate_dirs()[0] / SCRATCH_SUBDIR
     if not is_windows():
         try:

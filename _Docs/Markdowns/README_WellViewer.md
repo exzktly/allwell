@@ -5997,6 +5997,9 @@ Earlier versions spread these over several places (`~/.config/allwell`,
 The first time this version starts, your settings, remote hosts, queued jobs
 and suspended runs are moved into the folder above; the old scan cache is not
 moved — it rebuilds as you open plates — and the dialog offers it for deletion.
+Nothing changes on a remote host: a run there keeps its scratch in
+`~/.allwell/scratch` (or the host's *Remote scratch dir*) and its scan cache in
+`~/.cache/allwell`, as before.
 
 The dialog lists what can go, each with its size, and clears what you tick:
 

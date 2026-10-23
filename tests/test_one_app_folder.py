@@ -241,3 +241,59 @@ def test_settings_are_not_carried_over_while_the_state_dir_is_overridden(
     native = _native(tmp_path, monkeypatch, mod, {"phone_text_size": "L"})
     assert mod.app_settings().value("phone_text_size") is None
     assert QSettings(str(native), QSettings.IniFormat).value("phone_text_size") == "L"
+
+
+# ── a remote host keeps its folders ─────────────────────────────────────────
+#
+# The pipeline that runs on a remote host is the same code, with util/ shipped
+# beside it. Only the desktop app (and what it starts on this machine) is marked
+# ALLWELL_DESKTOP=1; without the mark the scratch and the scan cache keep the
+# rules they had before the app's folder existed, so nothing on a remote host
+# moves.
+
+@pytest.fixture
+def remote_host(tmp_path, monkeypatch):
+    """A remote worker: a Linux home folder, no desktop mark, no overrides."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for name in (state_dir.DESKTOP_ENV, state_dir.STATE_DIR_ENV,
+                 state_dir.SCRATCH_DIR_ENV, state_dir.SCAN_CACHE_ENV, "LOCALAPPDATA"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(state_dir, "is_windows", lambda: False)
+    return home
+
+
+def test_on_a_remote_host_the_scan_cache_stays_in_dot_cache(remote_host):
+    from pipeline import scan_cache
+
+    assert scan_cache.cache_dir() == remote_host / ".cache" / "allwell" / "czi-scans"
+    assert not (remote_host / ".allwell" / "czi-scans").exists()
+
+
+def test_on_a_remote_host_the_scratch_stays_in_home_dot_allwell(remote_host, tmp_path,
+                                                                  monkeypatch):
+    """Even where an ``ALLWELL_STATE_DIR`` is set: off the desktop the scratch
+    never followed the app's folder, and still does not."""
+    from pipeline import io as pio
+
+    monkeypatch.setenv(state_dir.STATE_DIR_ENV, str(tmp_path / "elsewhere"))
+    assert pio.scratch_base_for(tmp_path / "out") == remote_host / ".allwell" / "scratch"
+    assert state_dir.default_scratch_label() == "~/.allwell/scratch"
+
+
+def test_the_desktop_mark_is_what_moves_them(remote_host, monkeypatch):
+    """The same layout with the mark set: the desktop's folders. Without this
+    the two tests above could pass because nothing moved anywhere."""
+    from pipeline import scan_cache
+
+    monkeypatch.setenv(state_dir.DESKTOP_ENV, "1")
+    assert scan_cache.cache_dir() == remote_host / ".allwell" / "czi-scans"
+
+
+def test_the_desktop_app_marks_itself_before_anything_runs():
+    """``allwell.py`` sets the mark at import, beside ``ALLWELL_BOOT_LOG``, so
+    the pipeline subprocesses it starts inherit it."""
+    src = (Path(__file__).resolve().parent.parent / "allwell.py").read_text()
+    head = src[: src.index("from PySide6")]
+    assert '__import__("os").environ["ALLWELL_DESKTOP"] = "1"' in head

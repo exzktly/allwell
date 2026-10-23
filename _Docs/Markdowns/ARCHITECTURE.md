@@ -5645,7 +5645,7 @@ running — by the cell pool's start-up sweep and by the storage dialog alike.
 The analysis pipeline's run scratch sits in the same folder, as `scratch/`, on
 every platform: `util.state_dir.default_scratch_dir()` is `scratch` under the
 first of `gui_candidate_dirs()` that can hold it — `%LOCALAPPDATA%\allwell\scratch`
-on Windows, `~/.allwell/scratch` on macOS, Linux and a remote worker — unless
+on Windows, `~/.allwell/scratch` on macOS and Linux — unless
 `ALLWELL_SCRATCH_DIR` says otherwise (§6.5). It skips the system-temp candidate
 the app's folder falls back to, because a run's scratch is gigabytes and the
 temp folder on Linux is often a tmpfs; `pipeline.io.scratch_base_for` and
@@ -5653,10 +5653,25 @@ temp folder on Linux is often a tmpfs; `pipeline.io.scratch_base_for` and
 Being in the app's folder does not make the scratch a cache: no storage-dialog
 area reaches `scratch/`, because a suspended run resumes from its checkpoints.
 The CZI scan cache is `czi-scans/` in the same folder (`pipeline.scan_cache.cache_dir`,
-unless `ALLWELL_SCAN_CACHE` says otherwise), on a remote worker as on the
-desktop; its old copy in `~/.cache/allwell` is not carried over — a cache
-rebuilds — and is offered for deletion instead. No storage-dialog area reaches
-`czi-scans/` or the records either.
+unless `ALLWELL_SCAN_CACHE` says otherwise); its old copy in `~/.cache/allwell`
+is not carried over — a cache rebuilds — and is offered for deletion instead.
+No storage-dialog area reaches `czi-scans/` or the records either.
+
+**A remote host keeps its own folders.** The scratch and the scan cache follow
+the app's folder only in the desktop app and the processes it starts on this
+machine: `allwell.py` sets `ALLWELL_DESKTOP=1` at import, beside
+`ALLWELL_BOOT_LOG`, and `util.state_dir.on_the_desktop()` reads it. The pipeline
+on a remote host runs the same code without the mark — ssh forwards no
+environment unless configured to, and the remote command names none — and
+resolves both exactly as before the app's folder existed:
+`~/.allwell/scratch` (or the host's *Remote scratch dir*) and `czi-scans` in
+the first usable folder of `util.state_dir.candidate_dirs()`, `~/.cache/allwell`
+first. Its log line for an unusable scratch is the same one, word for word.
+`tests/conftest.py` sets the mark for the whole session so no test's answer
+depends on whether an earlier test imported `allwell.py`, and
+`tests/test_one_app_folder.py` unsets it to pin the remote-host rules. The same
+rules apply to the pipeline run by hand from a terminal, which has no mark
+either.
 
 The title bar's `hard-drive` button, beside Help and shown in every mode, opens
 `ui/local_storage_view.StorageDialog`. The shell keeps one per window: a click

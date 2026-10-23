@@ -42,7 +42,9 @@ from skimage.segmentation import find_boundaries
 
 from util.aw_safe import swallow, swallowed
 from util.retry_io import retry_io
-from util.state_dir import SCRATCH_DIR_ENV, default_scratch_dir
+from util.state_dir import (
+    SCRATCH_DIR_ENV, default_scratch_dir, default_scratch_label, on_the_desktop,
+)
 from util.image_exts import GROUP_IMAGE_EXTS
 from util.zip_write import atomic_zip, fsync_path, staging_path
 
@@ -65,7 +67,8 @@ log = logging.getLogger("process_microscopy")
 
 # The default scratch location is ``scratch`` in the app's own folder
 # (``util.state_dir.default_scratch_dir``): ``%LOCALAPPDATA%\\allwell\\scratch``
-# on Windows, ``~/.allwell/scratch`` on macOS and Linux and on a remote worker.
+# on Windows, ``~/.allwell/scratch`` on macOS and Linux — and on a remote host,
+# which keeps ``~/.allwell/scratch`` whatever the platform rules say (no desktop mark).
 # Deliberately a dedicated subdirectory: ``_sweep_stale_scratch_dirs`` globs
 # ``_tmp_extract_*`` / ``_tmp_images_*`` under the scratch base and *deletes*
 # what it finds, so pointing the base at a directory the user also keeps their
@@ -166,13 +169,15 @@ def scratch_base_for(output_dir: Path) -> Path:
     home = default_scratch_base()
     if home is not None:
         return home
+    # Off the desktop (a remote host) this is the same line as before the
+    # scratch default followed the app's folder: "Home scratch dir
+    # (~/.allwell/scratch) unusable; ...".
     log.warning(
-        "The default scratch dir (the app folder's scratch/) is unusable; using "
-        "the output dir %s for per-well working files. On a network-mounted "
-        "output dir this is the configuration that causes 'Bad file descriptor' "
-        "well failures — set ALLWELL_SCRATCH_DIR (Analyze → Scratch disk) to a "
-        "local path.",
-        output_dir,
+        "%s scratch dir (%s) unusable; using the output dir %s for per-well "
+        "working files. On a network-mounted output dir this is the "
+        "configuration that causes 'Bad file descriptor' well failures — set "
+        "ALLWELL_SCRATCH_DIR (Analyze → Scratch disk) to a local path.",
+        "Default" if on_the_desktop() else "Home", default_scratch_label(), output_dir,
     )
     return output_dir
 

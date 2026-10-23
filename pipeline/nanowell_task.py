@@ -35,11 +35,14 @@ TEMPLATE_SUFFIX = "_template.npz"
 SCHEME_VERSION = 1
 
 #: The columns of ``nanowells/<well>.csv`` in the order they are written (§3.7). Per-channel site
-#: intensities follow, as ``<token>_integrated`` and ``<token>_mean_bg``.
+#: intensities follow, as ``<token>_integrated`` and ``<token>_mean_bg``. ``level_offset`` / ``level_gain`` are the
+#: ``(offset, gain)`` a site's pixels were levelled by before the template division; ``segmenter_floor`` /
+#: ``segmenter_contrast`` are its interior's median and 1st-99th percentile spread on the 0-1 scale the segmenter
+#: normalises its tile to (``nanowell_measure.segmenter_view``). All four are blank for a site not measured.
 SITE_COLUMNS = ("timepoint", "nw_q", "nw_r", "nw_ring", "well_x_um", "well_y_um", "owner", "radius_um",
                 "geometry", "detected", "fused", "imaged_fraction", "visible_fraction", "state",
                 "partially_visible", "focus", "n_cells", "confluence", "area_est_cells", "count_disagreement",
-                "consistency")
+                "level_offset", "level_gain", "segmenter_floor", "segmenter_contrast", "consistency")
 
 
 class NanowellInputError(RuntimeError):

@@ -1093,6 +1093,9 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     rim = nm.rim_suppress(images[owner], px, template, fit_sites, levels=norm.levels)
     # The timepoint's one threshold, from every tile's nanowells (``_normalise``), not this tile's alone.
     confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, norm.threshold)))
+    # Each site as the segmenter receives it, written beside its count so a zero the segmenter could not have
+    # avoided (cells a few per cent of the tile's range) is told apart from an empty nanowell.
+    view = nm.segmenter_view(rim, px, fit_sites)
     channel_images = {c: img for c, f in (channels or {}).items() if (img := f(owner)) is not None}
     counts = area = None
     table: dict = {}
@@ -1111,7 +1114,8 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
                           "interior_imaged": nm.interior_imaged(images[owner].shape, px, g),
                           "area": None if area is None else area[g.index],
                           "fluor": {c: f[g.index] for c, f in fluorescence.items()},
-                          "focus": rim_focus(images[owner], px, g)} for g in fit_sites}
+                          "focus": rim_focus(images[owner], px, g),
+                          "level": norm.levels.get(g.index), "view": view[g.index]} for g in fit_sites}
     return contents, table, notes
 
 
@@ -1133,6 +1137,16 @@ def _cell_rows(labels, px, fit_sites, counts, addresses, owner, origin, channel_
     return table
 
 
+def _levelling_columns(got) -> dict:
+    """How a site was levelled before segmenting, and how the segmenter saw it; every field ``None`` when the site
+    was not measured (``SITE_COLUMNS`` documents them)."""
+    level = None if got is None else got.get("level")
+    view = None if got is None else got.get("view")
+    return {"level_offset": None if level is None else level[0], "level_gain": None if level is None else level[1],
+            "segmenter_floor": None if view is None else view.floor,
+            "segmenter_contrast": None if view is None else view.contrast}
+
+
 def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused, channels, kind=None) -> dict:
     q, r = address if address is not None else (None, None)
     row = {"timepoint": timepoint, "nw_q": q, "nw_r": r, "nw_ring": lattice_ring(q, r, kind),
@@ -1143,7 +1157,8 @@ def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused
            "focus": None if got is None else got["focus"], "n_cells": state.n_cells,
            "confluence": state.confluence,
            "area_est_cells": None if got is None or got["area"] is None else got["area"].area_count,
-           "count_disagreement": None if got is None or got["area"] is None else got["area"].count_disagreement}
+           "count_disagreement": None if got is None or got["area"] is None else got["area"].count_disagreement,
+           **_levelling_columns(got)}
     for channel in (channels or {}):
         f = None if got is None else got["fluor"].get(channel)
         row[f"{channel}_integrated"] = None if f is None else f.integrated

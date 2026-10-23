@@ -9981,7 +9981,12 @@ a site the tile **owns** (`owned_indices(report.owners, tile)` from the `ownersh
 6.2f; fused sites have no owner and are counted by no tile until they are segmented on a blended
 crop, tracker C14, so `site_state` sees an undefined count for them); a cell in the overlap of two tiles
 is therefore counted by the one tile that owns the site, and a cell on a rim or between
-sites belongs to none. A site with no cell is a zero, not an absence; an owned site with no geometry in the
+sites belongs to none. Beside each count the row records what the segmenter was given: `level_offset` and
+`level_gain`, the site's `(offset, gain)` from `_normalise`, and `segmenter_floor` / `segmenter_contrast` from
+`segmenter_view` — the median and the 1st-to-99th-percentile spread of the site's interior on the 0-1 scale the
+segmenter normalises the whole rim-suppressed tile to (its 1st and 99th percentiles, flat 1.0 between sites
+included). A zero beside a contrast of a few per cent is a nanowell the segmenter could barely see, not an empty
+one; all four are `None` for a site not measured. A site with no cell is a zero, not an absence; an owned site with no geometry in the
 tile is an error, not a missing key.
 
 **The second count.** `area_estimate` divides each site's labelled interior area by the
@@ -10265,7 +10270,11 @@ needs, and a few rim-suppressed crops beside their
 segmentation. The crops are cut from the owner tile rim-suppressed and segmented **whole**, as the run does
 (`_tile_segmented`, once per tile however many crops it holds), never segmented on their own: Cellpose scales each
 image by its own percentiles, so a crop holding one nanowell was scaled differently from the tile holding a hundred,
-and its outlines were not the ones the run counted. When the segmenter cannot be loaded — `pipeline.cellpose.CellposeUnavailable` (marked
+and its outlines were not the ones the run counted. Each crop carries its tile's `scale`, the tile's 1st and 99th
+percentiles (`nanowell_measure.SEGMENTER_PERCENTILES`, the range Cellpose normalises the tile to), and
+`analyze.nanowell_preview.render_crop` draws its grey levels on that scale, so a nanowell the segmenter saw at low
+contrast is drawn at low contrast; stretched to its own range every crop would look alike whatever the segmenter
+saw. When the segmenter cannot be loaded — `pipeline.cellpose.CellposeUnavailable` (marked
 `segmenter_unavailable`, raised for any failure to import Cellpose or Torch, an `OSError` from a library that will
 not load included, and for a model that cannot be built, as when its weights cannot be downloaded offline) or an
 `ImportError` anywhere in the measuring exception's chain (`_missing_import`) — the timepoint is

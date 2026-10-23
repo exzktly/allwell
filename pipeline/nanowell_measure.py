@@ -661,6 +661,52 @@ def site_confluence(rim_image, pixel_size_um: float, geometries, threshold: floa
     return out
 
 
+# ── what the segmenter is shown ──────────────────────────────────────────────
+#: The percentiles Cellpose scales an image by before segmenting it: its default normalisation maps the whole
+#: image's 1st percentile to 0 and its 99th to 1, so every site on a tile shares one scale.
+SEGMENTER_PERCENTILES = (1.0, 99.0)
+
+
+@dataclass(frozen=True)
+class SegmenterView:
+    """One site as the segmenter receives it, on the 0-1 scale it normalises the whole tile to.
+
+    ``floor`` is the median of the site's interior there (the bare floor of a correctly levelled site sits where
+    the flat 1.0 between sites does); ``contrast`` is the spread between the interior's 1st and 99th percentiles,
+    the share of the segmenter's range the site's cells occupy. Both are ``None`` when they cannot be read: no
+    interior on the image, a non-finite pixel in it, or a tile with no spread at all."""
+    index: int
+    floor: float | None
+    contrast: float | None
+
+
+def segmenter_view(rim_image, pixel_size_um: float, geometries, *,
+                   fraction: float = INTERIOR_FRACTION) -> dict[int, SegmenterView]:
+    """Each site's interior on the segmenter's own scale (:class:`SegmenterView`), read from *rim_image* exactly as
+    :func:`segment_tile` passes it.
+
+    The point is to make a site the segmenter could not see visible in the output: two neighbouring nanowells
+    whose cells look alike in the raw image can reach the segmenter at very different contrast once each has been
+    levelled and divided by the template, and a site whose cells occupy a few per cent of the tile's range is one
+    whose zero count says nothing about its cells. The tile's percentiles are taken over the whole image, flat
+    1.0 between sites included, because that is what the segmenter scales."""
+    rim = np.asarray(rim_image, dtype=np.float64)
+    finite = rim[np.isfinite(rim)]
+    low, high = (np.percentile(finite, SEGMENTER_PERCENTILES) if finite.size else (math.nan, math.nan))
+    span = float(high - low)
+    out = {}
+    for g in geometries:
+        ys, xs = _interior_pixels(rim.shape, pixel_size_um, g, fraction)
+        values = rim[ys, xs]
+        if not len(values) or not np.isfinite(values).all() or not (math.isfinite(span) and span > 0):
+            out[g.index] = SegmenterView(g.index, None, None)
+            continue
+        p_low, p_high = np.percentile(values, SEGMENTER_PERCENTILES)
+        out[g.index] = SegmenterView(g.index, float((np.median(values) - low) / span),
+                                     float((p_high - p_low) / span))
+    return out
+
+
 # ── C4 / C5: counting ────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class SiteCount:

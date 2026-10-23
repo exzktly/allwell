@@ -325,6 +325,14 @@ fractions, cell count, confluence, and fluorescence over the nanowell floor's ba
 `nanowells/<well>_grid.json`, the registration, lattice and status of every timepoint. A nanowell no tile could
 see, or that was hidden, has a row with its state and **no number**, never a zero.
 
+Four columns of that table say what Cellpose was actually shown, for when a nanowell's count looks wrong next to
+its neighbours'. Before counting, each nanowell is brought to a common brightness (`level_offset`, `level_gain`),
+divided by the picture of an empty nanowell, and the whole tile is then rescaled for Cellpose. `segmenter_floor`
+is where the nanowell's floor landed on Cellpose's 0–1 scale, and `segmenter_contrast` how much of that scale its
+contents span. A zero count beside a `segmenter_contrast` of a few hundredths, where its neighbours read several
+tenths, is a nanowell whose cells Cellpose could barely see — not an empty one. Test detection's crops are drawn on
+the same scale, so such a nanowell looks faint there too.
+
 **No empty nanowell is needed.** A plate seeded at twenty cells to a nanowell has none, so nothing is read from
 "the empty ones": the picture of an empty nanowell every nanowell is divided by is built, pixel by pixel, from the
 value most nanowells share there (cells sit in different places in different nanowells, so the bare floor is what

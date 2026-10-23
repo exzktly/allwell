@@ -614,8 +614,9 @@ def threshold_from_departures(values, *, sigmas: float = TEXTURE_SIGMAS) -> tupl
     (:func:`modal_level`'s window, which begins at the floor) and grows: the values within ``CLIP_SIGMAS`` robust
     standard deviations of what is kept are kept, until that stops changing. Cells lie further out and are never
     taken in, so what is kept is the floor's own spread. Measured on a half-normal floor with cells uniform over
-    0.05-0.3 (floor sigma 0.03): 4 % above the floor-only threshold at a cell share of 20 %, 16 % at 40 %, 33 % at
-    50 %; at 60 % the cells' values reach down into the floor's and the threshold is theirs. The *cell share* (the
+    0.05-0.3 (floor sigma 0.03): 4 % above the floor-only threshold at a cell share of 20 %, 15 % at 40 %, 33 % at
+    50 %, 67 % at 55 % (where starting from every value instead of the densest gives 5.1x); at 60 % the cells' values
+    reach down into the floor's and the threshold is theirs. The *cell share* (the
     fraction of values above the threshold) is returned for the caller to record; one above a half is noted.
     """
     values = [v for v in values if len(v)]

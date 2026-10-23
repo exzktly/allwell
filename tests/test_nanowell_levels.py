@@ -114,10 +114,11 @@ def test_a_contrast_follows_its_own_tile_and_outvotes_a_nanowell_lost_under_cell
     its neighbours'; a tile with none at all stays NaN."""
     xs, ys = np.meshgrid(np.arange(0, 1500, 150.0), np.arange(0, 1500, 150.0))
     centres = np.column_stack([xs.ravel(), ys.ravel()])
-    groups = ["F0" if x < 800 else "F1" for x, _ in centres]
+    # In the overlap (x 450 to 1050) the two tiles own alternate sites, so every neighbourhood there mixes them.
+    groups = ["F0" if x < 450 or (x < 1050 and (x + y) % 300 == 0) else "F1" for x, y in centres]
     contrast = np.where(np.array(groups) == "F0", 0.4, 0.6)
     read = contrast.copy()
-    read[22], read[23] = 0.05, np.nan
+    read[22], read[23] = 0.05, np.nan                                      # both F0, outside the overlap
     found = nm.neighbourhood_median(centres, read, 225.0, groups)
     np.testing.assert_allclose(found, contrast)
     assert np.isnan(nm.neighbourhood_median(centres, np.full(len(centres), np.nan), 225.0, groups)).all()
@@ -148,12 +149,13 @@ def test_the_division_applies_a_site_s_level_and_leaves_an_empty_one_at_one():
 def test_one_threshold_is_the_floor_s_whatever_share_of_the_pooled_values_are_cells():
     """Tracker L1: the threshold is pooled over every site, cells included, and the cells are clipped away. Against
     the threshold the floor alone gives, it holds within 5 % with a fifth of the values cells (measured 4.4 %) and
-    within 17 % with two fifths (15.5 %); the share above the threshold is returned beside it."""
+    within 17 % with two fifths (15.5 %), within 35 % with half (33 %) and within 80 % at 55 % (67 %; starting from
+    every value rather than the densest it is 5.1x there); the share above the threshold is returned beside it."""
     rng = np.random.default_rng(0)
     floor = np.abs(rng.normal(0, 0.03, 100_000))
     alone, share = nm.threshold_from_departures([floor])
     assert share == pytest.approx(0.0, abs=0.002)
-    for fraction, tolerance in ((0.2, 0.05), (0.4, 0.17)):
+    for fraction, tolerance in ((0.2, 0.05), (0.4, 0.17), (0.5, 0.35), (0.55, 0.8)):
         cells = rng.uniform(0.05, 0.3, int(len(floor) * fraction / (1 - fraction)))
         found, share = nm.threshold_from_departures([floor[:50_000], cells, floor[50_000:]])
         assert found == pytest.approx(alone, rel=tolerance)

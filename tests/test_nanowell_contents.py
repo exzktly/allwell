@@ -313,19 +313,25 @@ def test_every_cell_s_mean_is_its_own_pixels_on_every_channel():
 # ── C7 ──────────────────────────────────────────────────────────────────────
 def test_fluorescence_is_over_the_floor_s_level_and_none_is_not_zero():
     """Tracker L1: the background is the floor's level, read from every site's modal interior level, so it holds
-    when no site is empty. Here a bright cell sits in every site; the floor under them is 10."""
+    when no site is empty. Here every site holds cells over more than half its interior, each pixel of them its own
+    brightness (20 to 80 over the floor), so even a median of a site's interior is the cells'; the floor is 10."""
+    rng = np.random.default_rng(4)
     image = np.full((190, 190), 10.0)
     yy, xx = np.mgrid[0:190, 0:190]
+    cells = np.zeros((190, 190), dtype=bool)
     for x, y in CENTRES:
-        image[np.hypot(xx + 0.5 - x - 3, yy + 0.5 - y) <= 5] += 40.0
-    x, y = CENTRES[3]
-    image[np.hypot(xx + 0.5 - x + 4, yy + 0.5 - y + 4) <= 3] += 50.0
+        cells |= np.hypot(xx + 0.5 - x - 2, yy + 0.5 - y) <= 8               # 69 % of the interior
+        cells |= np.hypot(xx + 0.5 - x + 5, yy + 0.5 - y + 3) <= 6
+    image[cells] += rng.uniform(20.0, 80.0, int(cells.sum()))
+    interior = nm._interior_pixels(image.shape, PX, GEOMS[0], nm.INTERIOR_FRACTION)
+    assert np.median(image[interior]) > 20.0                                   # the case a median gets wrong
     levels = nm.site_floor_levels(image, PX, GEOMS)
     assert set(levels) == set(range(16)) and all(v == pytest.approx(10.0) for v in levels.values())
     background = float(np.median(list(levels.values())))
     by = {r.index: r for r in nm.site_fluorescence(image, PX, GEOMS, background=background)}
-    assert by[0].background == 10.0 and by[0].integrated == pytest.approx(40.0 * np.pi * 25, rel=0.1)
-    assert by[3].integrated - by[0].integrated == pytest.approx(50.0 * np.pi * 9, rel=0.15)
+    ys, xs = interior
+    assert by[0].background == 10.0
+    assert by[0].integrated == pytest.approx(float((image[ys, xs] - 10.0).sum()), rel=1e-9)
     assert all(r.integrated is None and r.background is None
                for r in nm.site_fluorescence(None, PX, GEOMS, background=10.0))
     no_background = nm.site_fluorescence(image, PX, GEOMS, background=None)

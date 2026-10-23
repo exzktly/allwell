@@ -9870,7 +9870,10 @@ against a stale earliest. The measurement itself is not changed.
 **gain** comes from its floor-to-surround **contrast** (`site_contrast`: surround minus modal floor), which light
 added to both cancels from, taken as the median over the sites within `CONTRAST_NEIGHBOURHOOD_PITCHES` (1.5) of it
 **on the same tile** (`neighbourhood_median`; one tile is one exposure), so a nanowell whose floor is lost under
-cells is outvoted by its six neighbours; its **offset** then comes from its own surround (`site_level`). Light added
+cells is outvoted by its six neighbours; a contrast more than twice or half its tile's median
+(`PLAUSIBLE_CONTRAST_FACTOR`, `_plausible`) is not a nanowell's — bare floor outside the array, a bubble — and has no
+vote at all (where such sites were most of a neighbourhood, its median once gave a gain of 0.003 and the noise there
+was segmented as a cell); its **offset** then comes from its own surround (`site_level`). Light added
 unevenly across a well — glare brighter toward its centre — is an offset that changes from nanowell to nanowell,
 which one offset per tile could not follow: the rest was taken as gain, and every cell where the light was added
 was flattened. The gain is not taken from the surround after subtracting an offset, because the lattice is dark: an
@@ -9880,7 +9883,10 @@ whose surround is off the image takes its tile's median level, and a tile with n
 unmeasured (`tiles_without_gain`). With the template's floor and surround too alike to tell an offset from a gain
 (`offset_identifiable`) every site is corrected for brightness alone, from its surround (`site_gain`), with a note.
 Light added to every crop alike becomes part of the floor the cells are measured against, which scales every cell's
-height alike; Cellpose scales each tile by its own percentiles, which removes that. The timepoint's `template` block
+height alike; Cellpose scales each tile by its own percentiles, which removes that. Two things it does not take out
+are open rows: light that slopes **across one nanowell** (near a strong glare peak, empty nanowells read confluence up
+to about 0.05; tracker L6), and a nanowell whose fitted radius is off the template's, which leaves a ring of its rim
+undivided (tracker L7). The timepoint's `template` block
 carries all of this as `normalisation`: `measure_version` (`nanowell_measure.MEASURE_VERSION`), `offset` (`per
 nanowell` or `not identifiable`), `contrast_neighbourhood_um`, `offset_range` (the 5th and 95th percentile of the
 offsets the sites were given: where light was added and how much), `nanowells_levelled`, `tiles_without_gain`, the
@@ -9907,8 +9913,8 @@ interiors (0.9 of the radius) of **every** nanowell on every tile, every fourth 
 `threshold_from_departures` starts from the densest quarter of them, which begins at the floor, and grows the kept
 set to everything within three robust standard deviations of it (`CLIP_SIGMAS`) until it stops changing; cells lie
 further out and are never taken in. Against a floor-only threshold it reads 1.04x with a fifth of the values cells,
-1.16x with two fifths and 1.33x with half; past about 60 % the cells reach down into the floor's values and the
-threshold is theirs. It returns the share above it (`cell_share`, on the block), and a share over a half is a note.
+1.15x with two fifths, 1.33x with half and 1.67x at 55 % (starting from every value instead of the densest, 5.1x);
+past about 60 % the cells reach down into the floor's values and the threshold is theirs. It returns the share above it (`cell_share`, on the block), and a share over a half is a note.
 `site_confluence` is the share of a site's interior above the threshold. It is `None`, not zero, with no site to
 calibrate against or with under half the interior on the image (a quadrant is not a site); 0.0 is a measurement.
 Because "departs from the floor" includes the optical halo of a cell, it reads high: on the synthetic scene it lies

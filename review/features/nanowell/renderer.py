@@ -26,8 +26,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from review.features.nanowell.array_compute import padded
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
+from review.features.nanowell.full_montage_compute import fit_region
 
 #: A dot's diameter, in points.
 DOT_PT = 3.4
@@ -513,23 +515,38 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     view fits everything drawn. The nanowells are coloured as ``ui/nanowell_sites.py`` colours them wherever one is
     drawn, so a state reads the same here as in Analyze's Test detection.
     """
-    from matplotlib.collections import EllipseCollection
-    from matplotlib.patches import Rectangle
-
-    from review.features.nanowell.array_compute import padded
-    from review.features.nanowell.full_montage_compute import fit_region
-    from ui.nanowell_sites import FUSED_COLOUR, LABEL_COLOUR, MIN_LABEL_DIAMETER_PX, OUTLINE_WIDTH_PX, state_colour
-    from ui.theme import Colors
-
     fig.clear()
     in_well = scene.frame == "well"
     image = image if in_well and layers.image != "off" else None
     lines = array_footer(scene, layers, label=label, image_note=image_note, note=note)
-    reserve = len(lines) + (1 if layers.addresses else 0)
     right = 0.62 if layers.record else 0.86
-    bottom = _FOOTER_BASE + (reserve + 0.5) * _LINE
-    ax = fig.add_axes([0.03, bottom, right - 0.03, 0.92 - bottom])
+    drawn = _array_axes(fig, scene, image, region, right=right,
+                        bottom=_FOOTER_BASE + (len(lines) + (1 if layers.addresses else 0) + 0.5) * _LINE)
+    ax = drawn.ax
     _bg, ink, muted = _inks(ax)
+    if image is not None:
+        _draw_image(ax, drawn, image)
+    if in_well and layers.tiles:
+        _draw_tiles(ax, scene.tiles, muted)
+    if layers.nanowells and len(scene.sites):
+        _draw_nanowells(fig, ax, drawn, scene, layers, label=label, selected=selected)
+    if layers.addresses and len(scene.sites):
+        lines += _draw_addresses(fig, ax, drawn, scene.sites)
+    if in_well and layers.anchor and scene.anchor is not None:
+        _draw_anchor(ax, drawn, scene.anchor)
+    _ink(ax.set_title(f"{scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
+    for i, text in enumerate(lines):
+        y = _FOOTER_BASE + (len(lines) - 1 - i) * _LINE
+        _ink(fig.text(0.03, y, text, fontsize=7.5, color=ink if i == 0 else muted, gid="nw-array-footer"),
+             muted=i != 0)
+    if layers.record:
+        _draw_record(fig, scene.record, right + 0.08, ink, muted)
+    return drawn
+
+
+def _array_axes(fig, scene, image, region, *, right: float, bottom: float) -> ArrayDrawn:
+    """The axes, looking at *region* (or at everything drawn) widened to their shape, so pixels stay square."""
+    ax = fig.add_axes([0.03, bottom, right - 0.03, 0.92 - bottom])
     ax.set_axis_off()
     extent = scene.extent()
     if image is not None:
@@ -539,133 +556,174 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
         region = padded(extent, scene.pitch_um or 0.02 * max(extent[2] - extent[0], extent[3] - extent[1], 1.0))
     box = ax.get_window_extent()
     w_px, h_px = max(int(round(box.width)), 1), max(int(round(box.height)), 1)
-    # Square pixels: the region is widened about its centre to the axes' shape, never stretched to it.
     x0, y0, x1, y1 = fit_region(region, w_px, h_px, margin=0.0)
     ax.set_xlim(x0, x1)
     ax.set_ylim(y1, y0)                                                 # y down
-    drawn = ArrayDrawn(HitMap(), ax, (x0, y0, x1, y1), (w_px, h_px), scene.frame)
-    px_per_um = w_px / max(x1 - x0, 1e-9)
-    if image is not None:
-        if hasattr(image, "render"):
-            drawn.rendered = image.render(drawn.region, w_px, h_px)
-            ax.imshow(drawn.rendered.image, cmap="gray", vmin=0, vmax=255, extent=(x0, x1, y1, y0),
-                      interpolation="nearest", zorder=0)
+    return ArrayDrawn(HitMap(), ax, (x0, y0, x1, y1), (w_px, h_px), scene.frame)
+
+
+def _draw_image(ax, drawn, image) -> None:
+    """The run montage at its own place, or the raw tiles rendered for exactly the region and pixels shown."""
+    x0, y0, x1, y1 = drawn.region
+    if hasattr(image, "render"):
+        drawn.rendered = image.render(drawn.region, *drawn.size_px)
+        ax.imshow(drawn.rendered.image, cmap="gray", vmin=0, vmax=255, extent=(x0, x1, y1, y0),
+                  interpolation="nearest", zorder=0)
+    else:
+        ax.imshow(image.image, cmap="gray", vmin=0, vmax=255, extent=image.extent(), interpolation="nearest",
+                  zorder=0)
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y1, y0)
+
+
+def _draw_tiles(ax, tiles, muted) -> None:
+    """Each tile's placement coloured by how the run placed it, labelled with its residual."""
+    from matplotlib.patches import Rectangle
+
+    from ui.theme import Colors
+
+    unsized = 0
+    for tile in tiles:
+        colour = getattr(Colors, _SOURCE_TOKENS.get(tile.source, "danger"))
+        if tile.width_um and tile.height_um:
+            ax.add_patch(Rectangle((tile.left_um, tile.top_um), tile.width_um, tile.height_um, fill=False,
+                                   edgecolor=colour, linewidth=1.2, zorder=2, gid="nw-array-tile-box"))
+            at = (tile.left_um + 0.02 * tile.width_um, tile.top_um + 0.06 * tile.height_um)
         else:
-            ax.imshow(image.image, cmap="gray", vmin=0, vmax=255, extent=image.extent(), interpolation="nearest",
-                      zorder=0)
-        ax.set_xlim(x0, x1)
-        ax.set_ylim(y1, y0)
-    if in_well and layers.tiles:
-        unsized = 0
-        for tile in scene.tiles:
-            colour = getattr(Colors, _SOURCE_TOKENS.get(tile.source, "danger"))
-            if tile.width_um and tile.height_um:
-                ax.add_patch(Rectangle((tile.left_um, tile.top_um), tile.width_um, tile.height_um, fill=False,
-                                       edgecolor=colour, linewidth=1.2, zorder=2, gid="nw-array-tile-box"))
-                at = (tile.left_um + 0.02 * tile.width_um, tile.top_um + 0.06 * tile.height_um)
-            else:
-                # The acquisition record gives no tile size: mark the corner the grid record placed, never a guessed
-                # outline.
-                unsized += 1
-                ax.plot([tile.left_um], [tile.top_um], marker="+", markersize=9, color=colour, zorder=2)
-                at = (tile.left_um, tile.top_um)
-            _ink(ax.text(*at, f"{tile.tile} · {tile.source}" + (f" · {tile.residual_um:.1f} µm"
-                                                                if tile.residual_um is not None else ""),
-                         fontsize=6.5, color=colour, gid="nw-array-tile", clip_on=True))
-        if unsized:
-            _ink(ax.text(0.01, 0.01, f"{unsized} tile(s) without a size in the acquisition record: their placed "
-                         "corner is marked (+), not an outline.", transform=ax.transAxes, fontsize=6.5,
-                         color=muted, gid="nw-array-unsized"), muted=True)
+            # The acquisition record gives no tile size: mark the corner the grid record placed, never a guessed
+            # outline.
+            unsized += 1
+            ax.plot([tile.left_um], [tile.top_um], marker="+", markersize=9, color=colour, zorder=2)
+            at = (tile.left_um, tile.top_um)
+        residual = f" · {tile.residual_um:.1f} µm" if tile.residual_um is not None else ""
+        _ink(ax.text(*at, f"{tile.tile} · {tile.source}{residual}", fontsize=6.5, color=colour,
+                     gid="nw-array-tile", clip_on=True))
+    if unsized:
+        _ink(ax.text(0.01, 0.01, f"{unsized} tile(s) without a size in the acquisition record: their placed "
+                     "corner is marked (+), not an outline.", transform=ax.transAxes, fontsize=6.5,
+                     color=muted, gid="nw-array-unsized"), muted=True)
+
+
+def _ellipses(ax, sites, mask, **kw):
+    """The nanowells of *mask* as one collection at their radii."""
+    from matplotlib.collections import EllipseCollection
+
+    width = 2 * sites.radius[mask]
+    coll = EllipseCollection(width, width, np.zeros(int(mask.sum())), units="xy",
+                             offsets=np.column_stack([sites.x[mask], sites.y[mask]]), offset_transform=ax.transData,
+                             **kw)
+    ax.add_collection(coll)
+    return coll
+
+
+def _draw_nanowells(fig, ax, drawn, scene, layers, *, label: str, selected) -> None:
+    """The nanowells filled by the metric or outlined by state, a fused one dashed, the central one boxed, the
+    selection ringed; and where a click finds them."""
+    from matplotlib.patches import Rectangle
+
+    from ui.nanowell_sites import FUSED_COLOUR, OUTLINE_WIDTH_PX
+
     sites = scene.sites
-    offsets = np.column_stack([sites.x, sites.y]) if len(sites) else np.zeros((0, 2))
-    width = 2 * sites.radius
     outline = OUTLINE_WIDTH_PX * 72.0 / fig.dpi
-    if layers.nanowells and len(sites):
-        fused = np.asarray(sites.fused, dtype=bool)
-        if layers.colour == "metric":
-            has = np.isfinite(sites.values)
-            if has.any():
-                coll = EllipseCollection(width[has], width[has], np.zeros(has.sum()), units="xy",
-                                         offsets=offsets[has], offset_transform=ax.transData, cmap=MAP_CMAP,
-                                         edgecolors="none", zorder=3)
-                coll.set_array(sites.values[has])
-                ax.add_collection(coll)
-                place = ax.get_position()
-                cax = fig.add_axes([place.x1 + 0.012, place.y0 + 0.1 * place.height, 0.012, 0.8 * place.height])
-                bar = fig.colorbar(coll, cax=cax)
-                _ink(bar.ax.set_ylabel(label, fontsize=8, color=ink))
-                bar.ax.tick_params(labelsize=7, colors=muted)
-            states = np.array(sites.state, dtype=object)
-            plain = ~has & np.isin(states, ["measured", "empty"])
-            groups = [(plain, "", "solid")] + [(~has & (states == s), hatch, style)
-                                               for s, (hatch, style) in _STATE_STYLE.items()]
-            for mask, hatch, style in groups:
-                mask = mask & ~fused
-                if mask.any():
-                    coll = EllipseCollection(width[mask], width[mask], np.zeros(mask.sum()), units="xy",
-                                             offsets=offsets[mask], offset_transform=ax.transData, facecolors="none",
-                                             edgecolors=Colors.plot_undefined_ink, linewidths=outline, zorder=3)
-                    coll.set_linestyle(style)
-                    if hatch:
-                        coll.set_hatch(hatch)
-                    ax.add_collection(coll)
-        else:
-            plain = ~fused
-            if plain.any():
-                ax.add_collection(EllipseCollection(
-                    width[plain], width[plain], np.zeros(plain.sum()), units="xy", offsets=offsets[plain],
-                    offset_transform=ax.transData, facecolors="none", linewidths=outline, zorder=3,
-                    edgecolors=[state_colour(s) for s, p in zip(sites.state, plain) if p]))
-        if fused.any():                                  # dashed in the fused colour whatever else it is
-            coll = EllipseCollection(width[fused], width[fused], np.zeros(fused.sum()), units="xy",
-                                     offsets=offsets[fused], offset_transform=ax.transData, facecolors="none",
-                                     edgecolors=FUSED_COLOUR, linewidths=outline, zorder=4)
-            coll.set_linestyle("dashed")
-            ax.add_collection(coll)
-        centre = scene.centre()
-        if centre is not None:
-            side = sites.radius[centre] * 1.6
-            ax.add_patch(Rectangle((sites.x[centre] - side / 2, sites.y[centre] - side / 2), side, side, fill=False,
-                                   edgecolor=ink, linewidth=1.0, zorder=5))
-        addressed = [k for k, s in enumerate(sites.sites) if s[1] is not None and s[2] is not None]
-        drawn.hits.entries.append((ax, sites.x[addressed], sites.y[addressed], [sites.sites[k] for k in addressed]))
-        for site, colour in zip(map(tuple, selected), selection_colours()):
-            if site in sites.sites:
-                k = sites.sites.index(site)
-                ax.add_patch(_ring(sites.x[k], sites.y[k], sites.radius[k] * 1.35, colour))
-    if layers.addresses and len(sites):
-        diameter = width * px_per_um
-        labels = np.array(sites.labels, dtype=object)
-        show = ((labels != "") & (diameter >= MIN_LABEL_DIAMETER_PX) & (sites.x >= x0) & (sites.x <= x1)
-                & (sites.y >= y0) & (sites.y <= y1))
-        if show.sum() > MAX_ADDRESSES:
-            lines.append(f"{int(show.sum()):,} addresses in view: zoom in to read them.")
-        elif not show.any():
-            lines.append(f"Addresses are written in a nanowell drawn at least {MIN_LABEL_DIAMETER_PX} px across: "
-                         "zoom in to read them.")
-        else:
-            for k in np.nonzero(show)[0]:
-                ax.text(sites.x[k], sites.y[k], labels[k], ha="center", va="center", clip_on=True, zorder=6,
-                        fontsize=max(5.0, min(8.0, diameter[k] * 0.22 * 72.0 / fig.dpi)), color=LABEL_COLOUR,
-                        gid="nw-array-address")
-    if in_well and layers.anchor and scene.anchor is not None:
-        ax_, ay = scene.anchor
-        arm = ANCHOR_ARM_PX / px_per_um
-        for xs, ys in (([ax_ - arm, ax_ + arm], [ay, ay]), ([ax_, ax_], [ay - arm, ay + arm])):
-            ax.plot(xs, ys, color=Colors.accent2, linewidth=2, zorder=7, gid="nw-array-anchor")
-    _ink(ax.set_title(f"{scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
-    for i, text in enumerate(lines):
-        y = _FOOTER_BASE + (len(lines) - 1 - i) * _LINE
-        _ink(fig.text(0.03, y, text, fontsize=7.5, color=ink if i == 0 else muted, gid="nw-array-footer"),
-             muted=i != 0)
-    if layers.record:
-        for i, (text, kind) in enumerate(scene.record):
-            item = fig.text(right + 0.08, 0.92 - i * _RECORD_LINE, text, fontsize=7, wrap=True,
-                            gid="nw-array-record", color=Colors.warn if kind == "flag" else ink if kind == "head"
-                            else muted)
-            if kind != "flag":                           # a warning keeps its colour; plain lines follow the theme
-                _ink(item, muted=kind != "head")
-    return drawn
+    fused = np.asarray(sites.fused, dtype=bool)
+    if layers.colour == "metric":
+        _fill_by_metric(fig, ax, sites, fused, outline, label)
+    else:
+        _outline_by_state(ax, sites, fused, outline)
+    if fused.any():                                      # dashed in the fused colour whatever else it is
+        _ellipses(ax, sites, fused, facecolors="none", edgecolors=FUSED_COLOUR, linewidths=outline,
+                  zorder=4).set_linestyle("dashed")
+    _bg, ink, _muted = _inks(ax)
+    centre = scene.centre()
+    if centre is not None:
+        side = sites.radius[centre] * 1.6
+        ax.add_patch(Rectangle((sites.x[centre] - side / 2, sites.y[centre] - side / 2), side, side, fill=False,
+                               edgecolor=ink, linewidth=1.0, zorder=5))
+    addressed = [k for k, s in enumerate(sites.sites) if s[1] is not None and s[2] is not None]
+    drawn.hits.entries.append((ax, sites.x[addressed], sites.y[addressed], [sites.sites[k] for k in addressed]))
+    for site, colour in zip(map(tuple, selected), selection_colours()):
+        if site in sites.sites:
+            k = sites.sites.index(site)
+            ax.add_patch(_ring(sites.x[k], sites.y[k], sites.radius[k] * 1.35, colour))
+
+
+def _fill_by_metric(fig, ax, sites, fused, outline: float, label: str) -> None:
+    """Filled by the metric with a colour bar; one without a value a grey outline styled by its state."""
+    from ui.theme import Colors
+
+    _bg, ink, muted = _inks(ax)
+    has = np.isfinite(sites.values)
+    if has.any():
+        coll = _ellipses(ax, sites, has, cmap=MAP_CMAP, edgecolors="none", zorder=3)
+        coll.set_array(sites.values[has])
+        place = ax.get_position()
+        cax = fig.add_axes([place.x1 + 0.012, place.y0 + 0.1 * place.height, 0.012, 0.8 * place.height])
+        bar = fig.colorbar(coll, cax=cax)
+        _ink(bar.ax.set_ylabel(label, fontsize=8, color=ink))
+        bar.ax.tick_params(labelsize=7, colors=muted)
+    states = np.array(sites.state, dtype=object)
+    groups = [(~has & np.isin(states, ["measured", "empty"]), "", "solid")] + [
+        (~has & (states == s), hatch, style) for s, (hatch, style) in _STATE_STYLE.items()]
+    for mask, hatch, style in groups:
+        mask = mask & ~fused
+        if mask.any():
+            coll = _ellipses(ax, sites, mask, facecolors="none", edgecolors=Colors.plot_undefined_ink,
+                             linewidths=outline, zorder=3)
+            coll.set_linestyle(style)
+            if hatch:
+                coll.set_hatch(hatch)
+
+
+def _outline_by_state(ax, sites, fused, outline: float) -> None:
+    from ui.nanowell_sites import state_colour
+
+    plain = ~fused
+    if plain.any():
+        _ellipses(ax, sites, plain, facecolors="none", linewidths=outline, zorder=3,
+                  edgecolors=[state_colour(s) for s, p in zip(sites.state, plain) if p])
+
+
+def _draw_addresses(fig, ax, drawn, sites) -> list[str]:
+    """Each address in view inside a nanowell drawn large enough to hold it; a footer line when none is, or when
+    too many are to write."""
+    from ui.nanowell_sites import LABEL_COLOUR, MIN_LABEL_DIAMETER_PX
+
+    x0, y0, x1, y1 = drawn.region
+    diameter = 2 * sites.radius * drawn.size_px[0] / max(x1 - x0, 1e-9)
+    labels = np.array(sites.labels, dtype=object)
+    show = ((labels != "") & (diameter >= MIN_LABEL_DIAMETER_PX) & (sites.x >= x0) & (sites.x <= x1)
+            & (sites.y >= y0) & (sites.y <= y1))
+    if show.sum() > MAX_ADDRESSES:
+        return [f"{int(show.sum()):,} addresses in view: zoom in to read them."]
+    if not show.any():
+        return [f"Addresses are written in a nanowell drawn at least {MIN_LABEL_DIAMETER_PX} px across: zoom in to "
+                "read them."]
+    for k in np.nonzero(show)[0]:
+        ax.text(sites.x[k], sites.y[k], labels[k], ha="center", va="center", clip_on=True, zorder=6,
+                fontsize=max(5.0, min(8.0, diameter[k] * 0.22 * 72.0 / fig.dpi)), color=LABEL_COLOUR,
+                gid="nw-array-address")
+    return []
+
+
+def _draw_anchor(ax, drawn, anchor) -> None:
+    from ui.theme import Colors
+
+    x, y = anchor
+    arm = ANCHOR_ARM_PX * (drawn.region[2] - drawn.region[0]) / drawn.size_px[0]
+    for xs, ys in (([x - arm, x + arm], [y, y]), ([x, x], [y - arm, y + arm])):
+        ax.plot(xs, ys, color=Colors.accent2, linewidth=2, zorder=7, gid="nw-array-anchor")
+
+
+def _draw_record(fig, record, left: float, ink, muted) -> None:
+    """The grid record beside the axes; a line that warns keeps the warning colour, the rest follow the theme."""
+    from ui.theme import Colors
+
+    for i, (text, kind) in enumerate(record):
+        item = fig.text(left, 0.92 - i * _RECORD_LINE, text, fontsize=7, wrap=True, gid="nw-array-record",
+                        color=Colors.warn if kind == "flag" else ink if kind == "head" else muted)
+        if kind != "flag":
+            _ink(item, muted=kind != "head")
+
 
 def render_message(fig, text: str, *, gid: str) -> None:
     """A figure that says why there is nothing to draw, rather than an empty canvas."""

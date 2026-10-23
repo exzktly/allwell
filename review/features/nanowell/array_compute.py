@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.collect import MEASURABLE
 from review.features.nanowell.image_compute import tile_boxes
@@ -162,8 +163,6 @@ def _int(value):
 
 
 def _anchor_into(scene: ArrayScene, data, block: dict) -> None:
-    from review.features.nanowell import full_montage_compute as fmc
-
     anchor, problem = fmc.read_well_anchor(data, scene.well, scene.timepoint)
     scene.anchor = anchor
     scene.anchorable = fmc.anchors_file(data) is not None and scene.status in fmc.ANCHORABLE

@@ -10,6 +10,8 @@ a control that does not work (CLAUDE.md §7.6).
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
@@ -24,6 +26,7 @@ from review.features.nanowell.distribution_compute import (
     BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut, match_channel,
 )
 from widgets.control_band import ControlBand
+from widgets.owned_action import owned_action
 
 #: The views the page draws, in the order the switch lists them.
 VIEWS = (("distribution", "Distribution"), ("array", "Array"), ("trajectories", "Trajectories"),
@@ -158,41 +161,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_well_cb", well_cb)
     grp_well = band.add_scope("Well", well_cb)
 
-    image_cb = _combo(_IMAGES, _IMAGE_TIP)
-    image_cb.currentIndexChanged.connect(lambda _i: nwc.set_layer(ctx, "image", image_cb.currentData() or "off"))
-    reg.register("_nw_image_cb", image_cb)
-    grp_image = band.add_scope("Image", image_cb)
-
-    positions_seg = SegmentedControl()
-    for key, label in _POSITIONS:
-        positions_seg.addSegment(text=label, data=key)
-    positions_seg.setToolTip(_POSITIONS_TIP)
-    positions_seg.currentChanged.connect(lambda idx: nwc.set_layer(ctx, "positions", _POSITIONS[idx][0]))
-    reg.register("_nw_positions_seg", positions_seg)
-    grp_positions = band.add_scope("Positions", positions_seg)
-
-    layers_btn, layer_actions, colour_actions = _layers_button(ctx, band)
-    grp_layers = band.add_scope("", layers_btn)
-
-    fit_btn = _button("Fit", "Show everything drawn.", lambda: nwc.array_fit(ctx))
-    one_btn = _button("1:1", "One image pixel per screen pixel, about the centre of the view.",
-                      lambda: nwc.array_one_to_one(ctx))
-    reg.register("_nw_fit_btn", fit_btn)
-    reg.register("_nw_one_btn", one_btn)
-    grp_zoom = band.add_scope("", fit_btn, one_btn)
-
-    anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
-    anchor_btn.setCheckable(True)
-    anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
-    clear_anchor_btn = _button("Clear anchor", "Remove this well's anchor at this timepoint.",
-                               lambda: nwc.clear_anchor(ctx))
-    rerun_btn = _button("Re-run anchored wells…", "Open Analyze on this dataset, limited to the wells with an "
-                        "anchor, each run again in full so its timepoints are located with the anchor.",
-                        lambda: nwc.rerun_anchored(ctx))
-    reg.register("_nw_anchor_btn", anchor_btn)
-    reg.register("_nw_clear_anchor_btn", clear_anchor_btn)
-    reg.register("_nw_rerun_btn", rerun_btn)
-    grp_anchor = band.add_scope("Anchor", anchor_btn, clear_anchor_btn, rerun_btn)
+    array_controls = _build_array_controls(ctx, band)
 
     tp_slider = QSlider(Qt.Horizontal)
     tp_slider.setToolTip(_SLIDER_TIP)
@@ -290,7 +259,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
     controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box, responding_edit,
-                image_cb, positions_seg, anchor_btn, *layer_actions.values(), *colour_actions.values())
+                *array_controls.signalling)
 
     def refresh_controls() -> None:
         channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None
@@ -338,15 +307,12 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             distribution = view == "distribution"
             wells_axis = distribution and (st.axis == "wells" or per_nanowell)
             array = view == "array"
-            # The metric reaches the Array view through its fill: without it, the metric controls do nothing there.
-            by_metric = not array or (st.layers.nanowells and st.layers.colour == "metric")
+            by_metric = _metric_reaches_figure(st, view)
             grp_metric.setVisible(by_metric)
             grp_baseline.setVisible(by_metric)
             grp_axis.setVisible(distribution)
             cohort_box.setChecked(st.cohort)
-            _refresh_array_controls(ctx, st, array, image_cb, positions_seg, layer_actions, colour_actions,
-                                    (grp_image, grp_positions, grp_layers, grp_zoom, grp_anchor),
-                                    (one_btn, anchor_btn, clear_anchor_btn, rerun_btn))
+            _refresh_array_controls(ctx, st, array, array_controls)
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
             # applies to what it draws, so its box stays where it can be turned off.
@@ -393,7 +359,7 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
     reg = ctx.widgets
     layer_actions = {}
     for key, label, tip in _LAYERS:
-        action = menu.addAction(label)
+        action = owned_action(menu, label)
         action.setCheckable(True)
         action.setToolTip(tip)
         action.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, key, on))
@@ -403,7 +369,7 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
     group = QActionGroup(menu)
     colour_actions = {}
     for key, label in (("metric", "Fill nanowells by the metric"), ("state", "Outline nanowells by state")):
-        action = menu.addAction(label)
+        action = owned_action(menu, label)
         action.setCheckable(True)
         group.addAction(action)
         action.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, "colour", key) if on else None)
@@ -415,44 +381,95 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
     presets = QMenu("Show as", menu)
     menu.addMenu(presets)
     for key, label in _PRESETS:
-        action = presets.addAction(label)
+        action = owned_action(presets, label)
         action.triggered.connect(lambda _=False, key=key: nwc.apply_array_preset(ctx, key))
         reg.register(f"_nw_preset_{key}", action)
     reg.register("_nw_layers_btn", button)
     return button, layer_actions, colour_actions
 
 
-def _refresh_array_controls(ctx, st, array: bool, image_cb, positions_seg, layer_actions, colour_actions, groups,
-                            buttons) -> None:
+def _metric_reaches_figure(st, view: str) -> bool:
+    """Whether the Metric and Baseline controls change what *view* draws: on the Array view only through the
+    nanowells' fill, so not when they are outlined by state or not drawn."""
+    return view != "array" or (st.layers.nanowells and st.layers.colour == "metric")
+
+
+def _refresh_array_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
     """The Array view's controls in step with its layers; shown only on that view. What the lattice frame cannot
     draw (the image, the tiles, the anchor) is greyed there and says why."""
-    one_btn, anchor_btn, clear_anchor_btn, rerun_btn = buttons
     layers = st.layers
     lattice = layers.lattice()
-    _select(image_cb, layers.image)
-    image_cb.setEnabled(not lattice)
-    positions_seg.setCurrentByData(layers.positions)
-    for key, action in layer_actions.items():
+    _select(c.image_cb, layers.image)
+    c.image_cb.setEnabled(not lattice)
+    c.positions_seg.setCurrentByData(layers.positions)
+    names = {k: label for k, label, _t in _LAYERS}
+    for key, action in c.layer_actions.items():
         action.setChecked(getattr(layers, key))
         well_frame_only = key in ("tiles", "anchor")
         action.setEnabled(not (lattice and well_frame_only))
-        action.setText(dict((k, label) for k, label, _t in _LAYERS)[key]
-                       + (" (measured positions only)" if lattice and well_frame_only else ""))
-    for key, action in colour_actions.items():
+        action.setText(names[key] + (" (measured positions only)" if lattice and well_frame_only else ""))
+    for key, action in c.colour_actions.items():
         action.setChecked(layers.colour == key)
         action.setEnabled(layers.nanowells)
-    for group in groups[:4]:
-        group.setVisible(array)
+    for group in c.groups:
+        group.setVisible(on_view)
     can_set, can_clear, can_rerun = nwc.anchor_controls(ctx)
-    groups[4].setVisible(array and layers.anchor and not lattice)
-    one_btn.setEnabled(nwc.array_um_per_px(ctx) is not None)
-    anchor_btn.setEnabled(can_set)
-    anchor_btn.setChecked(st.anchor_mode and can_set)
-    clear_anchor_btn.setEnabled(can_clear)
-    rerun_btn.setEnabled(can_rerun)
+    c.grp_anchor.setVisible(on_view and layers.anchor and not lattice)
+    c.one_btn.setEnabled(nwc.array_um_per_px(ctx) is not None)
+    c.anchor_btn.setEnabled(can_set)
+    c.anchor_btn.setChecked(st.anchor_mode and can_set)
+    c.clear_anchor_btn.setEnabled(can_clear)
+    c.rerun_btn.setEnabled(can_rerun)
     canvas = ctx.widgets.get_or_none("_nw_canvas")
     if canvas is not None:
-        canvas.setCursor(Qt.CrossCursor if array and st.anchor_mode and can_set else Qt.ArrowCursor)
+        canvas.setCursor(Qt.CrossCursor if on_view and st.anchor_mode and can_set else Qt.ArrowCursor)
+
+
+def _build_array_controls(ctx, band) -> SimpleNamespace:
+    """The Array view's controls on the band: Image, Positions, Layers, Fit / 1:1 and the anchor's three buttons."""
+    from widgets.segmented_control import SegmentedControl
+
+    reg = ctx.widgets
+    image_cb = _combo(_IMAGES, _IMAGE_TIP)
+    image_cb.currentIndexChanged.connect(lambda _i: nwc.set_layer(ctx, "image", image_cb.currentData() or "off"))
+    reg.register("_nw_image_cb", image_cb)
+    grp_image = band.add_scope("Image", image_cb)
+
+    positions_seg = SegmentedControl()
+    for key, label in _POSITIONS:
+        positions_seg.addSegment(text=label, data=key)
+    positions_seg.setToolTip(_POSITIONS_TIP)
+    positions_seg.currentChanged.connect(lambda idx: nwc.set_layer(ctx, "positions", _POSITIONS[idx][0]))
+    reg.register("_nw_positions_seg", positions_seg)
+    grp_positions = band.add_scope("Positions", positions_seg)
+
+    layers_btn, layer_actions, colour_actions = _layers_button(ctx, band)
+    grp_layers = band.add_scope("", layers_btn)
+
+    fit_btn = _button("Fit", "Show everything drawn.", lambda: nwc.array_fit(ctx))
+    one_btn = _button("1:1", "One image pixel per screen pixel, about the centre of the view.",
+                      lambda: nwc.array_one_to_one(ctx))
+    reg.register("_nw_fit_btn", fit_btn)
+    reg.register("_nw_one_btn", one_btn)
+    grp_zoom = band.add_scope("", fit_btn, one_btn)
+
+    anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
+    anchor_btn.setCheckable(True)
+    anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
+    clear_anchor_btn = _button("Clear anchor", "Remove this well's anchor at this timepoint.",
+                               lambda: nwc.clear_anchor(ctx))
+    rerun_btn = _button("Re-run anchored wells…", "Open Analyze on this dataset, limited to the wells with an "
+                        "anchor, each run again in full so its timepoints are located with the anchor.",
+                        lambda: nwc.rerun_anchored(ctx))
+    reg.register("_nw_anchor_btn", anchor_btn)
+    reg.register("_nw_clear_anchor_btn", clear_anchor_btn)
+    reg.register("_nw_rerun_btn", rerun_btn)
+    grp_anchor = band.add_scope("Anchor", anchor_btn, clear_anchor_btn, rerun_btn)
+    return SimpleNamespace(
+        image_cb=image_cb, positions_seg=positions_seg, layer_actions=layer_actions, colour_actions=colour_actions,
+        groups=(grp_image, grp_positions, grp_layers, grp_zoom), grp_anchor=grp_anchor, one_btn=one_btn,
+        anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn,
+        signalling=(image_cb, positions_seg, anchor_btn, *layer_actions.values(), *colour_actions.values()))
 
 
 def _clear_sites(ctx) -> None:

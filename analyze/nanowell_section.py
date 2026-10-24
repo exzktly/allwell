@@ -51,6 +51,11 @@ _FIELDS = (
 )
 
 
+#: The fields of :data:`_FIELDS` that set the cell count, built with the count's other settings in the Segmentation
+#: section (:meth:`AnalyzeNanowellSectionMixin._build_nanowell_count_rows`) rather than here.
+_COUNT_FIELDS = ("nanowell_cell_diameter_um",)
+
+
 #: A custom format's geometry (tracker A7), shown only while the format is Custom.
 _CUSTOM_FIELDS = (
     ("nanowell_diameter_um", "Nanowell diameter (µm)", "_nanowell_diameter_edit",
@@ -89,7 +94,9 @@ def settings_from_opts(opts: dict):
         number("nanowell_clipped_below", 0.5), custom,
         str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]),
         str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]),
-        str(opts.get("nanowell_segment_on") or SEGMENT_ON_CHOICES[0][0]))
+        str(opts.get("nanowell_segment_on") or SEGMENT_ON_CHOICES[0][0]),
+        # No control on the form: the run takes the command line's default (crops), and Test detection the same.
+        str(opts.get("nanowell_segment_scope") or "nanowells"))
 
 
 class AnalyzeNanowellSectionMixin:
@@ -133,43 +140,13 @@ class AnalyzeNanowellSectionMixin:
         row.layout().addWidget(self._nanowell_geometry_cb)
         row.layout().addStretch(1)
         self._nanowell_field_rows.append(row.parentWidget())
-        row = self._row(sec, "Cellpose model", tooltip=(
-            "The model the cell count segments with. cpsam: Cellpose-SAM, Cellpose 4's model, which the app "
-            "installs. cyto3: Cellpose 3's generalist. livecell_cp3: the Cellpose 3 model trained on phase-contrast "
-            "images of eight cell lines (LIVECell). cyto3 and livecell_cp3 run only where Cellpose 3 is installed; "
-            "on Cellpose 4 the run refuses them by name rather than segmenting with another model. Compare them on "
-            "your plate with Test detection, whose crops show the run's own segmentation. Weights download on first "
-            "use."))
-        self._nanowell_model_cb = QComboBox(row)
-        for value, label in CELLPOSE_MODEL_CHOICES:
-            self._nanowell_model_cb.addItem(label, userData=value)
-        self._nanowell_model_cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self._nanowell_model_cb.setMinimumContentsLength(12)
-        row.layout().addWidget(self._nanowell_model_cb)
-        row.layout().addStretch(1)
-        self._nanowell_field_rows.append(row.parentWidget())
-        row = self._row(sec, "Segment on", tooltip=(
-            "What the cell count's model is given. Raw image: each tile as it was imaged — what Cellpose's models, "
-            "Cellpose-SAM's among them, were trained on. A cell found on a nanowell's rim is still not counted: only "
-            "a cell whose centre lies inside a nanowell's interior is. Rim-removed: each nanowell divided by the "
-            "well's empty-nanowell picture, which takes the rim away but is a ratio image no model was trained on, "
-            "and stretches the faint noise of an empty nanowell. Confluence is measured on the rim-removed image "
-            "either way. Compare the two on one well with Test detection, whose crops show the image the model was "
-            "given."))
-        self._nanowell_segment_on_cb = QComboBox(row)
-        for value, label in SEGMENT_ON_CHOICES:
-            self._nanowell_segment_on_cb.addItem(label, userData=value)
-        self._nanowell_segment_on_cb.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self._nanowell_segment_on_cb.setMinimumContentsLength(12)
-        row.layout().addWidget(self._nanowell_segment_on_cb)
-        row.layout().addStretch(1)
-        self._nanowell_field_rows.append(row.parentWidget())
+        self._build_nanowell_count_rows(sec)
         self._nanowell_custom_rows = []
         for key, label, attr, tip in _CUSTOM_FIELDS:
             self._nanowell_custom_rows.append(self._nanowell_edit_row(sec, key, label, attr, tip))
         for key, label, attr, tip in _FIELDS:
-            self._nanowell_field_rows.append(self._nanowell_edit_row(sec, key, label, attr, tip))
+            if key not in _COUNT_FIELDS:                # the count's own rows sit with segmentation (above)
+                self._nanowell_field_rows.append(self._nanowell_edit_row(sec, key, label, attr, tip))
         row = self._row(sec, "Scan order", tooltip="Only with a tile grid: where the stage started and how it ran.")
         self._nanowell_scan_cb = QComboBox(row)
         for value in SCAN_CHOICES:
@@ -235,6 +212,51 @@ class AnalyzeNanowellSectionMixin:
         if folder:
             self._nanowell_registration_edit.setText(folder)
 
+    def _build_nanowell_count_rows(self, sec: QWidget) -> None:
+        """The cell count's own settings — its Cellpose model, what that model is given, and the cell size — in the
+        Segmentation section's label-free page (``seg_params._nanowell_count_box``), which shows them in nanowell
+        mode in place of the settings the count does not read. In a form without that page they stay here."""
+        box = getattr(self, "_nanowell_count_box", None) or sec
+        heading = QLabel("Nanowell mode: the cell count in each nanowell segments with these.", box)
+        heading.setObjectName("Muted")
+        heading.setWordWrap(True)
+        box.layout().addWidget(heading)
+        row = self._row(box, "Cellpose model", tooltip=(
+            "The model the cell count segments with. cpsam: Cellpose-SAM, Cellpose 4's model, which the app "
+            "installs. cyto3: Cellpose 3's generalist. livecell_cp3: the Cellpose 3 model trained on phase-contrast "
+            "images of eight cell lines (LIVECell). cyto3 and livecell_cp3 run only where Cellpose 3 is installed; "
+            "on Cellpose 4 the run refuses them by name rather than segmenting with another model. Compare them on "
+            "your plate with Test detection, whose crops show the run's own segmentation. Weights download on first "
+            "use."))
+        self._nanowell_model_cb = QComboBox(row)
+        for value, label in CELLPOSE_MODEL_CHOICES:
+            self._nanowell_model_cb.addItem(label, userData=value)
+        self._nanowell_model_cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._nanowell_model_cb.setMinimumContentsLength(12)
+        row.layout().addWidget(self._nanowell_model_cb)
+        row.layout().addStretch(1)
+        self._nanowell_field_rows.append(row.parentWidget())
+        row = self._row(box, "Segment on", tooltip=(
+            "What the cell count's model is given. Raw image: each tile as it was imaged — what Cellpose's models, "
+            "Cellpose-SAM's among them, were trained on. A cell found on a nanowell's rim is still not counted: only "
+            "a cell whose centre lies inside a nanowell's interior is. Rim-removed: each nanowell divided by the "
+            "well's empty-nanowell picture, which takes the rim away but is a ratio image no model was trained on, "
+            "and stretches the faint noise of an empty nanowell. Confluence is measured on the rim-removed image "
+            "either way. Compare the two on one well with Test detection, whose crops show the image the model was "
+            "given."))
+        self._nanowell_segment_on_cb = QComboBox(row)
+        for value, label in SEGMENT_ON_CHOICES:
+            self._nanowell_segment_on_cb.addItem(label, userData=value)
+        self._nanowell_segment_on_cb.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._nanowell_segment_on_cb.setMinimumContentsLength(12)
+        row.layout().addWidget(self._nanowell_segment_on_cb)
+        row.layout().addStretch(1)
+        self._nanowell_field_rows.append(row.parentWidget())
+        for key, label, attr, tip in _FIELDS:
+            if key in _COUNT_FIELDS:
+                self._nanowell_field_rows.append(self._nanowell_edit_row(box, key, label, attr, tip))
+
     def _nanowell_edit_row(self, sec, key, label, attr, tip):
         r = self._row(sec, label, tooltip=tip)
         edit = self._entry(r, "", width=70)
@@ -256,6 +278,14 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_geometry_cb.setEnabled(on)
         self._nanowell_model_cb.setEnabled(on)
         self._nanowell_segment_on_cb.setEnabled(on)
+        # The count's rows live on the Segmentation section's label-free page: shown in nanowell mode, and the
+        # page's own note (and its pixel diameter, which the count does not read) hidden then.
+        box = getattr(self, "_nanowell_count_box", None)
+        if box is not None:
+            box.setVisible(on)
+            self._labelfree_note.setVisible(not on)
+            self._sync_cellpose_diameter_row()
+            self._collapse_seg_param_stack()
         for _key, _label, attr, _tip in _FIELDS + _CUSTOM_FIELDS + _GRID_FIELDS:
             getattr(self, attr).setEnabled(on)
         self._nanowell_scan_cb.setEnabled(on)

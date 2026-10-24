@@ -105,3 +105,15 @@ def test_the_default_model_is_the_one_the_pinned_cellpose_ships():
                (Path(__file__).resolve().parents[1] / "requirements-remote.txt").read_text().splitlines()
                if line.startswith("cellpose=="))
     assert cp.model_refusal(cp.DEFAULT_MODEL, cp.cellpose_major(pin)) is None
+
+
+@pytest.mark.parametrize("major", [3, 4])
+def test_a_fixed_range_reaches_cellpose_as_its_normalisation(monkeypatch, major):
+    """A nanowell's crop is scaled as its whole tile is: the range goes to ``eval`` as ``normalize={"lowhigh": …}``,
+    which both versions read; without one, Cellpose scales each image by its own percentiles, as before."""
+    calls = _install(monkeypatch, major)
+    model = "cpsam" if major == 4 else "cyto3"
+    cp._segment_cellpose(np.zeros((4, 4)), model_type=model, lowhigh=(10.0, 250.0))
+    cp._segment_cellpose(np.zeros((4, 4)), model_type=model)
+    (_s1, with_range), (_s2, without) = calls["eval"]
+    assert with_range["normalize"] == {"lowhigh": [10.0, 250.0]} and "normalize" not in without

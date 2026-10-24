@@ -208,9 +208,14 @@ In the Analyze pane, open the **Nanowells** section (below Quality Control, fold
 channel the tiles are imaged in as **Phase** (Channel Tokens). The section asks for the plate format (100 µm or
 50 µm nanowells, or **Custom size**, which shows two more fields: the nanowell diameter and the lattice pitch,
 centre to centre — the run measures the pitch on the tiles, so it is a starting value), the **Array geometry**
-and, optionally, the cell diameter, the margin around a nanowell that must lie inside one tile
+and, optionally, the margin around a nanowell that must lie inside one tile
 for that tile to own it, the angle of the central square's edges to a lattice row, and the occlusion and
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
+
+With **Nanowell arrays** ticked, the **Segmentation** section at the top of the form is set to label-free and shows
+the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on** and **Cell diameter
+(µm)** (the typical cell size, which sets the scale the model looks for cells at; blank uses the default). The count
+reads only these — not the pixel diameter label-free shows outside nanowell mode.
 
 **Cellpose model** chooses what counts the cells: *cpsam* (Cellpose-SAM, the default), *cyto3* (Cellpose 3's
 generalist) or *livecell_cp3* (the Cellpose 3 model trained on phase-contrast images of eight cell lines,
@@ -229,6 +234,11 @@ which the faint noise of an empty nanowell is stretched across the model's whole
 in a nanowell only when its centre lies inside the nanowell's interior, so a cell found on a rim is not counted, and
 confluence is measured on the rim-removed image. Test detection's crops show the image the model was given (their
 tooltip says which). A run made before this setting existed counted on the rim-removed image, and its settings say so.
+
+The model is given each nanowell separately — a crop around it, scaled to the brightness range of the whole tile, so
+an empty nanowell is not stretched to look busy — rather than the whole tile at once: the lattice between nanowells
+holds no cell that is counted, and on a slow GPU it was most of the work. On the command line,
+`--nanowell_segment_scope tile` segments whole tiles instead, as runs made before this did.
 
 **Array geometry** says how the array is found. *Hexagonal lattice in a circle* (the default) looks for nanowells
 on a hexagonal lattice inside a circular array. Either way the nanowells' diameter is measured on the images — one
@@ -1551,7 +1561,8 @@ and by `remote_fetch_report.txt` in the output folder.
   no cog — the dial and its colour already say it is working. That holds for
   every plate map in the app, including the ones on the Datasets tools.
 - The dial follows whichever step the well is actually in. While the well is
-  being computed it fills with the fields measured; while its input archive is
+  being computed it fills with the fields measured — in a nanowell run, with
+  its timepoints, each located and then measured; while its input archive is
   being uploaded, or its results downloaded, it fills with the bytes moved. It
   never runs backwards: once a well's archive is uploaded the dial stays full
   while it waits its turn on the remote — its colour is what says the well is

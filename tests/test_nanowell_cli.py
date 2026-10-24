@@ -516,3 +516,21 @@ def test_an_incremental_timepoint_of_another_lattice_kind_than_the_kept_ones_is_
     block = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())["timepoints"]["24h"]
     assert block["status"] == "lattice_kind_mismatch" and "the earlier run kept a hex one" in block["reason"]
     assert not [r for r in _rows(out, f"{WELL}.csv") if r["timepoint"] == "24h"]
+
+
+def test_a_nanowell_run_prints_the_progress_its_well_s_dial_follows(tmp_path, monkeypatch, rendered_well, caplog):
+    """Reported: during a nanowell run the well's dial on Analyze's plate never moved. Driven through the real run and
+    the real reader of its log: the dial starts at the well's total and climbs to it, never backwards."""
+    import logging
+
+    from services.pipeline_runner import ProgressTracker
+
+    rendered, record, _truth = rendered_well
+    plate = _write_plate(tmp_path, rendered, record)
+    with caplog.at_level(logging.INFO, logger="allwell.nanowell"):
+        _run_main(monkeypatch, plate, "--nanowell_format", "100um")
+    reader = ProgressTracker()
+    dial = [payload for record_ in caplog.records for kind, payload in reader.parse(record_.getMessage())
+            if kind == "well_fov"]
+    assert dial and dial[0] == (WELL, 0, 2) and dial[-1] == (WELL, 2, 2)     # one timepoint: located, then measured
+    assert [done for _w, done, _t in dial] == sorted(done for _w, done, _t in dial)

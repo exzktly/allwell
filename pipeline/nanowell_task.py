@@ -58,7 +58,8 @@ def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
                                spec.get("clipped_below", 0.5), custom,
                                spec.get("geometry") or nr.GEOMETRY_HEX_CIRCLE,
                                spec.get("cellpose_model") or nr.LEGACY_CELLPOSE_MODEL,
-                               spec.get("segment_on") or nr.LEGACY_SEGMENT_ON)
+                               spec.get("segment_on") or nr.LEGACY_SEGMENT_ON,
+                               spec.get("segment_scope") or nr.LEGACY_SEGMENT_SCOPE)
 
 
 def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
@@ -85,8 +86,18 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
                           earliest_template=None if saved is None else saved[0],
                           spill_dir=Path(scratch_dir) / ".montages",     # removed with the scratch (X23)
                           expected_shape=expected_shape, stored_placements=stored_placements,
-                          manual_anchors=manual_anchors)
+                          manual_anchors=manual_anchors, progress=lambda done, total: _log_steps(well_label, done, total))
     return outcome, fixed, fixed_roster, saved
+
+
+def _log_steps(well_label: str, done: int, total: int) -> None:
+    """The well's progress, in the two lines Analyze's run reader turns into the well's dial on the plate
+    (``services.pipeline_runner``: ``_RE_WELL_FOV_TOTAL`` / ``_RE_WELL_FOV_DONE``). A nanowell well is processed a
+    timepoint at a time, never a field at a time, so without them it printed nothing the dial could follow."""
+    if done == 0:
+        log.info("Well %s — %d step(s): each timepoint located, then measured", well_label, total)
+    else:
+        log.info("Well %s — step %d/%d done", well_label, done, total)
 
 
 def stored_placements(folders, well_label: str) -> dict:

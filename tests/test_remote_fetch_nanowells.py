@@ -201,6 +201,11 @@ def test_a_nanowell_well_s_completion_line_is_the_one_the_fetcher_and_the_progre
     plate = _write_plate(tmp_path, rendered, record)
     with caplog.at_level(logging.INFO):
         _run_main(monkeypatch, plate, "--nanowell_format", "100um")
-    done = [r.getMessage() for r in caplog.records if "done" in r.getMessage() and "A01" in r.getMessage()]
+    messages = [r.getMessage() for r in caplog.records if "A01" in r.getMessage()]
+    done = [m for m in messages if "done." in m]                     # the completion line: "Well A01 — done. …"
     assert done and _RE_WELL_DONE.search(done[0]).group("well") == "A01"
     assert _RE_WELL_DONE_ID.search(done[0]).group(1) == "A01"
+    # The well's progress lines ("Well A01 — step k/N done") also say "done", for the plate's dial; read as the
+    # completion line, a remote run would fetch the well before it had finished.
+    steps = [m for m in messages if " step " in m]
+    assert steps and not any(_RE_WELL_DONE.search(m) or _RE_WELL_DONE_ID.search(m) for m in steps)

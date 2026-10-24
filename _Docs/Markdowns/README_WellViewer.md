@@ -242,12 +242,13 @@ counted, and on a slow GPU it was most of the work. *Whole tile* gives it each t
 this setting existed did, and their settings say so. Compare the two on one well with **Test detection**, which
 segments as the run would. (On the command line: `--nanowell_segment_scope nanowells|tile`.)
 
-While a run counts, Cellpose may print *No cell pixels found.* in the log. That is Cellpose's own line, printed
-each time it is given an image it finds no cell in: with **Segment** on *Each nanowell* that is once per empty
-nanowell, so some of them are expected. A nanowell it is printed for is recorded as measured with 0 cells (state
-*empty*): the Nanowells page counts it as a zero in its count, growth and occupancy metrics, and it adds no rows to
-the per-cell table the other plots read. If it is printed for nearly every nanowell, including ones you can see cells
-in, the counts are wrong: check that well with Test detection before plotting them.
+While a run counts, its log says how far it is: `Well A01 — 24h: 120/400 nanowells segmented (1.5 s each, about
+7 min 0 s left)`, about every tenth of a timepoint's nanowells. Cellpose's own *No cell pixels found.* — which it
+prints for every image it finds no cell in, once per empty nanowell — is no longer shown. A nanowell with no cell is
+recorded as measured with 0 cells (state *empty*): the Nanowells page counts it as a zero in its count, growth and
+occupancy metrics, and it adds no rows to the per-cell table the other plots read. If nearly every nanowell comes out
+empty, including ones you can see cells in, the counts are wrong: check that well with Test detection before
+plotting them.
 
 **Array geometry** says how the array is found. *Hexagonal lattice in a circle* (the default) looks for nanowells
 on a hexagonal lattice inside a circular array. Either way the nanowells' diameter is measured on the images — one
@@ -1575,7 +1576,8 @@ and by `remote_fetch_report.txt` in the output folder.
   measured, with how many of its nanowells are segmented so far. Hovering the
   well says where it is (`step 5/8, 24h: 120/400 nanowells segmented`), and the
   run log prints the same count about every tenth of a timepoint's nanowells
-  (`Well A01 — 24h: 120/400 nanowells segmented`); a timepoint whose last line
+  (`Well A01 — 24h: 120/400 nanowells segmented`, with the time per nanowell
+  and the time left); a timepoint whose last line
   stops short of its total had nanowells that could not be segmented. While its input archive is
   being uploaded, or its results downloaded, it fills with the bytes moved. It
   never runs backwards: once a well's archive is uploaded the dial stays full

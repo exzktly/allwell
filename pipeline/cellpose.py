@@ -122,6 +122,11 @@ def _cellpose_model(model_type: str = DEFAULT_MODEL):
         # states where segmentation actually happened: the main process can
         # count GPUs, but only Torch in the worker knows whether it can use one.
         log.info("Cellpose %s on %s (worker %d).", key, where, os.getpid())
+        # Cellpose logs "No cell pixels found." for every image it finds no cell in. A nanowell run gives it one image
+        # per nanowell, so that bare line, naming no well, nanowell or time, was the only thing a long count printed,
+        # and read as the run being stuck. The count's own progress lines say what it is doing instead
+        # (``nanowell_task._log_sites``), and a nanowell with no cell is recorded as one, with ``n_cells`` 0.
+        logging.getLogger("cellpose.dynamics").setLevel(logging.WARNING)
         _CELLPOSE_MODELS[key] = model
     return model
 

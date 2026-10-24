@@ -129,3 +129,37 @@ def qapp():
     from PySide6.QtWidgets import QApplication
 
     return QApplication.instance() or QApplication([])
+
+
+def test_each_count_line_after_the_first_says_how_long_a_nanowell_takes_and_what_is_left():
+    """Reported: during a Cellpose-SAM count the log showed only Cellpose's own "No cell pixels found." every few
+    minutes, "it provides no status as to what it is doing". The count's lines now carry the rate and the time left,
+    and the reader still reads them."""
+    import logging
+
+    from pipeline.nanowell_task import _log_sites
+
+    seen = []
+
+    class Collect(logging.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+
+    handler = Collect()
+    logger = logging.getLogger("allwell.nanowell")
+    logger.addHandler(handler)
+    old = logger.level
+    logger.setLevel(logging.INFO)
+    times = iter([100.0, 160.0, 500.0])
+    try:
+        for done in (0, 40, 400):
+            _log_sites("C03", "24h", done, 400, clock=lambda: next(times))
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(old)
+    assert seen == ["Well C03 — 24h: 0/400 nanowells segmented",
+                    "Well C03 — 24h: 40/400 nanowells segmented (1.5 s each, about 9 min 0 s left)",
+                    "Well C03 — 24h: 400/400 nanowells segmented (in 6 min 40 s, 1.0 s each)"]
+    reader = ProgressTracker()
+    assert [p for line in seen for k, p in reader.parse(line) if k == "well_sites"] == [
+        ("C03", "24h", 0, 400), ("C03", "24h", 40, 400), ("C03", "24h", 400, 400)]

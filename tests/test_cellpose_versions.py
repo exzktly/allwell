@@ -125,3 +125,19 @@ def test_a_fixed_range_scales_the_image_here_and_cellpose_normalises_nothing(mon
     assert np.allclose(calls["images"][0], [[0.0, 0.5], [1.0, 2.0]]) and np.array_equal(calls["images"][1], image)
     with pytest.raises(ValueError, match="nucleus"):
         cp._segment_cellpose(image, model_type=model, lowhigh=(10.0, 250.0), nucleus_image=image)
+
+
+def test_loading_a_model_quiets_cellpose_s_bare_no_cell_line(monkeypatch):
+    """Reported: "No cell pixels found, it just sits there" — Cellpose's INFO line for every image without a cell,
+    one per empty nanowell, naming nothing. The count's own progress lines replace it; Cellpose's warnings still pass."""
+    import logging
+
+    logger = logging.getLogger("cellpose.dynamics")
+    old = logger.level
+    logger.setLevel(logging.INFO)                           # as a run that logs at INFO leaves it
+    try:
+        _install(monkeypatch, 4)
+        cp._segment_cellpose(np.zeros((4, 4)), model_type="cpsam")
+        assert not logger.isEnabledFor(logging.INFO) and logger.isEnabledFor(logging.WARNING)
+    finally:
+        logger.setLevel(old)

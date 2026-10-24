@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import time
 import zipfile
 from pathlib import Path
 from types import MappingProxyType
@@ -101,11 +102,30 @@ def _log_steps(well_label: str, done: int, total: int) -> None:
         log.info("Well %s — step %d/%d done", well_label, done, total)
 
 
-def _log_sites(well_label: str, timepoint, done: int, total: int) -> None:
+#: When each (well, timepoint)'s count started, by this process's clock: what :func:`_log_sites` times the rate from.
+_SITES_STARTED: dict = {}
+
+
+def _log_sites(well_label: str, timepoint, done: int, total: int, *, clock=time.monotonic) -> None:
     """How many of a timepoint's nanowells are segmented so far, while it is measured: the measure step's own
     progress, which the run reader adds to the well's dial and names in its hover text
-    (``services.pipeline_runner._RE_WELL_SITES``)."""
-    log.info("Well %s — %s: %d/%d nanowells segmented", well_label, timepoint, done, total)
+    (``services.pipeline_runner._RE_WELL_SITES``). After the first line each says how long a nanowell is taking and
+    about how long the timepoint has left, so a slow count reads as slow rather than stuck."""
+    now = clock()
+    if done == 0:
+        _SITES_STARTED[(well_label, timepoint)] = now
+        log.info("Well %s — %s: %d/%d nanowells segmented", well_label, timepoint, done, total)
+        return
+    elapsed = now - _SITES_STARTED.get((well_label, timepoint), now)
+    each = elapsed / done
+    timing = (f"in {_duration(elapsed)}, {each:.1f} s each" if done >= total
+              else f"{each:.1f} s each, about {_duration(each * (total - done))} left")
+    log.info("Well %s — %s: %d/%d nanowells segmented (%s)", well_label, timepoint, done, total, timing)
+
+
+def _duration(seconds: float) -> str:
+    minutes, secs = divmod(int(round(seconds)), 60)
+    return f"{minutes} min {secs} s" if minutes else f"{secs} s"
 
 
 def stored_placements(folders, well_label: str) -> dict:

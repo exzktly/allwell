@@ -10004,7 +10004,16 @@ scaling stretches. A run's options that name none mean `rim` (`LEGACY_SEGMENT_ON
 so `NanowellSettings.key()` names the input only when it is not `rim`, `--nanowell_segment_on` defaults to `raw`, the
 form always sends its choice, and `settings_digest._before_cpsam` aliases a nanowell run on `rim` to the digest the
 earlier build recorded. Confluence is measured on the rim-suppressed tile either way, and Test detection's crops
-(`pipeline/nanowell_preview._tile_segmented`) are cut from the image the segmenter was given, marked `input`
+(`pipeline/nanowell_preview._tile_segmented`) are cut from the image the segmenter was given, marked `input`.
+How much of that image the segmenter is given is `segment_scope` (`SEGMENT_SCOPES`): `nanowells`, the default for a
+new run, calls it once per owned nanowell on a crop `CROP_REACH` (1.2) radii around the centre
+(`nanowell_measure.segment_sites`), renumbers each crop's labels and pastes them into a whole-tile label image, so
+`count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's, which passes it
+on as `normalize={"lowhigh": …}`) is given the tile's own 1st-99th percentiles for every crop, because a crop scaled
+to its own range would stretch an empty nanowell's noise. `tile` is one call on the whole tile (`segment_tile`), and
+is what options that name no scope mean (`LEGACY_SEGMENT_SCOPE`), with the same key and digest-alias treatment as
+`segment_on`. The form has no control for it: a run takes `--nanowell_segment_scope`'s default, and
+`settings_from_opts` gives Test detection the same
 (`cellpose_segmenter` is the production segmenter and imports `pipeline.cellpose` only
 when called). Its model is the setting's `cellpose_model`, one of `nanowell_run.CELLPOSE_MODELS`: `cpsam`
 (Cellpose-SAM, the default, in the pinned `cellpose==4.1.1`), `cyto3` (Cellpose 3's generalist) or `livecell_cp3`

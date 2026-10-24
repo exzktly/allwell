@@ -94,7 +94,9 @@ def settings_from_opts(opts: dict):
         number("nanowell_clipped_below", 0.5), custom,
         str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]),
         str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]),
-        str(opts.get("nanowell_segment_on") or SEGMENT_ON_CHOICES[0][0]))
+        str(opts.get("nanowell_segment_on") or SEGMENT_ON_CHOICES[0][0]),
+        # No control on the form: the run takes the command line's default (crops), and Test detection the same.
+        str(opts.get("nanowell_segment_scope") or "nanowells"))
 
 
 class AnalyzeNanowellSectionMixin:

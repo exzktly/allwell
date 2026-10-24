@@ -58,7 +58,8 @@ def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
                                spec.get("clipped_below", 0.5), custom,
                                spec.get("geometry") or nr.GEOMETRY_HEX_CIRCLE,
                                spec.get("cellpose_model") or nr.LEGACY_CELLPOSE_MODEL,
-                               spec.get("segment_on") or nr.LEGACY_SEGMENT_ON)
+                               spec.get("segment_on") or nr.LEGACY_SEGMENT_ON,
+                               spec.get("segment_scope") or nr.LEGACY_SEGMENT_SCOPE)
 
 
 def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:

@@ -235,6 +235,11 @@ in a nanowell only when its centre lies inside the nanowell's interior, so a cel
 confluence is measured on the rim-removed image. Test detection's crops show the image the model was given (their
 tooltip says which). A run made before this setting existed counted on the rim-removed image, and its settings say so.
 
+The model is given each nanowell separately — a crop around it, scaled to the brightness range of the whole tile, so
+an empty nanowell is not stretched to look busy — rather than the whole tile at once: the lattice between nanowells
+holds no cell that is counted, and on a slow GPU it was most of the work. On the command line,
+`--nanowell_segment_scope tile` segments whole tiles instead, as runs made before this did.
+
 **Array geometry** says how the array is found. *Hexagonal lattice in a circle* (the default) looks for nanowells
 on a hexagonal lattice inside a circular array. Either way the nanowells' diameter is measured on the images — one
 diameter for the whole well, the median over its timepoints — and the nanowells are found, fitted and measured at

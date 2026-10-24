@@ -160,6 +160,7 @@ def _segment_cellpose(
     flow_threshold: float = 0.4,
     cellprob_threshold: float = 0.0,
     nucleus_image: np.ndarray | None = None,
+    lowhigh: tuple[float, float] | None = None,
 ) -> np.ndarray:
     """Segment *image* with Cellpose. Works on any channel (fluorescent or
     brightfield) — the caller chooses the input. ``diameter=0`` passes none, so
@@ -174,19 +175,24 @@ def _segment_cellpose(
 
     Cellpose 4 takes no ``channels``: it reads up to three channels in any order,
     so the two are stacked on the last axis and named by ``channel_axis``.
+
+    *lowhigh* fixes the intensities Cellpose scales to 0 and 1, in place of the
+    image's own 1st and 99th percentiles (``normalize={"lowhigh": …}``, in both
+    versions): a crop of a larger image is then scaled as the whole image is.
     """
     model = _cellpose_model(model_type)
     diam = float(diameter) if diameter and diameter > 0 else None
     seg = np.asarray(image)
+    extra = {} if lowhigh is None else {"normalize": {"lowhigh": [float(lowhigh[0]), float(lowhigh[1])]}}
     major = cellpose_major()
     if major is not None and major >= 4:
         if nucleus_image is not None:
             stacked = np.stack([seg, np.asarray(nucleus_image)], axis=-1)  # (Y, X, 2)
             result = model.eval(stacked, diameter=diam, channel_axis=-1, flow_threshold=flow_threshold,
-                                cellprob_threshold=cellprob_threshold)
+                                cellprob_threshold=cellprob_threshold, **extra)
         else:
             result = model.eval(seg, diameter=diam, flow_threshold=flow_threshold,
-                                cellprob_threshold=cellprob_threshold)
+                                cellprob_threshold=cellprob_threshold, **extra)
         return np.asarray(result[0], dtype=np.int32)
     if nucleus_image is not None:
         stacked = np.stack([seg, np.asarray(nucleus_image)], axis=-1)  # (Y, X, 2)
@@ -196,6 +202,6 @@ def _segment_cellpose(
     else:
         result = model.eval(seg, diameter=diam, channels=[0, 0],
                             flow_threshold=flow_threshold,
-                            cellprob_threshold=cellprob_threshold)
+                            cellprob_threshold=cellprob_threshold, **extra)
     masks = result[0]  # eval returns (masks, flows, styles[, diams])
     return np.asarray(masks, dtype=np.int32)

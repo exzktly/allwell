@@ -124,6 +124,8 @@ KEYED_ON: dict[str, str] = {
                                    "every address",
     "nanowell_cellpose_model":     "the model the label-free count segments with, so every count",
     "nanowell_segment_on":         "the image that model is given (as imaged, or rim-divided), so every count",
+    "nanowell_segment_scope":      "whether that model is given each nanowell's crop or the whole tile, so what "
+                                   "it sees around each cell and every count",
     "nanowell_grid":               "the described grid a dataset without an acquisition record is "
                                    "placed from, so where every tile and nanowell sits",
     "nanowell_scan":               "the order the described grid's fields were taken in, the same",
@@ -242,6 +244,9 @@ def _before_cpsam(opts) -> dict:
     # Nor was there a choice of what the model is given: every run segmented the rim-divided tile.
     if "nanowell_segment_on" in out and (not nanowell or out["nanowell_segment_on"] == "rim"):
         out["nanowell_segment_on"] = None
+    # Nor of how much of the tile: every run segmented the whole of it.
+    if "nanowell_segment_scope" in out and (not nanowell or out["nanowell_segment_scope"] == "tile"):
+        out["nanowell_segment_scope"] = None
     return out
 
 

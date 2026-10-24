@@ -146,6 +146,17 @@ class AnalyzeSegParamsMixin:
         lf_lbl.setObjectName("Muted")
         lf_lbl.setWordWrap(True)
         lf.layout().addWidget(lf_lbl)
+        self._labelfree_note = lf_lbl
+        # Nanowell mode's cell count, which is its own Cellpose call (``pipeline.nanowell_run``) with its own model,
+        # input and cell size, and reads none of this section's other settings. Its rows are built here by the
+        # Nanowells section (``nanowell_section._build_nanowell_count_rows``) and shown only in nanowell mode, so the
+        # settings that decide how cells are segmented sit with the rest of segmentation.
+        self._nanowell_count_box = QWidget(lf)
+        box = QVBoxLayout(self._nanowell_count_box)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(2)
+        lf.layout().addWidget(self._nanowell_count_box)
+        self._nanowell_count_box.hide()
         self._seg_param_stack.addPage("cellpose_labelfree", lf)
 
         # Classical (Otsu + watershed): no extra parameters.
@@ -184,10 +195,13 @@ class AnalyzeSegParamsMixin:
         self._sync_cellpose_diameter_row()
 
     def _sync_cellpose_diameter_row(self) -> None:
-        """Show the diameter only for the methods that run Cellpose."""
+        """Show the diameter only for the methods that run Cellpose — and not in nanowell mode, whose count takes
+        its cell size in micrometres from its own row (``nanowell_cell_diameter_um``) and never reads this one."""
         row = getattr(self, "_cellpose_diameter_row", None)
         if row is not None:
-            row.setVisible(self._seg_method() in _CELLPOSE_DIAMETER_METHODS)
+            nanowell = getattr(self, "_nanowell_cb", None)
+            row.setVisible(self._seg_method() in _CELLPOSE_DIAMETER_METHODS
+                           and not (nanowell is not None and nanowell.isChecked()))
 
     def _build_stardist_threshold_rows(self, sec: QWidget) -> None:
         """The two StarDist detection thresholds, shared by both StarDist pages.

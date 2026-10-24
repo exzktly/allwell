@@ -701,7 +701,8 @@ allwell/
 │   ├── nanowell_hook.py        ← picks the section or a stand-in by the build's profile
 │   ├── nanowell_section.py     ← the Nanowells section: mode, plate format, the numeric
 │   │                              fields, Reuse registration, Test detection, and the run
-│   │                              validation
+│   │                              validation; builds the count's model, input and cell
+│   │                              size into the Segmentation section's label-free page
 │   ├── nanowell_preflight.py   ← what is checkable before a nanowell run without reading an
 │   │                              image: record, archives, grids, overlap and seam estimate
 │   ├── nanowell_preview.py     ← the Test detection window and the marks drawn on the montage
@@ -10270,8 +10271,15 @@ stay in every build: Qt-free, sent to remote hosts, and what keeps a dataset wit
 Nanowells section (`analyze/nanowell_section.py`, folded by default, directly below Quality Control) holds the mode
 checkbox, the plate format, the array geometry (*Hexagonal lattice in a circle*, which sends no flag, or *Infer
 from the image*, which sends `--nanowell_geometry infer`; `GEOMETRY_CHOICES` in `domain/nanowell_fields.py`), the
-cell diameter, the margin, the square's edge angle and the occlusion and
-clipping thresholds; a blank number sends no flag and the pipeline's default applies. *Reuse registration* (a path
+margin, the square's edge angle and the occlusion and
+clipping thresholds; a blank number sends no flag and the pipeline's default applies. **The count's own settings sit
+with segmentation**: the cell count is its own Cellpose call with its own model, input and cell size, and reads none
+of the Segmentation section's other settings, so `_build_nanowell_count_rows` builds the **Cellpose model**,
+**Segment on** and **Cell diameter (µm)** rows (`_COUNT_FIELDS`) into the Segmentation section's label-free page
+(`seg_params._nanowell_count_box`). That box is shown only in nanowell mode, which pins the method to label-free;
+the page's own note and the pixel diameter row (`_sync_cellpose_diameter_row`, which the count never reads) are
+hidden then. Their option keys are the section's as before
+(`tests/test_nanowell_count_settings_sit_with_segmentation.py`). *Reuse registration* (a path
 and a Browse button, key `nanowell_registration_from`) sends `--nanowell_registration_from` when filled; a folder
 without `nanowells/` is refused (`registration_from_error`), and with a remote host chosen the run goes on and the log
 says once that the host registers every tile (`_nanowell_log_once`). Its option keys are

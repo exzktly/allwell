@@ -208,9 +208,14 @@ In the Analyze pane, open the **Nanowells** section (below Quality Control, fold
 channel the tiles are imaged in as **Phase** (Channel Tokens). The section asks for the plate format (100 µm or
 50 µm nanowells, or **Custom size**, which shows two more fields: the nanowell diameter and the lattice pitch,
 centre to centre — the run measures the pitch on the tiles, so it is a starting value), the **Array geometry**
-and, optionally, the cell diameter, the margin around a nanowell that must lie inside one tile
+and, optionally, the margin around a nanowell that must lie inside one tile
 for that tile to own it, the angle of the central square's edges to a lattice row, and the occlusion and
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
+
+With **Nanowell arrays** ticked, the **Segmentation** section at the top of the form is set to label-free and shows
+the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on** and **Cell diameter
+(µm)** (the typical cell size, which sets the scale the model looks for cells at; blank uses the default). The count
+reads only these — not the pixel diameter label-free shows outside nanowell mode.
 
 **Cellpose model** chooses what counts the cells: *cpsam* (Cellpose-SAM, the default), *cyto3* (Cellpose 3's
 generalist) or *livecell_cp3* (the Cellpose 3 model trained on phase-contrast images of eight cell lines,

@@ -93,6 +93,9 @@ class NanowellData:
     schema: str = ""
     separator: str = ""
     phase_token: str = ""
+    #: Every well with a nanowell table in the folder, read or not: the tables are read only for the wells asked
+    #: for (:func:`load_nanowell_data`), and this is what tells a well that was not read from one with no table.
+    available: list = field(default_factory=list)
 
     @property
     def wells(self) -> list[str]:
@@ -243,17 +246,14 @@ def _times(data_dir: Path, timepoints) -> tuple[dict, str | None, str]:
                       "nothing measured against time is defined.")
 
 
-def _cell_brightness(cell_dir: Path, channels) -> pd.DataFrame | None:
-    """Mean per-cell intensity per (well, timepoint, nanowell, channel), from the per-cell CSVs in *cell_dir*.
-
-    *cell_dir* is the folder holding ``nanowells/`` — the run's output folder — whichever of it and its
-    parent was loaded.
+def _cell_brightness(paths, well: str | None = None) -> pd.DataFrame | None:
+    """Mean per-cell intensity per (well, timepoint, nanowell), one ``brightness_<token>`` column per
+    ``<token>_mean_intensity`` column, from the per-cell CSVs at *paths*; only *well*'s rows when one is named.
+    Which of the columns are fluorescence channels is decided when the wells are put together
+    (:func:`_assemble`), from the site tables.
     """
     frames = []
-    from util.csv_gz import glob_csvs
-
-    # Either spelling, one path per logical file, plain winning: the rule ``util/csv_gz`` states for every reader.
-    for path in glob_csvs(Path(cell_dir)):
+    for path in paths:
         try:
             header = pd.read_csv(path, nrows=0).columns
         except (OSError, ValueError, pd.errors.EmptyDataError):
@@ -261,8 +261,10 @@ def _cell_brightness(cell_dir: Path, channels) -> pd.DataFrame | None:
         wanted = [c for c in ("well", "timepoint", "nw_q", "nw_r") if c in header]
         if len(wanted) < 4:
             continue                                       # not a nanowell-mode cell table
-        intensity = [f"{t}_mean_intensity" for t in channels if f"{t}_mean_intensity" in header]
+        intensity = [c for c in header if c.endswith("_mean_intensity")]
         frame = pd.read_csv(path, usecols=wanted + intensity, dtype={"timepoint": str, "well": str})
+        if well is not None:
+            frame = frame[frame["well"] == well]
         frames.append(frame)
     if not frames:
         return None
@@ -277,6 +279,63 @@ def _cell_brightness(cell_dir: Path, channels) -> pd.DataFrame | None:
     return out.reset_index()
 
 
+def _cell_files_of(well: str, cell_files, wells) -> list[Path]:
+    """The per-cell CSVs that can hold *well*'s cells: its own (``<prefix>_<well>.csv``, as the pipeline names
+    them) and any that name no well of the dataset (a table made by hand or by merging, which may hold
+    several). A file named for another well is not opened."""
+    def named_well(path: Path) -> str | None:
+        stem = path.name.split(".csv")[0]
+        return next((w for w in wells if stem.endswith(f"_{w}")), None)
+
+    return [p for p in cell_files if named_well(p) in (well, None)]
+
+
+@dataclass
+class WellPart:
+    """One well's share of :class:`NanowellData`, read once and kept, so a well selected again is not read
+    again: its site table (``None`` with :attr:`problem` saying why it was left out), its grid record's
+    timepoints, roster rule and re-analysis note, and its cells' brightness."""
+    well: str
+    table: pd.DataFrame | None = None
+    grid: dict = field(default_factory=dict)
+    roster_rule: object = None
+    reanalysed: str = ""
+    problem: str = ""
+    brightness: pd.DataFrame | None = None
+
+
+def read_well_part(folder: Path, well: str, cell_files, wells) -> WellPart:
+    """*well*'s table, grid record and cells' brightness, or a part whose :attr:`WellPart.problem` says why it
+    cannot be used."""
+    path = folder / f"{well}.csv"
+    grid_path = folder / f"{well}_grid.json"
+    try:
+        grid = json.loads(grid_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return WellPart(well, problem=f"{well}: its grid record ({grid_path.name}) is missing, so its timepoints' "
+                                      "status is unknown; the well is left out.")
+    except (OSError, ValueError) as exc:
+        return WellPart(well, problem=f"{well}: its grid record cannot be read ({exc}); the well is left out.")
+    if grid.get("scheme_version") not in SUPPORTED_SCHEMES:
+        return WellPart(well, problem=f"{well}: scheme version {grid.get('scheme_version')!r} is not one this "
+                                      f"version reads ({sorted(SUPPORTED_SCHEMES)}); the well is left out.")
+    try:
+        table = _read_well_table(path, well)
+    except (OSError, ValueError, pd.errors.ParserError) as exc:
+        return WellPart(well, problem=f"{well}: its nanowell table cannot be read ({exc}); the well is left out.")
+    repeated = table[table["nw_q"].notna()].duplicated(["timepoint", "nw_q", "nw_r"], keep=False)
+    if repeated.any():
+        first = table[table["nw_q"].notna()][repeated].iloc[0]
+        return WellPart(well, problem=f"{well}: {int(repeated.sum())} rows repeat an address at one timepoint "
+                                      f"(e.g. ({int(first['nw_q'])}, {int(first['nw_r'])}) at "
+                                      f"{first['timepoint']}), so its nanowells cannot be followed over time; "
+                                      "the well is left out.")
+    return WellPart(well, table=table, grid=grid.get("timepoints") or {},
+                    roster_rule=roster_rule(grid.get("array_radius")),
+                    reanalysed=(grid.get("array_radius") or {}).get("reanalysed_because") or "",
+                    brightness=_cell_brightness(_cell_files_of(well, cell_files, wells), well))
+
+
 def _phase_token(sidecar: dict) -> str:
     """The run's phase channel token, lower-cased ("" when not stated).
 
@@ -288,11 +347,23 @@ def _phase_token(sidecar: dict) -> str:
     return str(token).strip().lower()
 
 
-def load_nanowell_data(data_dir) -> NanowellData | None:
+def nanowell_wells(folder: Path) -> list[str]:
+    """Every well with a nanowell table in *folder* (``nanowells/<well>.csv``), in name order; nothing is read."""
+    return [path.stem for path in sorted(folder.glob("*.csv"))]
+
+
+def load_nanowell_data(data_dir, wells=None, parts: dict | None = None) -> NanowellData | None:
     """The dataset's nanowell tables, or ``None`` for a dataset that was not run in nanowell mode.
+
+    Only the tables of *wells* are read (every well's when ``None``): a plate of a hundred wells is not read
+    whole to draw the three selected. *parts* (``well -> WellPart``) holds wells already read, which are used
+    as they are, and receives each well read now, so the caller can keep it and a well selected again is not
+    read again. :attr:`NanowellData.available` lists every well with a table, read or not.
 
     Raises :class:`NanowellSchemeError` when the sidecar states a scheme this version does not understand.
     """
+    from util.csv_gz import glob_csvs
+
     data_dir = Path(data_dir)
     folder = nanowell_dir(data_dir)
     if folder is None:
@@ -304,49 +375,37 @@ def load_nanowell_data(data_dir) -> NanowellData | None:
             f"This dataset's nanowell tables use scheme version {block.get('scheme_version')!r}; this version of "
             f"All-Well reads {sorted(SUPPORTED_SCHEMES)}. Open it with the version that analysed it, or re-run "
             "the analysis.")
-    frames, grids, problems, roster_rules, reanalysed = [], {}, [], {}, {}
-    for path in sorted(folder.glob("*.csv")):
-        well = path.stem
-        grid_path = folder / f"{well}_grid.json"
-        try:
-            grid = json.loads(grid_path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            problems.append(f"{well}: its grid record ({grid_path.name}) is missing, so its timepoints' "
-                            "status is unknown; the well is left out.")
-            continue
-        except (OSError, ValueError) as exc:
-            problems.append(f"{well}: its grid record cannot be read ({exc}); the well is left out.")
-            continue
-        if grid.get("scheme_version") not in SUPPORTED_SCHEMES:
-            problems.append(f"{well}: scheme version {grid.get('scheme_version')!r} is not one this version "
-                            f"reads ({sorted(SUPPORTED_SCHEMES)}); the well is left out.")
-            continue
-        try:
-            table = _read_well_table(path, well)
-        except (OSError, ValueError, pd.errors.ParserError) as exc:
-            problems.append(f"{well}: its nanowell table cannot be read ({exc}); the well is left out.")
-            continue
-        repeated = table[table["nw_q"].notna()].duplicated(["timepoint", "nw_q", "nw_r"], keep=False)
-        if repeated.any():
-            first = table[table["nw_q"].notna()][repeated].iloc[0]
-            problems.append(f"{well}: {int(repeated.sum())} rows repeat an address at one timepoint (e.g. "
-                            f"({int(first['nw_q'])}, {int(first['nw_r'])}) at {first['timepoint']}), so its "
-                            "nanowells cannot be followed over time; the well is left out.")
-            continue
-        frames.append(table)
-        grids[well] = grid.get("timepoints") or {}
-        roster_rules[well] = roster_rule(grid.get("array_radius"))
-        if (grid.get("array_radius") or {}).get("reanalysed_because"):
-            reanalysed[well] = grid["array_radius"]["reanalysed_because"]
+    available = nanowell_wells(folder)
+    asked = available if wells is None else [w for w in available if w in set(wells)]
+    parts = {} if parts is None else parts
+    missing = [w for w in asked if w not in parts]
+    if missing:
+        # Listed once (a name glob, nothing opened) and shared by every well read now.
+        cell_files = glob_csvs(folder.parent)
+        for well in missing:
+            parts[well] = read_well_part(folder, well, cell_files, available)
+    return _assemble(data_dir, folder, sidecar, [parts[w] for w in asked], available)
+
+
+def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, available: list) -> NanowellData:
+    """The wells of *parts* (in name order) put together as one :class:`NanowellData`."""
+    frames = [p.table for p in parts if p.table is not None]
+    grids = {p.well: p.grid for p in parts if p.table is not None}
+    roster_rules = {p.well: p.roster_rule for p in parts if p.table is not None}
+    reanalysed = {p.well: p.reanalysed for p in parts if p.table is not None and p.reanalysed}
+    problems = [p.problem for p in parts if p.problem]
     sites = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["well", "timepoint"])
     phase = _phase_token(sidecar)
     channels = sorted({c[: -len("_integrated")] for c in sites.columns if c.endswith("_integrated")}
                       - {c for c in (c[: -len("_integrated")] for c in sites.columns) if c.lower() == phase})
     timepoints = sorted(set(sites["timepoint"].dropna()) | {tp for g in grids.values() for tp in g})
     times_h, source, note = _times(data_dir, timepoints)
-    brightness = _cell_brightness(folder.parent, channels)
+    keep = ["well", "timepoint", "nw_q", "nw_r"] + [f"brightness_{ch}" for ch in channels]
+    found = [p.brightness for p in parts if p.table is not None and p.brightness is not None]
+    brightness = pd.concat(found, ignore_index=True) if found else None
     if brightness is not None and len(sites):
-        sites = sites.merge(brightness, on=["well", "timepoint", "nw_q", "nw_r"], how="left")
+        sites = sites.merge(brightness[[c for c in keep if c in brightness]],
+                            on=["well", "timepoint", "nw_q", "nw_r"], how="left")
     for channel in channels:
         if f"brightness_{channel}" not in sites:
             sites[f"brightness_{channel}"] = np.nan
@@ -361,4 +420,4 @@ def load_nanowell_data(data_dir) -> NanowellData | None:
                         separator=str(options.get("filename_sep") or sidecar.get("separator") or ""),
                         phase_token=str(options.get("phase_token") or sidecar.get("phase_token") or ""),
                         channels=channels, problems=problems, roster_rules=roster_rules,
-                        reanalysed=reanalysed)
+                        reanalysed=reanalysed, available=available)

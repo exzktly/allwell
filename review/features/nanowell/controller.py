@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pandas as pd
 
 if TYPE_CHECKING:
     from review.core.ui_helpers import EmptyReason
@@ -57,6 +58,7 @@ def load_into(state, data_dir) -> None:
     state.data = data
     state.metrics = site_metrics(data, state.baseline)
     state.loaded_for = (str(data_dir), state.baseline)     # what the page's own load records (roll-up review X16)
+    state.loaded_wells, state.parts_for = frozenset(data.available), str(data_dir)   # every well was read
 
 
 def set_baseline(state, baseline: str) -> None:
@@ -88,15 +90,18 @@ def replicate_groups(ctx, wells) -> dict:
     return groups
 
 
-def export_long_csv(state, path) -> int:
-    """Write every site, timepoint and metric as a long-format CSV (tracker D8); returns the rows written.
+def export_long_csv(state, path, wells=None) -> int:
+    """Write every site, timepoint and metric as a long-format CSV (tracker D8); returns the rows written. With
+    *wells*, only theirs: the page reads only the wells it draws, so what else is loaded is whichever wells
+    happened to be selected before.
 
     Written to a temporary name and moved into place, so a failed write never leaves half a table under the
     name a person will open.
     """
     if state.metrics is None or state.data is None:
         raise ValueError("There are no nanowell tables loaded to export.")
-    table = long_format(state.metrics, state.data.channels)
+    metrics = state.metrics if wells is None else state.metrics[state.metrics["well"].isin(list(wells))]
+    table = long_format(metrics, state.data.channels)
     table.insert(table.columns.get_loc("time_h") + 1, "time_source", state.data.time_source or "")
     table.insert(table.columns.get_loc("baseline_timepoint"), "baseline", state.baseline)
     path = Path(path)
@@ -129,6 +134,16 @@ def active_wells(ctx) -> list[str]:
     return sorted({w for _name, wells, _rset in plot_group_well_lists(ctx, fallback_to_all=False) for w in wells})
 
 
+def tableless_wells(ctx) -> list[str]:
+    """The wells the page draws that have no usable nanowell table: none in the folder, or one that was read and
+    left out (``data.problems`` says why). A well whose table is still being read is not one of them."""
+    st = _state(ctx)
+    if st is None or st.data is None:
+        return []
+    have, available = set(st.data.wells), set(st.data.available)
+    return [w for w in active_wells(ctx) if w not in have and (w not in available or w in st.loaded_wells)]
+
+
 def page_groups(ctx) -> dict:
     """``group -> wells`` for the page: replicate sets over the active wells only (gap G9 of the plan)."""
     st = _state(ctx)
@@ -157,14 +172,21 @@ def nanowell_empty_reason(ctx) -> EmptyReason | None:
         return _empty("This dataset has no nanowell tables.",
                       "Nanowell tables are written by a run with Analyze ▸ Nanowells switched on "
                       "(nanowells/<well>.csv beside the per-well CSVs).")
-    if not st.data.wells:
+    available = st.data.available
+    if not available:
         return _empty("No well's nanowell table could be used.", " ".join(st.data.problems))
     from review.core.selection_controller import has_plottable_selection
 
     if not has_plottable_selection(ctx) or not page_groups(ctx):
+        chosen = [w for w in active_wells(ctx) if w in set(available)]
+        if chosen and st.computing:
+            return _empty("Reading the nanowell tables…", "The figure appears when they are loaded.")
+        if chosen:
+            return _empty("None of the selected wells' nanowell tables could be used.",
+                          " ".join(st.data.problems))
         return _empty("No nanowell wells selected.",
                       "Click wells with nanowell tables on the plate at the left: "
-                      + ", ".join(st.data.wells[:12]) + ("…" if len(st.data.wells) > 12 else "") + ".")
+                      + ", ".join(available[:12]) + ("…" if len(available) > 12 else "") + ".")
     return None
 
 
@@ -182,6 +204,16 @@ def _call(ctx, name: str) -> None:
         fn()
 
 
+def _metrics_of(data, baseline: str) -> pd.DataFrame | None:
+    """The metrics of *data*, ``None`` with no data; with no well read yet (nothing selected) an empty table, so
+    the page counts as loaded and says what to select rather than reading on."""
+    if data is None:
+        return None
+    if not len(data.sites):
+        return pd.DataFrame(columns=["well", "timepoint", "nw_q", "nw_r", "state"])
+    return site_metrics(data, baseline)
+
+
 def ensure_loaded(ctx, *, force: bool = False) -> None:
     """Load the dataset's tables and compute the metrics on a worker, unless they are current.
 
@@ -194,10 +226,16 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
     if st is None:
         return
     data_dir = ctx.state.dataset.data_dir
+    # Only the wells the page draws are read: a plate's other tables wait until they are selected, and a well
+    # read once is kept (``st.well_parts``), so selecting it again reads nothing.
+    wanted = frozenset(active_wells(ctx))
+    if st.parts_for != str(data_dir or ""):
+        st.well_parts, st.parts_for, st.loaded_wells = {}, str(data_dir or ""), frozenset()
+    wells = wanted | st.loaded_wells
     key = (str(data_dir or ""), st.baseline)
-    if not force and st.computing and st.pending_for == key:
+    if not force and st.computing and st.pending_for == (key, wells):
         return                                           # this very request is already running
-    if not force and st.loaded_for == key:
+    if not force and st.loaded_for == key and wanted <= st.loaded_wells:
         if st.computing:
             # The current data is what is wanted again (a baseline changed and changed back): whatever is
             # running is for another key and now stale, so it must not land when it finishes.
@@ -207,24 +245,28 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         return
     st.request += 1
     request, baseline = st.request, st.baseline
-    st.computing, st.pending_for = True, key
-    previous = st.data if st.loaded_for is not None and st.loaded_for[0] == key[0] else None
+    st.computing, st.pending_for = True, (key, wells)
+    same_wells = wanted <= st.loaded_wells and st.loaded_for is not None and st.loaded_for[0] == key[0]
+    previous = st.data if same_wells else None
+    parts = dict(st.well_parts)                          # the worker's own copy: it adds the wells it reads
 
     def job():
         if previous is not None:
-            return previous, site_metrics(previous, baseline), ""
+            return previous, _metrics_of(previous, baseline), "", parts
         try:
-            data = load_nanowell_data(Path(data_dir)) if data_dir else None
+            data = load_nanowell_data(Path(data_dir), wells=sorted(wells), parts=parts) if data_dir else None
         except NanowellSchemeError as exc:
-            return None, None, str(exc)
-        return data, (site_metrics(data, baseline) if data is not None else None), ""
+            return None, None, str(exc), parts
+        return data, _metrics_of(data, baseline), "", parts
 
     def done(result):
         if request != st.request:
             return                                       # a newer request has been made; this one is stale
-        data, metrics, error = result
+        data, metrics, error, read = result
         st.data, st.metrics, st.load_error = data, metrics, error
         st.loaded_for, st.computing = key, False
+        if st.parts_for == key[0]:
+            st.well_parts, st.loaded_wells = read, wells
         for problem in (data.problems if data is not None else []):
             log.warning("Nanowells: %s", problem)
         _call(ctx, "_nw_refresh_controls")
@@ -262,7 +304,7 @@ def redraw(ctx) -> None:
         return                                           # the right metrics are on their way
     metric, channel, note = resolve_metric(st.view, st.metric, ctx.state.channel.active_channel, st.data.channels)
     well = page_well(ctx)
-    tableless = [w for w in active_wells(ctx) if w not in set(st.data.wells)]
+    tableless = tableless_wells(ctx)
     array = {}
     if st.view == "array":
         timepoint = page_timepoint(ctx, well)
@@ -1003,6 +1045,9 @@ def nw_on_dataset_loaded(ctx) -> None:
 
 def nw_on_selection_changed(ctx) -> None:
     if ctx.widgets.get_or_none("_nw_canvas") is not None:
+        visible = ctx.widgets.get_or_none("_nw_page_visible")
+        if callable(visible) and visible():
+            ensure_loaded(ctx)                   # a well selected now is read now; a hidden page reads on show
         _call(ctx, "_nw_refresh_controls")
         redraw(ctx)
 
@@ -1099,7 +1144,8 @@ def _set(ctx, name: str, value) -> None:
 
 
 def export_page_csv(ctx) -> None:
-    """*Save nanowell data…*: every nanowell, timepoint and metric of the dataset, long format (D8)."""
+    """*Save nanowell data…*: every nanowell, timepoint and metric of the wells the page draws, long format
+    (D8)."""
     from review.core.csv_export import ask_save_csv
 
     st = _state(ctx)
@@ -1112,11 +1158,15 @@ def export_page_csv(ctx) -> None:
         ctx.notify.set_status(f"The nanowell metrics for baseline {st.baseline!r} are still being computed; "
                               "save again once the page has drawn them.")
         return
+    wells = page_wells(ctx)
+    if not wells:
+        ctx.notify.set_status("Select wells with nanowell tables first: the file holds the wells the page draws.")
+        return
     path = ask_save_csv(ctx, "Save nanowell data", "nanowell_metrics.csv")
     if not path:
         return
     try:
-        rows = export_long_csv(st, path)
+        rows = export_long_csv(st, path, wells)
     except OSError as exc:
         log.warning("Nanowell export to %s failed: %s", path, exc)
         ctx.notify.set_status(f"Could not write {path}: {exc}")

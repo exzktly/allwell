@@ -204,7 +204,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     export_btn, _menu, _act = build_plot_save_menu(
         ctx, band, card_key="_nw_card", data_label="Save nanowell data…",
         data_cb=lambda: nwc.export_page_csv(ctx),
-        data_tooltip="Every nanowell, timepoint and metric of this dataset, one row each",
+        data_tooltip="Every nanowell, timepoint and metric of the wells the page draws, one row each",
         cells_cb=lambda: export_cell_data_from(
             ctx, cell_scope, unavailable="Select wells with nanowell tables first."))
     band.add_action(export_btn)

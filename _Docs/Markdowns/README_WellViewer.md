@@ -4972,8 +4972,13 @@ from the image the run segmented (the well's archive in `in/`). When that archiv
 the crop is cut from the lower-resolution montage instead, and the caption under the strip says so and why; a
 timepoint with no crop says why. Selecting nanowells does not change the plate selection.
 
-**Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the dataset as one
-long CSV, with the baseline and where the times came from. Right after you change the baseline it waits:
+**What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
+draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
+is selected and kept, so selecting it again is instant. While a newly selected well is read the page shows
+*Computing…*.
+
+**Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
+draws as one long CSV, with the baseline and where the times came from. Right after you change the baseline it waits:
 until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
 drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
 is opened again.

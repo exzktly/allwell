@@ -10383,6 +10383,18 @@ per-cell CSVs beside `nanowells/` place at each `(well, timepoint, q, r)`, which
 its parent was loaded; a CSV is read in either spelling through `util/csv_gz.glob_csvs`, the plain one winning
 when both exist.
 
+**Only the wells asked for are read.** `load_nanowell_data(data_dir, wells=None, parts=None)` lists the folder
+(`nanowell_wells`: the stems of `nanowells/*.csv`, nothing opened) into `NanowellData.available`, then reads only
+*wells* — every well when `None`, as a headless caller wants. Each well is read by `read_well_part` into a
+`WellPart` (its site table, grid timepoints, roster rule, re-analysis note, cells' brightness, or the problem that
+left it out), and *parts* (`well -> WellPart`) supplies wells already read and receives the new ones; `_assemble`
+puts the parts together (channels, timepoints and times from the wells assembled). A well's brightness comes from
+the per-cell CSVs `_cell_files_of` gives it: its own (`<prefix>_<well>.csv`, as `pipeline/nanowell_task` names
+them) and any that names no well of the dataset (a merged or hand-made table, filtered to the well's rows); a
+file named for another well is not opened. Every metric of `site_metrics` is the well's own (its baseline, its
+nanowells), so a subset read gives each well exactly the numbers a whole read gives it
+(`tests/test_nanowell_reads_selected_wells.py`, per-well and merged cell files).
+
 **Time** is each timepoint's recorded start from `in/acquisition.json` (looked for beside the data dir and
 one level up), in hours since the earliest. All timepoints must have a start on comparable clocks; otherwise
 every timepoint's label is parsed instead (`util.timepoint.parse_hours`), never a mixture, and
@@ -10641,15 +10653,24 @@ the slider and the figure always agree. `page_well` is the chosen well when it i
 well. Wells are what `data_loading.plot_group_well_lists(ctx, fallback_to_all=False)` says every plotting tab
 draws — so a group-by variable, hidden sets and the solo-well toggles mean the same here as elsewhere — never
 every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and site signal follow the app's shared channel (U6); the Metric entries are greyed, with the
-reason, when that channel has no site intensities. `ensure_loaded` reads the tables and computes the metrics
-on `core.worker_bridge.run_off_thread`; each request is numbered and a result for an older one is discarded,
-so a slow load can never replace a newer baseline's figure — including when the baseline goes back to the one
+reason, when that channel has no site intensities. `ensure_loaded` reads the tables of the wells the page draws
+(`active_wells`) and computes the metrics on `core.worker_bridge.run_off_thread`. The wells read are kept
+(`state.well_parts`, for the data dir in `parts_for`; `loaded_wells` the wells asked for, a well without a table
+included), so a well selected again reads nothing and a deselection neither reads nor recomputes; the worker
+reads into its own copy of the parts, which `done` adopts. A selection change on the shown page asks for the new
+wells at once (`nw_on_selection_changed`); a hidden page reads on its next show. With nothing selected nothing is
+read, and `_metrics_of` gives an empty table so the page counts as loaded and says what to select.
+`tableless_wells` names a drawn well with no usable table — none in the folder, or one read and left out — but
+never a well whose table is still being read. Each load request is numbered and a result for an older one is
+discarded, so a slow load can never replace a newer baseline's figure — including when the baseline goes back to the one
 already loaded, which invalidates the request in flight. `redraw` never computes; when the state's baseline
 is not the one the metrics were computed for (a reset or restore wrote it directly), it asks for them and draws
-nothing stale meanwhile. The page's saved choices are loaded once per dataset, on the dataset load and on first
+nothing stale meanwhile. Batch Export's Nanowells mode reuses the page's tables only when they hold every exported
+well that has a table, and otherwise reads exactly the exported wells (`NanowellBatchExportPanel._load`). The page's saved choices are loaded once per dataset, on the dataset load and on first
 activation (`_load_config`), so one dataset's choices never carry into another. `nanowell_empty_reason`
 names each state: no dataset, tables unreadable (with the refused scheme version), reading, no nanowell
-tables, no usable well, and no nanowell wells selected (listing the wells that have tables). A click on the
+tables, no usable well, the selected wells' tables unusable, and no nanowell wells selected (listing
+`available`, the wells that have tables). A click on the
 figure selects the nearest drawn dot within 6 px; Shift, ⌘ or Ctrl adds (up to six, read from matplotlib's
 `event.modifiers`); empty space clears; the plate selection is never touched.
 
@@ -10657,7 +10678,8 @@ figure selects the nearest drawn dot within 6 px; Shift, ⌘ or Ctrl adds (up to
 (`nanowell`, `nanowell_detail`), the Properties dock and open-panel maps in `features/export/style.py`, the
 feature redraw in `features/export/sidebar_view._FIGURE_OWNING_FEATURES`, and `plot_card_actions._CARDS` for
 both cards. `view_state_io` makes a Saved Plot restore the whole configuration, the selected nanowells
-included. *Save nanowell data…* writes `long_format`, and is refused with a status while the metrics on hand
+included. *Save nanowell data…* writes `long_format` for the wells the page draws (`export_long_csv(…, wells)`:
+other wells may be loaded from an earlier selection), and is refused with a status while the metrics on hand
 were computed for another baseline than the one chosen (`loaded_for[1] != baseline`, or a load in flight); *Save cell data…* exports the per-cell rows of the drawn
 wells that carry a nanowell address (`cell_scope_compute`). The rail glyph map lives in
 `review/core/section_icons.py`. The Properties panel's Lines & Markers controls restyle the median line and

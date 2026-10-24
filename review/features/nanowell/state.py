@@ -117,6 +117,12 @@ class NanowellState:
     metrics: object = None                  # series_compute.site_metrics(data, baseline)
     load_error: str = ""
     loaded_for: object = None               # (data_dir, baseline) the data and metrics were computed for
+    #: The wells the data was read for (the page's wells when it asked, a well without a table included), and
+    #: each well's parts as read (``collect.WellPart``) for the data dir in ``parts_for``, so a well selected again
+    #: is not read again. Only the wells the page draws are read (``controller.ensure_loaded``).
+    loaded_wells: frozenset = frozenset()
+    well_parts: dict = field(default_factory=dict)
+    parts_for: object = None
     computing: bool = False                 # a load or recompute is running on a worker
     request: int = 0                        # the latest load request; an older result is discarded
     hits: object = None                     # renderer.HitMap of the figure on screen
@@ -156,6 +162,7 @@ class NanowellState:
 
     def reset_data(self) -> None:
         self.data, self.metrics, self.load_error, self.loaded_for = None, None, "", None
+        self.loaded_wells, self.well_parts, self.parts_for = frozenset(), {}, None
         self.crops, self.montages, self.fetching, self.fetch_bridges = {}, {}, set(), []
         self.region = self.region_for = self.press = self.drawn = None
         self.anchor_mode, self.array_message = False, ""

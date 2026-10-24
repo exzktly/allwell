@@ -1556,7 +1556,8 @@ and by `remote_fetch_report.txt` in the output folder.
   no cog — the dial and its colour already say it is working. That holds for
   every plate map in the app, including the ones on the Datasets tools.
 - The dial follows whichever step the well is actually in. While the well is
-  being computed it fills with the fields measured; while its input archive is
+  being computed it fills with the fields measured — in a nanowell run, with
+  its timepoints, each located and then measured; while its input archive is
   being uploaded, or its results downloaded, it fills with the bytes moved. It
   never runs backwards: once a well's archive is uploaded the dial stays full
   while it waits its turn on the remote — its colour is what says the well is

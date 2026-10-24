@@ -1923,12 +1923,37 @@ def _spill_montage(montage, folder: Path, stem: str):
     return replace(montage, **arrays)
 
 
+class _Steps:
+    """:func:`run_well`'s work counted as steps for a progress report: every timepoint located, then every one that
+    can be measured measured, so ``2 x timepoints`` in all. A timepoint that cannot be measured counts as done once
+    that is known, so the count always reaches its total. ``report(done, total)`` is called with ``done == 0`` first,
+    which states the total."""
+
+    def __init__(self, report, n_timepoints: int):
+        self.report, self.total, self.done = report, 2 * n_timepoints, 0
+        if report is not None:
+            report(0, self.total)
+
+    def tick(self, n: int = 1) -> None:
+        if self.report is None or n <= 0:
+            return
+        self.done = min(self.done + n, self.total)
+        self.report(self.done, self.total)
+
+    def skip(self, timepoints, measurable) -> None:
+        """The timepoints that will not be measured: done once they are located."""
+        self.tick(sum(tp not in measurable for tp in timepoints))
+
+    def finish(self) -> None:
+        self.tick(self.total - self.done)
+
+
 def run_well(well: str, record: dict, timepoints, load_phase, settings: NanowellSettings, *,
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
              expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None,
              reference: dict | None = None, earliest_template=None, spill_dir=None, fixed_roster=None,
              kept_evidence: dict | None = None, stored_placements: dict | None = None,
-             manual_anchors: Mapping = MappingProxyType({})) -> WellOutcome:
+             manual_anchors: Mapping = MappingProxyType({}), progress=None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -1953,9 +1978,11 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     *stored_placements* maps a timepoint to ``(folder, grid block)`` pairs from earlier runs' grid records, whose
     registration :func:`locate_timepoint` takes when it was solved from exactly this timepoint's inputs.
     *manual_anchors* maps a timepoint to the anchor a person set for it, in the well frame (``util.nanowell_anchors``).
+    *progress*, when given, is ``f(done, total)``, called as the work goes (:class:`_Steps`).
     """
     outcome = WellOutcome(well)
     timepoints = list(timepoints)
+    steps = _Steps(progress, len(timepoints))
     for tp in timepoints:
         images = _images_for(record, well, tp, load_phase)
         located = locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape,
@@ -1967,6 +1994,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         outcome.timepoints[tp] = dict(located.grid) or {"status": located.status, "reason": located.reason}
         outcome.timepoints[tp]["record_digest"] = record_digest(record, well, tp)
         del images
+        steps.tick()
     anchored = [tp for tp in timepoints if outcome.located[tp].status == OK]
     unaddressed = [tp for tp in timepoints if outcome.located[tp].status == UNADDRESSED]
     # An inferred array has a shared set of addresses instead of a shared radius, whatever its outline (X35).
@@ -1995,6 +2023,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
             for tp in anchored + unaddressed:
                 outcome.timepoints[tp].update(status=NO_LATTICE, reason="No timepoint fitted an array boundary, so "
                                                                        "no roster radius could be shared")
+            steps.finish()
             return outcome
         roster, own, circle_reference = _circle_roster(outcome, anchored, radius_um,
                                                        replace(settings, diameter_override_um=used), fixed_roster,
@@ -2008,6 +2037,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     # first this run builds in time. A resumed run gets it back from the checkpoint (tracker C16).
     earliest = earliest_template
     measurable = set(anchored) | set(unaddressed)
+    steps.skip(timepoints, measurable)
     for tp in [t for t in timepoints if t in measurable]:          # in time, so "earliest" means it
         located = outcome.located[tp]
         key = _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts)
@@ -2048,5 +2078,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         for name, values in measured.cells.items():
             outcome.cells.setdefault(name, []).extend(values)
         outcome.cells.setdefault("timepoint", []).extend([tp] * len(measured.cells.get("label", ())))
+        steps.tick()
     flag_template_drift(outcome.timepoints, timepoints)     # the caller re-runs it over kept timepoints too
+    steps.finish()
     return outcome

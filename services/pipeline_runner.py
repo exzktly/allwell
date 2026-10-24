@@ -271,8 +271,10 @@ _RE_THRESH_WELL = re.compile(r"Auto-threshold: completed well \d+/\d+ \(([A-Ha-h
 # it's attributable even when wells process in parallel:
 #   "Well A01 — 12 FOV-group(s)"  (the total, at well start)
 #   "Well A01 — FOV 3/12 done"    (each group as it completes)
-_RE_WELL_FOV_TOTAL = re.compile(r"Well (\S+)\s+\S+\s+(\d+) FOV-group")
-_RE_WELL_FOV_DONE = re.compile(r"Well (\S+)\s+\S+\s+FOV (\d+)/(\d+) done")
+# A field-by-field well counts FOV-groups; a nanowell well, processed a timepoint at a time, counts steps
+# (``pipeline.nanowell_task._log_steps``). Either moves the well's dial.
+_RE_WELL_FOV_TOTAL = re.compile(r"Well (\S+)\s+\S+\s+(\d+) (?:FOV-group|step)")
+_RE_WELL_FOV_DONE = re.compile(r"Well (\S+)\s+\S+\s+(?:FOV|step) (\d+)/(\d+) done")
 # Finalize-phase status lines. After the last well the run is still busy
 # (auto-threshold scans every well's zip; a remote run then drains downloads
 # and cleans up) — surface what it's doing so "Finalizing…" doesn't look hung.

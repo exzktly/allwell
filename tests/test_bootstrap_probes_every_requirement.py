@@ -169,11 +169,11 @@ def test_an_env_with_every_module_but_an_old_cellpose_is_installed_into(monkeypa
     """Cellpose 3 imports as ``cellpose`` exactly as Cellpose 4 does, so a module probe alone left an env on it
     reporting ready — and the run then refused Cellpose-SAM on the compute node."""
     stdout = ("has_conda=true\nhas_repo=true\nhas_env=true\ntensorflow_version=2.13.0\nstardist_ok=true\n"
-              "gpu_visible=true\npython_version=3.10.14\nmissing_modules=\noff_pin=cellpose==4.2.1.1\n"
+              "gpu_visible=true\npython_version=3.10.14\nmissing_modules=\noff_pin=cellpose==4.1.1\n"
               "pip_in_progress=false\n")
     monkeypatch.setattr(rb, "_ssh_run", lambda *a, **k: types.SimpleNamespace(stdout=stdout))
     probe = rb.probe_host("h")
-    assert probe.off_pin == ("cellpose==4.2.1.1",) and probe.missing_modules == ()
+    assert probe.off_pin == ("cellpose==4.1.1",) and probe.missing_modules == ()
     calls, said = _install_calls(monkeypatch, probe)
     assert calls and "requirements-remote.txt" in str(calls[-1])
-    assert any("is not at cellpose==4.2.1.1" in s for s in said)
+    assert any("is not at cellpose==4.1.1" in s for s in said)

@@ -9999,7 +9999,7 @@ loading rather than an area.
 **Counts.** `segment_tile` makes one segmenter call on the whole rim-suppressed tile
 (`cellpose_segmenter` is the production segmenter and imports `pipeline.cellpose` only
 when called). Its model is the setting's `cellpose_model`, one of `nanowell_run.CELLPOSE_MODELS`: `cpsam`
-(Cellpose-SAM, the default, in the pinned `cellpose==4.2.1.1`), `cyto3` (Cellpose 3's generalist) or `livecell_cp3`
+(Cellpose-SAM, the default, in the pinned `cellpose==4.1.1`), `cyto3` (Cellpose 3's generalist) or `livecell_cp3`
 (Cellpose 3's model trained on LIVECell's phase-contrast images of eight cell lines); the last two need a Cellpose 3
 install (below, *Cellpose versions*). **A run's options that name no model mean `cyto3`**
 (`LEGACY_CELLPOSE_MODEL`): every run made before there was a choice segmented with it, and its settings and reuse key

@@ -94,7 +94,7 @@ def test_the_refusal_is_said_for_each_version_and_silent_where_it_cannot_know():
     assert cp.model_refusal("cpsam", 4) is None and cp.model_refusal("cyto3", 3) is None
     assert cp.model_refusal("cyto3", None) is None                 # not installed: the import says so instead
     assert "not a Cellpose 4 model" in cp.model_refusal("mystery", 4)
-    assert cp.cellpose_major("4.2.1.1") == 4 and cp.cellpose_major("3.1.1.2") == 3
+    assert cp.cellpose_major("4.1.1") == 4 and cp.cellpose_major("3.1.1.2") == 3
 
 
 def test_the_default_model_is_the_one_the_pinned_cellpose_ships():

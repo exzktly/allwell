@@ -553,7 +553,7 @@ NOT_PROBED: dict[str, str] = {
 #: makes the bootstrap install, which moves it to the pin. ``tests/test_bootstrap_probes_every_requirement.py``
 #: holds each against ``requirements-remote.txt``.
 VERSION_PINS: dict[str, str] = {
-    "cellpose": "4.2.1.1",
+    "cellpose": "4.1.1",
 }
 
 #: Prints the comma-joined ``dist==pin`` arguments whose installed version is not the pin (or not installed). No

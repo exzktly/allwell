@@ -10011,14 +10011,24 @@ new run, gives it each owned nanowell's crop, `CROP_REACH` (1.2) radii around th
 (Cellpose's: `pipeline.cellpose._segment_cellpose_many` centres them in a common shape padded with 0 and makes one
 Cellpose 4 `eval` of the `(N, H, W, 1)` stack, which runs 8 crops' network tiles per pass and computes each crop's
 masks on its own; on Cellpose 3 it is one call per crop), one call per crop otherwise — renumbers each crop's labels and pastes them into a whole-tile label image, so
-`count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's) is given the
-tile's own 1st-99th percentiles for every crop, because a crop scaled to its own range would stretch an empty
-nanowell's noise. `pipeline.cellpose._segment_cellpose(lowhigh=…)` scales the crop to that range itself and calls
+`count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's) is given one
+range for every crop of a tile, because a crop scaled to its own range would stretch an empty nanowell's noise. Which
+range is `segment_scale` (`nanowell_measure.SEGMENT_SCALES`, applied by `segmenter_scale` in `_tile_contents` and in
+Test detection's `_tile_segmented`, for either scope): `nanowells`, the default for a new run, takes the pooled
+1st-99th percentiles of the tile's nanowell interiors (`INTERIOR_FRACTION` of each radius) and sets every pixel
+farther than `SEGMENT_MASK_FRACTION` (the same 0.9) of a radius from every nanowell to the interiors' median, so the
+rims — the extremes of a phase or brightfield tile — are neither in the range nor in the image; `tile` takes the
+tile's own percentiles and leaves the image alone, and is what options naming none mean (`LEGACY_SEGMENT_SCALE`,
+keyed and digest-aliased as `segment_scope` is). The whole-tile scope passes the range to the segmenter too
+(`segment_tile(lowhigh=…)`). `segmenter_view` (the `segmenter_floor` / `segmenter_contrast` columns) and the
+inspection sheet read the same range. `pipeline.cellpose._segment_cellpose(lowhigh=…)` scales the crop to that range itself and calls
 `eval(normalize=False)`: Cellpose pads a greyscale image with empty channels and applies a `normalize={"lowhigh": …}`
 range to all of them, so they read `-lo / (hi - lo)` (about -1 on camera counts) instead of the 0 its percentile
 path leaves a flat channel at. Loading a model sets the `cellpose.dynamics`, `cellpose.models` and `cellpose.core`
 loggers to WARNING (a batch's tqdm progress is INFO) and adds `_CellposeChatter`, which drops the two warnings a batch
-makes as a matter of course ("3D stack used…", once per batch; "no seeds found…", once per empty crop). Among the INFO lines this hides is "No cell pixels found.", printed for every image without a cell (once per empty nanowell on the crop path), named no well and was the only thing a long count printed; `_log_sites` reports the count instead. `tile` is one call on the whole tile (`segment_tile`), and
+makes as a matter of course ("3D stack used…", once per batch; "no seeds found…", once per empty crop). `cellpose.models` stays at INFO so the filter sees Cellpose's per-call timings ("network run in …", "masks created in …"), which it adds to `CELLPOSE_SECONDS` before dropping every INFO line; `nanowell_task._log_sites` snapshots it at a timepoint's first line and reports the network's and the masks' seconds per nanowell on every later one. Among the INFO lines this hides is "No cell pixels found.", printed for every image without a cell (once per empty nanowell on the crop path), named no well and was the only thing a long count printed; `_log_sites` reports the count instead. Before a timepoint is measured, `run_well(note=…)` logs `cellpose_scale_text` — pixel size, the cell diameter in pixels, Cellpose's resize factor (30 px over it) and a crop's side before and after — through `_Steps.scale`, only when the count is Cellpose's.
+
+For its first measured timepoint `run_well` also keeps a sample of what the segmenter was given (`_Steps.inspect` → `measure_timepoint(inspect=…)` → `_tile_contents(keep=…)` → `_keep_crops`): `pipeline/nanowell_inspect.inspection_sites` picks the `PER_GROUP` (8) nanowells nearest the array's centre and the 8 farthest, and each is cut from the image the segmenter received, on its tile's 1st-99th percentile scale, with the labels it returned. `WellOutcome.inspection` carries them to `nanowell_task`, which writes `nanowells/<well>_segmenter_input.png` (`nanowell_inspect.write_sheet`; the PNG is encoded with `zlib`, nothing else, because it runs on the remote worker), and `remote_fetch_nanowells.fetch_nanowell_tables` pulls it with the tables. It exists because Test detection runs on the app's own machine, where a Torch that cannot load stops it. `tile` is one call on the whole tile (`segment_tile`), and
 is what options that name no scope mean (`LEGACY_SEGMENT_SCOPE`), with the same key and digest-alias treatment as
 `segment_on`. The form's **Segment** combo (`_nanowell_segment_scope_cb`, `SEGMENT_SCOPE_CHOICES` in
 `analyze/domain/nanowell_fields.py`) sets it, `pipeline_service` always sends it, a restore that names none shows

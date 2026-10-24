@@ -106,8 +106,8 @@ _DIGEST_9145 = {"stardist": "748b063f4dab7c72", "nanowell": "6698c1c49a7e1270", 
                 "cellpose": "9153e16dd6928742"}
 _NANOWELL = [*_ARGV_9125, "--nanowell_format", "100um", "--phase_token", "PHASE"]
 #: What every earlier nanowell run segmented: the rim-divided image of the whole tile (``--nanowell_segment_on`` and
-#: ``--nanowell_segment_scope`` did not exist).
-_ON_RIM = ["--nanowell_segment_on", "rim", "--nanowell_segment_scope", "tile"]
+#: ``--nanowell_segment_scope`` and ``--nanowell_segment_scale`` did not exist).
+_ON_RIM = ["--nanowell_segment_on", "rim", "--nanowell_segment_scope", "tile", "--nanowell_segment_scale", "tile"]
 _CELLPOSE = [*_ARGV_9125, "--segmentation_method", "cellpose"]
 
 

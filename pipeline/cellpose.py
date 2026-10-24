@@ -128,23 +128,46 @@ def _cellpose_model(model_type: str = DEFAULT_MODEL):
         # (``nanowell_task._log_sites``), and a nanowell with no cell is recorded as one, with ``n_cells`` 0.
         # A batch of crops (``_segment_cellpose_many``) also makes Cellpose's models and core log a tqdm progress
         # line per call, which says less than the count's own lines; their warnings still pass.
+        # Cellpose's models logger stays at INFO so its own timings ("network run in …", "masks created in …") reach
+        # _CellposeChatter, which adds them to CELLPOSE_SECONDS and prints none of its INFO lines.
         for name in ("cellpose.dynamics", "cellpose.models", "cellpose.core"):
-            logging.getLogger(name).setLevel(logging.WARNING)
+            logging.getLogger(name).setLevel(logging.INFO if name == "cellpose.models" else logging.WARNING)
             if not any(isinstance(f, _CellposeChatter) for f in logging.getLogger(name).filters):
                 logging.getLogger(name).addFilter(_CellposeChatter())
         _CELLPOSE_MODELS[key] = model
     return model
 
 
+#: Seconds this process's Cellpose calls have spent, by Cellpose's own clock: running the network on the images
+#: (``network``) and turning its flows into masks (``masks``). ``_CellposeChatter`` adds to it from the two INFO lines
+#: Cellpose 4 logs per call; the nanowell count's progress lines report the share of each per nanowell
+#: (``pipeline.nanowell_task._log_sites``). Cellpose 3 logs neither, and it stays at zero there.
+CELLPOSE_SECONDS = {"network": 0.0, "masks": 0.0}
+
+
 class _CellposeChatter(logging.Filter):
-    """Drops two Cellpose warnings that are expected, not wrong, on the nanowell count's batched crops, and would
-    otherwise print once per batch and once per empty nanowell: that a stack is segmented per plane (which is the
-    point), and that an image had no seeds (an empty nanowell, recorded as one). Every other warning passes."""
+    """Keeps Cellpose's own log lines out of the run log, except the warnings worth reading.
+
+    Its INFO lines are dropped, after the two that time a call ("network run in 1.23s", "masks created in 0.45s")
+    are added to ``CELLPOSE_SECONDS``. Two warnings are dropped as well, because they are expected, not wrong, on
+    the nanowell count's batched crops, and would otherwise print once per batch and once per empty nanowell: that a
+    stack is segmented per plane (which is the point), and that an image had no seeds (an empty nanowell, recorded
+    as one). Every other warning passes."""
 
     EXPECTED = ("3D stack used, but stitch_threshold=0 and do_3D=False", "no seeds found in get_masks_torch")
+    TIMED = (("network run in ", "network"), ("masks created in ", "masks"))
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return not str(record.msg).startswith(self.EXPECTED)
+        message = str(record.getMessage())
+        if record.levelno < logging.WARNING:
+            for prefix, key in self.TIMED:
+                if message.startswith(prefix):
+                    try:
+                        CELLPOSE_SECONDS[key] += float(message[len(prefix):].strip().rstrip("s"))
+                    except ValueError:
+                        return False                    # a timing line in a shape this version does not know
+            return False
+        return not message.startswith(self.EXPECTED)
 
 
 def _cellpose_device():

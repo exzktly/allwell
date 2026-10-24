@@ -81,7 +81,7 @@ def _missing_import(exc: BaseException) -> str | None:
 
 
 def _tile_segmented(owner: str, measured, images: dict, located, template, segment, px: float,
-                    segment_on: str = "rim", segment_scope: str = "tile"):
+                    segment_on: str = "rim", segment_scope: str = "tile", segment_scale: str = "tile"):
     """``(the tile the segmenter was given, labels)`` for *owner* exactly as the run made them: the tile as imaged
     (*segment_on* ``raw``) or every site the tile owns, at the level the run brought it to, divided by the template
     (``rim``), and the segmenter called once on the whole tile.
@@ -97,9 +97,10 @@ def _tile_segmented(owner: str, measured, images: dict, located, template, segme
              for i, row in enumerate(measured.sites) if row["owner"] == owner and i in measured.levels]
     fit, _too_large = nm.fits_template(template, local, pixel_size_um=px)
     rim = nm.rim_suppress(images[owner], px, template, fit, levels=measured.levels)
-    seen = nm.segmenter_input(images[owner], rim, segment_on)
-    labels = nm.segment_sites(seen, px, fit, segment) if segment_scope == "nanowells" else nm.segment_tile(seen, segment)
-    return seen, labels
+    seen, lowhigh = nm.segmenter_scale(nm.segmenter_input(images[owner], rim, segment_on), px, fit, segment_scale)
+    labels = (nm.segment_sites(seen, px, fit, segment, lowhigh=lowhigh) if segment_scope == "nanowells"
+              else nm.segment_tile(seen, segment, lowhigh=lowhigh))
+    return seen, labels, lowhigh
 
 
 def _crop_for(site: dict, tile, located, px: float, half_um: float) -> dict | None:
@@ -110,7 +111,7 @@ def _crop_for(site: dict, tile, located, px: float, half_um: float) -> dict | No
     owner = site["owner"]
     if owner is None or tile is None:
         return None
-    rim, labels = tile
+    rim, labels, lowhigh = tile
     left, top = located.positions[owner]
     cx, cy = (site["well_x_um"] - left) / px - 0.5, (site["well_y_um"] - top) / px - 0.5
     half = int(np.ceil(half_um / px))
@@ -121,7 +122,8 @@ def _crop_for(site: dict, tile, located, px: float, half_um: float) -> dict | No
     # The tile's own 1st-99th percentiles, which Cellpose scales the whole tile by: drawn on them, a crop shows the
     # contrast the segmenter saw, where a crop stretched to its own range would make every nanowell look alike.
     finite = rim[np.isfinite(rim)]
-    scale = tuple(float(v) for v in np.percentile(finite, nm.SEGMENTER_PERCENTILES)) if finite.size else None
+    scale = (tuple(float(v) for v in lowhigh) if lowhigh is not None else
+             tuple(float(v) for v in np.percentile(finite, nm.SEGMENTER_PERCENTILES)) if finite.size else None)
     return {"label": site["address"], "n_cells": site["n_cells"], "rim": window.astype(np.float32),
             "labels": labels[y0:y0 + 2 * half + 1, x0:x0 + 2 * half + 1], "scale": scale}
 
@@ -216,12 +218,14 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
         result.sites.append({**row, "address": coordinate_text(row["nw_q"], row["nw_r"])})
     if segment is not None:
         result.crops = _sample_crops(result.sites, measured, images, located, segment, px,
-                                     0.75 * settings.diameter_um, n_crops, settings.segment_on, settings.segment_scope)
+                                     0.75 * settings.diameter_um, n_crops, settings.segment_on, settings.segment_scope,
+                                     settings.segment_scale)
     return result
 
 
 def _sample_crops(sites: list, measured, images: dict, located, segment, px: float, half_um: float,
-                  n_crops: int, segment_on: str = "rim", segment_scope: str = "tile") -> list:
+                  n_crops: int, segment_on: str = "rim", segment_scope: str = "tile",
+                  segment_scale: str = "tile") -> list:
     """Up to *n_crops* crops: the most loaded measured sites, then one empty one, each cut from its owner tile
     segmented as the run segments it (:func:`_tile_segmented`)."""
     template = measured.template.get("_object")
@@ -235,7 +239,8 @@ def _sample_crops(sites: list, measured, images: dict, located, segment, px: flo
             continue
         # One tile segmented at a time and dropped once its crops are cut: a full sensor's tile and labels are a
         # couple of hundred megabytes.
-        tile = _tile_segmented(owner, measured, images, located, template, segment, px, segment_on, segment_scope)
+        tile = _tile_segmented(owner, measured, images, located, template, segment, px, segment_on, segment_scope,
+                               segment_scale)
         for site in (s for s in wanted if s["owner"] == owner):
             crop = _crop_for(site, tile, located, px, half_um)
             if crop is not None:

@@ -87,6 +87,10 @@ LEGACY_SEGMENT_ON = "rim"
 #: each nanowell (``nanowells``, the default for a new run: the lattice between them is work that counts nothing) or
 #: the whole tile (``tile``), which is what a run's options that name none mean — every earlier run did so.
 SEGMENT_SCOPES = ("nanowells", "tile")
+#: How the segmenter's input is scaled (``nanowell_measure.SEGMENT_SCALES``); options that name none mean ``tile``,
+#: the tile's own percentiles, which is what every earlier run did.
+SEGMENT_SCALES = ("nanowells", "tile")
+LEGACY_SEGMENT_SCALE = "tile"
 LEGACY_SEGMENT_SCOPE = "tile"
 
 GEOMETRY_HEX_CIRCLE = "hex_circle"
@@ -107,6 +111,7 @@ class NanowellSettings:
     cellpose_model: str = LEGACY_CELLPOSE_MODEL  # the model the count segments with; unnamed, an earlier run's
     segment_on: str = LEGACY_SEGMENT_ON         # what that model is given (SEGMENT_ON); unnamed, an earlier run's
     segment_scope: str = LEGACY_SEGMENT_SCOPE   # how much of each tile it is given (SEGMENT_SCOPES); unnamed, the same
+    segment_scale: str = LEGACY_SEGMENT_SCALE   # what its input is scaled by (SEGMENT_SCALES); unnamed, the same
     #: The nanowell diameter measured on the plate, whatever the geometry (tracker F2): sites are fitted, owned and
     #: measured at it. Set from the well's one diameter by :func:`measure_timepoint` and by :func:`run_well` for its
     #: roster, and by Test detection; never part of the reuse key, which holds the setting (``key``), while the
@@ -126,6 +131,8 @@ class NanowellSettings:
             raise ValueError(f"Unknown nanowell segmenter input {self.segment_on!r}; one of {SEGMENT_ON}")
         if self.segment_scope not in SEGMENT_SCOPES:
             raise ValueError(f"Unknown nanowell segmentation scope {self.segment_scope!r}; one of {SEGMENT_SCOPES}")
+        if self.segment_scale not in SEGMENT_SCALES:
+            raise ValueError(f"Unknown nanowell segmenter scale {self.segment_scale!r}; one of {SEGMENT_SCALES}")
 
     @property
     def infer(self) -> bool:
@@ -160,6 +167,8 @@ class NanowellSettings:
             key["segment_on"] = self.segment_on
         if self.segment_scope != LEGACY_SEGMENT_SCOPE:     # and on the whole tile, as every earlier run did
             key["segment_scope"] = self.segment_scope
+        if self.segment_scale != LEGACY_SEGMENT_SCALE:     # and scaled by the tile's own percentiles, the same
+            key["segment_scale"] = self.segment_scale
         return key
 
 
@@ -1121,12 +1130,13 @@ def _normalise(located, images, template, by_tile, geoms, channels, pitch_um: fl
 
 
 def _tile_contents(owner, indices, located, images, settings, geoms, addresses, template, segment, channels,
-                   kind=None, norm: "Normalisation | None" = None, on_segmented=None):
+                   kind=None, norm: "Normalisation | None" = None, on_segmented=None, keep=None):
     """Counts, confluence, area estimate, fluorescence and focus for the sites one tile owns, and its cell rows.
 
     *segment* ``None`` counts no cells: every site keeps its confluence (texture, no segmentation), fluorescence and
     focus, its ``n_cells`` and area estimate are ``None`` (not counted, never zero) and there are no cell rows.
-    *on_segmented*, when given, is ``f(n)``, called as *n* more of the tile's nanowells are segmented."""
+    *on_segmented*, when given, is ``f(n)``, called as *n* more of the tile's nanowells are segmented. *keep*, when
+    given, is ``(wanted, kept)``: each wanted site's crop as the segmenter saw it is put in *kept* (:func:`_keep_crops`)."""
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_sites import rim_focus
 
@@ -1145,18 +1155,21 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, norm.threshold)))
     # Each site as the segmenter receives it, written beside its count so a zero the segmenter could not have
     # avoided (cells a few per cent of the tile's range) is told apart from an empty nanowell.
-    seen = nm.segmenter_input(images[owner], rim, settings.segment_on)
-    view = nm.segmenter_view(seen, px, fit_sites)
+    # Scaled (and, under the nanowells scale, rims and lattice blanked) as the segmenter is given it.
+    seen, lowhigh = nm.segmenter_scale(nm.segmenter_input(images[owner], rim, settings.segment_on), px, fit_sites,
+                                       settings.segment_scale)
+    view = nm.segmenter_view(seen, px, fit_sites, lowhigh=lowhigh)
     channel_images = {c: img for c, f in (channels or {}).items() if (img := f(owner)) is not None}
     counts = area = None
     table: dict = {}
     if segment is not None:
         tick = on_segmented or (lambda _n: None)
         if settings.segment_scope == "nanowells":
-            labels = nm.segment_sites(seen, px, fit_sites, segment, on_site=lambda: tick(1))
+            labels = nm.segment_sites(seen, px, fit_sites, segment, on_site=lambda: tick(1), lowhigh=lowhigh)
         else:
-            labels = nm.segment_tile(seen, segment)
+            labels = nm.segment_tile(seen, segment, lowhigh=lowhigh)
             tick(len(fit_sites))
+        _keep_crops(keep, seen, labels, px, fit_sites, addresses, lowhigh)
         counts = nm.count_cells(labels, px, fit_sites, owned={g.index for g in fit_sites})
         area = nm.area_estimate(labels, px, fit_sites, counts)
         table = _cell_rows(labels, px, fit_sites, counts, addresses, owner, (left, top), channel_images, channels,
@@ -1173,6 +1186,27 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
                           "focus": rim_focus(images[owner], px, g),
                           "level": norm.levels.get(g.index), "view": view[g.index]} for g in fit_sites}
     return contents, table, notes
+
+
+def _keep_crops(keep, seen, labels, px, fit_sites, addresses, lowhigh=None) -> None:
+    """Put each wanted site's crop of *seen* — on the 0-1 scale the segmenter was given it at: *lowhigh*, else its
+    tile's 1st-99th percentiles — and of *labels* into ``keep = (wanted, kept)``. Nothing when *keep* is ``None``."""
+    if keep is None:
+        return
+    from pipeline import nanowell_measure as nm
+
+    wanted, kept = keep
+    seen = np.asarray(seen, dtype=float)
+    finite = seen[np.isfinite(seen)]
+    if not finite.size:
+        return
+    lo, hi = lowhigh if lowhigh is not None else np.percentile(finite, nm.SEGMENTER_PERCENTILES)
+    for g in fit_sites:
+        win = nm.crop_window(g, px, seen.shape) if g.index in wanted else None
+        if win is not None:
+            kept[g.index] = {"kind": wanted[g.index], "address": addresses[g.index],
+                             "image": ((seen[win] - lo) / (hi - lo if hi > lo else 1.0)).astype(np.float32),
+                             "labels": np.asarray(labels[win])}
 
 
 def _cell_rows(labels, px, fit_sites, counts, addresses, owner, origin, channel_images, channels, kind) -> dict:
@@ -1224,7 +1258,8 @@ def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused
 
 def measure_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float | None, *,
                       segmenter=None, channels: dict | None = None, earliest_template=None,
-                      roster=None, count_cells: bool = True, on_segmented=None) -> Measured:
+                      roster=None, count_cells: bool = True, on_segmented=None, inspect: dict | None = None
+                      ) -> Measured:
     """Rows for every roster site of a located timepoint, and the cells inside them.
 
     *array_radius_um* is the well's one shared array-model radius (so every timepoint has the same
@@ -1237,6 +1272,8 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     that is not ``ok`` (no origin) is measured on every site of its array, with no address
     (:func:`_unaddressed_positions`). *on_segmented*, when given, is ``f(done, total)``: how many of the timepoint's
     imaged nanowells have been segmented, out of all of them (:class:`_SiteCount`, which says when it is called).
+    *inspect*, when given, is filled with the crops of a sample of nanowells as the segmenter saw them
+    (``nanowell_inspect.inspection_sites``): what ``nanowells/<well>_segmenter_input.png`` draws.
     """
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_detect import FITTED, MIN_REFINE_RADIUS_PX
@@ -1295,9 +1332,10 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     contents: dict[int, dict] = {}
     imaged = {owner: indices for owner, indices in by_tile.items() if owner is not None and template is not None}
     sites = _SiteCount(on_segmented if segment is not None else None, sum(map(len, imaged.values())))
+    keep = _inspection(inspect, points_m, imaged, segment)
     for owner, indices in imaged.items():
         got, table, notes = _tile_contents(owner, indices, located, images, settings, geoms, addresses, template,
-                                           segment, channels, kind, norm, on_segmented=sites.tick)
+                                           segment, channels, kind, norm, on_segmented=sites.tick, keep=keep)
         contents.update(got)
         out.notes += notes
         for name, values in table.items():
@@ -1330,6 +1368,8 @@ class WellOutcome:
     earliest_template: tuple | None = None               # (timepoint, Template): the first own template in time
     roster_change: str = ""                              # a kept roster the new evidence changes (X35a-R1): why
     diameter_source: str | None = None                   # where the well's one diameter came from (_settle_diameter)
+    #: (timepoint, {site index: crop as the segmenter saw it}) for the first timepoint measured (pipeline.nanowell_inspect)
+    inspection: tuple | None = None
 
 
 _DRIFT_NOTE = "The empty-nanowell template departs from the earliest timepoint's"
@@ -1948,10 +1988,25 @@ class _Steps:
     which states the total. *site_report*, when given, is ``f(timepoint, done, total)``: a measure step's own progress,
     in nanowells segmented (:class:`_SiteCount`)."""
 
-    def __init__(self, report, n_timepoints: int, site_report=None):
+    def __init__(self, report, n_timepoints: int, site_report=None, note=None, settings=None, *, cellpose=True):
         self.report, self.total, self.done, self.site_report = report, 2 * n_timepoints, 0, site_report
+        # The scale is Cellpose's: a run given another segmenter (a test's) has none to state.
+        self.note, self.settings, self.inspected = note, (settings if cellpose else None), None
         if report is not None:
             report(0, self.total)
+
+    def inspect(self, timepoint) -> dict | None:
+        """The dict the first timepoint measured fills with its sample of crops (``WellOutcome.inspection``); ``None``
+        for every later one, so a well keeps one sample however many timepoints it has."""
+        if self.inspected is not None:
+            return None
+        self.inspected = (timepoint, {})
+        return self.inspected[1]
+
+    def scale(self, located) -> None:
+        """Say, before a timepoint is measured, the scale Cellpose will see it at (:func:`cellpose_scale_text`)."""
+        if self.note is not None and self.settings is not None and located.pixel_size_um:
+            self.note(cellpose_scale_text(located, self.settings))
 
     def tick(self, n: int = 1) -> None:
         if self.report is None or n <= 0:
@@ -1971,6 +2026,34 @@ class _Steps:
         if self.site_report is None:
             return None
         return lambda done, total: self.site_report(timepoint, done, total)
+
+
+def _inspection(inspect, points, imaged, segment) -> tuple[dict, dict] | None:
+    """``(wanted, inspect)`` for :func:`_tile_contents`, or ``None`` when no crops are to be kept (none asked for, or
+    nothing is segmented)."""
+    if inspect is None or segment is None:
+        return None
+    from pipeline.nanowell_inspect import inspection_sites
+
+    return inspection_sites(points, [i for indices in imaged.values() for i in indices]), inspect
+
+
+def cellpose_scale_text(located, settings: NanowellSettings) -> str:
+    """The scale a timepoint's images reach Cellpose at, for the run log: the pixel size, the cell diameter in
+    pixels, the factor Cellpose resizes every image by to bring that diameter to its models' 30 pixels, and, for a
+    count on crops, a crop's side before and after. A count that finds nothing can be at a scale where a cell is a
+    few pixels, or a nanowell fills the network's 256-pixel tile; this is the line that says which."""
+    from pipeline.nanowell_measure import CROP_REACH
+
+    px = float(located.pixel_size_um)
+    cell_px = settings.cell_diameter_um / px
+    factor = 30.0 / cell_px
+    text = (f"{located.timepoint}: Cellpose {settings.cellpose_model} at {px:.3g} um/px — a cell of "
+            f"{settings.cell_diameter_um:g} um is {cell_px:.1f} px, so Cellpose resizes each image x{factor:.2f}")
+    if settings.segment_scope == "nanowells":
+        crop = 2 * CROP_REACH * (located.diameter_um or settings.diameter_um) / 2 / px
+        text += f"; a nanowell's crop is {crop:.0f} px, {crop * factor:.0f} px as the network sees it"
+    return text
 
 
 class _SiteCount:
@@ -2011,7 +2094,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
              expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None,
              reference: dict | None = None, earliest_template=None, spill_dir=None, fixed_roster=None,
              kept_evidence: dict | None = None, stored_placements: dict | None = None,
-             manual_anchors: Mapping = MappingProxyType({}), progress=None, site_progress=None) -> WellOutcome:
+             manual_anchors: Mapping = MappingProxyType({}), progress=None, site_progress=None,
+             note=None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -2037,11 +2121,13 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     registration :func:`locate_timepoint` takes when it was solved from exactly this timepoint's inputs.
     *manual_anchors* maps a timepoint to the anchor a person set for it, in the well frame (``util.nanowell_anchors``).
     *progress*, when given, is ``f(done, total)``, called as the work goes (:class:`_Steps`); *site_progress*, when
-    given, is ``f(timepoint, done, total)``, the nanowells of the timepoint being measured that are segmented so far.
+    given, is ``f(timepoint, done, total)``, the nanowells of the timepoint being measured that are segmented so far;
+    *note*, when given, is ``f(text)``, told the scale Cellpose sees each timepoint at before it is measured (only when
+    the count is Cellpose's, *segmenter* ``None``).
     """
     outcome = WellOutcome(well)
     timepoints = list(timepoints)
-    steps = _Steps(progress, len(timepoints), site_progress)
+    steps = _Steps(progress, len(timepoints), site_progress, note, settings, cellpose=segmenter is None)
     for tp in timepoints:
         images = _images_for(record, well, tp, load_phase)
         located = locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape,
@@ -2102,11 +2188,12 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         key = _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts)
         measured = checkpoint.load(tp, key) if checkpoint is not None else None
         if measured is None:
+            steps.scale(located)
             images = _images_for(record, well, tp, load_phase)
             loaders = {name: (lambda tile, _f=f, _tp=tp: _f(_tp, tile)) for name, f in (channels or {}).items()}
             measured = measure_timepoint(located, images, settings, radius_um, segmenter=segmenter,
                                          channels=loaders, earliest_template=earliest, roster=roster,
-                                         on_segmented=steps.sites(tp))
+                                         on_segmented=steps.sites(tp), inspect=steps.inspect(tp))
             del images
             if checkpoint is not None:
                 checkpoint.save(tp, key, measured)
@@ -2141,4 +2228,5 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         steps.tick()
     flag_template_drift(outcome.timepoints, timepoints)     # the caller re-runs it over kept timepoints too
     steps.finish()
+    outcome.inspection = steps.inspected
     return outcome

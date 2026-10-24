@@ -236,20 +236,37 @@ confluence is measured on the rim-removed image. Test detection's crops show the
 tooltip says which). A run made before this setting existed counted on the rim-removed image, and its settings say so.
 
 **Segment** chooses how much of each tile the model is given. *Each nanowell* (the default) gives it each nanowell
-separately — a crop around it, scaled to the brightness range of the whole tile, so an empty nanowell is not
-stretched to look busy, and with Cellpose-SAM 32 crops at a time so the GPU works on several at once — rather than
-the whole tile at once: the lattice between nanowells holds no cell that is
+separately — a crop around it, with Cellpose-SAM 32 crops at a time so the GPU works on several at once — rather
+than the whole tile at once: the lattice between nanowells holds no cell that is
 counted, and on a slow GPU it was most of the work. *Whole tile* gives it each tile in one piece, as runs made before
 this setting existed did, and their settings say so. Compare the two on one well with **Test detection**, which
 segments as the run would. (On the command line: `--nanowell_segment_scope nanowells|tile`.)
 
+Whichever you choose, the model is given the nanowells only: everything outside each nanowell's interior — its rim
+and the lattice between nanowells — is set to plain grey, and the brightness range is taken from the nanowells'
+interiors across the tile. On the image as imaged the rims are the darkest and brightest things on a tile, and
+when the range was taken from the whole tile, cells were left a sliver of it: Cellpose-SAM then counted almost every
+nanowell empty, except at the array's edge, where a tile holds fewer rims. The range is pooled over a tile's
+nanowells, so an empty nanowell is not stretched to look busy. Runs made before this counted with the whole tile's
+range, and their settings say so; on the command line, `--nanowell_segment_scale tile` does the same.
+
 While a run counts, its log says how far it is: `Well A01 — 24h: 120/400 nanowells segmented (1.5 s each, about
-7 min 0 s left)`, about every tenth of a timepoint's nanowells. Cellpose's own *No cell pixels found.* — which it
+7 min 0 s left; per nanowell, Cellpose's network 0.20 s, its masks 1.10 s)`, about every tenth of a timepoint's
+nanowells. The last part is Cellpose's own timing, so a slow count says whether the GPU's network or the step that
+turns its output into cells is taking the time. Before each timepoint is counted, a line gives the scale Cellpose sees
+it at: `Well A01 — 24h: Cellpose cpsam at 0.65 um/px — a cell of 10 um is 15.4 px, so Cellpose resizes each image
+x1.95; a nanowell's crop is 185 px, 360 px as the network sees it`. Cellpose's own *No cell pixels found.* — which it
 prints for every image it finds no cell in, once per empty nanowell — is no longer shown. A nanowell with no cell is
 recorded as measured with 0 cells (state *empty*): the Nanowells page counts it as a zero in its count, growth and
-occupancy metrics, and it adds no rows to the per-cell table the other plots read. If nearly every nanowell comes out
-empty, including ones you can see cells in, the counts are wrong: check that well with Test detection before
-plotting them.
+occupancy metrics, and it adds no rows to the per-cell table the other plots read.
+
+**What the model was given.** Each well's results include `nanowells/<well>_segmenter_input.png`, fetched with the
+tables on a remote run: for the well's first timepoint counted, the eight nanowells nearest the array's centre (top
+row, blue frames) and the eight farthest from it (bottom row, orange frames), each exactly as the model was given it —
+same image, same brightness scale, so a nanowell the model saw at low contrast is drawn at low contrast — with the
+cells it found outlined in red. It is the way to see what went wrong when nearly every nanowell comes out empty,
+including where Test detection cannot run (it runs on this computer, so a Windows install whose Torch cannot load
+cannot use it).
 
 **Array geometry** says how the array is found. *Hexagonal lattice in a circle* (the default) looks for nanowells
 on a hexagonal lattice inside a circular array. Either way the nanowells' diameter is measured on the images — one
@@ -1577,8 +1594,8 @@ and by `remote_fetch_report.txt` in the output folder.
   measured, with how many of its nanowells are segmented so far. Hovering the
   well says where it is (`step 5/8, 24h: 120/400 nanowells segmented`), and the
   run log prints the same count about every tenth of a timepoint's nanowells
-  (`Well A01 — 24h: 120/400 nanowells segmented`, with the time per nanowell
-  and the time left); a timepoint whose last line
+  (`Well A01 — 24h: 120/400 nanowells segmented`, with the time per nanowell,
+  how much of it was Cellpose's network and its masks, and the time left); a timepoint whose last line
   stops short of its total had nanowells that could not be segmented. While its input archive is
   being uploaded, or its results downloaded, it fills with the bytes moved. It
   never runs backwards: once a well's archive is uploaded the dial stays full

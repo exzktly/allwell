@@ -174,3 +174,59 @@ def test_a_segmenter_that_takes_several_crops_gets_them_in_batches_and_labels_th
     lowhigh = tuple(np.percentile(image, nm.SEGMENTER_PERCENTILES))
     assert [n for n, _ in batches] == [nm.CROP_BATCH, 4] and all(np.allclose(lh, lowhigh) for _, lh in batches)
     assert len(ticks) == len(geoms)
+
+
+def _rimmed_tile():
+    """A raw phase-like tile: nanowells with a dark-then-bright rim (the extremes of the tile), a mid-grey interior
+    and lattice, and faint cells inside — a few per cent of the rims' swing, as cells are on such an image."""
+    px = 1.0
+    tile = np.full((200, 200), 100.0)
+    yy, xx = np.mgrid[:200, :200]
+    centres = [(50.5, 50.5), (150.5, 50.5), (50.5, 150.5), (150.5, 150.5)]
+    for cx, cy in [(x - 0.5, y - 0.5) for x, y in centres]:              # a site at x um is pixel x - 0.5
+        d = np.hypot(xx - cx, yy - cy)
+        tile[(d > 20) & (d <= 22)] = 20.0                                    # dark rim
+        tile[(d > 22) & (d <= 24)] = 250.0                                   # bright halo
+        tile[np.hypot(xx - (cx + 5), yy - cy) <= 4] = 112.0                  # a faint cell
+    return tile, px, _sites(centres, radius=22.0)
+
+
+def test_the_nanowell_scale_gives_cells_the_range_the_rims_took():
+    """Reported: on the image as imaged Cellpose-SAM counted almost every nanowell empty, except at the array's edge.
+    Scaled by the tile's own percentiles (``tile``) the rims are 0 and 1 and a cell is a sliver between; scaled by the
+    nanowells' interiors (``nanowells``), with rims and lattice set to the interiors' median, the cell spans the range
+    and nothing outside the nanowells is left to segment."""
+    tile, px, geoms = _rimmed_tile()
+    same, none = nm.segmenter_scale(tile, px, geoms, "tile")
+    assert same is tile and none is None
+    seen, (lo, hi) = nm.segmenter_scale(tile, px, geoms, "nanowells")
+    cell = (112.0 - lo) / (hi - lo)
+    background = (100.0 - lo) / (hi - lo)
+    tile_lo, tile_hi = np.percentile(tile, nm.SEGMENTER_PERCENTILES)
+    assert (112.0 - 100.0) / (tile_hi - tile_lo) < 0.06                  # a sliver of the tile's range
+    assert cell - background > 0.9                                        # most of the range under the new scale
+    assert np.all(seen[np.isin(tile, (20.0, 250.0))] == 100.0)           # no rim left for the segmenter
+    assert seen[0, 0] == 100.0 and seen[50, 55] == 112.0                 # lattice blanked, the cell kept
+    view = nm.segmenter_view(seen, px, geoms, lowhigh=(lo, hi))
+    assert all(v.contrast > 0.9 for v in view.values())                  # the column says what the model saw
+
+
+def test_a_run_s_count_is_scaled_by_its_nanowells_interiors_and_an_earlier_run_s_by_its_tile():
+    from pipeline.cli_args import build_parser, nanowell_options_from_args
+    from pipeline.nanowell_task import settings_from_kwargs
+
+    parser = build_parser()
+
+    def options(*extra):
+        args = parser.parse_args(["--input_dir", "in", "--output_dir", "out", "--nanowell_format", "100um",
+                                  "--phase_token", "PHASE", *extra])
+        return nanowell_options_from_args(args, parser.error)
+
+    new = settings_from_kwargs({"_nanowell": options()})
+    assert new.segment_scale == "nanowells" and new.key()["segment_scale"] == "nanowells"
+    for legacy in (options("--nanowell_segment_scale", "tile"),
+                   {k: v for k, v in options().items() if k != "segment_scale"}):
+        settings = settings_from_kwargs({"_nanowell": legacy})
+        assert settings.segment_scale == "tile" and "segment_scale" not in settings.key()
+    with pytest.raises(ValueError, match="segmenter scale"):
+        nr.NanowellSettings("100um", segment_scale="percentile")

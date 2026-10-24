@@ -666,6 +666,50 @@ def site_confluence(rim_image, pixel_size_um: float, geometries, threshold: floa
 #: The percentiles Cellpose scales an image by before segmenting it: its default normalisation maps the whole
 #: image's 1st percentile to 0 and its 99th to 1, so every site on a tile shares one scale.
 SEGMENTER_PERCENTILES = (1.0, 99.0)
+#: How the segmenter's input is scaled (``NanowellSettings.segment_scale``). ``tile``: by the tile's own 1st-99th
+#: percentiles, as Cellpose scales any image. On the image as imaged those are the nanowells' rims — the darkest and
+#: brightest things on a phase or brightfield tile — so the cells inside a nanowell were left a sliver of the range,
+#: and Cellpose-SAM found almost none, except at the array's edge, where a tile holds fewer rims. ``nanowells``: by
+#: the 1st-99th percentiles of the tile's nanowell interiors, pooled (so an empty nanowell is not stretched on its
+#: own), with everything outside the nanowells — rims and lattice — set to the interiors' median, so the segmenter
+#: sees cells against a plain background (:func:`segmenter_scale`).
+SEGMENT_SCALES = ("nanowells", "tile")
+#: Out to this multiple of a nanowell's radius its pixels are kept for the segmenter under the ``nanowells`` scale;
+#: past it, plain background. The same circle a cell's centre must lie in to be counted (``INTERIOR_FRACTION``):
+#: where the fitted radius falls on the rim's profile is not fixed, and at 0.95 of it a rim's inner edge was still
+#: there to segment. A counted cell at the very edge of the circle keeps the half of it that counts it.
+SEGMENT_MASK_FRACTION = INTERIOR_FRACTION
+
+
+def segmenter_scale(image, pixel_size_um: float, geometries, scale: str = "nanowells"):
+    """``(image for the segmenter, (lo, hi) or None)`` under *scale* (``SEGMENT_SCALES``).
+
+    ``tile`` returns *image* unchanged and no range: the segmenter scales the tile by its own percentiles.
+    ``nanowells`` returns a copy with every pixel farther than ``SEGMENT_MASK_FRACTION`` of a radius from every
+    nanowell set to the median of the nanowells' interiors, and the interiors' pooled 1st-99th percentiles as the
+    range; with no interior pixel to read (no nanowell on the tile) it falls back to ``tile``."""
+    if scale == "tile":
+        return image, None
+    if scale != "nanowells":
+        raise ValueError(f"Unknown segmenter scale {scale!r}; one of {SEGMENT_SCALES}")
+    image = np.asarray(image, dtype=np.float64)
+    values = [image[_interior_pixels(image.shape, pixel_size_um, g, INTERIOR_FRACTION)] for g in geometries]
+    values = np.concatenate([v for v in values if v.size]) if any(v.size for v in values) else np.empty(0)
+    values = values[np.isfinite(values)]
+    if not values.size:
+        return image, None
+    lo, hi = (float(v) for v in np.percentile(values, SEGMENTER_PERCENTILES))
+    keep = np.zeros(image.shape, dtype=bool)
+    h, w = image.shape
+    for g in geometries:
+        win = crop_window(g, pixel_size_um, (h, w), SEGMENT_MASK_FRACTION)
+        if win is None:
+            continue
+        cx, cy = g.centre_um[0] / pixel_size_um - 0.5, g.centre_um[1] / pixel_size_um - 0.5
+        ys, xs = np.ogrid[win[0], win[1]]
+        keep[win] |= np.hypot(xs - cx, ys - cy) <= SEGMENT_MASK_FRACTION * g.radius_um / pixel_size_um
+    out = np.where(keep, image, float(np.median(values)))
+    return out, (lo, hi)
 
 
 @dataclass(frozen=True)
@@ -681,8 +725,8 @@ class SegmenterView:
     contrast: float | None
 
 
-def segmenter_view(rim_image, pixel_size_um: float, geometries, *,
-                   fraction: float = INTERIOR_FRACTION) -> dict[int, SegmenterView]:
+def segmenter_view(rim_image, pixel_size_um: float, geometries, *, fraction: float = INTERIOR_FRACTION,
+                   lowhigh: tuple[float, float] | None = None) -> dict[int, SegmenterView]:
     """Each site's interior on the segmenter's own scale (:class:`SegmenterView`), read from *rim_image* exactly as
     :func:`segment_tile` passes it.
 
@@ -690,10 +734,14 @@ def segmenter_view(rim_image, pixel_size_um: float, geometries, *,
     whose cells look alike in the raw image can reach the segmenter at very different contrast once each has been
     levelled and divided by the template, and a site whose cells occupy a few per cent of the tile's range is one
     whose zero count says nothing about its cells. The tile's percentiles are taken over the whole image, flat
-    1.0 between sites included, because that is what the segmenter scales."""
+    1.0 between sites included, because that is what the segmenter scales — unless *lowhigh* gives the range it was
+    scaled by instead (:func:`segmenter_scale`)."""
     rim = np.asarray(rim_image, dtype=np.float64)
     finite = rim[np.isfinite(rim)]
-    low, high = (np.percentile(finite, SEGMENTER_PERCENTILES) if finite.size else (math.nan, math.nan))
+    if lowhigh is not None:
+        low, high = lowhigh
+    else:
+        low, high = (np.percentile(finite, SEGMENTER_PERCENTILES) if finite.size else (math.nan, math.nan))
     span = float(high - low)
     out = {}
     for g in geometries:
@@ -763,7 +811,7 @@ CROP_BATCH = 32
 
 
 def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: float = CROP_REACH,
-                  on_site=None) -> np.ndarray:
+                  on_site=None, lowhigh: tuple[float, float] | None = None) -> np.ndarray:
     """One segmenter call per nanowell on a crop around it, pasted into a label image of the whole tile.
 
     The segmenter's work is the pixels it is given, so on a tile where the lattice between nanowells is most of the
@@ -774,20 +822,16 @@ def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: 
     them ``CROP_BATCH`` at a time, so they share its network passes; each crop's labels are still its own. Labels are
     renumbered so no two crops share one; where two crops overlap, the first label to a pixel keeps it. *on_site*,
     when given, is called with no argument after each nanowell is segmented, so a run can say how far through a
-    tile's nanowells it is."""
+    tile's nanowells it is. *lowhigh*, when given, is the range to scale by in place of the tile's
+    (:func:`segmenter_scale`)."""
     image = np.asarray(image)
     h, w = image.shape
     finite = image[np.isfinite(image)]
-    lowhigh = (tuple(float(v) for v in np.percentile(finite, SEGMENTER_PERCENTILES))
-               if finite.size and getattr(segmenter, "accepts_range", False) else None)
-    windows = []
-    for g in geometries:
-        cx, cy = g.centre_um[0] / pixel_size_um - 0.5, g.centre_um[1] / pixel_size_um - 0.5
-        half = reach * g.radius_um / pixel_size_um
-        x0, x1 = max(int(math.floor(cx - half)), 0), min(int(math.ceil(cx + half)) + 1, w)
-        y0, y1 = max(int(math.floor(cy - half)), 0), min(int(math.ceil(cy + half)) + 1, h)
-        if x1 > x0 and y1 > y0:
-            windows.append((slice(y0, y1), slice(x0, x1)))
+    if not getattr(segmenter, "accepts_range", False):
+        lowhigh = None
+    elif lowhigh is None and finite.size:
+        lowhigh = tuple(float(v) for v in np.percentile(finite, SEGMENTER_PERCENTILES))
+    windows = [win for g in geometries if (win := crop_window(g, pixel_size_um, (h, w), reach)) is not None]
     many = getattr(segmenter, "segment_many", None) if lowhigh is not None else None
     batch = CROP_BATCH if many is not None else 1
     out = np.zeros((h, w), dtype=np.int64)
@@ -813,9 +857,23 @@ def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: 
     return out
 
 
-def segment_tile(rim_image, segmenter) -> np.ndarray:
-    """One segmenter call on the whole rim-suppressed tile, as the pipeline calls Cellpose today."""
-    labels = np.asarray(segmenter(rim_image))
+def crop_window(g, pixel_size_um: float, shape, reach: float = CROP_REACH) -> tuple[slice, slice] | None:
+    """The ``(rows, cols)`` of a tile of *shape* that :func:`segment_sites` crops around site *g*, clipped to the
+    tile; ``None`` when nothing of it is inside."""
+    h, w = shape
+    cx, cy = g.centre_um[0] / pixel_size_um - 0.5, g.centre_um[1] / pixel_size_um - 0.5
+    half = reach * g.radius_um / pixel_size_um
+    x0, x1 = max(int(math.floor(cx - half)), 0), min(int(math.ceil(cx + half)) + 1, w)
+    y0, y1 = max(int(math.floor(cy - half)), 0), min(int(math.ceil(cy + half)) + 1, h)
+    return (slice(y0, y1), slice(x0, x1)) if x1 > x0 and y1 > y0 else None
+
+
+def segment_tile(rim_image, segmenter, *, lowhigh: tuple[float, float] | None = None) -> np.ndarray:
+    """One segmenter call on the whole tile. *lowhigh*, when given and the segmenter takes a range, is the range it
+    scales by (:func:`segmenter_scale`); otherwise it scales the tile by the tile's own percentiles, as Cellpose
+    does."""
+    use_range = lowhigh is not None and getattr(segmenter, "accepts_range", False)
+    labels = np.asarray(segmenter(rim_image, lowhigh=lowhigh) if use_range else segmenter(rim_image))
     if labels.shape != np.asarray(rim_image).shape:
         raise ValueError("The segmenter returned a label image of a different shape")
     return labels.astype(np.int64)

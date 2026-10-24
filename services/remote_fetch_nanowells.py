@@ -36,7 +36,8 @@ NANOWELL_DIR = "nanowells"
 
 
 def fetch_nanowell_tables(fetcher, well: str) -> int:
-    """Pull ``nanowells/<well>.csv``, ``<well>_grid.json`` and ``<well>_template.npz`` beside the well's other
+    """Pull ``nanowells/<well>.csv``, ``<well>_grid.json``, ``<well>_template.npz`` and ``<well>_segmenter_input.png``
+    (``pipeline.nanowell_inspect``) beside the well's other
     output; return how many landed.
 
     Exact names, never a glob on the well label (``A01*`` would also match ``A010``). A file the
@@ -50,7 +51,7 @@ def fetch_nanowell_tables(fetcher, well: str) -> int:
     dest = Path(run.local_output_dir) / NANOWELL_DIR
     pulled = 0
     # The template is what a later incremental run falls back to for a crowded timepoint (tracker C16).
-    for name in (f"{well}.csv", f"{well}_grid.json", f"{well}_template.npz"):
+    for name in (f"{well}.csv", f"{well}_grid.json", f"{well}_template.npz", f"{well}_segmenter_input.png"):
         host, files, _bytes = fetcher._list_remote_glob(
             f"{fetcher.host.ssh_alias}:{run.remote_output_dir}/{NANOWELL_DIR}/{name}")
         if files:

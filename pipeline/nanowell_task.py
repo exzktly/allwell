@@ -60,7 +60,8 @@ def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
                                spec.get("geometry") or nr.GEOMETRY_HEX_CIRCLE,
                                spec.get("cellpose_model") or nr.LEGACY_CELLPOSE_MODEL,
                                spec.get("segment_on") or nr.LEGACY_SEGMENT_ON,
-                               spec.get("segment_scope") or nr.LEGACY_SEGMENT_SCOPE)
+                               spec.get("segment_scope") or nr.LEGACY_SEGMENT_SCOPE,
+                               spec.get("segment_scale") or nr.LEGACY_SEGMENT_SCALE)
 
 
 def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
@@ -88,7 +89,8 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
                           spill_dir=Path(scratch_dir) / ".montages",     # removed with the scratch (X23)
                           expected_shape=expected_shape, stored_placements=stored_placements,
                           manual_anchors=manual_anchors, progress=lambda done, total: _log_steps(well_label, done, total),
-                          site_progress=lambda tp, done, total: _log_sites(well_label, tp, done, total))
+                          site_progress=lambda tp, done, total: _log_sites(well_label, tp, done, total),
+                          note=lambda text: log.info("Well %s — %s", well_label, text))
     return outcome, fixed, fixed_roster, saved
 
 
@@ -102,24 +104,42 @@ def _log_steps(well_label: str, done: int, total: int) -> None:
         log.info("Well %s — step %d/%d done", well_label, done, total)
 
 
-#: When each (well, timepoint)'s count started, by this process's clock: what :func:`_log_sites` times the rate from.
+#: When each (well, timepoint)'s count started, by this process's clock, and Cellpose's own seconds then
+#: (``pipeline.cellpose.CELLPOSE_SECONDS``): what :func:`_log_sites` times the rate and its breakdown from.
 _SITES_STARTED: dict = {}
+
+
+def _cellpose_seconds() -> dict:
+    """Cellpose's own seconds so far in this process, or zeros where the module is not shipped (a feature-subset
+    build): the count then reports its rate without the breakdown."""
+    try:
+        from pipeline.cellpose import CELLPOSE_SECONDS
+    except ImportError:
+        return {"network": 0.0, "masks": 0.0}
+    return dict(CELLPOSE_SECONDS)
 
 
 def _log_sites(well_label: str, timepoint, done: int, total: int, *, clock=time.monotonic) -> None:
     """How many of a timepoint's nanowells are segmented so far, while it is measured: the measure step's own
     progress, which the run reader adds to the well's dial and names in its hover text
     (``services.pipeline_runner._RE_WELL_SITES``). After the first line each says how long a nanowell is taking and
-    about how long the timepoint has left, so a slow count reads as slow rather than stuck."""
+    about how long the timepoint has left, so a slow count reads as slow rather than stuck, and, where Cellpose
+    reported its own times, how much of a nanowell's time was its network and how much its masks — the rest is the
+    pipeline's own measuring and Cellpose's resizing."""
     now = clock()
     if done == 0:
-        _SITES_STARTED[(well_label, timepoint)] = now
+        _SITES_STARTED[(well_label, timepoint)] = (now, _cellpose_seconds())
         log.info("Well %s — %s: %d/%d nanowells segmented", well_label, timepoint, done, total)
         return
-    elapsed = now - _SITES_STARTED.get((well_label, timepoint), now)
+    started, cellpose_then = _SITES_STARTED.get((well_label, timepoint), (now, _cellpose_seconds()))
+    elapsed = now - started
     each = elapsed / done
     timing = (f"in {_duration(elapsed)}, {each:.1f} s each" if done >= total
               else f"{each:.1f} s each, about {_duration(each * (total - done))} left")
+    spent = {k: v - cellpose_then.get(k, 0.0) for k, v in _cellpose_seconds().items()}
+    if spent["network"] > 0 or spent["masks"] > 0:
+        timing += (f"; per nanowell, Cellpose's network {spent['network'] / done:.2f} s, "
+                   f"its masks {spent['masks'] / done:.2f} s")
     log.info("Well %s — %s: %d/%d nanowells segmented (%s)", well_label, timepoint, done, total, timing)
 
 
@@ -664,6 +684,9 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         compress_well_csv(output_dir / f"{csv_prefix}_{well_label}.csv")
     write_sites_csv(output_dir / NANOWELL_DIR / f"{well_label}.csv", all_sites, fluor_tokens)
     write_grid_json(output_dir / NANOWELL_DIR / f"{well_label}_grid.json", well_label, outcome, settings)
+    from pipeline.nanowell_inspect import SUFFIX, write_sheet
+
+    write_sheet(output_dir / NANOWELL_DIR / f"{well_label}{SUFFIX}", outcome.inspection)
     rank_of = {tp: k for k, tp in enumerate(timepoints)}
     if outcome.earliest_template is not None and (
             saved is None or rank_of.get(outcome.earliest_template[0], 0) < rank_of.get(saved[1], len(rank_of))):

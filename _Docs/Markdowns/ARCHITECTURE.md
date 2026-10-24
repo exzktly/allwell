@@ -10014,7 +10014,11 @@ masks on its own; on Cellpose 3 it is one call per crop), one call per crop othe
 `count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's) is given one
 range for every crop of a tile, because a crop scaled to its own range would stretch an empty nanowell's noise. Which
 range is `segment_scale` (`nanowell_measure.SEGMENT_SCALES`, applied by `segmenter_scale` in `_tile_contents` and in
-Test detection's `_tile_segmented`, for either scope): `nanowells`, the default for a new run, takes the pooled
+Test detection's `_tile_segmented`, for either scope): `levelled`, the default for a new run, first shifts each
+nanowell's interior by a constant so its median is the median of the tile's nanowells' medians (`_level_interiors`),
+then does what `nanowells` does — on brightfield a few nanowells are far brighter than the rest, and under one pooled
+range such a nanowell either lay above it (a rare one) or widened it and squashed every other nanowell's cells (a
+common one), and was counted empty; the shift moves brightness, not contrast. `nanowells` takes the pooled
 1st-99th percentiles of the tile's nanowell interiors (`INTERIOR_FRACTION` of each radius) and sets every pixel
 farther than `SEGMENT_MASK_FRACTION` (the same 0.9) of a radius from every nanowell to the interiors' median, so the
 rims — the extremes of a phase or brightfield tile — are neither in the range nor in the image; `tile` takes the

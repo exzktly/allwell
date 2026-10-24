@@ -248,8 +248,12 @@ and the lattice between nanowells — is set to plain grey, and the brightness r
 interiors across the tile. On the image as imaged the rims are the darkest and brightest things on a tile, and
 when the range was taken from the whole tile, cells were left a sliver of it: Cellpose-SAM then counted almost every
 nanowell empty, except at the array's edge, where a tile holds fewer rims. The range is pooled over a tile's
-nanowells, so an empty nanowell is not stretched to look busy. Runs made before this counted with the whole tile's
-range, and their settings say so; on the command line, `--nanowell_segment_scale tile` does the same.
+nanowells, so an empty nanowell is not stretched to look busy. Before the range is taken, each nanowell's interior
+is shifted to the tile's typical nanowell brightness: on brightfield a few nanowells are much brighter than the
+rest, and without the shift they sat outside the range and were counted empty. The shift changes a nanowell's
+brightness, not the contrast of its cells. Runs made before this counted with the whole tile's range, and their
+settings say so; on the command line, `--nanowell_segment_scale tile` does the same, and `nanowells` uses the
+nanowells' range without the shift.
 
 While a run counts, its log says how far it is: `Well A01 — 24h: 120/400 nanowells segmented (1.5 s each, about
 7 min 0 s left; per nanowell, Cellpose's network 0.20 s, its masks 1.10 s)`, about every tenth of a timepoint's

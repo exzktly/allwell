@@ -61,7 +61,7 @@ from datasets.core.nanowell_tables import (
     carried_nanowell_block, has_nanowell_tables, refuse_nanowell_tables, refuse_unusable_tables,
 )
 from datasets.concatenate.raw_compute import (
-    check_raw_compatible, is_raw_dataset, raw_info, raw_paths,
+    check_raw_compatible, is_raw_dataset, raw_info, raw_paths, unusable_reason,
 )
 
 # Written at the start of a concatenation and removed only after the merged
@@ -584,6 +584,10 @@ def open_pair(ds1_root: Path | str, ds2_root: Path | str):
     refused: the earliest timepoints would be left unanalysed beneath analysed
     later ones, which the other three combinations cover better.
     """
+    for root, label in ((ds1_root, "Dataset 1"), (ds2_root, "Dataset 2")):
+        reason = unusable_reason(root)
+        if reason:
+            raise ConcatError(f"{label} ({root}) can't be used. {reason}")
     raw1, raw2 = is_raw_dataset(ds1_root), is_raw_dataset(ds2_root)
     if raw1 and not raw2:
         raise ConcatError(

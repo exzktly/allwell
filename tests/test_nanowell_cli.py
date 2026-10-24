@@ -532,5 +532,15 @@ def test_a_nanowell_run_prints_the_progress_its_well_s_dial_follows(tmp_path, mo
     reader = ProgressTracker()
     dial = [payload for record_ in caplog.records for kind, payload in reader.parse(record_.getMessage())
             if kind == "well_fov"]
-    assert dial and dial[0] == (WELL, 0, 2) and dial[-1] == (WELL, 2, 2)     # one timepoint: located, then measured
-    assert [done for _w, done, _t in dial] == sorted(done for _w, done, _t in dial)
+    assert dial and dial[0] == (WELL, 0, 2, "step") and dial[-1] == (WELL, 2, 2, "step")   # located, then measured
+    assert [p[1] for p in dial] == sorted(p[1] for p in dial)
+    # Inside the measure step, the nanowells segmented so far: from none to all of them, about a tenth at a time,
+    # and only between that step starting and ending — where the dial adds them to the step it is in.
+    reader = ProgressTracker()
+    events = [(kind, payload) for record_ in caplog.records for kind, payload in reader.parse(record_.getMessage())
+              if kind in ("well_fov", "well_sites")]
+    sites = [payload for kind, payload in events if kind == "well_sites"]
+    assert sites and sites[0][:3] == (WELL, "0h", 0) and sites[-1][2] == sites[-1][3] == sites[0][3] > 0
+    assert [p[2] for p in sites] == sorted(p[2] for p in sites) and len(sites) == 11
+    kinds = [kind if kind == "well_sites" else payload[1] for kind, payload in events]
+    assert kinds == [0, 1, *["well_sites"] * 11, 2]

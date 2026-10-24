@@ -86,7 +86,8 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
                           earliest_template=None if saved is None else saved[0],
                           spill_dir=Path(scratch_dir) / ".montages",     # removed with the scratch (X23)
                           expected_shape=expected_shape, stored_placements=stored_placements,
-                          manual_anchors=manual_anchors, progress=lambda done, total: _log_steps(well_label, done, total))
+                          manual_anchors=manual_anchors, progress=lambda done, total: _log_steps(well_label, done, total),
+                          site_progress=lambda tp, done, total: _log_sites(well_label, tp, done, total))
     return outcome, fixed, fixed_roster, saved
 
 
@@ -98,6 +99,13 @@ def _log_steps(well_label: str, done: int, total: int) -> None:
         log.info("Well %s — %d step(s): each timepoint located, then measured", well_label, total)
     else:
         log.info("Well %s — step %d/%d done", well_label, done, total)
+
+
+def _log_sites(well_label: str, timepoint, done: int, total: int) -> None:
+    """How many of a timepoint's nanowells are segmented so far, while it is measured: the measure step's own
+    progress, which the run reader adds to the well's dial and names in its hover text
+    (``services.pipeline_runner._RE_WELL_SITES``)."""
+    log.info("Well %s — %s: %d/%d nanowells segmented", well_label, timepoint, done, total)
 
 
 def stored_placements(folders, well_label: str) -> dict:

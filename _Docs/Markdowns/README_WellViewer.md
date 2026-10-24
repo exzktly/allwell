@@ -1562,7 +1562,12 @@ and by `remote_fetch_report.txt` in the output folder.
   every plate map in the app, including the ones on the Datasets tools.
 - The dial follows whichever step the well is actually in. While the well is
   being computed it fills with the fields measured — in a nanowell run, with
-  its timepoints, each located and then measured; while its input archive is
+  its timepoints, each located and then measured, and while a timepoint is
+  measured, with how many of its nanowells are segmented so far. Hovering the
+  well says where it is (`step 5/8, 24h: 120/400 nanowells segmented`), and the
+  run log prints the same count about every tenth of a timepoint's nanowells
+  (`Well A01 — 24h: 120/400 nanowells segmented`); a timepoint whose last line
+  stops short of its total had nanowells that could not be segmented. While its input archive is
   being uploaded, or its results downloaded, it fills with the bytes moved. It
   never runs backwards: once a well's archive is uploaded the dial stays full
   while it waits its turn on the remote — its colour is what says the well is

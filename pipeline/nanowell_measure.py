@@ -754,7 +754,8 @@ def segmenter_input(image, rim_image, segment_on: str) -> np.ndarray:
 CROP_REACH = 1.2
 
 
-def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: float = CROP_REACH) -> np.ndarray:
+def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: float = CROP_REACH,
+                  on_site=None) -> np.ndarray:
     """One segmenter call per nanowell on a crop around it, pasted into a label image of the whole tile.
 
     The segmenter's work is the pixels it is given, so on a tile where the lattice between nanowells is most of the
@@ -762,7 +763,8 @@ def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: 
     segmenter that takes a range (``accepts_range``, Cellpose's) is given the tile's own 1st-99th percentiles
     (``SEGMENTER_PERCENTILES``), because a crop scaled to its own range would stretch an empty nanowell's noise across
     the segmenter's range. Labels are renumbered so no two crops share one; where two crops overlap, the first label
-    to a pixel keeps it."""
+    to a pixel keeps it. *on_site*, when given, is called with no argument after each nanowell is segmented, so a run
+    can say how far through a tile's nanowells it is."""
     image = np.asarray(image)
     h, w = image.shape
     finite = image[np.isfinite(image)]
@@ -786,6 +788,8 @@ def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: 
         free = (labels > 0) & (window == 0)
         window[free] = labels[free] + next_id
         next_id += int(labels.max()) if labels.size else 0
+        if on_site is not None:
+            on_site()
     return out
 
 

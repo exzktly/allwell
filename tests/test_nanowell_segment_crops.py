@@ -107,3 +107,38 @@ def test_a_new_run_crops_and_an_earlier_run_s_options_mean_the_whole_tile():
     from analyze.nanowell_section import settings_from_opts
 
     assert settings_from_opts({"nanowell_format": "100um"}).segment_scope == "nanowells"     # Test detection's
+
+
+@pytest.mark.parametrize("scope", ["nanowells", "tile"])
+def test_a_measured_timepoint_reports_its_segmented_nanowells_and_where_the_count_stopped(plate, tmp_path,  # noqa: F811
+                                                                                          monkeypatch, scope):
+    """The progress a run prints inside a measure step (``_SiteCount``), through the real measurement: it starts at
+    none of the timepoint's imaged nanowells, climbs, and its last word is the count reached — here one short of the
+    total, a nanowell the first tile leaves unsegmented — rather than going silent at the last tenth it crossed."""
+    said = []
+    real_measure, real_tile = nr.measure_timepoint, nr._tile_contents
+    first = []
+
+    def measure(*a, **kw):
+        return real_measure(*a, on_segmented=lambda done, total: said.append((done, total)), **kw)
+
+    def tile(*a, on_segmented=None, **kw):
+        if not first:                                                 # the first tile segments one nanowell fewer
+            first.append(True)
+            skipped = []
+
+            def short(n, _skipped=skipped):
+                if not _skipped:
+                    _skipped.append(True)
+                    n -= 1
+                on_segmented(n)
+            return real_tile(*a, on_segmented=short, **kw)
+        return real_tile(*a, on_segmented=on_segmented, **kw)
+
+    monkeypatch.setattr(nr, "measure_timepoint", measure)
+    monkeypatch.setattr(nr, "_tile_contents", tile)
+    _preview(plate, tmp_path, scope, threshold_segmenter())
+    total = said[0][1]
+    assert said[0] == (0, total) and total > 0 and {t for _d, t in said} == {total}
+    assert [d for d, _t in said] == sorted(d for d, _t in said)
+    assert said[-1] == (total - 1, total)

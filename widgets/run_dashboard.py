@@ -91,6 +91,10 @@ class RunDashboard(PlateProgress):
         self._active: set = set()                # wells currently processing
         self._errored: set = set()
         self._fov: dict[str, tuple] = {}         # well -> (done, total) FOV-groups
+        self._fov_unit: dict[str, str] = {}      # well -> "FOV" or "step": what _fov counts
+        # well -> (timepoint, done, total): the nanowells segmented so far in the
+        # step a nanowell well is in, which fills its dial within that step.
+        self._sites: dict[str, tuple] = {}
         # well -> (direction, fraction) for a transfer in flight right now.
         # Entries are added when a transfer starts and dropped when it reaches
         # 1.0, so membership *is* "this well is moving bytes at the moment".
@@ -120,6 +124,8 @@ class RunDashboard(PlateProgress):
         self._active = set()
         self._errored = set()
         self._fov = {}
+        self._fov_unit = {}
+        self._sites = {}
         self._xfer = {}
         self._active_stage = ""
         self._transfer = None
@@ -208,13 +214,30 @@ class RunDashboard(PlateProgress):
         self._plate.setWellMarker(w, "✕" if w in self._errored else None)
         self._refresh_rail()
 
-    def set_well_fov(self, well_id: str, done: int, total: int) -> None:
-        """Per-well FOV·timepoint sub-progress (one group = one FOV × timepoint)
-        for the well(s) currently computing."""
+    def set_well_fov(self, well_id: str, done: int, total: int, *, unit: str = "FOV") -> None:
+        """Per-well sub-progress for the well(s) currently computing: FOV·timepoint
+        groups (one group = one FOV × timepoint), or for a nanowell well its
+        steps (``unit="step"``: each timepoint located, then measured). A step
+        completed ends whatever nanowell count was filling it."""
         w = canon_well(well_id)
         if not w:
             return
+        if self._fov.get(w, (None,))[0] != int(done):
+            self._sites.pop(w, None)
         self._fov[w] = (int(done), int(total))
+        self._fov_unit[w] = unit
+        self.set_well_fraction(w, self._well_fraction(w))
+
+    def set_well_sites(self, well_id: str, timepoint: str, done: int, total: int) -> None:
+        """How many of the nanowells of the timepoint a nanowell well is
+        measuring are segmented so far. It fills the dial within the current
+        step — a measure step is most of a nanowell well's time, and without it
+        the dial sat still for the whole of one — and its hover text names the
+        count."""
+        w = canon_well(well_id)
+        if not w or int(total) <= 0:
+            return
+        self._sites[w] = (str(timepoint), int(done), int(total))
         self.set_well_fraction(w, self._well_fraction(w))
 
     def set_well_transfer(self, well_id: str, direction: str,
@@ -316,7 +339,8 @@ class RunDashboard(PlateProgress):
             return 1.0
         done, total = self._fov.get(well, (0, 0))
         if total > 0:
-            return max(0.0, min(1.0, done / total))
+            _tp, seg, of = self._sites.get(well, ("", 0, 1))
+            return max(0.0, min(1.0, (done + seg / of) / total))
         # Computing, with no group finished yet: an empty dial, not a plain
         # disc. Drawing it as a solid well made the part of the plate that is
         # actively being worked on say nothing about how far in it was.
@@ -482,7 +506,10 @@ class RunDashboard(PlateProgress):
             return f" — {verb} {int(round(frac * 100))}%"
         done, total = self._fov.get(w, (0, 0))
         if total > 0 and not any(self._has(s, w) for s in _COMPUTED_STAGES):
-            return f" — FOV {done}/{total}"
+            sites = self._sites.get(w)
+            if sites is not None:
+                return f" — step {done + 1}/{total}, {sites[0]}: {sites[1]}/{sites[2]} nanowells segmented"
+            return f" — {self._fov_unit.get(w, 'FOV')} {done}/{total}"
         return ""
 
     def _well_tooltip(self, well_id: str) -> str:

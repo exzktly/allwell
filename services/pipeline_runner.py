@@ -272,14 +272,23 @@ _RE_THRESH_WELL = re.compile(r"Auto-threshold: completed well \d+/\d+ \(([A-Ha-h
 #   "Well A01 — 12 FOV-group(s)"  (the total, at well start)
 #   "Well A01 — FOV 3/12 done"    (each group as it completes)
 # A field-by-field well counts FOV-groups; a nanowell well, processed a timepoint at a time, counts steps
-# (``pipeline.nanowell_task._log_steps``). Either moves the well's dial.
-_RE_WELL_FOV_TOTAL = re.compile(r"Well (\S+)\s+\S+\s+(\d+) (?:FOV-group|step)")
-_RE_WELL_FOV_DONE = re.compile(r"Well (\S+)\s+\S+\s+(?:FOV|step) (\d+)/(\d+) done")
+# (``pipeline.nanowell_task._log_steps``). Either moves the well's dial; a step's payload names its unit, so the
+# well's hover text does not call a nanowell well's steps FOVs. While a nanowell timepoint is measured it also prints
+#   "Well A01 — 0h: 120/400 nanowells segmented"   (``pipeline.nanowell_task._log_sites``)
+# which fills the dial within the step and is named in the hover text.
+_RE_WELL_FOV_TOTAL = re.compile(r"Well (\S+)\s+\S+\s+(\d+) (FOV-group|step)")
+_RE_WELL_FOV_DONE = re.compile(r"Well (\S+)\s+\S+\s+(FOV|step) (\d+)/(\d+) done")
+_RE_WELL_SITES = re.compile(r"Well (\S+)\s+\S+\s+(.+?): (\d+)/(\d+) nanowells segmented")
 # Finalize-phase status lines. After the last well the run is still busy
 # (auto-threshold scans every well's zip; a remote run then drains downloads
 # and cleans up) — surface what it's doing so "Finalizing…" doesn't look hung.
 _RE_TF_SCAN = re.compile(r"Auto-threshold: scanning (\d+) well")
 _RE_TF_PROG = re.compile(r"Auto-threshold: completed well (\d+)/(\d+)")
+
+
+def _fov_payload(well: str, done: int, total: int, unit: str) -> tuple:
+    """``(well, done, total)`` for a field-by-field well, ``(well, done, total, "step")`` for a nanowell well."""
+    return (well, done, total) if unit.startswith("FOV") else (well, done, total, "step")
 
 
 def is_transient_progress(line: str) -> bool:
@@ -531,11 +540,13 @@ class ProgressTracker:
         # Per-well FOV-group sub-progress (within the Process stage).
         mft = _RE_WELL_FOV_TOTAL.search(line)
         if mft:
-            events.append(("well_fov", (mft.group(1), 0, int(mft.group(2)))))
+            events.append(("well_fov", _fov_payload(mft.group(1), 0, int(mft.group(2)), mft.group(3))))
         mfd = _RE_WELL_FOV_DONE.search(line)
         if mfd:
-            events.append(("well_fov",
-                           (mfd.group(1), int(mfd.group(2)), int(mfd.group(3)))))
+            events.append(("well_fov", _fov_payload(mfd.group(1), int(mfd.group(3)), int(mfd.group(4)), mfd.group(2))))
+        mns = _RE_WELL_SITES.search(line)
+        if mns:
+            events.append(("well_sites", (mns.group(1), mns.group(2), int(mns.group(3)), int(mns.group(4)))))
         # Auto-threshold pass runs after the last well → the "Threshold" stage.
         if not self._finalize_emitted and line.lstrip().startswith("Auto-threshold:"):
             self._finalize_emitted = True

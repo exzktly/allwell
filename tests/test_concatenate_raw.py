@@ -120,6 +120,76 @@ def test_a_dataset_with_analysis_output_is_not_raw(tmp_path):
     assert is_raw_dataset(tmp_path / "d1") is False
 
 
+def test_an_out_folder_holding_only_finder_debris_is_still_raw_and_merges(tmp_path):
+    # Finder writes .DS_Store into any folder a user opens; an AppleDouble twin
+    # appears on non-HFS volumes. Neither is analysis output, so the plate stays raw.
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    (tmp_path / "d1" / "out").mkdir()
+    (tmp_path / "d1" / "out" / ".DS_Store").write_bytes(b"\0\0\0\1Bud1")
+    (tmp_path / "d2" / "out").mkdir()
+    (tmp_path / "d2" / "out" / "._.DS_Store").write_bytes(b"x")
+    assert is_raw_dataset(tmp_path / "d1") is True
+    plan, _summary = _merge(tmp_path, gap_hours=24.0)
+    assert plan.raw is True
+    assert "E_DAPI_A01_f0_24h.tif" in _members(tmp_path / "dest")
+
+
+def test_loose_images_with_no_in_folder_are_told_to_go_through_import_loose(tmp_path):
+    (tmp_path / "d1").mkdir()
+    (tmp_path / "d1" / "E_DAPI_A01_f0_0h.tif").write_bytes(b"x")
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    with pytest.raises(cc.ConcatError) as caught:
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=6.0)
+    message = str(caught.value)
+    assert message.startswith("Dataset 1 (")
+    assert "holds images but no 'in' folder" in message and "Import Loose" in message
+
+
+def test_a_folder_of_well_folders_of_images_is_recognised_as_loose_images(tmp_path):
+    (tmp_path / "d2" / "A01").mkdir(parents=True)
+    (tmp_path / "d2" / "A01" / "E_DAPI_A01_f0_0h.tif").write_bytes(b"x")
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    with pytest.raises(cc.ConcatError, match=r"^Dataset 2 \(.*holds images but no 'in' folder"):
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=6.0)
+
+
+def test_a_folder_with_no_in_and_no_images_names_both_accepted_shapes(tmp_path):
+    (tmp_path / "d1").mkdir()
+    (tmp_path / "d1" / "notes.txt").write_text("x")
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    with pytest.raises(cc.ConcatError) as caught:
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=6.0)
+    message = str(caught.value)
+    assert "has no 'in' folder" in message and "or a raw one" in message
+    assert "needs both" not in message
+
+
+def test_stray_output_without_a_sidecar_is_named_as_neither_raw_nor_analysed(tmp_path):
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    _raw(tmp_path / "d2", timepoints=["0h"])
+    (tmp_path / "d2" / "out").mkdir()
+    (tmp_path / "d2" / "out" / "A01.csv").write_text("a")
+    (tmp_path / "d2" / "out" / ".DS_Store").write_bytes(b"x")
+    with pytest.raises(cc.ConcatError) as caught:
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=6.0)
+    message = str(caught.value)
+    assert message.startswith("Dataset 2 (")
+    assert "neither an analysed dataset nor a raw one (A01.csv)" in message
+
+
+def test_the_page_field_hint_gives_the_same_specific_reason(tmp_path):
+    from datasets.concatenate.view import _is_dataset
+
+    (tmp_path / "loose").mkdir()
+    (tmp_path / "loose" / "E_DAPI_A01_f0_0h.tif").write_bytes(b"x")
+    assert "Import Loose" in _is_dataset(tmp_path / "loose")
+    _raw(tmp_path / "raw", timepoints=["0h"])
+    (tmp_path / "raw" / "out").mkdir()
+    (tmp_path / "raw" / "out" / ".DS_Store").write_bytes(b"x")
+    assert _is_dataset(tmp_path / "raw") == ""
+
+
 def test_a_dropped_image_fails_verification_rather_than_passing_as_a_merge(tmp_path):
     _raw(tmp_path / "d1", timepoints=["0h"], extra={"notes.txt": b"one"})
     _raw(tmp_path / "d2", timepoints=["0h"], extra={"notes.txt": b"two"})

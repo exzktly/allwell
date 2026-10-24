@@ -7156,7 +7156,11 @@ How it works:
    path (the box itself shows just the folder name). A field turns up its own
    hint below it if the folder isn't usable — **Dataset 1**/**Dataset 2** must
    each contain an `in/` folder and either an `out/` folder (an analysed
-   dataset) or no results at all (a raw dataset); **Destination** must be a
+   dataset) or no results at all (a raw dataset — an empty `out/`, or one holding
+   only a macOS `.DS_Store`, counts as no results). A folder of images that was
+   never converted (no `in/` folder) is told to go through **Import Loose** or the
+   OME/CZI import first; that is the step that turns loose images into a raw
+   dataset. **Destination** must be a
    new, empty folder, different from both datasets. Both originals are left
    untouched either way.
 2. Choose where the result goes. **Create a new dataset in the destination

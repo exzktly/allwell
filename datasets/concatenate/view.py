@@ -47,8 +47,8 @@ from datasets.concatenate.concatenate_compute import (
 from datasets.concatenate.dashboard import ConcatDashboard
 from datasets.concatenate.in_place import in_place_refusal
 from util.zip_append import pending_journals
-from datasets.concatenate.raw_compute import is_raw_dataset
-from datasets.core.dataset_fields import is_dataset, is_free_destination
+from datasets.concatenate.raw_compute import unusable_reason
+from datasets.core.dataset_fields import is_free_destination
 from datasets.core.dataset_fields import promote_open_button
 
 # Wide enough for "1d 6h 30m"; the gap is a short duration, not a path.
@@ -66,8 +66,10 @@ _IN_PLACE_NOTE = (
 
 
 def _is_dataset(root: Path) -> str:
-    """This page's dataset rule: the shared one, or a raw dataset (``in/`` only)."""
-    return "" if is_raw_dataset(root) else is_dataset(root)
+    """This page's dataset rule: an analysed dataset or a raw one (``in/`` only),
+    with a reason that names whichever is closest, rather than the shared rule's
+    "needs an 'in' and an 'out' folder", which reads as if raw sets were refused."""
+    return unusable_reason(root)
 
 
 def _is_destination(root: Path) -> str:

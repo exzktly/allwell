@@ -13,6 +13,7 @@ finished locally; only the host is a stub that records what it was handed (the h
 from __future__ import annotations
 
 import csv
+import json
 import types
 import zipfile
 from pathlib import Path
@@ -58,8 +59,9 @@ def _record(out: Path, well: str, opts: dict, host_extras=()) -> None:
     record_well_settings(out, well, settings_key_from_argv([*argv[2:], *host_extras]))
 
 
-def _run(inp: Path, out: Path, opts: dict, *, host_extras=()):
-    """``(wells sent, log lines)`` for one remote run of *inp* into *out*."""
+def _run(inp: Path, out: Path, opts: dict, *, host_extras=(), argv_sent: list | None = None):
+    """``(wells sent, log lines)`` for one remote run of *inp* into *out*; the argv the host was handed goes into
+    *argv_sent* when given."""
     import services.pipeline_runner as pr
     from services.pipeline_service import build_pipeline_args
 
@@ -79,6 +81,8 @@ def _run(inp: Path, out: Path, opts: dict, *, host_extras=()):
 
     def spawn(zipped, out_dir, argv, **k):
         spawned.append(zipped)
+        if argv_sent is not None:
+            argv_sent.append(list(argv))
         return _Proc()
 
     r = pr.PipelineRunner()
@@ -153,11 +157,26 @@ def test_a_well_without_its_csv_is_sent(tmp_path):
     assert sent == ["B02"]
 
 
+def _grid(out: Path, well: str, *timepoints: str) -> None:
+    """A nanowell well's grid record naming *timepoints* as measured."""
+    (out / "nanowells").mkdir(exist_ok=True)
+    (out / "nanowells" / f"{well}_grid.json").write_text(
+        json.dumps({"timepoints": {tp: {"status": "ok"} for tp in timepoints}}))
+
+
+def _forced(argv: list[str]) -> list[str]:
+    if "--force_wells" not in argv:
+        return []
+    rest = argv[argv.index("--force_wells") + 1:]
+    return [a for a in rest[:next((i for i, a in enumerate(rest) if a.startswith("--")), len(rest))]]
+
+
 def test_a_nanowell_re_run_skips_its_finished_wells_too(tmp_path):
     """The reported case: a remote nanowell run, which cannot be incremental, run again on a finished plate."""
     inp, out = _plate(tmp_path)
     opts = _opts(**NANOWELL)
     _record(out, "A01", opts)
+    _grid(out, "A01", "T01")
     (out / "measurements_B02.csv").unlink()                               # B02 never finished
     sent, lines = _run(inp, out, opts)
     assert sent == ["B02"]
@@ -210,3 +229,57 @@ def test_the_batched_path_never_skips_an_incremental_run_s_wells(tmp_path):
     proc._log = logged.append
     proc._run_batches()
     assert not any("already complete locally" in ln for ln in logged)
+
+
+def test_a_nanowell_well_short_of_a_timepoint_is_sent_whole_and_forced(tmp_path):
+    """Left part way (its grid names fewer timepoints than its archive holds) or given a new timepoint since: either
+    way its tables do not cover its input, so it is not finished. It is sent whole — the host analyses it in full —
+    and forced, so an earlier attempt's output on the host cannot be kept in its place."""
+    inp, out = _plate(tmp_path)
+    opts = _opts(**NANOWELL)
+    for well in ("A01", "B02"):
+        _record(out, well, opts)
+        _grid(out, well, "T01")
+    with zipfile.ZipFile(inp / "B02.zip", "a") as zf:                      # a timepoint added since
+        for ch in ("DAPI", "GFP"):
+            zf.writestr(f"e_{ch}_B02_1_T02.tif", b"x")
+    argv: list = []
+    sent, _lines = _run(inp, out, opts, argv_sent=argv)
+    assert sent == ["B02"]
+    assert _forced(argv[-1]) == ["B02"]
+
+
+def test_a_nanowell_well_its_record_says_failed_is_sent_again(tmp_path):
+    inp, out = _plate(tmp_path)
+    opts = _opts(**NANOWELL)
+    for well in ("A01", "B02"):
+        _record(out, well, opts)
+        _grid(out, well, "T01")
+    (out / "pipeline_info.json").write_text(json.dumps({"run_report": {"wells": {
+        "A01": {"groups_total": 1, "groups_covered": 1},
+        "B02": {"groups_total": 1, "groups_covered": 1, "failed": ["T01"]}}}}))
+    argv: list = []
+    sent, _lines = _run(inp, out, opts, argv_sent=argv)
+    assert sent == ["B02"] and _forced(argv[-1]) == ["B02"]
+
+
+def test_a_well_without_output_is_sent_but_not_forced(tmp_path):
+    """Forcing is for a well with partial output here; one with none has nothing an earlier attempt could stand in
+    for, and the force list the user typed is kept as it was."""
+    inp, out = _plate(tmp_path)
+    opts = _opts(**NANOWELL)
+    _record(out, "A01", opts)
+    _grid(out, "A01", "T01")
+    (out / "measurements_B02.csv").unlink()
+    argv: list = []
+    sent, _lines = _run(inp, out, opts, argv_sent=argv)
+    assert sent == ["B02"] and _forced(argv[-1]) == []
+
+
+def test_forcing_merges_with_the_wells_the_user_named():
+    from services.remote_finished_wells import argv_forcing
+
+    argv = ["--input_dir", "in", "--force_wells", "C03", "D04", "--output_dir", "out"]
+    assert argv_forcing(argv, ["D04", "E05"]) == [
+        "--input_dir", "in", "--output_dir", "out", "--force_wells", "C03", "D04", "E05"]
+    assert argv_forcing(argv, []) == argv

@@ -67,21 +67,6 @@ def _canonical_well_from_path(stem: str) -> str | None:
 
 
 
-#: Said by Analyze and by the run record alike, so the two refusals cannot drift.
-NANOWELL_REMOTE_RESUME_REFUSAL = (
-    "This plate has results from an earlier run that did not finish, so this run would add to them incrementally, "
-    "and a nanowell run cannot do that on a remote host yet. Tick Force to analyse the plate again in full on the "
-    "remote, or run it on this computer.")
-
-def nanowell_remote_resume_refusal_for(wells) -> str:
-    """The refusal for a run limited to named wells, naming those an unfinished earlier run left part-way."""
-    names = ", ".join(sorted(wells))
-    return (f"An earlier run of this plate did not finish and left {names} part-way, so this run would add to "
-            f"{'it' if len(wells) == 1 else 'them'} incrementally, and a nanowell run cannot do that on a remote host "
-            "yet. Tick Force to analyse the wells this run names again in full on the remote (only those wells), or "
-            "run it on this computer.")
-
-
 NANOWELL_REMOTE_INCREMENTAL_REFUSAL = (
     "An incremental nanowell run cannot run on a remote host yet: the remote would analyse the new timepoints "
     "without the earlier ones' roster and template, and its tables would replace yours. Run it incrementally "

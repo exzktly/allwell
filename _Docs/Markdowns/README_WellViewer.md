@@ -462,12 +462,14 @@ at least four of the plate's wells are in the run; otherwise click each timepoin
 Concatenate carry the anchors of the wells and timepoints they keep, renamed as they rename them.
 
 `--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile
-record recomputes the timepoint. An incremental nanowell run is refused on a remote host for now — the remote
-would analyse the new timepoints without the earlier ones — so run it on this computer, or run the remote plate
-in full. The same holds when the app would make the run incremental on its own — a plate with an unfinished
-earlier run: the run is refused before anything is sent, and Force runs the plate in full. Wells already
-brought home from an earlier remote run are analysed again with the rest. Test detection is not affected: it
-runs on this computer. A remote nanowell run keeps every well's files on the remote until the run ends, because the
+record recomputes the timepoint. Ticking **Incremental** for a nanowell run on a remote host is refused for now —
+the remote would analyse the new timepoints without the earlier ones — so run it on this computer, or run the
+remote plate in full. Resuming one is not refused: when a remote nanowell run stopped part way (or the app finds an
+unfinished earlier run of the plate), pressing Run or Resume goes well by well. Every well whose results here
+cover all of its timepoints under the same settings is skipped; every other well — left part way, never finished,
+or given new timepoints since — is uploaded whole and analysed again in full, and its tables replace the partial
+ones when it comes back. The log says so before anything is sent. Test detection is not affected: it runs on this
+computer. A remote nanowell run keeps every well's files on the remote until the run ends, because the
 end-of-run re-anchoring may re-run a well, and then brings the final tables home with the re-anchored wells.
 
 **Datasets tools and nanowell results.** *Subset* carries the nanowell tables of the wells and timepoints it

@@ -177,12 +177,12 @@ def test_test_detection_without_a_record_places_the_tiles_from_the_grid(tab, qtb
     window.close()
 
 
-def test_a_remote_nanowell_run_the_app_makes_incremental_is_refused_before_launch(tab, tmp_path, monkeypatch):  # noqa: F811
+def test_a_remote_nanowell_run_the_app_makes_incremental_runs_well_by_well(tab, tmp_path, monkeypatch):  # noqa: F811
     """Roll-up review X29: with Incremental unticked, ``resume_aware_spec`` turns the run incremental on a plate with
     an unfinished run. The form's own check had passed by then, so the run reached the remote and was refused there
-    with "untick Incremental". ``start_run`` now refuses it from the options the run will really use."""
+    with "untick Incremental"; then ``start_run`` refused it, which left Force as the only way on. It now reaches the
+    runner not incremental: the remote run goes well by well (``services.remote_finished_wells``)."""
     import services.remote_config as remote_config
-    from services.remote_run_state import NANOWELL_REMOTE_RESUME_REFUSAL
 
     root, _ = _plate(tmp_path)
     _use_nanowell_schema(tab)
@@ -193,14 +193,20 @@ def test_a_remote_nanowell_run_the_app_makes_incremental_is_refused_before_launc
     tab._remote_cb.setCurrentIndex(tab._remote_cb.findData("bench-box"))
     monkeypatch.setattr(remote_config, "get_remote", lambda name: object())
     monkeypatch.setattr(tab, "_input_has_unfinished_work", lambda raw: "an unfinished run")
-    class Launched(Exception):
-        """The run got as far as the running UI state: past every refusal."""
+    sent: list[dict] = []
 
-    def launch(**_kwargs):
+    class Launched(Exception):
+        """The run reached the runner: past every refusal."""
+
+    def launch(_pipeline, opts, **_kwargs):
+        sent.append(dict(opts))
         raise Launched
 
-    monkeypatch.setattr(tab, "_set_running_ui_state", launch)
-    assert tab.start_run(tab._collect_run_spec()) == NANOWELL_REMOTE_RESUME_REFUSAL
+    monkeypatch.setattr(tab, "_set_running_ui_state", lambda **_k: None)
+    monkeypatch.setattr(tab._runner, "start", launch)
+    with pytest.raises(Launched):
+        tab.start_run(tab._collect_run_spec())
+    assert sent and sent[-1]["incremental"] is False
 
 
 def test_the_runner_refuses_an_incremental_nanowell_run_before_staging_anything(monkeypatch, tmp_path):
@@ -231,7 +237,8 @@ def test_the_runner_refuses_an_incremental_nanowell_run_before_staging_anything(
 
 def test_recovering_a_remote_nanowell_plate_does_not_make_the_run_incremental(monkeypatch):
     """Roll-up review X29, the runner's half: wells recovered from an earlier remote run made staging incremental,
-    which a remote nanowell run refuses. A nanowell run recomputes them instead; any other run still reuses them."""
+    which a remote nanowell run refuses. A nanowell run is not made incremental (its finished wells, the recovered
+    ones among them, are left out by the finished-wells step instead); any other run still reuses them."""
     import threading
     from types import SimpleNamespace
 
@@ -246,7 +253,7 @@ def test_recovering_a_remote_nanowell_plate_does_not_make_the_run_incremental(mo
     runner._enqueue = lines.append
     plain = ["--input_dir", "in", "--output_dir", "out"]
     assert runner._recover_remote_outputs(Path("out"), plain + ["--nanowell_format", "100um"], {}) is False
-    assert any("cannot resume on a remote host" in line[1] for line in lines)
+    assert any("cannot add to a well part-way on a remote host" in line[1] for line in lines)
     assert runner._recover_remote_outputs(Path("out"), plain, {})          # the pulled wells: incremental
 
 

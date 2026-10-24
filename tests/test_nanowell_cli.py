@@ -582,3 +582,21 @@ def test_the_key_the_app_computes_is_the_one_the_pipeline_records(tmp_path, monk
     recorded = recorded_well_settings(out, "A01")
     assert recorded and recorded == settings_key_from_argv(argv).split("~")[0]
     assert json.loads((out / ".aw_settings" / "A01.json").read_text())["digest"] == recorded
+
+
+def test_a_real_nanowell_well_reads_as_finished_and_a_new_timepoint_unfinishes_it(tmp_path, monkeypatch):
+    """The remote finished-wells rule (``services.remote_finished_wells``) on the pipeline's own output rather than
+    hand-made files: the CSV, settings record, grid record and completeness record a real run writes read as a
+    finished well under the same settings — and stop doing so when the archive gains a timepoint, or the settings
+    change."""
+    from services.remote_finished_wells import finished_here
+
+    rendered, record = build_well(timepoint="0h")
+    plate = _write_plate(tmp_path, rendered, record)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um")
+    argv = ["python", "process_microscopy.py", *sys.argv[1:]]
+    assert finished_here(out, argv, ["A01"]) == ["A01"]
+    assert finished_here(out, [*argv, "--nanowell_resize", "none"], ["A01"]) == []
+    with zipfile.ZipFile(plate / "in" / f"{WELL}.zip", "a") as zf:
+        zf.writestr(f"exp_PHASE_{WELL}_F0_24h.tif", b"x")
+    assert finished_here(out, argv, ["A01"]) == []

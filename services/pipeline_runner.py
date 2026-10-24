@@ -56,7 +56,7 @@ from services.remote_runner import (
     stage_local_zips,
 )
 from services import run_journal, run_provenance
-from services.remote_finished_wells import drop_finished
+from services.remote_finished_wells import argv_forcing, drop_finished, nanowell_forced
 from services.remote_recover import recover_finished_outputs
 from services.remote_run_state import refuse_remote_nanowell_incremental
 from services.subprocess_kill import signal_subprocess
@@ -1935,6 +1935,9 @@ class PipelineRunner:
             if scope is None:
                 return
             zipped, args, grouped, download_n = scope
+            # A nanowell well sent again over partial output here is forced, so the host's own skip cannot
+            # keep an earlier attempt's partial tables (services.remote_finished_wells.nanowell_forced).
+            args = argv_forcing(args, nanowell_forced(output_dir, args, (Path(w).stem for w in zipped.well_zips)))
             if self._nothing_left_to_upload(zipped, opts, output_dir):
                 return
             self._announce_staged_plate(zipped, grouped, download_n)

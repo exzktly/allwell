@@ -98,10 +98,9 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
             remote = spec.resolve_remote()
         except RunSpecError as exc:
             return str(exc)
-        refusal = _nanowell_remote_resume_refusal(spec.opts, remote,
-                                                  getattr(self, "_resume_part_way_wells", ()))
-        if refusal:
-            return refusal
+        spec, resume_note = _nanowell_remote_resume_by_well(spec, remote)
+        if resume_note:
+            self._log_line(resume_note, "INFO")
         self._run_ok = False
         self._run_error = None
         self._set_running_ui_state(remote=remote)
@@ -444,24 +443,27 @@ def _earlier_run_still_alive(spec: RunSpec) -> str | None:
             "race it for the same files.")
 
 
-def _nanowell_remote_resume_refusal(opts: dict, remote, part_way=()) -> str | None:
-    """Why a remote nanowell run that has become incremental cannot start, or ``None``.
+def _nanowell_remote_resume_by_well(spec, remote) -> tuple:
+    """``(spec, note)``: a remote nanowell run the app made incremental, made a run by whole wells instead.
 
-    The form refuses a remote nanowell run with Incremental ticked; this is the same refusal for the runs the app
-    makes incremental on its own — ``resume_aware_spec`` on a plate with an unfinished run, and a resume after a
-    suspend — read from the options the run will really use, before anything reaches the remote (roll-up review
-    X29). The key is read directly rather than through the nanowell field rules, which ship with the removable
-    Nanowells feature; in a build without it nothing sets the key.
+    ``resume_aware_spec`` (an unfinished run behind the input) and a resume after a suspend turn a run incremental,
+    so that wells left part way recover their missing groups. A nanowell run cannot do that on a remote host — the
+    host has none of a well's earlier timepoints, roster or template, and its tables would replace the local ones
+    (``NANOWELL_REMOTE_INCREMENTAL_REFUSAL``) — and was refused, which left a stopped remote nanowell run with Force
+    as its only way forward (roll-up review X29). It does not need to add to a well: the remote run skips every well
+    finished here (``services.remote_finished_wells``, whose nanowell rule is that the tables cover every timepoint
+    of the well's archive) and sends every other whole, to be analysed again in full and forced over any earlier
+    output. So the incremental is dropped and the note says what will happen. ``force`` and a run on this computer
+    are left as they are, and so is an Incremental the user ticked, which the form refuses before this. The key is
+    read directly rather than through the nanowell field rules, which ship with the removable Nanowells feature.
     """
-    from services.remote_run_state import NANOWELL_REMOTE_RESUME_REFUSAL
+    import dataclasses
 
+    opts = spec.opts or {}
     nanowell = bool(str(opts.get("nanowell_format") or "").strip())
     if remote is None or not nanowell or not opts.get("incremental") or opts.get("force"):
-        return None
-    if part_way:
-        # A run limited to named wells was made incremental for those of them an unfinished run left half-done: say
-        # which, and that Force redoes only the named wells, not the plate.
-        from services.remote_run_state import nanowell_remote_resume_refusal_for
-
-        return nanowell_remote_resume_refusal_for(part_way)
-    return NANOWELL_REMOTE_RESUME_REFUSAL
+        return spec, ""
+    note = ("[resume] A nanowell run cannot add to a well part-way on a remote host, so this one goes well by well: "
+            "every well whose results here cover all its timepoints under these settings is skipped, and every "
+            "other well — left part way, or never finished — is sent whole and analysed again in full.\n")
+    return dataclasses.replace(spec, opts={**opts, "incremental": False}), note

@@ -128,6 +128,8 @@ KEYED_ON: dict[str, str] = {
                                    "it sees around each cell and every count",
     "nanowell_segment_scale":      "what that model's input is scaled by (the nanowells' interiors or the whole "
                                    "tile), so what contrast every cell had",
+    "nanowell_resize":             "whether Cellpose resizes that input to the cell diameter first, so the scale "
+                                   "every cell was seen at",
     "nanowell_grid":               "the described grid a dataset without an acquisition record is "
                                    "placed from, so where every tile and nanowell sits",
     "nanowell_scan":               "the order the described grid's fields were taken in, the same",
@@ -252,6 +254,9 @@ def _before_cpsam(opts) -> dict:
     # Nor of what it was scaled by: every run scaled by the tile's own range.
     if "nanowell_segment_scale" in out and (not nanowell or out["nanowell_segment_scale"] == "tile"):
         out["nanowell_segment_scale"] = None
+    # Nor of whether Cellpose resized it: every run resized it to the cell diameter.
+    if "nanowell_resize" in out and (not nanowell or out["nanowell_resize"] == "cell"):
+        out["nanowell_resize"] = None
     return out
 
 

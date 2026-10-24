@@ -61,7 +61,8 @@ def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
                                spec.get("cellpose_model") or nr.LEGACY_CELLPOSE_MODEL,
                                spec.get("segment_on") or nr.LEGACY_SEGMENT_ON,
                                spec.get("segment_scope") or nr.LEGACY_SEGMENT_SCOPE,
-                               spec.get("segment_scale") or nr.LEGACY_SEGMENT_SCALE)
+                               spec.get("segment_scale") or nr.LEGACY_SEGMENT_SCALE,
+                               spec.get("resize") or nr.LEGACY_RESIZE)
 
 
 def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:

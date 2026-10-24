@@ -213,9 +213,14 @@ for that tile to own it, the angle of the central square's edges to a lattice ro
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
 
 With **Nanowell arrays** ticked, the **Segmentation** section at the top of the form is set to label-free and shows
-the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on**, **Segment** and
-**Cell diameter (µm)** (the typical cell size, which sets the scale the model looks for cells at; blank uses the default). The count
-reads only these — not the pixel diameter label-free shows outside nanowell mode.
+the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on**, **Segment**,
+**Resize** and **Cell diameter (µm)** (the typical cell size, which sets the scale the model looks for cells at). The cell diameter
+starts at 19.5 µm: at 0.65 µm per pixel that is Cellpose's own 30 px, so Cellpose segments without resizing, about
+four times faster than at the pipeline's 15 µm, which it enlarged; blank uses that 15 µm default. The count
+reads only these — not the pixel diameter label-free shows outside nanowell mode. When a pixel diameter was set there
+and the µm field is empty or still holds the 19.5 µm it starts with (not typed by you), ticking **Nanowell arrays** converts it with the pixel size the dataset's acquisition record
+gives and fills the µm field, and a note under it says so; a µm size you entered is never replaced. Without a record
+that gives the pixel size, the note says the pixel diameter is not used and asks for the size in µm.
 
 **Cellpose model** chooses what counts the cells: *cpsam* (Cellpose-SAM, the default), *cyto3* (Cellpose 3's
 generalist) or *livecell_cp3* (the Cellpose 3 model trained on phase-contrast images of eight cell lines,
@@ -229,13 +234,13 @@ it, and in full precision (float32, with the GPU's faster TF32 maths) elsewhere;
 cells, so compare them on one well with **Test detection** before a plate-wide run: its crops show the outlines the
 run itself would count, cut from the whole tile segmented as the run segments it.
 
-**Segment on** chooses the image the model counts cells in. *Raw image* (the default) is each tile as it was imaged —
-what Cellpose's models, Cellpose-SAM among them, were trained on. *Rim-removed* is each nanowell divided by the well's
-picture of an empty nanowell, which takes the bright rim away but is a ratio image no model was trained on, and in
-which the faint noise of an empty nanowell is stretched across the model's whole range. Either way a cell is counted
+**Segment on** chooses the image the model counts cells in. *Rim-removed* (the default) is each nanowell divided by the
+well's picture of an empty nanowell, which takes the bright rim away, so the model is not drawn to it; it is a ratio
+image no model was trained on. *Raw image* is each tile as it was imaged — what Cellpose's models, Cellpose-SAM among
+them, were trained on — with the nanowell's bright rim in it. Either way a cell is counted
 in a nanowell only when its centre lies inside the nanowell's interior, so a cell found on a rim is not counted, and
 confluence is measured on the rim-removed image. Test detection's crops show the image the model was given (their
-tooltip says which). A run made before this setting existed counted on the rim-removed image, and its settings say so.
+tooltip says which). A run made before this setting existed also counted on the rim-removed image.
 
 **Segment** chooses how much of each tile the model is given. *Each nanowell* (the default) gives it each nanowell
 separately — a crop around it, with Cellpose-SAM 32 crops at a time so the GPU works on several at once — rather
@@ -243,6 +248,14 @@ than the whole tile at once: the lattice between nanowells holds no cell that is
 counted, and on a slow GPU it was most of the work. *Whole tile* gives it each tile in one piece, as runs made before
 this setting existed did, and their settings say so. Compare the two on one well with **Test detection**, which
 segments as the run would. (On the command line: `--nanowell_segment_scope nanowells|tile`.)
+
+**Resize** chooses whether Cellpose resizes each image before segmenting it. *To the cell diameter* (the default, and
+what every earlier run did) resizes by 30 ÷ the cell diameter in pixels, so a cell reaches the 30 pixels Cellpose's
+models work at. Where cells are smaller than that in pixels it is an enlargement, and the network's work grows with
+its square: at 0.65 µm per pixel a 10 µm cell is 15.4 px, enlarged ×1.95, nearly four times the pixels. *None (as
+imaged)* segments each image as it is, which is that much faster, at whatever the model makes of cells at that size
+— compare the counts on one well before a plate-wide run. With *None*, the cell diameter no longer sets the scale.
+(On the command line: `--nanowell_resize none`.)
 
 Whichever you choose, the model is given the nanowells only: everything outside each nanowell's interior — its rim
 and the lattice between nanowells — is set to plain grey, and the brightness range is taken from the nanowells'
@@ -261,7 +274,8 @@ While a run counts, its log says how far it is: `Well A01 — 24h: 120/400 nanow
 nanowells. The last part is Cellpose's own timing, so a slow count says whether the GPU's network or the step that
 turns its output into cells is taking the time. Before each timepoint is counted, a line gives the scale Cellpose sees
 it at: `Well A01 — 24h: Cellpose cpsam at 0.65 um/px — a cell of 10 um is 15.4 px, so Cellpose resizes each image
-x1.95; a nanowell's crop is 185 px, 360 px as the network sees it`. Cellpose's own *No cell pixels found.* — which it
+x1.95; a nanowell's crop is 185 px, 360 px as the network sees it` (with **Resize** set to *None* it says Cellpose is
+set not to resize). Cellpose's own *No cell pixels found.* — which it
 prints for every image it finds no cell in, once per empty nanowell — is no longer shown. A nanowell with no cell is
 recorded as measured with 0 cells (state *empty*): the Nanowells page counts it as a zero in its count, growth and
 occupancy metrics, and it adds no rows to the per-cell table the other plots read.
@@ -734,7 +748,7 @@ convert it.
 
 You can also explicitly override the output folder.
 
-**If that output folder already holds a run, a card under the Folders section
+**If that output folder already holds a run, a card at the top of the form, above the Folders section,
 says so before you press anything.** It names when the last run against this folder
 started and how it ended — completed, failed, stopped, suspended, or *never
 finished*, which means All-Well was closed while it was going — followed by how
@@ -745,7 +759,7 @@ already accounts for, so you can see how much a re-run has left to do. If new
 images have been dropped in since, it also says what the run will do about them,
 in the same words the run log will use.
 
-**Load settings from a run…**, just under the Folders section, does the same from a
+**Load settings from a run…**, just above the Folders section, does the same from a
 `pipeline_info.json` you pick, and points the input at the plate
 that file belongs to. It loads settings only — it does not resume the run; use
 the resume card (or tick **Incremental** and Run) for that. A file from a

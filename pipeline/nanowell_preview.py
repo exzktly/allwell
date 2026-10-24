@@ -185,7 +185,7 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
     if located.status not in (nr.OK, nr.UNADDRESSED) or (located.boundary is None and located.array_sites is None):
         return result
     px = located.pixel_size_um
-    segment = segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px, model_type=settings.cellpose_model)
+    segment = segmenter or nm.cellpose_segmenter(settings.segmenter_diameter_px(px), model_type=settings.cellpose_model)
     missing = None
     try:
         radius, own = nr.own_array_model(located, settings)

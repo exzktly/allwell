@@ -20,9 +20,9 @@ from PySide6.QtWidgets import (
 )
 
 from analyze.domain.nanowell_fields import (
-    CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, LEGACY_CELLPOSE_MODEL, PLATE_FORMAT_CHOICES,
-    LEGACY_SEGMENT_ON, LEGACY_SEGMENT_SCOPE, REGISTRATION_FROM_KEY, SEGMENT_ON_CHOICES, SEGMENT_SCOPE_CHOICES,
-    SCAN_CHOICES,
+    CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, PREFILLED, GEOMETRY_CHOICES, LEGACY_CELLPOSE_MODEL, PLATE_FORMAT_CHOICES,
+    LEGACY_SEGMENT_ON, LEGACY_SEGMENT_SCOPE, REGISTRATION_FROM_KEY, RESIZE_CHOICES, SEGMENT_ON_CHOICES,
+    SEGMENT_SCOPE_CHOICES, SCAN_CHOICES,
     nanowell_enabled, nanowell_option_errors,
 )
 
@@ -97,7 +97,8 @@ def settings_from_opts(opts: dict):
         str(opts.get("nanowell_segment_on") or SEGMENT_ON_CHOICES[0][0]),
         str(opts.get("nanowell_segment_scope") or SEGMENT_SCOPE_CHOICES[0][0]),
         # No control on the form: a run takes the command line's default, and Test detection the same.
-        str(opts.get("nanowell_segment_scale") or "levelled"))
+        str(opts.get("nanowell_segment_scale") or "levelled"),
+        str(opts.get("nanowell_resize") or RESIZE_CHOICES[0][0]))
 
 
 class AnalyzeNanowellSectionMixin:
@@ -269,13 +270,40 @@ class AnalyzeNanowellSectionMixin:
         row.layout().addWidget(self._nanowell_segment_scope_cb)
         row.layout().addStretch(1)
         self._nanowell_field_rows.append(row.parentWidget())
+        row = self._row(box, "Resize", tooltip=(
+            "Whether Cellpose resizes each image before segmenting it. To the cell diameter: by 30 ÷ the cell "
+            "diameter in pixels, so a cell reaches the 30 pixels Cellpose's models work at — for cells smaller than "
+            "that, an enlargement that multiplies the pixels the network runs on (x2 is four times the work). "
+            "None: each image is segmented as imaged, much faster for small cells, at whatever the model makes of "
+            "cells at that size. Compare the two counts on one well before a plate-wide run."))
+        self._nanowell_resize_cb = QComboBox(row)
+        for value, label in RESIZE_CHOICES:
+            self._nanowell_resize_cb.addItem(label, userData=value)
+        self._nanowell_resize_cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._nanowell_resize_cb.setMinimumContentsLength(12)
+        row.layout().addWidget(self._nanowell_resize_cb)
+        row.layout().addStretch(1)
+        self._nanowell_field_rows.append(row.parentWidget())
         for key, label, attr, tip in _FIELDS:
             if key in _COUNT_FIELDS:
                 self._nanowell_field_rows.append(self._nanowell_edit_row(box, key, label, attr, tip))
+        # Where the size came from, when it was carried over from the pixel diameter above (_carry_cellpose_diameter).
+        self._nanowell_size_note = QLabel("", box)
+        self._nanowell_size_note.setObjectName("Muted")
+        self._nanowell_size_note.setWordWrap(True)
+        self._nanowell_size_note.setVisible(False)
+        box.layout().addWidget(self._nanowell_size_note)
+        # Whether someone typed in the size, which the carry-over must then leave alone even when it reads as the
+        # prefilled value; textEdited fires on typing only, never on setText (a restore, the carry-over itself).
+        self._nanowell_size_typed = False
+        size_edit = self._nanowell_cell_diameter_edit
+        size_edit.textEdited.connect(lambda _t: setattr(self, "_nanowell_size_typed", True))
+        # A note about where the size came from stops being true once anything else sets it.
+        size_edit.textChanged.connect(lambda _t: self._nanowell_size_note.setVisible(False))
 
     def _nanowell_edit_row(self, sec, key, label, attr, tip):
         r = self._row(sec, label, tooltip=tip)
-        edit = self._entry(r, "", width=70)
+        edit = self._entry(r, PREFILLED.get(key, ""), width=70)
         edit.setPlaceholderText(DEFAULTS[key] or "default")
         setattr(self, attr, edit)
         r.layout().addStretch(1)
@@ -295,6 +323,7 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_model_cb.setEnabled(on)
         self._nanowell_segment_on_cb.setEnabled(on)
         self._nanowell_segment_scope_cb.setEnabled(on)
+        self._nanowell_resize_cb.setEnabled(on)
         # The count's rows live on the Segmentation section's label-free page: shown in nanowell mode, and the
         # page's own note (and its pixel diameter, which the count does not read) hidden then.
         box = getattr(self, "_nanowell_count_box", None)
@@ -311,6 +340,43 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_preview_btn.setEnabled(on)
         self._nanowell_pin_segmentation(on)
         self._refresh_nanowell_custom()
+        self._carry_cellpose_diameter()
+
+    def _carry_cellpose_diameter(self) -> None:
+        """Turning nanowell mode on with a cell diameter in pixels set above and none set in µm here: convert it.
+
+        The count takes its cell size in micrometres, because a plate's pixel size can differ between timepoints,
+        so it never reads the pixel diameter above; and an empty size here means its default. A size someone had
+        set above therefore seemed to vanish when the mode was turned on. It is carried over, converted with the
+        pixel size the dataset's acquisition record gives, and the note says so; without a record that gives one
+        the note says the size above is not used. A size already set here is never overwritten; the form's prefilled
+        size (``PREFILLED``) counts as set only once someone has typed in the field."""
+        note = getattr(self, "_nanowell_size_note", None)
+        top = getattr(self, "_cellpose_diameter_edit", None)
+        size_edit = self._nanowell_cell_diameter_edit
+        current = size_edit.text().strip()
+        untouched = not current or (current == PREFILLED["nanowell_cell_diameter_um"]
+                                    and not getattr(self, "_nanowell_size_typed", False))
+        if note is None or top is None or not self._nanowell_cb.isChecked() or not untouched:
+            return
+        try:
+            px = float(top.text().strip() or 0)
+        except ValueError:
+            return
+        if not (px > 0):
+            return
+        from analyze.nanowell_preflight import record_pixel_size_um
+
+        pixel = record_pixel_size_um(self._input_edit.text().strip())
+        if pixel is None:
+            note.setText(f"The {px:g} px cell diameter set for Cellpose is not used in nanowell mode, which takes the "
+                         "cell size in µm: enter it here (no acquisition record giving the pixel size was found to "
+                         "convert it).")
+        else:
+            size_edit.setText(f"{px * pixel:.3g}")
+            note.setText(f"Converted from the {px:g} px cell diameter set for Cellpose, at the acquisition record's "
+                         f"{pixel:g} µm per pixel.")
+        note.setVisible(True)
 
     def _nanowell_label_free_index(self) -> int:
         return self._seg_method_cb.findData("cellpose_labelfree")
@@ -345,6 +411,7 @@ class AnalyzeNanowellSectionMixin:
         out["nanowell_segment_on"] = self._nanowell_segment_on_cb.currentData() or SEGMENT_ON_CHOICES[0][0]
         out["nanowell_segment_scope"] = (self._nanowell_segment_scope_cb.currentData()
                                          or SEGMENT_SCOPE_CHOICES[0][0])
+        out["nanowell_resize"] = self._nanowell_resize_cb.currentData() or RESIZE_CHOICES[0][0]
         out[REGISTRATION_FROM_KEY] = self._nanowell_registration_edit.text().strip()
         return out
 
@@ -376,9 +443,13 @@ class AnalyzeNanowellSectionMixin:
         if known:
             self._nanowell_format_cb.setCurrentIndex(index)
         for key, _label, attr, _tip in _FIELDS + _CUSTOM_FIELDS + _GRID_FIELDS:
-            # A key the dataset does not state is blank, not whatever the previous dataset left in the box.
+            # A key the dataset does not state is blank, not whatever the previous dataset left in the box: a nanowell
+            # run that stated none used the pipeline's default. A dataset that was no nanowell run states nothing about
+            # them, so a field the form prefills goes back to that.
             value = d.get(key)
-            getattr(self, attr).setText("" if value is None else f"{value:.12g}" if isinstance(value, float) else str(value))
+            blank = "" if plate_format else PREFILLED.get(key, "")
+            getattr(self, attr).setText(blank if value is None else f"{value:.12g}" if isinstance(value, float)
+                                        else str(value))
         scan = self._nanowell_scan_cb.findData(str(d.get("nanowell_scan") or SCAN_CHOICES[0]))
         self._nanowell_scan_cb.setCurrentIndex(max(scan, 0))
         # Absent or None is a run that did not choose: the format's hexagonal lattice in a circle.
@@ -396,6 +467,9 @@ class AnalyzeNanowellSectionMixin:
         named = d.get("nanowell_segment_scope") if "nanowell_segment_scope" in d else SEGMENT_SCOPE_CHOICES[0][0]
         self._nanowell_segment_scope_cb.setCurrentIndex(
             max(self._nanowell_segment_scope_cb.findData(str(named or LEGACY_SEGMENT_SCOPE)), 0))
+        # And for the resize: absent or None is a run that resized to the cell diameter, every run's default.
+        self._nanowell_resize_cb.setCurrentIndex(
+            max(self._nanowell_resize_cb.findData(str(d.get("nanowell_resize") or RESIZE_CHOICES[0][0])), 0))
         self._nanowell_registration_edit.setText(str(d.get(REGISTRATION_FROM_KEY) or ""))
         self._refresh_nanowell_custom()
 

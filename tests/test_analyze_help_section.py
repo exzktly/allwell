@@ -241,3 +241,18 @@ def test_the_resume_and_preflight_banners_head_the_form_above_folders(analyze_ta
     assert row(holder) == 0
     assert row(analyze_tab._section_widgets["Folders"]) > row(holder)
     assert row(analyze_tab._section_widgets["Folders"]) < row(analyze_tab._section_widgets["Filename Schema"])
+
+
+def test_load_settings_from_a_run_sits_above_folders_under_the_banners(analyze_tab):
+    """Asked for: "Load settings from a run…" above the folder selection (it sets the input folder), and still below
+    the banners that head the form."""
+    holder = analyze_tab._preflight_banner.parentWidget()
+    form = holder.parentWidget().layout()
+
+    def row(widget):
+        while widget.parentWidget() is not holder.parentWidget():
+            widget = widget.parentWidget()
+        return form.indexOf(widget)
+
+    load = row(analyze_tab._open_pinfo_btn)
+    assert row(holder) < load == row(analyze_tab._section_widgets["Folders"]) - 1

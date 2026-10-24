@@ -10001,8 +10001,8 @@ loading rather than an area.
 chooses by the setting's `segment_on` (`SEGMENT_ON`): `raw`, the tile as imaged, what Cellpose's models were trained
 on, or `rim`, the rim-suppressed tile, a ratio image whose near-flat empty nanowells Cellpose's 1st-99th percentile
 scaling stretches. A run's options that name none mean `rim` (`LEGACY_SEGMENT_ON`): every earlier run segmented it,
-so `NanowellSettings.key()` names the input only when it is not `rim`, `--nanowell_segment_on` defaults to `raw`, the
-form always sends its choice, and `settings_digest._before_cpsam` aliases a nanowell run on `rim` to the digest the
+so `NanowellSettings.key()` names the input only when it is not `rim`, `--nanowell_segment_on` defaults to `rim` (the
+form's combo too, `SEGMENT_ON_CHOICES`), the form always sends its choice, and `settings_digest._before_cpsam` aliases a nanowell run on `rim` to the digest the
 earlier build recorded. Confluence is measured on the rim-suppressed tile either way, and Test detection's crops
 (`pipeline/nanowell_preview._tile_segmented`) are cut from the image the segmenter was given, marked `input`.
 How much of that image the segmenter is given is `segment_scope` (`SEGMENT_SCOPES`): `nanowells`, the default for a
@@ -10023,14 +10023,19 @@ common one), and was counted empty; the shift moves brightness, not contrast. `n
 farther than `SEGMENT_MASK_FRACTION` (the same 0.9) of a radius from every nanowell to the interiors' median, so the
 rims — the extremes of a phase or brightfield tile — are neither in the range nor in the image; `tile` takes the
 tile's own percentiles and leaves the image alone, and is what options naming none mean (`LEGACY_SEGMENT_SCALE`,
-keyed and digest-aliased as `segment_scope` is). The whole-tile scope passes the range to the segmenter too
+keyed and digest-aliased as `segment_scope` is). Whether Cellpose resizes that input first is `resize`
+(`RESIZE_MODES`): `cell` resizes it by 30 over the cell diameter in pixels and is what options naming none mean
+(`LEGACY_RESIZE`); `none` tells Cellpose no diameter (`NanowellSettings.segmenter_diameter_px` is 0), so the image is
+segmented as imaged, at a quarter of the network's pixels where a cell is half its 30. `--nanowell_resize` has no
+parser default and the form (`RESIZE_CHOICES`, the **Resize** combo) sends it only for `none`, so a run that does not
+resize differently hashes exactly as runs from before the flag existed. The whole-tile scope passes the range to the segmenter too
 (`segment_tile(lowhigh=…)`). `segmenter_view` (the `segmenter_floor` / `segmenter_contrast` columns) and the
 inspection sheet read the same range. `pipeline.cellpose._segment_cellpose(lowhigh=…)` scales the crop to that range itself and calls
 `eval(normalize=False)`: Cellpose pads a greyscale image with empty channels and applies a `normalize={"lowhigh": …}`
 range to all of them, so they read `-lo / (hi - lo)` (about -1 on camera counts) instead of the 0 its percentile
 path leaves a flat channel at. Loading a model sets the `cellpose.dynamics`, `cellpose.models` and `cellpose.core`
 loggers to WARNING (a batch's tqdm progress is INFO) and adds `_CellposeChatter`, which drops the two warnings a batch
-makes as a matter of course ("3D stack used…", once per batch; "no seeds found…", once per empty crop). `cellpose.models` stays at INFO so the filter sees Cellpose's per-call timings ("network run in …", "masks created in …"), which it adds to `CELLPOSE_SECONDS` before dropping every INFO line; `nanowell_task._log_sites` snapshots it at a timepoint's first line and reports the network's and the masks' seconds per nanowell on every later one. Among the INFO lines this hides is "No cell pixels found.", printed for every image without a cell (once per empty nanowell on the crop path), named no well and was the only thing a long count printed; `_log_sites` reports the count instead. Before a timepoint is measured, `run_well(note=…)` logs `cellpose_scale_text` — pixel size, the cell diameter in pixels, Cellpose's resize factor (30 px over it) and a crop's side before and after — through `_Steps.scale`, only when the count is Cellpose's.
+makes as a matter of course ("3D stack used…", once per batch; "no seeds found…", once per empty crop). `cellpose.models` stays at INFO so the filter sees Cellpose's per-call timings ("network run in …", "masks created in …"), which it adds to `CELLPOSE_SECONDS` before dropping every INFO line; `nanowell_task._log_sites` snapshots it at a timepoint's first line and reports the network's and the masks' seconds per nanowell on every later one. Among the INFO lines this hides is "No cell pixels found.", printed for every image without a cell (once per empty nanowell on the crop path), named no well and was the only thing a long count printed; `_log_sites` reports the count instead. Before a timepoint is measured, `run_well(note=…)` logs `cellpose_scale_text` — pixel size, the cell diameter in pixels, Cellpose's resize factor (30 px over it, or none under `resize` `none`) and a crop's side before and after — through `_Steps.scale`, only when the count is Cellpose's.
 
 For its first measured timepoint `run_well` also keeps a sample of what the segmenter was given (`_Steps.inspect` → `measure_timepoint(inspect=…)` → `_tile_contents(keep=…)` → `_keep_crops`): `pipeline/nanowell_inspect.inspection_sites` picks the `PER_GROUP` (8) nanowells nearest the array's centre and the 8 farthest, and each is cut from the image the segmenter received, on the scale it was given it at (`segmenter_scale`), with the labels it returned, the counting circle (`circle`: the fitted centre and `INTERIOR_FRACTION` of the fitted radius, in the crop's pixels) and the labels `count_cells` counted (`counted`), so `_keep_crops` runs after the count. The sheet outlines counted labels green and the rest red, and draws the circle yellow. `WellOutcome.inspection` carries them to `nanowell_task`, which writes `nanowells/<well>_segmenter_input.png` (`nanowell_inspect.write_sheet`; the PNG is encoded with `zlib`, nothing else, because it runs on the remote worker), and `remote_fetch_nanowells.fetch_nanowell_tables` pulls it with the tables. It exists because Test detection runs on the app's own machine, where a Torch that cannot load stops it. `tile` is one call on the whole tile (`segment_tile`), and
 is what options that name no scope mean (`LEGACY_SEGMENT_SCOPE`), with the same key and digest-alias treatment as
@@ -10311,7 +10316,13 @@ of the Segmentation section's other settings, so `_build_nanowell_count_rows` bu
 **Segment on** and **Cell diameter (µm)** rows (`_COUNT_FIELDS`) into the Segmentation section's label-free page
 (`seg_params._nanowell_count_box`). That box is shown only in nanowell mode, which pins the method to label-free;
 the page's own note and the pixel diameter row (`_sync_cellpose_diameter_row`, which the count never reads) are
-hidden then. Their option keys are the section's as before
+hidden then. Because the pixel row is hidden and the count's size is in µm, turning the mode on with a pixel
+diameter set and the µm field empty, or holding the form's prefilled 19.5 µm (`nanowell_fields.PREFILLED`; a typed
+value is tracked by `textEdited` as `_nanowell_size_typed`), converts it (`_carry_cellpose_diameter`, at
+`nanowell_preflight.record_pixel_size_um`, the acquisition record's first stated pixel size) and says so in
+`_nanowell_size_note`; a µm size already set is never overwritten, and with no record giving a pixel size the note
+says the pixel value is not used. A restore leaves a field a nanowell run did not state blank (it used the
+pipeline's 15 µm) and puts a dataset that was no nanowell run back on the prefill. Their option keys are the section's
 (`tests/test_nanowell_count_settings_sit_with_segmentation.py`). *Reuse registration* (a path
 and a Browse button, key `nanowell_registration_from`) sends `--nanowell_registration_from` when filled; a folder
 without `nanowells/` is refused (`registration_from_error`), and with a remote host chosen the run goes on and the log

@@ -34,12 +34,15 @@ CELLPOSE_MODEL_CHOICES = (("cpsam", "cpsam (Cellpose-SAM)"), ("cyto3", "cyto3 (n
 LEGACY_CELLPOSE_MODEL = "cyto3"
 #: What the count's segmenter is given (``pipeline.nanowell_run.SEGMENT_ON``), as (option value, label), the first
 #: the default; a run that names none segmented the rim-divided tile (``LEGACY_SEGMENT_ON``).
-SEGMENT_ON_CHOICES = (("raw", "Raw image"), ("rim", "Rim-removed"))
+SEGMENT_ON_CHOICES = (("rim", "Rim-removed"), ("raw", "Raw image"))
 LEGACY_SEGMENT_ON = "rim"
 #: How much of each tile the count's segmenter is given (``pipeline.nanowell_run.SEGMENT_SCOPES``), as (option value,
 #: label), the first the default; a run that names none segmented whole tiles (``LEGACY_SEGMENT_SCOPE``).
 SEGMENT_SCOPE_CHOICES = (("nanowells", "Each nanowell"), ("tile", "Whole tile"))
 LEGACY_SEGMENT_SCOPE = "tile"
+#: Whether Cellpose resizes the count's input to the cell diameter first (``pipeline.nanowell_run.RESIZE_MODES``), as
+#: (option value, label), the first the default and what a run that names none did.
+RESIZE_CHOICES = (("cell", "To the cell diameter"), ("none", "None (as imaged)"))
 
 #: ``--nanowell_scan`` spellings (``pipeline.nanowell_pattern_record.parse_scan``), the first the default.
 SCAN_CHOICES = tuple(f"{corner}-{major}{'-serpentine' if serpentine else ''}"
@@ -49,6 +52,12 @@ SCAN_CHOICES = tuple(f"{corner}-{major}{'-serpentine' if serpentine else ''}"
 #: The fields that describe the tile grid of a dataset with no acquisition record (tracker P15, A8).
 GRID_KEYS = ("nanowell_grid", "nanowell_scan", "nanowell_overlap_percent", "nanowell_pixel_size_um")
 CUSTOM_KEYS = ("nanowell_diameter_um", "nanowell_pitch_um")
+
+#: What a field holds on a new form, where that is not blank. The cell diameter's 19.5 µm is the size at which, on
+#: a 0.65 µm-per-pixel plate, a cell is Cellpose's own 30 px, so it segments without resizing (four times faster than
+#: the pipeline's 15 µm default there, which Cellpose enlarged x1.5) — measured on a user's plate to count as well.
+#: A blank field still sends no flag, and the pipeline's 15 µm applies (``DEFAULTS``, the placeholder).
+PREFILLED = {"nanowell_cell_diameter_um": "19.5"}
 
 #: Field defaults, shown as placeholders: a blank field sends no flag and the pipeline's own default applies.
 DEFAULTS = {
@@ -183,6 +192,9 @@ def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]
     scope = str(opts.get("nanowell_segment_scope") or SEGMENT_SCOPE_CHOICES[0][0]).strip()
     if scope not in {value for value, _label in SEGMENT_SCOPE_CHOICES}:
         errors.append(f"Nanowell segmentation scope {scope!r} is not one this version knows.")
+    resize = str(opts.get("nanowell_resize") or RESIZE_CHOICES[0][0]).strip()
+    if resize not in {value for value, _label in RESIZE_CHOICES}:
+        errors.append(f"Nanowell Cellpose resize {resize!r} is not one this version knows.")
     model = str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]).strip()
     if model not in {value for value, _label in CELLPOSE_MODEL_CHOICES}:
         errors.append(f"Nanowell Cellpose model {model!r} is not one this version knows.")

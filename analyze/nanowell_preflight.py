@@ -66,6 +66,24 @@ def seam_site_estimate(plan, plate_format: str, margin_um: float | None, *, phas
     return int(round(float(np.mean(fused)))), int(round(float(np.mean(totals))))
 
 
+def record_pixel_size_um(raw: str) -> float | None:
+    """The pixel size the dataset at *raw*'s acquisition record gives (µm, its first timepoint's x), or ``None``
+    without a readable record that states one: what the form converts a cell size given in pixels by."""
+    from util.acquisition_record import AcquisitionRecordError, read_record_file
+
+    if not raw:
+        return None
+    try:
+        record = read_record_file(wells_directory(raw) / "acquisition.json")
+    except (AcquisitionRecordError, OSError):
+        return None
+    for block in ((record or {}).get("timepoints") or {}).values():
+        x = ((block or {}).get("pixel_size_um") or {}).get("x")
+        if isinstance(x, (int, float)) and x > 0:
+            return float(x)
+    return None
+
+
 def nanowell_input_report(raw: str, opts: dict) -> tuple[list[str], list[str]]:
     """``(problems, warnings)`` for the dataset at *raw* under the form's nanowell *opts*."""
     from util.well_token import canonical_well_label, well_archives

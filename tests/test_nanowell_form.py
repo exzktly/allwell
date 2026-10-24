@@ -78,6 +78,10 @@ def test_a_blank_field_sends_no_flag_so_the_pipeline_default_applies(tab):
     tab._nanowell_cb.setChecked(True)
     argv = _argv(tab)
     assert _flag(argv, "--nanowell_format") == "100um"
+    # Asked for: the cell diameter starts at 19.5 µm (Cellpose's 30 px at 0.65 µm/px, so no resize), and is sent.
+    assert _flag(argv, "--nanowell_cell_diameter_um") == "19.5"
+    tab._nanowell_cell_diameter_edit.setText("")
+    argv = _argv(tab)
     assert not any(a in argv for a in ("--nanowell_margin_um", "--nanowell_cell_diameter_um",
                                        "--nanowell_occluded_below"))
 

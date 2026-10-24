@@ -42,7 +42,7 @@ def _write_plate(tmp_path, rendered, record, *, token="0h", fluorescence=None):
     return plate
 
 
-def _run_main(monkeypatch, plate, *extra, run_check=False):
+def _run_main(monkeypatch, plate, *extra, run_check=False, segmenter_factory=None):
     from pipeline import well_skip
 
     def _serial(*, well_zips, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
@@ -57,7 +57,7 @@ def _run_main(monkeypatch, plate, *extra, run_check=False):
         return failed
 
     monkeypatch.setattr(pm, "process_well_zips", _serial)
-    monkeypatch.setattr(nm, "cellpose_segmenter", lambda *a, **k: threshold_segmenter())
+    monkeypatch.setattr(nm, "cellpose_segmenter", segmenter_factory or (lambda *a, **k: threshold_segmenter()))
     monkeypatch.setattr(_suspend, "install_handlers", lambda **k: None)
     monkeypatch.setattr(_suspend, "watch_parent", lambda *a, **k: None)
     argv = ["process_microscopy.py", "--input_dir", str(plate / "in"), "--output_dir", str(plate / "out"),
@@ -544,3 +544,26 @@ def test_a_nanowell_run_prints_the_progress_its_well_s_dial_follows(tmp_path, mo
     assert [p[2] for p in sites] == sorted(p[2] for p in sites) and len(sites) == 11
     kinds = [kind if kind == "well_sites" else payload[1] for kind, payload in events]
     assert kinds == [0, 1, *["well_sites"] * 11, 2]
+
+
+def test_the_resize_choice_reaches_cellpose_and_the_run_s_settings(tmp_path, monkeypatch, rendered_well):
+    """Asked for: a run that does not resize for Cellpose. At 0.65 µm/px a 10 µm cell is 15 px, which Cellpose
+    enlarges x2 to its 30 px: four times the pixels. ``none`` must tell Cellpose no diameter at all (0, so no
+    resize), on the run's own path; the default keeps telling it the cell diameter in pixels."""
+    from tests._nanowell_run_fixture import PX
+
+    rendered, record, _truth = rendered_well
+    told = []
+
+    def run(name, *extra):
+        (tmp_path / name).mkdir()
+        out = _run_main(monkeypatch, _write_plate(tmp_path / name, rendered, record), "--nanowell_format", "100um",
+                        *extra, segmenter_factory=lambda diameter_px=0.0, **k: told.append(diameter_px)
+                        or threshold_segmenter())
+        return json.loads((out / "pipeline_info.json").read_text())["nanowell"]["settings"]
+
+    default = run("default")
+    assert told and told == [pytest.approx(15.0 / PX)] * len(told) and "resize" not in default
+    told.clear()
+    none = run("none", "--nanowell_resize", "none")
+    assert told and set(told) == {0.0} and none["resize"] == "none"

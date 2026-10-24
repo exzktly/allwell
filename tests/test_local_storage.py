@@ -596,3 +596,38 @@ def test_the_scratch_warning_defaults_to_cancel(populated, home, qtbot, monkeypa
     assert seen["default"] == QMessageBox.Cancel
     assert seen["text"] == ls.SCRATCH_WARNING
     assert dialog.last_result is None and populated["idle_scratch"].exists()
+
+
+@pytest.mark.qt
+def test_a_survey_that_lands_after_the_dialog_is_gone_touches_nothing(populated, home, qtbot, monkeypatch):
+    """CI on main failed three times in a row on this: a clear's follow-up survey finished after the test had torn
+    the dialog down, and ``_build_rows`` read a deleted checkbox (``RuntimeError: Internal C++ object (QCheckBox)
+    already deleted``). A user who closes the dialog while it is measuring reaches the same code. Held here by
+    deleting the dialog while a survey is held on its worker, then letting the survey land."""
+    import threading
+
+    import shiboken6
+    from PySide6.QtWidgets import QApplication
+
+    from ui.local_storage_view import StorageDialog
+
+    dialog = StorageDialog(None, dataset_dir=home / "plate")
+    qtbot.waitUntil(lambda: bool(dialog._boxes) and not dialog._working, timeout=10_000)
+    release, landed = threading.Event(), threading.Event()
+    real = ls.survey
+
+    def held(dataset):
+        release.wait(10)
+        try:
+            return real(dataset)
+        finally:
+            landed.set()
+
+    monkeypatch.setattr(ls, "survey", held)
+    dialog.refresh()                                   # a survey now waits on its worker
+    shiboken6.delete(dialog)                           # the dialog goes, as the test reaper (or a close) does
+    assert not shiboken6.isValid(dialog)
+    release.set()
+    assert landed.wait(10)
+    qtbot.wait(100)                                    # the outcome is delivered on the GUI thread
+    QApplication.processEvents()

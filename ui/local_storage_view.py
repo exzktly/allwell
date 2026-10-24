@@ -126,7 +126,17 @@ class StorageDialog(QDialog):
             lambda: (dataset, *ls.survey(dataset)),
             on_done=self._on_surveyed, on_failed=self._on_failed)
 
+    def _gone(self) -> bool:
+        """Whether this dialog's widgets are already deleted: closed (or torn down) while a survey or a clear was
+        running on its worker. The outcome then arrives for widgets that no longer exist, and touching one raises
+        ``RuntimeError: Internal C++ object already deleted``; there is nothing left to show it in."""
+        import shiboken6
+
+        return not shiboken6.isValid(self)
+
     def _on_surveyed(self, outcome) -> None:
+        if self._gone():
+            return
         dataset, areas, sizes = outcome
         self._listed_dataset = dataset
         self._areas = list(areas)
@@ -167,6 +177,8 @@ class StorageDialog(QDialog):
             self._boxes[area.key] = box
 
     def _on_failed(self, message: str) -> None:
+        if self._gone():
+            return
         self._note = ""
         self._set_working(False, f"Could not measure or clear: {message}")
 
@@ -232,6 +244,8 @@ class StorageDialog(QDialog):
         return answer == QMessageBox.Yes
 
     def _on_cleared(self, result: ls.ClearResult) -> None:
+        if self._gone():
+            return
         text = f"Freed {ls.format_bytes(result.freed)}."
         if result.failed:
             shown = ", ".join(Path(p).name for p in result.failed[:3])

@@ -4926,7 +4926,8 @@ use them.
     it was not seen) or *outlined by state* in the colours Test detection uses (blue measured, green empty,
     amber occluded, red clipped, grey not seen). Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
-    large enough. *Tiles* outlines each tile, coloured by how it was placed (green on the lattice, blue by
+    large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the
+    `q,r` when both are on). A nanowell without a value has no number written, never a 0. *Tiles* outlines each tile, coloured by how it was placed (green on the lattice, blue by
     overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
     hand and says how the timepoint was addressed (and, where it was not, how to anchor it), and offers **Set
@@ -4938,10 +4939,22 @@ use them.
     confluence may be biased.
   - **Layers → Show as** sets every layer at once: *Array map* (lattice places filled by the metric), *Array
     QC* (the run montage, the tiles and the nanowells by state, with the run record) or *Full montage* (full
-    resolution, nanowells by state with their addresses, and the anchor).
+    resolution, nanowells by state with their addresses and values, and the anchor).
+  - **Overlays** — one button that takes every coloured layer (the nanowells, the tiles and the anchor) off
+    the image and puts them back, for a quick look at what is underneath. The Layers menu's choices are kept,
+    so pressing it again restores exactly what was on; while they are hidden the footer says so, and Set
+    anchor is greyed.
 
-  Drag to pan, scroll to zoom about the pointer, **Fit** for the whole well, **1:1** for one image pixel per
-  screen pixel. Click a nanowell to open its site detail, as on the beeswarm (with **Set anchor** on, a click
+  The controls on the band stay where they are whatever the layers say: a control a layer makes useless —
+  **Metric** and **Baseline** with nothing drawn by the metric, the anchor's buttons with the anchor layer off
+  — is greyed rather than hidden.
+
+  Drag to pan, scroll to zoom about the pointer, **−** and **+** to zoom about the centre, **Fit** for the
+  whole well, **1:1** for one image pixel per screen pixel; the readout between − and + says how far the view
+  is zoomed against Fit (from a quarter of it out to 500×). On a phone over RealVNC a two-finger swipe up or
+  down is sent as the scroll wheel, so it zooms the view; a pinch is the viewer zooming its own picture of the
+  desktop and never reaches All-Well. The swipe zooms about the pointer when the pointer is on the image, and
+  about the view's centre when it was last left elsewhere on the figure. Click a nanowell to open its site detail, as on the beeswarm (with **Set anchor** on, a click
   sets the anchor instead). The footer counts the nanowells by state. The page remembers the layers with its
   other settings; a page saved on the old *Array map* or *Array QC* view opens on the Array view with the
   layers that view drew.

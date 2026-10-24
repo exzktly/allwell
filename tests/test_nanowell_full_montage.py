@@ -384,7 +384,9 @@ def test_on_lattice_positions_the_well_frame_layers_are_greyed_and_not_drawn(mon
     assert st.layers.positions == "lattice" and st.tile_store is None
     assert not ctx.widgets.get("_nw_image_cb").isEnabled()
     assert not ctx.widgets.get("_nw_layer_tiles").isEnabled() and not ctx.widgets.get("_nw_layer_anchor").isEnabled()
-    assert not ctx.widgets.get("_nw_anchor_btn").isVisible()
+    # Greyed, not hidden: the anchor's buttons keep their place on the band whatever the layers say.
+    anchor_btn = ctx.widgets.get("_nw_anchor_btn")
+    assert anchor_btn.isVisibleTo(ctx.window) and not anchor_btn.isEnabled()
     from tests.test_nanowell_page import _texts
 
     # This dataset's grid records give no pitch, so nothing has a lattice place either; the figure says both.

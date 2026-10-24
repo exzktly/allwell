@@ -267,8 +267,9 @@ def redraw(ctx) -> None:
         if st.region_for != (well, st.layers.positions):         # another well, or the other frame: fit it
             st.region, st.region_for = None, (well, st.layers.positions)
         image, image_note = _array_image(ctx, st, well, timepoint)
-        array = {"layers": st.layers, "image": image, "image_note": image_note, "region": st.region}
-        note = " ".join(filter(None, [st.array_message, note]))
+        array = {"layers": drawn_layers(st), "image": image, "image_note": image_note, "region": st.region}
+        hidden = OVERLAYS_HIDDEN_NOTE if st.overlays_hidden else ""
+        note = " ".join(filter(None, [hidden, st.array_message, note]))
     st.hits, model = draw_view(
         fig, st.view, st.metrics, st.data, groups=page_groups(ctx), metric=metric, channel=channel,
         axis=st.axis, timepoint=shown_timepoint(ctx)[1] if st.view == "position" else st.timepoint,
@@ -280,6 +281,7 @@ def redraw(ctx) -> None:
         st.drawn = model
         if model is not None and model.rendered is not None:
             _want_tiles(ctx, {(tile, None) for tile in model.rendered.unread} | set(model.rendered.wants))
+        _call(ctx, "_nw_refresh_zoom")
     elif model is not None:
         st.model = model
     from review.core.plot_style import apply_export_style_to_current
@@ -540,6 +542,29 @@ def _load_tiles(ctx, names, *, level) -> None:
 
 
 # ── the Array view's layers ──────────────────────────────────────────────────
+#: Said on the figure while the *Overlays* button hides the coloured layers, so a view with no nanowells drawn
+#: cannot be mistaken for a timepoint that has none (CLAUDE.md §7: degraded output must say so).
+OVERLAYS_HIDDEN_NOTE = "Overlays hidden — press Overlays to show the nanowells, tiles and anchor again."
+
+
+def drawn_layers(st) -> ArrayLayers:
+    """The layers the Array view draws: the ones switched on, less the coloured overlays while *Overlays* hides
+    them."""
+    return st.layers.without_overlays() if st.overlays_hidden else st.layers
+
+
+def set_overlays(ctx, shown: bool) -> None:
+    """*Overlays*: take every coloured layer off the Array view at once, or put back exactly the ones that were on."""
+    st = _state(ctx)
+    if st is None or st.overlays_hidden == (not shown):
+        return
+    st.overlays_hidden = not shown
+    if st.overlays_hidden:
+        st.anchor_mode = False                       # an anchor click with the anchor not drawn would land unseen
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
+
+
 def set_layer(ctx, name: str, value) -> None:
     """Turn one of the Array view's layers on or off, or choose its image, positions or colouring."""
     st = _state(ctx)
@@ -598,8 +623,45 @@ def array_one_to_one(ctx) -> None:
 
 #: A press that moves less than this many pixels before it is released is a click, not a drag.
 CLICK_SLOP_PX = 4
-#: One wheel notch zooms by this factor.
+#: One wheel notch zooms by this factor; the *−* and *+* buttons step by two notches.
 WHEEL_STEP = 0.8
+BUTTON_STEP = WHEEL_STEP ** 2
+#: How far the Array view zooms, against what *Fit* shows: out to a quarter of it, in to 500 times it — past
+#: either the view is a speck or one pixel of the raw tiles is wider than the screen.
+ZOOM_OUT_LIMIT, ZOOM_IN_LIMIT = 0.25, 500.0
+
+
+def array_zoom_factor(drawn) -> float | None:
+    """How far the Array view is zoomed against *Fit* (1 is fitted, 2 shows half the width); ``None`` with
+    nothing drawn."""
+    if drawn is None or drawn.fit is None or drawn.region is None:
+        return None
+    width = drawn.region[2] - drawn.region[0]
+    return (drawn.fit[2] - drawn.fit[0]) / width if width > 0 else None
+
+
+def _zoom_to(ctx, st, factor: float, at_um) -> None:
+    """Zoom the drawn view by *factor* (under 1 zooms in) about *at_um*, within the zoom limits, and draw it."""
+    drawn = st.drawn
+    now = array_zoom_factor(drawn)
+    if now is not None:
+        # The zoom after this step, held inside the limits: the step is shortened to land on the limit.
+        target = min(max(now / factor, ZOOM_OUT_LIMIT), ZOOM_IN_LIMIT)
+        factor = now / target
+    if factor == 1.0:
+        return
+    st.region = fmc.zoom_region(drawn.region, factor, at_um)
+    redraw(ctx)
+
+
+def array_zoom(ctx, factor: float) -> None:
+    """*−* / *+*: zoom the Array view by *factor* about the centre of what it shows."""
+    st = _state(ctx)
+    drawn = st.drawn if st is not None and st.view == "array" else None
+    if drawn is None or drawn.region is None:
+        return
+    x0, y0, x1, y1 = drawn.region
+    _zoom_to(ctx, st, factor, ((x0 + x1) / 2, (y0 + y1) / 2))
 
 
 def _array_press(st, event) -> None:
@@ -648,13 +710,19 @@ def on_release(ctx, event) -> None:
 
 
 def on_scroll(ctx, event) -> None:
-    """The wheel zooms the Array view about the pointer."""
+    """The wheel zooms the Array view about the pointer — or about the view's centre when the pointer is on the
+    figure but off the image (the colour bar, the footer). Over VNC from a phone a two-finger swipe arrives as the
+    wheel, at wherever the remote pointer was last left, which is often not over the image."""
     st = _state(ctx)
     drawn = st.drawn if st is not None and st.view == "array" else None
-    if drawn is None or event.inaxes is not drawn.ax or event.xdata is None or not event.step:
+    if drawn is None or drawn.region is None or not event.step:
         return
-    st.region = fmc.zoom_region(drawn.region, WHEEL_STEP ** event.step, (event.xdata, event.ydata))
-    redraw(ctx)
+    if event.inaxes is drawn.ax and event.xdata is not None:
+        at = (event.xdata, event.ydata)
+    else:
+        x0, y0, x1, y1 = drawn.region
+        at = ((x0 + x1) / 2, (y0 + y1) / 2)
+    _zoom_to(ctx, st, WHEEL_STEP ** event.step, at)
 
 
 # ── the anchor ───────────────────────────────────────────────────────────────
@@ -667,7 +735,7 @@ def anchor_controls(ctx) -> tuple[bool, bool, bool]:
     well = page_well(ctx)
     timepoint = page_timepoint(ctx, well)
     status = ((st.data.grids.get(well) or {}).get(timepoint) or {}).get("status")
-    can = (bool(well) and st.layers.anchor and not st.layers.lattice() and fmc.anchors_file(st.data) is not None
+    can = (bool(well) and drawn_layers(st).anchor and not st.layers.lattice() and fmc.anchors_file(st.data) is not None
            and status in fmc.ANCHORABLE)
     anchor, _problem = fmc.read_well_anchor(st.data, well, timepoint) if can else (None, "")
     return can, can and anchor is not None, bool(fmc.anchored_wells(st.data))

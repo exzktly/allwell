@@ -213,8 +213,8 @@ for that tile to own it, the angle of the central square's edges to a lattice ro
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
 
 With **Nanowell arrays** ticked, the **Segmentation** section at the top of the form is set to label-free and shows
-the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on** and **Cell diameter
-(µm)** (the typical cell size, which sets the scale the model looks for cells at; blank uses the default). The count
+the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on**, **Segment** and
+**Cell diameter (µm)** (the typical cell size, which sets the scale the model looks for cells at; blank uses the default). The count
 reads only these — not the pixel diameter label-free shows outside nanowell mode.
 
 **Cellpose model** chooses what counts the cells: *cpsam* (Cellpose-SAM, the default), *cyto3* (Cellpose 3's
@@ -235,10 +235,19 @@ in a nanowell only when its centre lies inside the nanowell's interior, so a cel
 confluence is measured on the rim-removed image. Test detection's crops show the image the model was given (their
 tooltip says which). A run made before this setting existed counted on the rim-removed image, and its settings say so.
 
-The model is given each nanowell separately — a crop around it, scaled to the brightness range of the whole tile, so
-an empty nanowell is not stretched to look busy — rather than the whole tile at once: the lattice between nanowells
-holds no cell that is counted, and on a slow GPU it was most of the work. On the command line,
-`--nanowell_segment_scope tile` segments whole tiles instead, as runs made before this did.
+**Segment** chooses how much of each tile the model is given. *Each nanowell* (the default) gives it each nanowell
+separately — a crop around it, scaled to the brightness range of the whole tile, so an empty nanowell is not
+stretched to look busy — rather than the whole tile at once: the lattice between nanowells holds no cell that is
+counted, and on a slow GPU it was most of the work. *Whole tile* gives it each tile in one piece, as runs made before
+this setting existed did, and their settings say so. Compare the two on one well with **Test detection**, which
+segments as the run would. (On the command line: `--nanowell_segment_scope nanowells|tile`.)
+
+While a run counts, Cellpose may print *No cell pixels found.* in the log. That is Cellpose's own line, printed
+each time it is given an image it finds no cell in: with **Segment** on *Each nanowell* that is once per empty
+nanowell, so some of them are expected. A nanowell it is printed for is recorded as measured with 0 cells (state
+*empty*): the Nanowells page counts it as a zero in its count, growth and occupancy metrics, and it adds no rows to
+the per-cell table the other plots read. If it is printed for nearly every nanowell, including ones you can see cells
+in, the counts are wrong: check that well with Test detection before plotting them.
 
 **Array geometry** says how the array is found. *Hexagonal lattice in a circle* (the default) looks for nanowells
 on a hexagonal lattice inside a circular array. Either way the nanowells' diameter is measured on the images — one

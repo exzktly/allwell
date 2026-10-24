@@ -10008,12 +10008,16 @@ earlier build recorded. Confluence is measured on the rim-suppressed tile either
 How much of that image the segmenter is given is `segment_scope` (`SEGMENT_SCOPES`): `nanowells`, the default for a
 new run, calls it once per owned nanowell on a crop `CROP_REACH` (1.2) radii around the centre
 (`nanowell_measure.segment_sites`), renumbers each crop's labels and pastes them into a whole-tile label image, so
-`count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's, which passes it
-on as `normalize={"lowhigh": …}`) is given the tile's own 1st-99th percentiles for every crop, because a crop scaled
-to its own range would stretch an empty nanowell's noise. `tile` is one call on the whole tile (`segment_tile`), and
+`count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's) is given the
+tile's own 1st-99th percentiles for every crop, because a crop scaled to its own range would stretch an empty
+nanowell's noise. `pipeline.cellpose._segment_cellpose(lowhigh=…)` scales the crop to that range itself and calls
+`eval(normalize=False)`: Cellpose pads a greyscale image with empty channels and applies a `normalize={"lowhigh": …}`
+range to all of them, so they read `-lo / (hi - lo)` (about -1 on camera counts) instead of the 0 its percentile
+path leaves a flat channel at. `tile` is one call on the whole tile (`segment_tile`), and
 is what options that name no scope mean (`LEGACY_SEGMENT_SCOPE`), with the same key and digest-alias treatment as
-`segment_on`. The form has no control for it: a run takes `--nanowell_segment_scope`'s default, and
-`settings_from_opts` gives Test detection the same
+`segment_on`. The form's **Segment** combo (`_nanowell_segment_scope_cb`, `SEGMENT_SCOPE_CHOICES` in
+`analyze/domain/nanowell_fields.py`) sets it, `pipeline_service` always sends it, a restore that names none shows
+`tile`, and `settings_from_opts` gives Test detection the same
 (`cellpose_segmenter` is the production segmenter and imports `pipeline.cellpose` only
 when called). Either scope reports the nanowells segmented as it goes (`measure_timepoint(on_segmented=…)`, through
 `_SiteCount`), which is what the run's per-nanowell progress lines count. Its model is the setting's `cellpose_model`, one of `nanowell_run.CELLPOSE_MODELS`: `cpsam`

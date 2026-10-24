@@ -39,6 +39,8 @@ _POSITIONS = (("measured", "Measured"), ("lattice", "Lattice"))
 #: The Array view's switchable layers, in the order its Layers menu lists them, with what each draws.
 _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or outlined by its state."),
            ("addresses", "Addresses", "Each nanowell's q,r, wherever it is drawn large enough to hold it."),
+           ("values", "Values", "Each nanowell's value of the Metric, written inside it (under its q,r when "
+                                "Addresses is on) wherever it is drawn large enough to hold it."),
            ("cells", "Cells", "A dot at the centre of each cell the run counted, from its cell table. The run keeps "
                               "no cell outlines, so a dot is all there is to draw."),
            ("tiles", "Tiles", "Each tile's placement, coloured by how the run placed it, with its residual."),
@@ -86,6 +88,10 @@ _POSITIONS_TIP = ("Measured: where the run found each nanowell, over the image, 
                   "Lattice: each nanowell at its address on an ideal lattice, so it keeps its place from one "
                   "timepoint to the next even when the plate was put back rotated.")
 _LAYERS_TIP = "Turn the Array view's elements on and off, colour the nanowells, or set them all from a preset."
+_OVERLAYS_TIP = ("Show or hide every coloured overlay at once — the nanowells, the tiles and the anchor — to see the "
+                 "image beneath. The Layers menu's choices are kept: showing them again restores exactly those.")
+_ZOOM_TIP = ("How far the view is zoomed against Fit. The wheel zooms about the pointer (over VNC from a phone, a "
+             "two-finger swipe); − and + zoom about the centre.")
 _ANCHOR_TIP = ("On: click the central square to anchor this well at this timepoint. Drag still pans. Offered where "
                "an anchor can change the result: a timepoint addressed or left unaddressed.")
 _CONTROL_TIP = "Compare each group's centre with this group's, computed the same way (× ratio, or a difference on log₂)."
@@ -286,7 +292,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             axis_seg.setToolTip(_AXIS_TIP + ("\n\n(Time is greyed: this metric has one value per nanowell.)"
                                              if per_nanowell else ""))
             _select(baseline_cb, st.baseline)
-            baseline_cb.setEnabled(st.metric in BASELINE_METRICS)
+            baseline_cb.setEnabled(st.metric in BASELINE_METRICS and _metric_reaches_figure(st, view))
             tps, shown = nwc.shown_timepoint(ctx)
             tp_cb.clear()
             for tp in reversed(tps):
@@ -309,9 +315,12 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             distribution = view == "distribution"
             wells_axis = distribution and (st.axis == "wells" or per_nanowell)
             array = view == "array"
+            # Shown on every view that has a metric at all, and only greyed on the Array view when no layer draws
+            # it: hidden, they came and went with the Layers menu and every control after them jumped sideways.
             by_metric = _metric_reaches_figure(st, view)
-            grp_metric.setVisible(by_metric)
-            grp_baseline.setVisible(by_metric)
+            metric_cb.setEnabled(by_metric)
+            grp_metric.setVisible(True)
+            grp_baseline.setVisible(True)
             grp_axis.setVisible(distribution)
             cohort_box.setChecked(st.cohort)
             _refresh_array_controls(ctx, st, array, array_controls)
@@ -392,8 +401,9 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
 
 def _metric_reaches_figure(st, view: str) -> bool:
     """Whether the Metric and Baseline controls change what *view* draws: on the Array view only through the
-    nanowells' fill, so not when they are outlined by state or not drawn."""
-    return view != "array" or (st.layers.nanowells and st.layers.colour == "metric")
+    nanowells' fill or their written values, so not when neither is drawn."""
+    layers = nwc.drawn_layers(st)
+    return view != "array" or (layers.nanowells and layers.colour == "metric") or layers.values
 
 
 def _refresh_array_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
@@ -415,8 +425,11 @@ def _refresh_array_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
         action.setEnabled(layers.nanowells)
     for group in c.groups:
         group.setVisible(on_view)
+    c.overlays_btn.setChecked(not st.overlays_hidden)
     can_set, can_clear, can_rerun = nwc.anchor_controls(ctx)
-    c.grp_anchor.setVisible(on_view and layers.anchor and not lattice)
+    # On the view whatever the layers say, its buttons greyed where they cannot act, so turning a layer on or off
+    # never moves the controls beside it.
+    c.grp_anchor.setVisible(on_view)
     c.one_btn.setEnabled(nwc.array_um_per_px(ctx) is not None)
     c.anchor_btn.setEnabled(can_set)
     c.anchor_btn.setChecked(st.anchor_mode and can_set)
@@ -446,14 +459,36 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
     grp_positions = band.add_scope("Positions", positions_seg)
 
     layers_btn, layer_actions, colour_actions = _layers_button(ctx, band)
-    grp_layers = band.add_scope("", layers_btn)
+    overlays_btn = _button("Overlays", _OVERLAYS_TIP, None)
+    overlays_btn.setCheckable(True)
+    overlays_btn.setChecked(True)
+    overlays_btn.toggled.connect(lambda on: nwc.set_overlays(ctx, on))
+    reg.register("_nw_overlays_btn", overlays_btn)
+    grp_layers = band.add_scope("", layers_btn, overlays_btn)
 
+    out_btn = _button("−", "Zoom out, about the centre of the view.", lambda: nwc.array_zoom(ctx, 1 / nwc.BUTTON_STEP))
+    zoom_lbl = QLabel("")
+    zoom_lbl.setObjectName("NanowellZoomLabel")
+    zoom_lbl.setToolTip(_ZOOM_TIP)
+    in_btn = _button("+", "Zoom in, about the centre of the view.", lambda: nwc.array_zoom(ctx, nwc.BUTTON_STEP))
     fit_btn = _button("Fit", "Show everything drawn.", lambda: nwc.array_fit(ctx))
     one_btn = _button("1:1", "One image pixel per screen pixel, about the centre of the view.",
                       lambda: nwc.array_one_to_one(ctx))
+    reg.register("_nw_zoom_out_btn", out_btn)
+    reg.register("_nw_zoom_in_btn", in_btn)
+    reg.register("_nw_zoom_lbl", zoom_lbl)
     reg.register("_nw_fit_btn", fit_btn)
     reg.register("_nw_one_btn", one_btn)
-    grp_zoom = band.add_scope("", fit_btn, one_btn)
+    grp_zoom = band.add_scope("Zoom", out_btn, zoom_lbl, in_btn, fit_btn, one_btn)
+
+    def refresh_zoom() -> None:
+        st = ctx.state.feature_slice("nanowell")
+        factor = nwc.array_zoom_factor(st.drawn) if st is not None and st.view == "array" else None
+        zoom_lbl.setText("" if factor is None else f"{factor:.2g}×" if factor < 10 else f"{factor:.0f}×")
+        out_btn.setEnabled(factor is not None and factor > nwc.ZOOM_OUT_LIMIT * 1.0001)
+        in_btn.setEnabled(factor is not None and factor < nwc.ZOOM_IN_LIMIT / 1.0001)
+
+    reg.register("_nw_refresh_zoom", refresh_zoom)
 
     anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
     anchor_btn.setCheckable(True)
@@ -470,8 +505,9 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
     return SimpleNamespace(
         image_cb=image_cb, positions_seg=positions_seg, layer_actions=layer_actions, colour_actions=colour_actions,
         groups=(grp_image, grp_positions, grp_layers, grp_zoom), grp_anchor=grp_anchor, one_btn=one_btn,
-        anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn,
-        signalling=(image_cb, positions_seg, anchor_btn, *layer_actions.values(), *colour_actions.values()))
+        anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn, overlays_btn=overlays_btn,
+        signalling=(image_cb, positions_seg, anchor_btn, overlays_btn, *layer_actions.values(),
+                    *colour_actions.values()))
 
 
 def _clear_sites(ctx) -> None:

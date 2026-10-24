@@ -97,9 +97,15 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
     assert _visible_scopes(page) == {"Metric", "Along x", "Baseline"}
     _choose_view(page, "array")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Slider"}
-    # Outlined by state, the metric reaches nothing on the figure, so its controls go.
+    # Outlined by state with no values written, the metric reaches nothing on the figure: its controls are greyed,
+    # not hidden, so the controls beside them stay where they were (asked for: "the buttons should be frozen in
+    # their position regardless of layer selection").
     page.widgets.get("_nw_colour_state").trigger()
-    assert _visible_scopes(page) == {"Well", "Slider"}
+    page.widgets.get("_nw_layer_values").trigger()
+    assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Slider"}
+    assert not page.widgets.get("_nw_metric_cb").isEnabled()
+    page.widgets.get("_nw_layer_values").trigger()                   # the values written: the metric is drawn again
+    assert page.widgets.get("_nw_metric_cb").isEnabled()
     _choose_view(page, "trajectories")
     assert _visible_scopes(page) == {"Metric", "Baseline"}
     _choose_view(page, "position")

@@ -95,7 +95,8 @@ def test_the_layer_is_off_until_switched_on_and_kept_with_the_page_s_settings():
 
 
 def test_the_layers_menu_switches_the_dots_on_and_off(tmp_path, qtbot):
-    """Through the real page: the Layers menu's Cells action, triggered as a click triggers it."""
+    """Through the real page: the Layers menu's Cells action, triggered as a click triggers it; and the Overlays
+    button, which hides the coloured layers together and leaves each switch as it was, takes the dots with them."""
     pytest.importorskip("PySide6")
     from review.features.nanowell import controller as nwc
     from tests.test_nanowell_page import _loaded, _page, _texts
@@ -116,5 +117,10 @@ def test_the_layers_menu_switches_the_dots_on_and_off(tmp_path, qtbot):
     action.trigger()
     assert st.layers.cells and action.isChecked() and dots() == 3
     assert any("3 cells the run counted" in t for t in _texts(ctx, "nw-array-footer"))
+    overlays = ctx.widgets.get("_nw_overlays_btn")
+    overlays.click()                                                     # the coloured layers hidden together
+    assert dots() == 0 and st.layers.cells
+    overlays.click()                                                     # and back, as they were
+    assert dots() == 3
     action.trigger()
     assert not st.layers.cells and dots() == 0

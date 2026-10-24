@@ -10521,8 +10521,15 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   `<well>_<timepoint>_montage.png` in `<well>_out.zip`, placed by the grid record's `montage_origin_um` and
   `montage_um_per_px`, read on a worker, the last `MONTAGES_KEPT` kept) or `tiles` (full resolution, below);
   `positions` — `measured` (the well frame, where the run found each nanowell) or `lattice` (`map_model`'s
-  places, U4); `colour` — `metric` or `state`; and the switches `nanowells`, `addresses`, `cells`, `tiles`,
-  `anchor`, `record`. The image, the tiles and the anchor are in the well frame and have no place on the lattice, so on
+  places, U4); `colour` — `metric` or `state`; and the switches `nanowells`, `addresses`, `values`, `cells`,
+  `tiles`, `anchor`, `record`. The *Overlays* button (`state.overlays_hidden`, not persisted) hides the coloured layers
+  (`OVERLAY_SWITCHES`: nanowells, cells, tiles, anchor) without touching the switches: the controller draws
+  `controller.drawn_layers(st)` — `ArrayLayers.without_overlays()` while hidden — so showing them again restores
+  exactly what was on, and the footer carries `OVERLAYS_HIDDEN_NOTE` meanwhile; `anchor_controls` reads the drawn
+  layers too, so no anchor is set unseen. The band's groups are shown by view only, never by layer: Metric and
+  Baseline are greyed when no drawn layer carries the metric (`tab_view._metric_reaches_figure`: a fill by the
+  metric or the values written), and the anchor's buttons are greyed when they cannot act, so a layer choice
+  never moves the controls beside it (`tests/test_nanowell_array_controls.py`). The image, the tiles and the anchor are in the well frame and have no place on the lattice, so on
   *Lattice* they are greyed in the controls, not drawn, and the footer (or the empty-state message) says so.
 - **Cells** (off by default, in no preset) is a dot at the centre of each cell the run counted — the run keeps
   no cell outlines, so a centre is all there is. The positions are the cell table's `well_x_um` / `well_y_um`
@@ -10547,9 +10554,11 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   stay square; the image is drawn for exactly that region and those pixels; the nanowells are filled by the
   metric (`MAP_CMAP`, with a colour bar; a nanowell without a value is a grey outline styled by its state,
   `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour`, a fused one
-  dashed in `FUSED_COLOUR` either way, at `OUTLINE_WIDTH_PX`, the central nanowell boxed; addresses in
-  `LABEL_COLOUR` only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most
-  `MAX_ADDRESSES` of them (beyond, the footer asks for a zoom); tiles coloured by their placement `source`
+  dashed in `FUSED_COLOUR` either way, at `OUTLINE_WIDTH_PX`, the central nanowell boxed; labels in
+  `LABEL_COLOUR` (`_draw_labels`: the `q,r` with *Addresses*, the metric value to three significant figures with
+  *Values*, one under the other when both are on, `site_label_texts`; a nanowell without a value writes no number)
+  only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
+  (beyond, the footer asks for a zoom); tiles coloured by their placement `source`
   (lattice, overlap, recorded) with the residual, or — with no tile size in the acquisition record — their corner
   marked and the figure saying the outline is unknown, never a guessed rectangle; the anchor as a crosshair;
   the run record beside the axes, a suspect template in amber. `array_footer` writes what is drawn and how to
@@ -10575,10 +10584,19 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   the page's canvas). A press records where it started; a drag pans the axes at once and, on release, keeps the
   region (`state.region`, for the `(well, positions)` in `region_for`, so another well or frame fits afresh) and
   draws again, which renders the tiles for it; the wheel zooms about the pointer (`fit_region` /
-  `zoom_region`); *Fit* clears the region, *1:1* sets one image pixel (the tiles' or the montage's) per figure
-  pixel. A release within `CLICK_SLOP_PX` of its press is a click: with *Set anchor* on it writes the well's
+  `zoom_region`), or about the view's centre when it lands on the figure off the axes — over VNC from a phone a
+  two-finger swipe is the wheel at wherever the remote pointer was last left; *−* / *+* zoom about the centre by
+  `BUTTON_STEP`; every zoom goes through `controller._zoom_to`, which holds it between `ZOOM_OUT_LIMIT` and
+  `ZOOM_IN_LIMIT` of *Fit* (`ArrayDrawn.fit`, the region *Fit* shows at the axes' shape) and the readout
+  (`_nw_zoom_lbl`, refreshed after every Array draw by `_nw_refresh_zoom`) says `array_zoom_factor`; *Fit* clears
+  the region, *1:1* sets one image pixel (the tiles' or the montage's) per figure pixel. A release within `CLICK_SLOP_PX` of its press is a click: with *Set anchor* on it writes the well's
   anchor at this timepoint (`util.nanowell_anchors.set_anchor`, in `in/nanowell_anchors.json`), otherwise it
-  selects the nearest nanowell within 6 px, as on the beeswarm.
+  selects the nearest nanowell within 6 px, as on the beeswarm. A double-click (matplotlib's `dblclick` press,
+  ignored with *Set anchor* on) goes to `focus_nanowell_at`: `nanowell_at` finds the nanowell whose disc holds the
+  point, or the nearest within 6 px of its rim, in `ArrayDrawn.sites` — the scene's nanowells whether drawn or
+  not, so it works with the overlays hidden — and the region becomes that nanowell's box, `FOCUS_MARGIN` times its
+  radius each side (widened to the axes' shape), then selects it so the site detail opens; an unaddressed one is
+  centred but not selected. On empty space it does nothing.
 - **The anchor.** *Set anchor* is offered only with the anchor layer on, on measured positions, with an `in/`
   folder to keep the file in, and where an anchor can change the result (`ANCHORABLE`: `ok` or `unaddressed`) —
   `controller.anchor_controls`. *Clear anchor* removes it; *Re-run anchored wells…* hands the dataset to Analyze

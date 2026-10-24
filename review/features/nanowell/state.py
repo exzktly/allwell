@@ -8,7 +8,7 @@ a state its controls cannot show.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 BASELINES = ("earliest", "first_measurable")
 AXES = ("time", "wells")            # what the Distribution view's x-axis carries
@@ -30,7 +30,10 @@ POSITIONS = ("measured", "lattice")
 #: What a nanowell's fill says: the page's metric, or the state the run recorded for it.
 COLOURINGS = ("metric", "state")
 #: The layers that are on or off, as :class:`ArrayLayers` names them.
-LAYER_SWITCHES = ("nanowells", "addresses", "cells", "tiles", "anchor", "record")
+LAYER_SWITCHES = ("nanowells", "addresses", "values", "cells", "tiles", "anchor", "record")
+#: The layers drawn in colour over the image, which the page's one *Overlays* button takes off and puts back
+#: together (:meth:`ArrayLayers.without_overlays`). The labels are text, not colour, and keep their own switches.
+OVERLAY_SWITCHES = ("nanowells", "cells", "tiles", "anchor")
 
 
 @dataclass
@@ -42,6 +45,7 @@ class ArrayLayers:
     colour: str = "metric"
     nanowells: bool = True                  # the nanowells, coloured by :attr:`colour`
     addresses: bool = True                  # each nanowell's ``q,r``, where it is drawn large enough to hold it
+    values: bool = True                     # each nanowell's value of the page's metric, written the same way
     cells: bool = False                     # a dot at each counted cell's centre, from the run's cell table
     tiles: bool = False                     # each tile's placement, coloured by how the run placed it
     anchor: bool = True                     # the anchor set by hand, and the grid status that says whether to set one
@@ -55,11 +59,11 @@ class ArrayLayers:
         ``qc`` (the montage, the tiles by how they were placed, the nanowells by state, the grid record) or
         ``full`` (the raw tiles at full resolution, the nanowells by state with their addresses, the anchor)."""
         if name == "map":
-            return cls(image="off", positions="lattice", colour="metric", addresses=False, tiles=False,
-                       anchor=False, record=False)
+            return cls(image="off", positions="lattice", colour="metric", addresses=False, values=False,
+                       tiles=False, anchor=False, record=False)
         if name == "qc":
-            return cls(image="montage", positions="measured", colour="state", addresses=False, tiles=True,
-                       anchor=False, record=True)
+            return cls(image="montage", positions="measured", colour="state", addresses=False, values=False,
+                       tiles=True, anchor=False, record=True)
         if name == "full":
             return cls(image="tiles", positions="measured", colour="state", addresses=True, tiles=False,
                        anchor=True, record=False)
@@ -67,6 +71,12 @@ class ArrayLayers:
 
     def lattice(self) -> bool:
         return self.positions == "lattice"
+
+    def without_overlays(self) -> ArrayLayers:
+        """These layers with every coloured overlay off (``OVERLAY_SWITCHES``): what the view draws while the
+        *Overlays* button hides them. The switches themselves are untouched, so showing them again restores
+        exactly what was on."""
+        return replace(self, **{name: False for name in OVERLAY_SWITCHES})
 
     def to_config(self) -> dict:
         return {"image": self.image, "positions": self.positions, "colour": self.colour,
@@ -126,6 +136,9 @@ class NanowellState:
     region_for: object = None
     press: object = None
     anchor_mode: bool = False
+    #: The *Overlays* button: the coloured layers hidden for a look at the image beneath, without touching which
+    #: layers are on. Not persisted — a page reopened with its overlays silently missing would look broken.
+    overlays_hidden: bool = False
     drawn: object = None
     array_message: str = ""                 # what the last anchor action could not do, said on the figure
     # Full resolution: the raw tiles of one (well, timepoint), read on a worker as the view asks for them.

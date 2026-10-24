@@ -435,7 +435,7 @@ _STATE_STYLE = {"occluded": ("////", "solid"), "clipped": ("", "dashed"), "absen
 #: How each tile was placed (``pipeline/tile_register.py``), as the ``Colors`` token it is drawn in: on the lattice
 #: phase, by overlap correlation, or where the acquisition record put it when neither could be measured.
 _SOURCE_TOKENS = {"lattice": "success", "overlap": "accent", "recorded": "warn"}
-#: Addresses written at most: with more than this many large enough in view, the figure asks for a zoom instead.
+#: Labels written at most: with more than this many large enough in view, the figure asks for a zoom instead.
 MAX_ADDRESSES = 600
 #: The anchor's crosshair arm, in figure pixels.
 ANCHOR_ARM_PX = 14
@@ -451,6 +451,8 @@ class ArrayDrawn:
     size_px: tuple = (0, 0)          # the axes' size in figure pixels
     frame: str = "well"
     rendered: object = None          # full_montage_compute.Rendered, when the image is the raw tiles
+    fit: tuple | None = None         # the region *Fit* shows, at the axes' shape: what the zoom readout is against
+    sites: object = None             # the scene's nanowells (``ArraySites``), drawn or not: what a double-click finds
 
 
 def _image_extent(image) -> tuple[float, float, float, float]:
@@ -521,8 +523,10 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     lines = array_footer(scene, layers, label=label, image_note=image_note, note=note)
     right = 0.62 if layers.record else 0.86
     drawn = _array_axes(fig, scene, image, region, right=right,
-                        bottom=_FOOTER_BASE + (len(lines) + (1 if layers.addresses else 0) + 0.5) * _LINE)
+                        bottom=_FOOTER_BASE + (len(lines) + (1 if layers.addresses or layers.values else 0) + 0.5)
+                        * _LINE)
     ax = drawn.ax
+    drawn.sites = scene.sites
     _bg, ink, muted = _inks(ax)
     if image is not None:
         _draw_image(ax, drawn, image)
@@ -530,8 +534,8 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
         _draw_tiles(ax, scene.tiles, muted)
     if layers.nanowells and len(scene.sites):
         _draw_nanowells(fig, ax, drawn, scene, layers, label=label, selected=selected)
-    if layers.addresses and len(scene.sites):
-        lines += _draw_addresses(fig, ax, drawn, scene.sites)
+    if (layers.addresses or layers.values) and len(scene.sites):
+        lines += _draw_labels(fig, ax, drawn, scene.sites, addresses=layers.addresses, values=layers.values)
     if in_well and layers.anchor and scene.anchor is not None:
         _draw_anchor(ax, drawn, scene.anchor)
     _ink(ax.set_title(f"{scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
@@ -551,15 +555,15 @@ def _array_axes(fig, scene, image, region, *, right: float, bottom: float) -> Ar
     extent = scene.extent()
     if image is not None:
         extent = _union(extent, _image_extent(image))
-    if region is None:
-        extent = extent or (-1.0, -1.0, 1.0, 1.0)
-        region = padded(extent, scene.pitch_um or 0.02 * max(extent[2] - extent[0], extent[3] - extent[1], 1.0))
+    extent = extent or (-1.0, -1.0, 1.0, 1.0)
+    whole = padded(extent, scene.pitch_um or 0.02 * max(extent[2] - extent[0], extent[3] - extent[1], 1.0))
     box = ax.get_window_extent()
     w_px, h_px = max(int(round(box.width)), 1), max(int(round(box.height)), 1)
-    x0, y0, x1, y1 = fit_region(region, w_px, h_px, margin=0.0)
+    fit = fit_region(whole, w_px, h_px, margin=0.0)
+    x0, y0, x1, y1 = fit if region is None else fit_region(region, w_px, h_px, margin=0.0)
     ax.set_xlim(x0, x1)
     ax.set_ylim(y1, y0)                                                 # y down
-    return ArrayDrawn(HitMap(), ax, (x0, y0, x1, y1), (w_px, h_px), scene.frame)
+    return ArrayDrawn(HitMap(), ax, (x0, y0, x1, y1), (w_px, h_px), scene.frame, fit=fit)
 
 
 def _draw_image(ax, drawn, image) -> None:
@@ -683,25 +687,44 @@ def _outline_by_state(ax, sites, fused, outline: float) -> None:
                   edgecolors=[state_colour(s) for s, p in zip(sites.state, plain) if p])
 
 
-def _draw_addresses(fig, ax, drawn, sites) -> list[str]:
-    """Each address in view inside a nanowell drawn large enough to hold it; a footer line when none is, or when
-    too many are to write."""
+def value_text(value) -> str:
+    """A nanowell's metric value as its label writes it: three significant figures; ``""`` for no value, which is
+    not a zero and is never written as one."""
+    return f"{value:.3g}" if value is not None and np.isfinite(value) else ""
+
+
+def site_label_texts(sites, *, addresses: bool, values: bool) -> list[str]:
+    """What each nanowell's label says: its ``q,r`` (the *Addresses* layer) over its value of the page's metric
+    (the *Values* layer), whichever of the two it has; ``""`` where it has neither."""
+    out = []
+    for address, value in zip(sites.labels, sites.values):
+        parts = ([address] if addresses and address else []) + ([value_text(value)] if values else [])
+        out.append("\n".join(p for p in parts if p))
+    return out
+
+
+def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool) -> list[str]:
+    """Each nanowell's label (its address, its value, or both) in view inside a nanowell drawn large enough to
+    hold it; a footer line when none is, or when too many are to write."""
     from ui.nanowell_sites import LABEL_COLOUR, MIN_LABEL_DIAMETER_PX
 
     x0, y0, x1, y1 = drawn.region
     diameter = 2 * sites.radius * drawn.size_px[0] / max(x1 - x0, 1e-9)
-    labels = np.array(sites.labels, dtype=object)
+    labels = np.array(site_label_texts(sites, addresses=addresses, values=values), dtype=object)
     show = ((labels != "") & (diameter >= MIN_LABEL_DIAMETER_PX) & (sites.x >= x0) & (sites.x <= x1)
             & (sites.y >= y0) & (sites.y <= y1))
+    what = "addresses and values" if addresses and values else "addresses" if addresses else "values"
     if show.sum() > MAX_ADDRESSES:
-        return [f"{int(show.sum()):,} addresses in view: zoom in to read them."]
+        return [f"{int(show.sum()):,} nanowell {what} in view: zoom in to read them."]
     if not show.any():
-        return [f"Addresses are written in a nanowell drawn at least {MIN_LABEL_DIAMETER_PX} px across: zoom in to "
-                "read them."]
+        return [f"Nanowell {what} are written in a nanowell drawn at least {MIN_LABEL_DIAMETER_PX} px across: zoom "
+                "in to read them."]
     for k in np.nonzero(show)[0]:
+        lines = labels[k].count("\n") + 1
+        # Two lines share the height one line had, so each is a little smaller.
+        size = diameter[k] * (0.22 if lines == 1 else 0.17) * 72.0 / fig.dpi
         ax.text(sites.x[k], sites.y[k], labels[k], ha="center", va="center", clip_on=True, zorder=6,
-                fontsize=max(5.0, min(8.0, diameter[k] * 0.22 * 72.0 / fig.dpi)), color=LABEL_COLOUR,
-                gid="nw-array-address")
+                fontsize=max(5.0, min(8.0, size)), color=LABEL_COLOUR, linespacing=1.0, gid="nw-array-address")
     return []
 
 

@@ -128,10 +128,10 @@ def _array_figure(*, colour: str, px_per_um: float):
 
     fig = Figure(figsize=(8.0, 6.0), dpi=100)
     scene = array_scene(_metrics(), _data(), "A01", "0h", "n", positions="measured", anchors=False)
-    drawn = render_array(fig, scene, ArrayLayers(image="off", colour=colour, addresses=True), label="Cell count")
+    drawn = render_array(fig, scene, ArrayLayers(image="off", colour=colour, addresses=True, values=False), label="Cell count")
     width = drawn.size_px[0] / px_per_um
     centre = 400.0
-    return fig, render_array(fig, scene, ArrayLayers(image="off", colour=colour, addresses=True), label="Cell count",
+    return fig, render_array(fig, scene, ArrayLayers(image="off", colour=colour, addresses=True, values=False), label="Cell count",
                              region=(centre - width / 2, 0.0, centre + width / 2, 200.0))
 
 

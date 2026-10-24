@@ -213,8 +213,8 @@ for that tile to own it, the angle of the central square's edges to a lattice ro
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
 
 With **Nanowell arrays** ticked, the **Segmentation** section at the top of the form is set to label-free and shows
-the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on** and **Cell diameter
-(µm)** (the typical cell size, which sets the scale the model looks for cells at; blank uses the default). The count
+the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on**, **Segment** and
+**Cell diameter (µm)** (the typical cell size, which sets the scale the model looks for cells at; blank uses the default). The count
 reads only these — not the pixel diameter label-free shows outside nanowell mode.
 
 **Cellpose model** chooses what counts the cells: *cpsam* (Cellpose-SAM, the default), *cyto3* (Cellpose 3's
@@ -235,10 +235,20 @@ in a nanowell only when its centre lies inside the nanowell's interior, so a cel
 confluence is measured on the rim-removed image. Test detection's crops show the image the model was given (their
 tooltip says which). A run made before this setting existed counted on the rim-removed image, and its settings say so.
 
-The model is given each nanowell separately — a crop around it, scaled to the brightness range of the whole tile, so
-an empty nanowell is not stretched to look busy — rather than the whole tile at once: the lattice between nanowells
-holds no cell that is counted, and on a slow GPU it was most of the work. On the command line,
-`--nanowell_segment_scope tile` segments whole tiles instead, as runs made before this did.
+**Segment** chooses how much of each tile the model is given. *Each nanowell* (the default) gives it each nanowell
+separately — a crop around it, scaled to the brightness range of the whole tile, so an empty nanowell is not
+stretched to look busy — rather than the whole tile at once: the lattice between nanowells holds no cell that is
+counted, and on a slow GPU it was most of the work. *Whole tile* gives it each tile in one piece, as runs made before
+this setting existed did, and their settings say so. Compare the two on one well with **Test detection**, which
+segments as the run would. (On the command line: `--nanowell_segment_scope nanowells|tile`.)
+
+While a run counts, its log says how far it is: `Well A01 — 24h: 120/400 nanowells segmented (1.5 s each, about
+7 min 0 s left)`, about every tenth of a timepoint's nanowells. Cellpose's own *No cell pixels found.* — which it
+prints for every image it finds no cell in, once per empty nanowell — is no longer shown. A nanowell with no cell is
+recorded as measured with 0 cells (state *empty*): the Nanowells page counts it as a zero in its count, growth and
+occupancy metrics, and it adds no rows to the per-cell table the other plots read. If nearly every nanowell comes out
+empty, including ones you can see cells in, the counts are wrong: check that well with Test detection before
+plotting them.
 
 **Array geometry** says how the array is found. *Hexagonal lattice in a circle* (the default) looks for nanowells
 on a hexagonal lattice inside a circular array. Either way the nanowells' diameter is measured on the images — one
@@ -1562,7 +1572,13 @@ and by `remote_fetch_report.txt` in the output folder.
   every plate map in the app, including the ones on the Datasets tools.
 - The dial follows whichever step the well is actually in. While the well is
   being computed it fills with the fields measured — in a nanowell run, with
-  its timepoints, each located and then measured; while its input archive is
+  its timepoints, each located and then measured, and while a timepoint is
+  measured, with how many of its nanowells are segmented so far. Hovering the
+  well says where it is (`step 5/8, 24h: 120/400 nanowells segmented`), and the
+  run log prints the same count about every tenth of a timepoint's nanowells
+  (`Well A01 — 24h: 120/400 nanowells segmented`, with the time per nanowell
+  and the time left); a timepoint whose last line
+  stops short of its total had nanowells that could not be segmented. While its input archive is
   being uploaded, or its results downloaded, it fills with the bytes moved. It
   never runs backwards: once a well's archive is uploaded the dial stays full
   while it waits its turn on the remote — its colour is what says the well is

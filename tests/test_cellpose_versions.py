@@ -19,7 +19,7 @@ from pipeline import cellpose as cp
 
 def _install(monkeypatch, major: int, *, cuda: bool = True, bf16: bool = True) -> dict:
     """A fake Cellpose of *major* and a fake Torch; returns what the model was built with and evaluated with."""
-    calls: dict = {"built": None, "eval": []}
+    calls: dict = {"built": None, "eval": [], "images": []}
 
     class _Model:
         def __init__(self, **kw):
@@ -27,6 +27,7 @@ def _install(monkeypatch, major: int, *, cuda: bool = True, bf16: bool = True) -
 
         def eval(self, x, **kw):
             calls["eval"].append((np.asarray(x).shape, kw))
+            calls["images"].append(np.array(x))
             return np.ones(np.asarray(x).shape[:2], dtype=int), None, None
 
     models = types.SimpleNamespace(CellposeModel=_Model)
@@ -108,12 +109,35 @@ def test_the_default_model_is_the_one_the_pinned_cellpose_ships():
 
 
 @pytest.mark.parametrize("major", [3, 4])
-def test_a_fixed_range_reaches_cellpose_as_its_normalisation(monkeypatch, major):
-    """A nanowell's crop is scaled as its whole tile is: the range goes to ``eval`` as ``normalize={"lowhigh": …}``,
-    which both versions read; without one, Cellpose scales each image by its own percentiles, as before."""
+def test_a_fixed_range_scales_the_image_here_and_cellpose_normalises_nothing(monkeypatch, major):
+    """A nanowell's crop is scaled as its whole tile is. Handed to Cellpose as ``normalize={"lowhigh": …}``, the range
+    was applied to the empty channels Cellpose pads a greyscale image with, which then read about -1 instead of 0
+    (measured on Cellpose 4.1.1's ``convert_image`` / ``normalize_img``) and Cellpose-SAM found no cells. So the image
+    is scaled before ``eval`` and ``eval`` is told not to normalise. Without a range, Cellpose scales each image by its
+    own percentiles, as before."""
     calls = _install(monkeypatch, major)
     model = "cpsam" if major == 4 else "cyto3"
-    cp._segment_cellpose(np.zeros((4, 4)), model_type=model, lowhigh=(10.0, 250.0))
-    cp._segment_cellpose(np.zeros((4, 4)), model_type=model)
+    image = np.array([[10.0, 130.0], [250.0, 490.0]])
+    cp._segment_cellpose(image, model_type=model, lowhigh=(10.0, 250.0))
+    cp._segment_cellpose(image, model_type=model)
     (_s1, with_range), (_s2, without) = calls["eval"]
-    assert with_range["normalize"] == {"lowhigh": [10.0, 250.0]} and "normalize" not in without
+    assert with_range["normalize"] is False and "normalize" not in without
+    assert np.allclose(calls["images"][0], [[0.0, 0.5], [1.0, 2.0]]) and np.array_equal(calls["images"][1], image)
+    with pytest.raises(ValueError, match="nucleus"):
+        cp._segment_cellpose(image, model_type=model, lowhigh=(10.0, 250.0), nucleus_image=image)
+
+
+def test_loading_a_model_quiets_cellpose_s_bare_no_cell_line(monkeypatch):
+    """Reported: "No cell pixels found, it just sits there" — Cellpose's INFO line for every image without a cell,
+    one per empty nanowell, naming nothing. The count's own progress lines replace it; Cellpose's warnings still pass."""
+    import logging
+
+    logger = logging.getLogger("cellpose.dynamics")
+    old = logger.level
+    logger.setLevel(logging.INFO)                           # as a run that logs at INFO leaves it
+    try:
+        _install(monkeypatch, 4)
+        cp._segment_cellpose(np.zeros((4, 4)), model_type="cpsam")
+        assert not logger.isEnabledFor(logging.INFO) and logger.isEnabledFor(logging.WARNING)
+    finally:
+        logger.setLevel(old)

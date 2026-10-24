@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from analyze.domain.nanowell_fields import (
     CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, LEGACY_CELLPOSE_MODEL, PLATE_FORMAT_CHOICES,
-    LEGACY_SEGMENT_ON, REGISTRATION_FROM_KEY, SEGMENT_ON_CHOICES,
+    LEGACY_SEGMENT_ON, LEGACY_SEGMENT_SCOPE, REGISTRATION_FROM_KEY, SEGMENT_ON_CHOICES, SEGMENT_SCOPE_CHOICES,
     SCAN_CHOICES,
     nanowell_enabled, nanowell_option_errors,
 )
@@ -95,8 +95,7 @@ def settings_from_opts(opts: dict):
         str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]),
         str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]),
         str(opts.get("nanowell_segment_on") or SEGMENT_ON_CHOICES[0][0]),
-        # No control on the form: the run takes the command line's default (crops), and Test detection the same.
-        str(opts.get("nanowell_segment_scope") or "nanowells"))
+        str(opts.get("nanowell_segment_scope") or SEGMENT_SCOPE_CHOICES[0][0]))
 
 
 class AnalyzeNanowellSectionMixin:
@@ -253,6 +252,21 @@ class AnalyzeNanowellSectionMixin:
         row.layout().addWidget(self._nanowell_segment_on_cb)
         row.layout().addStretch(1)
         self._nanowell_field_rows.append(row.parentWidget())
+        row = self._row(box, "Segment", tooltip=(
+            "How much of each tile the model is given. Each nanowell: one call per nanowell, on a crop just larger "
+            "than it, scaled with its whole tile's brightness range, so the lattice between nanowells is never "
+            "segmented — much faster with Cellpose-SAM. Whole tile: one call on the whole tile, which is how earlier "
+            "runs counted. Only a cell whose centre lies inside a nanowell is counted either way. Compare the two on "
+            "one well with Test detection."))
+        self._nanowell_segment_scope_cb = QComboBox(row)
+        for value, label in SEGMENT_SCOPE_CHOICES:
+            self._nanowell_segment_scope_cb.addItem(label, userData=value)
+        self._nanowell_segment_scope_cb.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._nanowell_segment_scope_cb.setMinimumContentsLength(12)
+        row.layout().addWidget(self._nanowell_segment_scope_cb)
+        row.layout().addStretch(1)
+        self._nanowell_field_rows.append(row.parentWidget())
         for key, label, attr, tip in _FIELDS:
             if key in _COUNT_FIELDS:
                 self._nanowell_field_rows.append(self._nanowell_edit_row(box, key, label, attr, tip))
@@ -278,6 +292,7 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_geometry_cb.setEnabled(on)
         self._nanowell_model_cb.setEnabled(on)
         self._nanowell_segment_on_cb.setEnabled(on)
+        self._nanowell_segment_scope_cb.setEnabled(on)
         # The count's rows live on the Segmentation section's label-free page: shown in nanowell mode, and the
         # page's own note (and its pixel diameter, which the count does not read) hidden then.
         box = getattr(self, "_nanowell_count_box", None)
@@ -326,6 +341,8 @@ class AnalyzeNanowellSectionMixin:
         out["nanowell_geometry"] = self._nanowell_geometry_cb.currentData() or GEOMETRY_CHOICES[0][0]
         out["nanowell_cellpose_model"] = self._nanowell_model_cb.currentData() or CELLPOSE_MODEL_CHOICES[0][0]
         out["nanowell_segment_on"] = self._nanowell_segment_on_cb.currentData() or SEGMENT_ON_CHOICES[0][0]
+        out["nanowell_segment_scope"] = (self._nanowell_segment_scope_cb.currentData()
+                                         or SEGMENT_SCOPE_CHOICES[0][0])
         out[REGISTRATION_FROM_KEY] = self._nanowell_registration_edit.text().strip()
         return out
 
@@ -373,6 +390,10 @@ class AnalyzeNanowellSectionMixin:
         named = d.get("nanowell_segment_on") if "nanowell_segment_on" in d else SEGMENT_ON_CHOICES[0][0]
         self._nanowell_segment_on_cb.setCurrentIndex(
             max(self._nanowell_segment_on_cb.findData(str(named or LEGACY_SEGMENT_ON)), 0))
+        # And for how much of a tile it is given: a run that named none segmented whole tiles.
+        named = d.get("nanowell_segment_scope") if "nanowell_segment_scope" in d else SEGMENT_SCOPE_CHOICES[0][0]
+        self._nanowell_segment_scope_cb.setCurrentIndex(
+            max(self._nanowell_segment_scope_cb.findData(str(named or LEGACY_SEGMENT_SCOPE)), 0))
         self._nanowell_registration_edit.setText(str(d.get(REGISTRATION_FROM_KEY) or ""))
         self._refresh_nanowell_custom()
 

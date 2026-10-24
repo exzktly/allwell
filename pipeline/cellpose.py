@@ -122,6 +122,11 @@ def _cellpose_model(model_type: str = DEFAULT_MODEL):
         # states where segmentation actually happened: the main process can
         # count GPUs, but only Torch in the worker knows whether it can use one.
         log.info("Cellpose %s on %s (worker %d).", key, where, os.getpid())
+        # Cellpose logs "No cell pixels found." for every image it finds no cell in. A nanowell run gives it one image
+        # per nanowell, so that bare line, naming no well, nanowell or time, was the only thing a long count printed,
+        # and read as the run being stuck. The count's own progress lines say what it is doing instead
+        # (``nanowell_task._log_sites``), and a nanowell with no cell is recorded as one, with ``n_cells`` 0.
+        logging.getLogger("cellpose.dynamics").setLevel(logging.WARNING)
         _CELLPOSE_MODELS[key] = model
     return model
 
@@ -176,14 +181,27 @@ def _segment_cellpose(
     Cellpose 4 takes no ``channels``: it reads up to three channels in any order,
     so the two are stacked on the last axis and named by ``channel_axis``.
 
-    *lowhigh* fixes the intensities Cellpose scales to 0 and 1, in place of the
-    image's own 1st and 99th percentiles (``normalize={"lowhigh": …}``, in both
-    versions): a crop of a larger image is then scaled as the whole image is.
+    *lowhigh* fixes the intensities scaled to 0 and 1, in place of the image's
+    own 1st and 99th percentiles: a crop of a larger image is then scaled as the
+    whole image is. The image is scaled here and Cellpose is told not to
+    normalise (``normalize=False``), rather than handed the range as
+    ``normalize={"lowhigh": …}``: Cellpose pads a greyscale image with empty
+    channels and applies a given range to every channel, so the empty ones
+    became the constant ``-lo / (hi - lo)`` (about -1 on camera counts) instead
+    of 0 — an input no model was trained on, which Cellpose-SAM answered with no
+    cells. Its own percentile path leaves a flat channel at 0, as here. Only a
+    single image takes a range; with a *nucleus_image* it is refused.
     """
     model = _cellpose_model(model_type)
     diam = float(diameter) if diameter and diameter > 0 else None
     seg = np.asarray(image)
-    extra = {} if lowhigh is None else {"normalize": {"lowhigh": [float(lowhigh[0]), float(lowhigh[1])]}}
+    extra: dict = {}
+    if lowhigh is not None:
+        if nucleus_image is not None:
+            raise ValueError("A fixed intensity range is for a single image, not one with a nucleus channel")
+        lo, hi = float(lowhigh[0]), float(lowhigh[1])
+        seg = (seg.astype(np.float32) - lo) / (hi - lo if hi > lo else 1.0)
+        extra = {"normalize": False}
     major = cellpose_major()
     if major is not None and major >= 4:
         if nucleus_image is not None:

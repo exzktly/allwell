@@ -36,6 +36,10 @@ LEGACY_CELLPOSE_MODEL = "cyto3"
 #: the default; a run that names none segmented the rim-divided tile (``LEGACY_SEGMENT_ON``).
 SEGMENT_ON_CHOICES = (("raw", "Raw image"), ("rim", "Rim-removed"))
 LEGACY_SEGMENT_ON = "rim"
+#: How much of each tile the count's segmenter is given (``pipeline.nanowell_run.SEGMENT_SCOPES``), as (option value,
+#: label), the first the default; a run that names none segmented whole tiles (``LEGACY_SEGMENT_SCOPE``).
+SEGMENT_SCOPE_CHOICES = (("nanowells", "Each nanowell"), ("tile", "Whole tile"))
+LEGACY_SEGMENT_SCOPE = "tile"
 
 #: ``--nanowell_scan`` spellings (``pipeline.nanowell_pattern_record.parse_scan``), the first the default.
 SCAN_CHOICES = tuple(f"{corner}-{major}{'-serpentine' if serpentine else ''}"
@@ -176,6 +180,9 @@ def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]
     segment_on = str(opts.get("nanowell_segment_on") or SEGMENT_ON_CHOICES[0][0]).strip()
     if segment_on not in {value for value, _label in SEGMENT_ON_CHOICES}:
         errors.append(f"Nanowell segmenter input {segment_on!r} is not one this version knows.")
+    scope = str(opts.get("nanowell_segment_scope") or SEGMENT_SCOPE_CHOICES[0][0]).strip()
+    if scope not in {value for value, _label in SEGMENT_SCOPE_CHOICES}:
+        errors.append(f"Nanowell segmentation scope {scope!r} is not one this version knows.")
     model = str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]).strip()
     if model not in {value for value, _label in CELLPOSE_MODEL_CHOICES}:
         errors.append(f"Nanowell Cellpose model {model!r} is not one this version knows.")

@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from tests.test_nanowell_form import tab  # noqa: F401
 
-_COUNT_WIDGETS = ("_nanowell_model_cb", "_nanowell_segment_on_cb", "_nanowell_cell_diameter_edit")
+_COUNT_WIDGETS = ("_nanowell_model_cb", "_nanowell_segment_on_cb", "_nanowell_segment_scope_cb",
+                  "_nanowell_cell_diameter_edit")
 
 
 def _shown(tab, attr) -> bool:  # noqa: F811

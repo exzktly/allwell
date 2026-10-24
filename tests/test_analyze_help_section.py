@@ -224,3 +224,20 @@ def test_a_collapsed_sidebar_reports_nothing(qapp, analyze_tab):
     finally:
         analyze_tab._left_sidebar.show()
         _settle(qapp, 2)
+
+
+def test_the_resume_and_preflight_banners_head_the_form_above_folders(analyze_tab):
+    """Reported: the Folders section appeared above the sidebar's banners, which it should not. The banners (resume
+    and preflight, one holder) are the form's first item, and Folders — still the first section — comes after them."""
+    holder = analyze_tab._preflight_banner.parentWidget()
+    assert holder is analyze_tab._resume_banner.parentWidget()
+    form = holder.parentWidget().layout()
+
+    def row(widget):
+        while widget.parentWidget() is not holder.parentWidget():
+            widget = widget.parentWidget()
+        return form.indexOf(widget)
+
+    assert row(holder) == 0
+    assert row(analyze_tab._section_widgets["Folders"]) > row(holder)
+    assert row(analyze_tab._section_widgets["Folders"]) < row(analyze_tab._section_widgets["Filename Schema"])

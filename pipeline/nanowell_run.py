@@ -19,7 +19,7 @@ Positions are in micrometres in the registration's common frame (the "well frame
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 import math
 from pathlib import Path
@@ -1121,11 +1121,12 @@ def _normalise(located, images, template, by_tile, geoms, channels, pitch_um: fl
 
 
 def _tile_contents(owner, indices, located, images, settings, geoms, addresses, template, segment, channels,
-                   kind=None, norm: "Normalisation | None" = None):
+                   kind=None, norm: "Normalisation | None" = None, on_segmented=None):
     """Counts, confluence, area estimate, fluorescence and focus for the sites one tile owns, and its cell rows.
 
     *segment* ``None`` counts no cells: every site keeps its confluence (texture, no segmentation), fluorescence and
-    focus, its ``n_cells`` and area estimate are ``None`` (not counted, never zero) and there are no cell rows."""
+    focus, its ``n_cells`` and area estimate are ``None`` (not counted, never zero) and there are no cell rows.
+    *on_segmented*, when given, is ``f(n)``, called as *n* more of the tile's nanowells are segmented."""
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_sites import rim_focus
 
@@ -1150,8 +1151,12 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     counts = area = None
     table: dict = {}
     if segment is not None:
-        labels = (nm.segment_sites(seen, px, fit_sites, segment) if settings.segment_scope == "nanowells"
-                  else nm.segment_tile(seen, segment))
+        tick = on_segmented or (lambda _n: None)
+        if settings.segment_scope == "nanowells":
+            labels = nm.segment_sites(seen, px, fit_sites, segment, on_site=lambda: tick(1))
+        else:
+            labels = nm.segment_tile(seen, segment)
+            tick(len(fit_sites))
         counts = nm.count_cells(labels, px, fit_sites, owned={g.index for g in fit_sites})
         area = nm.area_estimate(labels, px, fit_sites, counts)
         table = _cell_rows(labels, px, fit_sites, counts, addresses, owner, (left, top), channel_images, channels,
@@ -1219,7 +1224,7 @@ def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused
 
 def measure_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float | None, *,
                       segmenter=None, channels: dict | None = None, earliest_template=None,
-                      roster=None, count_cells: bool = True) -> Measured:
+                      roster=None, count_cells: bool = True, on_segmented=None) -> Measured:
     """Rows for every roster site of a located timepoint, and the cells inside them.
 
     *array_radius_um* is the well's one shared array-model radius (so every timepoint has the same
@@ -1230,7 +1235,8 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     Test detection shows when Cellpose cannot be loaded. *channels* maps a fluorescence channel name to
     ``f(tile_id) -> image | None``. A timepoint
     that is not ``ok`` (no origin) is measured on every site of its array, with no address
-    (:func:`_unaddressed_positions`).
+    (:func:`_unaddressed_positions`). *on_segmented*, when given, is ``f(done, total)``: how many of the timepoint's
+    imaged nanowells have been segmented, out of all of them (:class:`_SiteCount`, which says when it is called).
     """
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_detect import FITTED, MIN_REFINE_RADIUS_PX
@@ -1287,15 +1293,16 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
                 out.notes.append(f"{len(borrowed)} tile(s) gave no {channel} floor level of their own "
                                  f"({', '.join(borrowed)}): their fluorescence background is the well's")
     contents: dict[int, dict] = {}
-    for owner, indices in by_tile.items():
-        if owner is None or template is None:
-            continue
+    imaged = {owner: indices for owner, indices in by_tile.items() if owner is not None and template is not None}
+    sites = _SiteCount(on_segmented if segment is not None else None, sum(map(len, imaged.values())))
+    for owner, indices in imaged.items():
         got, table, notes = _tile_contents(owner, indices, located, images, settings, geoms, addresses, template,
-                                           segment, channels, kind, norm)
+                                           segment, channels, kind, norm, on_segmented=sites.tick)
         contents.update(got)
         out.notes += notes
         for name, values in table.items():
             out.cells.setdefault(name, []).extend(values)
+    sites.close()
     for i, address in enumerate(addresses):
         got = contents.get(i)
         state = nm.site_state(visible_fraction=visibility[i].visible_fraction,
@@ -1938,10 +1945,11 @@ class _Steps:
     """:func:`run_well`'s work counted as steps for a progress report: every timepoint located, then every one that
     can be measured measured, so ``2 x timepoints`` in all. A timepoint that cannot be measured counts as done once
     that is known, so the count always reaches its total. ``report(done, total)`` is called with ``done == 0`` first,
-    which states the total."""
+    which states the total. *site_report*, when given, is ``f(timepoint, done, total)``: a measure step's own progress,
+    in nanowells segmented (:class:`_SiteCount`)."""
 
-    def __init__(self, report, n_timepoints: int):
-        self.report, self.total, self.done = report, 2 * n_timepoints, 0
+    def __init__(self, report, n_timepoints: int, site_report=None):
+        self.report, self.total, self.done, self.site_report = report, 2 * n_timepoints, 0, site_report
         if report is not None:
             report(0, self.total)
 
@@ -1958,13 +1966,52 @@ class _Steps:
     def finish(self) -> None:
         self.tick(self.total - self.done)
 
+    def sites(self, timepoint) -> Callable[[int, int], None] | None:
+        """The ``f(done, total)`` :func:`measure_timepoint` reports *timepoint*'s segmented nanowells through."""
+        if self.site_report is None:
+            return None
+        return lambda done, total: self.site_report(timepoint, done, total)
+
+
+class _SiteCount:
+    """A timepoint's segmented nanowells counted for a progress report, out of every nanowell its tiles image.
+
+    ``report(done, total)`` is called with ``0`` when the count starts, which states the total, then each time the
+    count crosses another tenth of it, and once more with the final count (:meth:`close`), so a timepoint of a few
+    hundred nanowells prints about a dozen lines rather than one per nanowell. The final count can stop short of the
+    total: a nanowell that is not segmented (larger than the template, or with no level to scale it) is not counted,
+    and the shortfall is the report's to show, not to hide."""
+
+    STEPS = 10
+
+    def __init__(self, report, total: int):
+        self.report, self.total, self.done, self.said = report, total, 0, None
+        if report is not None and total > 0:
+            self._say()
+
+    def _say(self) -> None:
+        self.said = self.done
+        self.report(self.done, self.total)
+
+    def tick(self, n: int = 1) -> None:
+        if self.report is None or self.total <= 0 or n <= 0:
+            return
+        before = self.done * self.STEPS // self.total
+        self.done = min(self.done + n, self.total)
+        if self.done * self.STEPS // self.total > before:
+            self._say()
+
+    def close(self) -> None:
+        if self.report is not None and self.total > 0 and self.said != self.done:
+            self._say()
+
 
 def run_well(well: str, record: dict, timepoints, load_phase, settings: NanowellSettings, *,
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
              expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None,
              reference: dict | None = None, earliest_template=None, spill_dir=None, fixed_roster=None,
              kept_evidence: dict | None = None, stored_placements: dict | None = None,
-             manual_anchors: Mapping = MappingProxyType({}), progress=None) -> WellOutcome:
+             manual_anchors: Mapping = MappingProxyType({}), progress=None, site_progress=None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -1989,11 +2036,12 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     *stored_placements* maps a timepoint to ``(folder, grid block)`` pairs from earlier runs' grid records, whose
     registration :func:`locate_timepoint` takes when it was solved from exactly this timepoint's inputs.
     *manual_anchors* maps a timepoint to the anchor a person set for it, in the well frame (``util.nanowell_anchors``).
-    *progress*, when given, is ``f(done, total)``, called as the work goes (:class:`_Steps`).
+    *progress*, when given, is ``f(done, total)``, called as the work goes (:class:`_Steps`); *site_progress*, when
+    given, is ``f(timepoint, done, total)``, the nanowells of the timepoint being measured that are segmented so far.
     """
     outcome = WellOutcome(well)
     timepoints = list(timepoints)
-    steps = _Steps(progress, len(timepoints))
+    steps = _Steps(progress, len(timepoints), site_progress)
     for tp in timepoints:
         images = _images_for(record, well, tp, load_phase)
         located = locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape,
@@ -2057,7 +2105,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
             images = _images_for(record, well, tp, load_phase)
             loaders = {name: (lambda tile, _f=f, _tp=tp: _f(_tp, tile)) for name, f in (channels or {}).items()}
             measured = measure_timepoint(located, images, settings, radius_um, segmenter=segmenter,
-                                         channels=loaders, earliest_template=earliest, roster=roster)
+                                         channels=loaders, earliest_template=earliest, roster=roster,
+                                         on_segmented=steps.sites(tp))
             del images
             if checkpoint is not None:
                 checkpoint.save(tp, key, measured)

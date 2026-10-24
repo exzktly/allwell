@@ -115,3 +115,24 @@ def test_an_earlier_nanowell_run_on_the_rim_divided_image_keeps_its_digest():
 
     assert _DIGEST_9145["nanowell"] in aliases("--nanowell_segment_on", "rim", "--nanowell_segment_scope", "tile")
     assert _DIGEST_9145["nanowell"] not in aliases("--nanowell_segment_on", "raw", "--nanowell_segment_scope", "tile")
+
+
+def test_the_form_s_segment_choice_reaches_the_run_and_test_detection_and_a_sidecar_restores_it(tab):  # noqa: F811
+    """Asked for: a control for how much of each tile the count segments (``segment_scope``), which a run took only
+    from the command line's default. Each nanowell is the default; a run that named none segmented whole tiles."""
+    from analyze.nanowell_section import settings_from_opts
+
+    tab._nanowell_cb.setChecked(True)
+    combo = tab._nanowell_segment_scope_cb
+    assert combo.currentData() == "nanowells" and combo.isEnabled()
+    assert _flag(_argv(tab), "--nanowell_segment_scope") == "nanowells"
+    assert settings_from_opts(tab._collect_run_spec().opts).segment_scope == "nanowells"
+    combo.setCurrentIndex(combo.findData("tile"))
+    assert _flag(_argv(tab), "--nanowell_segment_scope") == "tile"
+    assert settings_from_opts(tab._collect_run_spec().opts).segment_scope == "tile"   # Test detection's settings
+    tab._apply_nanowell_settings({"nanowell_format": "100um", "nanowell_segment_scope": "nanowells"})
+    assert combo.currentData() == "nanowells"
+    tab._apply_nanowell_settings({"nanowell_format": "100um", "nanowell_segment_scope": None})
+    assert combo.currentData() == "tile"                                 # a run that did not choose
+    tab._nanowell_cb.setChecked(False)
+    assert not combo.isEnabled()

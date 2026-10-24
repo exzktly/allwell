@@ -476,7 +476,7 @@ class AnalyzeProgressMixin:
     #: last tick before rsync exits can be any value, and in batched mode it is
     #: scaled per batch. The label used to be left holding whatever that last
     #: number was for the whole compute phase.
-    _COMPUTE_PHASE_EVENTS = ("well_total", "well_done", "well_fov")
+    _COMPUTE_PHASE_EVENTS = ("well_total", "well_done", "well_fov", "well_sites")
 
     def _apply_progress_event(self, kind: str, payload: object) -> None:
         """Render a progress event from :class:`ProgressTracker` to the UI."""
@@ -577,13 +577,16 @@ class AnalyzeProgressMixin:
             else:
                 self._journal_well_stage(str(well), str(stage))
         elif kind == "well_fov":
-            well, done, total = payload  # type: ignore[misc]
-            self._dashboard.set_well_fov(str(well), int(done), int(total))
+            well, done, total, *unit = payload  # type: ignore[misc]
+            self._dashboard.set_well_fov(str(well), int(done), int(total), unit=(unit or ["FOV"])[0])
             # A field measured is a well computing, whatever the run announced
             # on its way here — the backstop for a host whose scheduler
             # hand-off went unannounced, matching the transfer/clock retraction
             # above.
             self._set_compute_phase()
+        elif kind == "well_sites":
+            well, timepoint, done, total = payload  # type: ignore[misc]
+            self._dashboard.set_well_sites(str(well), str(timepoint), int(done), int(total))
         elif kind == "well_xfer":
             well, direction, frac = payload  # type: ignore[misc]
             self._dashboard.set_well_transfer(str(well), str(direction), float(frac))

@@ -1169,8 +1169,8 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
         else:
             labels = nm.segment_tile(seen, segment, lowhigh=lowhigh)
             tick(len(fit_sites))
-        _keep_crops(keep, seen, labels, px, fit_sites, addresses, lowhigh)
         counts = nm.count_cells(labels, px, fit_sites, owned={g.index for g in fit_sites})
+        _keep_crops(keep, seen, labels, px, fit_sites, addresses, lowhigh, counts)
         area = nm.area_estimate(labels, px, fit_sites, counts)
         table = _cell_rows(labels, px, fit_sites, counts, addresses, owner, (left, top), channel_images, channels,
                            kind)
@@ -1188,9 +1188,11 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     return contents, table, notes
 
 
-def _keep_crops(keep, seen, labels, px, fit_sites, addresses, lowhigh=None) -> None:
+def _keep_crops(keep, seen, labels, px, fit_sites, addresses, lowhigh=None, counts=None) -> None:
     """Put each wanted site's crop of *seen* — on the 0-1 scale the segmenter was given it at: *lowhigh*, else its
-    tile's 1st-99th percentiles — and of *labels* into ``keep = (wanted, kept)``. Nothing when *keep* is ``None``."""
+    tile's 1st-99th percentiles — and of *labels* into ``keep = (wanted, kept)``, with the circle a cell's centre
+    must lie in to be counted (``circle``: centre and radius in the crop's pixels) and the labels that were counted
+    (``counted``, from *counts*). Nothing when *keep* is ``None``."""
     if keep is None:
         return
     from pipeline import nanowell_measure as nm
@@ -1204,9 +1206,13 @@ def _keep_crops(keep, seen, labels, px, fit_sites, addresses, lowhigh=None) -> N
     for g in fit_sites:
         win = nm.crop_window(g, px, seen.shape) if g.index in wanted else None
         if win is not None:
+            cx, cy = g.centre_um[0] / px - 0.5 - win[1].start, g.centre_um[1] / px - 0.5 - win[0].start
             kept[g.index] = {"kind": wanted[g.index], "address": addresses[g.index],
                              "image": ((seen[win] - lo) / (hi - lo if hi > lo else 1.0)).astype(np.float32),
-                             "labels": np.asarray(labels[win])}
+                             "labels": np.asarray(labels[win]),
+                             "circle": (float(cx), float(cy), nm.INTERIOR_FRACTION * g.radius_um / px),
+                             "counted": frozenset(counts[g.index].labels) if counts and g.index in counts
+                             else frozenset()}
 
 
 def _cell_rows(labels, px, fit_sites, counts, addresses, owner, origin, channel_images, channels, kind) -> dict:

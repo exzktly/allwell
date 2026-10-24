@@ -6,10 +6,13 @@ itself keeps, for its first measured timepoint, a sample of nanowells as they re
 nearest the array's centre and the eight farthest from it — and writes them as one PNG,
 ``nanowells/<well>_segmenter_input.png``, which a remote run fetches with the tables.
 
-Each crop is drawn on the 0-1 scale the segmenter was given (its tile's 1st-99th percentiles,
-``nanowell_measure.SEGMENTER_PERCENTILES``), so a nanowell the model saw at low contrast is drawn at low contrast,
-with what it found outlined in red. The top row is the centre sample, framed blue; the bottom row the edge sample,
-framed orange. Qt-free and dependency-free (the PNG is written with ``zlib``), because it runs on the remote worker.
+Each crop is drawn on the 0-1 scale the segmenter was given it at (``nanowell_measure.segmenter_scale``), so a
+nanowell the model saw at low contrast is drawn at low contrast. What the model found is outlined: green for a cell
+that was counted, red for one it found but the count left out because its centre lies outside the counting circle,
+which is drawn in yellow (``INTERIOR_FRACTION`` of the nanowell's fitted radius, about its fitted centre). So a cell
+with no outline was not found at all, a red one was found and not counted, and a yellow circle off the nanowell's
+centre is a misplaced fit. The top row is the centre sample, framed blue; the bottom row the edge sample, framed
+orange. Qt-free and dependency-free (the PNG is written with ``zlib``), because it runs on the remote worker.
 """
 
 from __future__ import annotations
@@ -27,7 +30,9 @@ CELL_PX = 160
 GAP_PX = 6
 FRAME_PX = 3
 FRAME = {"centre": (40, 110, 230), "edge": (240, 140, 20)}
-OUTLINE = (255, 30, 30)
+OUTLINE = (255, 30, 30)              # found, not counted
+COUNTED = (40, 200, 60)              # found and counted
+CIRCLE = (255, 210, 0)               # the counting circle
 BACKGROUND = (255, 255, 255)
 SUFFIX = "_segmenter_input.png"
 
@@ -65,7 +70,8 @@ def sheet(kept: dict) -> np.ndarray | None:
 
 
 def _render(crop: dict, side: int) -> np.ndarray:
-    """One crop, grey on its 0-1 scale with its labels' edges in red, fitted into *side* x *side* (nearest)."""
+    """One crop, grey on its 0-1 scale, fitted into *side* x *side* (nearest): each label's edge green when it was
+    counted (``crop["counted"]``) and red when not, and the counting circle (``crop["circle"]``) in yellow."""
     image = np.clip(np.nan_to_num(np.asarray(crop["image"], dtype=float), nan=0.0), 0.0, 1.0)
     labels = np.asarray(crop["labels"])
     h, w = image.shape
@@ -76,11 +82,22 @@ def _render(crop: dict, side: int) -> np.ndarray:
     grey = (image[np.ix_(ys, xs)] * 255).astype(np.uint8)
     rgb = np.repeat(grey[..., None], 3, axis=-1)
     lab = labels[np.ix_(ys, xs)]
+    # A label's inner boundary: its pixels with a 4-neighbour of another label (or none), coloured by the label.
     edge = np.zeros_like(lab, dtype=bool)
     edge[1:, :] |= lab[1:, :] != lab[:-1, :]
+    edge[:-1, :] |= lab[:-1, :] != lab[1:, :]
     edge[:, 1:] |= lab[:, 1:] != lab[:, :-1]
-    edge &= (lab > 0) | np.roll(lab > 0, 1, axis=0) | np.roll(lab > 0, 1, axis=1)
-    rgb[edge] = OUTLINE
+    edge[:, :-1] |= lab[:, :-1] != lab[:, 1:]
+    edge &= lab > 0
+    counted = np.isin(lab, list(crop.get("counted", ())))
+    rgb[edge & ~counted] = OUTLINE
+    rgb[edge & counted] = COUNTED
+    circle = crop.get("circle")
+    if circle is not None:
+        cx, cy, r = circle
+        oy, ox = np.mgrid[:side, :side]
+        ring = np.abs(np.hypot((ox + 0.5) / scale - 0.5 - cx, (oy + 0.5) / scale - 0.5 - cy) - r) * scale <= 0.75
+        rgb[ring & inside] = CIRCLE
     rgb[~inside] = BACKGROUND
     return rgb
 

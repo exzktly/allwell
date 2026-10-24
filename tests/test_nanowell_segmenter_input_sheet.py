@@ -62,6 +62,29 @@ def test_a_crop_is_drawn_on_the_segmenter_s_scale_with_its_cells_outlined(tmp_pa
     assert not ni.write_sheet(tmp_path / "none.png", None) and not (tmp_path / "none.png").exists()
 
 
+def test_counted_cells_are_green_uncounted_red_and_the_counting_circle_yellow(tmp_path):
+    """Asked for: the counting circle on the sheet, so that a cell found but left out because the circle is not
+    where the nanowell is can be told apart from a cell never found. One crop, two cells: the one inside the circle
+    was counted (green), the one outside was not (red); the circle is drawn where it was placed."""
+    image = np.full((50, 50), 0.5, np.float32)
+    labels = np.zeros((50, 50), np.int32)
+    labels[22:28, 22:28] = 1                                              # at the centre: counted
+    labels[2:8, 40:46] = 2                                                # in a corner: outside the circle
+    crop = {"kind": "centre", "address": (0, 0), "image": image, "labels": labels,
+            "circle": (24.5, 24.5, 15.0), "counted": frozenset({1})}
+    rgb = ni._render(crop, 100)                                           # 2 output px per crop px
+    green = (rgb == ni.COUNTED).all(axis=-1)
+    red = (rgb == ni.OUTLINE).all(axis=-1)
+    yellow = (rgb == ni.CIRCLE).all(axis=-1)
+    gy, gx = np.nonzero(green)
+    ry, rx = np.nonzero(red)
+    assert green.any() and 44 <= gx.min() and gx.max() <= 56                # around label 1, in output pixels
+    assert red.any() and rx.min() >= 80 and ry.max() <= 16                  # around label 2
+    yy, xx = np.nonzero(yellow)
+    radii = np.hypot((xx + 0.5) / 2 - 0.5 - 24.5, (yy + 0.5) / 2 - 0.5 - 24.5)
+    assert yellow.sum() > 100 and np.allclose(radii, 15.0, atol=0.5)       # the circle, where it was placed
+
+
 def test_a_nanowell_run_writes_its_wells_sheet_from_the_crops_the_segmenter_was_given(tmp_path, monkeypatch,
                                                                                        rendered_well,  # noqa: F811
                                                                                        caplog):
@@ -76,8 +99,8 @@ def test_a_nanowell_run_writes_its_wells_sheet_from_the_crops_the_segmenter_was_
     captured = []
     real = nr._keep_crops
 
-    def spy(keep, seen, labels, px, fit_sites, addresses, lowhigh=None):
-        real(keep, seen, labels, px, fit_sites, addresses, lowhigh)
+    def spy(keep, seen, labels, px, fit_sites, addresses, lowhigh=None, counts=None):
+        real(keep, seen, labels, px, fit_sites, addresses, lowhigh, counts)
         if keep is not None:
             captured.append(dict(keep[1]))
     monkeypatch.setattr(nr, "_keep_crops", spy)
@@ -103,6 +126,14 @@ def test_a_nanowell_run_writes_its_wells_sheet_from_the_crops_the_segmenter_was_
     kept = {k: v for part in captured for k, v in part.items()}
     assert len(kept) == 2 * ni.PER_GROUP and {v["kind"] for v in kept.values()} == {"centre", "edge"}
     assert all(v["labels"].any() for v in kept.values())                 # each crop's labels are the segmenter's
+    # The counting circle is the nanowell's, about the crop's centre, and the centre mark it holds was counted.
+    for v in kept.values():
+        h, w = v["labels"].shape
+        if h == w:
+            cx, cy, r = v["circle"]
+            assert abs(cx - (w - 1) / 2) <= 1.5 and abs(cy - (h - 1) / 2) <= 1.5 and r < h / 2
+            centre_label = int(v["labels"][h // 2, w // 2])
+            assert centre_label > 0 and centre_label in v["counted"]
     # Scaled by the nanowells' interiors, with rims and lattice blanked: everything in a crop outside its nanowell's
     # counting circle is one plain value — on a run that scaled by the tile, the rim is there, in many values.
     whole = [np.asarray(v["image"]) for v in kept.values() if v["image"].shape[0] == v["image"].shape[1]]

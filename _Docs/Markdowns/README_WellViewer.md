@@ -223,7 +223,8 @@ LIVECell). All-Well installs Cellpose 4, which has only Cellpose-SAM: *cyto3* an
 Cellpose 3 is installed instead, and on Cellpose 4 the run stops on them with a message naming the model rather than
 counting with a different one. A model's weights are downloaded the first time it is used (about 1.2 GB for
 Cellpose-SAM), so the machine that runs the analysis needs internet access then. Cellpose-SAM is a large model: run
-it on a GPU. A run made before Cellpose-SAM was the default counted with *cyto3*, and its settings say so. Which counts your cells better depends on the
+it on a GPU. With the Torch All-Well installs it runs in full precision (float32) on every GPU; the log line
+`Cellpose cpsam on cuda:0 (…), float32` says which precision a run used. A run made before Cellpose-SAM was the default counted with *cyto3*, and its settings say so. Which counts your cells better depends on the
 cells, so compare them on one well with **Test detection** before a plate-wide run: its crops show the outlines the
 run itself would count, cut from the whole tile segmented as the run segments it.
 
@@ -263,8 +264,11 @@ occupancy metrics, and it adds no rows to the per-cell table the other plots rea
 **What the model was given.** Each well's results include `nanowells/<well>_segmenter_input.png`, fetched with the
 tables on a remote run: for the well's first timepoint counted, the eight nanowells nearest the array's centre (top
 row, blue frames) and the eight farthest from it (bottom row, orange frames), each exactly as the model was given it —
-same image, same brightness scale, so a nanowell the model saw at low contrast is drawn at low contrast — with the
-cells it found outlined in red. It is the way to see what went wrong when nearly every nanowell comes out empty,
+same image, same brightness scale, so a nanowell the model saw at low contrast is drawn at low contrast. Each crop
+also shows the counting circle in yellow: a cell is counted only when its centre lies inside it (0.9 of the nanowell's
+fitted radius, about its fitted centre). Cells the model found are outlined green when they were counted and red
+when they were found but left out because their centre lies outside the circle. So a cell with no outline was never
+found, a red one was found and not counted, and a circle off the nanowell's centre is a misplaced fit. It is the way to see what went wrong when nearly every nanowell comes out empty,
 including where Test detection cannot run (it runs on this computer, so a Windows install whose Torch cannot load
 cannot use it).
 

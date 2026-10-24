@@ -41,7 +41,8 @@ def test_keystrokes_reuse_the_reading_and_a_changed_dataset_is_read_again(tmp_pa
 
 def test_a_refusal_is_remembered_as_the_same_message(tmp_path, monkeypatch):
     analysed = tmp_path / "an"
-    (analysed / "out").mkdir(parents=True)
+    (analysed / "in").mkdir(parents=True)        # an analysed dataset has its inputs too
+    (analysed / "out").mkdir()
     (analysed / "out" / "pipeline_info.json").write_text("{}")
     raw = _raw(tmp_path / "raw", "0h")
     monkeypatch.setattr(cc, "_preview_pairs", {})

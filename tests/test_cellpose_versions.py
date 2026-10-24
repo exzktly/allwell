@@ -132,12 +132,63 @@ def test_loading_a_model_quiets_cellpose_s_bare_no_cell_line(monkeypatch):
     one per empty nanowell, naming nothing. The count's own progress lines replace it; Cellpose's warnings still pass."""
     import logging
 
-    logger = logging.getLogger("cellpose.dynamics")
-    old = logger.level
-    logger.setLevel(logging.INFO)                           # as a run that logs at INFO leaves it
+    loggers = [logging.getLogger(f"cellpose.{n}") for n in ("dynamics", "models", "core")]   # + a batch's tqdm
+    old = [lg.level for lg in loggers]
+    for lg in loggers:
+        lg.setLevel(logging.INFO)                           # as a run that logs at INFO leaves it
     try:
         _install(monkeypatch, 4)
         cp._segment_cellpose(np.zeros((4, 4)), model_type="cpsam")
-        assert not logger.isEnabledFor(logging.INFO) and logger.isEnabledFor(logging.WARNING)
+        for lg in loggers:
+            assert not lg.isEnabledFor(logging.INFO) and lg.isEnabledFor(logging.WARNING), lg.name
+
+        def passes(name, msg):
+            return logging.getLogger(name).filter(logging.LogRecord(name, logging.WARNING, "", 0, msg, None, None))
+        # The two warnings a batch of crops makes as a matter of course are dropped; any other still passes.
+        assert not passes("cellpose.models", "3D stack used, but stitch_threshold=0 and do_3D=False, so masks are "
+                          "made per plane only")
+        assert not passes("cellpose.dynamics", "no seeds found in get_masks_torch - no masks found.")
+        assert passes("cellpose.models", "Found more than 3 channels, only using first 3")
     finally:
-        logger.setLevel(old)
+        for lg, level in zip(loggers, old):
+            lg.setLevel(level)
+            lg.filters[:] = [f for f in lg.filters if not isinstance(f, cp._CellposeChatter)]
+
+
+class _BatchModel:
+    """Labels each image of what it is given by where it is above 0.5, numbered by the image's place in the call."""
+
+    def __init__(self):
+        self.calls = []
+
+    def eval(self, x, **kw):
+        x = np.asarray(x)
+        self.calls.append((x.copy(), kw))
+        planes = x[..., 0] if x.ndim == 4 else x[np.newaxis]
+        masks = np.stack([(p > 0.5) * (i + 1) for i, p in enumerate(planes)])
+        return (masks if x.ndim == 4 else masks[0]), None, None
+
+
+@pytest.mark.parametrize("major", [3, 4])
+def test_several_crops_go_to_cellpose_4_in_one_call_and_each_comes_back_as_its_own(monkeypatch, major):
+    """Reported: Cellpose-SAM took 2.4 s a nanowell on a Tesla T4, one call each. Cellpose 4 takes a batch of
+    images and runs their network tiles together: one call, a (N, H, W, 1) stack scaled to the range and padded with
+    0, ``normalize=False``; each crop's labels come back cut to its own shape. Cellpose 3 has no batch: one call each."""
+    _install(monkeypatch, major)
+    model = _BatchModel()
+    monkeypatch.setattr(cp, "_cellpose_model", lambda model_type=None: model)
+    crops = [np.full((3, 4), 250.0), np.full((2, 5), 10.0), np.array([[250.0, 10.0]])]
+    got = cp._segment_cellpose_many(crops, lowhigh=(10.0, 250.0), model_type="cpsam" if major == 4 else "cyto3",
+                                    diameter=12.0)
+    assert [g.shape for g in got] == [(3, 4), (2, 5), (1, 2)]
+    if major == 4:
+        (stack, kw), = model.calls
+        assert stack.shape == (3, 3, 5, 1) and stack.dtype == np.float32 and kw["normalize"] is False
+        assert kw["diameter"] == 12.0
+        # Scaled to the range, centred in the common shape, padded with 0.
+        assert np.allclose(stack[0, :3, :4, 0], 1.0) and np.allclose(stack[0, :, 4, 0], 0.0)
+        assert np.allclose(stack[2, 1, 1:3, 0], [1.0, 0.0]) and np.allclose(stack[2, [0, 2], :, 0], 0.0)
+        assert np.array_equal(got[0], np.ones((3, 4))) and not got[1].any() and got[2].tolist() == [[3, 0]]
+    else:
+        assert len(model.calls) == 3 and all(kw["normalize"] is False for _x, kw in model.calls)
+        assert np.array_equal(got[0], np.ones((3, 4))) and not got[1].any() and got[2].tolist() == [[1, 0]]

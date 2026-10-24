@@ -126,9 +126,25 @@ def _cellpose_model(model_type: str = DEFAULT_MODEL):
         # per nanowell, so that bare line, naming no well, nanowell or time, was the only thing a long count printed,
         # and read as the run being stuck. The count's own progress lines say what it is doing instead
         # (``nanowell_task._log_sites``), and a nanowell with no cell is recorded as one, with ``n_cells`` 0.
-        logging.getLogger("cellpose.dynamics").setLevel(logging.WARNING)
+        # A batch of crops (``_segment_cellpose_many``) also makes Cellpose's models and core log a tqdm progress
+        # line per call, which says less than the count's own lines; their warnings still pass.
+        for name in ("cellpose.dynamics", "cellpose.models", "cellpose.core"):
+            logging.getLogger(name).setLevel(logging.WARNING)
+            if not any(isinstance(f, _CellposeChatter) for f in logging.getLogger(name).filters):
+                logging.getLogger(name).addFilter(_CellposeChatter())
         _CELLPOSE_MODELS[key] = model
     return model
+
+
+class _CellposeChatter(logging.Filter):
+    """Drops two Cellpose warnings that are expected, not wrong, on the nanowell count's batched crops, and would
+    otherwise print once per batch and once per empty nanowell: that a stack is segmented per plane (which is the
+    point), and that an image had no seeds (an empty nanowell, recorded as one). Every other warning passes."""
+
+    EXPECTED = ("3D stack used, but stitch_threshold=0 and do_3D=False", "no seeds found in get_masks_torch")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not str(record.msg).startswith(self.EXPECTED)
 
 
 def _cellpose_device():
@@ -223,3 +239,47 @@ def _segment_cellpose(
                             cellprob_threshold=cellprob_threshold, **extra)
     masks = result[0]  # eval returns (masks, flows, styles[, diams])
     return np.asarray(masks, dtype=np.int32)
+
+
+def _segment_cellpose_many(
+    images,
+    *,
+    lowhigh: tuple[float, float],
+    model_type: str = DEFAULT_MODEL,
+    diameter: float = 0.0,
+    flow_threshold: float = 0.4,
+    cellprob_threshold: float = 0.0,
+) -> list[np.ndarray]:
+    """Segment several single-channel *images* in one Cellpose 4 call; one label image per input, its shape.
+
+    One call per nanowell crop gave Cellpose one image at a time, and each crop, however small, became a whole
+    network tile run alone: on a Tesla T4 that was 2.4 s a nanowell. Given a batch, Cellpose 4 runs up to
+    ``batch_size`` (8) images' tiles in each network pass, and computes each image's masks on its own. The images
+    are centred in a common shape padded with the value that scales to 0 — what Cellpose pads a small image with
+    anyway — scaled to *lowhigh* here, as :func:`_segment_cellpose` does, and cut back after. The network sees each
+    crop within a pixel or two of where a call of its own puts it, so its masks can differ from that call's by
+    those pixels' effect, not by the crop's content. Cellpose 3 has no such batching: there each image is its own
+    call, as before.
+    """
+    images = [np.asarray(im) for im in images]
+    if not images:
+        return []
+    major = cellpose_major()
+    if major is None or major < 4 or len(images) == 1:
+        return [_segment_cellpose(im, model_type=model_type, diameter=diameter, flow_threshold=flow_threshold,
+                                  cellprob_threshold=cellprob_threshold, lowhigh=lowhigh) for im in images]
+    model = _cellpose_model(model_type)
+    lo, hi = float(lowhigh[0]), float(lowhigh[1])
+    h = max(im.shape[0] for im in images)
+    w = max(im.shape[1] for im in images)
+    # Each image is centred in the common shape, as Cellpose centres a small image in its padding, so a crop sits
+    # where a call of its own would put it.
+    at = [((h - im.shape[0]) // 2, (w - im.shape[1]) // 2) for im in images]
+    stack = np.zeros((len(images), h, w, 1), np.float32)              # 0: the padding Cellpose itself would add
+    for i, (im, (y, x)) in enumerate(zip(images, at)):
+        stack[i, y:y + im.shape[0], x:x + im.shape[1], 0] = (im.astype(np.float32) - lo) / (hi - lo if hi > lo else 1.0)
+    diam = float(diameter) if diameter and diameter > 0 else None
+    result = model.eval(stack, diameter=diam, flow_threshold=flow_threshold, cellprob_threshold=cellprob_threshold,
+                        normalize=False)
+    masks = np.asarray(result[0], dtype=np.int32).reshape(len(images), h, w)
+    return [masks[i, y:y + im.shape[0], x:x + im.shape[1]] for i, (im, (y, x)) in enumerate(zip(images, at))]

@@ -726,7 +726,12 @@ def cellpose_segmenter(diameter_px: float = 0.0, **options):
     def segment(image, lowhigh=None):
         from pipeline.cellpose import _segment_cellpose
         return _segment_cellpose(image, diameter=diameter_px, lowhigh=lowhigh, **options)
+
+    def segment_many(images, lowhigh):
+        from pipeline.cellpose import _segment_cellpose_many
+        return _segment_cellpose_many(images, diameter=diameter_px, lowhigh=lowhigh, **options)
     segment.accepts_range = True              # segment_sites hands it the tile's scale for each crop
+    segment.segment_many = segment_many       # and several crops at once (CROP_BATCH)
     return segment
 
 
@@ -752,6 +757,9 @@ def segmenter_input(image, rim_image, segment_on: str) -> np.ndarray:
 #: the lattice beyond, so a cell against the rim is whole in the crop; the count only keeps a cell whose centre lies
 #: inside the interior (``INTERIOR_FRACTION``).
 CROP_REACH = 1.2
+#: How many nanowell crops :func:`segment_sites` gives a segmenter that takes several at once (``segment_many``).
+#: Cellpose runs 8 images' network tiles in each pass; 32 keeps a progress tick every few seconds on a slow GPU.
+CROP_BATCH = 32
 
 
 def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: float = CROP_REACH,
@@ -762,34 +770,46 @@ def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: 
     area, segmenting only the nanowells is that much less work. Each crop is scaled as the whole tile would be: a
     segmenter that takes a range (``accepts_range``, Cellpose's) is given the tile's own 1st-99th percentiles
     (``SEGMENTER_PERCENTILES``), because a crop scaled to its own range would stretch an empty nanowell's noise across
-    the segmenter's range. Labels are renumbered so no two crops share one; where two crops overlap, the first label
-    to a pixel keeps it. *on_site*, when given, is called with no argument after each nanowell is segmented, so a run
-    can say how far through a tile's nanowells it is."""
+    the segmenter's range. A segmenter that also takes several crops at once (``segment_many``, Cellpose's) is given
+    them ``CROP_BATCH`` at a time, so they share its network passes; each crop's labels are still its own. Labels are
+    renumbered so no two crops share one; where two crops overlap, the first label to a pixel keeps it. *on_site*,
+    when given, is called with no argument after each nanowell is segmented, so a run can say how far through a
+    tile's nanowells it is."""
     image = np.asarray(image)
     h, w = image.shape
     finite = image[np.isfinite(image)]
     lowhigh = (tuple(float(v) for v in np.percentile(finite, SEGMENTER_PERCENTILES))
                if finite.size and getattr(segmenter, "accepts_range", False) else None)
-    out = np.zeros((h, w), dtype=np.int64)
-    next_id = 0
+    windows = []
     for g in geometries:
         cx, cy = g.centre_um[0] / pixel_size_um - 0.5, g.centre_um[1] / pixel_size_um - 0.5
         half = reach * g.radius_um / pixel_size_um
         x0, x1 = max(int(math.floor(cx - half)), 0), min(int(math.ceil(cx + half)) + 1, w)
         y0, y1 = max(int(math.floor(cy - half)), 0), min(int(math.ceil(cy + half)) + 1, h)
-        if x1 <= x0 or y1 <= y0:
-            continue
-        crop = image[y0:y1, x0:x1]
-        labels = np.asarray(segmenter(crop) if lowhigh is None else segmenter(crop, lowhigh=lowhigh))
-        if labels.shape != crop.shape:
-            raise ValueError("The segmenter returned a label image of a different shape")
-        labels = labels.astype(np.int64)
-        window = out[y0:y1, x0:x1]
-        free = (labels > 0) & (window == 0)
-        window[free] = labels[free] + next_id
-        next_id += int(labels.max()) if labels.size else 0
-        if on_site is not None:
-            on_site()
+        if x1 > x0 and y1 > y0:
+            windows.append((slice(y0, y1), slice(x0, x1)))
+    many = getattr(segmenter, "segment_many", None) if lowhigh is not None else None
+    batch = CROP_BATCH if many is not None else 1
+    out = np.zeros((h, w), dtype=np.int64)
+    next_id = 0
+    for start in range(0, len(windows), batch):
+        chunk = windows[start:start + batch]
+        crops = [image[win] for win in chunk]
+        if many is not None:
+            found = many(crops, lowhigh)
+        else:
+            found = [segmenter(c) if lowhigh is None else segmenter(c, lowhigh=lowhigh) for c in crops]
+        for win, crop, labels in zip(chunk, crops, found):
+            labels = np.asarray(labels)
+            if labels.shape != crop.shape:
+                raise ValueError("The segmenter returned a label image of a different shape")
+            labels = labels.astype(np.int64)
+            window = out[win]
+            free = (labels > 0) & (window == 0)
+            window[free] = labels[free] + next_id
+            next_id += int(labels.max()) if labels.size else 0
+            if on_site is not None:
+                on_site()
     return out
 
 

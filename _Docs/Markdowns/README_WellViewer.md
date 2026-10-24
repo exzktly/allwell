@@ -263,8 +263,11 @@ occupancy metrics, and it adds no rows to the per-cell table the other plots rea
 **What the model was given.** Each well's results include `nanowells/<well>_segmenter_input.png`, fetched with the
 tables on a remote run: for the well's first timepoint counted, the eight nanowells nearest the array's centre (top
 row, blue frames) and the eight farthest from it (bottom row, orange frames), each exactly as the model was given it —
-same image, same brightness scale, so a nanowell the model saw at low contrast is drawn at low contrast — with the
-cells it found outlined in red. It is the way to see what went wrong when nearly every nanowell comes out empty,
+same image, same brightness scale, so a nanowell the model saw at low contrast is drawn at low contrast. Each crop
+also shows the counting circle in yellow: a cell is counted only when its centre lies inside it (0.9 of the nanowell's
+fitted radius, about its fitted centre). Cells the model found are outlined green when they were counted and red
+when they were found but left out because their centre lies outside the circle. So a cell with no outline was never
+found, a red one was found and not counted, and a circle off the nanowell's centre is a misplaced fit. It is the way to see what went wrong when nearly every nanowell comes out empty,
 including where Test detection cannot run (it runs on this computer, so a Windows install whose Torch cannot load
 cannot use it).
 

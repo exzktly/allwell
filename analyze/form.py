@@ -66,11 +66,13 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
 
     def _build_form(self, parent: QWidget) -> None:
-        # The banners head the form, above Folders, which leads the sections
-        # (the default schema is valid, so it is open from launch).
+        # The banners head the form, then "Load settings from a run…" (it sets
+        # the input folder, so it comes before the folder it would replace),
+        # then Folders, which leads the sections (the default schema is valid,
+        # so it is open from launch).
         self._build_banner_strips(parent)
-        self._build_folders_section(parent)
         self._build_open_pinfo_row(parent)
+        self._build_folders_section(parent)
         self._build_schema_section(parent)
         self._build_channel_tokens_section(parent)
         self._refresh_schema_preview()
@@ -159,7 +161,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         self._refresh_segmentation_hints()
 
     def _build_open_pinfo_row(self, parent: QWidget) -> None:
-        """Top-of-tab button: restore a prior run's settings (incl. input/output
+        """Button above Folders: restore a prior run's settings (incl. input/output
         paths) from its pipeline_info.json sidecar — to re-run a failed run or
         append new data."""
         row = QWidget(parent)

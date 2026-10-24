@@ -9998,11 +9998,17 @@ loading rather than an area.
 
 **Counts.** `segment_tile` makes one segmenter call on the whole rim-suppressed tile
 (`cellpose_segmenter` is the production segmenter and imports `pipeline.cellpose` only
-when called). Its model is the setting's `cellpose_model`, one of `nanowell_run.CELLPOSE_MODELS`: `cyto3` (Cellpose
-3's generalist, the default) or `livecell_cp3` (the Cellpose 3 model trained on LIVECell's phase-contrast images of
-eight cell lines), both in the pinned `cellpose==3.1.1.2`; it reaches the run as `--nanowell_cellpose_model`, sent
-only when not the default, and joins the reuse key (`NanowellSettings.key`) and the settings digest only then. Which
-of the two counts these plates better has not been measured (tracker C10). `count_cells` keeps a label only when its centroid lies in the interior of
+when called). Its model is the setting's `cellpose_model`, one of `nanowell_run.CELLPOSE_MODELS`: `cpsam`
+(Cellpose-SAM, the default, in the pinned `cellpose==4.2.1.1`), `cyto3` (Cellpose 3's generalist) or `livecell_cp3`
+(Cellpose 3's model trained on LIVECell's phase-contrast images of eight cell lines); the last two need a Cellpose 3
+install (below, *Cellpose versions*). **A run's options that name no model mean `cyto3`**
+(`LEGACY_CELLPOSE_MODEL`): every run made before there was a choice segmented with it, and its settings and reuse key
+carry no model, so `NanowellSettings`'s default is cyto3 and `key()` names the model only when it is not cyto3 — an
+earlier run is never read as a cpsam one. New runs name their model: `--nanowell_cellpose_model` defaults to `cpsam`
+and `nanowell_options_from_args` leaves only cyto3 out, and `services/pipeline_service._emit_nanowell_flags` always
+sends the form's choice (sent only when not cyto3, a form's cyto3 would have run as the command line's cpsam). The form
+restores a sidecar that names none as cyto3. Which model counts these plates best has not been measured (tracker
+C10). `count_cells` keeps a label only when its centroid lies in the interior of
 a site the tile **owns** (`owned_indices(report.owners, tile)` from the `ownership_report` of
 6.2f; fused sites have no owner and are counted by no tile until they are segmented on a blended
 crop, tracker C14, so `site_state` sees an undefined count for them); a cell in the overlap of two tiles
@@ -11179,13 +11185,25 @@ noted:
   detected. `n_tiles` is logged per FOV. The tile-size math is pure integer logic
   covered by `tests/test_stardist_tiling.py`.
 - `cellpose` — **general** Cellpose, not phase-locked. Exposes model
-  (cyto3/cyto2/cyto/nuclei), diameter (the row shared with the label-free
+  (cpsam, the default, or Cellpose 3's cyto3/cyto2/cyto/nuclei), diameter (the row shared with the label-free
   preset), `flow_threshold`, `cellprob_threshold`,
-  and an optional second **nucleus channel** (`channels=[seg, nuc]`). Models are
-  cached per type in `_CELLPOSE_MODELS`; `_worker_init` skips the StarDist/TF load.
+  and an optional second **nucleus channel** (`channels=[seg, nuc]` on Cellpose 3; on Cellpose 4 the two are
+  stacked on the last axis with `channel_axis=-1`). Models are
+  cached per name in `_CELLPOSE_MODELS`; `_worker_init` skips the StarDist/TF load.
+
+  **Cellpose versions.** `pipeline/cellpose.py` works with either major version and reads which is installed from
+  the package metadata (`cellpose_major`), so asking imports neither Cellpose nor Torch. Cellpose 4 (the pin) ships
+  only Cellpose-SAM (`CELLPOSE_4_MODELS`); Cellpose 3's models (`CELLPOSE_3_MODELS`) need a Cellpose 3 install.
+  The two cannot share an environment. Cellpose 4's `CellposeModel` ignores `model_type` and answers an unknown
+  `pretrained_model` with its own default, each with only a log line, so asking it for `cyto3` would segment with
+  Cellpose-SAM under cyto3's name; `_cellpose_model` therefore refuses any model the installed version does not ship
+  (`model_refusal`), raising `CellposeUnavailable` with the reason — a run's well fails with it in `errors/`, and Test
+  detection draws without counts and says why. On Cellpose 4 the model is built with `pretrained_model=<name>` and
+  bfloat16 weights on a GPU that supports them (`torch.cuda.is_bf16_supported()`), float32 elsewhere; `eval` takes
+  no `channels`. The weights (about 1.2 GB for Cellpose-SAM) download from Hugging Face on first use.
 - `classical_threshold` — Otsu + distance-transform watershed (no model), general.
-- `cellpose_labelfree` — the **only** label-free method: a Cellpose `cyto3`
-  brightfield preset that segments the channel marked **Phase**. The Phase
+- `cellpose_labelfree` — the **only** label-free method: a Cellpose-SAM (`cpsam`)
+  preset that segments the channel marked **Phase**. The Phase
   channel is designated by a per-row checkbox (`analyze.tab._phase_token()`,
   mutually exclusive, not also smFISH) → `--phase_token`; `main()` remaps the
   phase token onto the nuclear slot (only for this method) so all per-FOV grouping
@@ -12676,7 +12694,11 @@ TensorFlow is present and nothing is missing; an env whose python cannot answer
 reports `?` and is installed into. The skip used to be TensorFlow alone, so an
 env built before Cellpose joined the requirements, or one whose Torch half
 failed, reported ready on every re-bootstrap and the run died on the compute node
-at `from cellpose import models`. `NOT_PROBED` names the requirement lines the
+at `from cellpose import models`. A package whose behaviour depends on its version is probed for the version too:
+`VERSION_PINS` (Cellpose) is checked with `importlib.metadata.version` against its pin, and one off its pin
+(`HostProbe.off_pin`) makes the install run, which moves it to the pin — Cellpose 3 imports as `cellpose` exactly as
+Cellpose 4 does, so a module probe alone left an env on it ready and the run refused Cellpose-SAM on the compute node.
+`tests/test_bootstrap_probes_every_requirement.py` holds `VERSION_PINS` against `requirements-remote.txt`. `NOT_PROBED` names the requirement lines the
 probe deliberately skips (the macOS-only TensorFlow builds, `tomli` below Python
 3.11), each with its reason, and `tests/test_bootstrap_probes_every_requirement.py`
 holds the two rosters against the requirements file and runs the probe's own

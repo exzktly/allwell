@@ -1167,7 +1167,7 @@ def _segment_image_group(
     elif segmentation_method in _CELLPOSE_METHODS:
         # General Cellpose segments the chosen Segmentation channel (nir_corr).
         # The 'cellpose_labelfree' preset is identical mechanics: main() already
-        # remapped the nuclear slot onto the phase channel, and forces cyto3, so
+        # remapped the nuclear slot onto the phase channel, and forces cpsam, so
         # nir_corr is the phase image and the params are the brightfield preset.
         nucleus_image = None
         nuc_tok = str(cellpose_nuclei_channel or "").strip().lower()
@@ -1331,7 +1331,7 @@ def process_image_group(
     qc_remove_debris: bool = False,
     measure_focus: bool = True,
     cellpose_diameter: float = 0.0,
-    cellpose_model: str = "cyto3",
+    cellpose_model: str = "cpsam",
     cellpose_flow_threshold: float = 0.4,
     cellpose_cellprob_threshold: float = 0.0,
     cellpose_nuclei_channel: str = "",
@@ -3192,10 +3192,10 @@ def main() -> None:
                 f"{args.segmentation_method} (the phase/brightfield channel to segment)."
             )
         args.nuclear_token = phase_token
-        # The label-free preset is Cellpose with a brightfield model.
-        args.cellpose_model = "cyto3"
-        log.info("Label-free segmentation (%s): Cellpose cyto3 on phase channel "
-                 "%r as the segmentation input.", args.segmentation_method, phase_token)
+        # The label-free preset is Cellpose-SAM (pipeline.cellpose.DEFAULT_MODEL; not imported: a StarDist-only build lacks it).
+        args.cellpose_model = "cpsam"
+        log.info("Label-free segmentation (%s): Cellpose %s on phase channel "
+                 "%r as the segmentation input.", args.segmentation_method, args.cellpose_model, phase_token)
     else:
         # Refuse a phase channel that is also a segmentation input. Checked here
         # and not only in the GUI: this is a self-sufficient entry point, and

@@ -60,7 +60,11 @@ pandas==2.2.3
 typing-extensions==4.5.0   # ceiling under TF 2.13's <4.6; satisfies torch 2.0.1
 torch==2.0.1               # Cellpose backend (MPS/CPU inference)
 torchvision==0.15.2        # torch companion pin
-cellpose==3.1.1.2          # label-free segmentation (cyto3); numpy<2.1,>=1.20
+cellpose==4.2.1.1          # label-free segmentation (Cellpose-SAM, cpsam); numpy>=1.20, torch>=1.6
+# Cellpose 4 ships only Cellpose-SAM: cyto3 / livecell_cp3 / cyto2 / cyto / nuclei are Cellpose 3's, and
+# pipeline/cellpose.py refuses them by name on this install rather than letting Cellpose 4 swap in its own model.
+# It adds segment_anything (pure Python) to the Torch stack. Its weights (about 1.2 GB) download from Hugging Face
+# on first use, to ~/.cellpose/models or $CELLPOSE_LOCAL_MODELS_PATH.
 
 # ── TOML config (used by services/remote_config.py on Python 3.10) ───────────
 tomli ; python_version < "3.11"

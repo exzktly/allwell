@@ -121,7 +121,10 @@ class AnalyzeSegParamsMixin:
         cp = _page()
         m_cell = self._row(cp, "Model")
         self._cellpose_model_cb = QComboBox(cp)
-        self._cellpose_model_cb.addItems(["cyto3", "cyto2", "cyto", "nuclei"])
+        self._cellpose_model_cb.addItems(["cpsam", "cyto3", "cyto2", "cyto", "nuclei"])
+        self._cellpose_model_cb.setToolTip(
+            "cpsam: Cellpose-SAM, Cellpose 4's model, which the app installs. cyto3, cyto2, cyto and nuclei are "
+            "Cellpose 3's and run only where Cellpose 3 is installed; on Cellpose 4 a run refuses them by name.")
         m_cell.layout().addWidget(self._cellpose_model_cb)
         m_cell.layout().addStretch(1)
         f_cell = self._row(cp, "Flow threshold")
@@ -138,8 +141,8 @@ class AnalyzeSegParamsMixin:
         # Label-free (Cellpose preset on the Phase channel). Its one exposed
         # parameter, the diameter, is the shared row below the stack.
         lf = _page()
-        lf_lbl = QLabel("Segments the channel marked 'Phase' above, using a Cellpose "
-                        "brightfield preset (cyto3).", lf)
+        lf_lbl = QLabel("Segments the channel marked 'Phase' above with Cellpose-SAM (cpsam), which reads "
+                        "brightfield and phase contrast.", lf)
         lf_lbl.setObjectName("Muted")
         lf_lbl.setWordWrap(True)
         lf.layout().addWidget(lf_lbl)
@@ -342,7 +345,7 @@ class AnalyzeSegParamsMixin:
             "stardist_nuclei": "Best default for a nuclear stain (DAPI/Hoechst/NIR): StarDist segments the 'Segmentation channel' above into nuclei.",
             "stardist_seeded_watershed_cell": "Use for whole-cell (cytoplasm) measurements: StarDist seeds + a cytoplasm mask; also quantifies the cytoplasm channel.",
             "cellpose": "Use for non-nuclear or tricky morphologies: Cellpose on the 'Segmentation channel' above (fluorescent or brightfield).",
-            "cellpose_labelfree": "Use when there's no stain at all: Cellpose (cyto3) on the channel marked 'Phase' — label-free. Set the cell diameter when your cells are far from 30 px.",
+            "cellpose_labelfree": "Use when there's no stain at all: Cellpose-SAM (cpsam) on the channel marked 'Phase' — label-free. Set the cell diameter when your cells are far from 30 px.",
             "classical_threshold": "Fast model-free fallback for clean, separated objects: Otsu threshold + watershed on the 'Segmentation channel' above.",
         }.get(method, "")
         self._segmentation_hint_lbl.setText(hint)

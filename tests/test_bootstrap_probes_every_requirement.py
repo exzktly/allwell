@@ -125,3 +125,55 @@ def test_a_complete_env_is_left_alone(monkeypatch):
     calls, said = _install_calls(monkeypatch, _probe())
     assert calls == []
     assert any("skipping pip install" in s for s in said)
+
+
+# ── a package at another version than its pin ───────────────────────────────
+def test_every_version_pin_the_probe_checks_is_the_requirements_file_s():
+    """``VERSION_PINS`` restates pins from ``requirements-remote.txt``; a pin moved there and not here would leave
+    every env already on the old version reporting ready."""
+    pins = {}
+    for raw in _REQ.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if "==" in line and ";" not in line:
+            dist, version = line.split("==", 1)
+            pins[dist.strip().lower()] = version.strip()
+    assert rb.VERSION_PINS and all(pins.get(d) == v for d, v in rb.VERSION_PINS.items()), (rb.VERSION_PINS, pins)
+
+
+def test_the_probe_line_reports_a_package_off_its_pin(tmp_path):
+    """The version line the remote runs, run here under bash with a real python: a distribution at its pin is not
+    reported, one at another version is, and one that is not installed is."""
+    import sys
+    from importlib.metadata import version
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    # A wrapper, not a symlink: a symlinked venv interpreter looks for its venv beside the link and loses it.
+    wrapper = bindir / "python"
+    wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    wrapper.chmod(0o755)
+    pins = " ".join(f"{d}=={v}" for d, v in rb.VERSION_PINS.items())
+    script = rb._PROBE_SCRIPT
+    start = script.index("OFF_PIN=$(python")
+    line = script[start:script.index('|| echo "?")', start) + len('|| echo "?")')]     # the command, all its lines
+    assert pins in line, "the probe line no longer carries the pins"
+    here = version("pytest")
+    cmd = (line.replace(pins, f"pytest=={here} pytest==0.0.1 no_such_dist_aw==1.0")
+           + '; echo "off_pin=$OFF_PIN"')
+    out = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True,
+                         env={"PATH": f"{bindir}:/usr/bin:/bin"}, check=True)
+    assert out.stdout.strip() == "off_pin=pytest==0.0.1,no_such_dist_aw==1.0"
+
+
+def test_an_env_with_every_module_but_an_old_cellpose_is_installed_into(monkeypatch):
+    """Cellpose 3 imports as ``cellpose`` exactly as Cellpose 4 does, so a module probe alone left an env on it
+    reporting ready — and the run then refused Cellpose-SAM on the compute node."""
+    stdout = ("has_conda=true\nhas_repo=true\nhas_env=true\ntensorflow_version=2.13.0\nstardist_ok=true\n"
+              "gpu_visible=true\npython_version=3.10.14\nmissing_modules=\noff_pin=cellpose==4.2.1.1\n"
+              "pip_in_progress=false\n")
+    monkeypatch.setattr(rb, "_ssh_run", lambda *a, **k: types.SimpleNamespace(stdout=stdout))
+    probe = rb.probe_host("h")
+    assert probe.off_pin == ("cellpose==4.2.1.1",) and probe.missing_modules == ()
+    calls, said = _install_calls(monkeypatch, probe)
+    assert calls and "requirements-remote.txt" in str(calls[-1])
+    assert any("is not at cellpose==4.2.1.1" in s for s in said)

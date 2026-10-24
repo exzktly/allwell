@@ -212,9 +212,13 @@ and, optionally, the cell diameter, the margin around a nanowell that must lie i
 for that tile to own it, the angle of the central square's edges to a lattice row, and the occlusion and
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
 
-**Cellpose model** chooses what counts the cells: *cyto3* (Cellpose's generalist, the default) or *livecell_cp3*
-(the Cellpose model trained on phase-contrast images of eight cell lines, LIVECell). Both come with the installed
-Cellpose; a model's weights are downloaded the first time it is used. Which counts your cells better depends on the
+**Cellpose model** chooses what counts the cells: *cpsam* (Cellpose-SAM, the default), *cyto3* (Cellpose 3's
+generalist) or *livecell_cp3* (the Cellpose 3 model trained on phase-contrast images of eight cell lines,
+LIVECell). All-Well installs Cellpose 4, which has only Cellpose-SAM: *cyto3* and *livecell_cp3* run only where
+Cellpose 3 is installed instead, and on Cellpose 4 the run stops on them with a message naming the model rather than
+counting with a different one. A model's weights are downloaded the first time it is used (about 1.2 GB for
+Cellpose-SAM), so the machine that runs the analysis needs internet access then. Cellpose-SAM is a large model: run
+it on a GPU. A run made before Cellpose-SAM was the default counted with *cyto3*, and its settings say so. Which counts your cells better depends on the
 cells, so compare them on one well with **Test detection** before a plate-wide run: its crops show the outlines the
 run itself would count, cut from the whole tile segmented as the run segments it.
 
@@ -314,8 +318,8 @@ inside one tile for that tile to own it (default a tenth of the diameter), and `
 angle of the central square's edges to a lattice row (default 0). `--nanowell_geometry infer` finds the array by
 its contrast and infers the lattice kind (hexagonal or square), pitch, orientation and outline, as *Infer from
 the image* does on the form; without it (`hex_circle`) the array is a hexagonal lattice in a circle.
-`--nanowell_cellpose_model livecell_cp3` counts with the LIVECell model instead of `cyto3`, as **Cellpose model**
-does on the form. `--nanowell_registration_from <folder>` reuses an earlier run's tile registration, as **Reuse
+`--nanowell_cellpose_model` chooses the counting model (`cpsam`, the default; `cyto3` or `livecell_cp3` on a
+Cellpose 3 install), as **Cellpose model** does on the form. `--nanowell_registration_from <folder>` reuses an earlier run's tile registration, as **Reuse
 registration** does on the form. Wells must be zips.
 
 Besides the usual per-cell CSV (one row per cell, with the owner tile as `fov` and the nanowell's address
@@ -1278,7 +1282,7 @@ archives and outputs are always written as per-well `.zip` archives. See
   `Cellpose :` line near the top with what the run found (`GPU — 1 visible…` or
   `CPU — no GPU visible on this node…`), and one line per worker naming the
   device its model actually loaded on, such as
-  `Cellpose cyto3 on GPU cuda:0 (NVIDIA A100…)`. If that line says
+  `Cellpose cpsam on GPU cuda:0 (NVIDIA A100…)`. If that line says
   `CPU — Torch … sees no CUDA device` on a node that has a GPU, the Torch
   installed in the remote environment cannot use it (a CPU-only build, or a
   driver older than its CUDA); the line names both. On a Mac, Cellpose stays on

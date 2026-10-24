@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from analyze.domain.nanowell_fields import (
-    CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, PLATE_FORMAT_CHOICES, REGISTRATION_FROM_KEY,
+    CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, LEGACY_CELLPOSE_MODEL, PLATE_FORMAT_CHOICES,
+    REGISTRATION_FROM_KEY,
     SCAN_CHOICES,
     nanowell_enabled, nanowell_option_errors,
 )
@@ -132,9 +133,12 @@ class AnalyzeNanowellSectionMixin:
         row.layout().addStretch(1)
         self._nanowell_field_rows.append(row.parentWidget())
         row = self._row(sec, "Cellpose model", tooltip=(
-            "The model the cell count segments with. cyto3: Cellpose 3's generalist. livecell_cp3: the Cellpose 3 "
-            "model trained on phase-contrast images of eight cell lines (LIVECell). Compare them on your plate with "
-            "Test detection, whose crops show the run's own segmentation. Weights download on first use."))
+            "The model the cell count segments with. cpsam: Cellpose-SAM, Cellpose 4's model, which the app "
+            "installs. cyto3: Cellpose 3's generalist. livecell_cp3: the Cellpose 3 model trained on phase-contrast "
+            "images of eight cell lines (LIVECell). cyto3 and livecell_cp3 run only where Cellpose 3 is installed; "
+            "on Cellpose 4 the run refuses them by name rather than segmenting with another model. Compare them on "
+            "your plate with Test detection, whose crops show the run's own segmentation. Weights download on first "
+            "use."))
         self._nanowell_model_cb = QComboBox(row)
         for value, label in CELLPOSE_MODEL_CHOICES:
             self._nanowell_model_cb.addItem(label, userData=value)
@@ -311,7 +315,9 @@ class AnalyzeNanowellSectionMixin:
         # Absent or None is a run that did not choose: the format's hexagonal lattice in a circle.
         geometry = self._nanowell_geometry_cb.findData(str(d.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]))
         self._nanowell_geometry_cb.setCurrentIndex(max(geometry, 0))
-        model = self._nanowell_model_cb.findData(str(d.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]))
+        # A run that named no model ran cyto3, and shows it; a new form starts on the default.
+        named = d.get("nanowell_cellpose_model") if "nanowell_cellpose_model" in d else CELLPOSE_MODEL_CHOICES[0][0]
+        model = self._nanowell_model_cb.findData(str(named or LEGACY_CELLPOSE_MODEL))
         self._nanowell_model_cb.setCurrentIndex(max(model, 0))
         self._nanowell_registration_edit.setText(str(d.get(REGISTRATION_FROM_KEY) or ""))
         self._refresh_nanowell_custom()

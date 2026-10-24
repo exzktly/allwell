@@ -439,6 +439,8 @@ _SOURCE_TOKENS = {"lattice": "success", "overlap": "accent", "recorded": "warn"}
 MAX_ADDRESSES = 600
 #: The anchor's crosshair arm, in figure pixels.
 ANCHOR_ARM_PX = 14
+#: A counted cell's dot on the Array view, in points squared (matplotlib's ``scatter`` size): about 4 px across.
+CELL_DOT_PT2 = 9.0
 _RECORD_LINE = 0.032
 
 
@@ -492,6 +494,8 @@ def array_footer(scene, layers, *, label: str, image_note: str = "", note: str =
                      if layers.colour == "metric" else
                      "Outlined by state: blue measured, green empty, amber occluded, red clipped, grey not seen; dashed "
                      "in the fused colour: on a tile seam, measured from a blended crop.")
+    if layers.cells and scene.cells_note:
+        lines.append(scene.cells_note)
     if in_well and layers.tiles and scene.tiles:
         lines.append("Tiles: green placed on the lattice, blue by overlap correlation, amber where the acquisition "
                      "record put them; each labelled with its registration residual.")
@@ -530,6 +534,8 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
         _draw_tiles(ax, scene.tiles, muted)
     if layers.nanowells and len(scene.sites):
         _draw_nanowells(fig, ax, drawn, scene, layers, label=label, selected=selected)
+    if layers.cells and scene.cells is not None and len(scene.cells[0]):
+        _draw_cells(ax, *scene.cells)
     if layers.addresses and len(scene.sites):
         lines += _draw_addresses(fig, ax, drawn, scene.sites)
     if in_well and layers.anchor and scene.anchor is not None:
@@ -681,6 +687,15 @@ def _outline_by_state(ax, sites, fused, outline: float) -> None:
     if plain.any():
         _ellipses(ax, sites, plain, facecolors="none", linewidths=outline, zorder=3,
                   edgecolors=[state_colour(s) for s, p in zip(sites.state, plain) if p])
+
+
+def _draw_cells(ax, x, y) -> None:
+    """A dot at each counted cell's centre, a fixed size on screen whatever the zoom, over the nanowells and under
+    their addresses."""
+    from ui.nanowell_sites import CELL_COLOUR, CELL_EDGE_COLOUR
+
+    ax.scatter(x, y, s=CELL_DOT_PT2, c=CELL_COLOUR, edgecolors=CELL_EDGE_COLOUR, linewidths=0.4, zorder=5.5,
+               gid="nw-array-cells")
 
 
 def _draw_addresses(fig, ax, drawn, sites) -> list[str]:

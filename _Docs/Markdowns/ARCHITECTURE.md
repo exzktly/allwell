@@ -10486,9 +10486,22 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   `<well>_<timepoint>_montage.png` in `<well>_out.zip`, placed by the grid record's `montage_origin_um` and
   `montage_um_per_px`, read on a worker, the last `MONTAGES_KEPT` kept) or `tiles` (full resolution, below);
   `positions` — `measured` (the well frame, where the run found each nanowell) or `lattice` (`map_model`'s
-  places, U4); `colour` — `metric` or `state`; and the switches `nanowells`, `addresses`, `tiles`, `anchor`,
-  `record`. The image, the tiles and the anchor are in the well frame and have no place on the lattice, so on
+  places, U4); `colour` — `metric` or `state`; and the switches `nanowells`, `addresses`, `cells`, `tiles`,
+  `anchor`, `record`. The image, the tiles and the anchor are in the well frame and have no place on the lattice, so on
   *Lattice* they are greyed in the controls, not drawn, and the footer (or the empty-state message) says so.
+- **Cells** (off by default, in no preset) is a dot at the centre of each cell the run counted — the run keeps
+  no cell outlines, so a centre is all there is. The positions are the cell table's `well_x_um` / `well_y_um`
+  (the table every nanowell run writes beside its nanowell tables, one row per counted cell);
+  `collect.load_nanowell_data` notes which CSV holds each well while it reads their brightness
+  (`NanowellData.cell_tables`), and `collect.cell_positions` reads one well's table only when the layer is on,
+  kept (`_read_cell_positions`, the last two files) until the file's modification time or size changes, so a
+  plate's every cell is never held at once. `array_compute.cells_into` puts them in the scene: where measured in
+  the well frame; on the lattice at the nanowell's lattice place plus the cell's offset from that nanowell's
+  measured centre, so a dot stays in the same spot of the same nanowell, and a cell whose nanowell has no address
+  or measured centre is counted in the footer, not drawn. The renderer draws them as one `scatter` of fixed
+  screen size (`CELL_DOT_PT2`), light with a dark rim (`ui/nanowell_sites.CELL_COLOUR`, `CELL_EDGE_COLOUR`) so
+  they read over the image and over any fill, above the nanowells and under the addresses. The footer says how
+  many were drawn, or that the well has no cell table, or that its table holds no positions.
 - **One scene, one renderer.** `array_compute.array_scene` builds the `ArrayScene` — the nanowells drawn
   (`ArraySites`: position, radius, value, state, fused flag, `(well, q, r)`, the `q,r` text from
   `util.nanowell_address.coordinate_text`; an unaddressed nanowell carries `None` and is drawn but never

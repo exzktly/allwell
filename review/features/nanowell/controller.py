@@ -426,7 +426,7 @@ def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, ch
         render_message(fig, "Select a well with a nanowell table.", gid="nw-array-missing")
         return None
     scene = array_scene(metrics, data, well, timepoint, metric_column(metric, channel), positions=layers.positions,
-                        anchors=layers.anchor)
+                        anchors=layers.anchor, cells=layers.cells)
     if scene.frame == "well" and image is not None and hasattr(image, "source"):
         # A plate placed from a scan pattern records no tile size; the tile store read it from the first image.
         width, height = image.source.tile_size_um

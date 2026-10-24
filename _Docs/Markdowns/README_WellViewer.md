@@ -223,8 +223,9 @@ LIVECell). All-Well installs Cellpose 4, which has only Cellpose-SAM: *cyto3* an
 Cellpose 3 is installed instead, and on Cellpose 4 the run stops on them with a message naming the model rather than
 counting with a different one. A model's weights are downloaded the first time it is used (about 1.2 GB for
 Cellpose-SAM), so the machine that runs the analysis needs internet access then. Cellpose-SAM is a large model: run
-it on a GPU. With the Torch All-Well installs it runs in full precision (float32) on every GPU; the log line
-`Cellpose cpsam on cuda:0 (…), float32` says which precision a run used. A run made before Cellpose-SAM was the default counted with *cyto3*, and its settings say so. Which counts your cells better depends on the
+it on a GPU. On a remote host bootstrapped with the Cellpose environment it runs in bfloat16 on a GPU that supports
+it, and in full precision (float32, with the GPU's faster TF32 maths) elsewhere; the log line
+`Cellpose cpsam on cuda:0 (…), TF32, bfloat16` says which a run used. A run made before Cellpose-SAM was the default counted with *cyto3*, and its settings say so. Which counts your cells better depends on the
 cells, so compare them on one well with **Test detection** before a plate-wide run: its crops show the outlines the
 run itself would count, cut from the whole tile segmented as the run segments it.
 
@@ -1477,7 +1478,14 @@ that has never run All-Well). Running bootstrap again on a host that is already
 set up checks for every package a run needs — TensorFlow, StarDist, Torch,
 Cellpose and the rest — and installs whatever is missing, so a host set up
 before Cellpose was part of the install picks it up on the next bootstrap. The
-log names the packages it found missing. A malformed `remotes.toml` never blocks the app —
+log names the packages it found missing. Bootstrap also installs a second
+environment, `allwell-cellpose`, with a newer Torch: Cellpose and nanowell runs use
+it, because only there can Cellpose-SAM run in the faster bfloat16 precision on a
+GPU that supports it (an A10G or L4, not a T4). A host bootstrapped before this
+keeps working — its Cellpose runs use the first environment, in full precision,
+and the run log says so — until you press Bootstrap again. If the bootstrap warns
+that the new environment's Torch cannot see the GPU, the host's NVIDIA driver is
+too old for it (525 or later is needed). A malformed `remotes.toml` never blocks the app —
 the run log carries a warning and the dropdown stays on `Local`. Inside the
 dialog, a file that cannot be read or parsed is reported in a message naming the
 error rather than leaving Edit…, Test and the list silently doing nothing.

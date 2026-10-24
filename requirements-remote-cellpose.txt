@@ -1,0 +1,37 @@
+# requirements-remote-cellpose.txt
+# ---------------------------------
+# The second conda env on a remote host, ``allwell-cellpose``, which Cellpose runs (the label-free methods and every
+# nanowell run) use when it is installed. The bootstrap (services/remote_bootstrap.py) creates it beside ``allwell``
+# and pip-installs this file into it.
+#
+# Why a second env: ``allwell`` holds TensorFlow 2.13 for StarDist, which caps typing-extensions below 4.6, and every
+# Torch from 2.2 needs at least 4.8 — so Torch there is held at 2.0.1. Torch 2.0's CUDA kernel for 1-D linear
+# upsampling has no bfloat16 version, and Segment Anything's encoder (Cellpose-SAM's) uses it, so on 2.0.1 the model
+# runs in float32 only (pipeline/cellpose.py: BF16_MIN_TORCH). StarDist and Cellpose never run in one process, and
+# the pipeline imports TensorFlow, StarDist and numba only inside StarDist's own functions, so this env holds no
+# TensorFlow and its Torch is free to move. On a GPU that computes in bfloat16 (an A10G or L4; not a T4) the model
+# then runs in it: about twice the matrix throughput of TF32 there, and half the memory.
+#
+# The scientific stack beneath (python 3.10.14, numpy 1.24, scipy, scikit-image, …) is the one the bootstrap's conda
+# create puts in both envs. The pins below match ``requirements-remote.txt`` where a package is in both, so a count
+# differs between the envs only by the model's arithmetic precision.
+
+# ── Image I/O ────────────────────────────────────────────────────────────────
+tifffile==2023.9.26
+imagecodecs==2023.9.18
+
+# ── Data analysis ────────────────────────────────────────────────────────────
+pandas==2.2.3
+
+# ── Cellpose ─────────────────────────────────────────────────────────────────
+# Torch 2.4.1's Linux wheels on PyPI are built for CUDA 12.1 and need an NVIDIA driver of 525 or later; on an older
+# driver Torch cannot see the GPU, and the bootstrap says so (it probes torch.cuda in this env). Cellpose stays at
+# 4.1.1, the release ``allwell`` has, so the model and its post-processing are the same in both envs.
+torch==2.4.1
+torchvision==0.19.1
+cellpose==4.1.1
+
+# ── TOML config (used by services/remote_config.py on Python 3.10) ───────────
+tomli ; python_version < "3.11"
+
+exceptiongroup<1.3

@@ -51,7 +51,7 @@ from services.remote_config import (
     RemoteHost,
     resolve_rsync_binary,
 )
-from services.remote_conda import _conda_env_selector, _conda_run_prefix_for
+from services.remote_conda import _conda_env_selector, _conda_run_prefix_for, cellpose_env_selector, describe_env
 from services import run_journal
 from util.aw_safe import swallow, swallowed
 # The run record and the line vocabulary every stage of a remote run shares.
@@ -728,8 +728,7 @@ class RemoteRunner:
         # Name the environment before the run starts. When it turns out not to
         # exist, the guard's error names the same thing, so the two lines read
         # as one story instead of a raw conda traceback out of nowhere.
-        kind, value = self.env_selector
-        log(f"[remote] conda env: {kind} {value}\n")
+        log(f"[remote] conda env: {describe_env(self.env_selector)}\n")
         if self._env_warning:
             log(f"[remote] warn: {self._env_warning}\n")
         log(
@@ -1081,6 +1080,7 @@ class RemoteRunner:
         # whose conda lives outside ``~/miniforge3``), we wrap with
         # ``conda run --no-capture-output -n allwell python`` — the
         # surrounding shell prefix in ``spawn`` sources conda.sh first.
+        self.env_selector = cellpose_env_selector(_conda_env_selector(self.host.remote_python)[0], local_argv)
         remote_script = f"{self.host.remote_project_dir}/process_microscopy.py"
         out = [*_conda_run_prefix_for(self.env_selector), "python", remote_script]
         i = 2  # skip the interpreter + script slots

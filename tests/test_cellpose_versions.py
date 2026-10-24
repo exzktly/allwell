@@ -43,6 +43,9 @@ def _install(monkeypatch, major: int, *, cuda: bool = True, bf16: bool = True, t
     torch = types.ModuleType("torch")
     torch.__version__ = torch_version
     torch.device = lambda spec: types.SimpleNamespace(type=spec.split(":")[0], spec=spec)
+    torch.backends = types.SimpleNamespace(cuda=types.SimpleNamespace(matmul=types.SimpleNamespace(allow_tf32=False)),
+                                           cudnn=types.SimpleNamespace(allow_tf32=False))
+    calls["torch"] = torch
     torch.cuda = types.SimpleNamespace(is_available=lambda: cuda, device_count=lambda: 1,
                                        get_device_name=lambda i: "GPU", is_bf16_supported=lambda: bf16)
     torch.version = types.SimpleNamespace(cuda="11.7" if cuda else None)
@@ -235,3 +238,19 @@ def test_a_gpu_and_torch_that_run_bfloat16_keep_it(monkeypatch):
     assert [b["use_bfloat16"] for b in calls["builds"]] == [True]
     assert cp._torch_at_least("2.0.1+cu117", (2, 1)) is False and cp._torch_at_least("2.1.0", (2, 1)) is True
     assert cp._torch_at_least("nightly", (2, 1)) is False
+
+
+@pytest.mark.parametrize("cuda", [True, False])
+def test_tf32_is_switched_on_for_a_model_on_a_gpu_and_said_in_the_load_line(monkeypatch, caplog, cuda):
+    """Asked for: Cellpose-SAM took about 10 min a well and timepoint on an A10G, in float32 on the pinned Torch,
+    whose matrix products leave the GPU's TF32 tensor cores off by default. A model on a GPU turns them on, and the
+    load line says so; on the CPU nothing changes."""
+    import logging
+
+    calls = _install(monkeypatch, 4, cuda=cuda)
+    with caplog.at_level(logging.INFO, logger="process_microscopy"):
+        cp._segment_cellpose(np.zeros((4, 4)), model_type="cpsam")
+    backends = calls["torch"].backends
+    assert backends.cuda.matmul.allow_tf32 is cuda and backends.cudnn.allow_tf32 is cuda
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Cellpose cpsam on"))
+    assert ("TF32" in line) is cuda and "float32" in line

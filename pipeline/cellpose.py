@@ -103,6 +103,8 @@ def _cellpose_model(model_type: str = DEFAULT_MODEL):
             raise CellposeUnavailable(f"Cellpose's {key} model cannot be used: {refusal}.")
         try:
             device, where = _cellpose_device()
+            if _allow_tf32(device):
+                where = f"{where}, TF32"
             if major is not None and major >= 4:
                 # bfloat16 halves the weights' memory, on a GPU that computes in it; elsewhere float32 (an older
                 # GPU without bfloat16, or the CPU, where it is slow).
@@ -182,6 +184,24 @@ class _CellposeChatter(logging.Filter):
 #: a GPU that offers bfloat16 (an Ampere card such as the A10G; a T4 does not) every image failed with
 #: "upsample_linear1d_out_frame" not implemented for 'BFloat16' — after the run had located every timepoint.
 BF16_MIN_TORCH = (2, 1)
+
+
+def _allow_tf32(device) -> bool:
+    """Let float32 matrix maths on a CUDA *device* use TF32 tensor cores; ``True`` when it was switched on.
+
+    Torch leaves them off for matrix products by default, so a model run in float32 — every Cellpose model on the
+    pinned Torch 2.0.1, and the fallback anywhere bfloat16 fails — ran on the GPU's plain float32 units: on an A10G
+    about half the throughput the same GPU gives in TF32. TF32 keeps float32's range and rounds products to a 10-bit
+    mantissa, which is far finer than a segmentation network's outputs need. A model built in bfloat16 is not
+    affected: its products are bfloat16. Process-wide, as the setting is; the pipeline's only Torch user is Cellpose.
+    """
+    if getattr(device, "type", None) != "cuda":
+        return False
+    import torch
+
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    return True
 
 
 def _torch_at_least(version: str, minimum: tuple[int, int]) -> bool:

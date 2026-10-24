@@ -43,6 +43,9 @@ OUTLINE_MIN_PX = 2.5
 OUTLINE_MAX_PX = 8.0
 #: The colour of an address written inside its outline: legible over any part of a greyscale montage.
 LABEL_COLOUR = Colors.brand_fg
+#: A counted cell's dot on the Array view: light with a dark rim, so it reads over a greyscale image and over any
+#: colour a nanowell is filled with, and is not mistaken for a state's colour.
+CELL_COLOUR, CELL_EDGE_COLOUR = Colors.ink_light, Colors.ink_dark
 
 
 def outline_width_px(diameter_px: float) -> float:

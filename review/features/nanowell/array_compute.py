@@ -26,7 +26,7 @@ import numpy as np
 
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import views_compute as vc
-from review.features.nanowell.collect import MEASURABLE
+from review.features.nanowell.collect import MEASURABLE, cell_positions
 from review.features.nanowell.image_compute import tile_boxes
 
 #: The states with a nanowell seen at its place, whatever its number: a timepoint with none of them has no
@@ -70,6 +70,8 @@ class ArrayScene:
     anchor_text: str = ""               # how the timepoint was addressed and what its anchor does
     anchorable: bool = False            # an anchor can change this timepoint's result (``ANCHORABLE``)
     record: list = field(default_factory=list)         # (text, kind): the grid record, kind head / flag / plain
+    cells: tuple | None = None          # (x, y) of each counted cell drawn, in the scene's frame; None = not read
+    cells_note: str = ""                # what the Cells layer drew, and what it could not
 
     def centre(self) -> int | None:
         """The index of the central nanowell, address ``(0, 0)``, among those drawn."""
@@ -105,10 +107,10 @@ def _labels(qs, rs) -> list[str]:
 
 
 def array_scene(metrics, data, well: str, timepoint: str, column: str, *, positions: str = "measured",
-                anchors: bool = True) -> ArrayScene:
+                anchors: bool = True, cells: bool = False) -> ArrayScene:
     """The Array view of *well* at *timepoint*, coloured by *column*, with its nanowells at their *positions*
     (``"measured"`` or ``"lattice"``). *anchors* off skips reading the anchors file (a batch figure, which draws
-    no anchor)."""
+    no anchor); *cells* on reads the well's counted cells for the Cells layer (:func:`cells_into`)."""
     rows = metrics[(metrics["well"] == well) & (metrics["timepoint"] == timepoint)]
     states = [str(s) for s in rows["state"]]
     counts: dict[str, int] = {}
@@ -154,7 +156,48 @@ def array_scene(metrics, data, well: str, timepoint: str, column: str, *, positi
     scene.record = record_lines(data.grids.get(well) or {}, timepoint)
     if frame == "well" and anchors:
         _anchor_into(scene, data, block)
+    if cells:
+        cells_into(scene, rows, data)
     return scene
+
+
+def cells_into(scene: ArrayScene, rows, data) -> None:
+    """The Cells layer: a dot at each counted cell's centre, from the run's cell table (the run keeps no outlines).
+
+    In the well frame a dot is where the run measured the cell. On the lattice it keeps its offset from its
+    nanowell's measured centre, added to that nanowell's lattice place, so it sits in the same spot of the same
+    nanowell; a cell whose nanowell has no address or no measured centre has no place there and is counted, not
+    drawn. What was drawn and what was not is :attr:`ArrayScene.cells_note`."""
+    found = cell_positions(data, scene.well, scene.timepoint)
+    if found is None:
+        scene.cells = (np.zeros(0), np.zeros(0))
+        scene.cells_note = (f"Cells: {scene.well}'s cell table holds no cell positions, so no cell is drawn."
+                            if scene.well in data.cell_tables else
+                            f"Cells: {scene.well} has no cell table, so no cell is drawn (a run that counted no "
+                            "cell, or one that could not count).")
+        return
+    x, y = found["well_x_um"].to_numpy(dtype=float), found["well_y_um"].to_numpy(dtype=float)
+    unplaced = 0
+    if scene.frame == "lattice":
+        centres = {(_int(q), _int(r)): (cx, cy) for q, r, cx, cy in
+                   zip(rows["nw_q"], rows["nw_r"], rows["well_x_um"], rows["well_y_um"])
+                   if np.isfinite(cx) and np.isfinite(cy)}
+        places = {(q, r): (scene.sites.x[k], scene.sites.y[k]) for k, (_w, q, r) in enumerate(scene.sites.sites)}
+        keep, lx, ly = [], [], []
+        for k, (q, r) in enumerate(zip(found["nw_q"], found["nw_r"])):
+            site = (_int(q), _int(r))
+            if site in centres and site in places:
+                keep.append(k)
+                lx.append(places[site][0] + x[k] - centres[site][0])
+                ly.append(places[site][1] + y[k] - centres[site][1])
+        unplaced = len(found) - len(keep)
+        x, y = np.asarray(lx, dtype=float), np.asarray(ly, dtype=float)
+    scene.cells = (x, y)
+    note = (f"Cells: a dot at the centre of each of the {len(x):,} cells the run counted here, from its cell table; "
+            "the run keeps no cell outlines.")
+    if unplaced:
+        note += f" {unplaced:,} more have no place on the lattice (their nanowell has no address or measured centre)."
+    scene.cells_note = note
 
 
 def _int(value):

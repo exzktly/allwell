@@ -780,14 +780,7 @@ def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: 
     finite = image[np.isfinite(image)]
     lowhigh = (tuple(float(v) for v in np.percentile(finite, SEGMENTER_PERCENTILES))
                if finite.size and getattr(segmenter, "accepts_range", False) else None)
-    windows = []
-    for g in geometries:
-        cx, cy = g.centre_um[0] / pixel_size_um - 0.5, g.centre_um[1] / pixel_size_um - 0.5
-        half = reach * g.radius_um / pixel_size_um
-        x0, x1 = max(int(math.floor(cx - half)), 0), min(int(math.ceil(cx + half)) + 1, w)
-        y0, y1 = max(int(math.floor(cy - half)), 0), min(int(math.ceil(cy + half)) + 1, h)
-        if x1 > x0 and y1 > y0:
-            windows.append((slice(y0, y1), slice(x0, x1)))
+    windows = [win for g in geometries if (win := crop_window(g, pixel_size_um, (h, w), reach)) is not None]
     many = getattr(segmenter, "segment_many", None) if lowhigh is not None else None
     batch = CROP_BATCH if many is not None else 1
     out = np.zeros((h, w), dtype=np.int64)
@@ -811,6 +804,17 @@ def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: 
             if on_site is not None:
                 on_site()
     return out
+
+
+def crop_window(g, pixel_size_um: float, shape, reach: float = CROP_REACH) -> tuple[slice, slice] | None:
+    """The ``(rows, cols)`` of a tile of *shape* that :func:`segment_sites` crops around site *g*, clipped to the
+    tile; ``None`` when nothing of it is inside."""
+    h, w = shape
+    cx, cy = g.centre_um[0] / pixel_size_um - 0.5, g.centre_um[1] / pixel_size_um - 0.5
+    half = reach * g.radius_um / pixel_size_um
+    x0, x1 = max(int(math.floor(cx - half)), 0), min(int(math.ceil(cx + half)) + 1, w)
+    y0, y1 = max(int(math.floor(cy - half)), 0), min(int(math.ceil(cy + half)) + 1, h)
+    return (slice(y0, y1), slice(x0, x1)) if x1 > x0 and y1 > y0 else None
 
 
 def segment_tile(rim_image, segmenter) -> np.ndarray:

@@ -163,3 +163,53 @@ def test_each_count_line_after_the_first_says_how_long_a_nanowell_takes_and_what
     reader = ProgressTracker()
     assert [p for line in seen for k, p in reader.parse(line) if k == "well_sites"] == [
         ("C03", "24h", 0, 400), ("C03", "24h", 40, 400), ("C03", "24h", 400, 400)]
+
+
+def test_a_count_line_splits_a_nanowell_s_time_between_cellpose_s_network_its_masks_and_the_rest(monkeypatch):
+    """Reported: batching the crops left a well's time "exactly the same". Whether the network is where the time goes
+    is a number Cellpose itself reports per call; the count's lines give it per nanowell beside the total."""
+    import logging
+
+    from pipeline import cellpose as cp
+    from pipeline.nanowell_task import _log_sites
+
+    seen = []
+
+    class Collect(logging.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+
+    handler = Collect()
+    logger = logging.getLogger("allwell.nanowell")
+    logger.addHandler(handler)
+    old = logger.level
+    logger.setLevel(logging.INFO)
+    monkeypatch.setattr(cp, "CELLPOSE_SECONDS", {"network": 100.0, "masks": 50.0})   # an earlier timepoint's
+    times = iter([0.0, 240.0])
+    try:
+        _log_sites("D04", "0h", 0, 1000, clock=lambda: next(times))
+        cp.CELLPOSE_SECONDS["network"] += 20.0
+        cp.CELLPOSE_SECONDS["masks"] += 200.0
+        _log_sites("D04", "0h", 100, 1000, clock=lambda: next(times))
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(old)
+    assert seen[1] == ("Well D04 — 0h: 100/1000 nanowells segmented (2.4 s each, about 36 min 0 s left; per "
+                       "nanowell, Cellpose's network 0.20 s, its masks 2.00 s)")
+
+
+def test_before_a_timepoint_is_measured_the_run_says_the_scale_cellpose_sees_it_at():
+    """A count that finds nothing can be at a scale where a cell is a few pixels or a nanowell fills the network's
+    tile; the run log now says which, from the timepoint's pixel size and the count's cell diameter."""
+    from types import SimpleNamespace
+
+    from pipeline import nanowell_run as nr
+
+    located = SimpleNamespace(timepoint="24h", pixel_size_um=0.65, diameter_um=None)
+    crops = nr.NanowellSettings("100um", cell_diameter_um=10.0, cellpose_model="cpsam", segment_scope="nanowells")
+    assert nr.cellpose_scale_text(located, crops) == (
+        "24h: Cellpose cpsam at 0.65 um/px — a cell of 10 um is 15.4 px, so Cellpose resizes each image x1.95; "
+        f"a nanowell's crop is {1.2 * crops.diameter_um / 0.65:.0f} px, "
+        f"{1.2 * crops.diameter_um / 0.65 * 30 / (10 / 0.65):.0f} px as the network sees it")
+    tile = nr.NanowellSettings("100um", cell_diameter_um=10.0, cellpose_model="cpsam", segment_scope="tile")
+    assert nr.cellpose_scale_text(located, tile).endswith("resizes each image x1.95")

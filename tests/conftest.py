@@ -992,6 +992,7 @@ NANOWELL_E2E_FILES = {
     "test_nanowell_tile_brightness.py": "tiles of different gain and offset, and a misread surround, measure alike; 105 s",
     "test_nanowell_real_plate.py": "tracker section F: the real plate's geometry on rendered tiles; 20 s",
     "test_nanowell_manual_anchor_run.py": "an anchor set by hand addresses a well end to end; 40 s",
+    "test_nanowell_segmenter_input_sheet.py": "a run writes the sample of what its segmenter was given; 8 s",
 }
 
 

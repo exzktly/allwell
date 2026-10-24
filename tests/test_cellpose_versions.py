@@ -139,11 +139,17 @@ def test_loading_a_model_quiets_cellpose_s_bare_no_cell_line(monkeypatch):
     try:
         _install(monkeypatch, 4)
         cp._segment_cellpose(np.zeros((4, 4)), model_type="cpsam")
-        for lg in loggers:
+        for lg in loggers[::2]:                             # dynamics, core: INFO is not even made
             assert not lg.isEnabledFor(logging.INFO) and lg.isEnabledFor(logging.WARNING), lg.name
 
-        def passes(name, msg):
-            return logging.getLogger(name).filter(logging.LogRecord(name, logging.WARNING, "", 0, msg, None, None))
+        def passes(name, msg, level=logging.WARNING):
+            return logging.getLogger(name).filter(logging.LogRecord(name, level, "", 0, msg, None, None))
+        # models' INFO is made, so its two timing lines are counted, and no INFO line of it is printed.
+        monkeypatch.setattr(cp, "CELLPOSE_SECONDS", {"network": 1.0, "masks": 0.0})
+        assert not passes("cellpose.models", "network run in 2.50s", logging.INFO)
+        assert not passes("cellpose.models", "masks created in 0.45s", logging.INFO)
+        assert not passes("cellpose.models", ">>>> loading model cpsam", logging.INFO)
+        assert cp.CELLPOSE_SECONDS == pytest.approx({"network": 3.5, "masks": 0.45})
         # The two warnings a batch of crops makes as a matter of course are dropped; any other still passes.
         assert not passes("cellpose.models", "3D stack used, but stitch_threshold=0 and do_3D=False, so masks are "
                           "made per plane only")

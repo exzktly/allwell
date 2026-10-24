@@ -218,7 +218,12 @@ def populated(home, monkeypatch):
         "young_unowned": _write(app / "tmp" / "allwell_batch_nodisk_c" / "f.png", 3000),
         "old_unowned": _write(app / "tmp" / "allwell_batch_nodisk_d" / "f.png", 2000),
         # runs' files and the user's records, in the same folder: never offered
+        # the run scratch: a live run's staging (just written), an idle one
+        # (offered), and one whose folder looks old but has a fresh file deep
+        # inside it — a run writing there, so not offered
         "scratch": _write(app / "scratch" / "_tmp_images_x" / ".fov_1.done", 9000),
+        "idle_scratch": _write(app / "scratch" / "_tmp_extract_B02" / "sub" / "img.tif", 1500),
+        "deep_live_scratch": _write(app / "scratch" / "_tmp_extract_C03" / "sub" / "img.tif", 800),
         "suspended": _write(app / "suspended_runs.json", 50),
         "scan": _write(app / "czi-scans" / "k" / "scan.json", 8000),
         "remotes": _write(app / "remotes.toml", 30),
@@ -239,6 +244,10 @@ def populated(home, monkeypatch):
                      ("legacy_spill", _dead_pid())):
         (files[key].parent / "owner.pid").write_text(f"{pid:010d}\n")
     _age(files["old_unowned"].parent, 2 * ls.UNOWNED_GRACE_S)
+    for p in (files["idle_scratch"], files["idle_scratch"].parent, files["idle_scratch"].parent.parent):
+        _age(p, 2 * ls.UNOWNED_GRACE_S)
+    for p in (files["deep_live_scratch"].parent, files["deep_live_scratch"].parent.parent):
+        _age(p, 2 * ls.UNOWNED_GRACE_S)
     _age(files["bootstrap"], 2 * ls.LIVE_LOG_GRACE_S)
     _age(files["bootstrap_recent"], ls.LIVE_LOG_GRACE_S / 3)
     return files
@@ -262,10 +271,15 @@ def test_each_area_offers_exactly_what_may_go(populated, home):
         "logs": {f["boot1"], f["bootstrap"]},
         "legacy": {f["legacy_boot"], f["legacy_fonts"].parent, f["legacy_scan"].parent.parent,
                    f["legacy_spill"].parent, f["repo_fonts"].parent},
+        "scratch": {f["idle_scratch"].parent.parent},
         "rows": {f["rows"].parent},
     }
-    # The row cache is offered unticked: clearing it slows the next open.
-    assert [a.key for a in ls.cache_areas(home / "plate") if not a.default_on] == ["rows"]
+    # The row cache and the run scratch are offered unticked: one slows the
+    # next open, the other costs a suspended run its progress.
+    areas = ls.cache_areas(home / "plate")
+    assert [a.key for a in areas if not a.default_on] == ["scratch", "rows"]
+    # Only the scratch asks first.
+    assert [a.key for a in areas if a.confirm] == ["scratch"]
     # No dataset open, no row cache area.
     assert "rows" not in _offered(ls.cache_areas(None))
 
@@ -275,13 +289,14 @@ def test_clearing_everything_frees_exactly_that_and_spares_the_rest(populated, h
     areas = ls.cache_areas(home / "plate")
     sizes = ls.measure(areas)
     assert sizes == {"fonts": 1000, "temp": 7000 + OWNER_BYTES, "logs": 500,
-                     "legacy": 2000 + OWNER_BYTES, "rows": 6000}
+                     "legacy": 2000 + OWNER_BYTES, "scratch": 1500, "rows": 6000}
     result = ls.clear(areas)
     assert result.freed == sum(sizes.values()) and result.failed == []
     gone = ("fonts", "boot1", "bootstrap", "dead_spill", "old_unowned",
-            "legacy_boot", "legacy_fonts", "legacy_scan", "legacy_spill", "repo_fonts", "rows")
+            "legacy_boot", "legacy_fonts", "legacy_scan", "legacy_spill", "repo_fonts", "rows",
+            "idle_scratch")
     kept = ("boot", "bootstrap_recent", "bootstrap_new", "live_spill", "young_unowned",
-            "scratch", "suspended", "scan", "remotes", "queue", "settings", "csv")
+            "scratch", "deep_live_scratch", "suspended", "scan", "remotes", "queue", "settings", "csv")
     assert [k for k in gone if f[k].exists()] == []
     assert [k for k in kept if not f[k].exists()] == []
     assert not f["rows"].parent.exists() and not f["dead_spill"].parent.exists()
@@ -492,3 +507,92 @@ def test_the_newest_bootstrap_log_is_kept_however_old(home):
     _age(older, 5 * ls.LIVE_LOG_GRACE_S)
     _age(newest, 4 * ls.LIVE_LOG_GRACE_S)
     assert _offered(ls.cache_areas(None))["logs"] == {older}
+
+
+# ── the run scratch: offered, but only with a warning accepted ──────────────
+
+def _scratch_dialog(home, qtbot, *, run_active=lambda: False):
+    from ui.local_storage_view import StorageDialog
+
+    dialog = StorageDialog(None, dataset_dir=home / "plate", run_active=run_active)
+    qtbot.addWidget(dialog)
+    qtbot.waitUntil(lambda: "scratch" in dialog._boxes and not dialog._working, timeout=10_000)
+    for key, box in dialog._boxes.items():
+        box.setChecked(key == "scratch")
+    return dialog
+
+
+@pytest.mark.qt
+def test_the_scratch_row_is_unticked_and_carries_its_warning(populated, home, qtbot):
+    from PySide6.QtWidgets import QLabel
+    from ui.local_storage_view import StorageDialog
+
+    dialog = StorageDialog(None, dataset_dir=home / "plate")
+    qtbot.addWidget(dialog)
+    qtbot.waitUntil(lambda: "scratch" in dialog._boxes and not dialog._working, timeout=10_000)
+    assert "scratch" not in dialog.selected_keys()
+    row = dialog._boxes["scratch"].parentWidget()
+    warnings = [w.text() for w in row.findChildren(QLabel) if w.objectName() == "Warn"]
+    assert warnings == ["⚠ Clearing the Analyze run scratch deletes the extracted images "
+                        "and per-field checkpoints that suspended and interrupted runs "
+                        "resume from."]
+    # No other row warns.
+    others = [w for k, b in dialog._boxes.items() if k != "scratch"
+              for w in b.parentWidget().findChildren(QLabel) if w.objectName() == "Warn"]
+    assert others == []
+
+
+@pytest.mark.qt
+def test_declining_the_scratch_warning_clears_nothing(populated, home, qtbot, monkeypatch):
+    dialog = _scratch_dialog(home, qtbot)
+    asked = []
+    monkeypatch.setattr(dialog, "_confirm", lambda area: asked.append(area.key) or False)
+    dialog._clear_btn.click()
+    assert asked == ["scratch"]
+    assert dialog.last_result is None and not dialog._working
+    assert populated["idle_scratch"].exists()
+
+
+@pytest.mark.qt
+def test_accepting_the_scratch_warning_clears_only_the_idle_scratch(populated, home, qtbot,
+                                                                    monkeypatch):
+    dialog = _scratch_dialog(home, qtbot)
+    monkeypatch.setattr(dialog, "_confirm", lambda area: True)
+    dialog._clear_btn.click()
+    qtbot.waitUntil(lambda: dialog.last_result is not None, timeout=10_000)
+    assert dialog.last_result.freed == 1500
+    assert not populated["idle_scratch"].parent.parent.exists()
+    assert populated["scratch"].exists() and populated["deep_live_scratch"].exists()
+    assert populated["dead_spill"].exists(), "an unticked area was cleared with the scratch"
+
+
+@pytest.mark.qt
+def test_the_scratch_is_not_cleared_while_an_analyze_run_is_going(populated, home, qtbot,
+                                                                 monkeypatch):
+    dialog = _scratch_dialog(home, qtbot, run_active=lambda: True)
+    asked = []
+    monkeypatch.setattr(dialog, "_confirm", lambda area: asked.append(area.key) or True)
+    dialog._clear_btn.click()
+    assert asked == [], "the user was asked to accept a clear that cannot happen"
+    assert dialog.last_result is None
+    assert dialog._status.text().startswith("An Analyze run is going")
+    assert populated["idle_scratch"].exists()
+
+
+@pytest.mark.qt
+def test_the_scratch_warning_defaults_to_cancel(populated, home, qtbot, monkeypatch):
+    """The real question, with the box's own default taken: Cancel."""
+    from PySide6.QtWidgets import QMessageBox
+
+    seen = {}
+
+    def warning(parent, title, text, buttons, default):
+        seen.update(title=title, text=text, default=default)
+        return default
+
+    monkeypatch.setattr(QMessageBox, "warning", warning)
+    dialog = _scratch_dialog(home, qtbot)
+    dialog._clear_btn.click()
+    assert seen["default"] == QMessageBox.Cancel
+    assert seen["text"] == ls.SCRATCH_WARNING
+    assert dialog.last_result is None and populated["idle_scratch"].exists()

@@ -53,7 +53,8 @@ MEASURABLE = frozenset({MEASURED, EMPTY})
 
 _BOOL_COLUMNS = ("detected", "fused", "partially_visible", "count_disagreement")
 _NUMERIC_COLUMNS = ("nw_q", "nw_r", "nw_ring", "well_x_um", "well_y_um", "radius_um", "imaged_fraction",
-                    "visible_fraction", "focus", "n_cells", "confluence", "area_est_cells")
+                    "visible_fraction", "focus", "n_cells", "confluence", "area_est_cells",
+                    "level_offset", "level_gain", "segmenter_floor", "segmenter_contrast")
 
 
 class NanowellSchemeError(ValueError):

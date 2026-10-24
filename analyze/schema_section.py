@@ -66,7 +66,7 @@ class AnalyzeSchemaSectionMixin:
         # first ten seconds that the feature does not work. The Zip Loose
         # Folder page has always carried the equivalent line.
         self._schema_picker.setDetection(
-            "Pick an input folder below, then detect its layout from the "
+            "Pick an input folder above, then detect its layout from the "
             "filenames.")
 
         # Run-time detection: the same scan the button above makes, made again
@@ -163,7 +163,7 @@ class AnalyzeSchemaSectionMixin:
             self._input_edit.setEnabled(schema_valid)
             self._browse_btn.setEnabled(schema_valid)
         if hasattr(self, "_folder_lock_lbl"):
-            self._folder_lock_lbl.setText("" if schema_valid else "Define the filename schema above first.")
+            self._folder_lock_lbl.setText("" if schema_valid else "Define the filename schema below first.")
 
         if errors:
             self._schema_err_lbl.setText("  ".join(errors))

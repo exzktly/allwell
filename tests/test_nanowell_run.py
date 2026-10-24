@@ -96,6 +96,13 @@ def test_every_roster_site_has_a_row_with_its_address_and_the_cell_painted_into_
     assert (measured.cells["nw_ring"][0]) == nr.hex_ring(*target)
     assert np.hypot(measured.cells["well_x_um"][0] - truth[target][0], measured.cells["well_y_um"][0] - truth[target][1]) < 10
     assert measured.cells["fov"][0] in {"F0", "F1", "F2", "F3"}
+    # Each row says how its site was levelled and how the segmenter saw it: the run's own level, and the one site
+    # holding a cell reaching the segmenter at more contrast than any empty one.
+    index = measured.sites.index(rows[target])
+    assert (rows[target]["level_offset"], rows[target]["level_gain"]) == pytest.approx(measured.levels[index])
+    empty_contrasts = [r["segmenter_contrast"] for r in others]
+    assert None not in empty_contrasts and rows[target]["segmenter_contrast"] > max(empty_contrasts)
+    assert all(r["segmenter_floor"] is not None for r in others)
 
 
 def test_a_cell_in_the_overlap_of_two_tiles_is_counted_by_one_row_only():

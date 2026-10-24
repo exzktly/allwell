@@ -11,7 +11,12 @@ is rebuilt — into two views, picked from the page button (``PhoneShell``):
 
 * **Settings** — the run dashboard reduced to its headline and overall bar
   (``PlateProgress.setCompact``), then the form, filling the page;
-* **Progress** — the full dashboard (stacked) and the log.
+* **Progress** — the full dashboard (stacked) and the log, in a scroll area.
+  At full phone width the plate alone is ~540 px tall, so on a short screen
+  the dashboard and log need more height than the page has. Without the scroll
+  area the column was squeezed below its minimum: the dashboard was cut short
+  and the log painted over the lower half of the plate, with no way to reach
+  it. Scrolled, the plate keeps its size and the log follows it.
 
 The run controls (Run, Suspend, + Queue, Stop) leave the foot of the form for
 a bar along the bottom of the pane, in reach in both views. A run starting
@@ -27,7 +32,7 @@ pane).
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtWidgets import QSizePolicy, QSplitter, QWidget
+from PySide6.QtWidgets import QFrame, QScrollArea, QSizePolicy, QSplitter, QWidget
 
 from core import phone_layout
 from core.panes import PANEL_IS_PAGE
@@ -64,6 +69,18 @@ class AnalyzePhoneView:
         self._on = False
         self._view = SETTINGS
         self._home: dict | None = None
+        # Holds the run column in the Progress view (see the module docstring).
+        # Settings keeps the column directly in the splitter, sized to the
+        # strip as before: a scroll area there would need a pinned height, and
+        # the strip's height is only known after the shell's phone restyle.
+        # Built up front, as the pane's child, so the shell's drag-to-scroll
+        # sweep (``swipe_roots``) finds it like the form's own scroll area.
+        self._scroll = QScrollArea(tab)
+        self._scroll.setObjectName("PhoneRunScroll")
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.hide()
         stop = getattr(tab, "_stop_btn", None)
         if stop is not None:
             stop.installEventFilter(_RunStartWatcher(stop, self))
@@ -90,6 +107,11 @@ class AnalyzePhoneView:
 
     # ── the parts ──────────────────────────────────────────────────────────
     def _parts(self) -> tuple[QWidget, QSplitter, QWidget | None, QWidget] | None:
+        """The form, the splitter, the run column and the run row.
+
+        In the Progress view the splitter holds the scroll area rather than
+        the run column; the column returned is still the one inside it.
+        """
         tab = self._tab
         form = tab._left_sidebar
         splitter = form.parentWidget()
@@ -97,8 +119,31 @@ class AnalyzePhoneView:
             return None
         right = next((splitter.widget(i) for i in range(splitter.count())
                       if splitter.widget(i) is not form), None)
+        if right is self._scroll:
+            right = self._scroll.widget()
         run_row = tab._run_btn.parentWidget()
         return form, splitter, right, run_row
+
+    def _mount(self, splitter: QSplitter, right: QWidget, scrolled: bool) -> None:
+        """Put the run column first in *splitter*: inside the scroll area when
+        *scrolled*, directly otherwise. A no-op when it is already there."""
+        if scrolled:
+            if self._scroll.widget() is not right:
+                splitter.replaceWidget(splitter.indexOf(right), self._scroll)
+                self._scroll.setWidget(right)
+            right.show()
+            self._scroll.show()
+            splitter.insertWidget(0, self._scroll)
+            return
+        if self._scroll.widget() is right:
+            # Out of the scroll area first, so the splitter takes back a free
+            # widget rather than one the scroll area still owns.
+            self._scroll.takeWidget()
+            splitter.replaceWidget(splitter.indexOf(self._scroll), right)
+            self._scroll.setParent(self._tab)
+            self._scroll.hide()
+            right.show()
+        splitter.insertWidget(0, right)
 
     def _on_layout(self, on: bool) -> None:
         try:
@@ -143,6 +188,7 @@ class AnalyzePhoneView:
         home, self._home = self._home, None
         self._on = False
         right.setMaximumHeight(_QWIDGETSIZE_MAX)
+        self._mount(splitter, right, scrolled=False)
         self._tab._dashboard.setCompact(False)
         form.setProperty(PANEL_IS_PAGE, None)
         form.setVisible(True)
@@ -170,6 +216,7 @@ class AnalyzePhoneView:
         form, splitter, right, _run_row = parts
         tab = self._tab
         settings = self._view == SETTINGS
+        self._mount(splitter, right, scrolled=not settings)
         form.setVisible(settings)
         tab._dashboard.setCompact(settings)
         if settings:

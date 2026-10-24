@@ -28,8 +28,9 @@ falls back to the system temp folder when it cannot be
 written (Windows tries ``~/.allwell`` first). ``ALLWELL_STATE_DIR``, when set,
 replaces all of that — the test harness points it at a per-worker scratch
 folder so no test writes into the real one. The app's caches are cleared from
-the title bar's storage button (``core.local_storage``); the scratch, the scan
-cache and the four records are never offered there.
+the title bar's storage button (``core.local_storage``), which offers the
+scratch only behind a warning; the scan cache and the four records are never
+offered there.
 
 **A remote host keeps its own folders.** The scratch and the scan cache follow
 this layout only in the desktop app and the processes it starts on this machine
@@ -56,9 +57,11 @@ folder beside the CSVs it caches, so it travels and is deleted with its dataset.
 **Scratch on Windows.** The scratch holds gigabytes of transient files, and
 ``%LOCALAPPDATA%`` is the part of a profile that is never roamed, so the move
 out of ``%USERPROFILE%\\.allwell`` is also the right volume class. The storage
-button never clears the scratch in use (a suspended run resumes from its
-checkpoints); it only offers the old ``~/.allwell/scratch`` on Windows, which
-nothing reads any more (:func:`legacy_scratch_dir`).
+button offers the scratch only unticked, behind a warning the user must accept,
+and never while an Analyze run is going or for anything written to in the last
+hour (a suspended run resumes from its checkpoints; ``core.local_storage``). It
+also offers the old ``~/.allwell/scratch`` on Windows, which nothing reads any
+more (:func:`legacy_scratch_dir`).
 
 Stdlib-only and Qt-free: ``startup.boot_diag`` imports it before PySide6, and
 ``util/`` is shipped to the remote worker.

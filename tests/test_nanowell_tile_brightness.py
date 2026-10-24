@@ -1,4 +1,4 @@
-"""Tiles of different brightness and offset measure the same nanowells the same way (MEASURE_VERSION 2).
+"""Tiles of different brightness and offset, and one nanowell's misread surround, measure alike (MEASURE_VERSION 5).
 
 Reported: 1,472 nanowells found and 17 with a confluence value. Rendered here as a 3x3-tile well whose tiles differ
 by a gain step and an additive offset, as real tiles do: before, the empty nanowells — chosen as the least textured on
@@ -57,7 +57,7 @@ def test_every_seen_nanowell_has_a_confluence_and_it_does_not_depend_on_the_tile
     assert {k: (sites[k]["state"], sites[k]["n_cells"]) for k in seen} == \
         {k: (reference[k]["state"], reference[k]["n_cells"]) for k in seen}
     block = measured.template["normalisation"]
-    assert block["measure_version"] == 4 and block["offset"] == "per nanowell" and block["tiles_without_gain"] == []
+    assert block["measure_version"] == 5 and block["offset"] == "per nanowell" and block["tiles_without_gain"] == []
 
 
 def test_empty_nanowells_read_empty_and_loaded_ones_textured_on_every_tile(well):
@@ -137,3 +137,73 @@ def test_the_run_counts_with_the_model_its_settings_name(well, monkeypatch):
     radius, roster = nr.own_array_model(located, settings)
     nr.measure_timepoint(located, base, settings, radius, roster=roster)
     assert asked and set(asked) == {"livecell_cp3"}
+
+
+
+#: The misread-surround cases render at 2 um per pixel, where a 10 um cell is five pixels across (at the fixture's
+#: 4.3 um a cell is two pixels and twenty of them do not stay apart in a 100 um nanowell).
+FINE_PX = 2.0
+
+
+def _fine_well():
+    from tests._nanowell_run_fixture import DIAMETER, PITCH, record_for
+    from tests._nanowell_synth import TilePlan, render_tiles
+
+    tile = int(round(700 * 4.3 / FINE_PX))
+    plan = TilePlan(2, 2, (tile, tile), 0.1, FINE_PX)
+    extent = (plan.step_um[0] + plan.extent_um[0], plan.step_um[1] + plan.extent_um[1])
+    rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=0.26 * min(extent),
+                            rotation_deg=7.0, noise_sigma=0.05, blur_px=1.0 * 4.3 / FINE_PX, seed=1)
+    return rendered, record_for(rendered)
+
+
+def _disk_add(rendered, centre_um, outer_um, amount, inner_um=-1.0):
+    """Add *amount* between *inner_um* and *outer_um* of *centre_um*, on every tile that sees it."""
+    for name, image in rendered.images.items():
+        left, top = rendered.true_left_top_um[name]
+        yy, xx = np.mgrid[0:image.shape[0], 0:image.shape[1]]
+        r = np.hypot((xx + 0.5) * FINE_PX + left - centre_um[0], (yy + 0.5) * FINE_PX + top - centre_um[1])
+        image[(r > inner_um) & (r <= outer_um)] += amount
+
+
+def _loaded_pair(surround=0.0):
+    """Two neighbouring nanowells holding the same twenty well-separated 10 um cells, the first with its surround
+    (the lattice ring 62-100 um from its centre) read *surround* brighter, as debris or a halo there would."""
+    rendered, record = _fine_well()
+    truth = dict(zip(rendered.array.addresses, rendered.sites_um))
+    rng = np.random.default_rng(3)
+    cells = []
+    while len(cells) < 20:
+        p = rng.uniform(-38, 38, 2)
+        if np.hypot(*p) < 38 and all(np.hypot(*(p - q)) > 14 for q in cells):
+            cells.append(p)
+    pair = [(1, 2), (2, 2)]
+    for address in pair:
+        for p in cells:
+            _disk_add(rendered, np.asarray(truth[address]) + p, 5.0, 0.5)
+    if surround:
+        _disk_add(rendered, truth[pair[0]], 100.0, surround, inner_um=62.0)
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    measured = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
+                                    segmenter=threshold_segmenter(level=1.2, smooth=1.0, min_px=6))
+    rows = {(r["nw_q"], r["nw_r"]): r for r in measured.sites}
+    return [rows[a] for a in pair]
+
+@pytest.fixture(scope="module")
+def clean_pair():
+    return _loaded_pair()
+
+
+@pytest.mark.parametrize("surround", [0.12, -0.08])
+def test_one_nanowell_s_misread_surround_does_not_move_its_floor_or_lose_its_cells(clean_pair, surround):
+    """Reported: neighbouring nanowells with similar cells and brightness get wildly different counts, down to
+    twenty visible cells counted as zero. A nanowell's offset came from its own surround alone, so one misread ring
+    moved that nanowell's floor and nothing else: +0.12 put it below the flat level between sites (segmenter floor
+    -0.11 against its neighbour's 0.75) and -0.08 lost 6 of its 20 cells even to this stand-in segmenter. Its offset
+    is now its neighbours' median, as its gain already was."""
+    clean, _ = clean_pair
+    misread, neighbour = _loaded_pair(surround)
+    assert clean["n_cells"] == neighbour["n_cells"] == 20                      # the fixture's premise
+    assert misread["n_cells"] == 20
+    assert misread["level_offset"] == pytest.approx(clean["level_offset"], abs=0.01)
+    assert misread["segmenter_floor"] == pytest.approx(clean["segmenter_floor"], abs=0.1)

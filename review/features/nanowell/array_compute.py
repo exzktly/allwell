@@ -26,7 +26,7 @@ import numpy as np
 
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import views_compute as vc
-from review.features.nanowell.collect import MEASURABLE
+from review.features.nanowell.collect import MEASURABLE, cell_positions
 from review.features.nanowell.image_compute import tile_boxes
 
 #: The states with a nanowell seen at its place, whatever its number: a timepoint with none of them has no
@@ -168,8 +168,6 @@ def cells_into(scene: ArrayScene, rows, data) -> None:
     nanowell's measured centre, added to that nanowell's lattice place, so it sits in the same spot of the same
     nanowell; a cell whose nanowell has no address or no measured centre has no place there and is counted, not
     drawn. What was drawn and what was not is :attr:`ArrayScene.cells_note`."""
-    from review.features.nanowell.collect import cell_positions
-
     found = cell_positions(data, scene.well, scene.timepoint)
     if found is None:
         scene.cells = (np.zeros(0), np.zeros(0))

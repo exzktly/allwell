@@ -128,6 +128,9 @@ def _fake_torch(*, cuda: bool, count: int = 1, built_for="11.7"):
         is_available=lambda: cuda, device_count=lambda: count,
         get_device_name=lambda i: f"NVIDIA A100 #{i}")
     t.version = types.SimpleNamespace(cuda=built_for)
+    # Every Torch has these; the model load sets the TF32 flags on a GPU (pipeline.cellpose._allow_tf32).
+    t.backends = types.SimpleNamespace(cuda=types.SimpleNamespace(matmul=types.SimpleNamespace(allow_tf32=False)),
+                                       cudnn=types.SimpleNamespace(allow_tf32=False))
     return t
 
 

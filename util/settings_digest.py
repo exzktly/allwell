@@ -199,6 +199,13 @@ NOT_KEYED_ON: dict[str, str] = {
 
 #: The keys that describe a nanowell run, and only a nanowell run (:func:`settings_digest`).
 _NANOWELL_PREFIX = "nanowell_"
+#: The keys that describe a Cellpose segmentation, and only one: they count when ``segmentation_method`` is one of
+#: :data:`CELLPOSE_METHODS` (``process_microscopy._CELLPOSE_METHODS``; a test holds the two equal). Their parser
+#: defaults sit in every run's options, so keyed on a StarDist run they changed its digest whenever a Cellpose
+#: default moved — the change of the default model to cpsam would have read every StarDist plate as recorded under
+#: other settings.
+_CELLPOSE_PREFIX = "cellpose_"
+CELLPOSE_METHODS = ("cellpose", "cellpose_labelfree")
 
 
 def settings_digest(opts) -> str:
@@ -213,7 +220,25 @@ def settings_digest(opts) -> str:
     Returns ``""`` when *opts* sets none of them, which a caller must read as
     "unknown", never as "matches".
     """
-    return _digest(opts, KEYED_ON, skip_nanowell_outside_mode=True)
+    return _digest(opts, KEYED_ON, skip_nanowell_outside_mode=True, skip_cellpose_outside_method=True)
+
+
+def _before_cpsam(opts) -> dict:
+    """*opts* as a build from before Cellpose-SAM became the default recorded the same configuration: the parser's
+    ``cellpose_model`` default was cyto3, and a nanowell run's cyto3 was sent as no ``nanowell_cellpose_model`` at
+    all. Only where the two describe the same work: a run that segments with Cellpose keeps its model (cyto3 then
+    and cpsam now are different counts), and a nanowell run keeps any model but cyto3."""
+    out = dict(opts)
+    try:
+        method = opts.get("segmentation_method")
+        nanowell = bool(opts.get("nanowell_format"))
+    except AttributeError:
+        return out
+    if "cellpose_model" in out and method not in CELLPOSE_METHODS:
+        out["cellpose_model"] = "cyto3"
+    if "nanowell_cellpose_model" in out and (not nanowell or out["nanowell_cellpose_model"] == "cyto3"):
+        out["nanowell_cellpose_model"] = None
+    return out
 
 
 #: The ways earlier builds computed :func:`settings_digest`, newest first. Each is a change to the *definition*
@@ -221,9 +246,14 @@ def settings_digest(opts) -> str:
 #: recorded under other settings — its finished wells re-run, its half-finished wells' checkpoints refused — though
 #: nothing it computes differs. Each entry says what the earlier definition did differently.
 _EARLIER_DEFINITIONS: tuple[dict, ...] = (
+    # Before the Cellpose options stopped counting outside a Cellpose segmentation, and while cyto3 was the default
+    # model (:func:`_before_cpsam`).
+    {"skip_nanowell_outside_mode": True, "without": frozenset(), "skip_cellpose_outside_method": False,
+     "as_recorded": _before_cpsam},
     # Before the nanowell options stopped counting outside nanowell mode, and before ``nanowell_geometry``
-    # existed. Their parser defaults were hashed into every run's digest.
-    {"skip_nanowell_outside_mode": False, "without": frozenset({"nanowell_geometry"})},
+    # existed. Their parser defaults were hashed into every run's digest — cyto3's among them.
+    {"skip_nanowell_outside_mode": False, "without": frozenset({"nanowell_geometry"}),
+     "skip_cellpose_outside_method": False, "as_recorded": _before_cpsam},
 )
 
 #: Joins a settings key's current digest to the digests earlier builds would have recorded for the same options
@@ -251,8 +281,9 @@ def legacy_settings_digests(opts) -> tuple[str, ...]:
     found = []
     for variant in variants:
         digests = [] if variant is opts else [settings_digest(variant)]
-        digests += [_digest(variant, KEYED_ON.keys() - definition["without"],
-                            skip_nanowell_outside_mode=definition["skip_nanowell_outside_mode"])
+        digests += [_digest(definition["as_recorded"](variant), KEYED_ON.keys() - definition["without"],
+                            skip_nanowell_outside_mode=definition["skip_nanowell_outside_mode"],
+                            skip_cellpose_outside_method=definition["skip_cellpose_outside_method"])
                     for definition in _EARLIER_DEFINITIONS]
         for digest in digests:
             if digest and digest != current and digest not in found:
@@ -280,13 +311,19 @@ def settings_key_aliases(key: str) -> tuple[str, ...]:
     return tuple(part for part in str(key or "").split(KEY_ALIAS_SEP) if part)
 
 
-def _digest(opts, keys, *, skip_nanowell_outside_mode: bool) -> str:
+def _digest(opts, keys, *, skip_nanowell_outside_mode: bool, skip_cellpose_outside_method: bool = False) -> str:
     payload = {}
     try:
         nanowell = bool(opts["nanowell_format"])
     except (KeyError, TypeError):
         nanowell = False
+    try:
+        cellpose = opts["segmentation_method"] in CELLPOSE_METHODS
+    except (KeyError, TypeError):
+        cellpose = False
     for key in sorted(keys):
+        if skip_cellpose_outside_method and key.startswith(_CELLPOSE_PREFIX) and not cellpose:
+            continue                     # a default nothing in this run used (``_CELLPOSE_PREFIX``)
         if skip_nanowell_outside_mode and key.startswith(_NANOWELL_PREFIX) and not nanowell:
             # The nanowell options carry parser defaults on every run, nanowell or not. Keyed on them
             # outside the mode, every plate recorded before they existed would read as recorded under

@@ -108,6 +108,7 @@ OTHER = {
     "nanowell_pitch_um": 90.0,
     "nanowell_geometry": "infer",
     "nanowell_cellpose_model": "livecell_cp3",
+    "nanowell_segment_on": "rim",
     "nanowell_grid": "3x7",
     "nanowell_scan": "bottom-right-column-serpentine",
     "nanowell_overlap_percent": 25.0,
@@ -181,6 +182,8 @@ def test_changing_one_key_alone_moves_the_digest(key):
     base = dict(BASE)
     if key.startswith("nanowell_") and key != "nanowell_format":
         base["nanowell_format"] = "100um"
+    if key.startswith("cellpose_"):
+        base["segmentation_method"] = "cellpose"     # the Cellpose options count only on a Cellpose run
     baseline = settings_digest(base)
     changed = settings_digest({**base, key: OTHER[key]})
 
@@ -215,6 +218,22 @@ def test_a_run_outside_nanowell_mode_is_not_keyed_on_the_nanowell_defaults():
     plain = {k: v for k, v in BASE.items() if not k.startswith("nanowell_")}
     assert settings_digest({**plain, **carried}) == settings_digest(plain)
     assert settings_digest({**plain, **carried, "nanowell_format": "100um"}) != settings_digest(plain)
+
+
+def test_a_run_that_does_not_segment_with_cellpose_is_not_keyed_on_the_cellpose_defaults():
+    """The Cellpose options carry parser defaults on every run. Keyed on them on a StarDist run, moving the default
+    model to cpsam read every StarDist plate as recorded under other settings. Built from the real parser."""
+    from pipeline.cli_args import build_parser
+
+    parsed = vars(build_parser().parse_args(["--input_dir", "in", "--output_dir", "out"]))
+    carried = {k: v for k, v in parsed.items() if k.startswith("cellpose_") and v is not None}
+    assert "cellpose_model" in carried, "the parser no longer defaults the model; this test measures nothing"
+    plain = {k: v for k, v in BASE.items() if not k.startswith("cellpose_")}
+    assert plain.get("segmentation_method") not in ("cellpose", "cellpose_labelfree")
+    assert settings_digest({**plain, **carried}) == settings_digest(plain)
+    for method in ("cellpose", "cellpose_labelfree"):
+        on = {**plain, "segmentation_method": method}
+        assert settings_digest({**on, **carried}) != settings_digest(on)
 
 
 def test_list_order_counts_but_dict_order_does_not():

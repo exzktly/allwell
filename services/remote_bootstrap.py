@@ -275,6 +275,10 @@ class HostProbe:
     missing_modules: tuple[str, ...] = ()
     """Modules of :data:`REQUIRED_IMPORTS` the env cannot find. ``("?",)``
     when the env's python could not be run to answer."""
+    off_pin: tuple[str, ...] = ()
+    """Pins of :data:`VERSION_PINS` the env does not hold, as ``dist==pin``
+    (installed at another version, or not at all). ``("?",)`` when the env's
+    python could not be run to answer."""
 
 
 # ── argv ───────────────────────────────────────────────────────────────────
@@ -543,6 +547,28 @@ NOT_PROBED: dict[str, str] = {
     "tomli": "installed only on Python < 3.11, where tomllib is missing",
 }
 
+#: Distributions whose installed *version* the probe checks, not only that they import: a package whose
+#: behaviour depends on its major version. Cellpose 4 ships different models from Cellpose 3, so an env still on
+#: Cellpose 3 imports ``cellpose`` happily and then refuses Cellpose-SAM on the compute node; a version off its pin
+#: makes the bootstrap install, which moves it to the pin. ``tests/test_bootstrap_probes_every_requirement.py``
+#: holds each against ``requirements-remote.txt``.
+VERSION_PINS: dict[str, str] = {
+    "cellpose": "4.1.1",
+}
+
+#: Prints the comma-joined ``dist==pin`` arguments whose installed version is not the pin (or not installed). No
+#: single quotes: it is embedded in one.
+_OFF_PIN_PY = (
+    "import sys, importlib.metadata as m\n"
+    "def off(spec):\n"
+    "    dist, pin = spec.split(\"==\")\n"
+    "    try:\n"
+    "        return m.version(dist) != pin\n"
+    "    except m.PackageNotFoundError:\n"
+    "        return True\n"
+    "print(\",\".join(s for s in sys.argv[1:] if off(s)))\n"
+)
+
 #: Prints the comma-joined modules among its arguments that the interpreter
 #: cannot find. ``find_spec`` locates a module without importing it, so the
 #: probe neither pays for importing Torch and TensorFlow nor risks the two
@@ -578,6 +604,7 @@ STARDIST_OK=false
 GPU_VISIBLE=false
 PY_VERSION=
 MISSING_MODULES=
+OFF_PIN=
 
 if has_conda; then
     # v5.2.4: same discovery as the install scripts — prefer miniforge
@@ -610,6 +637,7 @@ if has_conda; then
         fi
         # "?" when the env's python cannot run at all: unknown reads as missing.
         MISSING_MODULES=$(python -c '__MISSING_MODULES_PY__' __REQUIRED_MODULES__ 2>/dev/null || echo "?")
+        OFF_PIN=$(python -c '__OFF_PIN_PY__' __VERSION_PINS__ 2>/dev/null || echo "?")
     fi
 fi
 
@@ -619,6 +647,7 @@ echo "stardist_ok=$STARDIST_OK"
 echo "gpu_visible=$GPU_VISIBLE"
 echo "python_version=$PY_VERSION"
 echo "missing_modules=$MISSING_MODULES"
+echo "off_pin=$OFF_PIN"
 
 # v5.1.1: detect a still-running detached pip install from a prior
 # bootstrap. The marker is written by install_pip_deps; we only
@@ -635,7 +664,9 @@ echo "pip_in_progress=$PIP_IN_PROGRESS"
 """
 _PROBE_SCRIPT = (_PROBE_SCRIPT
                  .replace("__MISSING_MODULES_PY__", _MISSING_MODULES_PY)
-                 .replace("__REQUIRED_MODULES__", " ".join(REQUIRED_IMPORTS.values())))
+                 .replace("__REQUIRED_MODULES__", " ".join(REQUIRED_IMPORTS.values()))
+                 .replace("__OFF_PIN_PY__", _OFF_PIN_PY)
+                 .replace("__VERSION_PINS__", " ".join(f"{d}=={v}" for d, v in VERSION_PINS.items())))
 
 
 def probe_host(alias: str, *, ssh_key_path: str = "") -> HostProbe:
@@ -666,6 +697,7 @@ def probe_host(alias: str, *, ssh_key_path: str = "") -> HostProbe:
         pip_in_progress=_bool("pip_in_progress"),
         missing_modules=tuple(
             m for m in fields.get("missing_modules", "").split(",") if m),
+        off_pin=tuple(m for m in fields.get("off_pin", "").split(",") if m),
     )
 
 
@@ -885,16 +917,18 @@ def install_pip_deps(
     to exit so the synchronous code path stays as it was on a stable
     connection.
     """
-    if probe.tensorflow_version and not probe.missing_modules:
+    if probe.tensorflow_version and not probe.missing_modules and not probe.off_pin:
         say(
             f"Remote already has tensorflow {probe.tensorflow_version} and "
-            "every other pipeline package — skipping pip install."
+            "every other pipeline package at its pin — skipping pip install."
         )
         return
     if probe.tensorflow_version:
+        wrong = ([f"is missing {', '.join(probe.missing_modules)}"] if probe.missing_modules else []) + (
+            [f"is not at {', '.join(probe.off_pin)}"] if probe.off_pin else [])
         say(
-            f"Remote has tensorflow {probe.tensorflow_version} but is missing "
-            f"{', '.join(probe.missing_modules)} — installing "
+            f"Remote has tensorflow {probe.tensorflow_version} but "
+            f"{' and '.join(wrong)} — installing "
             "requirements-remote.txt (packages already at their pinned "
             "versions are left as they are)."
         )

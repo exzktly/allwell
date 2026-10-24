@@ -402,6 +402,8 @@ def test_changing_one_setting_alone_declines_the_reuse(tmp_path, key):
             "fluor_tokens": ["GFP"], "filename_sep": "_"}
     if key.startswith("nanowell_") and key != "nanowell_format":
         base["nanowell_format"] = "100um"   # the nanowell keys count only on a nanowell run
+    if key.startswith("cellpose_"):
+        base["segmentation_method"] = "cellpose"   # and the Cellpose keys only on a Cellpose run
     # A value that differs from the baseline's for this key, whatever its type.
     was = base.get(key)
     other = "___changed___" if was is None or isinstance(was, str) else None

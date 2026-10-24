@@ -212,11 +212,23 @@ and, optionally, the cell diameter, the margin around a nanowell that must lie i
 for that tile to own it, the angle of the central square's edges to a lattice row, and the occlusion and
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
 
-**Cellpose model** chooses what counts the cells: *cyto3* (Cellpose's generalist, the default) or *livecell_cp3*
-(the Cellpose model trained on phase-contrast images of eight cell lines, LIVECell). Both come with the installed
-Cellpose; a model's weights are downloaded the first time it is used. Which counts your cells better depends on the
+**Cellpose model** chooses what counts the cells: *cpsam* (Cellpose-SAM, the default), *cyto3* (Cellpose 3's
+generalist) or *livecell_cp3* (the Cellpose 3 model trained on phase-contrast images of eight cell lines,
+LIVECell). All-Well installs Cellpose 4, which has only Cellpose-SAM: *cyto3* and *livecell_cp3* run only where
+Cellpose 3 is installed instead, and on Cellpose 4 the run stops on them with a message naming the model rather than
+counting with a different one. A model's weights are downloaded the first time it is used (about 1.2 GB for
+Cellpose-SAM), so the machine that runs the analysis needs internet access then. Cellpose-SAM is a large model: run
+it on a GPU. A run made before Cellpose-SAM was the default counted with *cyto3*, and its settings say so. Which counts your cells better depends on the
 cells, so compare them on one well with **Test detection** before a plate-wide run: its crops show the outlines the
 run itself would count, cut from the whole tile segmented as the run segments it.
+
+**Segment on** chooses the image the model counts cells in. *Raw image* (the default) is each tile as it was imaged —
+what Cellpose's models, Cellpose-SAM among them, were trained on. *Rim-removed* is each nanowell divided by the well's
+picture of an empty nanowell, which takes the bright rim away but is a ratio image no model was trained on, and in
+which the faint noise of an empty nanowell is stretched across the model's whole range. Either way a cell is counted
+in a nanowell only when its centre lies inside the nanowell's interior, so a cell found on a rim is not counted, and
+confluence is measured on the rim-removed image. Test detection's crops show the image the model was given (their
+tooltip says which). A run made before this setting existed counted on the rim-removed image, and its settings say so.
 
 **Array geometry** says how the array is found. *Hexagonal lattice in a circle* (the default) looks for nanowells
 on a hexagonal lattice inside a circular array. Either way the nanowells' diameter is measured on the images — one
@@ -314,8 +326,8 @@ inside one tile for that tile to own it (default a tenth of the diameter), and `
 angle of the central square's edges to a lattice row (default 0). `--nanowell_geometry infer` finds the array by
 its contrast and infers the lattice kind (hexagonal or square), pitch, orientation and outline, as *Infer from
 the image* does on the form; without it (`hex_circle`) the array is a hexagonal lattice in a circle.
-`--nanowell_cellpose_model livecell_cp3` counts with the LIVECell model instead of `cyto3`, as **Cellpose model**
-does on the form. `--nanowell_registration_from <folder>` reuses an earlier run's tile registration, as **Reuse
+`--nanowell_cellpose_model` chooses the counting model (`cpsam`, the default; `cyto3` or `livecell_cp3` on a
+Cellpose 3 install), as **Cellpose model** does on the form. `--nanowell_registration_from <folder>` reuses an earlier run's tile registration, as **Reuse
 registration** does on the form. Wells must be zips.
 
 Besides the usual per-cell CSV (one row per cell, with the owner tile as `fov` and the nanowell's address
@@ -1278,7 +1290,7 @@ archives and outputs are always written as per-well `.zip` archives. See
   `Cellpose :` line near the top with what the run found (`GPU — 1 visible…` or
   `CPU — no GPU visible on this node…`), and one line per worker naming the
   device its model actually loaded on, such as
-  `Cellpose cyto3 on GPU cuda:0 (NVIDIA A100…)`. If that line says
+  `Cellpose cpsam on GPU cuda:0 (NVIDIA A100…)`. If that line says
   `CPU — Torch … sees no CUDA device` on a node that has a GPU, the Torch
   installed in the remote environment cannot use it (a CPU-only build, or a
   driver older than its CUDA); the line names both. On a Mac, Cellpose stays on
@@ -4924,7 +4936,8 @@ use them.
   - **Layers** — *Nanowells*, either *filled by the metric* (the colour bar names it; a nanowell without a
     value is a grey outline, never a colour: hatched where it was occluded, dashed where clipped, dotted where
     it was not seen) or *outlined by state* in the colours Test detection uses (blue measured, green empty,
-    amber occluded, red clipped, grey not seen). Either way a nanowell on a tile seam is dashed in purple and
+    amber occluded, red clipped, grey not seen). The outline's width follows the nanowell's size on screen (about
+    6 % of its diameter, never under 2.5 or over 8 screen pixels), so it stays visible zoomed out and on a phone. Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the
     `q,r` when both are on). A nanowell without a value has no number written, never a 0. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
@@ -4976,8 +4989,13 @@ from the image the run segmented (the well's archive in `in/`). When that archiv
 the crop is cut from the lower-resolution montage instead, and the caption under the strip says so and why; a
 timepoint with no crop says why. Selecting nanowells does not change the plate selection.
 
-**Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the dataset as one
-long CSV, with the baseline and where the times came from. Right after you change the baseline it waits:
+**What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
+draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
+is selected and kept, so selecting it again is instant. While a newly selected well is read the page shows
+*Computing…*.
+
+**Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
+draws as one long CSV, with the baseline and where the times came from. Right after you change the baseline it waits:
 until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
 drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
 is opened again.

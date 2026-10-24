@@ -45,8 +45,8 @@ def _opts(argv):
 def test_the_legacy_digest_is_the_one_9_12_5_recorded():
     opts = _opts(_ARGV_9125)
     assert settings_digest(opts) != _DIGEST_9125, "the fixture must reproduce the definition change"
-    assert legacy_settings_digests(opts) == (_DIGEST_9125,)
-    assert settings_key_for(opts).split("~") == [settings_digest(opts), _DIGEST_9125]
+    assert legacy_settings_digests(opts)[-1] == _DIGEST_9125                  # the oldest definition's
+    assert settings_key_for(opts).split("~") == [settings_digest(opts), *legacy_settings_digests(opts)]
 
 
 def test_a_well_recorded_by_the_earlier_build_is_not_rerun(tmp_path):
@@ -67,7 +67,7 @@ def test_a_field_the_earlier_build_checkpointed_is_not_computed_again(tmp_path, 
     argv = ["--input_dir", str(plate / "in"), "--output_dir", str(out), "--nuclear_token", "DAPI",
             "--fluor_tokens", "GFP", "--filename_schema", ":".join(SCHEMA), "--workers", "1",
             "--background", "none", "--flatfield", "none", "--no_auto_threshold", "--no_run_check"]
-    (legacy,) = legacy_settings_digests(_opts(argv))
+    legacy = legacy_settings_digests(_opts(argv))[-1]                      # what 9.12.5 recorded
     # What a 9.12.5 run killed after C01's first field leaves on its scratch volume: a staging directory named for
     # its own digest, holding F001's records under that digest.
     staging = scratch_base_for(out) / f"_tmp_images_{_output_stamp(out)}_{_settings_stamp(legacy)}_C01"
@@ -95,3 +95,46 @@ def test_a_field_the_earlier_build_checkpointed_is_not_computed_again(tmp_path, 
     with open_csv_text(existing_csv(out / "measurements_C01.csv")) as fh:
         rows = fh.read()
     assert "777.0" in rows, "the restored field's rows are not in the well's CSV"
+
+
+
+# ── Cellpose-SAM became the default model ───────────────────────────────────
+#: What the build before it (``origin/main`` at 9.14.5, cyto3 the default) records for each run, computed against a
+#: worktree of that commit: a StarDist run (``_ARGV_9125``), a nanowell run that named no model (so cyto3), the same
+#: on livecell_cp3, and a Cellpose segmentation on the default model (cyto3).
+_DIGEST_9145 = {"stardist": "748b063f4dab7c72", "nanowell": "6698c1c49a7e1270", "nanowell_livecell": "e4e030f2272cce57",
+                "cellpose": "9153e16dd6928742"}
+_NANOWELL = [*_ARGV_9125, "--nanowell_format", "100um", "--phase_token", "PHASE"]
+#: What every earlier nanowell run segmented: the rim-divided tile (``--nanowell_segment_on`` did not exist).
+_ON_RIM = ["--nanowell_segment_on", "rim"]
+_CELLPOSE = [*_ARGV_9125, "--segmentation_method", "cellpose"]
+
+
+def _aliases(argv):
+    from util.settings_digest import settings_key_aliases
+
+    return settings_key_aliases(settings_key_for(_opts(argv)))
+
+
+def test_a_run_whose_model_did_not_change_keeps_the_digest_the_cyto3_build_recorded():
+    """Moving the default to cpsam changed the parser's defaults, which every run's options carry. Where the model
+    describes nothing the run did (StarDist), or is the one it ran with (a nanowell run on cyto3 or livecell_cp3, a
+    Cellpose run told cyto3), a well the earlier build recorded is this run's."""
+    assert _DIGEST_9145["stardist"] in _aliases(_ARGV_9125)
+    assert _DIGEST_9145["nanowell"] in _aliases([*_NANOWELL, "--nanowell_cellpose_model", "cyto3", *_ON_RIM])
+    assert _DIGEST_9145["nanowell_livecell"] in _aliases([*_NANOWELL, "--nanowell_cellpose_model", "livecell_cp3",
+                                                          *_ON_RIM])
+    assert _DIGEST_9145["cellpose"] in _aliases([*_CELLPOSE, "--cellpose_model", "cyto3"])
+
+
+def test_a_run_now_on_cpsam_is_not_taken_for_the_cyto3_run_the_earlier_build_recorded():
+    """The other half: cyto3 then and cpsam now are different counts, so the earlier build's well is not reused."""
+    assert _DIGEST_9145["nanowell"] not in _aliases(_NANOWELL)                 # the default is now cpsam
+    assert _DIGEST_9145["nanowell"] not in _aliases([*_NANOWELL, "--nanowell_cellpose_model", "cyto3"])  # on raw
+    assert _DIGEST_9145["cellpose"] not in _aliases(_CELLPOSE)
+
+
+def test_the_digest_s_cellpose_methods_are_the_pipeline_s():
+    from util.settings_digest import CELLPOSE_METHODS
+
+    assert CELLPOSE_METHODS == pm._CELLPOSE_METHODS

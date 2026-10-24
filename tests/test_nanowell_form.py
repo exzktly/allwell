@@ -224,6 +224,8 @@ def test_pressing_test_detection_runs_a_worker_and_shows_the_addresses(tab, qtbo
     _use_nanowell_schema(tab)
     tab._input_edit.setText(str(root))
     tab._nanowell_cb.setChecked(True)
+    # The stand-in thresholds the rim-divided image (flat 1.0 between cells), so it is given that image.
+    tab._nanowell_segment_on_cb.setCurrentIndex(tab._nanowell_segment_on_cb.findData("rim"))
     tab._nanowell_preview_btn.click()
     window = tab._nanowell_preview_window
     assert window.isVisible() and window._well_cb.currentText() == WELL and window._tp_cb.currentText() == "0h"

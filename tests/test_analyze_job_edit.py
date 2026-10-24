@@ -102,6 +102,7 @@ _OPTS = {
     "nanowell_clipped_below": "0.7",
     "nanowell_geometry": "infer",
     "nanowell_cellpose_model": "livecell_cp3",
+    "nanowell_segment_on": "rim",              # not the default, so the round trip proves it is restored
     "nanowell_registration_from": "/data/plate6/out",
 }
 

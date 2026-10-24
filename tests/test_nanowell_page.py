@@ -99,7 +99,8 @@ def _texts(ctx, gid=None):
 def test_with_no_wells_selected_the_page_says_which_wells_have_nanowell_tables(qtbot, tmp_path):
     ctx = _page(qtbot, _write_nanowell_dataset(tmp_path))
     st = _loaded(qtbot, ctx)
-    assert st.data.wells == list(WELLS)
+    # Nothing is selected, so no well's table is read; the folder listing still names every well that has one.
+    assert (st.data.wells, st.data.available) == ([], list(WELLS))
     reason = nwc.nanowell_empty_reason(ctx)
     assert reason.title == "No nanowell wells selected." and "A01, A02, B01" in reason.hint
     assert not ctx.widgets.get("_nw_canvas").isVisible()

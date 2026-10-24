@@ -27,7 +27,15 @@ GEOMETRY_CHOICES = (("hex_circle", "Hexagonal lattice in a circle"), ("infer", "
 
 #: The Cellpose models the count may use (``pipeline.nanowell_run.CELLPOSE_MODELS``), as (option value, label), restated
 #: like the formats and held together by a test; the first is the default and sends no flag (tracker L2).
-CELLPOSE_MODEL_CHOICES = (("cyto3", "cyto3 (generalist)"), ("livecell_cp3", "livecell_cp3 (phase contrast)"))
+CELLPOSE_MODEL_CHOICES = (("cpsam", "cpsam (Cellpose-SAM)"), ("cyto3", "cyto3 (needs Cellpose 3)"),
+                          ("livecell_cp3", "livecell_cp3 (needs Cellpose 3)"))
+#: What a run's settings mean when they name no model: every run before there was a choice used cyto3
+#: (``pipeline.nanowell_run.LEGACY_CELLPOSE_MODEL``). Restoring such a run shows cyto3, the model it ran with.
+LEGACY_CELLPOSE_MODEL = "cyto3"
+#: What the count's segmenter is given (``pipeline.nanowell_run.SEGMENT_ON``), as (option value, label), the first
+#: the default; a run that names none segmented the rim-divided tile (``LEGACY_SEGMENT_ON``).
+SEGMENT_ON_CHOICES = (("raw", "Raw image"), ("rim", "Rim-removed"))
+LEGACY_SEGMENT_ON = "rim"
 
 #: ``--nanowell_scan`` spellings (``pipeline.nanowell_pattern_record.parse_scan``), the first the default.
 SCAN_CHOICES = tuple(f"{corner}-{major}{'-serpentine' if serpentine else ''}"
@@ -165,6 +173,9 @@ def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]
     geometry = str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]).strip()
     if geometry not in {value for value, _label in GEOMETRY_CHOICES}:
         errors.append(f"Nanowell geometry {geometry!r} is not one this version knows.")
+    segment_on = str(opts.get("nanowell_segment_on") or SEGMENT_ON_CHOICES[0][0]).strip()
+    if segment_on not in {value for value, _label in SEGMENT_ON_CHOICES}:
+        errors.append(f"Nanowell segmenter input {segment_on!r} is not one this version knows.")
     model = str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]).strip()
     if model not in {value for value, _label in CELLPOSE_MODEL_CHOICES}:
         errors.append(f"Nanowell Cellpose model {model!r} is not one this version knows.")

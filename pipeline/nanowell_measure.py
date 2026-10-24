@@ -729,6 +729,24 @@ def cellpose_segmenter(diameter_px: float = 0.0, **options):
     return segment
 
 
+#: What the segmenter is given (``NanowellSettings.segment_on``). ``raw``: the tile as it was imaged, which is what
+#: Cellpose's models — Cellpose-SAM's among them — were trained on; a cell on a rim is still not counted, because
+#: :func:`count_cells` keeps only a centroid inside a nanowell's interior. ``rim``: the rim-suppressed tile
+#: (:func:`rim_suppress`), every nanowell divided by the empty-nanowell template and everything between them flat,
+#: which takes the rim out of the segmenter's way but is a ratio image no model was trained on, scaled by its own
+#: 1st-99th percentiles so a near-flat empty nanowell's noise is stretched across the segmenter's range.
+SEGMENT_ON = ("raw", "rim")
+
+
+def segmenter_input(image, rim_image, segment_on: str) -> np.ndarray:
+    """The image the segmenter is given for one tile: *image* as imaged (``raw``) or *rim_image* (``rim``)."""
+    if segment_on == "raw":
+        return np.asarray(image, dtype=np.float64)
+    if segment_on == "rim":
+        return np.asarray(rim_image)
+    raise ValueError(f"Unknown segmenter input {segment_on!r}; one of {SEGMENT_ON}")
+
+
 def segment_tile(rim_image, segmenter) -> np.ndarray:
     """One segmenter call on the whole rim-suppressed tile, as the pipeline calls Cellpose today."""
     labels = np.asarray(segmenter(rim_image))

@@ -63,6 +63,8 @@ def _run_main(monkeypatch, plate, *extra, run_check=False):
     argv = ["process_microscopy.py", "--input_dir", str(plate / "in"), "--output_dir", str(plate / "out"),
             "--phase_token", "PHASE", "--fluor_tokens", "GFP", "--filename_schema", ":".join(SCHEMA), "--workers", "1",
             "--background", "none", "--flatfield", "none", "--no_auto_threshold",
+            # The stand-in segmenter thresholds the rim-divided image (flat 1.0 between cells), so it is given that.
+            *([] if "--nanowell_segment_on" in extra else ["--nanowell_segment_on", "rim"]),
             *([] if run_check else ["--no_run_check"]), *extra]
     monkeypatch.setattr(sys, "argv", argv)
     pm.main()

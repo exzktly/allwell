@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from analyze.domain.nanowell_fields import (
-    CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, PLATE_FORMAT_CHOICES, REGISTRATION_FROM_KEY,
+    CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, LEGACY_CELLPOSE_MODEL, PLATE_FORMAT_CHOICES,
+    LEGACY_SEGMENT_ON, REGISTRATION_FROM_KEY, SEGMENT_ON_CHOICES,
     SCAN_CHOICES,
     nanowell_enabled, nanowell_option_errors,
 )
@@ -87,7 +88,8 @@ def settings_from_opts(opts: dict):
         number("nanowell_square_edge_deg", 0.0), number("nanowell_occluded_below", 0.5),
         number("nanowell_clipped_below", 0.5), custom,
         str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]),
-        str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]))
+        str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]),
+        str(opts.get("nanowell_segment_on") or SEGMENT_ON_CHOICES[0][0]))
 
 
 class AnalyzeNanowellSectionMixin:
@@ -132,15 +134,35 @@ class AnalyzeNanowellSectionMixin:
         row.layout().addStretch(1)
         self._nanowell_field_rows.append(row.parentWidget())
         row = self._row(sec, "Cellpose model", tooltip=(
-            "The model the cell count segments with. cyto3: Cellpose 3's generalist. livecell_cp3: the Cellpose 3 "
-            "model trained on phase-contrast images of eight cell lines (LIVECell). Compare them on your plate with "
-            "Test detection, whose crops show the run's own segmentation. Weights download on first use."))
+            "The model the cell count segments with. cpsam: Cellpose-SAM, Cellpose 4's model, which the app "
+            "installs. cyto3: Cellpose 3's generalist. livecell_cp3: the Cellpose 3 model trained on phase-contrast "
+            "images of eight cell lines (LIVECell). cyto3 and livecell_cp3 run only where Cellpose 3 is installed; "
+            "on Cellpose 4 the run refuses them by name rather than segmenting with another model. Compare them on "
+            "your plate with Test detection, whose crops show the run's own segmentation. Weights download on first "
+            "use."))
         self._nanowell_model_cb = QComboBox(row)
         for value, label in CELLPOSE_MODEL_CHOICES:
             self._nanowell_model_cb.addItem(label, userData=value)
         self._nanowell_model_cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self._nanowell_model_cb.setMinimumContentsLength(12)
         row.layout().addWidget(self._nanowell_model_cb)
+        row.layout().addStretch(1)
+        self._nanowell_field_rows.append(row.parentWidget())
+        row = self._row(sec, "Segment on", tooltip=(
+            "What the cell count's model is given. Raw image: each tile as it was imaged — what Cellpose's models, "
+            "Cellpose-SAM's among them, were trained on. A cell found on a nanowell's rim is still not counted: only "
+            "a cell whose centre lies inside a nanowell's interior is. Rim-removed: each nanowell divided by the "
+            "well's empty-nanowell picture, which takes the rim away but is a ratio image no model was trained on, "
+            "and stretches the faint noise of an empty nanowell. Confluence is measured on the rim-removed image "
+            "either way. Compare the two on one well with Test detection, whose crops show the image the model was "
+            "given."))
+        self._nanowell_segment_on_cb = QComboBox(row)
+        for value, label in SEGMENT_ON_CHOICES:
+            self._nanowell_segment_on_cb.addItem(label, userData=value)
+        self._nanowell_segment_on_cb.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._nanowell_segment_on_cb.setMinimumContentsLength(12)
+        row.layout().addWidget(self._nanowell_segment_on_cb)
         row.layout().addStretch(1)
         self._nanowell_field_rows.append(row.parentWidget())
         self._nanowell_custom_rows = []
@@ -233,6 +255,7 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_format_cb.setEnabled(on)
         self._nanowell_geometry_cb.setEnabled(on)
         self._nanowell_model_cb.setEnabled(on)
+        self._nanowell_segment_on_cb.setEnabled(on)
         for _key, _label, attr, _tip in _FIELDS + _CUSTOM_FIELDS + _GRID_FIELDS:
             getattr(self, attr).setEnabled(on)
         self._nanowell_scan_cb.setEnabled(on)
@@ -272,6 +295,7 @@ class AnalyzeNanowellSectionMixin:
         out["nanowell_scan"] = self._nanowell_scan_cb.currentData() or SCAN_CHOICES[0]
         out["nanowell_geometry"] = self._nanowell_geometry_cb.currentData() or GEOMETRY_CHOICES[0][0]
         out["nanowell_cellpose_model"] = self._nanowell_model_cb.currentData() or CELLPOSE_MODEL_CHOICES[0][0]
+        out["nanowell_segment_on"] = self._nanowell_segment_on_cb.currentData() or SEGMENT_ON_CHOICES[0][0]
         out[REGISTRATION_FROM_KEY] = self._nanowell_registration_edit.text().strip()
         return out
 
@@ -311,8 +335,14 @@ class AnalyzeNanowellSectionMixin:
         # Absent or None is a run that did not choose: the format's hexagonal lattice in a circle.
         geometry = self._nanowell_geometry_cb.findData(str(d.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]))
         self._nanowell_geometry_cb.setCurrentIndex(max(geometry, 0))
-        model = self._nanowell_model_cb.findData(str(d.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]))
+        # A run that named no model ran cyto3, and shows it; a new form starts on the default.
+        named = d.get("nanowell_cellpose_model") if "nanowell_cellpose_model" in d else CELLPOSE_MODEL_CHOICES[0][0]
+        model = self._nanowell_model_cb.findData(str(named or LEGACY_CELLPOSE_MODEL))
         self._nanowell_model_cb.setCurrentIndex(max(model, 0))
+        # The same for the segmenter's input: a run that named none segmented the rim-removed image.
+        named = d.get("nanowell_segment_on") if "nanowell_segment_on" in d else SEGMENT_ON_CHOICES[0][0]
+        self._nanowell_segment_on_cb.setCurrentIndex(
+            max(self._nanowell_segment_on_cb.findData(str(named or LEGACY_SEGMENT_ON)), 0))
         self._nanowell_registration_edit.setText(str(d.get(REGISTRATION_FROM_KEY) or ""))
         self._refresh_nanowell_custom()
 

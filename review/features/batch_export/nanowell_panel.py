@@ -273,15 +273,19 @@ class NanowellBatchExportPanel(BatchExportPanel):
                 "fmt": self._fmt_cb.currentText(), "channel": self._ctx.state.channel.active_channel,
                 "thresholds": self._thresholds()[0]}
 
-    def _load(self, baseline: str) -> tuple | None:
-        """``(data, metrics)`` for the open dataset at *baseline*, or ``None`` with the user told why."""
+    def _load(self, baseline: str, wells) -> tuple | None:
+        """``(data, metrics)`` for the open dataset's *wells* at *baseline*, or ``None`` with the user told why.
+
+        The Nanowells page reads only the wells it draws, so its tables are used only when they hold every one of
+        *wells* that has a table; otherwise exactly *wells* are read here."""
         data_dir = self._ctx.state.dataset.data_dir
         st = self._ctx.state.feature_slice("nanowell")
         data = getattr(st, "data", None)
         loaded_for = getattr(st, "loaded_for", None) or (None,)      # None until the page has loaded (X16)
-        if data is None or loaded_for[0] != str(data_dir or ""):
+        covers = data is not None and set(wells) & set(data.available) <= set(data.wells)
+        if not covers or loaded_for[0] != str(data_dir or ""):
             try:
-                data = _load_nanowell_data(Path(data_dir)) if data_dir else None
+                data = _load_nanowell_data(Path(data_dir), wells=sorted(set(wells))) if data_dir else None
             except (ValueError, OSError) as exc:            # NanowellSchemeError is a ValueError
                 QMessageBox.warning(self, "Nanowell tables unreadable",
                                     f"The nanowell tables could not be read, so nothing was exported:\n\n{exc}")
@@ -315,7 +319,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         out_dir = self._resolve_out_dir()
         if out_dir is None:
             return
-        loaded = self._load(settings["baseline"])
+        loaded = self._load(settings["baseline"], {w for g in groups for w in g.wells})
         if loaded is None:
             return
         data, metrics = loaded

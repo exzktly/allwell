@@ -68,8 +68,11 @@ def _emit_nanowell_flags(args: list[str], opts: dict) -> None:
     if str(opts.get("nanowell_geometry") or "").strip() == "infer":   # the default sends nothing (tracker X35)
         args += ["--nanowell_geometry", "infer"]
     model = str(opts.get("nanowell_cellpose_model") or "").strip()
-    if model and model != "cyto3":                   # the default sends nothing, so earlier runs' argv is unchanged
+    if model:                                        # always: the command line's default is not every form's
         args += ["--nanowell_cellpose_model", model]
+    segment_on = str(opts.get("nanowell_segment_on") or "").strip()
+    if segment_on:                                   # the same
+        args += ["--nanowell_segment_on", segment_on]
     if plate_format == "custom":                     # a known format's geometry is its own, never sent
         for key in ("nanowell_diameter_um", "nanowell_pitch_um"):
             _emit_num_flag(args, opts, key, f"--{key}", float)
@@ -278,7 +281,7 @@ def build_pipeline_args(
     # General Cellpose also exposes model + thresholds + optional nucleus
     # channel (works on a fluorescent or brightfield channel; no phase remap).
     if segmentation_method == "cellpose":
-        args += ["--cellpose_model", str(opts.get("cellpose_model", "cyto3") or "cyto3")]
+        args += ["--cellpose_model", str(opts.get("cellpose_model", "cpsam") or "cpsam")]
         for flag, key, default in (
             ("--cellpose_flow_threshold", "cellpose_flow_threshold", 0.4),
             ("--cellpose_cellprob_threshold", "cellpose_cellprob_threshold", 0.0),

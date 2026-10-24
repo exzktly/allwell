@@ -31,17 +31,61 @@ class CellposeUnavailable(RuntimeError):
     segmenter_unavailable = True
 
 
-# Per-worker Cellpose models, keyed by model type (cyto3/cyto2/cyto/nuclei), so a
-# run can choose a model without silently reusing another type's cache. Lazy.
+# Per-worker Cellpose models, keyed by model name, so a run can choose a model
+# without silently reusing another model's cache. Lazy.
 _CELLPOSE_MODELS: dict[str, object] = {}
 
+#: The models each major version of Cellpose ships, by the name a run asks for. The two families do not overlap and
+#: cannot be installed side by side: Cellpose 4 replaced every Cellpose 3 model with Cellpose-SAM, and its
+#: ``CellposeModel`` ignores ``model_type`` and answers an unknown ``pretrained_model`` with its own default — both
+#: with no more than a log line, so asking Cellpose 4 for ``cyto3`` would segment with Cellpose-SAM under cyto3's
+#: name. :func:`_cellpose_model` refuses a model the installed version does not ship instead.
+CELLPOSE_3_MODELS = ("cyto3", "cyto2", "cyto", "nuclei", "livecell_cp3")
+CELLPOSE_4_MODELS = ("cpsam",)
+#: The model a run uses when it names none: Cellpose-SAM (Cellpose 4, ``requirements-remote.txt``).
+DEFAULT_MODEL = "cpsam"
 
-def _cellpose_model(model_type: str = "cyto3"):
+
+def cellpose_major(version: str | None = None) -> int | None:
+    """The installed Cellpose's major version (or *version*'s), ``None`` when it is not installed. Read from the
+    package metadata, so asking imports neither Cellpose nor Torch."""
+    if version is None:
+        from importlib.metadata import PackageNotFoundError
+        from importlib.metadata import version as installed
+
+        try:
+            version = installed("cellpose")
+        except PackageNotFoundError:
+            return None
+    head = str(version).split(".")[0]
+    return int(head) if head.isdigit() else None
+
+
+def model_refusal(model: str, major: int | None) -> str | None:
+    """Why *model* cannot run on Cellpose *major*, or ``None`` when it can (or the version is not known)."""
+    if major is None:
+        return None
+    if major >= 4 and model not in CELLPOSE_4_MODELS:
+        if model in CELLPOSE_3_MODELS:
+            return (f"{model} is a Cellpose 3 model and the installed Cellpose is version {major}, which ships only "
+                    f"{', '.join(CELLPOSE_4_MODELS)}; choose {DEFAULT_MODEL}, or install cellpose 3 to use {model}")
+        return f"{model!r} is not a Cellpose {major} model; it ships {', '.join(CELLPOSE_4_MODELS)}"
+    if major < 4 and model not in CELLPOSE_3_MODELS:
+        if model in CELLPOSE_4_MODELS:
+            return (f"{model} needs Cellpose 4 and the installed Cellpose is version {major}; install the pinned "
+                    "cellpose (requirements-remote.txt) or choose a Cellpose 3 model")
+        return f"{model!r} is not a Cellpose {major} model; it ships {', '.join(CELLPOSE_3_MODELS)}"
+    return None
+
+
+def _cellpose_model(model_type: str = DEFAULT_MODEL):
     """Return the per-worker Cellpose model for *model_type*, loading it once.
 
     Guarded import so the app / pipeline run without cellpose installed; the
-    error only surfaces when a Cellpose method is actually selected."""
-    key = str(model_type or "cyto3").strip() or "cyto3"
+    error only surfaces when a Cellpose method is actually selected. A model the
+    installed version does not ship is refused (:func:`model_refusal`), never
+    swapped for another."""
+    key = str(model_type or DEFAULT_MODEL).strip() or DEFAULT_MODEL
     model = _CELLPOSE_MODELS.get(key)
     if model is None:
         try:
@@ -53,10 +97,23 @@ def _cellpose_model(model_type: str = "cyto3"):
                 "Cellpose segmentation requires the 'cellpose' package. Install "
                 f"it (see requirements) — import failed: {type(exc).__name__}: {exc}"
             ) from exc
+        major = cellpose_major()
+        refusal = model_refusal(key, major)
+        if refusal:
+            raise CellposeUnavailable(f"Cellpose's {key} model cannot be used: {refusal}.")
         try:
             device, where = _cellpose_device()
-            model = _cp_models.CellposeModel(
-                model_type=key, gpu=device.type == "cuda", device=device)
+            if major is not None and major >= 4:
+                # bfloat16 halves the weights' memory, on a GPU that computes in it; elsewhere float32 (an older
+                # GPU without bfloat16, or the CPU, where it is slow).
+                import torch
+
+                bf16 = device.type == "cuda" and bool(torch.cuda.is_bf16_supported())
+                model = _cp_models.CellposeModel(gpu=device.type == "cuda", device=device, pretrained_model=key,
+                                                 use_bfloat16=bf16)
+            else:
+                model = _cp_models.CellposeModel(
+                    model_type=key, gpu=device.type == "cuda", device=device)
         except Exception as exc:  # pragma: no cover - depends on optional dep
             # The model's weights are fetched on first use: offline, that fails here, before any image is seen.
             raise CellposeUnavailable(
@@ -98,7 +155,7 @@ def _cellpose_device():
 def _segment_cellpose(
     image: np.ndarray,
     *,
-    model_type: str = "cyto3",
+    model_type: str = DEFAULT_MODEL,
     diameter: float = 0.0,
     flow_threshold: float = 0.4,
     cellprob_threshold: float = 0.0,
@@ -114,10 +171,23 @@ def _segment_cellpose(
     in cyto+nucleus mode (``channels=[1, 2]``); otherwise grayscale
     (``channels=[0, 0]``). ``flow_threshold`` / ``cellprob_threshold`` tune the
     mask recovery / probability cut.
+
+    Cellpose 4 takes no ``channels``: it reads up to three channels in any order,
+    so the two are stacked on the last axis and named by ``channel_axis``.
     """
     model = _cellpose_model(model_type)
     diam = float(diameter) if diameter and diameter > 0 else None
     seg = np.asarray(image)
+    major = cellpose_major()
+    if major is not None and major >= 4:
+        if nucleus_image is not None:
+            stacked = np.stack([seg, np.asarray(nucleus_image)], axis=-1)  # (Y, X, 2)
+            result = model.eval(stacked, diameter=diam, channel_axis=-1, flow_threshold=flow_threshold,
+                                cellprob_threshold=cellprob_threshold)
+        else:
+            result = model.eval(seg, diameter=diam, flow_threshold=flow_threshold,
+                                cellprob_threshold=cellprob_threshold)
+        return np.asarray(result[0], dtype=np.int32)
     if nucleus_image is not None:
         stacked = np.stack([seg, np.asarray(nucleus_image)], axis=-1)  # (Y, X, 2)
         result = model.eval(stacked, diameter=diam, channels=[1, 2],

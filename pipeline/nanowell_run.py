@@ -67,11 +67,22 @@ CUSTOM_FORMAT = "custom"
 #: contrast alone (light wells, dark lattice) and the lattice kind, pitch, orientation and the array's outline are
 #: inferred from where they are (``pipeline.nanowell_infer``); the format's pitch and diameter are then only
 #: compared with what is measured, and a disagreement is reported.
-#: The Cellpose models the label-free count may use, the first the default (tracker L2). ``cyto3`` is Cellpose 3's
-#: generalist; ``livecell_cp3`` is the Cellpose 3 model trained on LIVECell, a set of phase-contrast images of eight
-#: cell lines — the imaging this mode reads. Both ship with the pinned ``cellpose==3.1.1.2``. Which counts these
-#: plates better has not been measured here (tracker C10): the choice exists so it can be, with Test detection.
-CELLPOSE_MODELS = ("cyto3", "livecell_cp3")
+#: The Cellpose models the label-free count may use, the first the default (tracker L2). ``cpsam`` is Cellpose-SAM,
+#: Cellpose 4's one model, which the pinned ``cellpose`` installs; ``cyto3`` (Cellpose 3's generalist) and
+#: ``livecell_cp3`` (Cellpose 3's model trained on LIVECell's phase-contrast images of eight cell lines) need a
+#: Cellpose 3 install, and a run asking for one on Cellpose 4 is refused by ``pipeline.cellpose``, never segmented
+#: with another model under its name. Which counts these plates best has not been measured here (tracker C10): the
+#: choice exists so it can be, with Test detection.
+CELLPOSE_MODELS = ("cpsam", "cyto3", "livecell_cp3")
+#: The model a run's options mean when they name none: every run made before there was a choice segmented with
+#: cyto3, and their settings and reuse keys carry no model. A run that names none still means it, so such a run is
+#: never taken for a cpsam one; a new run names its model (the form and the command line both send it).
+LEGACY_CELLPOSE_MODEL = "cyto3"
+#: What the count's segmenter is given (``nanowell_measure.SEGMENT_ON``). A run's options that name none mean the
+#: rim-suppressed tile, which every run before there was a choice segmented; a new run names it (``raw`` by default,
+#: from the form and the command line).
+SEGMENT_ON = ("raw", "rim")
+LEGACY_SEGMENT_ON = "rim"
 
 GEOMETRY_HEX_CIRCLE = "hex_circle"
 GEOMETRY_INFER = "infer"
@@ -88,7 +99,8 @@ class NanowellSettings:
     clipped_below: float = 0.5          # a site imaged less than this is clipped and carries no count
     custom: tuple[float, float] | None = None   # (nominal pitch, diameter) um for CUSTOM_FORMAT
     geometry: str = GEOMETRY_HEX_CIRCLE         # how the array is found and its geometry decided (GEOMETRIES)
-    cellpose_model: str = CELLPOSE_MODELS[0]    # the model the label-free count segments with (CELLPOSE_MODELS)
+    cellpose_model: str = LEGACY_CELLPOSE_MODEL  # the model the count segments with; unnamed, an earlier run's
+    segment_on: str = LEGACY_SEGMENT_ON         # what that model is given (SEGMENT_ON); unnamed, an earlier run's
     #: The nanowell diameter measured on the plate, whatever the geometry (tracker F2): sites are fitted, owned and
     #: measured at it. Set from the well's one diameter by :func:`measure_timepoint` and by :func:`run_well` for its
     #: roster, and by Test detection; never part of the reuse key, which holds the setting (``key``), while the
@@ -104,6 +116,8 @@ class NanowellSettings:
             raise ValueError(f"Unknown nanowell geometry {self.geometry!r}; one of {GEOMETRIES}")
         if self.cellpose_model not in CELLPOSE_MODELS:
             raise ValueError(f"Unknown nanowell Cellpose model {self.cellpose_model!r}; one of {CELLPOSE_MODELS}")
+        if self.segment_on not in SEGMENT_ON:
+            raise ValueError(f"Unknown nanowell segmenter input {self.segment_on!r}; one of {SEGMENT_ON}")
 
     @property
     def infer(self) -> bool:
@@ -132,8 +146,10 @@ class NanowellSettings:
             key.update(pitch_um=self.custom[0], diameter_um=self.custom[1])
         if self.infer:                      # the same: a run on the format's geometry keeps the key it always had
             key["geometry"] = self.geometry
-        if self.cellpose_model != CELLPOSE_MODELS[0]:      # and the default model's
+        if self.cellpose_model != LEGACY_CELLPOSE_MODEL:   # and a run on the model every earlier run used
             key["cellpose_model"] = self.cellpose_model
+        if self.segment_on != LEGACY_SEGMENT_ON:           # and on the input every earlier run segmented
+            key["segment_on"] = self.segment_on
         return key
 
 
@@ -1118,12 +1134,13 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, norm.threshold)))
     # Each site as the segmenter receives it, written beside its count so a zero the segmenter could not have
     # avoided (cells a few per cent of the tile's range) is told apart from an empty nanowell.
-    view = nm.segmenter_view(rim, px, fit_sites)
+    seen = nm.segmenter_input(images[owner], rim, settings.segment_on)
+    view = nm.segmenter_view(seen, px, fit_sites)
     channel_images = {c: img for c, f in (channels or {}).items() if (img := f(owner)) is not None}
     counts = area = None
     table: dict = {}
     if segment is not None:
-        labels = nm.segment_tile(rim, segment)
+        labels = nm.segment_tile(seen, segment)
         counts = nm.count_cells(labels, px, fit_sites, owned={g.index for g in fit_sites})
         area = nm.area_estimate(labels, px, fit_sites, counts)
         table = _cell_rows(labels, px, fit_sites, counts, addresses, owner, (left, top), channel_images, channels,

@@ -106,7 +106,8 @@ def render_montage(result, zoom: float, *, show_addresses: bool = True, show_sit
 
 
 def render_crop(crop: dict, size: int = 160) -> QPixmap:
-    """A rim-suppressed crop with its segmentation outlined in red, scaled to *size* pixels on the long side.
+    """A crop of the image the segmenter was given (raw or rim-suppressed, ``crop["input"]``) with its segmentation
+    outlined in red, scaled to *size* pixels on the long side.
 
     Its grey levels are its tile's ``scale``, the range the segmenter normalised the whole tile to, so a nanowell
     the segmenter saw at low contrast is drawn at low contrast; only a crop without one is stretched to its own."""
@@ -314,7 +315,9 @@ class NanowellPreviewWindow(QWidget):
         for crop in result.crops:
             cell = QLabel(self)
             cell.setPixmap(render_crop(crop))
-            cell.setToolTip(f"Site {crop['label']}: {crop['n_cells']} cell(s) — rim-suppressed, on its tile's scale as Cellpose saw it, segmentation outlined")
+            seen = "raw image" if crop.get("input") == "raw" else "rim-suppressed"
+            cell.setToolTip(f"Site {crop['label']}: {crop['n_cells']} cell(s) — {seen}, on its tile's scale as "
+                            "Cellpose saw it, segmentation outlined")
             caption = QLabel(f"{crop['label']}: {crop['n_cells']} cell(s)", self)
             holder = QWidget(self)
             column = QVBoxLayout(holder)

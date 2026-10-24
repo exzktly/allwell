@@ -213,3 +213,31 @@ def test_the_form_s_resize_choice_reaches_the_run_and_a_sidecar_restores_it(tab)
     assert combo.currentData() == "none"
     tab._nanowell_cb.setChecked(False)
     assert not combo.isEnabled()
+
+
+def test_the_prefilled_cell_size_gives_way_to_a_pixel_diameter_but_a_typed_one_does_not(tab, tmp_path, qtbot):  # noqa: F811
+    """The form starts the count's size at 19.5 µm. That must not bring back the reported fault — a Cellpose
+    diameter set above ignored in nanowell mode — so the prefilled value is replaced by the converted one, while the
+    same number typed by someone is theirs and kept. A dataset that was no nanowell run restores the prefill."""
+    from analyze.nanowell_preflight import record_pixel_size_um
+    from tests.test_nanowell_form import _plate
+
+    edit = tab._nanowell_cell_diameter_edit
+    assert edit.text() == "19.5"
+    root, _ = _plate(tmp_path)
+    pixel = record_pixel_size_um(str(root))
+    tab._input_edit.setText(str(root))
+    tab._cellpose_diameter_edit.setText("30")
+    tab._nanowell_cb.setChecked(True)
+    assert edit.text() == f"{30 * pixel:.3g}" != "19.5"
+
+    edit.clear()
+    qtbot.keyClicks(edit, "19.5")                                    # typed while the mode is on, the field enabled
+    tab._nanowell_cb.setChecked(False)
+    tab._nanowell_cb.setChecked(True)
+    assert edit.text() == "19.5" and not tab._nanowell_size_note.isVisible()
+
+    tab._apply_nanowell_settings({"nanowell_format": None})
+    assert edit.text() == "19.5"
+    tab._apply_nanowell_settings({"nanowell_format": "100um"})
+    assert edit.text() == ""                                           # a nanowell run that stated none: 15 µm

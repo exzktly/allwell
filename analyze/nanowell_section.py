@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from analyze.domain.nanowell_fields import (
-    CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, LEGACY_CELLPOSE_MODEL, PLATE_FORMAT_CHOICES,
+    CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, PREFILLED, GEOMETRY_CHOICES, LEGACY_CELLPOSE_MODEL, PLATE_FORMAT_CHOICES,
     LEGACY_SEGMENT_ON, LEGACY_SEGMENT_SCOPE, REGISTRATION_FROM_KEY, RESIZE_CHOICES, SEGMENT_ON_CHOICES,
     SEGMENT_SCOPE_CHOICES, SCAN_CHOICES,
     nanowell_enabled, nanowell_option_errors,
@@ -293,10 +293,17 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_size_note.setWordWrap(True)
         self._nanowell_size_note.setVisible(False)
         box.layout().addWidget(self._nanowell_size_note)
+        # Whether someone typed in the size, which the carry-over must then leave alone even when it reads as the
+        # prefilled value; textEdited fires on typing only, never on setText (a restore, the carry-over itself).
+        self._nanowell_size_typed = False
+        size_edit = self._nanowell_cell_diameter_edit
+        size_edit.textEdited.connect(lambda _t: setattr(self, "_nanowell_size_typed", True))
+        # A note about where the size came from stops being true once anything else sets it.
+        size_edit.textChanged.connect(lambda _t: self._nanowell_size_note.setVisible(False))
 
     def _nanowell_edit_row(self, sec, key, label, attr, tip):
         r = self._row(sec, label, tooltip=tip)
-        edit = self._entry(r, "", width=70)
+        edit = self._entry(r, PREFILLED.get(key, ""), width=70)
         edit.setPlaceholderText(DEFAULTS[key] or "default")
         setattr(self, attr, edit)
         r.layout().addStretch(1)
@@ -336,17 +343,21 @@ class AnalyzeNanowellSectionMixin:
         self._carry_cellpose_diameter()
 
     def _carry_cellpose_diameter(self) -> None:
-        """Turning nanowell mode on with a cell diameter in pixels set above and none in µm here: convert it.
+        """Turning nanowell mode on with a cell diameter in pixels set above and none set in µm here: convert it.
 
         The count takes its cell size in micrometres, because a plate's pixel size can differ between timepoints,
         so it never reads the pixel diameter above; and an empty size here means its default. A size someone had
         set above therefore seemed to vanish when the mode was turned on. It is carried over, converted with the
         pixel size the dataset's acquisition record gives, and the note says so; without a record that gives one
-        the note says the size above is not used. A size already set here is never overwritten."""
+        the note says the size above is not used. A size already set here is never overwritten; the form's prefilled
+        size (``PREFILLED``) counts as set only once someone has typed in the field."""
         note = getattr(self, "_nanowell_size_note", None)
         top = getattr(self, "_cellpose_diameter_edit", None)
         size_edit = self._nanowell_cell_diameter_edit
-        if note is None or top is None or not self._nanowell_cb.isChecked() or size_edit.text().strip():
+        current = size_edit.text().strip()
+        untouched = not current or (current == PREFILLED["nanowell_cell_diameter_um"]
+                                    and not getattr(self, "_nanowell_size_typed", False))
+        if note is None or top is None or not self._nanowell_cb.isChecked() or not untouched:
             return
         try:
             px = float(top.text().strip() or 0)
@@ -432,9 +443,13 @@ class AnalyzeNanowellSectionMixin:
         if known:
             self._nanowell_format_cb.setCurrentIndex(index)
         for key, _label, attr, _tip in _FIELDS + _CUSTOM_FIELDS + _GRID_FIELDS:
-            # A key the dataset does not state is blank, not whatever the previous dataset left in the box.
+            # A key the dataset does not state is blank, not whatever the previous dataset left in the box: a nanowell
+            # run that stated none used the pipeline's default. A dataset that was no nanowell run states nothing about
+            # them, so a field the form prefills goes back to that.
             value = d.get(key)
-            getattr(self, attr).setText("" if value is None else f"{value:.12g}" if isinstance(value, float) else str(value))
+            blank = "" if plate_format else PREFILLED.get(key, "")
+            getattr(self, attr).setText(blank if value is None else f"{value:.12g}" if isinstance(value, float)
+                                        else str(value))
         scan = self._nanowell_scan_cb.findData(str(d.get("nanowell_scan") or SCAN_CHOICES[0]))
         self._nanowell_scan_cb.setCurrentIndex(max(scan, 0))
         # Absent or None is a run that did not choose: the format's hexagonal lattice in a circle.

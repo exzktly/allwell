@@ -214,10 +214,12 @@ clipping thresholds below which a nanowell carries its state but no cell count. 
 
 With **Nanowell arrays** ticked, the **Segmentation** section at the top of the form is set to label-free and shows
 the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on**, **Segment**,
-**Resize** and **Cell diameter (µm)** (the typical cell size, which sets the scale the model looks for cells at; blank uses the default). The count
+**Resize** and **Cell diameter (µm)** (the typical cell size, which sets the scale the model looks for cells at). The cell diameter
+starts at 19.5 µm: at 0.65 µm per pixel that is Cellpose's own 30 px, so Cellpose segments without resizing, about
+four times faster than at the pipeline's 15 µm, which it enlarged; blank uses that 15 µm default. The count
 reads only these — not the pixel diameter label-free shows outside nanowell mode. When a pixel diameter was set there
-and the µm field is empty, ticking **Nanowell arrays** converts it with the pixel size the dataset's acquisition record
-gives and fills the µm field, and a note under it says so; a µm size already entered is never replaced. Without a record
+and the µm field is empty or still holds the 19.5 µm it starts with (not typed by you), ticking **Nanowell arrays** converts it with the pixel size the dataset's acquisition record
+gives and fills the µm field, and a note under it says so; a µm size you entered is never replaced. Without a record
 that gives the pixel size, the note says the pixel diameter is not used and asks for the size in µm.
 
 **Cellpose model** chooses what counts the cells: *cpsam* (Cellpose-SAM, the default), *cyto3* (Cellpose 3's

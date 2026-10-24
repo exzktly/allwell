@@ -10317,10 +10317,12 @@ of the Segmentation section's other settings, so `_build_nanowell_count_rows` bu
 (`seg_params._nanowell_count_box`). That box is shown only in nanowell mode, which pins the method to label-free;
 the page's own note and the pixel diameter row (`_sync_cellpose_diameter_row`, which the count never reads) are
 hidden then. Because the pixel row is hidden and the count's size is in µm, turning the mode on with a pixel
-diameter set and the µm field empty converts it (`_carry_cellpose_diameter`, at
+diameter set and the µm field empty, or holding the form's prefilled 19.5 µm (`nanowell_fields.PREFILLED`; a typed
+value is tracked by `textEdited` as `_nanowell_size_typed`), converts it (`_carry_cellpose_diameter`, at
 `nanowell_preflight.record_pixel_size_um`, the acquisition record's first stated pixel size) and says so in
 `_nanowell_size_note`; a µm size already set is never overwritten, and with no record giving a pixel size the note
-says the pixel value is not used. Their option keys are the section's
+says the pixel value is not used. A restore leaves a field a nanowell run did not state blank (it used the
+pipeline's 15 µm) and puts a dataset that was no nanowell run back on the prefill. Their option keys are the section's
 (`tests/test_nanowell_count_settings_sit_with_segmentation.py`). *Reuse registration* (a path
 and a Browse button, key `nanowell_registration_from`) sends `--nanowell_registration_from` when filled; a folder
 without `nanowells/` is refused (`registration_from_error`), and with a remote host chosen the run goes on and the log

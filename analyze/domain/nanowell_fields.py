@@ -53,6 +53,12 @@ SCAN_CHOICES = tuple(f"{corner}-{major}{'-serpentine' if serpentine else ''}"
 GRID_KEYS = ("nanowell_grid", "nanowell_scan", "nanowell_overlap_percent", "nanowell_pixel_size_um")
 CUSTOM_KEYS = ("nanowell_diameter_um", "nanowell_pitch_um")
 
+#: What a field holds on a new form, where that is not blank. The cell diameter's 19.5 µm is the size at which, on
+#: a 0.65 µm-per-pixel plate, a cell is Cellpose's own 30 px, so it segments without resizing (four times faster than
+#: the pipeline's 15 µm default there, which Cellpose enlarged x1.5) — measured on a user's plate to count as well.
+#: A blank field still sends no flag, and the pipeline's 15 µm applies (``DEFAULTS``, the placeholder).
+PREFILLED = {"nanowell_cell_diameter_um": "19.5"}
+
 #: Field defaults, shown as placeholders: a blank field sends no flag and the pipeline's own default applies.
 DEFAULTS = {
     "nanowell_cell_diameter_um": "15",

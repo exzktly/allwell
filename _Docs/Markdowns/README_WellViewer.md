@@ -4927,7 +4927,11 @@ use them.
     amber occluded, red clipped, grey not seen). Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the
-    `q,r` when both are on). A nanowell without a value has no number written, never a 0. *Tiles* outlines each tile, coloured by how it was placed (green on the lattice, blue by
+    `q,r` when both are on). A nanowell without a value has no number written, never a 0. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
+    from the run's cell table, so you can see where cells were found and where none were; the run does not
+    keep cell outlines, so the dot is the cell's centre, not its shape. On *Lattice* positions each dot keeps
+    its place inside its nanowell, and **Overlays** hides the dots with the other coloured layers. Datasets
+    analysed before this setting existed show their cells too: nothing needs re-running. *Tiles* outlines each tile, coloured by how it was placed (green on the lattice, blue by
     overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
     hand and says how the timepoint was addressed (and, where it was not, how to anchor it), and offers **Set

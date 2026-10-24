@@ -25,6 +25,7 @@ Qt-free.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import math
@@ -89,6 +90,9 @@ class NanowellData:
     in_dir: Path | None = None
     #: ``timepoint -> {"pixel_size_um": {...}, "tile_size_px": {...}}`` from the sidecar's acquisition block.
     acquisition: dict = field(default_factory=dict)
+    #: ``well -> the per-cell CSV holding its cells``, found while reading their brightness: where the Array view's
+    #: Cells layer reads a well's cell positions (:func:`cell_positions`), one well at a time.
+    cell_tables: dict = field(default_factory=dict)
     #: The filename schema, separator and phase token the run read its images with (for the crop reader).
     schema: str = ""
     separator: str = ""
@@ -243,11 +247,11 @@ def _times(data_dir: Path, timepoints) -> tuple[dict, str | None, str]:
                       "nothing measured against time is defined.")
 
 
-def _cell_brightness(cell_dir: Path, channels) -> pd.DataFrame | None:
+def _cell_brightness(cell_dir: Path, channels, tables: dict | None = None) -> pd.DataFrame | None:
     """Mean per-cell intensity per (well, timepoint, nanowell, channel), from the per-cell CSVs in *cell_dir*.
 
     *cell_dir* is the folder holding ``nanowells/`` — the run's output folder — whichever of it and its
-    parent was loaded.
+    parent was loaded. *tables*, when given, is filled with ``well -> the CSV holding its cells``.
     """
     frames = []
     from util.csv_gz import glob_csvs
@@ -264,6 +268,9 @@ def _cell_brightness(cell_dir: Path, channels) -> pd.DataFrame | None:
         intensity = [f"{t}_mean_intensity" for t in channels if f"{t}_mean_intensity" in header]
         frame = pd.read_csv(path, usecols=wanted + intensity, dtype={"timepoint": str, "well": str})
         frames.append(frame)
+        if tables is not None:
+            for well in frame["well"].dropna().unique():
+                tables.setdefault(str(well), path)
     if not frames:
         return None
     cells = pd.concat(frames, ignore_index=True)
@@ -344,7 +351,8 @@ def load_nanowell_data(data_dir) -> NanowellData | None:
                       - {c for c in (c[: -len("_integrated")] for c in sites.columns) if c.lower() == phase})
     timepoints = sorted(set(sites["timepoint"].dropna()) | {tp for g in grids.values() for tp in g})
     times_h, source, note = _times(data_dir, timepoints)
-    brightness = _cell_brightness(folder.parent, channels)
+    cell_tables: dict = {}
+    brightness = _cell_brightness(folder.parent, channels, cell_tables)
     if brightness is not None and len(sites):
         sites = sites.merge(brightness, on=["well", "timepoint", "nw_q", "nw_r"], how="left")
     for channel in channels:
@@ -361,4 +369,38 @@ def load_nanowell_data(data_dir) -> NanowellData | None:
                         separator=str(options.get("filename_sep") or sidecar.get("separator") or ""),
                         phase_token=str(options.get("phase_token") or sidecar.get("phase_token") or ""),
                         channels=channels, problems=problems, roster_rules=roster_rules,
-                        reanalysed=reanalysed)
+                        reanalysed=reanalysed, cell_tables=cell_tables)
+
+
+#: The columns of a nanowell run's cell table the Cells layer reads.
+CELL_POSITION_COLUMNS = ("well", "timepoint", "nw_q", "nw_r", "well_x_um", "well_y_um")
+
+
+def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFrame | None:
+    """Every counted cell of *well* at *timepoint*: its nanowell's address and its centre in the well frame (µm),
+    from the run's cell table. ``None`` when the well has no cell table (a run that counted no cell, or one that
+    could not count). The table is read whole once per file and kept while it is unchanged on disk, so stepping
+    through a well's timepoints reads it once."""
+    path = data.cell_tables.get(well)
+    if path is None:
+        return None
+    try:
+        stat = Path(path).stat()
+    except OSError:
+        return None
+    frame = _read_cell_positions(str(path), stat.st_mtime_ns, stat.st_size)
+    if frame is None:
+        return None
+    return frame[(frame["well"] == well) & (frame["timepoint"] == timepoint)]
+
+
+@functools.lru_cache(maxsize=2)
+def _read_cell_positions(path: str, _mtime_ns: int, _size: int) -> pd.DataFrame | None:
+    """One cell table's positions; the modification time and size are the cache key, so an edited file is read
+    again."""
+    try:
+        frame = pd.read_csv(path, usecols=list(CELL_POSITION_COLUMNS), dtype={"timepoint": str, "well": str})
+    except (OSError, ValueError, pd.errors.ParserError) as exc:
+        log.warning("Nanowells: the cell table %s cannot be read for the Cells layer (%s)", path, exc)
+        return None
+    return frame.dropna(subset=["well_x_um", "well_y_um"])

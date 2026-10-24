@@ -41,6 +41,8 @@ _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or ou
            ("addresses", "Addresses", "Each nanowell's q,r, wherever it is drawn large enough to hold it."),
            ("values", "Values", "Each nanowell's value of the Metric, written inside it (under its q,r when "
                                 "Addresses is on) wherever it is drawn large enough to hold it."),
+           ("cells", "Cells", "A dot at the centre of each cell the run counted, from its cell table. The run keeps "
+                              "no cell outlines, so a dot is all there is to draw."),
            ("tiles", "Tiles", "Each tile's placement, coloured by how the run placed it, with its residual."),
            ("anchor", "Anchor", "The anchor set by hand, and what the grid record says about addressing this "
                                 "timepoint; with it on, Set anchor is offered."),

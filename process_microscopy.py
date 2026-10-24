@@ -66,11 +66,11 @@ import numpy as np
 from scipy import ndimage as ndi
 from skimage.filters import threshold_otsu
 from skimage.segmentation import watershed
-from util.channel_roles import phase_role_conflicts, quantified_channel_tokens
+from util.channel_roles import LABELFREE_METHODS, phase_role_conflicts, quantified_channel_tokens
 from util.fov import sort_key as _fov_sort_key
 from pipeline.cli_args import (
     DEFAULT_SEGMENTATION_METHOD,
-    build_parser, nanowell_options_from_args, qc_options_from_args,
+    apply_labelfree_preset, build_parser, nanowell_options_from_args, qc_options_from_args,
 )
 from pipeline.input_layout import (
     find_well_folders,
@@ -125,7 +125,7 @@ from pipeline.stardist import (
 # general routine (Otsu + watershed on the chosen channel).
 _STARDIST_METHODS = ("stardist_nuclei", "stardist_seeded_watershed_cell")
 _CELLPOSE_METHODS = ("cellpose", "cellpose_labelfree")
-_LABELFREE_METHODS = ("cellpose_labelfree",)
+_LABELFREE_METHODS = LABELFREE_METHODS              # one definition: util.channel_roles
 
 
 # ---------------------------------------------------------------------------
@@ -3191,9 +3191,7 @@ def main() -> None:
                 f"--phase_token is required when --segmentation_method="
                 f"{args.segmentation_method} (the phase/brightfield channel to segment)."
             )
-        args.nuclear_token = phase_token
-        # The label-free preset is Cellpose-SAM (pipeline.cellpose.DEFAULT_MODEL; not imported: a StarDist-only build lacks it).
-        args.cellpose_model = "cpsam"
+        apply_labelfree_preset(args)      # the phase channel in the nuclear slot, Cellpose-SAM (cli_args)
         log.info("Label-free segmentation (%s): Cellpose %s on phase channel "
                  "%r as the segmentation input.", args.segmentation_method, args.cellpose_model, phase_token)
     else:

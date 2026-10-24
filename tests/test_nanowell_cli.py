@@ -567,3 +567,18 @@ def test_the_resize_choice_reaches_cellpose_and_the_run_s_settings(tmp_path, mon
     told.clear()
     none = run("none", "--nanowell_resize", "none")
     assert told and set(told) == {0.0} and none["resize"] == "none"
+
+
+def test_the_key_the_app_computes_is_the_one_the_pipeline_records(tmp_path, monkeypatch):
+    """The whole feature rests on this: the key derived from the argv equals what ``process_microscopy.main``
+    writes beside the well, for a nanowell run (whose options rewrite the method and the nuclear slot)."""
+    from pipeline.cli_args import settings_key_from_argv
+    from pipeline.settings_record import recorded_well_settings
+
+    rendered, record = build_well(timepoint="0h")
+    plate = _write_plate(tmp_path, rendered, record)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--nanowell_resize", "none")
+    argv = sys.argv[1:]
+    recorded = recorded_well_settings(out, "A01")
+    assert recorded and recorded == settings_key_from_argv(argv).split("~")[0]
+    assert json.loads((out / ".aw_settings" / "A01.json").read_text())["digest"] == recorded

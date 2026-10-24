@@ -56,6 +56,7 @@ from services.remote_runner import (
     stage_local_zips,
 )
 from services import run_journal, run_provenance
+from services.remote_finished_wells import drop_finished
 from services.remote_recover import recover_finished_outputs
 from services.remote_run_state import refuse_remote_nanowell_incremental
 from services.subprocess_kill import signal_subprocess
@@ -1700,6 +1701,29 @@ class PipelineRunner:
             return None
         return zipped, argv_with_only_wells(args, sent), grouped, len(scoped)
 
+    def _finished_here(self, output_dir: Path, args: list[str], opts: dict) -> list[str]:
+        """The wells finished in *output_dir* under this run's settings, which a
+        remote run does not upload again (:mod:`services.remote_finished_wells`).
+        Asked of every well with a per-well CSV here; an empty-well blank is
+        never one (it is the correction's input), and the log names the rest."""
+        from services.remote_finished_wells import finished_here, wells_with_csvs
+
+        extras_of = getattr(self._remote_runner, "_host_argv_extras", None)
+        extras = extras_of(OutputFilter(self._output_filter)) if callable(extras_of) else ()
+        blanks = ()
+        if "empty_well" in (opts.get("background"), opts.get("flatfield")):
+            blanks = blank_wells_for_run(opts.get("background_well", ""),
+                                         opts.get("background_well_map", ""))
+        prefix = opts.get("csv_prefix", "measurements")
+        finished = finished_here(output_dir, args, wells_with_csvs(output_dir, prefix),
+                                 extras=extras, keep=blanks)
+        if finished:
+            shown = ", ".join(finished[:12]) + (f" and {len(finished) - 12} more" if len(finished) > 12 else "")
+            self._enqueue(("line", f"[remote] {len(finished)} well(s) already finished here under these "
+                                   f"settings — not uploaded or recomputed (tick Force, or name them in Force "
+                                   f"wells, to redo them): {shown}\n"))
+        return finished
+
     def _announce_staged_plate(self, zipped, grouped: list[str],
                                download_n: int) -> None:
         """Tell the dashboard what staging produced, before anything uploads."""
@@ -1745,7 +1769,8 @@ class PipelineRunner:
             self._enqueue(("stage_total", (_stage, _n)))
 
     def _nothing_left_to_upload(self, zipped, opts: dict, output_dir: Path) -> bool:
-        """End an incremental run whose staging left nothing to send.
+        """End a run whose staging left nothing to send: an incremental run, or
+        one whose wells are all finished here (``_finished_here``).
 
         Every well is already complete locally — typically because
         :meth:`_recover_remote_outputs` just downloaded what the previous run
@@ -1761,7 +1786,7 @@ class PipelineRunner:
         in the upload — and the run then uploaded it and asked the scheduler for
         a node to recompute a well that needed nothing.
         """
-        if not zipped.incremental:
+        if not (zipped.incremental or zipped.up_to_date_wells):
             return False
         if zipped.well_zips and not self._only_measured_blanks(zipped, opts, output_dir):
             return False
@@ -1830,10 +1855,12 @@ class PipelineRunner:
         if recovery.ok:
             if recovery.pulled and "--nanowell_format" in args:
                 # A nanowell run cannot add to earlier results on a remote host (NANOWELL_REMOTE_INCREMENTAL_REFUSAL),
-                # so the wells just brought home are recomputed with the rest rather than the run being refused for
-                # an Incremental the user never ticked (roll-up review X29).
-                self._enqueue(("line", "[remote] resume: a nanowell run cannot resume on a remote host, so the plate "
-                                       "is analysed in full\n"))
+                # so it is not made incremental (roll-up review X29). The wells just brought home are finished here
+                # now, and `_finished_here` leaves them out of the upload with the rest; a well left part-way is
+                # analysed in full.
+                self._enqueue(("line", "[remote] resume: a nanowell run cannot add to a well part-way on a remote "
+                                       "host, so a well left part-way is analysed in full; finished wells are not "
+                                       "sent again\n"))
                 return bool(opts.get("incremental", False))
             return bool(opts.get("incremental", False)) or recovery.pulled
         if self._stop_requested.is_set():
@@ -1873,6 +1900,9 @@ class PipelineRunner:
             if incremental is None:
                 return
             refuse_remote_nanowell_incremental(args)       # before anything is staged or sent (X29)
+            # What is finished here under these settings is not sent again, as a local run skips it
+            # (services.remote_finished_wells); an incremental run's split decides per field instead.
+            finished = [] if incremental else self._finished_here(output_dir, args, opts)
             zipped = stage_local_zips(
                 input_dir,
                 filename_schema=opts["filename_schema"],
@@ -1898,7 +1928,9 @@ class PipelineRunner:
                     if "empty_well" in (opts.get("background"),
                                         opts.get("flatfield"))
                     else ""),
+                skip_wells=finished,
             )
+            zipped = drop_finished(zipped, finished)
             scope = self._scope_remote_run(zipped, opts, args)
             if scope is None:
                 return

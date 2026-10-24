@@ -1738,6 +1738,12 @@ and by `remote_fetch_report.txt` in the output folder.
   incrementally on its own, and the log says so. **Force reprocess all wells**
   overrides that: every well is recomputed from scratch, and on a remote run
   every well is uploaded whole, even one that is already complete locally.
+  Without Force, a remote run — like a run on this computer — skips every well
+  already finished in the output folder under the same settings: it is not
+  uploaded or recomputed, the log names it (*already finished here under these
+  settings*), and the plate shows it complete. A well named in **Force wells**
+  is redone, and so is a well measured under different settings. A plate with
+  nothing left to do ends without uploading anything.
   A remote run in batches that is restarted — after Stop, Suspend, or a lost
   node — first checks what the host still holds from the earlier attempt with
   the same settings. A well that finished there but had not been downloaded

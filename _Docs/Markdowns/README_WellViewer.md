@@ -222,6 +222,14 @@ it on a GPU. A run made before Cellpose-SAM was the default counted with *cyto3*
 cells, so compare them on one well with **Test detection** before a plate-wide run: its crops show the outlines the
 run itself would count, cut from the whole tile segmented as the run segments it.
 
+**Segment on** chooses the image the model counts cells in. *Raw image* (the default) is each tile as it was imaged —
+what Cellpose's models, Cellpose-SAM among them, were trained on. *Rim-removed* is each nanowell divided by the well's
+picture of an empty nanowell, which takes the bright rim away but is a ratio image no model was trained on, and in
+which the faint noise of an empty nanowell is stretched across the model's whole range. Either way a cell is counted
+in a nanowell only when its centre lies inside the nanowell's interior, so a cell found on a rim is not counted, and
+confluence is measured on the rim-removed image. Test detection's crops show the image the model was given (their
+tooltip says which). A run made before this setting existed counted on the rim-removed image, and its settings say so.
+
 **Array geometry** says how the array is found. *Hexagonal lattice in a circle* (the default) looks for nanowells
 on a hexagonal lattice inside a circular array. Either way the nanowells' diameter is measured on the images — one
 diameter for the whole well, the median over its timepoints — and the nanowells are found, fitted and measured at

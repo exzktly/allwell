@@ -105,6 +105,8 @@ def test_a_field_the_earlier_build_checkpointed_is_not_computed_again(tmp_path, 
 _DIGEST_9145 = {"stardist": "748b063f4dab7c72", "nanowell": "6698c1c49a7e1270", "nanowell_livecell": "e4e030f2272cce57",
                 "cellpose": "9153e16dd6928742"}
 _NANOWELL = [*_ARGV_9125, "--nanowell_format", "100um", "--phase_token", "PHASE"]
+#: What every earlier nanowell run segmented: the rim-divided tile (``--nanowell_segment_on`` did not exist).
+_ON_RIM = ["--nanowell_segment_on", "rim"]
 _CELLPOSE = [*_ARGV_9125, "--segmentation_method", "cellpose"]
 
 
@@ -119,14 +121,16 @@ def test_a_run_whose_model_did_not_change_keeps_the_digest_the_cyto3_build_recor
     describes nothing the run did (StarDist), or is the one it ran with (a nanowell run on cyto3 or livecell_cp3, a
     Cellpose run told cyto3), a well the earlier build recorded is this run's."""
     assert _DIGEST_9145["stardist"] in _aliases(_ARGV_9125)
-    assert _DIGEST_9145["nanowell"] in _aliases([*_NANOWELL, "--nanowell_cellpose_model", "cyto3"])
-    assert _DIGEST_9145["nanowell_livecell"] in _aliases([*_NANOWELL, "--nanowell_cellpose_model", "livecell_cp3"])
+    assert _DIGEST_9145["nanowell"] in _aliases([*_NANOWELL, "--nanowell_cellpose_model", "cyto3", *_ON_RIM])
+    assert _DIGEST_9145["nanowell_livecell"] in _aliases([*_NANOWELL, "--nanowell_cellpose_model", "livecell_cp3",
+                                                          *_ON_RIM])
     assert _DIGEST_9145["cellpose"] in _aliases([*_CELLPOSE, "--cellpose_model", "cyto3"])
 
 
 def test_a_run_now_on_cpsam_is_not_taken_for_the_cyto3_run_the_earlier_build_recorded():
     """The other half: cyto3 then and cpsam now are different counts, so the earlier build's well is not reused."""
     assert _DIGEST_9145["nanowell"] not in _aliases(_NANOWELL)                 # the default is now cpsam
+    assert _DIGEST_9145["nanowell"] not in _aliases([*_NANOWELL, "--nanowell_cellpose_model", "cyto3"])  # on raw
     assert _DIGEST_9145["cellpose"] not in _aliases(_CELLPOSE)
 
 

@@ -571,6 +571,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "Cellpose 3 model trained on LIVECell's phase-contrast images of eight cell lines. cyto3 and "
                          "livecell_cp3 need a Cellpose 3 install and are refused on Cellpose 4. Weights are "
                          "downloaded on first use."))
+    p.add_argument("--nanowell_segment_on", choices=("raw", "rim"), default="raw",
+                   help=("What the cell count's segmenter is given. raw (the default): each tile as it was imaged, "
+                         "which is what Cellpose's models were trained on; a cell on a nanowell's rim is still not "
+                         "counted, since only a cell whose centre lies inside a nanowell's interior is. rim: each "
+                         "nanowell divided by the well's empty-nanowell template, which removes the rim but is a "
+                         "ratio image no model was trained on. Confluence uses the rim-divided image either way."))
     p.add_argument("--nanowell_square_edge_deg", type=float, default=0.0,
                    help=("Angle of the central square nanowell's edges to a lattice row, degrees (assumed 0: the "
                          "square is cut parallel to a row). Used to refuse a lattice fitted a sixth of a turn off."))
@@ -621,6 +627,8 @@ def nanowell_options_from_args(args, error) -> dict | None:
     # Only a run on cyto3 leaves the model out: that is what every earlier run's options mean, so its key is theirs.
     if args.nanowell_cellpose_model not in (None, "cyto3"):
         options["cellpose_model"] = args.nanowell_cellpose_model
+    if args.nanowell_segment_on not in (None, "rim"):          # rim is what every earlier run's options mean
+        options["segment_on"] = args.nanowell_segment_on
     pattern = _grid_pattern(args, error)
     if pattern:
         options["pattern"] = pattern

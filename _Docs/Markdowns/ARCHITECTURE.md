@@ -9996,7 +9996,14 @@ Because "departs from the floor" includes the optical halo of a cell, it reads h
 between the painted coverage and the coverage of a disk 3 px larger in radius, which makes it a monotone measure of
 loading rather than an area.
 
-**Counts.** `segment_tile` makes one segmenter call on the whole rim-suppressed tile
+**Counts.** `segment_tile` makes one segmenter call on the whole tile — the image `nanowell_measure.segmenter_input`
+chooses by the setting's `segment_on` (`SEGMENT_ON`): `raw`, the tile as imaged, what Cellpose's models were trained
+on, or `rim`, the rim-suppressed tile, a ratio image whose near-flat empty nanowells Cellpose's 1st-99th percentile
+scaling stretches. A run's options that name none mean `rim` (`LEGACY_SEGMENT_ON`): every earlier run segmented it,
+so `NanowellSettings.key()` names the input only when it is not `rim`, `--nanowell_segment_on` defaults to `raw`, the
+form always sends its choice, and `settings_digest._before_cpsam` aliases a nanowell run on `rim` to the digest the
+earlier build recorded. Confluence is measured on the rim-suppressed tile either way, and Test detection's crops
+(`pipeline/nanowell_preview._tile_segmented`) are cut from the image the segmenter was given, marked `input`
 (`cellpose_segmenter` is the production segmenter and imports `pipeline.cellpose` only
 when called). Its model is the setting's `cellpose_model`, one of `nanowell_run.CELLPOSE_MODELS`: `cpsam`
 (Cellpose-SAM, the default, in the pinned `cellpose==4.1.1`), `cyto3` (Cellpose 3's generalist) or `livecell_cp3`
@@ -10016,7 +10023,7 @@ is therefore counted by the one tile that owns the site, and a cell on a rim or 
 sites belongs to none. Beside each count the row records what the segmenter was given: `level_offset` and
 `level_gain`, the site's `(offset, gain)` from `_normalise`, and `segmenter_floor` / `segmenter_contrast` from
 `segmenter_view` — the median and the 1st-to-99th-percentile spread of the site's interior on the 0-1 scale the
-segmenter normalises the whole rim-suppressed tile to (its 1st and 99th percentiles, flat 1.0 between sites
+segmenter normalises the whole tile it is given to (its 1st and 99th percentiles; on `rim`, flat 1.0 between sites
 included). A zero beside a contrast of a few per cent is a nanowell the segmenter could barely see, not an empty
 one; all four are `None` for a site not measured. A site with no cell is a zero, not an absence; an owned site with no geometry in the
 tile is an error, not a missing key.

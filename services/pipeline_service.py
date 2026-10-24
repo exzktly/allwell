@@ -70,6 +70,9 @@ def _emit_nanowell_flags(args: list[str], opts: dict) -> None:
     model = str(opts.get("nanowell_cellpose_model") or "").strip()
     if model:                                        # always: the command line's default is not every form's
         args += ["--nanowell_cellpose_model", model]
+    segment_on = str(opts.get("nanowell_segment_on") or "").strip()
+    if segment_on:                                   # the same
+        args += ["--nanowell_segment_on", segment_on]
     if plate_format == "custom":                     # a known format's geometry is its own, never sent
         for key in ("nanowell_diameter_um", "nanowell_pitch_um"):
             _emit_num_flag(args, opts, key, f"--{key}", float)

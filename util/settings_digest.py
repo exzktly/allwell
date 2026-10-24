@@ -123,6 +123,7 @@ KEYED_ON: dict[str, str] = {
                                    "its contrast with the geometry inferred, so which sites exist and "
                                    "every address",
     "nanowell_cellpose_model":     "the model the label-free count segments with, so every count",
+    "nanowell_segment_on":         "the image that model is given (as imaged, or rim-divided), so every count",
     "nanowell_grid":               "the described grid a dataset without an acquisition record is "
                                    "placed from, so where every tile and nanowell sits",
     "nanowell_scan":               "the order the described grid's fields were taken in, the same",
@@ -225,8 +226,8 @@ def settings_digest(opts) -> str:
 
 def _before_cpsam(opts) -> dict:
     """*opts* as a build from before Cellpose-SAM became the default recorded the same configuration: the parser's
-    ``cellpose_model`` default was cyto3, and a nanowell run's cyto3 was sent as no ``nanowell_cellpose_model`` at
-    all. Only where the two describe the same work: a run that segments with Cellpose keeps its model (cyto3 then
+    ``cellpose_model`` default was cyto3, a nanowell run's cyto3 was sent as no ``nanowell_cellpose_model`` at
+    all, and there was no ``nanowell_segment_on`` (every run segmented the rim-divided tile). Only where the two describe the same work: a run that segments with Cellpose keeps its model (cyto3 then
     and cpsam now are different counts), and a nanowell run keeps any model but cyto3."""
     out = dict(opts)
     try:
@@ -238,6 +239,9 @@ def _before_cpsam(opts) -> dict:
         out["cellpose_model"] = "cyto3"
     if "nanowell_cellpose_model" in out and (not nanowell or out["nanowell_cellpose_model"] == "cyto3"):
         out["nanowell_cellpose_model"] = None
+    # Nor was there a choice of what the model is given: every run segmented the rim-divided tile.
+    if "nanowell_segment_on" in out and (not nanowell or out["nanowell_segment_on"] == "rim"):
+        out["nanowell_segment_on"] = None
     return out
 
 

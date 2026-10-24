@@ -625,10 +625,13 @@ def _draw_nanowells(fig, ax, drawn, scene, layers, *, label: str, selected) -> N
     selection ringed; and where a click finds them."""
     from matplotlib.patches import Rectangle
 
-    from ui.nanowell_sites import FUSED_COLOUR, OUTLINE_WIDTH_PX
+    from ui.nanowell_sites import FUSED_COLOUR, outline_width_px
 
     sites = scene.sites
-    outline = OUTLINE_WIDTH_PX * 72.0 / fig.dpi
+    # One width for the view, from the nanowells' median drawn diameter (they are one molded size), in points.
+    x0, _y0, x1, _y1 = drawn.region
+    diameter_px = 2 * float(np.median(sites.radius)) * drawn.size_px[0] / max(x1 - x0, 1e-9)
+    outline = outline_width_px(diameter_px) * 72.0 / fig.dpi
     fused = np.asarray(sites.fused, dtype=bool)
     if layers.colour == "metric":
         _fill_by_metric(fig, ax, sites, fused, outline, label)

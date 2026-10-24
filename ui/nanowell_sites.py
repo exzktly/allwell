@@ -4,7 +4,7 @@ Two views draw the nanowells of one well over its montage, at two moments of the
 detection** window (``analyze/nanowell_preview.py``) draws them before a run, from one timepoint analysed on the
 spot, painting each with :func:`paint_site`; the **Array view** of Review's Nanowells page
 (``review/features/nanowell/renderer.render_array``) draws them after one, from what the run recorded, in
-matplotlib with the same colours, outline width, fused dash, label colour and label threshold. A person checks
+matplotlib with the same colours, outline width rule (:func:`outline_width_px`), fused dash, label colour and label threshold. A person checks
 the first against the second, so a state has to read the same in both. Each view used to carry its own palette,
 label threshold and outline painter, and they had already drifted: Review's full-resolution window had no colour
 for a fused site at all, drew outlines a third thinner, and wrote addresses in the state's colour rather than the
@@ -34,10 +34,20 @@ STATE_COLOURS = {"empty": Colors.success, "measured": Colors.accent, "occluded":
 FUSED_COLOUR = Colors.accent2
 #: An address is written only inside a nanowell drawn at least this many screen pixels across.
 MIN_LABEL_DIAMETER_PX = 34
-#: The width of a site's outline, in screen pixels.
-OUTLINE_WIDTH_PX = 1.5
+#: A site's outline width as a share of the diameter it is drawn at, and the least and most it may be, in screen
+#: pixels (:func:`outline_width_px`). A fixed 1.5 px disappeared on a phone over VNC, which scales the desktop down
+#: again, and was a hairline beside a nanowell zoomed to fill the view; drawn in proportion, the coloured ring stays
+#: the same share of the nanowell at every zoom, and never thinner than the floor.
+OUTLINE_SHARE = 0.06
+OUTLINE_MIN_PX = 2.5
+OUTLINE_MAX_PX = 8.0
 #: The colour of an address written inside its outline: legible over any part of a greyscale montage.
 LABEL_COLOUR = Colors.brand_fg
+
+
+def outline_width_px(diameter_px: float) -> float:
+    """The outline width, in screen pixels, of a nanowell drawn *diameter_px* across."""
+    return float(min(max(OUTLINE_SHARE * float(diameter_px), OUTLINE_MIN_PX), OUTLINE_MAX_PX))
 
 
 def state_colour(state: str) -> str:
@@ -54,7 +64,7 @@ def paint_site(painter, centre: QPointF, radius: float, state: str, label: str =
     zoomed-out view is not a field of overlapping text.
     """
     pen = QPen(QColor(FUSED_COLOUR if fused else state_colour(state)))
-    pen.setWidthF(OUTLINE_WIDTH_PX)
+    pen.setWidthF(outline_width_px(2 * radius))
     if fused:
         pen.setStyle(Qt.DashLine)
     painter.setPen(pen)

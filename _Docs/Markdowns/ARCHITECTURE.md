@@ -10559,7 +10559,7 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   stay square; the image is drawn for exactly that region and those pixels; the nanowells are filled by the
   metric (`MAP_CMAP`, with a colour bar; a nanowell without a value is a grey outline styled by its state,
   `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour`, a fused one
-  dashed in `FUSED_COLOUR` either way, at `OUTLINE_WIDTH_PX`, the central nanowell boxed; labels in
+  dashed in `FUSED_COLOUR` either way, at `outline_width_px` of the median drawn diameter (6 % of it, 2.5–8 px), the central nanowell boxed; labels in
   `LABEL_COLOUR` (`_draw_labels`: the `q,r` with *Addresses*, the metric value to three significant figures with
   *Values*, one under the other when both are on, `site_label_texts`; a nanowell without a value writes no number)
   only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
@@ -10618,7 +10618,7 @@ only full resolution shows, and drives the real canvas's drag, wheel, *1:1*, anc
 
 **Drawing a nanowell.** Test detection (before a run) and the Array view (after it) show the same nanowells over
 the same kind of montage, and a person checks one against the other, so both draw from `ui/nanowell_sites.py`:
-Test detection paints through `paint_site`, and `render_array` takes the same colours, outline width, fused dash,
+Test detection paints through `paint_site`, and `render_array` takes the same colours, outline width rule (`outline_width_px`: a share of the drawn diameter, floored so it survives a phone over VNC), fused dash,
 label colour and label threshold. `STATE_COLOURS` is keyed on the state the
 pipeline records, plus Test detection's own `unaddressed` and `uncounted`; `state_colour` draws any other state
 (`absent`, `not_located`) muted. `paint_site` outlines a site in its state's colour — dashed in `FUSED_COLOUR`

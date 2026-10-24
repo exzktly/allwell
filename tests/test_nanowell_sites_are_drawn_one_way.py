@@ -166,7 +166,8 @@ def test_filled_by_the_metric_a_fused_site_is_still_dashed_in_the_fused_colour()
 
 # ── and neither keeps a copy of its own ──────────────────────────────────────
 #: The names the shared module owns. A second assignment of any of them anywhere is a second palette.
-_OWNED = {"STATE_COLOURS", "FUSED_COLOUR", "MIN_LABEL_DIAMETER_PX"}
+_OWNED = {"STATE_COLOURS", "FUSED_COLOUR", "MIN_LABEL_DIAMETER_PX", "OUTLINE_SHARE", "OUTLINE_MIN_PX",
+          "OUTLINE_MAX_PX"}
 _OWNER = "ui/nanowell_sites.py"
 
 
@@ -183,3 +184,45 @@ def test_no_module_but_the_shared_one_defines_the_nanowell_palette():
                     found.append(f"{rel(path)}:{node.lineno} {target.id}")
     assert not found, ("These redefine what ui/nanowell_sites.py owns; import it instead, so a nanowell reads the "
                        "same before a run and after it:\n  " + "\n  ".join(found))
+
+
+# ── outline width: in proportion to the drawn nanowell, never a hairline ─────
+def _ring_thickness(qapp, radius: float) -> int:
+    """Pixels of outline colour along the ray right of the centre, painted by Test detection's painter."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from ui.nanowell_sites import paint_site
+
+    image = QImage(240, 240, QImage.Format_RGB32)
+    image.fill(QColor(0, 0, 0))
+    painter = QPainter(image)
+    paint_site(painter, QPointF(120.0, 120.0), radius, "empty", show_label=False)
+    painter.end()
+    black = QColor(0, 0, 0).rgb()
+    return sum(image.pixelColor(x, 120).rgb() != black for x in range(120, 240))
+
+
+def test_the_outline_grows_with_the_nanowell_and_has_a_floor(qapp):
+    """Asked for: "When nanowells are outlined in a color by state, it's too thin to see." The outline was a fixed
+    1.5 px — under a pixel on a phone over VNC, a hairline round a nanowell zoomed to fill the view."""
+    from ui.nanowell_sites import OUTLINE_MAX_PX, OUTLINE_MIN_PX, outline_width_px
+
+    assert outline_width_px(10) == OUTLINE_MIN_PX and outline_width_px(1000) == OUTLINE_MAX_PX
+    assert outline_width_px(100) == pytest.approx(6.0)
+    small, large = _ring_thickness(qapp, 15.0), _ring_thickness(qapp, 100.0)
+    assert small >= 2                                  # the floor: 2.5 px, not 1.5
+    assert large >= 5 and large > small                # 6 % of 200 px is 8 px (the cap): not the old 1.5
+
+
+def test_the_array_view_outlines_at_the_width_of_the_nanowell_it_draws():
+    from ui.nanowell_sites import outline_width_px
+
+    for px_per_um in (0.2, 1.0):
+        fig, drawn = _array_figure(colour="state", px_per_um=px_per_um)
+        outlines = drawn.ax.collections[0]
+        x0, _y0, x1, _y1 = drawn.region
+        diameter_px = 2 * 50.0 * drawn.size_px[0] / (x1 - x0)
+        assert diameter_px == pytest.approx(100.0 * px_per_um, rel=0.01)
+        assert outlines.get_linewidths()[0] == pytest.approx(outline_width_px(diameter_px) * 72.0 / fig.dpi)
+    assert outlines.get_linewidths()[0] > 1.5 * 72.0 / fig.dpi * 3     # 100 px across: 6 px, four times the old

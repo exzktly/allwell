@@ -1744,8 +1744,11 @@ and by `remote_fetch_report.txt` in the output folder.
   already finished in the output folder under the same settings: it is not
   uploaded or recomputed, the log names it (*already finished here under these
   settings*), and the plate shows it complete. A well named in **Force wells**
-  is redone, and so is a well measured under different settings. A plate with
-  nothing left to do ends without uploading anything.
+  is redone, and so is a well measured under different settings or one its
+  completeness record says was left part way. A plate with nothing left to do
+  ends without uploading anything. When only part of a plate is sent, the
+  cell-gating thresholds are computed on this computer afterwards, over every
+  well, so they are the plate's rather than the part's.
   A remote run in batches that is restarted — after Stop, Suspend, or a lost
   node — first checks what the host still holds from the earlier attempt with
   the same settings. A well that finished there but had not been downloaded

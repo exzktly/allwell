@@ -43,7 +43,6 @@ from pathlib import Path
 from collections.abc import Callable
 
 from util.well_token import blank_wells_for_run, canonical_well_label
-from util.csv_gz import existing_csv
 from pipeline.well_skip import _canonical_force_wells
 from services.input_resolution_service import has_well_zip
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
@@ -57,6 +56,7 @@ from services.remote_runner import (
 )
 from services import run_journal, run_provenance
 from services.remote_finished_wells import argv_forcing, drop_finished, nanowell_forced
+from services.remote_process import run_local_auto_threshold
 from services.remote_recover import recover_finished_outputs
 from services.remote_run_state import refuse_remote_nanowell_incremental
 from services.subprocess_kill import signal_subprocess
@@ -1701,6 +1701,47 @@ class PipelineRunner:
             return None
         return zipped, argv_with_only_wells(args, sent), grouped, len(scoped)
 
+    def _host_argv(self, zipped, opts: dict, args: list[str], output_dir: Path, *,
+                   incremental: bool) -> tuple[list[str], list[str] | None]:
+        """``(argv for the host, argv to recompute the plate's gating from here
+        after the fetch, or None)`` for a staged run.
+
+        A nanowell well sent again over unfinished output here is forced, so
+        the host's own skip cannot keep an earlier attempt's partial tables
+        (``services.remote_finished_wells.nanowell_forced``); and a run that
+        sends part of a plate leaves the plate's cell gating to this computer
+        (``_regate_locally``)."""
+        if not incremental:
+            args = argv_forcing(args, nanowell_forced(output_dir, args, (Path(w).stem for w in zipped.well_zips)))
+        regate_argv = self._regate_locally(zipped, opts, args)
+        return ([*args, "--no_auto_threshold"] if regate_argv is not None else args), regate_argv
+
+    def _regate(self, output_dir: Path, regate_argv: list[str] | None) -> None:
+        """The plate's cell-gating thresholds, computed here over every well,
+        when ``_host_argv`` left them to this computer."""
+        if regate_argv is not None:
+            run_local_auto_threshold(output_dir, regate_argv, lambda m: self._enqueue(("line", m)))
+
+    @staticmethod
+    def _regate_locally(zipped, opts: dict, args: list[str]) -> list[str] | None:
+        """The argv to compute the plate's cell-gating thresholds from here,
+        after the fetch, when this single-shot run sends only part of the plate;
+        ``None`` otherwise.
+
+        The host's auto-threshold pass reads only the wells it was sent, and
+        writes into a sidecar that starts empty, so the thresholds it fetches
+        back replace the plate's with ones from a subset — from the wells left
+        part way, or the one well in Force wells. A batched run already
+        suppresses it per batch and re-runs it here
+        (``remote_process.run_local_auto_threshold``); this does the same for a
+        single-shot run with wells left out (``up_to_date_wells``) or an
+        incremental split. ``None`` too when the user turned the pass off."""
+        if int(opts.get("remote_batch_size", 0) or 0) > 0 or "--no_auto_threshold" in args:
+            return None
+        if not (zipped.incremental or zipped.up_to_date_wells):
+            return None
+        return list(args)
+
     def _finished_here(self, output_dir: Path, args: list[str], opts: dict) -> list[str]:
         """The wells finished in *output_dir* under this run's settings, which a
         remote run does not upload again (:mod:`services.remote_finished_wells`).
@@ -1768,7 +1809,7 @@ class PipelineRunner:
                            ("upload", len(zipped.well_zips))):
             self._enqueue(("stage_total", (_stage, _n)))
 
-    def _nothing_left_to_upload(self, zipped, opts: dict, output_dir: Path) -> bool:
+    def _nothing_left_to_upload(self, zipped, opts: dict, output_dir: Path, args: list[str] = ()) -> bool:
         """End a run whose staging left nothing to send: an incremental run, or
         one whose wells are all finished here (``_finished_here``).
 
@@ -1788,7 +1829,7 @@ class PipelineRunner:
         """
         if not (zipped.incremental or zipped.up_to_date_wells):
             return False
-        if zipped.well_zips and not self._only_measured_blanks(zipped, opts, output_dir):
+        if zipped.well_zips and not self._only_measured_blanks(zipped, opts, output_dir, args):
             return False
         for tok in (*zipped.up_to_date_wells, *(Path(w).stem for w in zipped.well_zips)):
             self._enqueue(("line", f"[remote] ✓ {tok}: up to date (local)\n"))
@@ -1796,23 +1837,29 @@ class PipelineRunner:
                                "complete locally.\n"))
         return True
 
-    @staticmethod
-    def _only_measured_blanks(zipped, opts: dict, output_dir: Path) -> bool:
-        """Whether every staged archive is an empty-well blank already measured
-        here (its per-well CSV and, for a full fetch, its output archive)."""
+    def _only_measured_blanks(self, zipped, opts: dict, output_dir: Path, args) -> bool:
+        """Whether every staged archive is an empty-well blank already finished
+        here — the rule every other well is held to
+        (``services.remote_finished_wells.finished_here``): its CSV, recorded
+        under these settings, whole, and not forced. Not its ``<well>_out.zip``,
+        which only a zip-layout full fetch keeps: requiring it uploaded a
+        finished blank alone and recomputed it after every folder-layout or
+        CSV-only run, and a blank named in Force wells was never redone."""
+        from services.remote_finished_wells import finished_here
+
         if "empty_well" not in (opts.get("background"), opts.get("flatfield")):
             return False
-        blanks = set(blank_wells_for_run(opts.get("background_well", ""),
-                                         opts.get("background_well_map", "")))
-        prefix = opts.get("csv_prefix", "measurements")
-        for wz in zipped.well_zips:
-            label = canonical_well_label(Path(wz).stem)
-            csv_path = existing_csv(output_dir / f"{prefix}_{label}.csv")
-            if (label not in blanks or csv_path is None
-                    or csv_path.stat().st_size == 0
-                    or not (output_dir / f"{label}_out.zip").is_file()):
-                return False
-        return True
+        blanks = {canonical_well_label(b) or b for b in blank_wells_for_run(
+            opts.get("background_well", ""), opts.get("background_well_map", ""))}
+        staged = [canonical_well_label(Path(wz).stem) or Path(wz).stem for wz in zipped.well_zips]
+        if not set(staged) <= blanks:
+            return False
+        extras_of = getattr(self._remote_runner, "_host_argv_extras", None)
+        extras = extras_of(OutputFilter(self._output_filter)) if callable(extras_of) else ()
+        # Asked of the blank itself, which staging sends whole on an incremental run too: `finished_here` answers
+        # nothing for an incremental run (its split decides per field), so the question is put without the flag.
+        whole_run = [a for a in args if a != "--incremental"]
+        return set(finished_here(output_dir, whole_run, staged, extras=extras)) == set(staged)
 
     def _recover_remote_outputs(self, output_dir: Path, args: list[str],
                                 opts: dict) -> bool | None:
@@ -1894,6 +1941,7 @@ class PipelineRunner:
         assert self._remote_runner is not None
         assert self._remote is not None
         zipped = None
+        regate_argv = None
         try:
             self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
             incremental = self._recover_remote_outputs(output_dir, args, opts)
@@ -1935,11 +1983,9 @@ class PipelineRunner:
             if scope is None:
                 return
             zipped, args, grouped, download_n = scope
-            # A nanowell well sent again over partial output here is forced, so the host's own skip cannot
-            # keep an earlier attempt's partial tables (services.remote_finished_wells.nanowell_forced).
-            args = argv_forcing(args, nanowell_forced(output_dir, args, (Path(w).stem for w in zipped.well_zips)))
-            if self._nothing_left_to_upload(zipped, opts, output_dir):
+            if self._nothing_left_to_upload(zipped, opts, output_dir, args):
                 return
+            args, regate_argv = self._host_argv(zipped, opts, args, output_dir, incremental=incremental)
             self._announce_staged_plate(zipped, grouped, download_n)
 
             est = self._remote_runner.estimate(zipped)
@@ -2019,6 +2065,7 @@ class PipelineRunner:
             elif rc == 0 and self._stop_requested.is_set():
                 self._enqueue_stopped(where="Remote pipeline")
             elif rc == 0 and ok:
+                self._regate(output_dir, regate_argv)
                 # v5.x.x: clean run-to-completion. Fire both success
                 # hooks:
                 # 1. ``zipped.on_pipeline_success`` — deletes the

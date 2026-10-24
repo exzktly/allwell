@@ -73,7 +73,7 @@ from services.remote_run_id import (
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import release_batch
 from services.remote_batch_resume import (
-    announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
+    _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
     reattach_output_dir, stage_leftovers, take_from_remote)
 from util.well_token import canonical_well_label
 from services.remote_scratch import (
@@ -986,7 +986,11 @@ class _BatchedRemoteProcess:
             from services.remote_finished_wells import finished_here
 
             extras_of = getattr(getattr(self, "_runner", None), "_host_argv_extras", None)
-            extras = extras_of(getattr(self, "_output_filter", None)) if callable(extras_of) else ()
+            # The flags every batch's host argv carries beyond the run's own: the host's extras, and the blank's
+            # `--background_dir` in this run's directory with each earlier attempt's as an alias, so a well an
+            # earlier attempt measured against its own copy of the blank still matches (`_blank_argv`).
+            extras = [*(extras_of(getattr(self, "_output_filter", None)) if callable(extras_of) else ()),
+                      *_blank_argv(self)]
             # An incremental run's archives carry only their new fields, and its wells have a local CSV by
             # definition: it is never asked (its staging split already decided).
             done = set() if self._zipped.incremental else set(finished_here(
@@ -1272,67 +1276,8 @@ class _BatchedRemoteProcess:
         return "--no_auto_threshold" in list(self._pipeline_argv or [])
 
     def _run_local_auto_threshold(self) -> None:
-        """Re-run the pipeline's auto-threshold pass locally against
-        the full ``local_output_dir`` after every batch has drained.
-        Failures are logged but non-fatal (matches the remote
-        pipeline's "informational only" stance on auto-threshold).
-
-        The pass reports itself through the ``logging`` module — "Auto-threshold:
-        scanning N well(s)", then "completed well i/N (WELL)" as it goes — and
-        the GUI parses exactly those strings off the run's line stream to drive
-        the Threshold stage. In a *subprocess* run they reach it because the
-        pipeline's stdout is that stream. Here the pass runs in-process, so its
-        records went to a logger nobody was reading and the only things on the
-        line stream were this method's own two bookends: one line as it started
-        and one when it finished. Over a full plate that is a long silence right
-        at the end of a run, with the rail sitting still. Forwarding the records
-        onto the same stream closes it, and the regexes that were always there
-        start matching."""
-        try:
-            # Late import: the threshold pass pulls in the imaging stack.
-            # Don't pay that cost on every import of the remote client.
-            sys.path.insert(0, str(repo_root()))
-            from pipeline.auto_threshold_pass import run_auto_threshold_pass
-            import logging
-            log_pylog = logging.getLogger("allwell.local_auto_threshold")
-            self._log(
-                "[remote] running auto-threshold pass locally over "
-                f"{self._local_output_dir} (full plate, all batches drained)\n"
-            )
-            args = _auto_threshold_args_from_argv(self._pipeline_argv)
-            forwarder = _LogToLineStream(self._log)
-            log_pylog.addHandler(forwarder)
-            log_pylog.setLevel(logging.INFO)
-            log_pylog.propagate = False
-            try:
-                written = run_auto_threshold_pass(
-                    args,
-                    self._local_output_dir,
-                    quantified_channel_tokens(
-                        args.fluor_tokens,
-                        nuclear_token=args.nuclear_token,
-                        segmentation_method=args.segmentation_method,
-                        cytoplasm_token=args.cytoplasm_token,
-                    ),
-                    log_pylog,
-                )
-            finally:
-                log_pylog.removeHandler(forwarder)
-            if written:
-                self._log(
-                    "[remote] local auto-threshold defaults written for "
-                    f"{len(written)} channel(s): "
-                    + ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items())
-                    + "\n"
-                )
-            else:
-                self._log(
-                    "[remote] local auto-threshold pass produced no new defaults.\n"
-                )
-        except Exception as exc:  # informational, never fatal
-            self._log(
-                f"[remote] warn: local auto-threshold pass failed: {exc}\n"
-            )
+        """The plate's cell-gating thresholds, computed here over every downloaded well (``run_local_auto_threshold``)."""
+        run_local_auto_threshold(self._local_output_dir, self._pipeline_argv, self._log)
 
 
 class _QueueLineIterator:
@@ -1350,3 +1295,67 @@ class _QueueLineIterator:
         if item is None:
             raise StopIteration
         return item
+
+
+def run_local_auto_threshold(local_output_dir, pipeline_argv, log) -> None:
+    """Re-run the pipeline's auto-threshold pass locally against
+    the full ``local_output_dir`` after every batch has drained.
+    Failures are logged but non-fatal (matches the remote
+    pipeline's "informational only" stance on auto-threshold).
+
+    The pass reports itself through the ``logging`` module — "Auto-threshold:
+    scanning N well(s)", then "completed well i/N (WELL)" as it goes — and
+    the GUI parses exactly those strings off the run's line stream to drive
+    the Threshold stage. In a *subprocess* run they reach it because the
+    pipeline's stdout is that stream. Here the pass runs in-process, so its
+    records went to a logger nobody was reading and the only things on the
+    line stream were this method's own two bookends: one line as it started
+    and one when it finished. Over a full plate that is a long silence right
+    at the end of a run, with the rail sitting still. Forwarding the records
+    onto the same stream closes it, and the regexes that were always there
+    start matching."""
+    try:
+        # Late import: the threshold pass pulls in the imaging stack.
+        # Don't pay that cost on every import of the remote client.
+        sys.path.insert(0, str(repo_root()))
+        from pipeline.auto_threshold_pass import run_auto_threshold_pass
+        import logging
+        log_pylog = logging.getLogger("allwell.local_auto_threshold")
+        log(
+            "[remote] running auto-threshold pass locally over "
+            f"{local_output_dir} (the whole plate)\n"
+        )
+        args = _auto_threshold_args_from_argv(pipeline_argv)
+        forwarder = _LogToLineStream(log)
+        log_pylog.addHandler(forwarder)
+        log_pylog.setLevel(logging.INFO)
+        log_pylog.propagate = False
+        try:
+            written = run_auto_threshold_pass(
+                args,
+                local_output_dir,
+                quantified_channel_tokens(
+                    args.fluor_tokens,
+                    nuclear_token=args.nuclear_token,
+                    segmentation_method=args.segmentation_method,
+                    cytoplasm_token=args.cytoplasm_token,
+                ),
+                log_pylog,
+            )
+        finally:
+            log_pylog.removeHandler(forwarder)
+        if written:
+            log(
+                "[remote] local auto-threshold defaults written for "
+                f"{len(written)} channel(s): "
+                + ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items())
+                + "\n"
+            )
+        else:
+            log(
+                "[remote] local auto-threshold pass produced no new defaults.\n"
+            )
+    except Exception as exc:  # informational, never fatal
+        log(
+            f"[remote] warn: local auto-threshold pass failed: {exc}\n"
+        )

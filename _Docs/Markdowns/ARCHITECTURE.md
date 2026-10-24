@@ -10406,8 +10406,8 @@ when the user ticked Incremental, in Analyze and as a backstop in the runner and
 ones' roster and template, and its tables would replace the local ones. A run the *app* makes incremental — a
 resume, or a plate with an unfinished run behind it — goes well by well instead
 (`analyze.run_spec._nanowell_remote_resume_by_well` drops the incremental and logs why): the finished-wells step
-skips every well whose tables here cover all its archive's timepoints (its grid record names each, and its
-completeness record, when the sidecar has one, says it is whole), and every other well is sent whole, analysed in
+skips every well whose tables here cover all its archive's timepoints (each finished `ok` in its grid record, and
+its completeness record, when the sidecar has one, whole), and every other well is sent whole, analysed in
 full, and forced (`remote_finished_wells.nanowell_forced`, merged into the argv by `argv_forcing`) when it has
 output here, so an earlier attempt's partial tables on the host cannot be kept in its place. In
 `datasets/core/nanowell_tables`, `carry_nanowell_tables` copies a dataset's tables through a well map (canonical
@@ -11675,7 +11675,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_jobs.py` | The scheduler jobs a remote run holds, and making sure none outlives it. `close_remote_job` is the teardown backstop every exit the app survives goes through (it reads the job id from `<pidfile>.slurm` and `scancel`s it); `sweep_orphaned_allocation` is what the next run of the same plate does about an exit the app did not survive, and returns its verdict (`swept`, `owned`, `notmine`, `unknown`, `none`) because the batched path acts on it. Both refuse to cancel a job that is not the caller's (`_only_my_job`), and both are no-ops on a host with no `compute_launcher`. `RemoteRunner.close_remote_job` and `_sweep_orphaned_allocation` delegate here. Line-budgeted (`REMOTE_JOBS_BUDGET`). |
 | `remote_process.py` | The run as the GUI sees it: `_RemoteProcess` wraps the single ssh that runs the pipeline and `_BatchedRemoteProcess` the driver that holds one allocation and runs the plate batch by batch. Both present the `subprocess.Popen` surface `PipelineRunner` reads and tee every line to the `Fetcher`, so per-well downloads start the moment a well is announced done; `wait` flushes the `Fetcher` and `terminate`/`kill` cancel it, and every exit path ends the run heartbeat (`_UploadHeartbeat`) exactly once. A batch whose driver vanished marks the run failed (1); a stopped one reports 130. `tests/test_remote_process.py` drives the single-launch wrapper against a real child process. Line-budgeted (`REMOTE_PROCESS_BUDGET`). |
 | `remote_staging.py` | Turning the user's input into the per-well archives a remote run uploads: `stage_local_zips` detects the layout (one zip per well, well folders, loose TIFs, or a mix left by an interrupted zip-up), zips folders and loose TIFs **into the input directory itself** so the next run finds zips and skips the zip-up (a folder's archived TIFs are removed the moment its own zip is published), and returns a `ZippedInput`. The channel filter and an incremental run's split are both planned from each archive's member list before any image data is read, and only archives that change are written — to a staging directory beside the input, never over the user's archives. `ZippedInput.cleanup` removes every staging directory a run made (the filter's and the split's, joined), a failure part way through removes its own before the error propagates, and a filter that matches no image in any well is refused before anything moves, on both the ZIP and the MIXED path. Line-budgeted (`REMOTE_STAGING_BUDGET`); `tests/test_remote_staging.py` pins the cleanup contract. |
-| `remote_finished_wells.py` | Which wells a remote run need not send: `finished_here` answers, before staging, with the pipeline's own rule — the per-well CSV present, recorded under the key `pipeline.cli_args.settings_key_from_argv` gives this run's argv plus the host's flags, not forced, never an empty-well blank, and for a nanowell well its grid record covering every timepoint of its archive — and `drop_finished` removes them from a staged `ZippedInput` into its `up_to_date_wells`; `nanowell_forced` and `argv_forcing` force a nanowell well sent again over partial output here. Called by `PipelineRunner._finished_here` and by batched mode's local-completion filter (see *What is finished here is not sent again*). |
+| `remote_finished_wells.py` | Which wells a remote run need not send: `finished_here` answers, before staging, with the pipeline's own rule — the per-well CSV present, recorded under the key `pipeline.cli_args.settings_key_from_argv` gives this run's argv plus the host's flags, not forced, its completeness record whole, never an empty-well blank, and for a nanowell well every timepoint of its archive finished `ok` — and `drop_finished` removes them from a staged `ZippedInput` into its `up_to_date_wells`; `nanowell_forced` and `argv_forcing` force a nanowell well sent again over partial output here, and `pull_settings_marker` writes `UNKNOWN_SETTINGS` when a well's marker cannot be fetched. Called by `PipelineRunner._finished_here` and by batched mode's local-completion filter (see *What is finished here is not sent again*). |
 | `remote_fetch.py` | Bringing a remote run's output home, and proving it arrived. `Fetcher` pulls each well's output the moment the pipeline announces it done (overlapping download with later wells' compute), merges an incremental run's partial zip and CSV into the local ones rather than overwriting them, keeps the mid-run `pipeline_info.json` current, and removes a well's remote files only once its local artefact is in place. `FetchedOutputVerifier` runs after the pipeline exits: it pulls the top-level artefacts, merges the fetched sidecar's run-report, field-quality and user blocks with the local ones, writes the client-side completeness record, checks every expected well's CSV and non-empty `<well>_out.zip` are present (and replaced, for a forced well), re-pulls what is missing, and returns a `FetchVerification`. It never deletes the run's remote directory — `RemoteRunner.verify_and_cleanup` does that, on a passing verdict only. Its collaborators (host, run record, the dataset cache whose ssh it borrows, the stop flag) are passed in, never read off the runner. Line-budgeted (`REMOTE_FETCH_BUDGET`). |
 | `remote_fetch_place.py` | The Fetcher's second thread. For an incremental run, a downloaded well's merge into the local output — partial CSV into the `.csv.gz`, partial `<well>_out.zip` into the local one — and everything after it (marking the well fetched, deleting its remote copy) run on `Placer`, not on the transfer thread, so one large well's merge does not hold every later download and remote copy behind it. The queue is bounded (`MAX_PENDING`), since each waiting well holds its download in the local transit directory; a remote copy is still deleted only after its well is in place. `Fetcher.flush_and_join` drains it before the run is reported done. A well with no local CSV or `<well>_out.zip` — one new to this run — has nothing to merge with, so its download is moved into place unchanged (`place_whole`, and `pipeline.io._place_fetched_csv` for the CSV) rather than parsed and rewritten. **A Stop part-way through a download leaves nothing that reads as finished.** The end-of-run retry pulls into the output folder with `--partial-dir=.allwell-partial`, so a cut-off transfer is never under the real name; and a truncated file an earlier build left there (it used `--partial`) is treated as absent wherever it is read: the retry re-pulls a zip that fails `_zip_is_complete` and a CSV that fails `util.csv_gz.csv_is_whole`, `_materialize_incremental` places a download whole over an unreadable local zip, `merge_images_into_zip` writes a whole archive rather than re-reading a corrupt one, and `merge_fetched_csvs` sets an unreadable local `.csv.gz` aside as `.<name>.truncated` (kept, never deleted) and rebuilds the well's CSV from its readable rows plus the download (`_merge_onto_cut_csv`) — a gzip error being the one failure that means a cut-off copy, where an `OSError` still leaves the local file untouched. The readable rows matter because an incremental download holds only the new field groups: placing it alone dropped every earlier group's rows, and the well's done-set, which also reads its `<well>_out.zip`, never computed them again. Only whole groups are kept (`_salvage_cut_csv`): the group the cut fell in is dropped rather than kept short, and unless the download carries that group the loss is written to `errors/<WELL>_local_csv_cut_short.txt` beside the run's own failure records, with an `Exception type:` header and the `--force` remedy, as well as logged. `tests/test_a_slow_merge_does_not_hold_the_next_download.py` drives the real worker loop with a merge that blocks. |
 | `remote_run_state.py` | `_RemoteRun`, the record one remote run carries from staging through fetch, and the two enums in it the user chooses — `LocalInputMode` and `OutputFilter`. Shared by the runner, the process wrappers and the `Fetcher`, so it lives in none of them and none has to import another to reach it. |
@@ -11793,32 +11793,63 @@ well whose output exists and was made under its settings unless the force list
 names it (`process_microscopy._run_well_worker_pool`); a remote run asks the same
 question before staging, through `services/remote_finished_wells.finished_here`,
 which `PipelineRunner._finished_here` calls for every unforced, non-incremental
-remote run and batched mode's local-completion filter calls again (where, staging
-having already left the rest out, it finds only a finished empty-well blank —
-not processed, still uploaded as the correction's input). A well is finished
-when its per-cell CSV is present and not empty (not its `<well>_out.zip`, which
-only a zip-layout full fetch keeps), its `.aw_settings/<well>.json` matches the
-key `pipeline.cli_args.settings_key_from_argv` derives from the run's argv plus
-the host's own flags (`RemoteRunner._host_argv_extras`) — the same function
-normalising the options in the order `process_microscopy.main` does, so the key is
-the one the host's pipeline records, which
-`tests/test_nanowell_cli.py::test_the_key_the_app_computes_is_the_one_the_pipeline_records`
-holds — and neither `--force` nor `--force_wells` names it. A nanowell well is
-finished only when its tables also cover every timepoint its archive holds (its
-grid record names each, its completeness record says it is whole); one that does
-not is sent whole and forced (`nanowell_forced`). An empty-well blank is
-never finished there. An argv that does not yield a key finishes nothing, since
-`settings_match` would accept an empty key as matching every well. Staging drops
-those wells' archives before planning (`stage_local_zips(skip_wells=…)`) and
-`drop_finished` lists them in `ZippedInput.up_to_date_wells`, so they are painted
-complete and a plate with nothing else to send ends before upload
-(`_nothing_left_to_upload`). Without this a plain re-run of a finished plate
-uploaded and recomputed all of it: *Clean up remote* empties the host's output
-directory after a verified download, so the host's own skip finds nothing, and a
-remote nanowell run, which cannot be incremental, had no other way to leave a
-well out. Batched mode's own check used to be the CSV alone, so it skipped a well
-named in Force wells or measured under other settings
-(`tests/test_a_remote_rerun_skips_finished_wells.py`).
+remote run and batched mode's local-completion filter calls again. A well is
+finished when:
+
+- its per-cell CSV is present and not empty — not its `<well>_out.zip`, which only
+  a zip-layout full fetch keeps;
+- its `.aw_settings/<well>.json` matches the key
+  `pipeline.cli_args.settings_key_from_argv` derives from the run's argv plus the
+  host's own flags (`RemoteRunner._host_argv_extras`). That function normalises the
+  options in the order `process_microscopy.main` does, so the key is the one the
+  host's pipeline records
+  (`tests/test_nanowell_cli.py::test_the_key_the_app_computes_is_the_one_the_pipeline_records`).
+  The key carries, as aliases, the same run with and without `--no_auto_threshold`:
+  every batched host is given that flag (`remote_commands.batch_pipeline_argv`) and
+  so is a single-shot run that sends part of a plate, and it changes no well's own
+  output — its only pipeline reader is the plate-level gating pass, which a test
+  holds;
+- its completeness record in the sidecar's `run_report`, if it has one, says it is
+  whole (`run_report.well_is_whole`): a well wound down part way, or with failed
+  groups, writes a CSV and a settings record too;
+- for a nanowell well, every timepoint its archive holds finished `ok` in its grid
+  record (`completeness.nanowell_coverage`, the rule Validate uses);
+- neither `--force` nor `--force_wells` names it, and it is not an empty-well
+  blank.
+
+An argv that does not yield a key finishes nothing, since `settings_match` would
+accept an empty key as matching every well. In batched mode the filter keys with
+the blank's argv as the host gets it (`remote_batch_resume._blank_argv`:
+`--background_dir` in this run's directory, each earlier attempt's as an alias),
+and since staging has already left out every other finished well, what it finds
+there is a finished blank — not processed, still uploaded as the correction's
+input. Staging drops the finished wells' archives before planning
+(`stage_local_zips(skip_wells=…)`) and `drop_finished` lists them in
+`ZippedInput.up_to_date_wells`, so they are painted complete; a plate with nothing
+else to send, or only its finished blank (`_only_measured_blanks`, the same rule),
+ends before upload (`_nothing_left_to_upload`).
+
+A run that sends part of a plate — wells left out, or an incremental split —
+gives its host `--no_auto_threshold` and computes the plate's cell-gating
+thresholds here after the fetch, over every well (`PipelineRunner._host_argv` /
+`_regate`, `remote_process.run_local_auto_threshold`), as a batched run always has:
+the host's pass reads only the wells it was sent into a sidecar that starts empty,
+and its thresholds replaced the plate's. A nanowell well sent again over
+unfinished output here is forced (`nanowell_forced`, merged by `argv_forcing`), so
+an earlier attempt's partial tables on the host cannot be kept in its place; only
+a nanowell run, because a forced well changes the argv the run's address is
+derived from, which would cost any other plain re-run the full cache hit it is
+entitled to (another run that resumes is made incremental and never comes here).
+When a well's settings marker cannot be pulled back with its output, the Fetcher
+writes one no key matches (`pull_settings_marker`, `UNKNOWN_SETTINGS`), so the
+previous computation's marker is never taken for the new output's.
+
+Without this a plain re-run of a finished plate uploaded and recomputed all of
+it: *Clean up remote* empties the host's output directory after a verified
+download, so the host's own skip finds nothing, and a remote nanowell run, which
+cannot be incremental, had no other way to leave a well out. Batched mode's own
+check used to be the CSV alone, so it skipped a well named in Force wells or
+measured under other settings (`tests/test_a_remote_rerun_skips_finished_wells.py`).
 
 **What the previous run finished is downloaded before any run stages.**
 Staging decides what to upload from the *local* folder alone — the incremental

@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+
 pytest.importorskip("PySide6")
 
 SCHEMA = "experiment:channel:well:fov:timepoint"
@@ -283,3 +284,160 @@ def test_forcing_merges_with_the_wells_the_user_named():
     assert argv_forcing(argv, ["D04", "E05"]) == [
         "--input_dir", "in", "--output_dir", "out", "--force_wells", "C03", "D04", "E05"]
     assert argv_forcing(argv, []) == argv
+
+
+# ── what the adversarial review found ────────────────────────────────────────
+
+def test_no_auto_threshold_changes_no_well_s_own_output():
+    """``finished_here`` treats a well recorded with and without ``--no_auto_threshold`` as made under the same
+    settings, because every batched host is given it (``batch_pipeline_argv``) and so is a single-shot run that sends
+    part of a plate. That is sound only while the flag gates nothing but the plate-level cell-gating pass: the one
+    pipeline module that reads it must stay ``pipeline/auto_threshold_pass.py``."""
+    import ast
+
+    from tests._repo_scan import parsed_sources, rel
+
+    readers = set()
+    for path, tree in parsed_sources(roots=("pipeline", "util")):
+        for node in ast.walk(tree):
+            attr = isinstance(node, ast.Attribute) and node.attr == "no_auto_threshold"
+            text = isinstance(node, ast.Constant) and node.value == "no_auto_threshold"
+            if attr or text:
+                readers.add(rel(path))
+    readers.discard("util/settings_digest.py")                             # names it as keyed, reads nothing
+    assert readers == {"pipeline/auto_threshold_pass.py"}, readers
+    import process_microscopy
+
+    assert "no_auto_threshold" not in Path(process_microscopy.__file__).read_text().replace(
+        "run_auto_threshold_pass", "")
+
+
+def test_a_well_its_host_computed_with_no_auto_threshold_is_finished(tmp_path):
+    """Reported by review: a batched host always gets ``--no_auto_threshold``, which is keyed, so no well a batched
+    run computed ever matched the client's key, and every batched re-run sent the whole plate again."""
+    from services.remote_commands import batch_pipeline_argv
+
+    inp, out = _plate(tmp_path)
+    _record(out, "A01", _opts(), host_extras=batch_pipeline_argv([])[-1:])  # as a batch's host recorded it
+    _record(out, "B02", _opts())
+    sent, _lines = _run(inp, out, _opts())
+    assert sent is None                                                   # both finished: nothing sent
+
+
+def test_a_partial_single_shot_upload_leaves_the_plate_s_gating_to_this_computer(tmp_path, monkeypatch):
+    """Reported by review: the host's auto-threshold pass reads only the wells it was sent and its fetched sidecar
+    replaced the plate's thresholds with a subset's. Sending part of a plate now tells the host not to, and the pass
+    runs here over every well after the fetch — unless the user turned it off."""
+    import services.pipeline_runner as pr
+
+    regated: list = []
+    monkeypatch.setattr(pr, "run_local_auto_threshold", lambda out, argv, log: regated.append(list(argv)))
+    inp, out = _plate(tmp_path)
+    _record(out, "A01", _opts())
+    (out / "measurements_B02.csv").unlink()
+    argv: list = []
+    sent, _lines = _run(inp, out, _opts(), argv_sent=argv)
+    assert sent == ["B02"] and "--no_auto_threshold" in argv[-1]
+    assert len(regated) == 1 and "--no_auto_threshold" not in regated[0]
+
+    regated.clear()
+    argv.clear()
+    sent, _lines = _run(inp, out, _opts(auto_threshold=False), argv_sent=argv)
+    assert sent == ["B02"] and regated == []                              # the user's choice stands
+
+
+def test_a_whole_plate_upload_keeps_the_host_s_own_gating(tmp_path, monkeypatch):
+    import services.pipeline_runner as pr
+
+    regated: list = []
+    monkeypatch.setattr(pr, "run_local_auto_threshold", lambda out, argv, log: regated.append(argv))
+    inp, out = _plate(tmp_path)
+    for well in ("A01", "B02"):
+        (out / f"measurements_{well}.csv").unlink()
+    argv: list = []
+    sent, _lines = _run(inp, out, _opts(), argv_sent=argv)
+    assert sent == ["A01", "B02"] and "--no_auto_threshold" not in argv[-1] and regated == []
+
+
+def test_a_well_its_record_says_was_left_part_way_is_sent_again(tmp_path):
+    """Reported by review: a well wound down part way still writes a CSV and a settings record, and only a nanowell
+    well was checked for wholeness. Every well with a completeness record is now."""
+    inp, out = _plate(tmp_path)
+    for well in ("A01", "B02"):
+        _record(out, well, _opts())
+    (out / "pipeline_info.json").write_text(json.dumps({"run_report": {"wells": {
+        "A01": {"groups_total": 2, "groups_covered": 2},
+        "B02": {"groups_total": 2, "groups_covered": 1, "aborted_reason": "suspended"}}}}))
+    argv: list = []
+    sent, _lines = _run(inp, out, _opts(), argv_sent=argv)
+    # Sent, not forced: only a nanowell run forces (`nanowell_forced`), since a forced well moves the run's address.
+    assert sent == ["B02"] and _forced(argv[-1]) == []
+
+
+def test_a_nanowell_timepoint_that_did_not_finish_ok_is_not_covered(tmp_path):
+    """Reported by review: every timepoint the grid record named counted, whatever its status; the rule
+    (``completeness.nanowell_coverage``) counts only those that finished ``ok``."""
+    inp, out = _plate(tmp_path)
+    opts = _opts(**NANOWELL)
+    for well in ("A01", "B02"):
+        _record(out, well, opts)
+        _grid(out, well, "T01")
+    (out / "nanowells" / "B02_grid.json").write_text(json.dumps({"timepoints": {"T01": {"status": "unaddressed"}}}))
+    sent, _lines = _run(inp, out, opts)
+    assert sent == ["B02"]
+
+
+def test_a_finished_blank_alone_ends_the_run_without_its_out_zip_and_a_forced_one_is_sent(tmp_path):
+    """Reported by review: the measured-blank check asked for ``<blank>_out.zip``, which a folder-layout or CSV-only
+    fetch never keeps, so a finished plate uploaded its blank alone and recomputed it; and it ignored Force wells."""
+    inp, out = _plate(tmp_path)
+    opts = _opts(background="empty_well", background_well="B02")
+    for well in ("A01", "B02"):
+        _record(out, well, opts)
+    sent, lines = _run(inp, out, opts)
+    assert sent is None and any("Nothing to upload" in ln for ln in lines)
+    sent, _lines = _run(inp, out, _opts(background="empty_well", background_well="B02", force_wells=["B02"]))
+    assert sent == ["B02"]
+
+
+def test_a_settings_marker_that_does_not_arrive_is_never_taken_as_a_match(tmp_path):
+    """Reported by review: a failed pull left the previous computation's marker beside the new output, which a
+    later run under those settings then skipped as current. A failed pull now leaves a marker nothing matches."""
+    from pipeline.settings_record import record_well_settings, well_settings_allow_reuse
+    from services.remote_finished_wells import UNKNOWN_SETTINGS, pull_settings_marker
+
+    out = tmp_path / "out"
+    record_well_settings(out, "A01", "0123456789abcdef")                  # the earlier computation's
+    dest = out / ".aw_settings" / "A01.json"
+    assert pull_settings_marker(lambda *a, **k: False, None, "remote", dest) is False
+    assert json.loads(dest.read_text())["digest"] == UNKNOWN_SETTINGS
+    assert not well_settings_allow_reuse(out, "A01", "0123456789abcdef")
+
+
+def test_a_batched_run_s_blank_measured_against_its_run_directory_copy_is_finished(tmp_path):
+    """Reported by review: a batched host is given the blank as ``--background_dir=<run dir>/bg``, which is keyed,
+    so the blank's record never matched the client's key. The batched filter now keys with the blank's argv as the
+    host gets it (``remote_batch_resume._blank_argv``) and the batch flag either way."""
+    import types
+
+    from pipeline.cli_args import settings_key_from_argv
+    from pipeline.settings_record import record_well_settings
+    from services.remote_commands import batch_pipeline_argv
+    from tests.test_batched_run_progress import _bare_batched
+
+    proc, out = _bare_batched(tmp_path, ["A01", "H12"])
+    for well in ("A01", "H12"):
+        (out / f"measurements_{well}.csv").write_text("cell_id\n1\n")
+    argv = ["--csv_prefix", "measurements", "--background", "empty_well", "--background_well", "H12"]
+    proc._pipeline_argv = argv
+    proc._runner = types.SimpleNamespace(host=types.SimpleNamespace(remote_staging_dir="/stage"),
+                                         _host_argv_extras=lambda _f: [], _run=None)
+    proc._run_id = "run1"
+    host_argv = ["--input_dir", "in", "--output_dir", "out", *batch_pipeline_argv(argv),
+                 "--background_dir=/stage/runs/run1/bg"]
+    record_well_settings(out, "H12", settings_key_from_argv(host_argv))
+    logged: list[str] = []
+    proc._log = logged.append
+    proc._run_batches()
+    skip_lines = [ln for ln in logged if "skipping upload + compute" in ln]
+    assert len(skip_lines) == 1 and "A01, H12" in skip_lines[0], logged[:6]

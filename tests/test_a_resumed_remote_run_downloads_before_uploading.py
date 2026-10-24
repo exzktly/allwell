@@ -134,6 +134,12 @@ def _run_one_finished_on_the_server(plate, host, remote, stop_fetchers, *,
         proc.wait(timeout=30)
     remote_out = r._remote_runner._run.remote_output_dir
     seeded = remote.path(remote_out)
+    # The digest the host's pipeline records for this argv (`pipeline.cli_args.settings_key_from_argv`), not a
+    # made-up one: a later run judges a fetched well by it (`services.remote_finished_wells`).
+    from pipeline.cli_args import settings_key_from_argv
+    from util.settings_digest import primary_settings_key
+
+    digest = primary_settings_key(settings_key_from_argv(args[2:]))
     seeded.mkdir(parents=True, exist_ok=True)
     for well in WELLS:
         with zipfile.ZipFile(seeded / f"{well}_out.zip", "w") as zf:
@@ -144,7 +150,7 @@ def _run_one_finished_on_the_server(plate, host, remote, stop_fetchers, *,
             f"well,fov,timepoint,nucleus_id\n{rows}")
         marker = seeded / ".aw_settings" / f"{well}.json"
         marker.parent.mkdir(exist_ok=True)
-        marker.write_text(f'{{"well": "{well}", "digest": "d-{well}"}}')
+        marker.write_text(f'{{"well": "{well}", "digest": "{digest}"}}')
         seal = seeded / ".aw_complete" / f"{well}.json"      # each covered its whole input
         seal.parent.mkdir(exist_ok=True)
         seal.write_text(f'{{"well": "{well}"}}')
@@ -338,17 +344,19 @@ def test_changed_settings_never_download_the_old_output(
 
 def test_a_plain_rerun_of_a_plate_the_server_holds_whole_uploads_nothing(
         plate, host, remote, stop_fetchers):
-    """Nothing missing locally, everything on the host: the pre-flight finds a
-    full cache hit and the pipeline is replaced by ``true``. The upload used to
-    run anyway, so a plate whose staged archives keyed differently from the
-    last run's was sent in full for a run that computes nothing."""
+    """Nothing missing locally, everything on the host. The upload used to run
+    anyway, so a plate whose staged archives keyed differently from the last
+    run's was sent in full for a run that computes nothing; then the pre-flight
+    found a full cache hit after the upload. Now the run ends before anything is
+    staged: every well is finished here under these settings
+    (``services.remote_finished_wells``), so there is nothing to send at all."""
     _run_one_finished_on_the_server(plate, host, remote, stop_fetchers)
     _resume(plate, host, stop_fetchers)          # downloads both wells
     uploads_before = list(remote.uploads)
 
     _r, events = _resume(plate, host, stop_fetchers, incremental=False)
 
-    assert "FULL CACHE HIT" in _text(events), _text(events)
+    assert "Nothing to upload: every well is already complete locally" in _text(events), _text(events)
     assert remote.uploads == uploads_before, _text(events)
 
 

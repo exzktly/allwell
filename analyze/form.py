@@ -66,10 +66,8 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
 
     def _build_form(self, parent: QWidget) -> None:
-        # The banners head the form, then "Load settings from a run…" (it sets
-        # the input folder, so it comes before the folder it would replace),
-        # then Folders, which leads the sections (the default schema is valid,
-        # so it is open from launch).
+        # Banners, then "Load settings from a run…" (it sets the input folder),
+        # then Folders, which leads the sections (open from launch).
         self._build_banner_strips(parent)
         self._build_open_pinfo_row(parent)
         self._build_folders_section(parent)

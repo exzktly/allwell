@@ -108,9 +108,16 @@ def _cellpose_model(model_type: str = DEFAULT_MODEL):
                 # GPU without bfloat16, or the CPU, where it is slow).
                 import torch
 
-                bf16 = device.type == "cuda" and bool(torch.cuda.is_bf16_supported())
-                model = _cp_models.CellposeModel(gpu=device.type == "cuda", device=device, pretrained_model=key,
-                                                 use_bfloat16=bf16)
+                bf16 = (device.type == "cuda" and bool(torch.cuda.is_bf16_supported())
+                        and _torch_at_least(torch.__version__, BF16_MIN_TORCH))
+
+                def build(half: bool):
+                    return _cp_models.CellposeModel(gpu=device.type == "cuda", device=device, pretrained_model=key,
+                                                    use_bfloat16=half)
+                model = build(bf16)
+                if bf16:
+                    model, bf16 = _bfloat16_or_float32(model, lambda: build(False), key)
+                where = f"{where}, {'bfloat16' if bf16 else 'float32'}"
             else:
                 model = _cp_models.CellposeModel(
                     model_type=key, gpu=device.type == "cuda", device=device)
@@ -168,6 +175,40 @@ class _CellposeChatter(logging.Filter):
                         return False                    # a timing line in a shape this version does not know
             return False
         return not message.startswith(self.EXPECTED)
+
+
+#: The first Torch that runs Cellpose-SAM in bfloat16 on a GPU. Torch 2.0's CUDA kernel for 1-D linear upsampling
+#: has no bfloat16 version, and Segment Anything's encoder upsamples its relative position embeddings with it, so on
+#: a GPU that offers bfloat16 (an Ampere card such as the A10G; a T4 does not) every image failed with
+#: "upsample_linear1d_out_frame" not implemented for 'BFloat16' — after the run had located every timepoint.
+BF16_MIN_TORCH = (2, 1)
+
+
+def _torch_at_least(version: str, minimum: tuple[int, int]) -> bool:
+    """Whether a Torch ``__version__`` (``"2.0.1+cu117"``) is at least *minimum* (major, minor); ``False`` when it
+    cannot be read."""
+    try:
+        major, minor = (int(part) for part in str(version).split("+")[0].split(".")[:2])
+    except ValueError:
+        return False
+    return (major, minor) >= minimum
+
+
+def _bfloat16_or_float32(model, float32, key: str):
+    """``(model, used bfloat16)``: *model*, built in bfloat16, if it can segment a small blank image; else the model
+    *float32* builds, with a warning that says why.
+
+    The version gate (``BF16_MIN_TORCH``) covers the one failure known; this covers the next, on the first image
+    rather than mid-run, since an operation without a bfloat16 kernel fails on every image the same way."""
+    try:
+        model.eval(np.zeros((64, 64), np.float32), normalize=False)
+    except RuntimeError as exc:
+        if "BFloat16" not in str(exc):
+            raise
+        log.warning("Cellpose %s cannot run in bfloat16 with this Torch (%s); using float32, which takes twice the "
+                    "GPU memory.", key, exc)
+        return float32(), False
+    return model, True
 
 
 def _cellpose_device():

@@ -17,15 +17,20 @@ import pytest
 from pipeline import cellpose as cp
 
 
-def _install(monkeypatch, major: int, *, cuda: bool = True, bf16: bool = True) -> dict:
+def _install(monkeypatch, major: int, *, cuda: bool = True, bf16: bool = True, torch_version: str = "2.0.1",
+             bf16_fails: bool = False) -> dict:
     """A fake Cellpose of *major* and a fake Torch; returns what the model was built with and evaluated with."""
-    calls: dict = {"built": None, "eval": [], "images": []}
+    calls: dict = {"built": None, "builds": [], "eval": [], "images": []}
 
     class _Model:
         def __init__(self, **kw):
             calls["built"] = kw
+            calls["builds"].append(kw)
+            self.half = bool(kw.get("use_bfloat16"))
 
         def eval(self, x, **kw):
+            if bf16_fails and self.half:
+                raise RuntimeError('"upsample_linear1d_out_frame" not implemented for \'BFloat16\'')
             calls["eval"].append((np.asarray(x).shape, kw))
             calls["images"].append(np.array(x))
             return np.ones(np.asarray(x).shape[:2], dtype=int), None, None
@@ -36,7 +41,7 @@ def _install(monkeypatch, major: int, *, cuda: bool = True, bf16: bool = True) -
     monkeypatch.setitem(sys.modules, "cellpose", package)
     monkeypatch.setitem(sys.modules, "cellpose.models", models)
     torch = types.ModuleType("torch")
-    torch.__version__ = "2.0.1"
+    torch.__version__ = torch_version
     torch.device = lambda spec: types.SimpleNamespace(type=spec.split(":")[0], spec=spec)
     torch.cuda = types.SimpleNamespace(is_available=lambda: cuda, device_count=lambda: 1,
                                        get_device_name=lambda i: "GPU", is_bf16_supported=lambda: bf16)
@@ -53,7 +58,8 @@ def test_cellpose_4_builds_cellpose_sam_by_name_and_evaluates_without_channels(m
     assert labels.shape == (8, 6) and labels.dtype == np.int32
     built = calls["built"]
     assert built["pretrained_model"] == "cpsam" and "model_type" not in built
-    assert built["gpu"] is True and built["use_bfloat16"] is True
+    # The pinned Torch (2.0.1) runs Cellpose-SAM in float32 even where the GPU offers bfloat16 (BF16_MIN_TORCH).
+    assert built["gpu"] is True and built["use_bfloat16"] is False
     (shape, kw), = calls["eval"]
     assert shape == (8, 6) and "channels" not in kw and kw["diameter"] == 12.0
 
@@ -198,3 +204,34 @@ def test_several_crops_go_to_cellpose_4_in_one_call_and_each_comes_back_as_its_o
     else:
         assert len(model.calls) == 3 and all(kw["normalize"] is False for _x, kw in model.calls)
         assert np.array_equal(got[0], np.ones((3, 4))) and not got[1].any() and got[2].tolist() == [[1, 0]]
+
+
+def test_torch_2_0_never_builds_cellpose_sam_in_bfloat16_even_on_a_gpu_that_offers_it(monkeypatch):
+    """Reported: on an A10G the run failed on every image with "upsample_linear1d_out_frame" not implemented for
+    'BFloat16'. The pinned Torch 2.0.1 has no bfloat16 kernel for an upsampling Segment Anything's encoder uses, and
+    the A10G (unlike the T4) offers bfloat16, so the model was built in it."""
+    calls = _install(monkeypatch, 4, torch_version="2.0.1+cu117", bf16=True)
+    cp._segment_cellpose(np.zeros((4, 4)), model_type="cpsam")
+    assert [b["use_bfloat16"] for b in calls["builds"]] == [False]
+
+
+def test_a_model_that_cannot_run_in_bfloat16_is_rebuilt_in_float32_before_the_first_image(monkeypatch, caplog):
+    """The version gate covers the failure known; the probe covers the next one, at load, not mid-run."""
+    import logging
+
+    calls = _install(monkeypatch, 4, torch_version="2.1.0", bf16=True, bf16_fails=True)
+    with caplog.at_level(logging.WARNING, logger="process_microscopy"):
+        labels = cp._segment_cellpose(np.zeros((8, 6)), model_type="cpsam")
+    assert labels.shape == (8, 6)
+    assert [b["use_bfloat16"] for b in calls["builds"]] == [True, False]
+    assert any("cannot run in bfloat16" in r.getMessage() for r in caplog.records)
+    shapes = [shape for shape, _kw in calls["eval"]]
+    assert shapes == [(8, 6)]                       # the probe failed before eval was recorded; the image ran once
+
+
+def test_a_gpu_and_torch_that_run_bfloat16_keep_it(monkeypatch):
+    calls = _install(monkeypatch, 4, torch_version="2.1.0", bf16=True)
+    cp._segment_cellpose(np.zeros((4, 4)), model_type="cpsam")
+    assert [b["use_bfloat16"] for b in calls["builds"]] == [True]
+    assert cp._torch_at_least("2.0.1+cu117", (2, 1)) is False and cp._torch_at_least("2.1.0", (2, 1)) is True
+    assert cp._torch_at_least("nightly", (2, 1)) is False

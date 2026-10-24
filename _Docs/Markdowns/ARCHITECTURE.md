@@ -11256,8 +11256,12 @@ noted:
   Cellpose-SAM under cyto3's name; `_cellpose_model` therefore refuses any model the installed version does not ship
   (`model_refusal`), raising `CellposeUnavailable` with the reason — a run's well fails with it in `errors/`, and Test
   detection draws without counts and says why. On Cellpose 4 the model is built with `pretrained_model=<name>` and
-  bfloat16 weights on a GPU that supports them (`torch.cuda.is_bf16_supported()`), float32 elsewhere; `eval` takes
-  no `channels`. The weights (about 1.2 GB for Cellpose-SAM) download from Hugging Face on first use.
+  bfloat16 weights only on a GPU that supports them (`torch.cuda.is_bf16_supported()`) and with Torch at least
+  `BF16_MIN_TORCH` (2.1): Torch 2.0's CUDA kernel for 1-D linear upsampling has no bfloat16 version and Segment
+  Anything's encoder uses it, so the pinned Torch 2.0.1 failed every image on an A10G. A bfloat16 model is also
+  probed on a blank image at load (`_bfloat16_or_float32`) and rebuilt in float32, with a warning, if any operation
+  lacks bfloat16; float32 elsewhere. The load line names the precision (`Cellpose cpsam on cuda:0 (…), float32`).
+  `eval` takes no `channels`. The weights (about 1.2 GB for Cellpose-SAM) download from Hugging Face on first use.
 - `classical_threshold` — Otsu + distance-transform watershed (no model), general.
 - `cellpose_labelfree` — the **only** label-free method: a Cellpose-SAM (`cpsam`)
   preset that segments the channel marked **Phase**. The Phase

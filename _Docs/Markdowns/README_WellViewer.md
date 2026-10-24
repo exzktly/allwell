@@ -223,7 +223,8 @@ LIVECell). All-Well installs Cellpose 4, which has only Cellpose-SAM: *cyto3* an
 Cellpose 3 is installed instead, and on Cellpose 4 the run stops on them with a message naming the model rather than
 counting with a different one. A model's weights are downloaded the first time it is used (about 1.2 GB for
 Cellpose-SAM), so the machine that runs the analysis needs internet access then. Cellpose-SAM is a large model: run
-it on a GPU. A run made before Cellpose-SAM was the default counted with *cyto3*, and its settings say so. Which counts your cells better depends on the
+it on a GPU. With the Torch All-Well installs it runs in full precision (float32) on every GPU; the log line
+`Cellpose cpsam on cuda:0 (…), float32` says which precision a run used. A run made before Cellpose-SAM was the default counted with *cyto3*, and its settings say so. Which counts your cells better depends on the
 cells, so compare them on one well with **Test detection** before a plate-wide run: its crops show the outlines the
 run itself would count, cut from the whole tile segmented as the run segments it.
 

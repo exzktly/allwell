@@ -571,12 +571,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "Cellpose 3 model trained on LIVECell's phase-contrast images of eight cell lines. cyto3 and "
                          "livecell_cp3 need a Cellpose 3 install and are refused on Cellpose 4. Weights are "
                          "downloaded on first use."))
-    p.add_argument("--nanowell_segment_on", choices=("raw", "rim"), default="raw",
-                   help=("What the cell count's segmenter is given. raw (the default): each tile as it was imaged, "
-                         "which is what Cellpose's models were trained on; a cell on a nanowell's rim is still not "
-                         "counted, since only a cell whose centre lies inside a nanowell's interior is. rim: each "
-                         "nanowell divided by the well's empty-nanowell template, which removes the rim but is a "
-                         "ratio image no model was trained on. Confluence uses the rim-divided image either way."))
+    p.add_argument("--nanowell_segment_on", choices=("raw", "rim"), default="rim",
+                   help=("What the cell count's segmenter is given. rim (the default): each nanowell divided by the "
+                         "well's empty-nanowell template, which removes the rim and the nanowell's own shading. raw: "
+                         "each tile as it was imaged, which is what Cellpose's models were trained on; a cell on a "
+                         "nanowell's rim is still not counted, since only a cell whose centre lies inside a "
+                         "nanowell's interior is. Confluence uses the rim-divided image either way."))
     p.add_argument("--nanowell_segment_scope", choices=("nanowells", "tile"), default="nanowells",
                    help=("How much of each tile the cell count's segmenter is given. nanowells (the default): a crop "
                          "around each nanowell, scaled as the whole tile is, so the lattice between them costs "

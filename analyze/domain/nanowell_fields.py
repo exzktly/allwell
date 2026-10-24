@@ -34,7 +34,7 @@ CELLPOSE_MODEL_CHOICES = (("cpsam", "cpsam (Cellpose-SAM)"), ("cyto3", "cyto3 (n
 LEGACY_CELLPOSE_MODEL = "cyto3"
 #: What the count's segmenter is given (``pipeline.nanowell_run.SEGMENT_ON``), as (option value, label), the first
 #: the default; a run that names none segmented the rim-divided tile (``LEGACY_SEGMENT_ON``).
-SEGMENT_ON_CHOICES = (("raw", "Raw image"), ("rim", "Rim-removed"))
+SEGMENT_ON_CHOICES = (("rim", "Rim-removed"), ("raw", "Raw image"))
 LEGACY_SEGMENT_ON = "rim"
 #: How much of each tile the count's segmenter is given (``pipeline.nanowell_run.SEGMENT_SCOPES``), as (option value,
 #: label), the first the default; a run that names none segmented whole tiles (``LEGACY_SEGMENT_SCOPE``).

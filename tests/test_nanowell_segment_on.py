@@ -72,9 +72,10 @@ def test_the_run_s_settings_name_the_input_and_an_earlier_run_s_mean_rim():
                                   "--phase_token", "PHASE", *extra])
         return nanowell_options_from_args(args, parser.error)
 
-    new = settings_from_kwargs({"_nanowell": options()})
-    assert new.segment_on == "raw" and new.key()["segment_on"] == "raw"
-    for legacy in (options("--nanowell_segment_on", "rim"),
+    raw = settings_from_kwargs({"_nanowell": options("--nanowell_segment_on", "raw")})
+    assert raw.segment_on == "raw" and raw.key()["segment_on"] == "raw"
+    # Rim-removed is the default, and keeps the key every earlier run (which had no choice) recorded.
+    for legacy in (options(), options("--nanowell_segment_on", "rim"),
                    {k: v for k, v in options().items() if k != "segment_on"}):
         settings = settings_from_kwargs({"_nanowell": legacy})
         assert settings.segment_on == "rim" and "segment_on" not in settings.key()
@@ -87,11 +88,11 @@ def test_the_form_sends_the_input_it_shows_and_a_sidecar_restores_it(tab):  # no
 
     tab._nanowell_cb.setChecked(True)
     combo = tab._nanowell_segment_on_cb
-    assert combo.currentData() == "raw" and combo.isEnabled()
+    assert combo.currentData() == "rim" and combo.isEnabled()
+    assert _flag(_argv(tab), "--nanowell_segment_on") == "rim"
+    combo.setCurrentIndex(combo.findData("raw"))
     assert _flag(_argv(tab), "--nanowell_segment_on") == "raw"
-    combo.setCurrentIndex(combo.findData("rim"))
-    assert _flag(_argv(tab), "--nanowell_segment_on") == "rim"          # sent: left out, the default would run
-    assert settings_from_opts(tab._collect_run_spec().opts).segment_on == "rim"     # Test detection's settings
+    assert settings_from_opts(tab._collect_run_spec().opts).segment_on == "raw"     # Test detection's settings
     tab._apply_nanowell_settings({"nanowell_format": "100um", "nanowell_segment_on": None})
     assert combo.currentData() == "rim"                                  # a run that did not choose
     tab._apply_nanowell_settings({"nanowell_format": "100um", "nanowell_segment_on": "raw"})
@@ -138,3 +139,32 @@ def test_the_form_s_segment_choice_reaches_the_run_and_test_detection_and_a_side
     assert combo.currentData() == "tile"                                 # a run that did not choose
     tab._nanowell_cb.setChecked(False)
     assert not combo.isEnabled()
+
+
+def test_a_pixel_cell_diameter_set_above_is_carried_into_the_count_s_micrometre_size(tab, tmp_path):  # noqa: F811
+    """Asked for: a Cellpose diameter typed above seemed to be wiped when nanowell mode was turned on. The count
+    takes µm and never reads the px field, so the px value is converted with the record's pixel size; a µm size
+    already set is never overwritten; with no record to convert by, the note says the px value is not used."""
+    from analyze.nanowell_preflight import record_pixel_size_um
+    from tests.test_nanowell_form import _plate
+
+    root, _ = _plate(tmp_path)
+    pixel = record_pixel_size_um(str(root))
+    assert pixel is not None and abs(pixel - 1.0) > 0.05       # a scale where px and µm give different numbers
+    tab._input_edit.setText(str(root))
+    tab._cellpose_diameter_edit.setText("30")
+    tab._nanowell_cb.setChecked(True)
+    assert tab._nanowell_cell_diameter_edit.text() == f"{30 * pixel:.3g}"
+    assert "Converted from the 30 px" in tab._nanowell_size_note.text()
+
+    tab._nanowell_cb.setChecked(False)
+    tab._nanowell_cell_diameter_edit.setText("12")
+    tab._nanowell_cb.setChecked(True)
+    assert tab._nanowell_cell_diameter_edit.text() == "12"                 # a size set here is kept
+
+    tab._nanowell_cb.setChecked(False)
+    tab._nanowell_cell_diameter_edit.setText("")
+    tab._input_edit.setText(str(tmp_path / "nowhere"))
+    tab._nanowell_cb.setChecked(True)
+    assert tab._nanowell_cell_diameter_edit.text() == ""
+    assert "not used in nanowell mode" in tab._nanowell_size_note.text()

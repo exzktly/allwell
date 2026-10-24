@@ -10001,8 +10001,8 @@ loading rather than an area.
 chooses by the setting's `segment_on` (`SEGMENT_ON`): `raw`, the tile as imaged, what Cellpose's models were trained
 on, or `rim`, the rim-suppressed tile, a ratio image whose near-flat empty nanowells Cellpose's 1st-99th percentile
 scaling stretches. A run's options that name none mean `rim` (`LEGACY_SEGMENT_ON`): every earlier run segmented it,
-so `NanowellSettings.key()` names the input only when it is not `rim`, `--nanowell_segment_on` defaults to `raw`, the
-form always sends its choice, and `settings_digest._before_cpsam` aliases a nanowell run on `rim` to the digest the
+so `NanowellSettings.key()` names the input only when it is not `rim`, `--nanowell_segment_on` defaults to `rim` (the
+form's combo too, `SEGMENT_ON_CHOICES`), the form always sends its choice, and `settings_digest._before_cpsam` aliases a nanowell run on `rim` to the digest the
 earlier build recorded. Confluence is measured on the rim-suppressed tile either way, and Test detection's crops
 (`pipeline/nanowell_preview._tile_segmented`) are cut from the image the segmenter was given, marked `input`.
 How much of that image the segmenter is given is `segment_scope` (`SEGMENT_SCOPES`): `nanowells`, the default for a
@@ -10311,7 +10311,11 @@ of the Segmentation section's other settings, so `_build_nanowell_count_rows` bu
 **Segment on** and **Cell diameter (µm)** rows (`_COUNT_FIELDS`) into the Segmentation section's label-free page
 (`seg_params._nanowell_count_box`). That box is shown only in nanowell mode, which pins the method to label-free;
 the page's own note and the pixel diameter row (`_sync_cellpose_diameter_row`, which the count never reads) are
-hidden then. Their option keys are the section's as before
+hidden then. Because the pixel row is hidden and the count's size is in µm, turning the mode on with a pixel
+diameter set and the µm field empty converts it (`_carry_cellpose_diameter`, at
+`nanowell_preflight.record_pixel_size_um`, the acquisition record's first stated pixel size) and says so in
+`_nanowell_size_note`; a µm size already set is never overwritten, and with no record giving a pixel size the note
+says the pixel value is not used. Their option keys are the section's
 (`tests/test_nanowell_count_settings_sit_with_segmentation.py`). *Reuse registration* (a path
 and a Browse button, key `nanowell_registration_from`) sends `--nanowell_registration_from` when filled; a folder
 without `nanowells/` is refused (`registration_from_error`), and with a remote host chosen the run goes on and the log

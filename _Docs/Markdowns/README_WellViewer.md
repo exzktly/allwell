@@ -215,7 +215,10 @@ clipping thresholds below which a nanowell carries its state but no cell count. 
 With **Nanowell arrays** ticked, the **Segmentation** section at the top of the form is set to label-free and shows
 the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on**, **Segment** and
 **Cell diameter (µm)** (the typical cell size, which sets the scale the model looks for cells at; blank uses the default). The count
-reads only these — not the pixel diameter label-free shows outside nanowell mode.
+reads only these — not the pixel diameter label-free shows outside nanowell mode. When a pixel diameter was set there
+and the µm field is empty, ticking **Nanowell arrays** converts it with the pixel size the dataset's acquisition record
+gives and fills the µm field, and a note under it says so; a µm size already entered is never replaced. Without a record
+that gives the pixel size, the note says the pixel diameter is not used and asks for the size in µm.
 
 **Cellpose model** chooses what counts the cells: *cpsam* (Cellpose-SAM, the default), *cyto3* (Cellpose 3's
 generalist) or *livecell_cp3* (the Cellpose 3 model trained on phase-contrast images of eight cell lines,
@@ -229,13 +232,13 @@ it, and in full precision (float32, with the GPU's faster TF32 maths) elsewhere;
 cells, so compare them on one well with **Test detection** before a plate-wide run: its crops show the outlines the
 run itself would count, cut from the whole tile segmented as the run segments it.
 
-**Segment on** chooses the image the model counts cells in. *Raw image* (the default) is each tile as it was imaged —
-what Cellpose's models, Cellpose-SAM among them, were trained on. *Rim-removed* is each nanowell divided by the well's
-picture of an empty nanowell, which takes the bright rim away but is a ratio image no model was trained on, and in
-which the faint noise of an empty nanowell is stretched across the model's whole range. Either way a cell is counted
+**Segment on** chooses the image the model counts cells in. *Rim-removed* (the default) is each nanowell divided by the
+well's picture of an empty nanowell, which takes the bright rim away, so the model is not drawn to it; it is a ratio
+image no model was trained on. *Raw image* is each tile as it was imaged — what Cellpose's models, Cellpose-SAM among
+them, were trained on — with the nanowell's bright rim in it. Either way a cell is counted
 in a nanowell only when its centre lies inside the nanowell's interior, so a cell found on a rim is not counted, and
 confluence is measured on the rim-removed image. Test detection's crops show the image the model was given (their
-tooltip says which). A run made before this setting existed counted on the rim-removed image, and its settings say so.
+tooltip says which). A run made before this setting existed also counted on the rim-removed image.
 
 **Segment** chooses how much of each tile the model is given. *Each nanowell* (the default) gives it each nanowell
 separately — a crop around it, with Cellpose-SAM 32 crops at a time so the GPU works on several at once — rather

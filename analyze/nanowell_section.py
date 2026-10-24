@@ -272,6 +272,12 @@ class AnalyzeNanowellSectionMixin:
         for key, label, attr, tip in _FIELDS:
             if key in _COUNT_FIELDS:
                 self._nanowell_field_rows.append(self._nanowell_edit_row(box, key, label, attr, tip))
+        # Where the size came from, when it was carried over from the pixel diameter above (_carry_cellpose_diameter).
+        self._nanowell_size_note = QLabel("", box)
+        self._nanowell_size_note.setObjectName("Muted")
+        self._nanowell_size_note.setWordWrap(True)
+        self._nanowell_size_note.setVisible(False)
+        box.layout().addWidget(self._nanowell_size_note)
 
     def _nanowell_edit_row(self, sec, key, label, attr, tip):
         r = self._row(sec, label, tooltip=tip)
@@ -311,6 +317,39 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_preview_btn.setEnabled(on)
         self._nanowell_pin_segmentation(on)
         self._refresh_nanowell_custom()
+        self._carry_cellpose_diameter()
+
+    def _carry_cellpose_diameter(self) -> None:
+        """Turning nanowell mode on with a cell diameter in pixels set above and none in µm here: convert it.
+
+        The count takes its cell size in micrometres, because a plate's pixel size can differ between timepoints,
+        so it never reads the pixel diameter above; and an empty size here means its default. A size someone had
+        set above therefore seemed to vanish when the mode was turned on. It is carried over, converted with the
+        pixel size the dataset's acquisition record gives, and the note says so; without a record that gives one
+        the note says the size above is not used. A size already set here is never overwritten."""
+        note = getattr(self, "_nanowell_size_note", None)
+        top = getattr(self, "_cellpose_diameter_edit", None)
+        size_edit = self._nanowell_cell_diameter_edit
+        if note is None or top is None or not self._nanowell_cb.isChecked() or size_edit.text().strip():
+            return
+        try:
+            px = float(top.text().strip() or 0)
+        except ValueError:
+            return
+        if not (px > 0):
+            return
+        from analyze.nanowell_preflight import record_pixel_size_um
+
+        pixel = record_pixel_size_um(self._input_edit.text().strip())
+        if pixel is None:
+            note.setText(f"The {px:g} px cell diameter set for Cellpose is not used in nanowell mode, which takes the "
+                         "cell size in µm: enter it here (no acquisition record giving the pixel size was found to "
+                         "convert it).")
+        else:
+            size_edit.setText(f"{px * pixel:.3g}")
+            note.setText(f"Converted from the {px:g} px cell diameter set for Cellpose, at the acquisition record's "
+                         f"{pixel:g} µm per pixel.")
+        note.setVisible(True)
 
     def _nanowell_label_free_index(self) -> int:
         return self._seg_method_cb.findData("cellpose_labelfree")

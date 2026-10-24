@@ -588,6 +588,14 @@ def build_parser() -> argparse.ArgumentParser:
                          "background, so a bright nanowell is not pushed past the range. nanowells: the same without "
                          "the shift. tile: the whole tile's range, which on the image as imaged is the rims', leaving "
                          "cells little contrast."))
+    # No default value: a run that does not name it resizes to the cell diameter, as every run before the flag
+    # existed did, and an absent value leaves the settings digest those runs recorded unchanged.
+    p.add_argument("--nanowell_resize", choices=("cell", "none"), default=None,
+                   help=("Whether Cellpose resizes the cell count's input first. cell (the default): by 30 / the "
+                         "cell diameter in pixels, so a cell reaches the 30 pixels Cellpose's models work at; a small "
+                         "cell in pixels makes that an enlargement, which multiplies the pixels the network runs on. "
+                         "none: each image is segmented as imaged, much faster for small cells, at whatever the "
+                         "model makes of cells at that size."))
     p.add_argument("--nanowell_square_edge_deg", type=float, default=0.0,
                    help=("Angle of the central square nanowell's edges to a lattice row, degrees (assumed 0: the "
                          "square is cut parallel to a row). Used to refuse a lattice fitted a sixth of a turn off."))
@@ -644,6 +652,8 @@ def nanowell_options_from_args(args, error) -> dict | None:
         options["segment_scope"] = args.nanowell_segment_scope
     if args.nanowell_segment_scale not in (None, "tile"):      # and the tile's own range what they scaled by
         options["segment_scale"] = args.nanowell_segment_scale
+    if args.nanowell_resize not in (None, "cell"):            # and resized to the cell diameter
+        options["resize"] = args.nanowell_resize
     pattern = _grid_pattern(args, error)
     if pattern:
         options["pattern"] = pattern

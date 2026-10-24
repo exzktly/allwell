@@ -76,6 +76,8 @@ def _emit_nanowell_flags(args: list[str], opts: dict) -> None:
     scope = str(opts.get("nanowell_segment_scope") or "").strip()
     if scope:                                        # the same
         args += ["--nanowell_segment_scope", scope]
+    if str(opts.get("nanowell_resize") or "").strip() == "none":   # the default sends nothing: no digest change
+        args += ["--nanowell_resize", "none"]
     if plate_format == "custom":                     # a known format's geometry is its own, never sent
         for key in ("nanowell_diameter_um", "nanowell_pitch_um"):
             _emit_num_flag(args, opts, key, f"--{key}", float)

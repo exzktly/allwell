@@ -40,6 +40,9 @@ LEGACY_SEGMENT_ON = "rim"
 #: label), the first the default; a run that names none segmented whole tiles (``LEGACY_SEGMENT_SCOPE``).
 SEGMENT_SCOPE_CHOICES = (("nanowells", "Each nanowell"), ("tile", "Whole tile"))
 LEGACY_SEGMENT_SCOPE = "tile"
+#: Whether Cellpose resizes the count's input to the cell diameter first (``pipeline.nanowell_run.RESIZE_MODES``), as
+#: (option value, label), the first the default and what a run that names none did.
+RESIZE_CHOICES = (("cell", "To the cell diameter"), ("none", "None (as imaged)"))
 
 #: ``--nanowell_scan`` spellings (``pipeline.nanowell_pattern_record.parse_scan``), the first the default.
 SCAN_CHOICES = tuple(f"{corner}-{major}{'-serpentine' if serpentine else ''}"
@@ -183,6 +186,9 @@ def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]
     scope = str(opts.get("nanowell_segment_scope") or SEGMENT_SCOPE_CHOICES[0][0]).strip()
     if scope not in {value for value, _label in SEGMENT_SCOPE_CHOICES}:
         errors.append(f"Nanowell segmentation scope {scope!r} is not one this version knows.")
+    resize = str(opts.get("nanowell_resize") or RESIZE_CHOICES[0][0]).strip()
+    if resize not in {value for value, _label in RESIZE_CHOICES}:
+        errors.append(f"Nanowell Cellpose resize {resize!r} is not one this version knows.")
     model = str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]).strip()
     if model not in {value for value, _label in CELLPOSE_MODEL_CHOICES}:
         errors.append(f"Nanowell Cellpose model {model!r} is not one this version knows.")

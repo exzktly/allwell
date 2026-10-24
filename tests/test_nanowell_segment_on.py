@@ -168,3 +168,48 @@ def test_a_pixel_cell_diameter_set_above_is_carried_into_the_count_s_micrometre_
     tab._nanowell_cb.setChecked(True)
     assert tab._nanowell_cell_diameter_edit.text() == ""
     assert "not used in nanowell mode" in tab._nanowell_size_note.text()
+
+
+def test_not_resizing_is_its_own_setting_and_leaves_every_earlier_run_s_digest_alone():
+    """The resize flag is new: a run that does not name it must hash exactly as a run made before it existed (or
+    every finished well would read as recorded under other settings and run again), and ``none`` must not."""
+    from pipeline.cli_args import build_parser, nanowell_options_from_args
+    from pipeline.nanowell_task import settings_from_kwargs
+    from util.settings_digest import settings_digest
+
+    parser = build_parser()
+    base = ["--input_dir", "in", "--output_dir", "out", "--nanowell_format", "100um", "--phase_token", "PHASE"]
+
+    def parsed(*extra):
+        return parser.parse_args([*base, *extra])
+
+    earlier = {k: v for k, v in vars(parsed()).items() if k != "nanowell_resize"}
+    assert settings_digest(vars(parsed())) == settings_digest(earlier)
+    assert settings_digest(vars(parsed("--nanowell_resize", "none"))) != settings_digest(earlier)
+
+    default = settings_from_kwargs({"_nanowell": nanowell_options_from_args(parsed(), parser.error)})
+    assert default.resize == "cell" and "resize" not in default.key()
+    assert default.segmenter_diameter_px(0.65) == pytest.approx(15.0 / 0.65)
+    none = settings_from_kwargs({"_nanowell": nanowell_options_from_args(parsed("--nanowell_resize", "none"),
+                                                                         parser.error)})
+    assert none.key()["resize"] == "none" and none.segmenter_diameter_px(0.65) == 0.0
+    with pytest.raises(ValueError, match="resize"):
+        nr.NanowellSettings("100um", resize="half")
+
+
+def test_the_form_s_resize_choice_reaches_the_run_and_a_sidecar_restores_it(tab):  # noqa: F811
+    from analyze.nanowell_section import settings_from_opts
+
+    tab._nanowell_cb.setChecked(True)
+    combo = tab._nanowell_resize_cb
+    assert combo.currentData() == "cell" and combo.isEnabled()
+    assert "--nanowell_resize" not in _argv(tab)                         # the default: the digest earlier runs had
+    combo.setCurrentIndex(combo.findData("none"))
+    assert _flag(_argv(tab), "--nanowell_resize") == "none"
+    assert settings_from_opts(tab._collect_run_spec().opts).resize == "none"   # Test detection's settings
+    tab._apply_nanowell_settings({"nanowell_format": "100um"})
+    assert combo.currentData() == "cell"                                  # a run that did not choose resized
+    tab._apply_nanowell_settings({"nanowell_format": "100um", "nanowell_resize": "none"})
+    assert combo.currentData() == "none"
+    tab._nanowell_cb.setChecked(False)
+    assert not combo.isEnabled()

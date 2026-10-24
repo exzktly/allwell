@@ -92,6 +92,12 @@ SEGMENT_SCOPES = ("nanowells", "tile")
 SEGMENT_SCALES = ("levelled", "nanowells", "tile")
 LEGACY_SEGMENT_SCALE = "tile"
 LEGACY_SEGMENT_SCOPE = "tile"
+#: Whether Cellpose resizes the count's input first. ``cell``: by ``30 / (cell diameter in pixels)``, so a cell
+#: reaches the 30 pixels its models work at, which is what every earlier run did (``LEGACY_RESIZE``). ``none``: the
+#: image is segmented as imaged, which costs far less where cells are small in pixels (a resize of x2 is four times
+#: the pixels the network runs on), at whatever the model makes of cells at that size.
+RESIZE_MODES = ("cell", "none")
+LEGACY_RESIZE = "cell"
 
 GEOMETRY_HEX_CIRCLE = "hex_circle"
 GEOMETRY_INFER = "infer"
@@ -112,6 +118,7 @@ class NanowellSettings:
     segment_on: str = LEGACY_SEGMENT_ON         # what that model is given (SEGMENT_ON); unnamed, an earlier run's
     segment_scope: str = LEGACY_SEGMENT_SCOPE   # how much of each tile it is given (SEGMENT_SCOPES); unnamed, the same
     segment_scale: str = LEGACY_SEGMENT_SCALE   # what its input is scaled by (SEGMENT_SCALES); unnamed, the same
+    resize: str = LEGACY_RESIZE                 # whether Cellpose resizes that input first (RESIZE_MODES); the same
     #: The nanowell diameter measured on the plate, whatever the geometry (tracker F2): sites are fitted, owned and
     #: measured at it. Set from the well's one diameter by :func:`measure_timepoint` and by :func:`run_well` for its
     #: roster, and by Test detection; never part of the reuse key, which holds the setting (``key``), while the
@@ -133,6 +140,8 @@ class NanowellSettings:
             raise ValueError(f"Unknown nanowell segmentation scope {self.segment_scope!r}; one of {SEGMENT_SCOPES}")
         if self.segment_scale not in SEGMENT_SCALES:
             raise ValueError(f"Unknown nanowell segmenter scale {self.segment_scale!r}; one of {SEGMENT_SCALES}")
+        if self.resize not in RESIZE_MODES:
+            raise ValueError(f"Unknown nanowell Cellpose resize {self.resize!r}; one of {RESIZE_MODES}")
 
     @property
     def infer(self) -> bool:
@@ -169,7 +178,13 @@ class NanowellSettings:
             key["segment_scope"] = self.segment_scope
         if self.segment_scale != LEGACY_SEGMENT_SCALE:     # and scaled by the tile's own percentiles, the same
             key["segment_scale"] = self.segment_scale
+        if self.resize != LEGACY_RESIZE:                   # and resized to the cell diameter, the same
+            key["resize"] = self.resize
         return key
+
+    def segmenter_diameter_px(self, pixel_size_um: float) -> float:
+        """The cell diameter Cellpose is told, in pixels: 0 (none, so no resize) when ``resize`` is ``none``."""
+        return 0.0 if self.resize == "none" else self.cell_diameter_um / float(pixel_size_um)
 
 
 @dataclass
@@ -1322,7 +1337,7 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
                         "_object": template}
         if template.source != nm.SOURCE_EARLIEST:                  # its own: what flag_template_drift compares
             out.template["floor_ratio"] = nm.floor_ratio(template)
-    segment = (segmenter or nm.cellpose_segmenter(settings.cell_diameter_um / px, model_type=settings.cellpose_model)
+    segment = (segmenter or nm.cellpose_segmenter(settings.segmenter_diameter_px(px), model_type=settings.cellpose_model)
                ) if count_cells else None
     norm = None
     if template is not None:
@@ -2053,9 +2068,11 @@ def cellpose_scale_text(located, settings: NanowellSettings) -> str:
 
     px = float(located.pixel_size_um)
     cell_px = settings.cell_diameter_um / px
-    factor = 30.0 / cell_px
+    factor = 30.0 / cell_px if settings.resize != "none" else 1.0
     text = (f"{located.timepoint}: Cellpose {settings.cellpose_model} at {px:.3g} um/px — a cell of "
-            f"{settings.cell_diameter_um:g} um is {cell_px:.1f} px, so Cellpose resizes each image x{factor:.2f}")
+            f"{settings.cell_diameter_um:g} um is {cell_px:.1f} px, "
+            + (f"so Cellpose resizes each image x{factor:.2f}" if settings.resize != "none" else
+               "and Cellpose is set not to resize: each image is segmented as imaged"))
     if settings.segment_scope == "nanowells":
         crop = 2 * CROP_REACH * (located.diameter_um or settings.diameter_um) / 2 / px
         text += f"; a nanowell's crop is {crop:.0f} px, {crop * factor:.0f} px as the network sees it"

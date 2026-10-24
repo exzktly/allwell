@@ -21,8 +21,8 @@ from PySide6.QtWidgets import (
 
 from analyze.domain.nanowell_fields import (
     CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, GEOMETRY_CHOICES, LEGACY_CELLPOSE_MODEL, PLATE_FORMAT_CHOICES,
-    LEGACY_SEGMENT_ON, LEGACY_SEGMENT_SCOPE, REGISTRATION_FROM_KEY, SEGMENT_ON_CHOICES, SEGMENT_SCOPE_CHOICES,
-    SCAN_CHOICES,
+    LEGACY_SEGMENT_ON, LEGACY_SEGMENT_SCOPE, REGISTRATION_FROM_KEY, RESIZE_CHOICES, SEGMENT_ON_CHOICES,
+    SEGMENT_SCOPE_CHOICES, SCAN_CHOICES,
     nanowell_enabled, nanowell_option_errors,
 )
 
@@ -97,7 +97,8 @@ def settings_from_opts(opts: dict):
         str(opts.get("nanowell_segment_on") or SEGMENT_ON_CHOICES[0][0]),
         str(opts.get("nanowell_segment_scope") or SEGMENT_SCOPE_CHOICES[0][0]),
         # No control on the form: a run takes the command line's default, and Test detection the same.
-        str(opts.get("nanowell_segment_scale") or "levelled"))
+        str(opts.get("nanowell_segment_scale") or "levelled"),
+        str(opts.get("nanowell_resize") or RESIZE_CHOICES[0][0]))
 
 
 class AnalyzeNanowellSectionMixin:
@@ -269,6 +270,20 @@ class AnalyzeNanowellSectionMixin:
         row.layout().addWidget(self._nanowell_segment_scope_cb)
         row.layout().addStretch(1)
         self._nanowell_field_rows.append(row.parentWidget())
+        row = self._row(box, "Resize", tooltip=(
+            "Whether Cellpose resizes each image before segmenting it. To the cell diameter: by 30 ÷ the cell "
+            "diameter in pixels, so a cell reaches the 30 pixels Cellpose's models work at — for cells smaller than "
+            "that, an enlargement that multiplies the pixels the network runs on (x2 is four times the work). "
+            "None: each image is segmented as imaged, much faster for small cells, at whatever the model makes of "
+            "cells at that size. Compare the two counts on one well before a plate-wide run."))
+        self._nanowell_resize_cb = QComboBox(row)
+        for value, label in RESIZE_CHOICES:
+            self._nanowell_resize_cb.addItem(label, userData=value)
+        self._nanowell_resize_cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._nanowell_resize_cb.setMinimumContentsLength(12)
+        row.layout().addWidget(self._nanowell_resize_cb)
+        row.layout().addStretch(1)
+        self._nanowell_field_rows.append(row.parentWidget())
         for key, label, attr, tip in _FIELDS:
             if key in _COUNT_FIELDS:
                 self._nanowell_field_rows.append(self._nanowell_edit_row(box, key, label, attr, tip))
@@ -301,6 +316,7 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_model_cb.setEnabled(on)
         self._nanowell_segment_on_cb.setEnabled(on)
         self._nanowell_segment_scope_cb.setEnabled(on)
+        self._nanowell_resize_cb.setEnabled(on)
         # The count's rows live on the Segmentation section's label-free page: shown in nanowell mode, and the
         # page's own note (and its pixel diameter, which the count does not read) hidden then.
         box = getattr(self, "_nanowell_count_box", None)
@@ -384,6 +400,7 @@ class AnalyzeNanowellSectionMixin:
         out["nanowell_segment_on"] = self._nanowell_segment_on_cb.currentData() or SEGMENT_ON_CHOICES[0][0]
         out["nanowell_segment_scope"] = (self._nanowell_segment_scope_cb.currentData()
                                          or SEGMENT_SCOPE_CHOICES[0][0])
+        out["nanowell_resize"] = self._nanowell_resize_cb.currentData() or RESIZE_CHOICES[0][0]
         out[REGISTRATION_FROM_KEY] = self._nanowell_registration_edit.text().strip()
         return out
 
@@ -435,6 +452,9 @@ class AnalyzeNanowellSectionMixin:
         named = d.get("nanowell_segment_scope") if "nanowell_segment_scope" in d else SEGMENT_SCOPE_CHOICES[0][0]
         self._nanowell_segment_scope_cb.setCurrentIndex(
             max(self._nanowell_segment_scope_cb.findData(str(named or LEGACY_SEGMENT_SCOPE)), 0))
+        # And for the resize: absent or None is a run that resized to the cell diameter, every run's default.
+        self._nanowell_resize_cb.setCurrentIndex(
+            max(self._nanowell_resize_cb.findData(str(d.get("nanowell_resize") or RESIZE_CHOICES[0][0])), 0))
         self._nanowell_registration_edit.setText(str(d.get(REGISTRATION_FROM_KEY) or ""))
         self._refresh_nanowell_custom()
 

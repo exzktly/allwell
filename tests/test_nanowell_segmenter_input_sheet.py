@@ -66,7 +66,8 @@ def test_a_nanowell_run_writes_its_wells_sheet_from_the_crops_the_segmenter_was_
                                                                                        rendered_well,  # noqa: F811
                                                                                        caplog):
     """Through the real run: the sheet is written, and its crops are the segmenter's own input — the sample's
-    crops, captured where the segmenter is called, carry the labels it returned. The run log states the scale the
+    crops, captured where the segmenter is called, carry the labels it returned (a segmenter that marks the centre
+    of every crop, so every kept crop has some). The run log states the scale the
     timepoint reached Cellpose at, before it is measured."""
     import logging
 
@@ -75,11 +76,19 @@ def test_a_nanowell_run_writes_its_wells_sheet_from_the_crops_the_segmenter_was_
     captured = []
     real = nr._keep_crops
 
-    def spy(keep, seen, labels, px, fit_sites, addresses):
-        real(keep, seen, labels, px, fit_sites, addresses)
+    def spy(keep, seen, labels, px, fit_sites, addresses, lowhigh=None):
+        real(keep, seen, labels, px, fit_sites, addresses, lowhigh)
         if keep is not None:
             captured.append(dict(keep[1]))
     monkeypatch.setattr(nr, "_keep_crops", spy)
+    import tests.test_nanowell_cli as cli
+
+    def centre_mark(crop):                       # labels a block at the centre of every crop: what it returned
+        labels = np.zeros(np.shape(crop), np.int32)
+        h, w = labels.shape
+        labels[h // 2 - 1:h // 2 + 2, w // 2 - 1:w // 2 + 2] = 1
+        return labels
+    monkeypatch.setattr(cli, "threshold_segmenter", lambda: centre_mark)
     rendered, record, _truth = rendered_well
     plate = _write_plate(tmp_path, rendered, record)
     with caplog.at_level(logging.INFO, logger="allwell.nanowell"):
@@ -93,5 +102,14 @@ def test_a_nanowell_run_writes_its_wells_sheet_from_the_crops_the_segmenter_was_
     rgb = _decode(png)
     kept = {k: v for part in captured for k, v in part.items()}
     assert len(kept) == 2 * ni.PER_GROUP and {v["kind"] for v in kept.values()} == {"centre", "edge"}
-    assert any(v["labels"].any() for v in kept.values())                 # the painted cells, as segmented
+    assert all(v["labels"].any() for v in kept.values())                 # each crop's labels are the segmenter's
+    # Scaled by the nanowells' interiors, with rims and lattice blanked: everything in a crop outside its nanowell's
+    # counting circle is one plain value — on a run that scaled by the tile, the rim is there, in many values.
+    whole = [np.asarray(v["image"]) for v in kept.values() if v["image"].shape[0] == v["image"].shape[1]]
+    assert whole
+    for image in whole:
+        n = image.shape[0]
+        yy, xx = np.mgrid[:n, :n]
+        beyond = np.hypot(yy - (n - 1) / 2, xx - (n - 1) / 2) > 0.95 * n / 2 / 1.2      # past 0.95 of the radius
+        assert len(np.unique(image[beyond])) == 1
     assert rgb.shape[0] == ni.GAP_PX + 2 * (ni.CELL_PX + ni.GAP_PX)

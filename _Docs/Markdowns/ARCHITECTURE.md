@@ -10011,9 +10011,17 @@ new run, gives it each owned nanowell's crop, `CROP_REACH` (1.2) radii around th
 (Cellpose's: `pipeline.cellpose._segment_cellpose_many` centres them in a common shape padded with 0 and makes one
 Cellpose 4 `eval` of the `(N, H, W, 1)` stack, which runs 8 crops' network tiles per pass and computes each crop's
 masks on its own; on Cellpose 3 it is one call per crop), one call per crop otherwise — renumbers each crop's labels and pastes them into a whole-tile label image, so
-`count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's) is given the
-tile's own 1st-99th percentiles for every crop, because a crop scaled to its own range would stretch an empty
-nanowell's noise. `pipeline.cellpose._segment_cellpose(lowhigh=…)` scales the crop to that range itself and calls
+`count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's) is given one
+range for every crop of a tile, because a crop scaled to its own range would stretch an empty nanowell's noise. Which
+range is `segment_scale` (`nanowell_measure.SEGMENT_SCALES`, applied by `segmenter_scale` in `_tile_contents` and in
+Test detection's `_tile_segmented`, for either scope): `nanowells`, the default for a new run, takes the pooled
+1st-99th percentiles of the tile's nanowell interiors (`INTERIOR_FRACTION` of each radius) and sets every pixel
+farther than `SEGMENT_MASK_FRACTION` (the same 0.9) of a radius from every nanowell to the interiors' median, so the
+rims — the extremes of a phase or brightfield tile — are neither in the range nor in the image; `tile` takes the
+tile's own percentiles and leaves the image alone, and is what options naming none mean (`LEGACY_SEGMENT_SCALE`,
+keyed and digest-aliased as `segment_scope` is). The whole-tile scope passes the range to the segmenter too
+(`segment_tile(lowhigh=…)`). `segmenter_view` (the `segmenter_floor` / `segmenter_contrast` columns) and the
+inspection sheet read the same range. `pipeline.cellpose._segment_cellpose(lowhigh=…)` scales the crop to that range itself and calls
 `eval(normalize=False)`: Cellpose pads a greyscale image with empty channels and applies a `normalize={"lowhigh": …}`
 range to all of them, so they read `-lo / (hi - lo)` (about -1 on camera counts) instead of the 0 its percentile
 path leaves a flat channel at. Loading a model sets the `cellpose.dynamics`, `cellpose.models` and `cellpose.core`

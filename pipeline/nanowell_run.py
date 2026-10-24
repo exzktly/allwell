@@ -87,6 +87,10 @@ LEGACY_SEGMENT_ON = "rim"
 #: each nanowell (``nanowells``, the default for a new run: the lattice between them is work that counts nothing) or
 #: the whole tile (``tile``), which is what a run's options that name none mean — every earlier run did so.
 SEGMENT_SCOPES = ("nanowells", "tile")
+#: How the segmenter's input is scaled (``nanowell_measure.SEGMENT_SCALES``); options that name none mean ``tile``,
+#: the tile's own percentiles, which is what every earlier run did.
+SEGMENT_SCALES = ("nanowells", "tile")
+LEGACY_SEGMENT_SCALE = "tile"
 LEGACY_SEGMENT_SCOPE = "tile"
 
 GEOMETRY_HEX_CIRCLE = "hex_circle"
@@ -107,6 +111,7 @@ class NanowellSettings:
     cellpose_model: str = LEGACY_CELLPOSE_MODEL  # the model the count segments with; unnamed, an earlier run's
     segment_on: str = LEGACY_SEGMENT_ON         # what that model is given (SEGMENT_ON); unnamed, an earlier run's
     segment_scope: str = LEGACY_SEGMENT_SCOPE   # how much of each tile it is given (SEGMENT_SCOPES); unnamed, the same
+    segment_scale: str = LEGACY_SEGMENT_SCALE   # what its input is scaled by (SEGMENT_SCALES); unnamed, the same
     #: The nanowell diameter measured on the plate, whatever the geometry (tracker F2): sites are fitted, owned and
     #: measured at it. Set from the well's one diameter by :func:`measure_timepoint` and by :func:`run_well` for its
     #: roster, and by Test detection; never part of the reuse key, which holds the setting (``key``), while the
@@ -126,6 +131,8 @@ class NanowellSettings:
             raise ValueError(f"Unknown nanowell segmenter input {self.segment_on!r}; one of {SEGMENT_ON}")
         if self.segment_scope not in SEGMENT_SCOPES:
             raise ValueError(f"Unknown nanowell segmentation scope {self.segment_scope!r}; one of {SEGMENT_SCOPES}")
+        if self.segment_scale not in SEGMENT_SCALES:
+            raise ValueError(f"Unknown nanowell segmenter scale {self.segment_scale!r}; one of {SEGMENT_SCALES}")
 
     @property
     def infer(self) -> bool:
@@ -160,6 +167,8 @@ class NanowellSettings:
             key["segment_on"] = self.segment_on
         if self.segment_scope != LEGACY_SEGMENT_SCOPE:     # and on the whole tile, as every earlier run did
             key["segment_scope"] = self.segment_scope
+        if self.segment_scale != LEGACY_SEGMENT_SCALE:     # and scaled by the tile's own percentiles, the same
+            key["segment_scale"] = self.segment_scale
         return key
 
 
@@ -1146,19 +1155,21 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, norm.threshold)))
     # Each site as the segmenter receives it, written beside its count so a zero the segmenter could not have
     # avoided (cells a few per cent of the tile's range) is told apart from an empty nanowell.
-    seen = nm.segmenter_input(images[owner], rim, settings.segment_on)
-    view = nm.segmenter_view(seen, px, fit_sites)
+    # Scaled (and, under the nanowells scale, rims and lattice blanked) as the segmenter is given it.
+    seen, lowhigh = nm.segmenter_scale(nm.segmenter_input(images[owner], rim, settings.segment_on), px, fit_sites,
+                                       settings.segment_scale)
+    view = nm.segmenter_view(seen, px, fit_sites, lowhigh=lowhigh)
     channel_images = {c: img for c, f in (channels or {}).items() if (img := f(owner)) is not None}
     counts = area = None
     table: dict = {}
     if segment is not None:
         tick = on_segmented or (lambda _n: None)
         if settings.segment_scope == "nanowells":
-            labels = nm.segment_sites(seen, px, fit_sites, segment, on_site=lambda: tick(1))
+            labels = nm.segment_sites(seen, px, fit_sites, segment, on_site=lambda: tick(1), lowhigh=lowhigh)
         else:
-            labels = nm.segment_tile(seen, segment)
+            labels = nm.segment_tile(seen, segment, lowhigh=lowhigh)
             tick(len(fit_sites))
-        _keep_crops(keep, seen, labels, px, fit_sites, addresses)
+        _keep_crops(keep, seen, labels, px, fit_sites, addresses, lowhigh)
         counts = nm.count_cells(labels, px, fit_sites, owned={g.index for g in fit_sites})
         area = nm.area_estimate(labels, px, fit_sites, counts)
         table = _cell_rows(labels, px, fit_sites, counts, addresses, owner, (left, top), channel_images, channels,
@@ -1177,10 +1188,9 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     return contents, table, notes
 
 
-def _keep_crops(keep, seen, labels, px, fit_sites, addresses) -> None:
-    """Put each wanted site's crop of *seen* — on the 0-1 scale of its tile's 1st-99th percentiles, which is the
-    scale the segmenter was given it at — and of *labels* into ``keep = (wanted, kept)``. Nothing when *keep* is
-    ``None``."""
+def _keep_crops(keep, seen, labels, px, fit_sites, addresses, lowhigh=None) -> None:
+    """Put each wanted site's crop of *seen* — on the 0-1 scale the segmenter was given it at: *lowhigh*, else its
+    tile's 1st-99th percentiles — and of *labels* into ``keep = (wanted, kept)``. Nothing when *keep* is ``None``."""
     if keep is None:
         return
     from pipeline import nanowell_measure as nm
@@ -1190,7 +1200,7 @@ def _keep_crops(keep, seen, labels, px, fit_sites, addresses) -> None:
     finite = seen[np.isfinite(seen)]
     if not finite.size:
         return
-    lo, hi = np.percentile(finite, nm.SEGMENTER_PERCENTILES)
+    lo, hi = lowhigh if lowhigh is not None else np.percentile(finite, nm.SEGMENTER_PERCENTILES)
     for g in fit_sites:
         win = nm.crop_window(g, px, seen.shape) if g.index in wanted else None
         if win is not None:

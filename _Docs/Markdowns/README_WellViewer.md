@@ -236,12 +236,19 @@ confluence is measured on the rim-removed image. Test detection's crops show the
 tooltip says which). A run made before this setting existed counted on the rim-removed image, and its settings say so.
 
 **Segment** chooses how much of each tile the model is given. *Each nanowell* (the default) gives it each nanowell
-separately — a crop around it, scaled to the brightness range of the whole tile, so an empty nanowell is not
-stretched to look busy, and with Cellpose-SAM 32 crops at a time so the GPU works on several at once — rather than
-the whole tile at once: the lattice between nanowells holds no cell that is
+separately — a crop around it, with Cellpose-SAM 32 crops at a time so the GPU works on several at once — rather
+than the whole tile at once: the lattice between nanowells holds no cell that is
 counted, and on a slow GPU it was most of the work. *Whole tile* gives it each tile in one piece, as runs made before
 this setting existed did, and their settings say so. Compare the two on one well with **Test detection**, which
 segments as the run would. (On the command line: `--nanowell_segment_scope nanowells|tile`.)
+
+Whichever you choose, the model is given the nanowells only: everything outside each nanowell's interior — its rim
+and the lattice between nanowells — is set to plain grey, and the brightness range is taken from the nanowells'
+interiors across the tile. On the image as imaged the rims are the darkest and brightest things on a tile, and
+when the range was taken from the whole tile, cells were left a sliver of it: Cellpose-SAM then counted almost every
+nanowell empty, except at the array's edge, where a tile holds fewer rims. The range is pooled over a tile's
+nanowells, so an empty nanowell is not stretched to look busy. Runs made before this counted with the whole tile's
+range, and their settings say so; on the command line, `--nanowell_segment_scale tile` does the same.
 
 While a run counts, its log says how far it is: `Well A01 — 24h: 120/400 nanowells segmented (1.5 s each, about
 7 min 0 s left; per nanowell, Cellpose's network 0.20 s, its masks 1.10 s)`, about every tenth of a timepoint's

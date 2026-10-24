@@ -95,7 +95,9 @@ def settings_from_opts(opts: dict):
         str(opts.get("nanowell_geometry") or GEOMETRY_CHOICES[0][0]),
         str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]),
         str(opts.get("nanowell_segment_on") or SEGMENT_ON_CHOICES[0][0]),
-        str(opts.get("nanowell_segment_scope") or SEGMENT_SCOPE_CHOICES[0][0]))
+        str(opts.get("nanowell_segment_scope") or SEGMENT_SCOPE_CHOICES[0][0]),
+        # No control on the form: a run takes the command line's default, and Test detection the same.
+        str(opts.get("nanowell_segment_scale") or "nanowells"))
 
 
 class AnalyzeNanowellSectionMixin:

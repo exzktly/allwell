@@ -110,6 +110,7 @@ OTHER = {
     "nanowell_cellpose_model": "livecell_cp3",
     "nanowell_segment_on": "rim",
     "nanowell_segment_scope": "tile",
+    "nanowell_segment_scale": "tile",
     "nanowell_grid": "3x7",
     "nanowell_scan": "bottom-right-column-serpentine",
     "nanowell_overlap_percent": 25.0,

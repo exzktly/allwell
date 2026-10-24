@@ -113,8 +113,10 @@ def test_an_earlier_nanowell_run_on_the_rim_divided_image_keeps_its_digest():
     def aliases(*extra):
         return settings_key_aliases(settings_key_for(vars(build_parser().parse_known_args([*nanowell, *extra])[0])))
 
-    assert _DIGEST_9145["nanowell"] in aliases("--nanowell_segment_on", "rim", "--nanowell_segment_scope", "tile")
-    assert _DIGEST_9145["nanowell"] not in aliases("--nanowell_segment_on", "raw", "--nanowell_segment_scope", "tile")
+    assert _DIGEST_9145["nanowell"] in aliases("--nanowell_segment_on", "rim", "--nanowell_segment_scope", "tile",
+                                                   "--nanowell_segment_scale", "tile")
+    assert _DIGEST_9145["nanowell"] not in aliases("--nanowell_segment_on", "raw", "--nanowell_segment_scope", "tile",
+                                                   "--nanowell_segment_scale", "tile")
 
 
 def test_the_form_s_segment_choice_reaches_the_run_and_test_detection_and_a_sidecar_restores_it(tab):  # noqa: F811

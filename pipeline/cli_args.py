@@ -581,6 +581,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help=("How much of each tile the cell count's segmenter is given. nanowells (the default): a crop "
                          "around each nanowell, scaled as the whole tile is, so the lattice between them costs "
                          "nothing. tile: the whole tile in one call."))
+    p.add_argument("--nanowell_segment_scale", choices=("nanowells", "tile"), default="nanowells",
+                   help=("What the cell count's segmenter input is scaled by. nanowells (the default): the range of "
+                         "the nanowells' interiors, with rims and the lattice between them set to plain background, "
+                         "so cells get the model's whole range. tile: the whole tile's range, which on the image as "
+                         "imaged is the rims', leaving cells little contrast."))
     p.add_argument("--nanowell_square_edge_deg", type=float, default=0.0,
                    help=("Angle of the central square nanowell's edges to a lattice row, degrees (assumed 0: the "
                          "square is cut parallel to a row). Used to refuse a lattice fitted a sixth of a turn off."))
@@ -635,6 +640,8 @@ def nanowell_options_from_args(args, error) -> dict | None:
         options["segment_on"] = args.nanowell_segment_on
     if args.nanowell_segment_scope not in (None, "tile"):      # and the whole tile what they segmented
         options["segment_scope"] = args.nanowell_segment_scope
+    if args.nanowell_segment_scale not in (None, "tile"):      # and the tile's own range what they scaled by
+        options["segment_scale"] = args.nanowell_segment_scale
     pattern = _grid_pattern(args, error)
     if pattern:
         options["pattern"] = pattern

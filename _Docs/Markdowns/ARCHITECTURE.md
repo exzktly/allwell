@@ -10006,14 +10006,19 @@ form always sends its choice, and `settings_digest._before_cpsam` aliases a nano
 earlier build recorded. Confluence is measured on the rim-suppressed tile either way, and Test detection's crops
 (`pipeline/nanowell_preview._tile_segmented`) are cut from the image the segmenter was given, marked `input`.
 How much of that image the segmenter is given is `segment_scope` (`SEGMENT_SCOPES`): `nanowells`, the default for a
-new run, calls it once per owned nanowell on a crop `CROP_REACH` (1.2) radii around the centre
-(`nanowell_measure.segment_sites`), renumbers each crop's labels and pastes them into a whole-tile label image, so
+new run, gives it each owned nanowell's crop, `CROP_REACH` (1.2) radii around the centre
+(`nanowell_measure.segment_sites`) — `CROP_BATCH` (32) crops a call to a segmenter that offers `segment_many`
+(Cellpose's: `pipeline.cellpose._segment_cellpose_many` centres them in a common shape padded with 0 and makes one
+Cellpose 4 `eval` of the `(N, H, W, 1)` stack, which runs 8 crops' network tiles per pass and computes each crop's
+masks on its own; on Cellpose 3 it is one call per crop), one call per crop otherwise — renumbers each crop's labels and pastes them into a whole-tile label image, so
 `count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's) is given the
 tile's own 1st-99th percentiles for every crop, because a crop scaled to its own range would stretch an empty
 nanowell's noise. `pipeline.cellpose._segment_cellpose(lowhigh=…)` scales the crop to that range itself and calls
 `eval(normalize=False)`: Cellpose pads a greyscale image with empty channels and applies a `normalize={"lowhigh": …}`
 range to all of them, so they read `-lo / (hi - lo)` (about -1 on camera counts) instead of the 0 its percentile
-path leaves a flat channel at. Loading a model sets the `cellpose.dynamics` logger to WARNING: its INFO line "No cell pixels found.", printed for every image without a cell (once per empty nanowell on the crop path), named no well and was the only thing a long count printed; `_log_sites` reports the count instead. `tile` is one call on the whole tile (`segment_tile`), and
+path leaves a flat channel at. Loading a model sets the `cellpose.dynamics`, `cellpose.models` and `cellpose.core`
+loggers to WARNING (a batch's tqdm progress is INFO) and adds `_CellposeChatter`, which drops the two warnings a batch
+makes as a matter of course ("3D stack used…", once per batch; "no seeds found…", once per empty crop). Among the INFO lines this hides is "No cell pixels found.", printed for every image without a cell (once per empty nanowell on the crop path), named no well and was the only thing a long count printed; `_log_sites` reports the count instead. `tile` is one call on the whole tile (`segment_tile`), and
 is what options that name no scope mean (`LEGACY_SEGMENT_SCOPE`), with the same key and digest-alias treatment as
 `segment_on`. The form's **Segment** combo (`_nanowell_segment_scope_cb`, `SEGMENT_SCOPE_CHOICES` in
 `analyze/domain/nanowell_fields.py`) sets it, `pipeline_service` always sends it, a restore that names none shows

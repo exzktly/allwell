@@ -142,3 +142,35 @@ def test_a_measured_timepoint_reports_its_segmented_nanowells_and_where_the_coun
     assert said[0] == (0, total) and total > 0 and {t for _d, t in said} == {total}
     assert [d for d, _t in said] == sorted(d for d, _t in said)
     assert said[-1] == (total - 1, total)
+
+
+def test_a_segmenter_that_takes_several_crops_gets_them_in_batches_and_labels_them_as_one_at_a_time():
+    """``segment_many`` (Cellpose 4's batch) is given ``CROP_BATCH`` crops a call, each with the tile's range, and
+    the tile's labels are exactly what one call per crop gives: same crops, same renumbering, same pasting."""
+    rng = np.random.default_rng(3)
+    image = rng.random((200, 200)) * 10
+    centres = [(15.5 + 30 * (i % 6), 15.5 + 30 * (i // 6)) for i in range(nm.CROP_BATCH + 4)]
+    for x, y in centres[::2]:                                               # a cell in every other nanowell
+        image[int(y) - 3:int(y) + 3, int(x) - 3:int(x) + 3] = 100.0
+    geoms = _sites(centres, radius=10.0)
+    one = threshold_segmenter(level=0.5)
+
+    def single(crop, lowhigh=None):
+        return one((np.asarray(crop) - lowhigh[0]) / (lowhigh[1] - lowhigh[0]))
+    single.accepts_range = True
+    batches = []
+
+    def batched(crop, lowhigh=None):
+        raise AssertionError("a crop went to the one-at-a-time call")
+
+    def many(crops, lowhigh):
+        batches.append((len(crops), lowhigh))
+        return [single(c, lowhigh=lowhigh) for c in crops]
+    batched.accepts_range, batched.segment_many = True, many
+    ticks = []
+    want = nm.segment_sites(image, 1.0, geoms, single)
+    got = nm.segment_sites(image, 1.0, geoms, batched, on_site=lambda: ticks.append(1))
+    assert np.array_equal(got, want) and got.max() > 0
+    lowhigh = tuple(np.percentile(image, nm.SEGMENTER_PERCENTILES))
+    assert [n for n, _ in batches] == [nm.CROP_BATCH, 4] and all(np.allclose(lh, lowhigh) for _, lh in batches)
+    assert len(ticks) == len(geoms)

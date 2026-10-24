@@ -237,7 +237,8 @@ tooltip says which). A run made before this setting existed counted on the rim-r
 
 **Segment** chooses how much of each tile the model is given. *Each nanowell* (the default) gives it each nanowell
 separately — a crop around it, scaled to the brightness range of the whole tile, so an empty nanowell is not
-stretched to look busy — rather than the whole tile at once: the lattice between nanowells holds no cell that is
+stretched to look busy, and with Cellpose-SAM 32 crops at a time so the GPU works on several at once — rather than
+the whole tile at once: the lattice between nanowells holds no cell that is
 counted, and on a slow GPU it was most of the work. *Whole tile* gives it each tile in one piece, as runs made before
 this setting existed did, and their settings say so. Compare the two on one well with **Test detection**, which
 segments as the run would. (On the command line: `--nanowell_segment_scope nanowells|tile`.)

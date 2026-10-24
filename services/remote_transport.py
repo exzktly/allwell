@@ -54,6 +54,12 @@ def _fmt_secs(s: float) -> str:
         return f"{s:.0f}s"
     return f"{int(s // 60)}m{int(s % 60):02d}s"
 
+#: The one argument :func:`_remote_quote` passes through unquoted: the env prefix the remote's env guard resolved
+#: (``services.remote_conda._conda_env_guard``) for a run that prefers the Cellpose env, which only the remote shell
+#: can know, so ``conda run -p`` must read it from the shell rather than from the argv.
+AW_PREFIX_ARG = '"$AW_PREFIX"'
+
+
 def _remote_quote(s: str) -> str:
     """Shell-quote ``s`` for embedding in a remote bash command line,
     preserving leading-``~/`` expansion.
@@ -79,6 +85,8 @@ def _remote_quote(s: str) -> str:
     """
     if s == "~":
         return '"$HOME"'
+    if s == AW_PREFIX_ARG:
+        return s
     if s.startswith("~/"):
         return '"$HOME"' + shlex.quote(s[1:])
     return shlex.quote(s)

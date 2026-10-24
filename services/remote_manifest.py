@@ -256,4 +256,5 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # — the remote doesn't run the GUI). See requirements.txt for
     # the GUI superset.
     "requirements-remote.txt",
+    "requirements-remote-cellpose.txt",
 )

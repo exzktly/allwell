@@ -67,6 +67,8 @@ cellpose==4.1.1          # label-free segmentation (Cellpose-SAM, cpsam); numpy>
 # on first use, to ~/.cellpose/models or $CELLPOSE_LOCAL_MODELS_PATH.
 # Not 4.2.x: from 4.2.0 Cellpose loads weights with torch.load(..., mmap=True), which Torch gained in 2.1, and the
 # Torch line is held at 2.0.1 above (typing-extensions under TF 2.13). 4.1.1 is the last release on Torch 2.0.1.
+# On Torch 2.0.1 Cellpose-SAM runs in float32 only; requirements-remote-cellpose.txt is the second env, without
+# TensorFlow, whose newer Torch runs it in bfloat16, and which Cellpose runs use where a host has it.
 
 # ── TOML config (used by services/remote_config.py on Python 3.10) ───────────
 tomli ; python_version < "3.11"

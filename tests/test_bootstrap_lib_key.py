@@ -219,16 +219,16 @@ def test_locate_conda_sh_snippet_is_used_by_setup_scripts():
     ``env_setup_script()`` so it can be tested against a stub conda, and what
     matters is that the discovery snippet reaches the remote either way.
     """
-    import inspect
-    setup_script = bl.env_setup_script()
-    pip_src = inspect.getsource(bl.install_pip_deps)
-    # Both should carry the discovery snippet.
-    assert bl._LOCATE_CONDA_SH in setup_script
-    assert "_LOCATE_CONDA_SH" in pip_src
-    # And neither should still hard-code the source line (which used
-    # to live in the heredoc body before v5.2.4).
-    assert 'source "$HOME/miniforge3/etc/profile.d/conda.sh"' not in setup_script
-    assert 'source "$HOME/miniforge3/etc/profile.d/conda.sh"' not in pip_src
+    # The pip install is generated too (``pip_install_script``, for both envs), so it is held the same way.
+    for env in (bl.ENV_NAME, bl.CELLPOSE_ENV_NAME):
+        setup_script = bl.env_setup_script(env)
+        pip_script = bl.pip_install_script(env)
+        # Both should carry the discovery snippet.
+        assert bl._LOCATE_CONDA_SH in setup_script and bl._LOCATE_CONDA_SH in pip_script
+        # And neither should still hard-code the source line (which used
+        # to live in the heredoc body before v5.2.4).
+        assert 'source "$HOME/miniforge3/etc/profile.d/conda.sh"' not in setup_script
+        assert 'source "$HOME/miniforge3/etc/profile.d/conda.sh"' not in pip_script
 
 
 def test_load_existing_key_is_silent_on_toml_parse_error(tmp_path, monkeypatch):

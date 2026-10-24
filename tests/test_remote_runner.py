@@ -2167,6 +2167,7 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/suspend.py",
         "pipeline/threshold_optimize.py",
         "requirements-remote.txt",
+        "requirements-remote-cellpose.txt",
     )
 
 

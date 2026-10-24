@@ -54,6 +54,11 @@ def _required_files() -> tuple[str, ...]:
     return _REQUIRED_REMOTE_FILES
 
 ENV_NAME = "allwell"
+#: The second env, for Cellpose (``requirements-remote-cellpose.txt``): a Torch new enough to run Cellpose-SAM in
+#: bfloat16, which ``allwell`` cannot hold beside TensorFlow 2.13. A Cellpose or nanowell run uses it when it is
+#: installed (``services.remote_conda.cellpose_env_selector``) and ``allwell`` otherwise.
+CELLPOSE_ENV_NAME = "allwell-cellpose"
+CELLPOSE_REQUIREMENTS = "requirements-remote-cellpose.txt"
 REMOTE_HOME_REPO = "~/allwell"
 REMOTE_STAGING = "~/.allwell-staging"
 REMOTE_MINIFORGE = "~/miniforge3"
@@ -279,6 +284,17 @@ class HostProbe:
     """Pins of :data:`VERSION_PINS` the env does not hold, as ``dist==pin``
     (installed at another version, or not at all). ``("?",)`` when the env's
     python could not be run to answer."""
+    cellpose_env: bool = False
+    """Whether the ``allwell-cellpose`` env (:data:`CELLPOSE_ENV_NAME`) exists."""
+    cellpose_missing_modules: tuple[str, ...] = ()
+    """Modules of :data:`CELLPOSE_REQUIRED_IMPORTS` that env cannot find (``("?",)``: could not ask)."""
+    cellpose_off_pin: tuple[str, ...] = ()
+    """Pins of :data:`CELLPOSE_VERSION_PINS` that env does not hold (``("?",)``: could not ask)."""
+    cellpose_cuda: str = ""
+    """``"True"`` / ``"False"``: whether that env's Torch sees a GPU; ``"?"`` when it could not be asked, ``""`` without
+    the env."""
+    cellpose_pip_in_progress: bool = False
+    """A detached install into that env, from an earlier bootstrap, still running."""
 
 
 # ── argv ───────────────────────────────────────────────────────────────────
@@ -556,6 +572,27 @@ VERSION_PINS: dict[str, str] = {
     "cellpose": "4.1.1",
 }
 
+#: What ``requirements-remote-cellpose.txt`` installs, by the module a run imports it as: the probe of the
+#: ``allwell-cellpose`` env, as :data:`REQUIRED_IMPORTS` is of ``allwell``'s, and held against the file by the same test.
+CELLPOSE_REQUIRED_IMPORTS: dict[str, str] = {
+    "tifffile": "tifffile",
+    "imagecodecs": "imagecodecs",
+    "pandas": "pandas",
+    "torch": "torch",
+    "torchvision": "torchvision",
+    "cellpose": "cellpose",
+    "exceptiongroup": "exceptiongroup",
+}
+CELLPOSE_NOT_PROBED: dict[str, str] = {
+    "tomli": "installed only on Python < 3.11, where tomllib is missing",
+}
+#: Versions the ``allwell-cellpose`` probe checks: Torch, because bfloat16 is the reason the env exists and Torch
+#: 2.0 cannot run Cellpose-SAM in it; Cellpose, so both envs run the same model and post-processing.
+CELLPOSE_VERSION_PINS: dict[str, str] = {
+    "torch": "2.4.1",
+    "cellpose": "4.1.1",
+}
+
 #: Prints the comma-joined ``dist==pin`` arguments whose installed version is not the pin (or not installed). No
 #: single quotes: it is embedded in one.
 _OFF_PIN_PY = (
@@ -641,6 +678,24 @@ if has_conda; then
     fi
 fi
 
+# The Cellpose env, read the same way: present, what it cannot import, what is off its pins, and whether its Torch
+# sees a GPU ("?" when its python cannot run). Read after allwell's, since activating it replaces that env.
+CP_ENV_PRESENT=false
+CP_ABSENT=
+CP_OFF=
+CP_CUDA=
+if has_conda && conda env list 2>/dev/null | awk '{print $1}' | grep -qx "__CP_ENV__"; then
+    CP_ENV_PRESENT=true
+    conda activate "__CP_ENV__" 2>/dev/null || true
+    CP_ABSENT=$(python -c '__MISSING_MODULES_PY__' __CP_REQUIRED_MODULES__ 2>/dev/null || echo "?")
+    CP_OFF=$(python -c '__OFF_PIN_PY__' __CP_VERSION_PINS__ 2>/dev/null || echo "?")
+    CP_CUDA=$(python -c 'import torch; print(torch.cuda.is_available())' 2>/dev/null || echo "?")
+fi
+echo "cellpose_env=$CP_ENV_PRESENT"
+echo "cellpose_missing_modules=$CP_ABSENT"
+echo "cellpose_off_pin=$CP_OFF"
+echo "cellpose_cuda=$CP_CUDA"
+
 echo "has_env=$ENV_PRESENT"
 echo "tensorflow_version=$TF_VERSION"
 echo "stardist_ok=$STARDIST_OK"
@@ -661,12 +716,24 @@ if [ -f "$PIP_RUNNING_MARKER" ]; then
     fi
 fi
 echo "pip_in_progress=$PIP_IN_PROGRESS"
+CP_PIP_MARKER="$HOME/.allwell-staging/.pip_cellpose_running"
+CP_PIP_IN_PROGRESS=false
+if [ -f "$CP_PIP_MARKER" ]; then
+    pid_val=$(cat "$CP_PIP_MARKER" 2>/dev/null || true)
+    if [ -n "$pid_val" ] && kill -0 "$pid_val" 2>/dev/null; then
+        CP_PIP_IN_PROGRESS=true
+    fi
+fi
+echo "cellpose_pip_in_progress=$CP_PIP_IN_PROGRESS"
 """
 _PROBE_SCRIPT = (_PROBE_SCRIPT
                  .replace("__MISSING_MODULES_PY__", _MISSING_MODULES_PY)
                  .replace("__REQUIRED_MODULES__", " ".join(REQUIRED_IMPORTS.values()))
                  .replace("__OFF_PIN_PY__", _OFF_PIN_PY)
-                 .replace("__VERSION_PINS__", " ".join(f"{d}=={v}" for d, v in VERSION_PINS.items())))
+                 .replace("__VERSION_PINS__", " ".join(f"{d}=={v}" for d, v in VERSION_PINS.items()))
+                 .replace("__CP_ENV__", CELLPOSE_ENV_NAME)
+                 .replace("__CP_REQUIRED_MODULES__", " ".join(CELLPOSE_REQUIRED_IMPORTS.values()))
+                 .replace("__CP_VERSION_PINS__", " ".join(f"{d}=={v}" for d, v in CELLPOSE_VERSION_PINS.items())))
 
 
 def probe_host(alias: str, *, ssh_key_path: str = "") -> HostProbe:
@@ -698,6 +765,11 @@ def probe_host(alias: str, *, ssh_key_path: str = "") -> HostProbe:
         missing_modules=tuple(
             m for m in fields.get("missing_modules", "").split(",") if m),
         off_pin=tuple(m for m in fields.get("off_pin", "").split(",") if m),
+        cellpose_env=_bool("cellpose_env"),
+        cellpose_missing_modules=tuple(m for m in fields.get("cellpose_missing_modules", "").split(",") if m),
+        cellpose_off_pin=tuple(m for m in fields.get("cellpose_off_pin", "").split(",") if m),
+        cellpose_cuda=fields.get("cellpose_cuda", ""),
+        cellpose_pip_in_progress=_bool("cellpose_pip_in_progress"),
     )
 
 
@@ -755,14 +827,14 @@ def force_clean_script() -> str:
     removing ``~/miniforge3`` alone left the env in place, and ``--force`` did
     not do what its help text promises ("Use when the remote env is suspected
     corrupt"). The prefix is resolved through conda and removed too, and
-    anything that is not the env's own directory is refused.
+    anything that is not the env's own directory is refused. Both envs, ``allwell`` and ``allwell-cellpose``.
     """
     from services.remote_conda import CONDA_ENV_SHELL_HELPERS
 
     return (
-        "ENV_NAME=allwell\n"
-        + CONDA_ENV_SHELL_HELPERS
+        CONDA_ENV_SHELL_HELPERS
         + r"""
+for ENV_NAME in __ENVS__; do
 AW_PREFIX="$(aw_env_prefix "$ENV_NAME" 2>/dev/null || true)"
 [ -n "$AW_PREFIX" ] || AW_PREFIX="$(aw_env_stale_dir "$ENV_NAME" || true)"
 if [ -n "$AW_PREFIX" ]; then
@@ -777,13 +849,14 @@ if [ -n "$AW_PREFIX" ]; then
             ;;
     esac
 fi
+done
 echo "[bootstrap-remote] --force: removing ~/miniforge3 and ~/allwell" >&2
 rm -rf ~/miniforge3 ~/allwell
-"""
+""".replace("__ENVS__", f"{ENV_NAME} {CELLPOSE_ENV_NAME}")
     )
 
 
-def env_setup_script() -> str:
+def env_setup_script(env_name: str = ENV_NAME) -> str:
     """The bash the remote runs to create the env + staging dirs.
 
     Split out from :func:`ensure_env_and_staging` so it can be run against a
@@ -800,7 +873,7 @@ def env_setup_script() -> str:
     from services.remote_conda import CONDA_ENV_SHELL_HELPERS
 
     return (
-        "set -euo pipefail\nENV_NAME=allwell\n"
+        f"set -euo pipefail\nENV_NAME={env_name}\n"
         + _LOCATE_CONDA_SH
         + CONDA_ENV_SHELL_HELPERS
         + r"""
@@ -863,12 +936,15 @@ def ensure_env_and_staging(
     have been rsynced to the remote — that way pip can read
     ``requirements.txt`` from disk.
     """
-    say("Ensuring conda env + staging dirs on remote…")
-    _ssh_run(
-        alias, ["bash", "-s"],
-        input=env_setup_script(), check=True, capture=False,
-        ssh_key_path=ssh_key_path,
-    )
+    say("Ensuring conda envs + staging dirs on remote…")
+    # The same create-or-repair script for both envs: the Cellpose env gets the same python and scientific stack,
+    # so a count differs between them only by the model's precision.
+    for env_name in (ENV_NAME, CELLPOSE_ENV_NAME):
+        _ssh_run(
+            alias, ["bash", "-s"],
+            input=env_setup_script(env_name), check=True, capture=False,
+            ssh_key_path=ssh_key_path,
+        )
 
 
 def sync_required_files(alias: str, *, ssh_key_path: str = "") -> None:
@@ -895,6 +971,65 @@ def sync_required_files(alias: str, *, ssh_key_path: str = "") -> None:
         name=alias, ssh_alias=alias, ssh_key_path=ssh_key_path,
     )
     RemoteRunner(host).sync_required_files(log_fn=lambda m: sys.stdout.write(m))
+
+
+def pip_install_script(env_name: str = ENV_NAME, requirements: str = "requirements-remote.txt",
+                       tag: str = "pip") -> str:
+    """The bash that pip-installs *requirements* into conda env *env_name*, detached, with its markers named by
+    *tag* in the staging dir (``.<tag>_running`` / ``_done`` / ``_failed`` / ``_install.log``). ``allwell`` keeps
+    the names it always had (``pip``); the Cellpose env's are ``pip_cellpose``, so the two installs never read each
+    other's markers and a bootstrap re-attaches to the one that is still running."""
+    return ("set -euo pipefail\n" + _LOCATE_CONDA_SH + _PIP_INSTALL_BODY
+            .replace("__ENV__", env_name).replace("__TAG__", tag).replace("__REQ__", requirements))
+
+
+_PIP_INSTALL_BODY = r"""
+conda activate __ENV__
+STAGING="$HOME/.allwell-staging"
+mkdir -p "$STAGING"
+PIPLOG="$STAGING/.__TAG___install.log"
+RUNNING="$STAGING/.__TAG___running"
+DONE="$STAGING/.__TAG___done"
+FAILED="$STAGING/.__TAG___failed"
+
+REQ_FILE="$HOME/allwell/__REQ__"
+if [ -f "$REQ_FILE" ]; then
+    # If a previous bootstrap left pip running in the background, just
+    # tail its log — don't start a second pip in parallel.
+    if [ -f "$RUNNING" ] && kill -0 "$(cat "$RUNNING")" 2>/dev/null; then
+        echo "[bootstrap-remote] pip install already running (pid $(cat "$RUNNING")); tailing log…" >&2
+        tail -n +1 --pid="$(cat "$RUNNING")" -f "$PIPLOG"
+        if [ -f "$DONE" ]; then exit 0; fi
+        if [ -f "$FAILED" ]; then exit 1; fi
+        # Process exited but no marker — treat as failure.
+        echo "[bootstrap-remote] pip process gone but no done/failed marker — investigate $PIPLOG" >&2
+        exit 1
+    fi
+    rm -f "$DONE" "$FAILED"
+    : > "$PIPLOG"
+    # Launch pip detached. Use a subshell so the PID we capture is the
+    # one whose stdout/stderr lands in PIPLOG.
+    (
+        ( pip install --no-build-isolation -r "$REQ_FILE" \
+            > "$PIPLOG" 2>&1 && touch "$DONE" ) \
+        || touch "$FAILED"
+        rm -f "$RUNNING"
+    ) </dev/null > /dev/null 2>&1 &
+    PIP_PID=$!
+    echo "$PIP_PID" > "$RUNNING"
+    echo "[bootstrap-remote] pip running detached as pid $PIP_PID; tailing log…" >&2
+    tail -n +1 --pid="$PIP_PID" -f "$PIPLOG"
+    wait "$PIP_PID" || true
+    if [ -f "$DONE" ]; then exit 0; fi
+    exit 1
+else
+    echo "ERROR: $REQ_FILE not found on remote." >&2
+    echo "(v5.2.1 split the GUI superset off into requirements.txt;" >&2
+    echo " the headless deps live in requirements-remote.txt — make" >&2
+    echo " sure your local working copy has that file and re-run bootstrap.)" >&2
+    exit 1
+fi
+"""
 
 
 def install_pip_deps(
@@ -946,53 +1081,7 @@ def install_pip_deps(
     # v5.2.4: same conda.sh discovery treatment as ensure_env_and_staging
     # so a host using a system / non-miniforge conda doesn't fail here
     # after install_miniforge_if_missing was correctly skipped.
-    pip_script = "set -euo pipefail\n" + _LOCATE_CONDA_SH + r"""
-conda activate allwell
-STAGING="$HOME/.allwell-staging"
-mkdir -p "$STAGING"
-PIPLOG="$STAGING/.pip_install.log"
-RUNNING="$STAGING/.pip_running"
-DONE="$STAGING/.pip_done"
-FAILED="$STAGING/.pip_failed"
-
-REQ_FILE="$HOME/allwell/requirements-remote.txt"
-if [ -f "$REQ_FILE" ]; then
-    # If a previous bootstrap left pip running in the background, just
-    # tail its log — don't start a second pip in parallel.
-    if [ -f "$RUNNING" ] && kill -0 "$(cat "$RUNNING")" 2>/dev/null; then
-        echo "[bootstrap-remote] pip install already running (pid $(cat "$RUNNING")); tailing log…" >&2
-        tail -n +1 --pid="$(cat "$RUNNING")" -f "$PIPLOG"
-        if [ -f "$DONE" ]; then exit 0; fi
-        if [ -f "$FAILED" ]; then exit 1; fi
-        # Process exited but no marker — treat as failure.
-        echo "[bootstrap-remote] pip process gone but no done/failed marker — investigate $PIPLOG" >&2
-        exit 1
-    fi
-    rm -f "$DONE" "$FAILED"
-    : > "$PIPLOG"
-    # Launch pip detached. Use a subshell so the PID we capture is the
-    # one whose stdout/stderr lands in PIPLOG.
-    (
-        ( pip install --no-build-isolation -r "$REQ_FILE" \
-            > "$PIPLOG" 2>&1 && touch "$DONE" ) \
-        || touch "$FAILED"
-        rm -f "$RUNNING"
-    ) </dev/null > /dev/null 2>&1 &
-    PIP_PID=$!
-    echo "$PIP_PID" > "$RUNNING"
-    echo "[bootstrap-remote] pip running detached as pid $PIP_PID; tailing log…" >&2
-    tail -n +1 --pid="$PIP_PID" -f "$PIPLOG"
-    wait "$PIP_PID" || true
-    if [ -f "$DONE" ]; then exit 0; fi
-    exit 1
-else
-    echo "ERROR: $REQ_FILE not found on remote." >&2
-    echo "(v5.2.1 split the GUI superset off into requirements.txt;" >&2
-    echo " the headless deps live in requirements-remote.txt — make" >&2
-    echo " sure your local working copy has that file and re-run bootstrap.)" >&2
-    exit 1
-fi
-"""
+    pip_script = pip_install_script()
     say(
         "Installing pip dependencies on remote (detached; tails log to local). "
         "If the SSH connection drops, pip keeps running and the next bootstrap "
@@ -1003,6 +1092,43 @@ fi
         input=pip_script, check=True, capture=False,
         ssh_key_path=ssh_key_path,
     )
+
+
+def install_cellpose_deps(
+    alias: str, probe: HostProbe, *, ssh_key_path: str = "",
+) -> None:
+    """Pip-install ``requirements-remote-cellpose.txt`` into the ``allwell-cellpose`` env, as :func:`install_pip_deps`
+    does ``allwell``'s: skipped when the probe found the env with every module and pin, detached and re-attachable
+    otherwise. A failure here is not the bootstrap's: Cellpose and nanowell runs fall back to ``allwell`` (float32) on
+    a host without a usable Cellpose env, so it is said and the bootstrap goes on."""
+    if probe.cellpose_env and not probe.cellpose_missing_modules and not probe.cellpose_off_pin:
+        say(f"Remote {CELLPOSE_ENV_NAME} env already has every package at its pin — skipping its pip install.")
+        return
+    if probe.cellpose_pip_in_progress:
+        say(f"A previous bootstrap left the {CELLPOSE_ENV_NAME} pip install running; re-attaching to its log.")
+    say(f"Installing {CELLPOSE_REQUIREMENTS} into the {CELLPOSE_ENV_NAME} env (Torch with bfloat16 for Cellpose; "
+        "detached, as above).")
+    result = _ssh_run(
+        alias, ["bash", "-s"],
+        input=pip_install_script(CELLPOSE_ENV_NAME, CELLPOSE_REQUIREMENTS, "pip_cellpose"),
+        check=False, capture=False, ssh_key_path=ssh_key_path,
+    )
+    if result.returncode != 0:
+        say(f"WARNING: installing {CELLPOSE_REQUIREMENTS} failed (exit {result.returncode}); the log is "
+            f"~/.allwell-staging/.pip_cellpose_install.log on the remote. Cellpose and nanowell runs will use the "
+            f"{ENV_NAME} env (float32) until a bootstrap installs it.")
+
+
+def cellpose_cuda_note(probe: HostProbe) -> str:
+    """What to say about the Cellpose env's GPU, read by a probe after its install: ``""`` when it sees one or the
+    host has none to see. Its Torch's CUDA 12 wheels need a recent NVIDIA driver, and on an older one Torch runs on
+    the CPU — Cellpose would then be slower in its own env than in ``allwell``."""
+    if not probe.cellpose_env or probe.cellpose_cuda == "True" or not probe.gpu_visible:
+        return ""
+    return (f"WARNING: the {CELLPOSE_ENV_NAME} env's Torch cannot see the GPU (torch.cuda.is_available() is "
+            f"{probe.cellpose_cuda or '?'}) though {ENV_NAME}'s TensorFlow can — most often an NVIDIA driver older than "
+            f"its CUDA 12 build needs (525 or later). Cellpose would run on the CPU there. Update the driver, or remove "
+            f"the env (conda env remove -n {CELLPOSE_ENV_NAME}) so Cellpose runs in {ENV_NAME} on the GPU.")
 
 
 # ── bandwidth probe ────────────────────────────────────────────────────────
@@ -1365,8 +1491,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nERROR: {exc}\n", file=sys.stderr)
         return 3
 
-    # 6. Install pip deps (skipped only if nothing in REQUIRED_IMPORTS is missing).
+    # 6. Install pip deps (skipped only if nothing in REQUIRED_IMPORTS is missing), then the Cellpose env's, and say
+    #    whether its Torch can see the GPU (asked again: the first probe ran before the install).
     install_pip_deps(ssh_target, probe, ssh_key_path=key_path)
+    install_cellpose_deps(ssh_target, probe, ssh_key_path=key_path)
+    try:
+        note = cellpose_cuda_note(probe_host(ssh_target, ssh_key_path=key_path))
+    except subprocess.CalledProcessError:
+        note = ""
+    if note:
+        say(note)
 
     # 7. Bandwidth probe. Also rsync-bound; same FileNotFoundError
     # catch as the sync step (covers the path where rsync was

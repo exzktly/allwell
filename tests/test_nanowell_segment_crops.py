@@ -223,10 +223,36 @@ def test_a_run_s_count_is_scaled_by_its_nanowells_interiors_and_an_earlier_run_s
         return nanowell_options_from_args(args, parser.error)
 
     new = settings_from_kwargs({"_nanowell": options()})
-    assert new.segment_scale == "nanowells" and new.key()["segment_scale"] == "nanowells"
+    assert new.segment_scale == "levelled" and new.key()["segment_scale"] == "levelled"
+    assert settings_from_kwargs({"_nanowell": options("--nanowell_segment_scale", "nanowells")}).segment_scale \
+        == "nanowells"
     for legacy in (options("--nanowell_segment_scale", "tile"),
                    {k: v for k, v in options().items() if k != "segment_scale"}):
         settings = settings_from_kwargs({"_nanowell": legacy})
         assert settings.segment_scale == "tile" and "segment_scale" not in settings.key()
     with pytest.raises(ValueError, match="segmenter scale"):
         nr.NanowellSettings("100um", segment_scale="percentile")
+
+
+def test_a_bright_nanowell_is_levelled_to_the_others_before_the_pooled_range():
+    """Reported: on brightfield, the nanowells counted empty were often the brightest. Under the pooled interior
+    range (``nanowells``) a bright nanowell either lies above the range (a rare one: the segmenter is given values it
+    never sees) or, being 1 % of the pixels or more, widens it and squashes every other nanowell's cells — here one in
+    four, so the second. ``levelled`` brings its floor to the others' and keeps every cell's contrast."""
+    tile, px, geoms = _rimmed_tile()
+    yy, xx = np.mgrid[:200, :200]
+    bright = np.hypot(xx - 149.5, yy - 149.5) <= 20                       # the fourth nanowell, 60 brighter
+    tile = tile.copy()
+    tile[bright] += 60.0
+    plain, (lo, hi) = nm.segmenter_scale(tile, px, geoms, "nanowells")
+    assert (plain[150, 150] - lo) / (hi - lo) >= 1.0                      # its floor at the top of the range
+    assert (plain[50, 55] - plain[50, 50]) / (hi - lo) < 0.25             # and another nanowell's cell squashed
+    seen, (lo2, hi2) = nm.segmenter_scale(tile, px, geoms, "levelled")
+    floor = (seen[150, 150] - lo2) / (hi2 - lo2)
+    others = (seen[50, 50] - lo2) / (hi2 - lo2)
+    assert abs(floor - others) < 1e-9 and 0.0 <= floor <= 1.0             # at the others' floor, in range
+    cell = (seen[150, 155] - lo2) / (hi2 - lo2)                           # its faint cell (cx + 5)
+    assert cell - floor > 0.9                                              # the cell keeps its contrast
+    assert (seen[50, 55] - seen[50, 50]) / (hi2 - lo2) > 0.9              # and so do the others' cells
+    with pytest.raises(ValueError, match="segmenter scale"):
+        nm.segmenter_scale(tile, px, geoms, "percentile")

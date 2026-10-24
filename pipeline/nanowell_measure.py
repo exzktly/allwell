@@ -673,7 +673,11 @@ SEGMENTER_PERCENTILES = (1.0, 99.0)
 #: the 1st-99th percentiles of the tile's nanowell interiors, pooled (so an empty nanowell is not stretched on its
 #: own), with everything outside the nanowells — rims and lattice — set to the interiors' median, so the segmenter
 #: sees cells against a plain background (:func:`segmenter_scale`).
-SEGMENT_SCALES = ("nanowells", "tile")
+#: ``levelled``: as ``nanowells``, after each nanowell's interior is first shifted so its median is the median of
+#: the tile's nanowells. On brightfield some nanowells are much brighter than the rest; under the pooled range their
+#: whole interior lay above it, and Cellpose, given values it never sees, counted them empty. The shift moves a
+#: nanowell's brightness, not its contrast, so the pooled range still keeps an empty nanowell from being stretched.
+SEGMENT_SCALES = ("levelled", "nanowells", "tile")
 #: Out to this multiple of a nanowell's radius its pixels are kept for the segmenter under the ``nanowells`` scale;
 #: past it, plain background. The same circle a cell's centre must lie in to be counted (``INTERIOR_FRACTION``):
 #: where the fitted radius falls on the rim's profile is not fixed, and at 0.95 of it a rim's inner edge was still
@@ -681,18 +685,21 @@ SEGMENT_SCALES = ("nanowells", "tile")
 SEGMENT_MASK_FRACTION = INTERIOR_FRACTION
 
 
-def segmenter_scale(image, pixel_size_um: float, geometries, scale: str = "nanowells"):
+def segmenter_scale(image, pixel_size_um: float, geometries, scale: str = "levelled"):
     """``(image for the segmenter, (lo, hi) or None)`` under *scale* (``SEGMENT_SCALES``).
 
     ``tile`` returns *image* unchanged and no range: the segmenter scales the tile by its own percentiles.
     ``nanowells`` returns a copy with every pixel farther than ``SEGMENT_MASK_FRACTION`` of a radius from every
     nanowell set to the median of the nanowells' interiors, and the interiors' pooled 1st-99th percentiles as the
-    range; with no interior pixel to read (no nanowell on the tile) it falls back to ``tile``."""
+    range; with no interior pixel to read (no nanowell on the tile) it falls back to ``tile``. ``levelled`` first
+    shifts each nanowell's interior so its median is the median of the nanowells' medians, then does the same."""
     if scale == "tile":
         return image, None
-    if scale != "nanowells":
+    if scale not in ("nanowells", "levelled"):
         raise ValueError(f"Unknown segmenter scale {scale!r}; one of {SEGMENT_SCALES}")
     image = np.asarray(image, dtype=np.float64)
+    if scale == "levelled":
+        image = _level_interiors(image, pixel_size_um, geometries)
     values = [image[_interior_pixels(image.shape, pixel_size_um, g, INTERIOR_FRACTION)] for g in geometries]
     values = np.concatenate([v for v in values if v.size]) if any(v.size for v in values) else np.empty(0)
     values = values[np.isfinite(values)]
@@ -710,6 +717,22 @@ def segmenter_scale(image, pixel_size_um: float, geometries, scale: str = "nanow
         keep[win] |= np.hypot(xs - cx, ys - cy) <= SEGMENT_MASK_FRACTION * g.radius_um / pixel_size_um
     out = np.where(keep, image, float(np.median(values)))
     return out, (lo, hi)
+
+
+def _level_interiors(image: np.ndarray, pixel_size_um: float, geometries) -> np.ndarray:
+    """A copy of *image* with each nanowell's interior (``INTERIOR_FRACTION`` of its radius, the pixels the
+    segmenter keeps) shifted by a constant so that its median is the median of all the interiors' medians."""
+    out = image.copy()
+    regions = [_interior_pixels(image.shape, pixel_size_um, g, INTERIOR_FRACTION) for g in geometries]
+    medians = [float(np.median(v)) if (v := image[r][np.isfinite(image[r])]).size else None for r in regions]
+    known = [m for m in medians if m is not None]
+    if not known:
+        return out
+    target = float(np.median(known))
+    for region, median in zip(regions, medians):
+        if median is not None:
+            out[region] = image[region] - median + target
+    return out
 
 
 @dataclass(frozen=True)

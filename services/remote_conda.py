@@ -22,7 +22,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 
 from services.remote_config import DEFAULT_CONDA_ENV, DEFAULT_REMOTE_PYTHON
-from services.remote_transport import _remote_quote
+from services.remote_transport import AW_PREFIX_ARG, _remote_quote
 
 
 # v5.2.13: bash snippet that locates conda.sh wherever conda is
@@ -110,10 +110,52 @@ def _conda_env_selector(remote_python: str) -> tuple[EnvSelector, str]:
 
 
 def _conda_run_prefix_for(selector: EnvSelector) -> list[str]:
-    """``conda run`` argv prefix for *selector* (``-n name`` or ``-p prefix``)."""
+    """``conda run`` argv prefix for *selector* (``-n name`` or ``-p prefix``; for ``prefer``, the prefix the env
+    guard resolved on the remote, ``"$AW_PREFIX"``)."""
     kind, value = selector
+    if kind == "prefer":
+        return ["conda", "run", "--no-capture-output", "-p", AW_PREFIX_ARG]
     return ["conda", "run", "--no-capture-output",
             "-p" if kind == "prefix" else "-n", value]
+
+
+#: The env a Cellpose run uses when the host has it (``services.remote_bootstrap.CELLPOSE_ENV_NAME``): a Torch new
+#: enough to run Cellpose-SAM in bfloat16, which the ``allwell`` env cannot hold beside TensorFlow 2.13.
+CELLPOSE_CONDA_ENV = "allwell-cellpose"
+#: ``--segmentation_method`` values that run Cellpose (``pipeline.parallelism.CELLPOSE_METHODS``).
+_CELLPOSE_METHODS = ("cellpose", "cellpose_labelfree")
+
+
+def runs_cellpose(argv) -> bool:
+    """Whether a pipeline argv segments with Cellpose: a nanowell run (its count is Cellpose's), or a Cellpose method."""
+    argv = [str(a) for a in argv]
+    if "--nanowell_format" in argv or any(a.startswith("--nanowell_format=") for a in argv):
+        return True
+    for i, arg in enumerate(argv):
+        if arg == "--segmentation_method" and i + 1 < len(argv):
+            return argv[i + 1] in _CELLPOSE_METHODS
+        if arg.startswith("--segmentation_method="):
+            return arg.split("=", 1)[1] in _CELLPOSE_METHODS
+    return False
+
+
+def describe_env(selector: EnvSelector) -> str:
+    """*selector* for the run log: ``name allwell``, ``prefix /path``, or which env ``prefer`` picks from."""
+    kind, value = selector
+    if kind == "prefer":
+        first, second = value.split()
+        return f"{first} where the host has it, else {second}"
+    return f"{kind} {value}"
+
+
+def cellpose_env_selector(base: EnvSelector, argv) -> EnvSelector:
+    """The env a run with *argv* uses: for a Cellpose run on a host left at the default env, ``prefer`` — the Cellpose
+    env where the remote has it, ``allwell`` where it does not (decided by the guard on the remote, so a host not yet
+    bootstrapped for it still runs, in float32); otherwise *base*. A host whose Remote python names an env keeps it:
+    that is an explicit choice, and nothing here can know what that env holds."""
+    if base != DEFAULT_ENV_SELECTOR or not runs_cellpose(argv):
+        return base
+    return ("prefer", f"{CELLPOSE_CONDA_ENV} {DEFAULT_CONDA_ENV}")
 
 
 # Shell helpers for locating and validating a conda env on the remote. Shared
@@ -174,7 +216,25 @@ def _conda_env_guard(selector: EnvSelector) -> str:
     """
     kind, value = selector
     value_q = _remote_quote(value)
-    if kind == "prefix":
+    if kind == "prefer":
+        # The first env when it is a usable environment, else the second, saying which and why; the second is then
+        # checked like any named env, so a host with neither still fails with the guard's own message.
+        first, second = value.split()
+        first_q, second_q = _remote_quote(first), _remote_quote(second)
+        resolve = (
+            f'AW_PREFIX="$(aw_env_prefix {first_q})"; '
+            f'if aw_env_is_valid "$AW_PREFIX"; then '
+            f'echo "[remote] conda env: {first} (Cellpose, Torch with bfloat16)"; '
+            f'else AW_PREFIX="$(aw_env_prefix {second_q})"; '
+            f'echo "[remote] note: env {first} is not installed on $(hostname), so Cellpose runs in {second} '
+            f'(float32). Run Analyze -> Remotes -> Bootstrap to install it."; fi; '
+            f'AW_STALE="$(aw_env_stale_dir {second_q} || true)"'
+        )
+        what = f"conda env {second}"
+        missing_fix = ('Run Analyze -> Remotes -> Bootstrap for this host to '
+                       'create it, or set Remote python to an existing env '
+                       'python.')
+    elif kind == "prefix":
         # The prefix is given, so there is nothing to look up: it either is an
         # environment, is a directory that is not one, or is absent.
         resolve = (

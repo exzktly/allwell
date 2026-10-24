@@ -10014,7 +10014,11 @@ masks on its own; on Cellpose 3 it is one call per crop), one call per crop othe
 `count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's) is given one
 range for every crop of a tile, because a crop scaled to its own range would stretch an empty nanowell's noise. Which
 range is `segment_scale` (`nanowell_measure.SEGMENT_SCALES`, applied by `segmenter_scale` in `_tile_contents` and in
-Test detection's `_tile_segmented`, for either scope): `nanowells`, the default for a new run, takes the pooled
+Test detection's `_tile_segmented`, for either scope): `levelled`, the default for a new run, first shifts each
+nanowell's interior by a constant so its median is the median of the tile's nanowells' medians (`_level_interiors`),
+then does what `nanowells` does — on brightfield a few nanowells are far brighter than the rest, and under one pooled
+range such a nanowell either lay above it (a rare one) or widened it and squashed every other nanowell's cells (a
+common one), and was counted empty; the shift moves brightness, not contrast. `nanowells` takes the pooled
 1st-99th percentiles of the tile's nanowell interiors (`INTERIOR_FRACTION` of each radius) and sets every pixel
 farther than `SEGMENT_MASK_FRACTION` (the same 0.9) of a radius from every nanowell to the interiors' median, so the
 rims — the extremes of a phase or brightfield tile — are neither in the range nor in the image; `tile` takes the
@@ -11260,7 +11264,9 @@ noted:
   `BF16_MIN_TORCH` (2.1): Torch 2.0's CUDA kernel for 1-D linear upsampling has no bfloat16 version and Segment
   Anything's encoder uses it, so the pinned Torch 2.0.1 failed every image on an A10G. A bfloat16 model is also
   probed on a blank image at load (`_bfloat16_or_float32`) and rebuilt in float32, with a warning, if any operation
-  lacks bfloat16; float32 elsewhere. The load line names the precision (`Cellpose cpsam on cuda:0 (…), float32`).
+  lacks bfloat16; float32 elsewhere. On a GPU, float32 matrix maths use TF32 tensor cores (`_allow_tf32`; Torch leaves
+  them off by default, which on an A10G halves float32 throughput). The load line names both
+  (`Cellpose cpsam on cuda:0 (…), TF32, float32`).
   `eval` takes no `channels`. The weights (about 1.2 GB for Cellpose-SAM) download from Hugging Face on first use.
 - `classical_threshold` — Otsu + distance-transform watershed (no model), general.
 - `cellpose_labelfree` — the **only** label-free method: a Cellpose-SAM (`cpsam`)
@@ -12691,8 +12697,9 @@ result. The end-of-run retry and the verification step use the same helpers.
 
 ### 6.6 The remote conda environment, and one definition of "it exists"
 
-A remote run needs exactly one thing installed on the host: a conda environment
-holding the pipeline's dependencies. Two pieces of code care whether it is
+A remote run needs one thing installed on the host: a conda environment
+holding the pipeline's dependencies — `allwell`, and for a Cellpose run, where the
+host has it, `allwell-cellpose` (below). Two pieces of code care whether one is
 there — `remote_runner`'s pre-launch guard, and `services/remote_bootstrap.py`,
 which creates it — and they answer with the same shell,
 `remote_conda.CONDA_ENV_SHELL_HELPERS` (`aw_env_prefix` / `aw_env_is_valid` /
@@ -12763,7 +12770,33 @@ Cellpose 4 does, so a module probe alone left an env on it ready and the run ref
 probe deliberately skips (the macOS-only TensorFlow builds, `tomli` below Python
 3.11), each with its reason, and `tests/test_bootstrap_probes_every_requirement.py`
 holds the two rosters against the requirements file and runs the probe's own
-shell line under bash with a real interpreter. Version drift — a package present
+shell line under bash with a real interpreter.
+
+**The Cellpose env.** `allwell` holds TensorFlow 2.13 for StarDist, which caps
+`typing-extensions` below 4.6 and so Torch at 2.0.1, and Torch 2.0 cannot run
+Cellpose-SAM in bfloat16 (`pipeline.cellpose.BF16_MIN_TORCH`). The bootstrap
+therefore also creates `allwell-cellpose` (`CELLPOSE_ENV_NAME`) with the same
+`env_setup_script` — the same python and scientific stack — and pip-installs
+`requirements-remote-cellpose.txt` into it: Torch 2.4.1, the same Cellpose 4.1.1,
+no TensorFlow or StarDist, which the pipeline imports only inside StarDist's own
+functions. The probe reads it as it reads `allwell` (`CELLPOSE_REQUIRED_IMPORTS`,
+`CELLPOSE_VERSION_PINS`, plus whether its Torch sees a GPU), `install_cellpose_deps`
+installs it with its own markers (`pip_install_script(..., tag="pip_cellpose")`),
+a failure there is a warning rather than the bootstrap's failure, and a re-probe
+after the install says when its Torch cannot see a GPU that `allwell`'s TensorFlow
+can (a driver too old for its CUDA 12 build). `--force` removes both envs.
+
+Which env a run uses is decided per run: `remote_conda.cellpose_env_selector` gives
+a run that segments with Cellpose (`runs_cellpose`: a nanowell run, or a Cellpose
+method) on a host left at the default env the `prefer` selector, and leaves a host
+whose Remote python names an env alone. `prefer` is resolved **on the remote**, by
+the env guard: the Cellpose env when it is a usable environment, `allwell` otherwise
+with a line saying so, and the guard's usual failure when neither is. `conda run -p`
+then reads the prefix the guard resolved (`remote_transport.AW_PREFIX_ARG`,
+`"$AW_PREFIX"`, the one argument `_remote_quote` passes through unquoted), so a host
+not yet bootstrapped for the Cellpose env still runs, in float32.
+`tests/test_bootstrap_cellpose_env.py` and `tests/test_remote_cellpose_env.py` hold
+both halves, the second running the guard under bash against a stub conda. Version drift — a package present
 at the wrong pin — is not detected; pip resolves that only when the install
 runs for another reason.
 

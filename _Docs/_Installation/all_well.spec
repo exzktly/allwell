@@ -175,6 +175,8 @@ sibling_scripts = [
     # "missing local file". (The GUI-superset requirements.txt is NOT bundled —
     # only the remote install manifest is needed at runtime.)
     (str(_parent / "requirements-remote.txt"), "."),
+    # And the Cellpose env's (``allwell-cellpose``): in the same manifest, so the same rule.
+    (str(_parent / "requirements-remote-cellpose.txt"), "."),
     # The remote bootstrap needs no entry here any more. It lives in
     # ``services/``, which the package loop below bundles whole, so it already
     # lands at _MEIPASS/services/remote_bootstrap.py — where

@@ -89,7 +89,7 @@ LEGACY_SEGMENT_ON = "rim"
 SEGMENT_SCOPES = ("nanowells", "tile")
 #: How the segmenter's input is scaled (``nanowell_measure.SEGMENT_SCALES``); options that name none mean ``tile``,
 #: the tile's own percentiles, which is what every earlier run did.
-SEGMENT_SCALES = ("nanowells", "tile")
+SEGMENT_SCALES = ("levelled", "nanowells", "tile")
 LEGACY_SEGMENT_SCALE = "tile"
 LEGACY_SEGMENT_SCOPE = "tile"
 

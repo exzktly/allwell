@@ -228,3 +228,61 @@ def test_the_wheel_off_the_image_zooms_about_the_centre_rather_than_doing_nothin
     assert width == pytest.approx(0.8 * (fit[2] - fit[0]), rel=1e-6)
     assert _centre(st.drawn.region) == pytest.approx(_centre(fit))
     assert not math.isclose(width, fit[2] - fit[0])
+
+
+# ── double-click a nanowell ──────────────────────────────────────────────────
+def test_a_double_click_centres_a_nanowell_zooms_until_it_fills_the_view_and_opens_its_detail(qc_page, qtbot):
+    """Asked for: "double click to center, focus, and maximize a specific nanowell". Driven by a real
+    double-click on the canvas, off the nanowell's centre but inside its rim — wider than a single click's 6 px."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from review.features.nanowell import controller as nwc
+    from tests.test_nanowell_full_montage import _widget_point
+
+    ctx = qc_page
+    st = ctx.state.feature_slice("nanowell")
+    k = 1                                                              # the nanowell at (200, 40), radius 30
+    site = list(st.drawn.sites.sites[k])
+    assert (st.drawn.sites.x[k], st.drawn.sites.y[k], st.drawn.sites.radius[k]) == (200.0, 40.0, 30.0)
+    canvas, point = _widget_point(ctx, st, 220.0, 50.0)                # 22 µm from its centre, inside the disc
+    QTest.mouseDClick(canvas, Qt.LeftButton, Qt.NoModifier, point)
+    qtbot.wait(50)
+    x0, y0, x1, y1 = st.drawn.region
+    assert ((x0 + x1) / 2, (y0 + y1) / 2) == pytest.approx((200.0, 40.0), abs=0.01)
+    # The nanowell fills the view's shorter side, with FOCUS_MARGIN of room.
+    assert min(x1 - x0, y1 - y0) == pytest.approx(2 * 30.0 * nwc.FOCUS_MARGIN, rel=1e-6)
+    assert st.selected_sites == [[site[0], int(site[1]), int(site[2])]]
+    assert ctx.widgets.get("_nw_detail_pane").isVisibleTo(ctx.window)
+
+
+def test_a_double_click_on_empty_space_or_with_set_anchor_on_changes_nothing(montage_page, qtbot):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from tests.test_nanowell_full_montage import _full, _widget_point
+
+    ctx, _in_dir = montage_page
+    st = _full(qtbot, ctx)
+    region = st.drawn.region
+    sites = st.drawn.sites
+    gaps = [np.hypot(sites.x - x, sites.y - y) - sites.radius for x, y in [(region[0] + 1, region[1] + 1)]]
+    assert min(gaps[0]) > 50.0                                         # the view's corner is far from every nanowell
+    canvas, point = _widget_point(ctx, st, region[0] + 1, region[1] + 1)
+    QTest.mouseDClick(canvas, Qt.LeftButton, Qt.NoModifier, point)
+    assert st.region is None and st.drawn.region == pytest.approx(region)
+
+
+def test_with_the_overlays_hidden_a_double_click_still_finds_the_nanowell(qc_page, qtbot):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from tests.test_nanowell_full_montage import _widget_point
+
+    ctx = qc_page
+    st = ctx.state.feature_slice("nanowell")
+    ctx.widgets.get("_nw_overlays_btn").click()
+    canvas, point = _widget_point(ctx, st, 40.0, 200.0)
+    QTest.mouseDClick(canvas, Qt.LeftButton, Qt.NoModifier, point)
+    x0, y0, x1, y1 = st.drawn.region
+    assert ((x0 + x1) / 2, (y0 + y1) / 2) == pytest.approx((40.0, 200.0), abs=0.01)

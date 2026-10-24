@@ -12,6 +12,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 if TYPE_CHECKING:
     from review.core.ui_helpers import EmptyReason
 
@@ -654,6 +656,43 @@ def _zoom_to(ctx, st, factor: float, at_um) -> None:
     redraw(ctx)
 
 
+#: A double-clicked nanowell fills the view's shorter side with this much room around it (1 is edge to edge).
+FOCUS_MARGIN = 1.25
+
+
+def nanowell_at(drawn, x_um: float, y_um: float, slop_um: float) -> int | None:
+    """The index of the nanowell under the well-frame point, in *drawn*'s scene: the one whose disc holds it, or
+    the nearest within *slop_um* of its rim; ``None`` on empty space. Found whether or not the nanowells are drawn,
+    so a double-click works with the overlays hidden."""
+    sites = getattr(drawn, "sites", None)
+    if sites is None or not len(sites.x):
+        return None
+    gap = np.hypot(np.asarray(sites.x) - x_um, np.asarray(sites.y) - y_um) - np.asarray(sites.radius)
+    k = int(np.argmin(gap))
+    return k if gap[k] <= slop_um else None
+
+
+def focus_nanowell_at(ctx, event) -> None:
+    """A double-click on the Array view: centre the nanowell under it, zoom until it fills the view, and select it
+    so its site detail opens. On empty space it does nothing."""
+    st = _state(ctx)
+    drawn = st.drawn if st is not None else None
+    if drawn is None or drawn.region is None or event.inaxes is not drawn.ax or event.xdata is None:
+        return
+    slop = CLICK_RADIUS_PX * (drawn.region[2] - drawn.region[0]) / max(drawn.size_px[0], 1)
+    k = nanowell_at(drawn, event.xdata, event.ydata, slop)
+    if k is None:
+        return
+    sites = drawn.sites
+    x, y, half = float(sites.x[k]), float(sites.y[k]), float(sites.radius[k]) * FOCUS_MARGIN
+    st.region = (x - half, y - half, x + half, y + half)        # widened to the axes' shape when drawn
+    site = sites.sites[k]
+    if site[1] is not None and site[2] is not None:
+        _select(ctx, site, False)                                # redraws, at the new region
+    else:
+        redraw(ctx)                                              # an unaddressed nanowell cannot be selected
+
+
 def array_zoom(ctx, factor: float) -> None:
     """*−* / *+*: zoom the Array view by *factor* about the centre of what it shows."""
     st = _state(ctx)
@@ -871,6 +910,9 @@ def on_click(ctx, event) -> None:
     :func:`on_release` tells apart. The plate selection is never touched."""
     st = _state(ctx)
     if st is not None and st.view == "array":
+        if event.dblclick and event.button == 1 and not st.anchor_mode:
+            focus_nanowell_at(ctx, event)
+            return
         _array_press(st, event)
         return
     if st is None or st.hits is None or event.inaxes is None or event.button != 1:

@@ -452,6 +452,7 @@ class ArrayDrawn:
     frame: str = "well"
     rendered: object = None          # full_montage_compute.Rendered, when the image is the raw tiles
     fit: tuple | None = None         # the region *Fit* shows, at the axes' shape: what the zoom readout is against
+    sites: object = None             # the scene's nanowells (``ArraySites``), drawn or not: what a double-click finds
 
 
 def _image_extent(image) -> tuple[float, float, float, float]:
@@ -525,6 +526,7 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
                         bottom=_FOOTER_BASE + (len(lines) + (1 if layers.addresses or layers.values else 0) + 0.5)
                         * _LINE)
     ax = drawn.ax
+    drawn.sites = scene.sites
     _bg, ink, muted = _inks(ax)
     if image is not None:
         _draw_image(ax, drawn, image)

@@ -10578,7 +10578,12 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   (`_nw_zoom_lbl`, refreshed after every Array draw by `_nw_refresh_zoom`) says `array_zoom_factor`; *Fit* clears
   the region, *1:1* sets one image pixel (the tiles' or the montage's) per figure pixel. A release within `CLICK_SLOP_PX` of its press is a click: with *Set anchor* on it writes the well's
   anchor at this timepoint (`util.nanowell_anchors.set_anchor`, in `in/nanowell_anchors.json`), otherwise it
-  selects the nearest nanowell within 6 px, as on the beeswarm.
+  selects the nearest nanowell within 6 px, as on the beeswarm. A double-click (matplotlib's `dblclick` press,
+  ignored with *Set anchor* on) goes to `focus_nanowell_at`: `nanowell_at` finds the nanowell whose disc holds the
+  point, or the nearest within 6 px of its rim, in `ArrayDrawn.sites` — the scene's nanowells whether drawn or
+  not, so it works with the overlays hidden — and the region becomes that nanowell's box, `FOCUS_MARGIN` times its
+  radius each side (widened to the axes' shape), then selects it so the site detail opens; an unaddressed one is
+  centred but not selected. On empty space it does nothing.
 - **The anchor.** *Set anchor* is offered only with the anchor layer on, on measured positions, with an `in/`
   folder to keep the file in, and where an anchor can change the result (`ANCHORABLE`: `ok` or `unaddressed`) —
   `controller.anchor_controls`. *Clear anchor* removes it; *Re-run anchored wells…* hands the dataset to Analyze

@@ -4954,8 +4954,11 @@ use them.
   is zoomed against Fit (from a quarter of it out to 500×). On a phone over RealVNC a two-finger swipe up or
   down is sent as the scroll wheel, so it zooms the view; a pinch is the viewer zooming its own picture of the
   desktop and never reaches All-Well. The swipe zooms about the pointer when the pointer is on the image, and
-  about the view's centre when it was last left elsewhere on the figure. Click a nanowell to open its site detail, as on the beeswarm (with **Set anchor** on, a click
-  sets the anchor instead). The footer counts the nanowells by state. The page remembers the layers with its
+  about the view's centre when it was last left elsewhere on the figure.
+
+  Click a nanowell to open its site detail, as on the beeswarm (with **Set anchor** on, a click sets the anchor
+  instead). Double-click a nanowell to centre it, zoom until it fills the view and open its site detail —
+  anywhere inside its rim counts, and it works with the overlays hidden. The footer counts the nanowells by state. The page remembers the layers with its
   other settings; a page saved on the old *Array map* or *Array QC* view opens on the Array view with the
   layers that view drew.
 

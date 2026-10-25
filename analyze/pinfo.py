@@ -260,21 +260,11 @@ class AnalyzePipelineInfoMixin:
                 picker.setSchema(str(d["filename_schema"]))
 
         # Segmentation method — the combo carries the canonical value as itemData.
-        method = d.get("segmentation_method")
-        if method:
-            idx = self._seg_method_cb.findData(method)
-            if idx >= 0:
-                # The channels below are about to be replaced, so the label-free handover waits for them.
-                self._seg_handover_paused = True
-                try:
-                    self._seg_method_cb.setCurrentIndex(idx)
-                finally:
-                    self._seg_handover_paused = False
+        self._restore_seg_method(d.get("segmentation_method"))
 
         # Channel tokens.
         s("_nuclear_token_edit", d.get("nuclear_token"))
-        if d.get("nuclear_token"):
-            self._seg_channel_known = True      # named by the input or a run, not the form's default
+        self._note_seg_channel(d.get("nuclear_token"))
         self._restore_channel_rows(d)
         self._settle_labelfree_handover()
 

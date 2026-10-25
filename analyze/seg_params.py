@@ -237,6 +237,27 @@ class AnalyzeSegParamsMixin:
                 self._fluor_remove_row(edit.parentWidget(), remove_btn)
                 return
 
+    def _restore_seg_method(self, method) -> None:
+        """Set the method a scan, a saved run or a queued job states, without a label-free handover.
+
+        The restore replaces the channels right after setting the method, so a handover here would move the
+        *previous* dataset's segmentation channel into rows that are about to be overwritten;
+        :meth:`_settle_labelfree_handover` runs once the new channels are in.
+        """
+        idx = self._seg_method_cb.findData(method) if method else -1
+        if idx < 0:
+            return
+        self._seg_handover_paused = True
+        try:
+            self._seg_method_cb.setCurrentIndex(idx)
+        finally:
+            self._seg_handover_paused = False
+
+    def _note_seg_channel(self, token) -> None:
+        """A segmentation channel a scan or a run named is real, not the field's starting default."""
+        if token:
+            self._seg_channel_known = True
+
     def _settle_labelfree_handover(self, *, hand_over: bool = False) -> None:
         """After the channels were rewritten: start the handover afresh from them.
 

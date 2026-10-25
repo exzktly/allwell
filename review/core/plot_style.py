@@ -732,6 +732,8 @@ _FIG_PREF_KEY_MAP = (
     ("_sp_fig", "spatial"),
     ("_nw_fig", "nanowell"),
     ("_nw_detail_fig", "nanowell_detail"),
+    ("_nw_strip_fig", "nanowell_crops"),
+    ("_nw_popout_fig", "nanowell_crops_popout"),
     ("_mv_fig", "multivariate"),
     ("_stats_fig", "stats"),
     ("_response_fig", "response"),

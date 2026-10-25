@@ -159,6 +159,7 @@ class DistributionModel:
     baseline: str = "earliest"
     notes: list = field(default_factory=list)          # sentences printed in the footer
     x_label: str = ""                                  # what the x axis is, written once under the bottom row
+    time_note: str = ""                                # the timepoint names at their hours, the footer's last note
     #: The cut the user set for this metric (tracker I9), or ``None``: then no fraction responding is computed.
     responding_above: float | None = None
     #: ``(group, fraction, timepoint)`` per group: the mean of its wells' fractions responding at *timepoint*.
@@ -295,7 +296,7 @@ def _time_axis(model, frame) -> dict:
         model.x_label = "Time (h)"
         named = [tp for tp in tps if tp not in (f"{hours[tp]:g} h", f"{hours[tp]:g}h", f"{hours[tp]:g}")]
         if named:
-            model.notes.append("Timepoints: " + " · ".join(f"{hours[tp]:g} h {tp}" for tp in tps) + ".")
+            model.time_note = "Timepoints: " + " · ".join(f"{hours[tp]:g} h {tp}" for tp in tps) + "."
         return {tp: f"{hours[tp]:g}" for tp in tps}
     model.x_label = "Timepoint"
     return {tp: str(tp) for tp in tps}
@@ -381,6 +382,8 @@ def _notes(model: DistributionModel, metric: str, time_source: str | None) -> No
     else:
         model.notes.append("The line joins each well's median over the nanowells with a value at that timepoint.")
     model.notes.append(responding_note(model))
+    if model.time_note:
+        model.notes.append(model.time_note)
     if time_source == "label":
         model.notes.append("Times are read from the timepoint labels, not the acquisition record.")
     elif time_source is None:

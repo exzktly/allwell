@@ -10876,9 +10876,9 @@ figure selects the nearest drawn dot within 6 px; Shift, ⌘ or Ctrl adds (up to
 `event.modifiers`); empty space clears; the plate selection is never touched.
 
 **Shared machinery.** The page is on every roster a plot page joins: `plot_style._FIG_PREF_KEY_MAP`
-(`nanowell`, `nanowell_detail`), the Properties dock and open-panel maps in `features/export/style.py`, the
+(`nanowell`, `nanowell_detail`, and `nanowell_crops` / `nanowell_crops_popout` for the crop strip and the pop-out window), the Properties dock and open-panel maps in `features/export/style.py`, the
 feature redraw in `features/export/sidebar_view._FIGURE_OWNING_FEATURES`, and `plot_card_actions._CARDS` for
-both cards. `view_state_io` makes a Saved Plot restore the whole configuration, the selected nanowells
+the page's card, the site detail's and the crop strip's (the pop-out window's card carries its own theme toggle). `view_state_io` makes a Saved Plot restore the whole configuration, the selected nanowells
 included. *Save nanowell data…* writes `long_format` for the wells the page draws (`export_long_csv(…, wells)`:
 other wells may be loaded from an earlier selection), and is refused with a status while the metrics on hand
 were computed for another baseline than the one chosen (`loaded_for[1] != baseline`, or a load in flight); *Save cell data…* exports the per-cell rows of the drawn

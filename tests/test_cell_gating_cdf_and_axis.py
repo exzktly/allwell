@@ -31,17 +31,51 @@ def test_cell_gating_valid_rows_absent_columns_pass_through():
     assert len(_cell_gating_valid_rows(df)) == 3
 
 
-def test_export_axis_default_targets_first_subplot():
-    """The active metric drives the first subplot, so the Export-Style 'Axis #'
-    defaults to it (not 'All'); a saved explicit choice is respected."""
+def test_export_axis_opens_on_all():
+    """The Properties "Axis #" field opens on "All", so an edit reaches every
+    panel until an axis is picked (asked for: "make the axis selection in the
+    properties sidebar select All instead of the first plot"). A stored
+    single-axis target is not honoured: the panel used to open on axis 1 and
+    save that, so a stored "1" says nothing about what anyone chose."""
     from types import SimpleNamespace
     from review.features.export.sidebar_view import ExportStyleSidebar
-    fn = ExportStyleSidebar._default_axis_target
+    fn = ExportStyleSidebar._open_on_all_axes
 
-    default_self = SimpleNamespace(_prefs={"axis_target": "All"})
-    assert fn(default_self) == "1"
-    explicit_self = SimpleNamespace(_prefs={"axis_target": "3"})
-    assert fn(explicit_self) == "3"
+    for saved in ("All", "1", "3"):
+        self_ = SimpleNamespace(_prefs={"axis_target": saved}, _axis_buckets={},
+                                _axis_keys=("y_lim_min", "y_lim_max"))
+        assert fn(self_) == "All"
+        assert self_._prefs["axis_target"] == "All"
+
+
+def test_opening_on_all_keeps_axis_one_s_limit_on_axis_one():
+    """A figure saved while axis 1 was targeted has that axis's limit in the
+    flat prefs, which the style pass applies to every *targeted* axis. Opening
+    on "All" files it in axis 1's bucket first, so the figure draws exactly as
+    before — axis 1 limited, axis 2 left alone — instead of the limit landing
+    on every panel."""
+    from types import SimpleNamespace
+
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.core import plot_style as PS
+    from review.features.export.sidebar_view import ExportStyleSidebar
+
+    prefs = {"axis_target": "1", "y_lim_min": "0", "y_lim_max": "5"}
+    self_ = SimpleNamespace(_prefs=prefs, _axis_buckets={},
+                            _axis_keys=("y_lim_min", "y_lim_max"))
+    ExportStyleSidebar._open_on_all_axes(self_)
+
+    fig = Figure()
+    first, second = fig.add_subplot(2, 1, 1), fig.add_subplot(2, 1, 2)
+    first.plot([0, 1], [0, 100])
+    second.plot([0, 1], [0, 100])
+    second_before = second.get_ylim()
+    PS.apply_export_style_prefs(fig, prefs)
+    assert first.get_ylim() == (0.0, 5.0), "axis 1 lost the limit it was saved with"
+    assert second.get_ylim() == second_before, "axis 1's limit spread to axis 2"
 
 
 def test_export_click_selects_axis():

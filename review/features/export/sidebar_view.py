@@ -629,10 +629,8 @@ class ExportStyleSidebar(QWidget):
             *_PER_AXIS_STYLE_KEYS,
         )
         self._axis_buckets: dict[str, dict] = dict(self._prefs.get("axis_buckets") or {})
-        # Default the targeted axis to the subplot showing the active metric (so
-        # edits land on the plot in view) rather than "All"; a saved explicit
-        # choice is respected.
-        self._current_axis = self._default_axis_target()
+        # The panel opens targeting "All" (``_open_on_all_axes``).
+        self._current_axis = self._open_on_all_axes()
         self._axis_buckets.setdefault(
             self._current_axis, {k: self._prefs.get(k) for k in self._axis_keys},
         )
@@ -1491,16 +1489,40 @@ class ExportStyleSidebar(QWidget):
             if not bool(getattr(ax, "_aw_colorbar", False))
         ]
 
-    def _default_axis_target(self) -> str:
-        """The axis the panel targets by default: the subplot showing the active
-        metric, so edits land on the plot in view instead of spreading across
-        "All". The global Property (active metric) always drives the FIRST
-        subplot — the value axis on the Bar/Line stacks [value, fraction, count]
-        and the only axis on Scatter / Distribution / Heat Map — so that's axis
-        1. A saved explicit (non-"All") choice is respected.
+    def _open_on_all_axes(self) -> str:
+        """Target "All" when the panel opens, and make the stored prefs agree.
+
+        An edit made with the panel just opened applies to every panel of the
+        figure; picking an axis in the "Axis #" field, or clicking a subplot,
+        narrows it to one. (The panel used to open on axis 1, the subplot the
+        active metric drives, and a figure saved since then records "1" as its
+        target whether or not anyone chose it, so a stored single-axis target is
+        not honoured here: there is no telling the two apart.)
+
+        Moving the target is not only a change of the field. While one axis was
+        targeted, its limits and log toggles were written to the flat prefs as
+        well as to its own bucket, and the style pass applies flat limits to
+        every *targeted* axis — so with the target simply set to "All", a
+        value-axis range typed for axis 1 would land on every panel of a Bar or
+        Line stack at the next edit. Before switching, the flat axis keys are
+        filed in the old target's bucket (where the style pass reads them first,
+        so that axis still draws the same), and the flat keys take the "All"
+        bucket's values, or the defaults. Nothing drawn changes; only what an
+        edit reaches does.
         """
         saved = str(self._prefs.get("axis_target", "All"))
-        return saved if saved != "All" else "1"
+        if saved != "All":
+            self._axis_buckets.setdefault(
+                saved, {k: self._prefs.get(k) for k in self._axis_keys})
+            all_bucket = self._axis_buckets.get("All") or {}
+            for k in self._axis_keys:
+                if k in _PER_AXIS_STYLE_KEYS:
+                    continue   # never written flat while one axis was targeted
+                v = all_bucket.get(k)
+                self._prefs[k] = v if v is not None else DEFAULT_EXPORT_STYLE_PREFS[k]
+            self._prefs["axis_target"] = "All"
+            self._prefs["axis_buckets"] = self._axis_buckets
+        return "All"
 
     def _on_canvas_axis_pick(self, event) -> None:
         """Clicking a subplot targets it: sync the Axis # field to the clicked
@@ -2255,7 +2277,7 @@ class ExportStyleSidebar(QWidget):
         self._updating = True
         try:
             self._axis_buckets = dict(self._prefs.get("axis_buckets") or {})
-            self._current_axis = self._default_axis_target()
+            self._current_axis = self._open_on_all_axes()
             self._axis_buckets.setdefault(
                 self._current_axis,
                 {k: self._prefs.get(k) for k in self._axis_keys},

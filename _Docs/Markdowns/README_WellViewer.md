@@ -3391,6 +3391,10 @@ row, holding five actions:
   per-cell `±` prints. The **Axis #** picker lists the figure's plot panels and
   leaves out its colour bar, which no setting in this panel has ever moved.
 
+The **Axis #** picker opens on **All**, on every plot: a change applies to every
+panel of the figure until you pick one axis from the list or click a subplot.
+Limits you set earlier on one axis stay on that axis.
+
 #### Bar colours — Plate or Grey
 
 The Bar Plots tab's Properties sidebar carries a **Colours** section with two

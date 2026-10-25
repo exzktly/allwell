@@ -1671,7 +1671,13 @@ single visible selector for the top-level pages. It mirrors the notebook —
 clicking a rail item drives `_notebook.setCurrentByName(name)`; programmatic
 changes to the notebook drive the rail back via
 `ReviewApp._on_notebook_current_changed`. There is no visible tab bar;
-the page stack is purely name-keyed.
+the page stack is purely name-keyed. A row's active state is carried as an
+`active` property on the row, its body, its accent strip **and its label**, each
+styled by its own rule and repolished together in `_RailNavRow.setActive`: the
+label's colour was a descendant rule on the row's property, which Qt resolves
+only when the label itself is polished, so the first row — made active by
+`addItem` — kept the active colour for good and the selected row never took it
+(`tests/test_rail_nav_label_follows_selection.py`).
 
 `NamedPageStack` also exposes `detachPage(name)` / `reattachPage(name, widget)`
 (backed by a canonical `_page_order`) so a page can be temporarily moved out of
@@ -5953,6 +5959,18 @@ bars. `fig.axes` includes a colour bar, and every per-axis pass in
 Map offered an "Axis 2" that selected the bar and moved nothing. The numbering
 stays positional — axis 1 is the figure's first axes whether or not a colour bar
 sits at 2 — because that is what a stored `axis_buckets` key already means.
+
+The picker **opens on "All"** (`ExportStyleSidebar._open_on_all_axes`, at build
+and on every dataset load), so an edit reaches every panel until an axis is
+picked or a subplot clicked. A stored single-axis target is not honoured, since
+figures saved while the panel opened on axis 1 record "1" whether or not anyone
+chose it. Switching the target is more than setting the field: while one axis
+was targeted its limits and log toggles were written to the flat prefs too, and
+the style pass applies flat limits to every targeted axis, so the flat axis keys
+are first filed in that axis's bucket (which the pass reads first, so it draws
+the same) and the flat keys take the "All" bucket's values or the defaults.
+Nothing drawn changes; only what an edit reaches does
+(`tests/test_cell_gating_cdf_and_axis.py`).
 
 `features/export/style.py` also owns the **Properties-panel roster**.
 `open_export_style_panel` maps a plot key to the figure, canvas and default

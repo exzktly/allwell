@@ -253,6 +253,13 @@ def test_the_axis_picker_still_lists_every_plot_panel(qtbot, monkeypatch):
     assert [cb.itemText(i) for i in range(cb.count())] == ["All", "1", "2"]
 
 
+def test_the_axis_picker_opens_on_all(qtbot, monkeypatch):
+    """Through the real panel: "All" is what the field shows when it opens."""
+    _app, sb = _sidebar(qtbot, monkeypatch, kind="_line_fig")
+    assert sb._axis_cb.currentText() == "All"
+    assert sb._prefs["axis_target"] == "All"
+
+
 def test_the_response_figure_predicate_is_defined_once(qtbot, monkeypatch):
     """``_is_response_fig`` had two identical definitions, the second shadowing
     the first. Harmless while they agreed, and a silent divergence the moment

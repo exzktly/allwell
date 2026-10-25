@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QSplitter, QToolButton,
@@ -99,6 +99,8 @@ _BASELINE_TIP = ("The timepoint a fold change and the occupancy class are measur
                  "First measurable: each nanowell's first timepoint at which the measurement exists.")
 _EXTREMES_TPS_TIP = ("The timepoints the montage shows as columns. Fewer columns give larger crops; the ranking "
                      "timepoint is always shown.")
+#: How long the page's canvas must hold one size before the Array view is re-fitted to it, in milliseconds.
+_REFIT_MS = 60
 _CROP_METRICS_TIP = ("Write each crop's numbers on it: its fold change in the corner and a line of its metrics along "
                      "its foot. Off leaves the crops bare; the row labels still give each nanowell's rank and value.")
 _CROP_CELLS_TIP = ("Draw a dot at the centre of each cell the run counted on every crop — the strip, the pop-out and "
@@ -266,6 +268,15 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     card.canvas.mpl_connect("button_release_event", lambda event: nwc.on_release(ctx, event))
     card.canvas.mpl_connect("motion_notify_event", lambda event: nwc.on_motion(ctx, event))
     card.canvas.mpl_connect("scroll_event", lambda event: nwc.on_scroll(ctx, event))
+    # The Array view fits the region it shows to its axes' shape when it draws, so square pixels and round nanowells
+    # hold only at that size; a resize (the window, the site detail opening beside it, the band re-flowing) re-fits
+    # it, once the resizing has settled.
+    refit = QTimer(card)
+    refit.setSingleShot(True)
+    refit.setInterval(_REFIT_MS)
+    refit.timeout.connect(lambda: nwc.on_canvas_resized(ctx))
+    card.canvas.mpl_connect("resize_event", lambda _event: refit.start())
+    reg.register("_nw_refit_timer", refit)
     computing = QLabel("Computing…", card)
     computing.setObjectName("NanowellComputing")
     computing.setAlignment(Qt.AlignCenter)

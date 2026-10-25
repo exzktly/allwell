@@ -1437,7 +1437,7 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
     plot on the right, on the card's ground."""
     from matplotlib.ticker import MaxNLocator, PercentFormatter
 
-    from ui.theme import WELL_COLORS_TUPLE
+    from review.domain.selections_model import color_for_well
 
     fig.clear()
     grid = fig.add_gridspec(2, 1, height_ratios=(3, 1), hspace=0.12)
@@ -1449,7 +1449,9 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
     _bg, ink, muted = _inks(ax)
     width = 0.8 / max(len(series), 1)
     for k, s in enumerate(series):
-        colour = WELL_COLORS_TUPLE[k % len(WELL_COLORS_TUPLE)]
+        # The well's plate-position colour, as the plate selector and every plot tab colour it: picked by the
+        # well's place in this list, A03 drawn alone took A01's colour and no well matched its swatch on the plate.
+        colour = color_for_well(s.well)
         ax.fill_between(s.rings, s.q1, s.q3, color=colour, alpha=0.18, linewidth=0)
         ax.plot(s.rings, s.median, color=colour, marker="o", markersize=3, linewidth=1.4, label=s.well)
         share.bar(s.rings + (k - (len(series) - 1) / 2) * width, s.excluded_share, width=width, color=colour)

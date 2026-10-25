@@ -779,6 +779,19 @@ def focus_nanowell_at(ctx, event) -> None:
         redraw(ctx)                                              # an unaddressed nanowell cannot be selected
 
 
+def on_canvas_resized(ctx) -> None:
+    """The page's canvas settled at a new size: redraw the Array view if its axes no longer have the size its region
+    was fitted to. Without it the view kept the old fit — a resize squashed every nanowell into an oval, and a draw
+    made while the canvas was still being laid out (a few pixels tall) showed one flattened row of the array."""
+    st = _state(ctx)
+    drawn = st.drawn if st is not None else None
+    if st is None or st.view != "array" or drawn is None or drawn.ax is None or drawn.ax.figure is None:
+        return
+    box = drawn.ax.get_window_extent()
+    if (max(int(round(box.width)), 1), max(int(round(box.height)), 1)) != tuple(drawn.size_px):
+        redraw(ctx)
+
+
 def array_zoom(ctx, factor: float) -> None:
     """*−* / *+*: zoom the Array view by *factor* about the centre of what it shows."""
     st = _state(ctx)

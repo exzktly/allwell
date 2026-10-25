@@ -10892,7 +10892,8 @@ localisation size). `map_model` places one well's roster at one timepoint on tha
 (`trajectory_panels`) are a line per nanowell over time and a median per occupancy class at baseline, on one x and
 one y range over the panels, ticked in hours when every time is recorded (`TrajectoryPanel.in_hours`); a metric
 with one value per nanowell is greyed in the Metric list there, and a saved one is drawn as cell count with a
-footer line saying so. **Position** (`position_series`) is the metric's median and interquartile range by ring,
+footer line saying so. **Position** (`position_series`) is the metric's median and interquartile range by ring, each well in its
+plate-position colour (`selections_model.color_for_well`, as the plate selector and every plot tab colour it),
 with the share of each ring's nanowells without a value below it on the same ring axis (the two panels share x, the wells' key outside on the right); it makes no test. The ring comes from the address
 (`lattice_ring`, the pipeline's: `(|q| + |r| + |q + r|) / 2` on a hexagonal lattice, `max(|q|, |r|)` on a square
 one, each well's kind at the timepoint passed by `controller.draw_view`), not from a row's `nw_ring`, because the rows Review adds
@@ -10947,7 +10948,10 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   timepoint has no addresses, the tiles (`image_compute.tile_boxes`), the grid status, the anchor and its status
   text (`full_montage_compute.status_text`) and the run record (`record_lines`, with `template_line`). One
   renderer draws it, `renderer.render_array`: the region is widened to the axes' shape (`fit_region`), so pixels
-  stay square; the image is drawn for exactly that region and those pixels; the nanowells are filled by the
+  stay square — and since that holds only at the size it was fitted for, the canvas's `resize_event` re-fits it:
+  `tab_view` restarts a `_REFIT_MS` single-shot timer on each resize, and `controller.on_canvas_resized` redraws the
+  Array view when its axes no longer have the size its region was fitted to (without it a resize squashed every
+  nanowell into an oval, and a draw made while the canvas was still being laid out showed one flattened row); the image is drawn for exactly that region and those pixels; the nanowells are filled by the
   metric (`MAP_CMAP`, with a colour bar; a nanowell without a value is a grey outline styled by its state,
   `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour`, a fused one
   dashed in `FUSED_COLOUR` either way, at `outline_width_px` of the median drawn diameter (6 % of it, 2.5–8 px), the central nanowell boxed; labels in

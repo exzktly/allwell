@@ -605,8 +605,8 @@ def test_clearing_entries_does_not_accumulate_widgets(qtbot, removable):
     §2 rule 1 exists to keep out of the lane.
 
     Run over both row shapes. A removable row is a container holding the entry
-    button, a fixed slot, a × and an event filter watching all four, and the
-    layout only ever takes the container back — so if the reparent did not
+    button, a fixed slot and a ×, and the layout only ever takes the container
+    back — so if the reparent did not
     reach the rest, this is where it would show.
     """
     from PySide6.QtWidgets import QApplication, QPushButton
@@ -701,43 +701,73 @@ def test_pressing_the_x_takes_the_dataset_out_of_the_stored_history(
 
 def test_the_x_is_hidden_until_the_pointer_is_on_the_row(qtbot, tmp_path,
                                                          monkeypatch):
-    """And survives the move from the row onto the × itself.
+    """And survives the move from the row's entry onto the × itself.
 
-    Qt sends Leave to the row and Enter to the button as the pointer crosses
-    between them, so a handler that hid on any Leave would take the button away
-    exactly as the user reached for it. The events are sent here in that order
-    because that is the order the crossing produces.
+    Driven by real pointer moves (``QTest.mouseMove`` through the shown
+    window), not hand-sent ``QEvent``s, so the Enter/Leave sequence is the one
+    Qt actually produces: the row gets one Enter on arrival and one Leave on
+    departure, and crossing from the entry to the × is Enter/Leave on those two
+    children only. A test that sent the row a Leave mid-crossing would be
+    asserting a sequence Qt never delivers.
     """
-    from PySide6.QtCore import QEvent
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
 
     from review.core.recent_view import entry_rows
+    from widgets.removable_row import row_entry
 
     here = tmp_path / "plate_a"
     here.mkdir()
     ctx, _ = _ctx_with_recents(monkeypatch, [here])
     empty = EmptyState("Load a directory.")
     qtbot.addWidget(empty)
+    empty.resize(600, 400)
     empty.setEntries(entry_rows(ctx, 5, on_removed=lambda: None))
+    empty.show()
+    qtbot.waitExposed(empty)
 
     row = empty._entries_layout.itemAt(0).widget()
+    entry = row_entry(row)
     button = empty.removeButtonAt(0)
-    # ``isVisibleTo(row)`` and not ``isVisible()``: the placeholder is never
-    # shown in this test, so ``isVisible()`` is False for every widget in it
-    # and the check would pass against a × that is never hidden at all.
+    # ``isVisibleTo(row)`` rather than ``isVisible()``, so the check reads the
+    # ×'s own hidden flag and not the row's visibility.
+    QTest.mouseMove(empty, QPoint(1, 1))
     assert not button.isVisibleTo(row), (
         "the × is drawn before anything is hovered")
 
-    QApplication.sendEvent(row, QEvent(QEvent.Enter))
+    QTest.mouseMove(entry, QPoint(5, 5))
     assert button.isVisibleTo(row), "hovering the row did not reveal the ×"
 
-    QApplication.sendEvent(button, QEvent(QEvent.Enter))
-    QApplication.sendEvent(row, QEvent(QEvent.Leave))
+    QTest.mouseMove(button, QPoint(5, 5))
     assert button.isVisibleTo(row), (
         "the × vanished as the pointer moved onto it, so it cannot be clicked")
 
-    QApplication.sendEvent(button, QEvent(QEvent.Leave))
+    QTest.mouseMove(empty, QPoint(1, 1))
     assert not button.isVisibleTo(row), "the × stayed after the pointer left"
+
+
+def test_a_row_runs_no_python_event_filter(qtbot):
+    """No Python ``eventFilter`` anywhere in a removable row.
+
+    Both recent-datasets lists rebuild by dropping their rows synchronously,
+    and Qt delivers Hide, ParentChange, ChildRemoved and Destroy to an object's
+    event filters *while that object is being destroyed*. With a Python filter
+    on the row's children, every rebuild had PySide wrapping half-destroyed
+    widgets — an access violation at ``event.type()`` in the filter, reported
+    from Windows on launch. Asserted on the objects the row is made of, so it
+    fails for a filter installed under any name.
+    """
+    from PySide6.QtCore import QObject
+    from PySide6.QtWidgets import QPushButton
+
+    from widgets.removable_row import removable_row
+
+    row = removable_row(QPushButton("open"), lambda: None, object_name="X")
+    qtbot.addWidget(row)
+
+    filters = [type(o).__name__ for o in [row, *row.findChildren(QObject)]
+               if type(o).eventFilter is not QObject.eventFilter]
+    assert filters == [], f"a removable row carries Python event filters: {filters}"
 
 
 def test_forgetting_a_row_repaints_both_of_homes_surfaces(monkeypatch, tmp_path):

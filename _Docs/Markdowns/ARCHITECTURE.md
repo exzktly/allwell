@@ -2177,10 +2177,18 @@ over the row (`widgets/removable_row`) and styled from one definition,
 Ten rows each wearing a permanent delete control read as a page about deleting
 rather than a page about opening — and the space for it is reserved in both
 states, because a control that appears by *widening* the row shifts the label at
-the one moment it must not. Hover is counted across the row and every child of
-it rather than sampled from `underMouse`: crossing from the row onto the × is a
-Leave on one and an Enter on the other, so hiding on any Leave takes the button
-away exactly as the user reaches for it.
+the one moment it must not. Hover is the row's own `enterEvent`/`leaveEvent`:
+Qt sends the row one Enter on arrival and one Leave when the pointer leaves its
+whole area, and crossing from the entry onto the × moves Enter/Leave between
+those children without the row seeing a Leave, so the × stays up as the user
+reaches for it. **It is never a Python `eventFilter`.** Both lists rebuild by
+dropping their rows synchronously, and Qt delivers Hide, ParentChange,
+ChildRemoved and Destroy to an object's event filters while that object is being
+destroyed; a Python filter on the row's children had PySide wrapping
+half-destroyed widgets on every rebuild, and crashed the app on Windows with an
+access violation at `event.type()`. `tests/test_home_empty_state.py::test_a_row_runs_no_python_event_filter`
+holds it. `review/core/split_view.py` records the same crash from an app-global
+filter.
 
 A row whose folder is not reachable is **drawn, disabled, with the reason on its
 tooltip** rather than dropped. Hiding it says the user's history was lost when

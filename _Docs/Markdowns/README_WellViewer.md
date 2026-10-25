@@ -259,7 +259,8 @@ what every earlier run did) resizes by 30 ÷ the cell diameter in pixels, so a c
 models work at. Where cells are smaller than that in pixels it is an enlargement, and the network's work grows with
 its square: at 0.65 µm per pixel a 10 µm cell is 15.4 px, enlarged ×1.95, nearly four times the pixels. *None (as
 imaged)* segments each image as it is, which is that much faster, at whatever the model makes of cells at that size
-— compare the counts on one well before a plate-wide run. With *None*, the cell diameter no longer sets the scale.
+— compare the counts on one well before a plate-wide run. With *None*, the cell diameter no longer sets the scale,
+so the field is greyed out.
 (On the command line: `--nanowell_resize none`.)
 
 Whichever you choose, the model is given the nanowells only: everything outside each nanowell's interior — its rim

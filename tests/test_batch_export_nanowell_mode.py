@@ -215,3 +215,16 @@ def test_a_batch_run_reads_the_wells_it_exports_when_the_page_has_not(panel, mon
     assert asked == [["A01", "B07"]] and data.wells == ["A01"]       # B07 has no table, so it is not read
     st.data = data
     assert p._load("earliest", ["A01", "B07"])[0] is data and len(asked) == 1     # now held: not read again
+
+
+def test_a_batch_whose_wells_have_no_nanowell_table_says_so_rather_than_raising(panel, monkeypatch):
+    """Only the batch's wells are read, so when none of them has a table the loaded data holds no site and the
+    metrics were computed over nothing: ``KeyError: 'state'``."""
+    from PySide6.QtWidgets import QMessageBox
+
+    p, ctx = panel
+    ctx.state.feature_slice("nanowell").data = None
+    shown = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda _parent, title, text: shown.append((title, text)))
+    assert p._load("earliest", ["B07"]) is None                      # B07 has no nanowell table
+    assert shown and "None of the groups' wells has a nanowell table" in shown[0][1]

@@ -241,7 +241,9 @@ def _before_cpsam(opts) -> dict:
         nanowell = bool(opts.get("nanowell_format"))
     except AttributeError:
         return out
-    if "cellpose_model" in out and method not in CELLPOSE_METHODS:
+    # A nanowell run segments with ``nanowell_cellpose_model`` and never reads ``cellpose_model``, though its method is
+    # pinned to a Cellpose one (``nanowell_options_from_args``); the earlier build hashed that parser default, cyto3.
+    if "cellpose_model" in out and (method not in CELLPOSE_METHODS or nanowell):
         out["cellpose_model"] = "cyto3"
     if "nanowell_cellpose_model" in out and (not nanowell or out["nanowell_cellpose_model"] == "cyto3"):
         out["nanowell_cellpose_model"] = None

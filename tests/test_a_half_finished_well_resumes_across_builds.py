@@ -139,3 +139,25 @@ def test_the_digest_s_cellpose_methods_are_the_pipeline_s():
     from util.settings_digest import CELLPOSE_METHODS
 
     assert CELLPOSE_METHODS == pm._CELLPOSE_METHODS
+
+
+#: What the build before Cellpose-SAM became the default (1355778^1) records for a nanowell run, through the
+#: normalisation its ``main`` applies (``nanowell_options_from_args`` pins the method to ``cellpose_labelfree``),
+#: computed against a worktree of that commit: named no model (cyto3), and on livecell_cp3. ``_DIGEST_9145`` above
+#: hashes the bare parse, which no build ever recorded for a nanowell run.
+_RECORDED_9145 = {"nanowell": "3dcb10b79aed4845", "nanowell_livecell": "277466d4387a3933"}
+
+
+def test_a_nanowell_run_on_the_old_settings_matches_what_the_old_build_recorded_through_main_s_normalisation():
+    """A nanowell run never reads ``cellpose_model``, but its method is a Cellpose one, so the alias kept cpsam there
+    and no key matched what the cyto3 build wrote: every finished well re-ran though the user pinned every option."""
+    from pipeline.cli_args import settings_key_from_argv
+    from util.settings_digest import settings_key_aliases
+
+    def aliases(argv):
+        return settings_key_aliases(settings_key_from_argv(argv))
+
+    assert _RECORDED_9145["nanowell"] in aliases([*_NANOWELL, "--nanowell_cellpose_model", "cyto3", *_ON_RIM])
+    assert _RECORDED_9145["nanowell_livecell"] in aliases([*_NANOWELL, "--nanowell_cellpose_model", "livecell_cp3",
+                                                           *_ON_RIM])
+    assert _RECORDED_9145["nanowell"] not in aliases(_NANOWELL)              # on cpsam now: a different count

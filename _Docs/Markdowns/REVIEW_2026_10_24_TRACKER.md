@@ -36,6 +36,6 @@ is deleted by the PR that closes its last row.
 | R6 | 1051 | Low | `.DS_Store` still makes a destination "already has unrelated files" | open | `datasets/core/dataset_paths.destination_has_content` |
 | C1 | 1049 | High | the Cellpose env's pip resolves numpy 2, breaking imagecodecs | done | `requirements-remote-cellpose.txt` pins numpy 1.24, opencv < 4.11 (pip dry-run resolves numpy-1.24.4 opencv-4.10.0.84); probe covers both; `test_bootstrap_cellpose_env` |
 | C2 | 1049 | High | runs routed to the Cellpose env even when its install failed | done | `remote_conda.aw_cellpose_env_ready`; `test_remote_cellpose_env` (3 states) |
-| C3 | 1043 | Med | an old nanowell plate's key never matched: `cellpose_model` kept as cpsam | open | `util/settings_digest._before_cpsam` |
-| C4 | 1043 | Med | Batch Export nanowell mode: `KeyError: 'state'` on a group with no table | open | `review/features/batch_export/nanowell_panel.py` |
+| C3 | 1043 | Med | an old nanowell plate's key never matched: `cellpose_model` kept as cpsam | done | `util/settings_digest._before_cpsam`; pinned to 1355778^1's normalised digests in `test_a_half_finished_well_resumes_across_builds` |
+| C4 | 1043 | Med | Batch Export nanowell mode: `KeyError: 'state'` on a group with no table | done | `nanowell_panel._load`; `test_batch_export_nanowell_mode` |
 | C5 | 1049 | Low | precision (bf16/TF32/fp32) is in no reuse key | open | doc |

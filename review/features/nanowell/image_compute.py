@@ -25,6 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
+from review.features.nanowell.collect import cell_positions
+
 log = logging.getLogger("review")
 
 
@@ -206,8 +208,6 @@ def _cut_well(data, well: str, records, pad: float, out: dict, tifffile) -> None
         except (OSError, zipfile.BadZipFile) as exc:
             log.warning("Nanowells: %s could not be opened for crops: %s", archive, exc)
             why_not = f"{archive.name} could not be read ({exc})"
-    from review.features.nanowell.collect import cell_positions
-
     held_cells: dict = {}
 
     def cells_at(tp):

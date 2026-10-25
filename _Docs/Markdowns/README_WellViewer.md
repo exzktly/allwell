@@ -212,9 +212,11 @@ and, optionally, the margin around a nanowell that must lie inside one tile
 for that tile to own it, the angle of the central square's edges to a lattice row, and the occlusion and
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
 
-With **Nanowell arrays** ticked, the **Segmentation** section at the top of the form is set to label-free and shows
-the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on**, **Segment**,
-**Resize** and **Cell diameter (µm)**. The cell diameter sets the scale the model looks for cells at: with Resize
+With **Nanowell arrays** ticked, the form has one **Segmentation** entry, **Nanowell cell count (Cellpose, on the
+Phase channel)**: a nanowell run does not use the segmentation methods the selector offers, so the selector is
+hidden, and the cell count's own settings are shown in place of their parameters: **Cellpose model**,
+**Segment on**, **Segment**, **Resize** and **Cell diameter (µm)**. Mark the channel the tiles are imaged in as
+**Phase**. Untick **Nanowell arrays** and the selector comes back with the method you had chosen. The cell diameter sets the scale the model looks for cells at: with Resize
 *To the cell diameter*, Cellpose resizes each image so that a cell of that diameter becomes its own 30 px. It is not
 necessarily your cells' real size. It starts at 19.5 µm, which at 0.65 µm per pixel is exactly 30 px, so Cellpose
 segments the images as imaged, without resizing — about four times faster than at the cells' real ~10 µm, which it
@@ -3388,6 +3390,10 @@ row, holding five actions:
   **Statistics → Error bars** and **Across**, which pick the interval the
   per-cell `±` prints. The **Axis #** picker lists the figure's plot panels and
   leaves out its colour bar, which no setting in this panel has ever moved.
+
+The **Axis #** picker opens on **All**, on every plot: a change applies to every
+panel of the figure until you pick one axis from the list or click a subplot.
+Limits you set earlier on one axis stay on that axis.
 
 #### Bar colours — Plate or Grey
 

@@ -1671,7 +1671,13 @@ single visible selector for the top-level pages. It mirrors the notebook —
 clicking a rail item drives `_notebook.setCurrentByName(name)`; programmatic
 changes to the notebook drive the rail back via
 `ReviewApp._on_notebook_current_changed`. There is no visible tab bar;
-the page stack is purely name-keyed.
+the page stack is purely name-keyed. A row's active state is carried as an
+`active` property on the row, its body, its accent strip **and its label**, each
+styled by its own rule and repolished together in `_RailNavRow.setActive`: the
+label's colour was a descendant rule on the row's property, which Qt resolves
+only when the label itself is polished, so the first row — made active by
+`addItem` — kept the active colour for good and the selected row never took it
+(`tests/test_rail_nav_label_follows_selection.py`).
 
 `NamedPageStack` also exposes `detachPage(name)` / `reattachPage(name, widget)`
 (backed by a canonical `_page_order`) so a page can be temporarily moved out of
@@ -5953,6 +5959,18 @@ bars. `fig.axes` includes a colour bar, and every per-axis pass in
 Map offered an "Axis 2" that selected the bar and moved nothing. The numbering
 stays positional — axis 1 is the figure's first axes whether or not a colour bar
 sits at 2 — because that is what a stored `axis_buckets` key already means.
+
+The picker **opens on "All"** (`ExportStyleSidebar._open_on_all_axes`, at build
+and on every dataset load), so an edit reaches every panel until an axis is
+picked or a subplot clicked. A stored single-axis target is not honoured, since
+figures saved while the panel opened on axis 1 record "1" whether or not anyone
+chose it. Switching the target is more than setting the field: while one axis
+was targeted its limits and log toggles were written to the flat prefs too, and
+the style pass applies flat limits to every targeted axis, so the flat axis keys
+are first filed in that axis's bucket (which the pass reads first, so it draws
+the same) and the flat keys take the "All" bucket's values or the defaults.
+Nothing drawn changes; only what an edit reaches does
+(`tests/test_cell_gating_cdf_and_axis.py`).
 
 `features/export/style.py` also owns the **Properties-panel roster**.
 `open_export_style_panel` maps a plot key to the figure, canvas and default
@@ -10407,8 +10425,15 @@ says once that the host registers every tile (`_nanowell_log_once`). Its option 
 the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's
 `execution_options` all name the same things and the edit-a-queued-job round trip and the sidecar restore
 need no translation; a sidecar that states `nanowell_format: null` switches the mode off, and one that
-predates the keys leaves it alone. Switching the mode on sets the segmentation selector to label-free and locks it (the
-choice returns when the mode goes off); a build with no label-free method disables the mode. Run validation adds
+predates the keys leaves it alone. Switching the mode on sets the segmentation selector to label-free, locks it and
+**hides its row** (the selector's `AnalyzeFormRow`; the choice returns, and the row is shown, when the mode goes off). A nanowell run
+never runs the per-image segmentation the selector chooses between — each well goes to `nanowell_task.run_zip_task`,
+and `pipeline/cli_args` sets the method to label-free itself — so the selector is set only so the form's checks for
+the other methods (a StarDist tile size, a watershed cytoplasm channel) do not refuse a run over settings it ignores;
+shown as well, it read as a second segmentation to configure beside the count's own. The count box carries the
+form's one **Segmentation** row in this mode ("Nanowell cell count (Cellpose, on the Phase channel)"), and the hint
+under the section names no method then, keeping only what stops the run (no channel marked Phase)
+(`tests/test_nanowell_count_settings_sit_with_segmentation.py`). A build with no label-free method disables the mode. Run validation adds
 `nanowell_option_errors` (bounds; a Phase channel only when channel auto-detection is off, since detection names it
 at run time) to the numeric checks, then, with an input folder, `nanowell_input_report`: **problems** stop the run (no
 well zips, no acquisition record and no tile grid, a tile the record names that an archive lacks, a grid that

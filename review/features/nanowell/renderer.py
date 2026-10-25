@@ -450,8 +450,8 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
 def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None)) -> None:
     """The occupancy colours' key at the figure's top right: every figure coloured by occupancy class carries one,
     or its colours decode to nothing. Its title reads ``title (baseline; faint: filtered out):``, each part in the
-    brackets only when it applies; *starting* is the *Starting cells* filter's ``(minimum, maximum)``, whose
-    excluded classes are drawn faint."""
+    brackets only when it applies; *starting* is the ``(minimum, maximum)`` count at the baseline the *Subset*
+    holds every kept nanowell to (``Subset.start_bounds``), whose excluded classes are drawn faint."""
     from widgets.plot_card import theme_paired_colours
 
     key = fig.add_axes([0.6, 0.955, 0.38, _LINE * 0.9])        # top right, above the panels' titles
@@ -459,7 +459,7 @@ def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None)
     key.set_xlim(0, 10)
     key.set_ylim(0, 1)
     classes = ["0", "1", "2", "3+", None]
-    # The classes the Starting cells filter removes whole are drawn faint and named so, or a key would decode
+    # The classes the Subset removes whole are drawn faint and named so, or a key would decode
     # colours the figure cannot contain.
     lo, hi = starting
     kept = [occupancy_in_filter(cls, lo, hi) for cls in classes]
@@ -491,7 +491,7 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     without a value is a gap in the line, never a zero; a timepoint whose state carries no number is a
     hatched band naming the state. The rows share one time axis, labelled once under the bottom row. The crops
     are drawn on a figure of their own under the **Pop out** button (:func:`render_crop_strip`). *outside*
-    (``site -> sentence``) marks a selected nanowell that the *Starting cells* filter leaves out of the page's
+    (``site -> sentence``) marks a selected nanowell that the *Subset* leaves out of the page's
     figures: the detail still draws it, and says so.
     """
     fig.clear()
@@ -572,7 +572,12 @@ def _cells_clause(tally: dict) -> str:
     return "; ".join(said)
 
 
-def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False) -> None:
+def _of_channel(image_channel: str) -> str:
+    """What a set of crops is an image of, for its caption: the fluorescence channel, or the phase image."""
+    return f"{image_channel} image" if image_channel else "phase image"
+
+
+def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, image_channel: str = "") -> None:
     """The first selected nanowell's crops, one per timepoint, on the strip under the site detail's **Pop out**
     button: each titled with its timepoint, a timepoint without a crop saying why in its place, and where the crops
     were cut from said once in the caption. *crops* is ``None`` while they are being cut."""
@@ -609,12 +614,14 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False) -> 
     origin = ("from its owner tile at full resolution" if sources == {"tile"} else
               "from the montage, at its lower resolution" if sources == {"montage"} else
               "from its owner tile, or the montage where marked" if sources else "none could be cut")
-    caption = f"Crops: {site[0]} · q {site[1]}, r {site[2]}, {origin}; one brightness scale" + "".join(
+    caption = (f"Crops ({_of_channel(image_channel)}): {site[0]} · q {site[1]}, r {site[2]}, {origin}; "
+               "one brightness scale") + "".join(
         f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else "")
     _ink(fig.text(0.03, 0.03, caption, fontsize=6, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
 
 
-def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metrics: dict | None = None) -> None:
+def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metrics: dict | None = None,
+                     image_channel: str = "") -> None:
     """The selected nanowell at every timepoint, large: one panel per timepoint, filling the page's figure.
 
     Asked for: a larger view of a selected nanowell over time than the site detail's strip of small crops. Every
@@ -661,7 +668,8 @@ def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metr
             width_pt = ax.get_position().width * fig.get_size_inches()[0] * 72
             _ink(ax.text(0.5, -0.03, "\n".join(_pack(said, width_pt, 8.0)), ha="center", va="top", fontsize=8,
                          transform=ax.transAxes, color=faint, gid="nw-crop-grid-metrics"), muted=True)
-    _ink(fig.text(0.02, 0.955, f"{site[0]} · q {site[1]}, r {site[2]} over time", fontsize=11, color=ink,
+    _ink(fig.text(0.02, 0.955, f"{site[0]} · q {site[1]}, r {site[2]} over time · {_of_channel(image_channel)}",
+                  fontsize=11, color=ink,
                   gid="nw-crop-grid-title"))
     sources = {crop.source for _tp, crop in items if crop.image is not None}
     origin = ("cut from its owner tile at full resolution" if sources == {"tile"} else
@@ -750,7 +758,8 @@ def _extremes_layout(fig, blocks, cols: int) -> _ExtremesLayout:
 
 
 def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cells: bool = False,
-                    timepoints=None, metrics: dict | None = None, numbers: bool = True) -> dict:
+                    timepoints=None, metrics: dict | None = None, numbers: bool = True,
+                    image_channel: str = "") -> dict:
     """The *N* nanowells with the largest fold change and the *N* with the smallest, each a row of its crops at the
     timepoints shown; returns ``{axes: (well, q, r)}`` so a click on a row selects its nanowell.
 
@@ -800,7 +809,7 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
     _ink(fig.text(0.02, 1 - 0.2 / draw.h_in,
                   f"{model.well} · the nanowells with the largest and smallest {label.lower()}",
                   fontsize=10, color=ink, va="top", gid="nw-extremes-title"))
-    _ink(fig.text(0.02, 0.012, draw.caption(label, columns, note), fontsize=7, color=faint,
+    _ink(fig.text(0.02, 0.012, draw.caption(label, columns, note, image_channel), fontsize=7, color=faint,
                   gid="nw-extremes-caption", wrap=True), muted=True)
     return hits
 
@@ -900,7 +909,7 @@ class _ExtremesDrawing:
             _ink(ax.text(0.5, 0.02, line, transform=ax.transAxes, ha="center", va="bottom", fontsize=_EXT_METRIC_PT,
                          color=self.ink, bbox=band, zorder=6, gid="nw-extremes-metrics"))
 
-    def caption(self, label: str, columns, note: str) -> str:
+    def caption(self, label: str, columns, note: str, image_channel: str = "") -> str:
         """What the montage says about itself: the ranking, where the crops came from, the cells, the timepoints left
         out, and the metrics when they had to be."""
         sources = self.sources
@@ -910,7 +919,8 @@ class _ExtremesDrawing:
                   "still being cut" if self.pending else "none could be cut")
         hidden = [tp for tp in self.model.timepoints if tp not in columns]
         said = [caption(self.model, label) + ".",
-                f"Crops {origin}; every crop on one brightness scale ({self.lo:.4g} to {self.hi:.4g})."
+                f"Crops of the {_of_channel(image_channel)}, {origin}; every crop on one brightness scale "
+                f"({self.lo:.4g} to {self.hi:.4g})."
                 + "".join(f" {_sentence(n_)}." for n_ in sorted(self.notes))
                 + (f" {_sentence(_cells_clause(self.tally))}." if self.tally else "")
                 + (f" Timepoints not shown: {', '.join(hidden)}." if hidden else "")
@@ -1037,7 +1047,7 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     *region* ``(left, top, right, bottom)`` is where the view looks, widened to the axes' shape; without one the
     view fits everything drawn. The nanowells are coloured as ``ui/nanowell_sites.py`` colours them wherever one is
     drawn, so a state reads the same here as in Analyze's Test detection. The nanowells in *dimmed* (``(well, q,
-    r)``: outside the *Starting cells* filter) are drawn under a veil of the ground, still where they are and still
+    r)``: outside the *Subset*) are drawn under a veil of the ground, still where they are and still
     clickable, so where the kept ones sit on the array stays visible.
     """
     fig.clear()
@@ -1184,7 +1194,7 @@ def _draw_nanowells(fig, ax, drawn, scene, layers, *, label: str, selected) -> N
             ax.add_patch(_ring(sites.x[k], sites.y[k], sites.radius[k] * 1.35, colour))
 
 
-#: How opaque the veil over a nanowell outside the *Starting cells* filter is: enough to read as set aside, little
+#: How opaque the veil over a nanowell outside the *Subset* is: enough to read as set aside, little
 #: enough that its state and fill still show through.
 DIM_ALPHA = 0.65
 

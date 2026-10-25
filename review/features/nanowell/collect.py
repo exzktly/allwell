@@ -78,6 +78,13 @@ class NanowellData:
     time_note: str = ""
     #: Fluorescence channels with site intensities (``<token>_integrated`` columns).
     channels: list = field(default_factory=list)
+    #: The fluorescence channels the run read images of (the sidecar's ``fluor_tokens`` less the phase channel, and
+    #: every channel with site intensities), spelled as the tables spell them where they have one: what the crops
+    #: and the full-resolution montage can be drawn from besides the phase image.
+    image_channels: list = field(default_factory=list)
+    #: ``channel -> why`` for each of :attr:`image_channels` with no site intensities, so the page can say why a
+    #: channel the run read offers no Brightness or Site signal rather than leaving it out without a word.
+    unmeasured_channels: dict = field(default_factory=dict)
     #: Wells left out and why, as sentences.
     problems: list = field(default_factory=list)
     #: ``well -> the rule its roster was decided by`` (``domain.nanowell_roster``): a dataset can mix them.
@@ -362,6 +369,30 @@ def _phase_token(sidecar: dict) -> str:
     return str(token).strip().lower()
 
 
+def _image_channels(sidecar: dict, phase: str, channels: list, *, read_any: bool) -> tuple[list, dict]:
+    """``(image channels, {channel: why it has no site intensities})``: every fluorescence channel the run read, in
+    the sidecar's order, then any the tables carry that the sidecar does not name. A channel is spelled as the tables
+    spell it when they carry it (the image reader matches names case-insensitively either way). The phase channel is
+    never one: its images are what the crops show by default."""
+    listed = sidecar.get("fluor_tokens")
+    listed = [str(t).strip() for t in listed if str(t).strip()] if isinstance(listed, list) else []
+    by_lower = {c.lower(): c for c in channels}
+    out: list = []
+    for token in [*listed, *channels]:
+        spelled = by_lower.get(token.lower(), token)
+        if token.lower() != phase and spelled.lower() not in {c.lower() for c in out}:
+            out.append(spelled)
+    unmeasured = {}
+    if read_any:
+        for token in out:
+            if token.lower() not in by_lower:
+                unmeasured[token] = (f"The run read {token} images, but the nanowell tables of the wells shown carry "
+                                     f"no {token}_integrated column, so there is no {token} brightness or site signal "
+                                     f"to draw. Re-run the wells with {token} among the fluorescence channels to "
+                                     f"measure it.")
+    return out, unmeasured
+
+
 def nanowell_wells(folder: Path) -> list[str]:
     """Every well with a nanowell table in *folder* (``nanowells/<well>.csv``), in name order; nothing is read."""
     return [path.stem for path in sorted(folder.glob("*.csv"))]
@@ -413,6 +444,7 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
     phase = _phase_token(sidecar)
     channels = sorted({c[: -len("_integrated")] for c in sites.columns if c.endswith("_integrated")}
                       - {c for c in (c[: -len("_integrated")] for c in sites.columns) if c.lower() == phase})
+    image_channels, unmeasured = _image_channels(sidecar, phase, channels, read_any=bool(frames))
     timepoints = sorted(set(sites["timepoint"].dropna()) | {tp for g in grids.values() for tp in g})
     times_h, source, note = _times(data_dir, timepoints)
     keep = ["well", "timepoint", "nw_q", "nw_r"] + [f"brightness_{ch}" for ch in channels]
@@ -435,7 +467,8 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
                         schema=str(options.get("filename_schema") or sidecar.get("schema") or ""),
                         separator=str(options.get("filename_sep") or sidecar.get("separator") or ""),
                         phase_token=str(options.get("phase_token") or sidecar.get("phase_token") or ""),
-                        channels=channels, problems=problems, roster_rules=roster_rules,
+                        channels=channels, image_channels=image_channels, unmeasured_channels=unmeasured,
+                        problems=problems, roster_rules=roster_rules,
                         reanalysed=reanalysed, available=available, cell_tables=cell_tables)
 
 

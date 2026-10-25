@@ -10715,7 +10715,12 @@ reader states which scheme versions it understands (`collect.SUPPORTED_SCHEMES`;
 pipeline's `SCHEME_VERSION` in it). A sidecar with another version refuses the whole dataset with
 `NanowellSchemeError`; a grid record with another version, or a table that repeats an address at one timepoint, leaves that well out
 and names it in `NanowellData.problems`. The phase channel's site intensities, which the pipeline writes like any other
-channel's, are not offered as fluorescence. Brightness is the mean `<token>_mean_intensity` of the cells the
+channel's, are not offered as fluorescence. `NanowellData.channels` are the channels with site intensities;
+`image_channels` are every fluorescence channel the run read (the sidecar's `fluor_tokens` less the phase token, then
+any the tables carry that it does not name, spelled as the tables spell them) — what the page's pictures can be cut
+from besides the phase image; and `unmeasured_channels` names, with why, each of those the tables of the wells read
+carry no `<token>_integrated` column for, so a channel the run read and did not measure is listed greyed on the page
+rather than missing without a word (`collect._image_channels`). Brightness is the mean `<token>_mean_intensity` of the cells the
 per-cell CSVs beside `nanowells/` place at each `(well, timepoint, q, r)`, whichever of the output folder and
 its parent was loaded; a CSV is read in either spelling through `util/csv_gz.glob_csvs`, the plain one winning
 when both exist.
@@ -10764,28 +10769,51 @@ and the footer states the cohort as kept of sites. `well_summary(reasons=…)`, 
 and `views_compute.trajectory_panels(cohort=…)` all apply it, so the beeswarm, the summaries and the trajectory
 medians follow the same nanowells.
 
-**The starting-cells filter** (`starting_cells_compute`, `NanowellState.start_min` / `start_max`, the *Starting
-cells* control). It keeps only the nanowells whose count at the baseline — `n0`, the number the occupancy colours
-are drawn from, so the filter and the key always agree — lies within the bounds; `None` is no bound on that side,
-a minimum of 0 is no minimum, and with a bound set a nanowell whose count at baseline is unknown is outside.
-`controller.draw_view` applies it first (`apply`, over the drawn wells), before any exclusion is worked out and
-before the fixed cohort, so a filtered nanowell is never counted twice: under `≥1`, "empty at baseline" no longer
-appears among a fold change's exclusions, because those nanowells were filtered first. The filtered nanowells are
-not given a reason per swarm (hundreds against every swarm would drown the reasons a reader acts on); every figure
-carries one sentence (`note`) with the bounds, the baseline, the nanowells kept of all, those outside the range and
-those with no count, the kept nanowells counted after the earliest timepoint under *First measurable* (their
-cells may have divided, so a "single cell" filter there is not a clonality filter), and each drawn well keeping
-fewer than `FEW_BELOW`, since wells are the replicate unit. A filter that keeps nothing draws `empty_text`.
-Distribution, Trajectories, Position and Extremes draw only the kept nanowells, and the fraction responding is
-over them; Position does not name a well the filter emptied as one without addresses. The Array view draws every
-nanowell and veils the ones outside in the figure's ground (`renderer._dim_nanowells`, a theme-paired colour, still
-clickable), counting them in its footer; the occupancy key fades the classes the filter removes whole
-(`occupancy_in_filter`); the site detail draws a selected nanowell outside the filter and says so. *Save nanowell
-data…* keeps every row and flags it (`in_starting_cells_filter`, `starting_cells_min` / `_max` / `_baseline`).
-Batch Export's Nanowells mode has its own minimum and maximum, seeded from the page each time the panel is shown;
-its figures pass them to `draw_view` and its summary CSV is of the kept nanowells, with the bounds in two columns.
-The bounds persist with the page's settings and in Saved Plots; a saved pair that is not a filter (a minimum above
-the maximum, a value that is not a whole number) restores as no filter rather than half of one.
+**The subset** (`subset_compute`, `NanowellState.subset`, the *Subset* control and its editor in `subset_view`). A
+`Subset` is a tuple of `Condition`s and a *match* (`all` or `any`); no conditions is every nanowell. A condition
+names a field (`field_choices`): `n0` — *Starting cells*, the count at the baseline, the number the occupancy colours
+are drawn from, so the condition and the key always agree; any metric column but the occupancy class (`n`, `c`,
+`brightness_<ch>`, `signal_<ch>`, the fold changes, `growth_rate`); the nanowell's place — `ring` (`views_compute.
+lattice_ring`) and `distance_um` (the hypotenuse of `lattice_xy` at the well's measured pitch, `well_pitch`), each on
+the well's own lattice kind from its grid record (`geometry_of`), and `nw_q` / `nw_r`; and `owner`, the imaging
+field (tile) the run cut the nanowell from. A numeric field is compared by `ge` / `le` / `eq` / `between` /
+`outside` (bounds inclusive; a `between` of one value is stored as `eq`, so two spellings of one subset compare
+equal); `owner` by `in` / `not_in` a set of tiles. A per-timepoint field (a metric with a value per timepoint, and
+`owner`) is read *at* a timepoint: `baseline` (the row at the count's `baseline_timepoint`), `earliest` / `latest`
+(the well's), `tp:<label>`, `any` or `every`; a per-nanowell field carries no `at`. `Condition.validated` is the one
+canonical form and the one place a condition is refused (an unknown field, an op the field cannot take, a range
+upside down, a fractional bound on a whole-number field, a tile condition with no tile).
+
+Each condition answers 1, 0 or NaN per nanowell (`_site_answers`, vectorised over the metrics frame by site number);
+NaN is "no value", never zero — an occluded baseline, a well with no recorded pitch, a timepoint the nanowell was
+not seen at. *At any timepoint* is 1 when some value passes, 0 when every value it has fails; *at every timepoint*
+is 0 when some value fails and 1 only with a passing value at every timepoint of the well. `_combine` decides a
+nanowell: under `all` kept when every condition is 1, *outside* when one is 0, otherwise *no value*; under `any`
+kept when one is 1, outside when every one is 0. `controller.draw_view` applies the subset first (`apply`, over the
+drawn wells), before any exclusion is worked out and before the fixed cohort, so a nanowell is never counted twice:
+under *Starting cells ≥1*, "empty at baseline" no longer appears among a fold change's exclusions. Every figure
+carries one sentence (`note`): the subset, the baseline when a condition depends on it (`uses_baseline`: `n0`, a
+fold change, or a value read at the baseline), the nanowells kept of all, those outside and those with no value, the
+kept nanowells counted after the earliest timepoint under *First measurable* (their cells may have divided, so a
+"single cell" condition there is not a clonality filter), and each drawn well keeping fewer than `FEW_BELOW`, since
+wells are the replicate unit. A subset that is one Starting cells condition (`is_starting_only`) is written as the
+Starting cells filter always was ("Starting cells 1 (count at the earliest timepoint): … outside the range, … with
+no count at baseline"). A subset that keeps nothing draws `empty_text`. Distribution, Trajectories, Position and
+Extremes draw only the kept nanowells, and the fraction responding is over them; Position does not name a well the
+subset emptied as one without addresses. The Array view draws every nanowell and veils the ones outside in the
+figure's ground (`renderer._dim_nanowells`, a theme-paired colour, still clickable), counting them in its footer; the
+occupancy key fades the classes the subset removes whole (`Subset.start_bounds`, the `n0` bounds every kept nanowell
+is known to meet — none under `any` with more than one condition — passed to `starting_cells_compute.
+occupancy_in_filter`); the site detail draws a selected nanowell outside the subset and names the condition it failed
+or lacked (`site_badge`). *Save nanowell data…* keeps every row and flags it (`in_subset`, `subset`,
+`subset_baseline`). `starting_cells_compute` keeps only what is about a count at the baseline: the presets, the
+bounds' rules (`normalise`), their text and `occupancy_in_filter`; `Subset.starting(lo, hi)` turns a preset into a
+subset. Batch Export's Nanowells mode uses the page's subset while *Use the page's subset* is ticked (every nanowell
+otherwise), naming it on the panel each time it is shown; its figures pass it to `draw_view` and its summary CSV is
+of the kept nanowells, with the subset in a `subset` column. The subset persists with the page's settings and in
+Saved Plots (`Subset.to_config`); a saved block with one condition that is not a condition restores as no subset
+rather than as part of one (`restore`), and a page saved before there was a Subset restores its `start_min` /
+`start_max` as the one-condition subset they were.
 
 **Summaries** (`summary_compute`). `well_summary` describes one well per timepoint: median, interquartile
 range, fraction responding — the share of the nanowells used whose value is strictly above
@@ -10803,7 +10831,7 @@ as every plot tab does, with each well in no set standing alone.
 **The responding cut** (`state.NanowellState.thresholds`). One number per metrics column — `n`,
 `confluence_fc`, `brightness_fc_GFP` — so a cut chosen for one metric, or for one channel's brightness, is never
 applied to another. The page's *Responding above* field (shown on Distribution) edits the cut for the column the
-page draws now (`controller.drawn_metric_column`, the shared channel applied); `set_responding_above` clears it
+page draws now (`controller.drawn_metric_column`, the page's channel applied); `set_responding_above` clears it
 on an empty field and puts the field back on text that is not a number, rather than clearing a cut by accident.
 `draw_view(responding_above=…)` hands it to `distribution_model`, which keeps it on the model with each group's
 fraction (`model.responding`: over time, at the group's latest timepoint; along wells, at the timepoint drawn);
@@ -11048,7 +11076,13 @@ its artists, and that no other module assigns `STATE_COLOURS`, `FUSED_COLOUR` or
 **Crops.** `image_compute.site_crops` cuts a nanowell at each timepoint from its **owner tile**, read from
 the input archive the run segmented (`in/<well>.zip`; the member found by the run's filename schema, separator
 and phase token, which `collect` puts on `NanowellData`, judging only TIFF members so directory entries,
-sidecars and AppleDouble files cannot match), at full resolution: the tile-local centre is the well-frame
+sidecars and AppleDouble files cannot match; in a schema with no channel field the member must carry the phase token,
+as `process_microscopy._is_nuclear_filename` requires, or a fluorescence image of the same tile would pass for it).
+With a `channel`, the member is the one the pipeline paired with the phase image
+(`image_compute._channel_member`, mirroring `_derive_fluor_filename`: the channel field replaced, or the phase token
+in a schema without one, matched case-insensitively in the same folder), and `full_montage_compute.montage_source`
+takes the same `channel`. A fluorescence crop never falls back to the montage, which is phase only: a timepoint
+without the channel's tile is a `Crop` with no image saying why. Crops are cut at full resolution: the tile-local centre is the well-frame
 position less the tile's placement, over the x pixel size on both axes as the pipeline places them. A crop is
 a copy, so a cached crop does not keep its whole tile in memory. Without the archive (an output folder copied
 alone), with an archive that cannot be opened, for a nanowell with no owner tile (fused or shared), or when the
@@ -11065,9 +11099,13 @@ and the read is not relaunched on every redraw; a result for a dataset loaded si
 the new dataset's bookkeeping; each worker bridge is kept on the state until it delivers, then released.
 
 **The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (the five
-views; U3 planned the first four), Metric, Along x, Baseline, *Starting cells* (`_build_starting_cells`: a preset
-combo — Any, ≥1, 1, 1–2, ≥2, Custom… — on every view, with a minimum and a maximum shown while Custom is chosen,
-the combo outlined in the accent through the `filterActive` QSS property while a bound is set), Timepoint (on
+views; U3 planned the first four), Metric, Along x, Baseline, *Subset* (`subset_view.build_subset_control`: a
+combo of the Starting cells presets — All nanowells, ≥1, 1, 1–2, ≥2 — and *Custom subset…*, with an **Edit…** button,
+on every view, the combo outlined in the accent through the `filterActive` QSS property while a subset is set; the
+editor, `SubsetEditor`, is a panel the page places under the band — never a dialog — with one `_ConditionRow` per
+condition, *all* / *any*, *Add condition* and *Clear*; each edit that makes a valid subset is applied at once
+through `controller.set_subset`, and one that does not is said in the panel's `Warn` line and changes nothing; the
+rows are rebuilt from the page's state only when it holds another subset or the dataset's channels changed), Timepoint (on
 *Along x: Wells*, Position, Extremes and the Array view), *vs* (on *Along x: Wells*), Well (on the one-well views),
 the Array view's Image combo, Positions switch,
 *Layers* menu (each switch, the colouring, and *Show as* for the presets), *Fit* / *1:1* and the anchor's
@@ -11083,8 +11121,29 @@ the first, Position and *Along x: Wells* offer every timepoint and start at the 
 the slider and the figure always agree. `page_well` is the chosen well when it is drawn, else the first drawn
 well. Wells are what `data_loading.plot_group_well_lists(ctx, fallback_to_all=False)` says every plotting tab
 draws — so a group-by variable, hidden sets and the solo-well toggles mean the same here as elsewhere — never
-every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and site signal follow the app's shared channel (U6); the Metric entries are greyed, with the
-reason, when that channel has no site intensities. `ensure_loaded` reads the tables of the wells the page draws
+every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and site signal, and
+their fold changes, are drawn for the page's own **Channel** (`_nw_channel_cb`, `NanowellState.channel`, persisted),
+beside Metric on every view: the app's shared channel selector sits on the Plotting band, which this page does not show,
+so the page cannot depend on it alone. `controller.page_channel_name` resolves it — the page's choice when set; else
+the shared channel when the tables carry it (U6); else the tables' first fluorescence channel, so a shared channel the
+tables lack (the phase channel, a ratio) never greys every fluorescence metric with no control here to change it —
+and `page_channel` spells it as the data does. Every caller that draws a channel (the views, Extremes, the site
+detail, the crop captions, the responding cut) asks these two, never `ctx.state.channel` directly. The Channel
+control lists `NanowellData.channels`, then each of `unmeasured_channels` greyed with its reason; the Metric entries
+are greyed, with the reason, only when the run measured no fluorescence in the nanowells at all. Batch Export's
+Nanowells mode still takes the shared channel.
+
+**The image channel** (`NanowellState.image_channel`, persisted; `controller.page_image_channel`). Every picture the
+page draws from the raw images — the site detail's crop strip, **Pop out**, the Extremes montage and the Array view's
+*Full resolution* montage — is of the phase image (`""`) or of one of `NanowellData.image_channels`. It is one
+setting offered by three combos (`tab_view._IMAGE_CHANNEL_COMBOS`: beside the strip's Cells box, in the Extremes
+group, beside the Array view's Image combo) that `_refresh_image_channels` keeps on it, each listing *Phase
+(<token>)* and the channels, greyed when the run read none. `set_image_channel` empties `st.crops`, drops the
+crop reads in flight from `st.fetching` and releases the tile store; `_fetch` tags a crop read with the channel it
+was started for and discards a result whose channel is no longer chosen, so a crop of one channel is never stored
+under another. The tile store's key is `(well, timepoint, channel)`. The run montage is phase only, so with a
+fluorescence channel chosen and *Image: Run montage* the footer says so and points at Full resolution. Each crop
+figure names its channel in its caption or title (`renderer._of_channel`). `ensure_loaded` reads the tables of the wells the page draws
 (`active_wells`) and computes the metrics on `core.worker_bridge.run_off_thread`. The wells read are kept
 (`state.well_parts`, for the data dir in `parts_for`; `loaded_wells` the wells asked for, a well without a table
 included), so a well selected again reads nothing and a deselection neither reads nor recomputes; the worker

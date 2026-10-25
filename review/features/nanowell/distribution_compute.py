@@ -164,8 +164,8 @@ class DistributionModel:
     responding_above: float | None = None
     #: ``(group, fraction, timepoint)`` per group: the mean of its wells' fractions responding at *timepoint*.
     responding: list = field(default_factory=list)
-    #: The *Starting cells* bounds the nanowells were filtered by before this model was built (``(None, None)``: no
-    #: filter), for the occupancy key, which greys the classes the filter removes.
+    #: The count at the baseline the *Subset* holds every kept nanowell to (``Subset.start_bounds``; ``(None, None)``:
+    #: no bound), for the occupancy key, which greys the classes the subset removes.
     starting: tuple = (None, None)
 
     def swarms(self):

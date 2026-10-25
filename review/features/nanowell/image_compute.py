@@ -11,6 +11,13 @@ tile's placement, over the pixel size. When the input archive is not beside the 
 copied alone) the crop is cut from the montage instead, at its lower resolution, and says so. A timepoint
 whose crop cannot be cut at all says why — never a blank square presented as a picture.
 
+**Channel.** Crops are cut from the phase image by default, or from a fluorescence channel the run read
+(``NanowellData.image_channels``). A fluorescence image is the member the pipeline paired with the phase image
+(``process_microscopy._derive_fluor_filename``): the phase name with its channel field — or, in a schema without
+one, the phase token — replaced by the channel's token, matched case-insensitively. The montage the run kept is
+phase only, so a fluorescence crop never falls back to it: a timepoint without the channel's tile says so, rather
+than showing the phase picture under the channel's name (CLAUDE.md §7).
+
 Qt-free; reads files, so the page calls it on a worker.
 """
 
@@ -108,13 +115,16 @@ class Crop:
     #: The cells the run counted inside the crop, as ``(column, row)`` pixel positions in it (N × 2), from the
     #: well's cell table; ``None`` when the well has no cell table, so "no table" never reads as "no cell".
     cells: np.ndarray | None = None
+    #: The fluorescence channel the image is of; ``""`` for the phase image.
+    channel: str = ""
 
 
 _IMAGE_SUFFIXES = (".tif", ".tiff")
 
 
-def _member_for(names, data, well: str, timepoint: str, tile: str) -> str | None:
-    """The input archive member holding the phase image of *tile* at *timepoint*, by the run's schema.
+def _member_for(names, data, well: str, timepoint: str, tile: str, channel: str = "") -> str | None:
+    """The input archive member holding the image of *tile* at *timepoint* — the phase image, or with *channel* that
+    fluorescence channel's image (:func:`_channel_member`) — by the run's schema.
 
     Only TIFF members are judged — an archive also carries ``.DS_Store``, ``__MACOSX/`` AppleDouble sidecars
     (``._<name>``, the same stem as the image) and directory entries, none of which is an image (CLAUDE.md
@@ -133,10 +143,39 @@ def _member_for(names, data, well: str, timepoint: str, tile: str) -> str | None
         parts = base.rsplit(".", 1)[0].split(sep)
         if len(parts) < len(fields):
             continue
+        # Without a channel field the pipeline tells the phase image by its token in the name
+        # (``process_microscopy._is_nuclear_filename``); without this a fluorescence image of the same tile, named
+        # the same but for its token, would be taken for the phase image.
+        if "channel" not in fields and data.phase_token and data.phase_token.lower() not in base.lower():
+            continue
         tokens = {f: p.lower() for f, p in zip(fields, parts)}
         if all(tokens[k] == v for k, v in want.items() if k in tokens):
-            return name
+            return _channel_member(names, data, name, channel) if channel else name
     return None
+
+
+def _channel_member(names, data, phase_member: str, channel: str) -> str | None:
+    """The member holding *channel*'s image beside *phase_member*, named as the pipeline pairs them: the channel
+    field of the schema replaced by *channel*, or — in a schema with no channel field — the phase token replaced by
+    it. Matched case-insensitively in the same folder of the archive; ``None`` when the archive holds no such image."""
+    folder, _sep, base = phase_member.rpartition("/")
+    stem, dot, suffix = base.rpartition(".")
+    fields = [f for f in data.schema.split(":") if f]
+    sep = data.separator or "_"
+    if "channel" in fields:
+        parts = stem.split(sep)
+        index = fields.index("channel")
+        if index >= len(parts):
+            return None
+        parts[index] = channel
+        derived = sep.join(parts) + dot + suffix
+    elif data.phase_token and data.phase_token.lower() in base.lower():
+        start = base.lower().index(data.phase_token.lower())
+        derived = base[:start] + channel + base[start + len(data.phase_token):]
+    else:
+        return None
+    wanted = ((folder + "/") if folder else "") + derived
+    return next((name for name in names if name.lower() == wanted.lower()), None)
 
 
 def _cut(image: np.ndarray, cx: float, cy: float, half: float) -> np.ndarray | None:
@@ -168,14 +207,16 @@ def _cells_in(cells, left_um: float, top_um: float, um_per_px: float, shape) -> 
     return np.column_stack([x[inside], y[inside]])
 
 
-def site_crops(data, metrics, site, *, pad: float = 1.4) -> dict:
-    """``timepoint -> Crop`` for the nanowell *site* ``(well, q, r)``, over every timepoint of its well."""
+def site_crops(data, metrics, site, *, pad: float = 1.4, channel: str = "") -> dict:
+    """``timepoint -> Crop`` for the nanowell *site* ``(well, q, r)``, over every timepoint of its well, from the phase
+    image or *channel*'s."""
     well, q, r = site
-    return crops_for_sites(data, metrics, [(well, q, r)], pad=pad).get((well, q, r), {})
+    return crops_for_sites(data, metrics, [(well, q, r)], pad=pad, channel=channel).get((well, q, r), {})
 
 
-def crops_for_sites(data, metrics, sites, *, pad: float = 1.4) -> dict:
-    """``(well, q, r) -> {timepoint: Crop}`` for every nanowell in *sites*, each over every timepoint of its well.
+def crops_for_sites(data, metrics, sites, *, pad: float = 1.4, channel: str = "") -> dict:
+    """``(well, q, r) -> {timepoint: Crop}`` for every nanowell in *sites*, each over every timepoint of its well, cut
+    from the phase image or, with *channel*, from that fluorescence channel's image.
 
     The same crops :func:`site_crops` cuts one nanowell at a time, read in one pass: each well's input archive is
     opened once, and the rows are taken in (timepoint, owner tile) order so an owner tile shared by several of
@@ -194,12 +235,13 @@ def crops_for_sites(data, metrics, sites, *, pad: float = 1.4) -> dict:
         records = rows.sort_values("tp_order").to_dict("records")
         # Timepoint first, then owner tile: rows that share a tile at a timepoint come one after another.
         records.sort(key=lambda row: (row["tp_order"], str(row.get("owner") or "")))
-        _cut_well(data, str(well), records, pad, out, tifffile)
+        _cut_well(data, str(well), records, pad, out, tifffile, channel)
     return out
 
 
-def _cut_well(data, well: str, records, pad: float, out: dict, tifffile) -> None:
-    """Cut *records* (one well's rows, in timepoint and owner order) into *out*."""
+def _cut_well(data, well: str, records, pad: float, out: dict, tifffile, channel: str = "") -> None:
+    """Cut *records* (one well's rows, in timepoint and owner order) into *out*, from *channel*'s images (``""``: the
+    phase image). A fluorescence crop is never cut from the montage, which is phase only."""
     zf, why_not = None, "the input archive is not beside this dataset"
     archive = Path(data.in_dir) / f"{well}.zip" if data.in_dir is not None else None
     if archive is not None and archive.is_file():
@@ -225,15 +267,18 @@ def _cut_well(data, well: str, records, pad: float, out: dict, tifffile) -> None
             site = (well, int(row["nw_q"]), int(row["nw_r"]))
             crops = out[site]
             if not (isinstance(row.get("well_x_um"), float) and math.isfinite(row["well_x_um"])):
-                crops[tp] = Crop(None, "", f"No position at {tp} ({row.get('state')}).")
+                crops[tp] = Crop(None, "", f"No position at {tp} ({row.get('state')}).", channel=channel)
                 continue
             half_um = pad * float(row.get("radius_um") or 50.0)
             crop, owner = None, row.get("owner")
             owned = isinstance(owner, str) and owner != ""
             if zf is not None and owned:
                 if tile_held[0] != (tp, owner):
-                    tile_held[:] = [(tp, owner), _owner_tile(zf, names, data, well, tp, owner, tifffile)]
-                crop = _tile_crop(tile_held[1], data, row, owner, half_um, cells_at(tp))
+                    tile_held[:] = [(tp, owner), _owner_tile(zf, names, data, well, tp, owner, tifffile, channel)]
+                crop = _tile_crop(tile_held[1], data, row, owner, half_um, cells_at(tp), channel)
+            if crop is None and channel:
+                crops[tp] = Crop(None, "", _no_channel_crop(channel, zf is None, why_not, owned), channel=channel)
+                continue
             if crop is None:
                 if montage_held[0] != tp:
                     montage_held[:] = [tp, read_montage(data, well, tp)]
@@ -259,10 +304,20 @@ def _cut_well(data, well: str, records, pad: float, out: dict, tifffile) -> None
             zf.close()
 
 
-def _owner_tile(zf, names, data, well, tp, owner, tifffile) -> np.ndarray | None:
-    """The phase image of tile *owner* at *tp*, as the input archive holds it; ``None`` when it cannot be found
-    or read."""
-    member = _member_for(names, data, well, tp, owner)
+def _no_channel_crop(channel: str, no_archive: bool, why_not: str, owned: bool) -> str:
+    """Why a fluorescence crop could not be cut. The montage is phase only, so there is no lower-resolution
+    fallback to offer."""
+    if no_archive:
+        return f"No {channel} crop: {why_not} (the run's montage is phase only)."
+    if not owned:
+        return f"No {channel} crop: the nanowell has no owner tile (it is fused or shared)."
+    return f"No {channel} crop: the archive holds no {channel} image of the owner tile here."
+
+
+def _owner_tile(zf, names, data, well, tp, owner, tifffile, channel: str = "") -> np.ndarray | None:
+    """The image of tile *owner* at *tp* — phase, or *channel*'s — as the input archive holds it; ``None`` when it
+    cannot be found or read."""
+    member = _member_for(names, data, well, tp, owner, channel)
     if member is None:
         return None
     try:
@@ -272,7 +327,7 @@ def _owner_tile(zf, names, data, well, tp, owner, tifffile) -> np.ndarray | None
         return None
 
 
-def _tile_crop(image, data, row, owner, half_um, cells=None) -> Crop | None:
+def _tile_crop(image, data, row, owner, half_um, cells=None, channel: str = "") -> Crop | None:
     if image is None:
         return None
     tp = row["timepoint"]
@@ -292,4 +347,4 @@ def _tile_crop(image, data, row, owner, half_um, cells=None) -> Crop | None:
     pixels, left, top = cut
     return Crop(pixels, "tile", f"{owner}, full resolution",
                 _cells_in(cells, float(tile["left_um"]) + left * scale, float(tile["top_um"]) + top * scale, scale,
-                          pixels.shape))
+                          pixels.shape), channel)

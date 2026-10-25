@@ -128,7 +128,7 @@ def test_many_nanowells_are_cut_as_one_at_a_time_cuts_them_reading_each_owner_ti
 def page(qtbot, tmp_path, monkeypatch):
     """The page on COUNTS with A01 and B01 selected, and crops that differ per nanowell in brightness: nanowell
     q is a constant image of value 10·(q + 1), with a dark pixel so no crop is flat."""
-    def crops_for_sites(_data, _metrics, sites):
+    def crops_for_sites(_data, _metrics, sites, **_kw):
         out = {}
         for well, q, r in sites:
             image = np.full((12, 12), 10.0 * (q + 1))
@@ -243,7 +243,7 @@ def test_another_well_is_ranked_among_its_own_nanowells(page, qtbot):
 
 
 def test_a_crop_read_that_failed_says_why_in_its_panels(page, qtbot, monkeypatch):
-    def broken(_data, _metrics, _sites):
+    def broken(_data, _metrics, _sites, **_kw):
         raise OSError("disk gone")
 
     monkeypatch.setattr(nwc, "crops_for_sites", broken)

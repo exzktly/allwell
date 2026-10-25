@@ -91,10 +91,10 @@ CELLS = {"t_c": [[2.0, 3.0]], "t_a": [[1.0, 1.0], [5.0, 6.0], [7.0, 2.0]]}
 
 @pytest.fixture
 def cell_crops(monkeypatch):
-    def crops(_data, _metrics, site):
+    def crops(_data, _metrics, site, **_kw):
         return {tp: Crop(np.zeros((10, 10)), "tile", "F0, full resolution", np.array(xy)) for tp, xy in CELLS.items()}
 
-    def many(data, metrics, sites):
+    def many(data, metrics, sites, **_kw):
         return {tuple(s): crops(data, metrics, s) for s in sites}
 
     monkeypatch.setattr(nwc, "site_crops", crops)
@@ -143,7 +143,7 @@ def test_the_extremes_view_draws_the_cells_and_its_box_is_the_same_setting(page,
 
 
 def test_a_crop_of_a_well_without_a_cell_table_is_named_in_the_caption(page, qtbot, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(nwc, "site_crops", lambda _d, _m, _s: {"t_c": Crop(np.zeros((10, 10)), "tile", "F0", None)})
+    monkeypatch.setattr(nwc, "site_crops", lambda _d, _m, _s, **_kw: {"t_c": Crop(np.zeros((10, 10)), "tile", "F0", None)})
     _loaded(qtbot, page)
     _click_dot(qtbot, page, ("A01", 1, 0))
     _press(qtbot, page, "_nw_strip_cells_box")

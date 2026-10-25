@@ -23,9 +23,9 @@ from review.features.export.service import export_cell_data_from
 from review.features.nanowell import controller as nwc
 from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
-    BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut, match_channel,
+    BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut,
 )
-from review.features.nanowell import starting_cells_compute as sc
+from review.features.nanowell.subset_view import build_subset_control
 from review.features.nanowell.state import EXTREMES_MAX_N
 from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
@@ -77,20 +77,17 @@ _EXTREMES_TIP = ("How many nanowells each block shows: this many with the larges
                  "smallest. A well with fewer shares them between the blocks, never showing one twice.")
 _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their well, so each line over time follows "
                "one set of nanowells. Off, each timepoint's median is over whichever nanowells could be measured "
-               "then. The others are counted as outside the fixed cohort. See also Starting cells, which chooses "
-               "nanowells by how many cells they held at the baseline.")
-_START_TIP = ("Use only the nanowells that held this many cells at the Baseline — at the well's earliest timepoint, "
-              "or at each nanowell's first measurable one. A nanowell whose count there is unknown is left out "
-              "whenever a bound is set. Every figure states how many were kept; the Array view dims the others "
-              "instead of hiding them, and Save nanowell data… keeps every row and flags them.\n"
-              "For clonality, use the Earliest baseline: a count taken later may follow a division.")
-_START_MIN_TIP = "The fewest cells a nanowell may have held at the baseline (0: no minimum)."
-_START_MAX_TIP = "The most cells a nanowell may have held at the baseline (any: no maximum)."
-#: The most cells either bound can be set to: well above any nanowell's seeding.
-_START_LIMIT = 999
+               "then. The others are counted as outside the fixed cohort. See also Subset, which chooses nanowells "
+               "by how many cells they held at the baseline, a metric, their position or their imaging field.")
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
-_METRIC_TIP = ("What each dot is. Brightness and site signal use the channel chosen in the app's channel "
-               "selector; they are greyed when that channel has no site intensities.")
+_METRIC_TIP = ("What each dot is. Brightness and site signal, and their fold changes, are of the fluorescence "
+               "channel chosen beside this (Channel); they are greyed when the run measured no fluorescence.")
+_CHANNEL_TIP = ("The fluorescence channel Brightness and Site signal (and their fold changes) are drawn for, on every "
+                "view and in the site detail. A channel the run read but did not measure in the nanowells is listed "
+                "greyed, with why.")
+_IMAGE_CHANNEL_TIP = ("The channel the crops are cut from — the site detail's strip, Pop out, the Extremes montage — "
+                      "and the Array view's Full resolution montage: the phase image, or a fluorescence channel the run "
+                      "read. One setting wherever it is offered. The run montage is phase only.")
 _AXIS_TIP = ("Time: one panel per well (or replicate set), timepoints along x, the well medians joined.\n"
              "Wells: one timepoint, wells and replicate sets along x, with each group's centre and 95% "
              "interval over wells — wells are the replicate unit, nanowells are not.")
@@ -176,6 +173,12 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_metric_cb", metric_cb)
     grp_metric = band.add_scope("Metric", metric_cb)
 
+    channel_cb = QComboBox()
+    channel_cb.setToolTip(_CHANNEL_TIP)
+    channel_cb.currentIndexChanged.connect(lambda _i: nwc.set_channel(ctx, channel_cb.currentData() or ""))
+    reg.register("_nw_channel_cb", channel_cb)
+    grp_channel = band.add_scope("Channel", channel_cb)
+
     axis_seg = SegmentedControl()
     for key, label in _AXES:
         axis_seg.addSegment(text=label, data=key)
@@ -190,7 +193,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_baseline_cb", baseline_cb)
     grp_baseline = band.add_scope("Baseline", baseline_cb)
 
-    start = _build_starting_cells(ctx, band)
+    start = build_subset_control(ctx, band, timepoint_text)
 
     cohort_box = QCheckBox("Fixed cohort")
     cohort_box.setToolTip(_COHORT_TIP)
@@ -222,6 +225,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     extremes_spin.valueChanged.connect(lambda value: nwc.set_extremes_n(ctx, value))
     reg.register("_nw_extremes_spin", extremes_spin)
     extremes_cells = _cells_box(ctx, "_nw_extremes_cells_box")
+    extremes_image = _image_channel_combo(ctx, "_nw_extremes_image_channel_cb")
     extremes_tps = _extremes_timepoints_button(ctx, band)
     extremes_numbers = QCheckBox("Metrics")
     extremes_numbers.setToolTip(_CROP_METRICS_TIP)
@@ -229,7 +233,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     extremes_numbers.toggled.connect(lambda on: nwc.set_crop_metrics(ctx, on))
     reg.register("_nw_extremes_metrics_box", extremes_numbers)
     grp_extremes = band.add_scope("Largest & smallest", extremes_spin, extremes_tps.button, extremes_cells,
-                                  extremes_numbers)
+                                  extremes_numbers, extremes_image)
 
     responding_edit = QLineEdit()
     responding_edit.setPlaceholderText("not set")
@@ -254,6 +258,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     band.add_action(export_btn)
     band.add_action(make_properties_button(ctx, band, "nanowell"))
     layout.addWidget(band)
+    layout.addWidget(start.editor)                  # the Subset's conditions, under the band when shown
 
     # ── the figures ─────────────────────────────────────────────────────────
     splitter = QSplitter(Qt.Horizontal, plot_area)
@@ -320,17 +325,22 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     def page_visible() -> bool:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
-    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, responding_edit,
-                extremes_spin, extremes_cells, extremes_numbers, *start.signalling, *array_controls.signalling)
+    controls = (metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box,
+                responding_edit, extremes_spin, extremes_cells, extremes_numbers, *start.signalling,
+                *array_controls.signalling)
 
     def refresh_controls() -> None:
-        channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None
+        channel = nwc.page_channel(ctx)
         blocked = [w.blockSignals(True) for w in controls]
         try:
             _select(metric_cb, st.metric)
             view = st.view if st.view in dict(VIEWS) else VIEWS[0][0]
             view_seg.setCurrentByData(view)
-            _grey_metrics(metric_cb, view, channel, ctx.state.channel.active_channel)
+            _grey_metrics(metric_cb, view, channel, nwc.page_channel_name(ctx))
+            _fill_channels(channel_cb, st.data, channel)
+            channel_cb.setEnabled(channel_cb.count() > 0 and METRICS.get(st.metric, ("", False))[1]
+                                  and _metric_reaches_figure(st, view))
+            _refresh_image_channels(ctx, st)
             per_nanowell = st.metric in PER_NANOWELL
             axis_seg.setCurrentByData("wells" if per_nanowell else st.axis)
             axis_seg.setSegmentEnabled(0, not per_nanowell)
@@ -360,6 +370,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             by_metric = _metric_reaches_figure(st, view)
             metric_cb.setEnabled(by_metric)
             grp_metric.setVisible(True)
+            grp_channel.setVisible(True)          # never hidden: a greyed control says why, an absent one cannot
             grp_baseline.setVisible(True)
             grp_axis.setVisible(distribution)
             cohort_box.setChecked(st.cohort)
@@ -415,71 +426,66 @@ def _fill_timepoints(combo, tps, times_h: dict) -> None:
     combo.setEnabled(len(tps) > 1)
 
 
-def _build_starting_cells(ctx, band) -> SimpleNamespace:
-    """*Starting cells*: a preset combo (Any, ≥1, 1, 1–2, ≥2, Custom…) right after Baseline, on every view, with a
-    minimum and a maximum shown while Custom is chosen. The combo is outlined in the accent while a bound is set,
-    so a filter restored with the page's settings is never forgotten."""
-    reg = ctx.widgets
+def _fill_channels(combo, data, channel) -> None:
+    """The *Channel* control: every fluorescence channel with site intensities, then — greyed, with why as the
+    tooltip — each channel the run read and did not measure in the nanowells. *channel* is the one drawn."""
+    combo.clear()
+    if data is None:
+        return
+    for name in data.channels:
+        combo.addItem(name, name)
+    for name, why in (getattr(data, "unmeasured_channels", None) or {}).items():
+        combo.addItem(f"{name} (not measured)", name)
+        item = combo.model().item(combo.count() - 1)
+        item.setEnabled(False)
+        item.setToolTip(why)
+    if channel is not None:
+        _select(combo, channel)
+    combo.setToolTip(_CHANNEL_TIP if data.channels or getattr(data, "unmeasured_channels", None) else
+                     _CHANNEL_TIP + "\n\nThis run measured no fluorescence channel in the nanowells.")
+
+
+#: The image-channel controls, one setting (``NanowellState.image_channel``) offered beside the crop strip, on the
+#: Extremes view and beside the Array view's Image.
+_IMAGE_CHANNEL_COMBOS = ("_nw_strip_image_channel_cb", "_nw_extremes_image_channel_cb", "_nw_array_image_channel_cb")
+
+
+def _image_channel_combo(ctx, name: str) -> QComboBox:
+    """One of the controls that choose the channel the page's pictures are of (:data:`_IMAGE_CHANNEL_COMBOS`)."""
     combo = QComboBox()
-    for key, label, _lo, _hi in sc.PRESETS:
-        combo.addItem(label, key)
-    combo.addItem("Custom…", sc.CUSTOM)
-    combo.setToolTip(_START_TIP)
-    lo_spin, hi_spin = QSpinBox(), QSpinBox()
-    lo_spin.setRange(0, _START_LIMIT)
-    hi_spin.setRange(-1, _START_LIMIT)
-    hi_spin.setSpecialValueText("any")                   # shown at -1: no maximum
-    hi_spin.setValue(-1)
-    for spin, tip in ((lo_spin, _START_MIN_TIP), (hi_spin, _START_MAX_TIP)):
-        spin.setToolTip(tip)
-        spin.setKeyboardTracking(False)                  # one change per value typed, not per keystroke
-    custom = {"open": False}                             # Custom stays chosen while its bounds are being typed
+    combo.setToolTip(_IMAGE_CHANNEL_TIP)
+    combo.currentIndexChanged.connect(lambda _i: nwc.set_image_channel(ctx, combo.currentData() or ""))
+    ctx.widgets.register(name, combo)
+    return combo
 
-    def typed(_value=None) -> None:
-        hi = hi_spin.value()
-        nwc.set_starting_cells(ctx, lo_spin.value() or None, None if hi < 0 else hi)
 
-    def chosen(_index=None) -> None:
-        key = combo.currentData()
-        custom["open"] = key == sc.CUSTOM
-        if custom["open"]:
-            refresh(ctx.state.feature_slice("nanowell"))  # shows the bounds that are set, changing nothing
-            return
-        _key, _label, lo, hi = next(p for p in sc.PRESETS if p[0] == key)
-        nwc.set_starting_cells(ctx, lo, hi)
-
-    def refresh(st) -> None:
-        lo, hi = st.start_min, st.start_max
-        blocked = [w.blockSignals(True) for w in (combo, lo_spin, hi_spin)]
+def _refresh_image_channels(ctx, st) -> None:
+    """Every image-channel control filled with the phase image and the run's fluorescence channels, on the one
+    chosen. Greyed, saying so, when the run read no fluorescence channel."""
+    channels = list(getattr(st.data, "image_channels", None) or []) if st.data is not None else []
+    phase = (getattr(st.data, "phase_token", "") or "") if st.data is not None else ""
+    chosen = nwc.page_image_channel(st)
+    for name in _IMAGE_CHANNEL_COMBOS:
+        combo = ctx.widgets.get_or_none(name)
+        if combo is None:
+            continue
+        blocked = combo.blockSignals(True)
         try:
-            _select(combo, sc.CUSTOM if custom["open"] else sc.preset_of(lo, hi))
-            lo_spin.setValue(lo or 0)
-            hi_spin.setValue(-1 if hi is None else hi)
-            show = combo.currentData() == sc.CUSTOM
-            lo_spin.setVisible(show)
-            hi_spin.setVisible(show)
-            active = sc.is_active(lo, hi)
-            if combo.property("filterActive") != active:
-                combo.setProperty("filterActive", active)
-                combo.style().unpolish(combo)
-                combo.style().polish(combo)
+            combo.clear()
+            combo.addItem(f"Phase ({phase})" if phase else "Phase", "")
+            for channel in channels:
+                combo.addItem(channel, channel)
+            _select(combo, chosen)
+            combo.setEnabled(bool(channels))
+            combo.setToolTip(_IMAGE_CHANNEL_TIP if channels else
+                             _IMAGE_CHANNEL_TIP + "\n\nThe run read no fluorescence channel: phase is all there is.")
         finally:
-            for w, b in zip((combo, lo_spin, hi_spin), blocked):
-                w.blockSignals(b)
-
-    combo.currentIndexChanged.connect(chosen)
-    lo_spin.valueChanged.connect(typed)
-    hi_spin.valueChanged.connect(typed)
-    reg.register("_nw_start_cb", combo)
-    reg.register("_nw_start_min", lo_spin)
-    reg.register("_nw_start_max", hi_spin)
-    group = band.add_scope("Starting cells", combo, lo_spin, hi_spin)
-    return SimpleNamespace(group=group, refresh=refresh, signalling=())
+            combo.blockSignals(blocked)
 
 
 def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:
     """Grey each Metric entry *view* cannot draw, with the reason as its tooltip: a channel metric with no site
-    intensities for the shared channel, and a metric with one value per nanowell on a view of values over time."""
+    intensities for the page's channel, and a metric with one value per nanowell on a view of values over time."""
     for i in range(metric_cb.count()):
         key = metric_cb.itemData(i)
         has_channel = not METRICS[key][1] or channel is not None
@@ -488,8 +494,8 @@ def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:
         item.setEnabled(has_channel and over_time)
         item.setToolTip("" if has_channel and over_time else
                         "One value per nanowell: no fold change to follow over time." if has_channel else
-                        f"No site intensities for the shared channel ({active_channel}); pick a fluorescence "
-                        f"channel.")
+                        f"No site intensities for the channel ({active_channel or 'none'}): this run measured no "
+                        f"fluorescence in the nanowells.")
 
 
 def _extremes_timepoints_button(ctx, parent) -> SimpleNamespace:
@@ -574,6 +580,7 @@ def _crops_header(ctx, parent) -> QHBoxLayout:
     row.addWidget(title)
     row.addStretch(1)
     row.addWidget(_cells_box(ctx, "_nw_strip_cells_box"))
+    row.addWidget(_image_channel_combo(ctx, "_nw_strip_image_channel_cb"))
     row.addWidget(button)
     return row
 
@@ -712,7 +719,7 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
     image_cb = _combo(_IMAGES, _IMAGE_TIP)
     image_cb.currentIndexChanged.connect(lambda _i: nwc.set_layer(ctx, "image", image_cb.currentData() or "off"))
     reg.register("_nw_image_cb", image_cb)
-    grp_image = band.add_scope("Image", image_cb)
+    grp_image = band.add_scope("Image", image_cb, _image_channel_combo(ctx, "_nw_array_image_channel_cb"))
 
     positions_seg = SegmentedControl()
     for key, label in _POSITIONS:

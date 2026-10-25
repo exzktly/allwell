@@ -87,7 +87,7 @@ def test_the_bounds_persist_and_a_saved_pair_that_is_not_a_filter_is_refused():
 # ── the page ─────────────────────────────────────────────────────────────────
 @pytest.fixture
 def page(qtbot, tmp_path, monkeypatch):
-    monkeypatch.setattr(nwc, "crops_for_sites", lambda _d, _m, sites: {s: {} for s in sites})
+    monkeypatch.setattr(nwc, "crops_for_sites", lambda _d, _m, sites, **_kw: {s: {} for s in sites})
     ctx = _page(qtbot, _write_nanowell_dataset(tmp_path, counts=COUNTS))
     ctx.state.selection.selected_wells = {"A01", "B01"}
     _loaded(qtbot, ctx)

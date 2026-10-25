@@ -3160,7 +3160,10 @@ What you can do depends on the row:
 
 - **Re-run wells…** (processing rows) opens Analyze set up to re-segment just
   the selected wells from scratch — *Only these wells* and *Force these wells*
-  both filled in — and leaves every other well alone. Nothing runs until you
+  both filled in, without switching *If a well already has output* to *Fill in
+  what's missing* — and leaves every other well alone. This works for a
+  nanowell plate on a remote host too, even if that choice is still set from
+  an earlier run. Nothing runs until you
   press **Run** there. Re-running replaces those wells' results; it cannot be
   undone.
 - **Exclude field…** (acquisition rows) asks why, then leaves that field out of

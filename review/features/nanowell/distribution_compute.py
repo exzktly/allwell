@@ -375,10 +375,10 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
 def _notes(model: DistributionModel, metric: str, time_source: str | None) -> None:
     if model.integer:
         model.notes.append("Whole-number values are packed within ±0.4 of their value.")
-    if model.axis == WELLS and any(p.stats for p in model.panels):
-        dfs = sorted({s.df for p in model.panels for s in p.stats if s.df is not None})
-        model.notes.append("Statistics are per well (mean of well medians, 95% t interval"
-                           + (f", df {', '.join(map(str, dfs))}" if dfs else "") + "); nanowells are not replicates.")
+    if model.axis == WELLS:
+        if any(math.isfinite(s.vs_control) for p in model.panels for s in p.stats):
+            model.notes.append("The comparison with the control is per well (mean of well medians over the "
+                               "control's); nanowells are not replicates.")
     elif any(n.startswith("Fixed cohort") for n in model.notes):
         model.notes.append("The line joins each well's median over its fixed cohort, the same nanowells at every "
                            "timepoint.")

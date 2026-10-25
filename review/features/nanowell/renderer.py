@@ -196,7 +196,8 @@ def _dot_units(ax, fig) -> tuple[float, float]:
 
 def _y_limits(model: DistributionModel, panel) -> tuple[float, float]:
     values = np.concatenate([s.values for s in panel.swarms] or [np.zeros(0)])
-    stats = [v for st in panel.stats for v in (st.ci_low, st.ci_high, st.centre) if math.isfinite(v)]
+    # Only a centre that carries a comparison is drawn (as text), so only that one widens the axis.
+    stats = [st.centre for st in panel.stats if math.isfinite(st.centre) and math.isfinite(st.vs_control)]
     if model.responding_above is not None and math.isfinite(model.responding_above):
         stats.append(model.responding_above)          # the cut stays in view, or the line would not be seen
     every = np.concatenate([values, np.asarray(stats, dtype=float)])
@@ -343,7 +344,10 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
 
 
 def _draw_centres(ax, model, panel, ink) -> None:
-    """Each well's median joined over time, and each group's centre, interval and comparison with the control."""
+    """Each well's median joined over time, and each group's comparison with the control.
+
+    No summary marker or interval is drawn beside a swarm: the swarm is the figure. The comparison with the
+    control (only when **vs** names a group) is written as text at the height of the group's centre."""
     for _well, points in panel.medians.items():
         pts = [(px, py) for px, py in points if math.isfinite(py)]
         if pts:
@@ -353,9 +357,6 @@ def _draw_centres(ax, model, panel, ink) -> None:
         if not math.isfinite(stat.centre):
             continue
         sx = stat.x + 0.44
-        if math.isfinite(stat.ci_low):
-            _ink(ax.plot([sx, sx], [stat.ci_low, stat.ci_high], color=ink, linewidth=1.4, zorder=4)[0])
-        _ink(ax.plot([sx], [stat.centre], marker="D", markersize=5, color=ink, zorder=4)[0])
         if math.isfinite(stat.vs_control):
             text = (f" {stat.vs_control:+.3g}" if "log2" in model.metric else f" ×{stat.vs_control:.3g}")
             _ink(ax.text(sx, stat.centre, text, fontsize=ANNOTATION_PT, va="center", color=ink, gid="nw-vs-control"))

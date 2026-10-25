@@ -92,11 +92,21 @@ def test_switching_back_takes_the_row_away_and_restores_the_field(tab):
     assert _shown_rows(tab) == ["Bright"], "the moved row stayed, listing EGFP twice"
 
 
-def test_an_input_loaded_while_label_free_is_already_chosen(tab):
+def test_a_folder_scanned_while_label_free_is_already_chosen(tab, tmp_path):
     _method(tab, "cellpose_labelfree")
-    tab._apply_pipeline_info({"nuclear_token": "EGFP", "fluor_tokens": ["Bright"]},
-                             set_input_path=False)
+    _scan(tab, tmp_path, ("BRIGHTFIELD", "EGFP"))
+    assert tab._nuclear_token_edit.text() == "EGFP", "premise: the scan chose EGFP"
     assert "EGFP" in _shown_rows(tab) and "EGFP" in _sent_channels(tab)
+
+
+def test_a_loaded_job_keeps_exactly_the_channels_it_states(tab):
+    """A queued job or a saved run states the channels it ran with; loading it
+    while label-free must not add the segmentation channel to them."""
+    tab._apply_pipeline_info({"segmentation_method": "cellpose_labelfree", "nuclear_token": "DAPI",
+                              "fluor_tokens": ["GFP", "BF"], "phase_token": "BF"},
+                             set_input_path=False)
+    assert tab._seg_method() == "cellpose_labelfree"
+    assert _sent_channels(tab) == ["GFP", "BF"]
 
 
 def test_the_form_s_default_is_not_made_into_a_channel(tab):

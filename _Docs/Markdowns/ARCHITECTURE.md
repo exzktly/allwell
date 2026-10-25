@@ -11452,9 +11452,11 @@ noted:
   dropped from the run, never segmented or measured. Switching the method to
   label-free therefore moves it into the fluorescent-channel rows, and switching
   back removes that row again unless it was marked smFISH or Phase since
-  (`seg_params._watch_labelfree_handover`); an input loaded while label-free is
-  already chosen is handed over at once (`_settle_labelfree_handover`, from
-  `_apply_pipeline_info`). Only a real channel moves — one a scan or a loaded run
+  (`seg_params._watch_labelfree_handover`); a folder scanned while label-free is
+  already chosen is handed over at once (`_settle_labelfree_handover(hand_over=True)`,
+  from `_autofill_from_input_scan`). A queued job or saved run being loaded is not:
+  the channels it records are the ones it ran with, and the edit-a-job round trip
+  reproduces them exactly. Only a real channel moves — one a scan or a loaded run
   named, or one typed (`_seg_channel_known`) — never the field's starting text,
   which no input is known to carry. The hidden field is hidden with its label
   (the parent `AnalyzeFormRow`), not only its cell

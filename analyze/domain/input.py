@@ -246,6 +246,9 @@ class AnalyzeInputMixin:
         info, tokens = scan_pipeline_info(guess)
         if info:
             self._apply_pipeline_info(info)
+            # A scan leaves the segmentation channel out of the fluorescent list; with label-free already chosen
+            # that channel would be dropped from the run (``seg_params._watch_labelfree_handover``).
+            self._settle_labelfree_handover(hand_over=True)
         # Beside the fields it just wrote, not only on the dashboard: the
         # dashboard line scrolls away and these two fields keep values that look
         # hand-entered for as long as the form is open.

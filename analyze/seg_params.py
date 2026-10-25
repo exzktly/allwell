@@ -224,15 +224,18 @@ class AnalyzeSegParamsMixin:
                 self._fluor_remove_row(edit.parentWidget(), remove_btn)
                 return
 
-    def _settle_labelfree_handover(self) -> None:
-        """After a scan or a loaded run rewrote the channels: start the handover afresh from them.
+    def _settle_labelfree_handover(self, *, hand_over: bool = False) -> None:
+        """After the channels were rewritten: start the handover afresh from them.
 
-        A row moved for the previous dataset means nothing for this one, and an input loaded while the method
-        is already label-free needs its segmentation channel listed now, since no switch will come to do it.
+        A row moved for the previous dataset means nothing for this one. With *hand_over* — a folder scan, which
+        names the segmentation channel and leaves it out of the fluorescent list — an input scanned while the
+        method is already label-free has that channel listed now, since no switch will come to do it. A queued
+        job or a saved run being loaded passes no *hand_over*: the channels it records are the ones that run
+        used, and the edit-a-job round trip must reproduce them exactly (``tests/test_analyze_job_edit.py``).
         """
         self._labelfree_moved_token = ""
         self._last_seg_method = self._seg_method()
-        if self._last_seg_method in LABELFREE_METHODS:
+        if hand_over and self._last_seg_method in LABELFREE_METHODS:
             self._hand_segmentation_channel_to_rows()
 
     def _build_cellpose_diameter_row(self, sec: QWidget) -> None:

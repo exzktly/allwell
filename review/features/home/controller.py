@@ -33,6 +33,8 @@ from .plate_panel import (
 # back — there is no cycle here to work around, and the deferred-feature-import
 # budget is a ratchet rather than a place to put convenience.
 from .sample_map.controller import current_layer, on_tab_entered
+from ._phone import apply as apply_phone_form
+from ._phone import grid_columns
 from .tab_view import (
     IMPORT_KEY, build_recent_tile, build_saved_plot_tile, definition_subtabs,
     format_value, legend_label, legend_swatch_style,
@@ -419,6 +421,8 @@ def refresh_home(ctx) -> None:
     triage_refresh = ctx.runtime.triage.refresh
     if callable(triage_refresh):
         triage_refresh()
+    # Last, so the phone pass measures the page as it now stands.
+    apply_phone_form(ctx, repaint=False)
     slice_ = ctx.state.feature_slice("home")
     if slice_ is not None:
         slice_.last_rendered_for = str(
@@ -584,11 +588,22 @@ def _paint_tiles(ctx) -> None:
     _clear(host)
     layout = host.layout()
     tiles = hc.stat_tiles(ctx)
-    for index, tile in enumerate(tiles):
-        layout.addWidget(_tile_widget(host, tile), 0, index)
     chips = hc.channel_chips(ctx)
+    cells = [_tile_widget(host, tile) for tile in tiles]
     if chips:
-        layout.addWidget(_channel_widget(host, chips), 0, len(tiles))
+        cells.append(_channel_widget(host, chips))
+    # One row at the desk, one column on a phone (``_phone``).
+    columns = max(1, grid_columns(len(cells)))
+    for index, cell in enumerate(cells):
+        layout.addWidget(cell, index // columns, index % columns)
+
+
+def repaint_grids(ctx) -> None:
+    """Redraw the two grids whose column count follows phone layout."""
+    if _widget(ctx, "_home_title") is None:
+        return
+    _paint_tiles(ctx)
+    _paint_saved_plots(ctx)
 
 
 def _tile_widget(parent: QWidget, tile) -> QWidget:
@@ -722,9 +737,10 @@ def _paint_saved_plots(ctx) -> None:
         + (f" — the {len(shown)} most recent are shown; open Saved Plots for "
            f"the other {hidden}." if hidden else ". Click one to open it."))
     grid = host.layout()
+    columns = grid_columns(_THUMBS_PER_ROW)
     for index, entry in enumerate(shown):
         grid.addWidget(build_saved_plot_tile(ctx, host, entry),
-                       index // _THUMBS_PER_ROW, index % _THUMBS_PER_ROW)
+                       index // columns, index % columns)
 
 
 def open_saved_plot(ctx, plot_id: str) -> None:
@@ -921,6 +937,8 @@ def _repaint_recents(ctx) -> None:
     """Redraw both surfaces that show the history. See :func:`recent_rows`."""
     _paint_recents(ctx)
     paint_recents_placeholder(ctx)
+    # Both were rebuilt, so in phone layout both are fitted again.
+    apply_phone_form(ctx, repaint=False)
 
 
 def paint_recents_placeholder(ctx) -> None:

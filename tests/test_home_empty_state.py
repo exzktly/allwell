@@ -787,9 +787,14 @@ def test_forgetting_a_row_repaints_both_of_homes_surfaces(monkeypatch, tmp_path)
     monkeypatch.setattr(home, "_paint_recents", lambda _c: painted.append("card"))
     monkeypatch.setattr(home, "paint_recents_placeholder",
                         lambda _c: painted.append("placeholder"))
+    # The repaint then fits both surfaces to a phone; that pass reads the
+    # page's widgets, which this context does not carry, and is
+    # ``tests/test_home_phone_layout.py``'s subject rather than this one's.
+    monkeypatch.setattr(home, "apply_phone_form",
+                        lambda _c, **_k: painted.append("phone"))
 
     home.recent_rows(ctx, 5)[0][5]()
-    assert painted == ["card", "placeholder"]
+    assert painted == ["card", "placeholder", "phone"]
 
 
 def test_the_cards_own_x_forgets_the_dataset_and_redraws_the_card(

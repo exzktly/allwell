@@ -12883,7 +12883,10 @@ therefore also creates `allwell-cellpose` (`CELLPOSE_ENV_NAME`) with the same
 `env_setup_script` — the same python and scientific stack — and pip-installs
 `requirements-remote-cellpose.txt` into it: Torch 2.4.1, the same Cellpose 4.1.1,
 no TensorFlow or StarDist, which the pipeline imports only inside StarDist's own
-functions. The probe reads it as it reads `allwell` (`CELLPOSE_REQUIRED_IMPORTS`,
+functions. The file holds numpy at conda's 1.24 and opencv below 4.11: with no
+TensorFlow capping it, Cellpose's unbounded opencv requirement otherwise pulled
+numpy 2 under conda's scipy, scikit-image and the pinned imagecodecs, which then
+failed to import. The probe reads it as it reads `allwell` (`CELLPOSE_REQUIRED_IMPORTS`,
 `CELLPOSE_VERSION_PINS`, plus whether its Torch sees a GPU), `install_cellpose_deps`
 installs it with its own markers (`pip_install_script(..., tag="pip_cellpose")`),
 a failure there is a warning rather than the bootstrap's failure, and a re-probe
@@ -12894,8 +12897,11 @@ Which env a run uses is decided per run: `remote_conda.cellpose_env_selector` gi
 a run that segments with Cellpose (`runs_cellpose`: a nanowell run, or a Cellpose
 method) on a host left at the default env the `prefer` selector, and leaves a host
 whose Remote python names an env alone. `prefer` is resolved **on the remote**, by
-the env guard: the Cellpose env when it is a usable environment, `allwell` otherwise
-with a line saying so, and the guard's usual failure when neither is. `conda run -p`
+the env guard: the Cellpose env when it is ready (`aw_cellpose_env_ready`: a valid
+environment, no failed or still-running `pip_cellpose` install, and its python
+finds Cellpose, Torch, pandas, tifffile and imagecodecs — the bootstrap creates the
+env before it installs into it, non-fatally, so an env that merely exists is not
+one a run can import in), `allwell` otherwise with a line saying so, and the guard's usual failure when neither is. `conda run -p`
 then reads the prefix the guard resolved (`remote_transport.AW_PREFIX_ARG`,
 `"$AW_PREFIX"`, the one argument `_remote_quote` passes through unquoted), so a host
 not yet bootstrapped for the Cellpose env still runs, in float32.

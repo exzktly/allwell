@@ -1678,7 +1678,13 @@ single visible selector for the top-level pages. It mirrors the notebook —
 clicking a rail item drives `_notebook.setCurrentByName(name)`; programmatic
 changes to the notebook drive the rail back via
 `ReviewApp._on_notebook_current_changed`. There is no visible tab bar;
-the page stack is purely name-keyed.
+the page stack is purely name-keyed. A row's active state is carried as an
+`active` property on the row, its body, its accent strip **and its label**, each
+styled by its own rule and repolished together in `_RailNavRow.setActive`: the
+label's colour was a descendant rule on the row's property, which Qt resolves
+only when the label itself is polished, so the first row — made active by
+`addItem` — kept the active colour for good and the selected row never took it
+(`tests/test_rail_nav_label_follows_selection.py`).
 
 `NamedPageStack` also exposes `detachPage(name)` / `reattachPage(name, widget)`
 (backed by a canonical `_page_order`) so a page can be temporarily moved out of
@@ -5960,6 +5966,18 @@ bars. `fig.axes` includes a colour bar, and every per-axis pass in
 Map offered an "Axis 2" that selected the bar and moved nothing. The numbering
 stays positional — axis 1 is the figure's first axes whether or not a colour bar
 sits at 2 — because that is what a stored `axis_buckets` key already means.
+
+The picker **opens on "All"** (`ExportStyleSidebar._open_on_all_axes`, at build
+and on every dataset load), so an edit reaches every panel until an axis is
+picked or a subplot clicked. A stored single-axis target is not honoured, since
+figures saved while the panel opened on axis 1 record "1" whether or not anyone
+chose it. Switching the target is more than setting the field: while one axis
+was targeted its limits and log toggles were written to the flat prefs too, and
+the style pass applies flat limits to every targeted axis, so the flat axis keys
+are first filed in that axis's bucket (which the pass reads first, so it draws
+the same) and the flat keys take the "All" bucket's values or the defaults.
+Nothing drawn changes; only what an edit reaches does
+(`tests/test_cell_gating_cdf_and_axis.py`).
 
 `features/export/style.py` also owns the **Properties-panel roster**.
 `open_export_style_panel` maps a plot key to the figure, canvas and default
@@ -10472,8 +10490,15 @@ says once that the host registers every tile (`_nanowell_log_once`). Its option 
 the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's
 `execution_options` all name the same things and the edit-a-queued-job round trip and the sidecar restore
 need no translation; a sidecar that states `nanowell_format: null` switches the mode off, and one that
-predates the keys leaves it alone. Switching the mode on sets the segmentation selector to label-free and locks it (the
-choice returns when the mode goes off); a build with no label-free method disables the mode. Run validation adds
+predates the keys leaves it alone. Switching the mode on sets the segmentation selector to label-free, locks it and
+**hides its row** (the selector's `AnalyzeFormRow`; the choice returns, and the row is shown, when the mode goes off). A nanowell run
+never runs the per-image segmentation the selector chooses between — each well goes to `nanowell_task.run_zip_task`,
+and `pipeline/cli_args` sets the method to label-free itself — so the selector is set only so the form's checks for
+the other methods (a StarDist tile size, a watershed cytoplasm channel) do not refuse a run over settings it ignores;
+shown as well, it read as a second segmentation to configure beside the count's own. The count box carries the
+form's one **Segmentation** row in this mode ("Nanowell cell count (Cellpose, on the Phase channel)"), and the hint
+under the section names no method then, keeping only what stops the run (no channel marked Phase)
+(`tests/test_nanowell_count_settings_sit_with_segmentation.py`). A build with no label-free method disables the mode. Run validation adds
 `nanowell_option_errors` (bounds; a Phase channel only when channel auto-detection is off, since detection names it
 at run time) to the numeric checks, then, with an input folder, `nanowell_input_report`: **problems** stop the run (no
 well zips, no acquisition record and no tile grid, a tile the record names that an archive lacks, a grid that
@@ -10640,6 +10665,29 @@ timepoint" (labelled "outside the fixed cohort"), so it is counted among the exc
 and the footer states the cohort as kept of sites. `well_summary(reasons=…)`, `distribution_model(cohort=…)`
 and `views_compute.trajectory_panels(cohort=…)` all apply it, so the beeswarm, the summaries and the trajectory
 medians follow the same nanowells.
+
+**The starting-cells filter** (`starting_cells_compute`, `NanowellState.start_min` / `start_max`, the *Starting
+cells* control). It keeps only the nanowells whose count at the baseline — `n0`, the number the occupancy colours
+are drawn from, so the filter and the key always agree — lies within the bounds; `None` is no bound on that side,
+a minimum of 0 is no minimum, and with a bound set a nanowell whose count at baseline is unknown is outside.
+`controller.draw_view` applies it first (`apply`, over the drawn wells), before any exclusion is worked out and
+before the fixed cohort, so a filtered nanowell is never counted twice: under `≥1`, "empty at baseline" no longer
+appears among a fold change's exclusions, because those nanowells were filtered first. The filtered nanowells are
+not given a reason per swarm (hundreds against every swarm would drown the reasons a reader acts on); every figure
+carries one sentence (`note`) with the bounds, the baseline, the nanowells kept of all, those outside the range and
+those with no count, the kept nanowells counted after the earliest timepoint under *First measurable* (their
+cells may have divided, so a "single cell" filter there is not a clonality filter), and each drawn well keeping
+fewer than `FEW_BELOW`, since wells are the replicate unit. A filter that keeps nothing draws `empty_text`.
+Distribution, Trajectories, Position and Extremes draw only the kept nanowells, and the fraction responding is
+over them; Position does not name a well the filter emptied as one without addresses. The Array view draws every
+nanowell and veils the ones outside in the figure's ground (`renderer._dim_nanowells`, a theme-paired colour, still
+clickable), counting them in its footer; the occupancy key fades the classes the filter removes whole
+(`occupancy_in_filter`); the site detail draws a selected nanowell outside the filter and says so. *Save nanowell
+data…* keeps every row and flags it (`in_starting_cells_filter`, `starting_cells_min` / `_max` / `_baseline`).
+Batch Export's Nanowells mode has its own minimum and maximum, seeded from the page each time the panel is shown;
+its figures pass them to `draw_view` and its summary CSV is of the kept nanowells, with the bounds in two columns.
+The bounds persist with the page's settings and in Saved Plots; a saved pair that is not a filter (a minimum above
+the maximum, a value that is not a whole number) restores as no filter rather than half of one.
 
 **Summaries** (`summary_compute`). `well_summary` describes one well per timepoint: median, interquartile
 range, fraction responding — the share of the nanowells used whose value is strictly above
@@ -10894,7 +10942,9 @@ and the read is not relaunched on every redraw; a result for a dataset loaded si
 the new dataset's bookkeeping; each worker bridge is kept on the state until it delivers, then released.
 
 **The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (the five
-views; U3 planned the first four), Metric, Along x, Baseline, Timepoint and *vs* (both shown on *Along x: Wells*), Well and a
+views; U3 planned the first four), Metric, Along x, Baseline, *Starting cells* (`_build_starting_cells`: a preset
+combo — Any, ≥1, 1, 1–2, ≥2, Custom… — on every view, with a minimum and a maximum shown while Custom is chosen,
+the combo outlined in the accent through the `filterActive` QSS property while a bound is set), Timepoint and *vs* (both shown on *Along x: Wells*), Well and a
 timepoint slider (on the one-well view, `ONE_WELL_VIEWS`), the Array view's Image combo, Positions switch,
 *Layers* menu (each switch, the colouring, and *Show as* for the presets), *Fit* / *1:1* and the anchor's
 three buttons, Save and Properties; `refresh_controls` shows each view only the controls it uses (Metric and

@@ -1342,6 +1342,11 @@ QComboBox:hover {{
 QComboBox:focus, QComboBox:on {{
     border-color: {c.accent};
 }}
+/* A filter control with a bound set (the Nanowells page's Starting cells): outlined in
+   the accent whatever its focus, so a filter restored with a page's settings is seen. */
+QComboBox[filterActive="true"] {{
+    border-color: {c.accent};
+}}
 /* Every other input type here has a disabled rule and this one did not, so a
    combo that a tab had greyed out rendered pixel-identical to a live one —
    ``setEnabled(False)`` took effect (the popup would not open) with nothing on

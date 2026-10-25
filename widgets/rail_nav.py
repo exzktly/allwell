@@ -115,6 +115,7 @@ class _RailNavRow(QFrame):
 
         self._label = QLabel(label, body)
         self._label.setObjectName("RailNavRowLabel")
+        self._label.setProperty("active", False)
         self._label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         self._chip = SelectionChip("", variant="muted", parent=body)
@@ -142,7 +143,16 @@ class _RailNavRow(QFrame):
         # the parent's property flips, leaving the previous accent bar
         # painted on the first-clicked row.
         self._strip.setProperty("active", bool(on))
-        for w in (self, self._body, self._strip):
+        # And on the label, for the same reason, with its own rule rather than
+        # ``QFrame#RailNavRow[active="true"] QLabel#RailNavRowLabel``. That
+        # descendant rule is resolved when the *label* is polished, and only the
+        # row, body and strip were repolished here — so the label kept the
+        # colour it was first polished with. The first row added is made active
+        # by ``addItem``, so the first entry of every rail (Home in Review, the
+        # first tool in Datasets) stayed at the active colour whatever was
+        # selected, and the row actually selected never brightened.
+        self._label.setProperty("active", bool(on))
+        for w in (self, self._body, self._strip, self._label):
             w.style().unpolish(w)
             w.style().polish(w)
         self._refresh_icon()
@@ -374,7 +384,7 @@ class RailNav(QFrame):
            Hover is still signalled, by `QFrame#RailNavRowBody:hover` above:
            that one styles the widget it names rather than a descendant of it,
            so the pseudo-state resolves normally. */
-        QFrame#RailNavRow[active="true"] QLabel#RailNavRowLabel {{
+        QLabel#RailNavRowLabel[active="true"] {{
             color: {c.text_primary};
         }}
         """

@@ -222,10 +222,15 @@ class AnalyzeNanowellSectionMixin:
         Segmentation section's label-free page (``seg_params._nanowell_count_box``), which shows them in nanowell
         mode in place of the settings the count does not read. In a form without that page they stay here."""
         box = getattr(self, "_nanowell_count_box", None) or sec
-        heading = QLabel("Nanowell mode: the cell count in each nanowell segments with these.", box)
-        heading.setObjectName("Muted")
+        # Stands where the method selector stood: in nanowell mode that selector is hidden
+        # (``_nanowell_pin_segmentation``), so this is the form's one Segmentation entry.
+        row = self._row(box, "Segmentation", tooltip=(
+            "A nanowell run does not run the per-image segmentation the methods above choose between: it counts the "
+            "cells in each nanowell with its own Cellpose call, on the channel marked 'Phase', with the settings "
+            "below."))
+        heading = QLabel("Nanowell cell count (Cellpose, on the Phase channel)", row)
         heading.setWordWrap(True)
-        box.layout().addWidget(heading)
+        row.layout().addWidget(heading, 1)
         row = self._row(box, "Cellpose model", tooltip=(
             "The model the cell count segments with. cpsam: Cellpose-SAM, Cellpose 4's model, which the app "
             "installs. cyto3: Cellpose 3's generalist. livecell_cp3: the Cellpose 3 model trained on phase-contrast "
@@ -399,12 +404,23 @@ class AnalyzeNanowellSectionMixin:
         return self._seg_method_cb.findData("cellpose_labelfree")
 
     def _nanowell_pin_segmentation(self, on: bool) -> None:
-        """Nanowell mode segments label-free whatever the selector says, so the selector says so and is locked.
+        """Nanowell mode segments its own way, so the method selector is set to label-free, locked and hidden.
 
-        The pipeline sets the method itself; the form's own checks (a StarDist tile size, a watershed
-        cytoplasm channel) would otherwise refuse a run over a setting the run ignores. The user's choice is
-        put back when the mode is switched off.
+        A nanowell run never runs the per-image segmentation the selector chooses between: each well goes to
+        ``pipeline.nanowell_task.run_zip_task``, whose cell count is its own Cellpose call with the settings in
+        the label-free page's count box, and ``pipeline.cli_args`` sets the method to label-free itself. The
+        selector is still set — the form's own checks (a StarDist tile size, a watershed cytoplasm channel)
+        would otherwise refuse a run over a setting the run ignores — but it is hidden, because a second,
+        locked "Segmentation" entry above the count's own read as two segmentations to configure. The count
+        box carries the one "Segmentation" row in this mode. The user's choice is put back, and the selector
+        shown, when the mode is switched off.
         """
+        # ``_row`` puts the selector in the row's right-hand cell; the label is in that cell's parent, so the parent
+        # is the row to hide — hiding the cell alone would strand the word "Segmentation".
+        cell = self._seg_method_cb.parentWidget()
+        row = cell.parentWidget() if cell is not None else None
+        if row is not None and row.objectName() == "AnalyzeFormRow":
+            row.setVisible(not on)
         index = self._nanowell_label_free_index()
         if on and index >= 0:
             if self._nanowell_previous_method is None:
@@ -415,6 +431,8 @@ class AnalyzeNanowellSectionMixin:
             self._seg_method_cb.setCurrentIndex(self._nanowell_previous_method)
             self._seg_method_cb.setEnabled(True)
             self._nanowell_previous_method = None
+        # The hint below the section names the selected method; in nanowell mode there is none to name.
+        self._refresh_segmentation_hints()
 
     def _nanowell_option_values(self) -> dict:
         """The section's run options: every key present, the format empty while the mode is off."""

@@ -1,10 +1,12 @@
 """The Nanowells page's **Display range**: the brightness window its pictures of the image channel are drawn with.
 
-Asked for: a display range for the nanowell channels "just like the other places in the app". Review Image, the
-Image Table and the Cell Browser each give a channel a *min* / *max* window with an **Auto** that hands it back to
-the image, and they share one per-channel store (``AppState.image_view``), so a window tuned in one is the default
-in the others. The page joins that store (``controller.display_key``): a range set here is the one those viewers
-show for the channel, and theirs is the one this page draws with.
+Asked for: a display range for the nanowell channels "just like the other places in the app" — the *min* / *max*
+window with an **Auto** that Review Image, the Image Table and the Cell Browser give a channel — and, once set
+anywhere on the page, kept that way for every render until it is changed again.
+
+So it is the page's own setting (``NanowellState.display_ranges``, one range per image channel, kept with the page's
+settings), not the per-channel store the other viewers share: Review Image writes its automatic window into that
+store whenever it draws, which would change the page's range without anyone touching it.
 
 One setting, offered where the page offers its image channel — beside the crop strip, on the Extremes view and
 beside the Array view's Image — as a button naming the range in force that opens the *min* / *max* / **Auto** row in
@@ -23,9 +25,8 @@ from ui import theme
 DISPLAY_RANGE_BUTTONS = ("_nw_strip_range_btn", "_nw_extremes_range_btn", "_nw_array_range_btn")
 
 _TIP = ("The brightness window the crops, the pop-out, the Extremes montage and the Array view's full-resolution "
-        "image of this channel are drawn with, in the image's own units. Blank is Auto: each picture is stretched "
-        "from the 1st to the 99th percentile of its pixels.\n\nThe range is the channel's own across the app: Review "
-        "Image, the Image Table and the Cell Browser show the same one.")
+        "image of this channel are drawn with, in the image's own units, kept until you change it. Blank is Auto: "
+        "each picture is stretched from the 1st to the 99th percentile of its pixels.")
 
 
 def _number(text: str) -> float | None:

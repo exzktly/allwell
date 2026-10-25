@@ -5276,12 +5276,13 @@ of that channel, or whose archive is not beside the dataset, says so in its plac
 display range the pictures of that channel are drawn with — a *min* and *max* in the image's own intensity units,
 as in Review Image, the Image Table and the Cell Browser — or **Auto**, which leaves each picture stretched from
 the 1st to the 99th percentile of its own pixels. The button names the range in force (*Range: auto*,
-*Range: 200–4000*). The range belongs to the channel across the app: one set in Review Image, the Image Table or
-the Cell Browser is the one the Nanowells crops are drawn with, and one set here is the one those viewers show. It
-applies to the strip, the pop-out, the Extremes montage and the Array view's *Full resolution* image, and each
-caption names it. A crop cut from the run montage, which is an 8-bit picture rather than the raw image, keeps a
-scale of its own and the caption says so, as does the Array view's *Run montage* image. Like the other viewers'
-ranges, it is forgotten when another dataset is opened, since intensities belong to the plate that produced them.
+*Range: 200–4000*). Set from any of the three places, it holds for every picture of that channel — the strip,
+the pop-out, the Extremes montage and the Array view's *Full resolution* image — through every redraw, view switch
+and selection, until you change it again here; each caption names it. Each channel keeps its own range, so
+switching the channel and back brings yours back. It is the Nanowells page's own and is saved with the page's
+settings: the ranges in Review Image, the Image Table and the Cell Browser neither change it nor are changed by it.
+A crop cut from the run montage, which is an 8-bit picture rather than the raw image, keeps a scale of its own and
+the caption says so, as does the Array view's *Run montage* image.
 Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it

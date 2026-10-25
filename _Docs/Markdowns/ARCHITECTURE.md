@@ -11146,14 +11146,17 @@ fluorescence channel chosen and *Image: Run montage* the footer says so and poin
 figure names its channel in its caption or title (`renderer._of_channel`).
 
 **The display range** (`display_range_view.py`; `controller.display_key` / `display_range` / `set_display_range`).
-The image channel's brightness window lives in the app's shared per-channel store, `AppState.image_view`
-(`core/image_view_state.py`), under `display_key`: the fluorescence channel's token, or the run's phase token for the
-phase image — the store Review Image, the Image Table and the Cell Browser already share, so a range is the channel's
-own across the app and is cleared with them by `reset_for_new_dataset`. It is one setting offered by three buttons
+The image channel's brightness window is the page's own: `NanowellState.display_ranges`, `channel key -> (low,
+high)` in the raw image's units, under `display_key` (the fluorescence channel's token, or the run's phase token for
+the phase image), persisted with the page's settings (`to_config` / `_display_ranges_from`, which drops an entry that
+is not two finite numbers with the high above the low). It is deliberately not the per-channel store Review Image,
+the Image Table and the Cell Browser share (`AppState.image_view`): Review Image writes its automatic window into that
+store whenever it draws, which would change the page's range with nobody touching it, and the request was that a
+range set on the page holds for every render until it is changed there. It is one setting offered by three buttons
 (`display_range_view.DISPLAY_RANGE_BUTTONS`, beside each image-channel combo), each naming the range in force and
 opening a *min* / *max* / **Auto** row in a `widgets.popover.Popover`; `refresh_display_range_buttons` runs from
 `_nw_refresh_controls`. Blank or **Auto** clears the entry, a high not above its low is refused, and
-`set_display_range` redraws the page. The three crop renderers take `display_range` and build a
+`set_display_range` saves the page's settings (`_save_soon`) and redraws. The three crop renderers take `display_range` and build a
 `renderer.CropScale` with `crop_scale`: without a range one percentile scale (1st–99th) over every crop, as before;
 with one, that range for the crops cut from an owner tile (raw units) while crops cut from the run montage — an
 8-bit picture — keep a percentile scale of their own, which `CropScale.said` puts in the caption. The full-resolution

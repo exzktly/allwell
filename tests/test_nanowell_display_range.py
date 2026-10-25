@@ -1,9 +1,10 @@
 """The Nanowells page's **Display range**: a *min* / *max* / **Auto** brightness window for its image channel.
 
-Asked for: "a display range LUT for the nanowell channels just like the other places in the app". Review Image, the
-Image Table and the Cell Browser give a channel a min / max window with an Auto, kept in one per-channel store
-(``AppState.image_view``) they share. The page joins that store, and every picture of its image channel — the crop
-strip, the pop-out, the Extremes montage, the Array view's full-resolution image — is drawn on the range.
+Asked for: "a display range LUT for the nanowell channels just like the other places in the app" — the min / max
+window with an Auto that Review Image, the Image Table and the Cell Browser give a channel — and, once set anywhere on
+the page, kept for all renders until changed again. Every picture of the page's image channel — the crop strip, the
+pop-out, the Extremes montage, the Array view's full-resolution image — is drawn on it, and it is the page's own
+(``NanowellState.display_ranges``), kept with its settings.
 
 Driven through the real buttons and the real popover fields in the minimal shell of ``tests/test_nanowell_page.py``;
 what is checked is read back from the drawn images (their ``clim`` and pixels), never from the state the figure was
@@ -86,17 +87,40 @@ def test_a_range_whose_high_is_not_above_its_low_is_not_taken(page, qtbot, known
     assert nwc.display_range(page) is None
 
 
-def test_the_range_is_the_channel_s_own_across_the_app(page, qtbot, known_crops):  # noqa: F811
-    """Set by another viewer (the shared store, keyed by the channel's token) → drawn here; set here → there."""
+def test_a_range_set_on_the_page_is_kept_for_every_render_until_changed_here(page, qtbot, known_crops):  # noqa: F811
+    """Asked for: once set anywhere on the page, the range stays for all renders until it is changed again. Review
+    Image writes its automatic window into the app's shared per-channel store whenever it draws, so the page keeps
+    its own: a write there — with a range set here, and with none — changes nothing on the page."""
     _strip_ready(qtbot, page)
+    auto = _clims(page, "_nw_strip_fig")
     st = page.state.feature_slice("nanowell")
     key = nwc.display_key(st)
     assert key == (st.data.phase_token or "phase").lower()              # the phase image goes by its token
-    page.state.image_view.set_lut(key, 3.0, 30.0)                       # as Review Image or the Cell Browser would
+    page.state.image_view.set_lut(key, 3.0, 30.0)                       # what Review Image does on a draw
     nwc.redraw(page)
-    assert _clims(page, "_nw_strip_fig") == [(3.0, 30.0), (3.0, 30.0)]
+    assert _clims(page, "_nw_strip_fig") == auto                        # unset here: still Auto
+
     _set_range(qtbot, page, "_nw_strip_range_btn", "4", "40")
-    assert page.state.image_view.get_lut(key) == (4.0, 40.0)
+    page.state.image_view.set_lut(key, 0.0, 1.0)
+    for view in ("trajectories", "extremes", "array", "distribution"):  # other renders, and back
+        nwc.set_view(page, view)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    nwc.redraw(page)
+    assert _clims(page, "_nw_strip_fig") == [(4.0, 40.0), (4.0, 40.0)]
+    assert page.widgets.get("_nw_array_range_btn").text() == "Range: 4–40"
+
+
+def test_the_range_is_kept_with_the_page_s_settings():
+    from review.features.nanowell.state import NanowellState
+
+    st = NanowellState()
+    st.display_ranges = {"phase": (4.0, 40.0), "egfp": (100.0, 3000.0)}
+    again = NanowellState()
+    again.apply_config(st.to_config())
+    assert again.display_ranges == {"phase": (4.0, 40.0), "egfp": (100.0, 3000.0)}
+    damaged = NanowellState()
+    damaged.apply_config({"display_ranges": {"phase": [40, 4], "egfp": [1, "x"], "rfp": [1, 2], 3: [1, 2]}})
+    assert damaged.display_ranges == {"rfp": (1.0, 2.0)}                # a bad entry restores as Auto
 
 
 def test_a_montage_crop_keeps_a_scale_of_its_own_under_a_chosen_range():
@@ -149,3 +173,25 @@ def test_the_full_resolution_image_is_drawn_on_the_range(qtbot, tmp_path):
     assert {t: _shade_at(st, x + 60, y + 60) for t, (x, y) in LEFT_TOP.items()} == {
         "F0": 0, "F1": 127, "F2": 255, "F3": 255}
     assert "Full resolution, phase, from the raw tiles in A01.zip, on the display range 1000 to 3000." in _footer(ctx)
+
+
+def test_setting_a_range_saves_the_page_s_settings(page, qtbot, known_crops, monkeypatch):  # noqa: F811
+    _strip_ready(qtbot, page)
+    saved = []
+    monkeypatch.setattr(nwc, "_save_soon", lambda ctx: saved.append(dict(ctx.state.feature_slice("nanowell")
+                                                                             .to_config()["display_ranges"])))
+    _set_range(qtbot, page, "_nw_strip_range_btn", "4", "40")
+    assert saved and saved[-1] == {nwc.display_key(page.state.feature_slice("nanowell")): [4.0, 40.0]}
+
+
+def test_each_image_channel_keeps_its_own_range(page, qtbot, known_crops):  # noqa: F811
+    _strip_ready(qtbot, page)
+    st = page.state.feature_slice("nanowell")
+    assert st.data.image_channels, "the fixture needs a fluorescence channel to switch to"
+    _set_range(qtbot, page, "_nw_strip_range_btn", "4", "40")
+    nwc.set_image_channel(page, st.data.image_channels[0])
+    assert nwc.display_range(page) is None and page.widgets.get("_nw_strip_range_btn").text() == "Range: auto"
+    nwc.set_image_channel(page, "")
+    assert nwc.display_range(page) == (4.0, 40.0)
+    qtbot.waitUntil(lambda: len(_images(page, "_nw_strip_fig")) == 2, timeout=10000)
+    assert _clims(page, "_nw_strip_fig") == [(4.0, 40.0), (4.0, 40.0)]

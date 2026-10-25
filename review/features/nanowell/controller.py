@@ -410,9 +410,8 @@ def page_image_channel(st) -> str:
 
 
 def display_key(st) -> str:
-    """The name the page's image channel goes by in the app's shared per-channel display ranges
-    (``AppState.image_view``): the fluorescence channel, or the run's phase token for the phase image — so a range
-    set for a channel in Review Image, the Image Table or the Cell Browser is the one this page draws with, and back."""
+    """The name the page keeps its image channel's **Display range** under (``NanowellState.display_ranges``): the
+    fluorescence channel, or the run's phase token for the phase image."""
     channel = page_image_channel(st)
     if channel:
         return channel.lower()
@@ -424,29 +423,27 @@ def display_range(ctx) -> tuple[float, float] | None:
     """The **Display range** ``(low, high)`` the page's pictures of its image channel are drawn with, in the raw
     image's units; ``None`` when unset, and each picture then takes its own percentile scale (Auto)."""
     st = _state(ctx)
-    image_view = getattr(ctx.state, "image_view", None)
-    if st is None or image_view is None:
-        return None
-    return image_view.get_lut(display_key(st))
+    return None if st is None else st.display_ranges.get(display_key(st))
 
 
 def set_display_range(ctx, low, high) -> None:
-    """Draw the page's image channel between *low* and *high*, or — either ``None`` — back to Auto. The range is the
-    app's shared one for the channel (:func:`display_key`), so it is also what the other image viewers show.
+    """Draw the page's image channel between *low* and *high*, or — either ``None`` — back to Auto.
 
-    Every picture of the channel follows: the crop strip, the pop-out, the Extremes montage and the Array view's
-    full-resolution image. A range whose high is not above its low is refused rather than drawn black."""
+    The range is the page's own (``NanowellState.display_ranges``) and kept with its settings: it holds for every
+    render of the channel — the crop strip, the pop-out, the Extremes montage and the Array view's full resolution —
+    until it is changed here again. Other image viewers keep their own ranges and never change it. A range whose
+    high is not above its low is refused rather than drawn black."""
     st = _state(ctx)
-    image_view = getattr(ctx.state, "image_view", None)
-    if st is None or image_view is None:
+    if st is None:
         return
     key = display_key(st)
     if low is None or high is None:
-        image_view.lut_by_channel.pop(key, None)
+        st.display_ranges.pop(key, None)
     elif float(high) > float(low):
-        image_view.set_lut(key, float(low), float(high))
+        st.display_ranges[key] = (float(low), float(high))
     else:
         return
+    _save_soon(ctx)
     _call(ctx, "_nw_refresh_controls")
     redraw(ctx)
 

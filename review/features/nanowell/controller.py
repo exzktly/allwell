@@ -409,6 +409,45 @@ def page_image_channel(st) -> str:
     return match_channel(st.image_channel, getattr(st.data, "image_channels", ())) or ""
 
 
+def display_key(st) -> str:
+    """The name the page keeps its image channel's **Display range** under (``NanowellState.display_ranges``): the
+    fluorescence channel, or the run's phase token for the phase image."""
+    channel = page_image_channel(st)
+    if channel:
+        return channel.lower()
+    phase = (getattr(st.data, "phase_token", "") or "") if st is not None and st.data is not None else ""
+    return phase.lower() or "phase"
+
+
+def display_range(ctx) -> tuple[float, float] | None:
+    """The **Display range** ``(low, high)`` the page's pictures of its image channel are drawn with, in the raw
+    image's units; ``None`` when unset, and each picture then takes its own percentile scale (Auto)."""
+    st = _state(ctx)
+    return None if st is None else st.display_ranges.get(display_key(st))
+
+
+def set_display_range(ctx, low, high) -> None:
+    """Draw the page's image channel between *low* and *high*, or — either ``None`` — back to Auto.
+
+    The range is the page's own (``NanowellState.display_ranges``) and kept with its settings: it holds for every
+    render of the channel — the crop strip, the pop-out, the Extremes montage and the Array view's full resolution —
+    until it is changed here again. Other image viewers keep their own ranges and never change it. A range whose
+    high is not above its low is refused rather than drawn black."""
+    st = _state(ctx)
+    if st is None:
+        return
+    key = display_key(st)
+    if low is None or high is None:
+        st.display_ranges.pop(key, None)
+    elif float(high) > float(low):
+        st.display_ranges[key] = (float(low), float(high))
+    else:
+        return
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
+
+
 def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
               note: str = "", tableless=(), selected=(), responding_above: float | None = None,
@@ -582,7 +621,9 @@ def _array_image(ctx, st, well: str, timepoint: str) -> tuple[object, str]:
         # The run kept a phase montage only: said on the figure, so a fluorescence choice is never shown phase
         # pixels without a word (CLAUDE.md §7).
         phase_only = (f"The run montage is the phase image; choose Full resolution to see {channel}."
-                      if channel else "")
+                      if channel else
+                      "The run montage is an 8-bit picture, drawn as the run saved it; the Display range applies to "
+                      "Full resolution." if display_range(ctx) is not None else "")
         if (well, timepoint) in st.montages:
             montage, why = st.montages[(well, timepoint)]
             return montage, " ".join(filter(None, [phase_only, "" if montage is not None else why]))
@@ -600,9 +641,12 @@ def _array_image(ctx, st, well: str, timepoint: str) -> tuple[object, str]:
     store = st.tile_store
     if store is None:
         return None, st.tile_why
+    store.display = display_range(ctx)
     source, failed = store.source, dict(store.failed)
     total, read = len(source.tiles), store.loaded()
-    said = [f"Full resolution, {channel or 'phase'}, from the raw tiles in {source.archive.name}."]
+    said = [f"Full resolution, {channel or 'phase'}, from the raw tiles in {source.archive.name}"
+            + (f", on the display range {store.display[0]:.4g} to {store.display[1]:.4g}."
+               if store.display is not None else ".")]
     if read + len(failed) < total:
         said.append(f"Reading tiles: {read} of {total}…")
     placed = {str(t.get("tile")) for t in ((st.data.grids.get(well) or {}).get(timepoint) or {}).get("tiles") or []}
@@ -824,10 +868,18 @@ def focus_nanowell_at(ctx, event) -> None:
 def on_canvas_resized(ctx) -> None:
     """The page's canvas settled at a new size: redraw the Array view if its axes no longer have the size its region
     was fitted to. Without it the view kept the old fit — a resize squashed every nanowell into an oval, and a draw
-    made while the canvas was still being laid out (a few pixels tall) showed one flattened row of the array."""
+    made while the canvas was still being laid out (a few pixels tall) showed one flattened row of the array.
+
+    A canvas no longer on screen is left alone. The re-fit fires a moment after the resize, and by then the page may
+    have been closed: a redraw there queues matplotlib's deferred draw, which then runs on a canvas already deleted
+    (``RuntimeError: Internal C++ object (FigureCanvasQTAgg) already deleted``). A hidden canvas has nothing to re-fit
+    for; showing it again resizes it, which re-fits it then."""
     st = _state(ctx)
     drawn = st.drawn if st is not None else None
     if st is None or st.view != "array" or drawn is None or drawn.ax is None or drawn.ax.figure is None:
+        return
+    canvas = ctx.widgets.get_or_none("_nw_canvas")
+    if canvas is None or not canvas.isVisible():
         return
     box = drawn.ax.get_window_extent()
     if (max(int(round(box.width)), 1), max(int(round(box.height)), 1)) != tuple(drawn.size_px):
@@ -1014,6 +1066,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                                                    if site in st.crops},
                                       label=_label(metric, channel), note=note, cells=st.crop_cells,
                                       image_channel=image_channel, numbers=st.crop_metrics,
+                                      display_range=display_range(ctx),
                                       timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
                                       metrics=crop_metrics(st, model.sites(), channel))
     apply_export_style_to_current(ctx, fig, canvas)
@@ -1088,7 +1141,8 @@ def draw_popout(ctx) -> None:
             _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site, channel=image_channel),
                    failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
         render_crop_grid(fig, st.crops.get(site), site, cells=st.crop_cells,
-                         metrics=crop_metrics(st, [site], page_channel(ctx)).get(site), image_channel=image_channel)
+                         metrics=crop_metrics(st, [site], page_channel(ctx)).get(site), image_channel=image_channel,
+                         display_range=display_range(ctx))
     canvas.draw_idle()
 
 
@@ -1124,7 +1178,8 @@ def redraw_detail(ctx) -> None:
     canvas.draw_idle()
     strip_fig, strip_canvas = ctx.widgets.get_or_none("_nw_strip_fig"), ctx.widgets.get_or_none("_nw_strip_canvas")
     if strip_fig is not None and strip_canvas is not None:
-        render_crop_strip(strip_fig, crops, first, cells=st.crop_cells, image_channel=image_channel)
+        render_crop_strip(strip_fig, crops, first, cells=st.crop_cells, image_channel=image_channel,
+                          display_range=display_range(ctx))
         strip_canvas.draw_idle()
 
 

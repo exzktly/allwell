@@ -25,6 +25,10 @@ from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
     BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut,
 )
+from review.features.nanowell.display_range_view import (
+    build_display_range_button,
+    refresh_display_range_buttons,
+)
 from review.features.nanowell.subset_view import build_subset_control
 from review.features.nanowell.state import EXTREMES_MAX_N
 from widgets.control_band import ControlBand
@@ -233,7 +237,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     extremes_numbers.toggled.connect(lambda on: nwc.set_crop_metrics(ctx, on))
     reg.register("_nw_extremes_metrics_box", extremes_numbers)
     grp_extremes = band.add_scope("Largest & smallest", extremes_spin, extremes_tps.button, extremes_cells,
-                                  extremes_numbers, extremes_image)
+                                  extremes_numbers, extremes_image,
+                                  build_display_range_button(ctx, "_nw_extremes_range_btn"))
 
     responding_edit = QLineEdit()
     responding_edit.setPlaceholderText("not set")
@@ -341,6 +346,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             channel_cb.setEnabled(channel_cb.count() > 0 and METRICS.get(st.metric, ("", False))[1]
                                   and _metric_reaches_figure(st, view))
             _refresh_image_channels(ctx, st)
+            refresh_display_range_buttons(ctx)
             per_nanowell = st.metric in PER_NANOWELL
             axis_seg.setCurrentByData("wells" if per_nanowell else st.axis)
             axis_seg.setSegmentEnabled(0, not per_nanowell)
@@ -581,6 +587,7 @@ def _crops_header(ctx, parent) -> QHBoxLayout:
     row.addStretch(1)
     row.addWidget(_cells_box(ctx, "_nw_strip_cells_box"))
     row.addWidget(_image_channel_combo(ctx, "_nw_strip_image_channel_cb"))
+    row.addWidget(build_display_range_button(ctx, "_nw_strip_range_btn"))
     row.addWidget(button)
     return row
 
@@ -719,7 +726,8 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
     image_cb = _combo(_IMAGES, _IMAGE_TIP)
     image_cb.currentIndexChanged.connect(lambda _i: nwc.set_layer(ctx, "image", image_cb.currentData() or "off"))
     reg.register("_nw_image_cb", image_cb)
-    grp_image = band.add_scope("Image", image_cb, _image_channel_combo(ctx, "_nw_array_image_channel_cb"))
+    grp_image = band.add_scope("Image", image_cb, _image_channel_combo(ctx, "_nw_array_image_channel_cb"),
+                               build_display_range_button(ctx, "_nw_array_range_btn"))
 
     positions_seg = SegmentedControl()
     for key, label in _POSITIONS:

@@ -5126,8 +5126,9 @@ use them.
   timepoint they are ranked at (the well's latest by default), and how many each block shows (1 to 12, 5 by
   default). **Timepoints** chooses which of the well's timepoints the montage shows (all by default),
   **Cells** draws the cells the run counted on every crop (see *Site detail*), **Metrics** shows or hides the
-  numbers written on each crop (its fold change and its line of measurements), and the box after it chooses the
-  image the crops are cut from — *Phase* or a fluorescence channel (see *Site detail*).
+  numbers written on each crop (its fold change and its line of measurements), the box after it chooses the
+  image the crops are cut from — *Phase* or a fluorescence channel — and **Range** its display range (see
+  *Site detail*).
 
 **Reading the figure**
 
@@ -5271,6 +5272,17 @@ It is one setting for every picture on the page: the strip, the pop-out, the Ext
 Full resolution, and is offered on each and kept with the page's settings. Each caption names the channel. A
 fluorescence crop is never cut from the run montage, which is phase only: a timepoint whose archive holds no image
 of that channel, or whose archive is not beside the dataset, says so in its place.
+**Range**, beside the channel box (and beside it on the Extremes view and the Array view's Image), sets the
+display range the pictures of that channel are drawn with — a *min* and *max* in the image's own intensity units,
+as in Review Image, the Image Table and the Cell Browser — or **Auto**, which leaves each picture stretched from
+the 1st to the 99th percentile of its own pixels. The button names the range in force (*Range: auto*,
+*Range: 200–4000*). Set from any of the three places, it holds for every picture of that channel — the strip,
+the pop-out, the Extremes montage and the Array view's *Full resolution* image — through every redraw, view switch
+and selection, until you change it again here; each caption names it. Each channel keeps its own range, so
+switching the channel and back brings yours back. It is the Nanowells page's own and is saved with the page's
+settings: the ranges in Review Image, the Image Table and the Cell Browser neither change it nor are changed by it.
+A crop cut from the run montage, which is an 8-bit picture rather than the raw image, keeps a scale of its own and
+the caption says so, as does the Array view's *Run montage* image.
 Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it

@@ -136,6 +136,12 @@ class NanowellState:
     #: The numbers written on each crop of the Extremes montage (its fold change and its metrics line); off leaves the
     #: crops bare, the row labels and the caption still giving the ranking.
     crop_metrics: bool = True
+    #: The **Display range** of each image channel, ``channel key -> (low, high)`` in the raw image's units
+    #: (``controller.display_key``): the window every picture of that channel on the page is drawn with — the crop
+    #: strip, the pop-out, the Extremes montage and the Array view's full resolution. The page's own and kept with
+    #: its settings, so a range set here stays for every render until it is changed here again; nothing outside the
+    #: page writes it. A channel without one is drawn on each picture's own percentile scale (Auto).
+    display_ranges: dict = field(default_factory=dict)
     #: The *Subset*: the conditions a nanowell must meet to be used — its starting cells, a metric at a timepoint,
     #: its ring or distance from the centre, its address, its imaging field. No conditions: every nanowell. See
     #: ``subset_compute``.
@@ -206,6 +212,7 @@ class NanowellState:
                 "extremes_n": self.extremes_n, "extremes_tps": list(self.extremes_tps), "crop_cells": self.crop_cells,
                 "channel": self.channel, "image_channel": self.image_channel,
                 "crop_metrics": self.crop_metrics,
+                "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
@@ -227,6 +234,7 @@ class NanowellState:
                            and 1 <= count <= EXTREMES_MAX_N else fresh.extremes_n)
         self.crop_cells = config.get("crop_cells") is True
         self.crop_metrics = config.get("crop_metrics") is not False
+        self.display_ranges = _display_ranges_from(config.get("display_ranges"))
         tps = config.get("extremes_tps")
         self.extremes_tps = [str(tp) for tp in tps if isinstance(tp, str)] if isinstance(tps, list) else []
         self.layers = _layers_from(config)
@@ -240,6 +248,20 @@ class NanowellState:
         self.thresholds = {k: float(v) for k, v in (thresholds.items() if isinstance(thresholds, dict) else ())
                            if isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool)
                            and math.isfinite(v)}
+
+
+def _display_ranges_from(block) -> dict:
+    """The saved display ranges, each ``channel -> (low, high)`` of two finite numbers, the high above the low; any
+    other entry is dropped, so a damaged block restores as Auto for that channel rather than as a range nobody set."""
+    out = {}
+    for key, pair in (block.items() if isinstance(block, dict) else ()):
+        if not (isinstance(key, str) and isinstance(pair, (list, tuple)) and len(pair) == 2):
+            continue
+        if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in pair):
+            continue
+        if pair[1] > pair[0]:
+            out[key] = (float(pair[0]), float(pair[1]))
+    return out
 
 
 def _subset_from(config: dict) -> Subset:

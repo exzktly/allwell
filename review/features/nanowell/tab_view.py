@@ -97,6 +97,11 @@ _AXIS_TIP = ("Time: one panel per well (or replicate set), timepoints along x, t
 _BASELINE_TIP = ("The timepoint a fold change and the occupancy class are measured from.\n"
                  "Earliest: the well's first timepoint; a nanowell unmeasurable there has no fold change.\n"
                  "First measurable: each nanowell's first timepoint at which the measurement exists.")
+_EXTREMES_TPS_TIP = ("The timepoints the montage shows as columns. Fewer columns give larger crops; the ranking "
+                     "timepoint is always shown.")
+_CROP_CELLS_TIP = ("Draw a dot at the centre of each cell the run counted on every crop — the strip, the pop-out and "
+                   "the Extremes montage — as the Array view's Cells layer does. The run keeps no cell outlines, so "
+                   "a dot is all there is to draw.")
 _TP_TIP = ("The timepoint drawn on Along x: Wells and Position (the latest by default), the one Extremes ranks the "
            "nanowells at (the well's latest by default), and the one the Array view shows (the well's first by "
            "default).")
@@ -212,7 +217,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     extremes_spin.setToolTip(_EXTREMES_TIP)
     extremes_spin.valueChanged.connect(lambda value: nwc.set_extremes_n(ctx, value))
     reg.register("_nw_extremes_spin", extremes_spin)
-    grp_extremes = band.add_scope("Largest & smallest", extremes_spin)
+    extremes_cells = _cells_box(ctx, "_nw_extremes_cells_box")
+    extremes_tps = _extremes_timepoints_button(ctx, band)
+    grp_extremes = band.add_scope("Largest & smallest", extremes_spin, extremes_tps.button, extremes_cells)
 
     responding_edit = QLineEdit()
     responding_edit.setPlaceholderText("not set")
@@ -295,7 +302,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
     controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, responding_edit,
-                extremes_spin, *start.signalling, *array_controls.signalling)
+                extremes_spin, extremes_cells, *start.signalling, *array_controls.signalling)
 
     def refresh_controls() -> None:
         channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None
@@ -352,6 +359,13 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
                               or view in ONE_WELL_VIEWS)
             grp_well.setVisible(view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS)
             extremes_spin.setValue(st.extremes_n)
+            extremes_cells.setChecked(st.crop_cells)
+            extremes_tps.refresh()
+            strip_cells = reg.get_or_none("_nw_strip_cells_box")
+            if strip_cells is not None:
+                blocked_strip = strip_cells.blockSignals(True)
+                strip_cells.setChecked(st.crop_cells)
+                strip_cells.blockSignals(blocked_strip)
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
         finally:
             for w, b in zip(controls, blocked):
@@ -458,6 +472,70 @@ def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:
                         f"channel.")
 
 
+def _extremes_timepoints_button(ctx, parent) -> SimpleNamespace:
+    """The Extremes view's **Timepoints** menu: which of the well's timepoints the montage shows as columns, each
+    named by its hours as the Timepoint control names it. Fewer columns give larger crops. The ranking timepoint is
+    always shown, so its entry is checked and greyed; *All timepoints* clears the choice."""
+    button = QToolButton(parent)
+    button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    button.setPopupMode(QToolButton.InstantPopup)
+    button.setToolTip(_EXTREMES_TPS_TIP)
+    button.setProperty("variant", "secondary")
+    button.setProperty("hasMenu", True)
+    menu = QMenu(button)
+    button.setMenu(menu)
+    ctx.widgets.register("_nw_extremes_tps_btn", button)
+
+    def state():
+        st = ctx.state.feature_slice("nanowell")
+        tps, ranked = nwc.shown_timepoint(ctx) if st is not None and st.data is not None else ([], "")
+        return st, list(tps), ranked
+
+    def toggle(tp: str, on: bool) -> None:
+        st, tps, ranked = state()
+        shown = set(nwc.extremes_columns(tps, ranked, st.extremes_tps))
+        shown = shown | {tp} if on else shown - {tp}
+        nwc.set_extremes_timepoints(ctx, [] if shown >= set(tps) else [t for t in tps if t in shown])
+
+    def rebuild() -> None:
+        st, tps, ranked = state()
+        menu.clear()
+        every = owned_action(menu, "All timepoints")
+        every.triggered.connect(lambda _=False: nwc.set_extremes_timepoints(ctx, []))
+        menu.addSeparator()
+        shown = set(nwc.extremes_columns(tps, ranked, st.extremes_tps if st is not None else []))
+        times = st.data.times_h if st is not None and st.data is not None else {}
+        for tp in tps:
+            action = owned_action(menu, timepoint_text(tp, times) + (" (ranked)" if tp == ranked else ""))
+            action.setCheckable(True)
+            action.setChecked(tp in shown)
+            action.setEnabled(tp != ranked)
+            action.setData(tp)
+            action.toggled.connect(lambda on, tp=tp: toggle(tp, on))
+
+    def refresh() -> None:
+        st, tps, ranked = state()
+        shown = nwc.extremes_columns(tps, ranked, st.extremes_tps if st is not None else [])
+        button.setText("Timepoints: all" if len(shown) >= len(tps) else f"Timepoints: {len(shown)} of {len(tps)}")
+
+    menu.aboutToShow.connect(rebuild)
+    ctx.widgets.register("_nw_extremes_tps_menu", menu)
+    ctx.widgets.register("_nw_extremes_tps_rebuild", rebuild)
+    return SimpleNamespace(button=button, refresh=refresh)
+
+
+def _cells_box(ctx, name: str) -> QCheckBox:
+    """**Cells**: the counted cells drawn as dots on every crop the page shows — the strip, the pop-out and the
+    Extremes montage — as the Array view's Cells layer draws them. One setting (``NanowellState.crop_cells``), offered
+    beside the strip and on the Extremes view; ``refresh_controls`` keeps both boxes on it."""
+    box = QCheckBox("Cells")
+    box.setToolTip(_CROP_CELLS_TIP)
+    box.setChecked(bool(ctx.state.feature_slice("nanowell").crop_cells))
+    box.toggled.connect(lambda on: nwc.set_crop_cells(ctx, on))
+    ctx.widgets.register(name, box)
+    return box
+
+
 def _crops_header(ctx, parent) -> QHBoxLayout:
     """The row above the site detail's crop strip: what the strip is, and **Pop out**, which opens the crops large in
     a window of their own (:func:`_popout_window`, ``controller.pop_out_crops``)."""
@@ -475,6 +553,7 @@ def _crops_header(ctx, parent) -> QHBoxLayout:
     ctx.widgets.register("_nw_open_popout", lambda: _popout_window(ctx).show_raised())
     row.addWidget(title)
     row.addStretch(1)
+    row.addWidget(_cells_box(ctx, "_nw_strip_cells_box"))
     row.addWidget(button)
     return row
 

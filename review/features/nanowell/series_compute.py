@@ -41,6 +41,8 @@ million rows).
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 
@@ -197,6 +199,46 @@ def site_series(metrics: pd.DataFrame, well: str, q: int, r: int) -> pd.DataFram
     """
     rows = metrics[(metrics["well"] == well) & (metrics["nw_q"] == q) & (metrics["nw_r"] == r)]
     return rows.sort_values("tp_order", kind="stable").reset_index(drop=True)
+
+
+def crop_metric_lines(row, channel: str | None = None) -> list[str]:
+    """What a crop of one nanowell at one timepoint is captioned with, one short item each: its computed
+    measurements there — the cell count, the confluence as a percentage, and the shared channel's brightness and site
+    signal when the run measured them. The renderer packs the items into as few lines as the crop's width allows. A
+    timepoint whose state carries no number says its state instead, and a measurement that is missing is left out
+    rather than written as zero.
+
+    *row* is one row of :func:`site_series` (a mapping)."""
+    state = str(row.get("state", ""))
+    if state not in ("measured", "empty"):
+        return [state.replace("_", " ") or "no row"]
+
+    def value(key):
+        v = row.get(key)
+        return float(v) if isinstance(v, (int, float, np.floating, np.integer)) and math.isfinite(v) else None
+
+    n, c = value("n"), value("c")
+    items = []
+    if n is not None:
+        items.append(f"{n:g} cell" + ("" if n == 1 else "s"))
+    if c is not None:
+        items.append(f"{100 * c:.0f}% conf.")
+    if channel:
+        b, sig = value(f"brightness_{channel}"), value(f"signal_{channel}")
+        if b is not None:
+            items.append(f"bright {compact_number(b)}")
+        if sig is not None:
+            items.append(f"signal {compact_number(sig)}")
+    return items
+
+
+def compact_number(value: float) -> str:
+    """*value* to three significant figures, thousands and millions as ``k`` and ``M`` (``5.79k``), so a caption
+    under a crop stays as narrow as the crop."""
+    for scale, suffix in ((1e9, "G"), (1e6, "M"), (1e3, "k")):
+        if abs(value) >= scale:
+            return f"{value / scale:.3g}{suffix}"
+    return f"{value:.3g}"
 
 
 # ── why a value is missing ───────────────────────────────────────────────────

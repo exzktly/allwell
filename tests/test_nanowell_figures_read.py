@@ -103,12 +103,18 @@ def test_position_s_two_panels_share_the_ring_axis(page, qtbot):  # noqa: F811
     assert top.get_xlim() == bars.get_xlim()
 
 
-def test_the_extremes_captions_are_drawn_at_a_crop_s_size(page, qtbot):  # noqa: F811
+def test_the_extremes_captions_keep_their_size_through_the_properties_pass(page, qtbot):  # noqa: F811
+    """The row labels, the fold changes and the metrics are figure text at the montage's own sizes: drawn as the
+    panels' axis labels at the Properties sizes, they overprinted the next row's crops."""
+    from review.core import plot_style
+
     _loaded(qtbot, page)
     nwc.set_view(page, "extremes")
+    plot_style._ensure_export_style_prefs(page)["axis_label_size"] = 30
+    nwc.redraw(page)
     fig = page.widgets.get("_nw_fig")
-    rows = [ax.yaxis.label for ax in fig.axes if ax.yaxis.label.get_gid() == "nw-extremes-row"]
-    assert rows and {round(label.get_fontsize(), 2) for label in rows} == {round(18 * renderer.EXTREMES_TYPE_SCALE, 2)}
+    sizes = {t.get_gid(): t.get_fontsize() for t in fig.texts if str(t.get_gid()).startswith("nw-extremes-")}
+    assert (sizes["nw-extremes-row"], sizes["nw-extremes-value"]) == (renderer._EXT_LABEL_PT, renderer._EXT_VALUE_PT)
 
 
 @pytest.mark.parametrize("n, shape", [(1, (1, 1)), (4, (1, 4)), (5, (2, 3)), (6, (2, 3)), (7, (2, 4)),

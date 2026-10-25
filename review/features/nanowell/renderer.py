@@ -22,7 +22,7 @@ are settings of it, so a nanowell is drawn one way whichever of them is on.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -140,8 +140,6 @@ def _grid(n: int) -> tuple[int, int]:
 #: raises it here.
 GRID_TYPE_SCALE = 0.5
 SINGLE_TYPE_SCALE = 0.62
-#: The Extremes montage's crop captions and the Array view's colour bar: 18 → 8 pt.
-EXTREMES_TYPE_SCALE = 0.45
 #: The Properties default tick size the scales above are measured against, for drawing before the style pass runs.
 _PREF_PT = 18.0
 #: The page's own annotation sizes — counts, keys, footers — in points: below the axes' type, above legibility.
@@ -543,7 +541,38 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     fig.align_ylabels(axes)
 
 
-def render_crop_strip(fig, crops: dict | None, site) -> None:
+def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
+    """The counted cells inside *crop*, as the Array view's Cells layer draws them: a light dot with a dark rim at
+    each centre (the run keeps no outlines). *tally* adds up what was drawn and which crops had no cell table, for
+    the caption."""
+    from ui.nanowell_sites import CELL_COLOUR, CELL_EDGE_COLOUR
+
+    if crop is None or crop.image is None:
+        return
+    if crop.cells is None:
+        tally["no_table"] = tally.get("no_table", 0) + 1
+        return
+    tally["drawn"] = tally.get("drawn", 0) + len(crop.cells)
+    if len(crop.cells):
+        ax.scatter(crop.cells[:, 0], crop.cells[:, 1], s=size or CELL_DOT_PT2, c=CELL_COLOUR,
+                   edgecolors=CELL_EDGE_COLOUR, linewidths=0.4, zorder=5, gid="nw-crop-cells")
+        h, w = crop.image.shape[:2]
+        ax.set_xlim(-0.5, w - 0.5)                      # the dots must not widen the image's own extent
+        ax.set_ylim(h - 0.5, -0.5)
+
+
+def _cells_clause(tally: dict) -> str:
+    """What the cell dots on a set of crops are, for its caption: how many were drawn, and that a crop without a
+    cell table has none drawn because none could be read — never that it holds no cells."""
+    if not tally:
+        return ""
+    said = [f"dots: the {tally.get('drawn', 0):,} cells the run counted in view"] if "drawn" in tally else []
+    if tally.get("no_table"):
+        said.append(f"{tally['no_table']} crop(s) of a well without a cell table, so no cells drawn there")
+    return "; ".join(said)
+
+
+def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False) -> None:
     """The first selected nanowell's crops, one per timepoint, on the strip under the site detail's **Pop out**
     button: each titled with its timepoint, a timepoint without a crop saying why in its place, and where the crops
     were cut from said once in the caption. *crops* is ``None`` while they are being cut."""
@@ -559,6 +588,7 @@ def render_crop_strip(fig, crops: dict | None, site) -> None:
     notes: set = set()
     mixed = len({c.source for _tp, c in items if c.image is not None}) > 1
     sub = fig.add_gridspec(1, len(items), left=0.03, right=0.97, top=0.84, bottom=0.36, wspace=0.08)
+    tally: dict = {}
     for k, (tp, crop) in enumerate(items):
         ax = fig.add_subplot(sub[0, k])
         ax._aw_image_panel = True
@@ -566,6 +596,8 @@ def render_crop_strip(fig, crops: dict | None, site) -> None:
         ax.set_yticks([])
         if crop.image is not None:
             ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi)
+            if cells:
+                _draw_crop_cells(ax, crop, tally, size=6.0)
             if crop.source == "montage":
                 notes.add(crop.note)
         else:
@@ -578,11 +610,11 @@ def render_crop_strip(fig, crops: dict | None, site) -> None:
               "from the montage, at its lower resolution" if sources == {"montage"} else
               "from its owner tile, or the montage where marked" if sources else "none could be cut")
     caption = f"Crops: {site[0]} · q {site[1]}, r {site[2]}, {origin}; one brightness scale" + "".join(
-        f"; {note}" for note in sorted(notes))
+        f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else "")
     _ink(fig.text(0.03, 0.03, caption, fontsize=6, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
 
 
-def render_crop_grid(fig, crops: dict | None, site) -> None:
+def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metrics: dict | None = None) -> None:
     """The selected nanowell at every timepoint, large: one panel per timepoint, filling the page's figure.
 
     Asked for: a larger view of a selected nanowell over time than the site detail's strip of small crops. Every
@@ -601,9 +633,12 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
     lo, hi = _one_scale(c.image for _tp, c in items)
     cols = int(min(len(items), max(1, np.ceil(np.sqrt(len(items) * 1.6)))))
     rows = int(np.ceil(len(items) / cols))
-    grid = fig.add_gridspec(rows, cols, left=0.02, right=0.98, top=0.87, bottom=0.08, wspace=0.05, hspace=0.18)
+    # *metrics* (``timepoint -> [items]``) are written under each panel, so the rows leave room for them.
+    grid = fig.add_gridspec(rows, cols, left=0.02, right=0.98, top=0.87, bottom=0.15 if metrics else 0.08, wspace=0.05,
+                            hspace=0.36 if metrics else 0.18)
     notes: set = set()
     mixed = len({c.source for _tp, c in items if c.image is not None}) > 1
+    tally: dict = {}
     for k, (tp, crop) in enumerate(items):
         ax = fig.add_subplot(grid[k // cols, k % cols])
         # An image, pixel for pixel: the style pass must not put the card's typed axis range on it.
@@ -612,6 +647,8 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
         ax.set_yticks([])
         if crop.image is not None:
             ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi, gid="nw-crop-grid-image")
+            if cells:
+                _draw_crop_cells(ax, crop, tally, size=CELL_DOT_PT2 * 2)
             if crop.source == "montage":
                 notes.add(crop.note)
         else:
@@ -619,6 +656,11 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
                          transform=ax.transAxes, color=faint, gid="nw-crop-missing"), muted=True)
         _ink(ax.set_title(tp + (" (montage)" if mixed and crop.source == "montage" else ""), fontsize=9, color=ink,
                           gid="nw-crop-title"))
+        said = (metrics or {}).get(tp, [])
+        if said:
+            width_pt = ax.get_position().width * fig.get_size_inches()[0] * 72
+            _ink(ax.text(0.5, -0.03, "\n".join(_pack(said, width_pt, 8.0)), ha="center", va="top", fontsize=8,
+                         transform=ax.transAxes, color=faint, gid="nw-crop-grid-metrics"), muted=True)
     _ink(fig.text(0.02, 0.955, f"{site[0]} · q {site[1]}, r {site[2]} over time", fontsize=11, color=ink,
                   gid="nw-crop-grid-title"))
     sources = {crop.source for _tp, crop in items if crop.image is not None}
@@ -626,7 +668,7 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
               "cut from the montage, at its lower resolution" if sources == {"montage"} else
               "cut from its owner tile, or the montage where marked" if sources else "none could be cut")
     caption = (f"{origin}; every panel on one brightness scale ({lo:.4g} to {hi:.4g})"
-               + "".join(f"; {note}" for note in sorted(notes)))
+               + "".join(f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else ""))
     _ink(fig.text(0.02, 0.015, caption, fontsize=8, color=faint, gid="nw-crop-grid-caption", wrap=True), muted=True)
 
 
@@ -644,104 +686,267 @@ def _sentence(text: str) -> str:
     return text[:1].upper() + text[1:]
 
 
-def render_extremes(fig, model, crops: dict, *, label: str, note: str = "") -> dict:
-    """The *N* nanowells with the largest fold change and the *N* with the smallest, each a row of its crops at
-    every timepoint of the well; returns ``{axes: (well, q, r)}`` so a click on a row selects its nanowell.
+#: The Extremes montage's text sizes, in points: a row's label, the fold change under a crop, its other metrics.
+_EXT_LABEL_PT, _EXT_VALUE_PT, _EXT_METRIC_PT = 8.0, 7.5, 6.5
+
+
+def _pack(items, width_pt: float, size_pt: float) -> list[str]:
+    """*items* joined with `` · `` into as few lines as fit *width_pt* at *size_pt* (an average glyph is taken as
+    0.55 of the size, which errs wide for the digits and lower case these are)."""
+    lines: list[str] = []
+    for item in items:
+        if lines and (len(lines[-1]) + 3 + len(item)) * 0.55 * size_pt <= width_pt:
+            lines[-1] += " · " + item
+        else:
+            lines.append(item)
+    return lines
+
+
+@dataclass
+class _ExtremesLayout:
+    """Where the Extremes montage goes, in inches: the crop's side, whether the two blocks sit side by side, whether
+    each crop's text sits to its right (in a column *text_w* wide) or under it, and how many lines that text takes."""
+    side: float
+    beside: bool
+    right: bool
+    text_lines: int
+    text_w: float = 0.0
+    metrics_left_out: bool = False
+
+
+#: The smallest crop side (inches) worth giving to metrics: below it, the metric lines are left out so the crops can
+#: grow, and the caption says so.
+_EXT_MIN_SIDE_WITH_METRICS = 0.6
+
+
+#: Inches: the row labels' column, the space between crops, the room above the montage and the caption below it, a
+#: block's title and timepoint headers, the gap between two blocks side by side, and the narrowest text column.
+_EXT_LABELS_W, _EXT_GAP, _EXT_TOP, _EXT_BOTTOM, _EXT_HEADER, _EXT_BLOCK_GAP, _EXT_MIN_TEXT_W = (
+    1.0, 0.07, 0.55, 0.5, 0.42, 0.3, 0.45)
+
+
+def _ext_text_h(lines: int) -> float:
+    """The height of a crop's text in inches: its fold change and *lines* of metrics."""
+    return (_EXT_VALUE_PT * 1.3 + lines * _EXT_METRIC_PT * 1.25) / 72 + 0.04
+
+
+def _extremes_layout(fig, blocks, cols: int, metric_items) -> _ExtremesLayout:
+    """:func:`_fit_extremes`, leaving the metrics out when with them every crop would be too small to read — the
+    fold change under each crop and the metrics in the pop-out are what remain then."""
+    with_metrics = _fit_extremes(fig, blocks, cols, metric_items)
+    if with_metrics.side >= _EXT_MIN_SIDE_WITH_METRICS or not any(metric_items):
+        return with_metrics
+    without = _fit_extremes(fig, blocks, cols, [])
+    if without.side <= with_metrics.side * 1.15:
+        return with_metrics
+    return replace(without, metrics_left_out=True)
+
+
+def _fit_extremes(fig, blocks, cols: int, metric_items) -> _ExtremesLayout:
+    """The largest crop the figure can hold: every arrangement is tried at every crop size, and the largest size
+    that fits wins.
+
+    Two choices make the arrangements. The blocks one above the other make the montage as tall as both blocks'
+    rows; side by side, as tall as the longer one but twice as wide. Each crop's text — its fold change and its
+    metrics, packed into as few lines as the room allows — goes under it, adding to each row's height, or in a
+    column to its right, whose width is whatever the crop leaves of its share of the figure's width. Stacked with
+    the text underneath, a figure as wide as a page's was limited by its height and left most of its width empty."""
+    w, h = fig.get_size_inches()
+    rows = [len(r) for _t, r in blocks]
+
+    def lines_for(width_in: float) -> int:
+        return max((len(_pack(items, width_in * 72, _EXT_METRIC_PT)) for items in metric_items), default=0)
+
+    best = None
+    for beside in ((False, True) if len(blocks) > 1 else (False,)):
+        n_blocks = len(blocks) if beside else 1
+        per_col = (w - 0.25 - n_blocks * _EXT_LABELS_W - (n_blocks - 1) * _EXT_BLOCK_GAP) / (cols * n_blocks)
+        n_rows = max(rows) if beside else sum(rows)
+        per_row = (h - _EXT_TOP - _EXT_BOTTOM - (1 if beside else len(blocks)) * _EXT_HEADER) / n_rows - _EXT_GAP
+        for right in (False, True):
+            for side in np.arange(min(per_col, per_row), 0.19, -0.02):
+                if right:
+                    text_w = per_col - side - 2 * _EXT_GAP
+                    if text_w < _EXT_MIN_TEXT_W:
+                        continue
+                    lines = lines_for(text_w)
+                    fits = _ext_text_h(lines) <= per_row
+                else:
+                    text_w, lines = 0.0, lines_for(side)
+                    fits = side + _ext_text_h(lines) <= per_row and side + _EXT_GAP <= per_col
+                if fits:
+                    if best is None or side > best.side + 1e-6:
+                        best = _ExtremesLayout(float(side), beside, right, lines, float(text_w))
+                    break
+    return best or _ExtremesLayout(0.2, False, False, lines_for(0.2))
+
+
+def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cells: bool = False,
+                    timepoints=None, metrics: dict | None = None) -> dict:
+    """The *N* nanowells with the largest fold change and the *N* with the smallest, each a row of its crops at the
+    timepoints shown; returns ``{axes: (well, q, r)}`` so a click on a row selects its nanowell.
 
     *model* is ``extremes_compute.ExtremesModel``; *crops* is ``(well, q, r) -> {timepoint: Crop}`` for the
-    nanowells cut so far — a row not yet cut says so in each panel. Every crop is drawn on **one** brightness
-    scale, as the enlarged crops are, so a nanowell that fills with cells reads brighter than one that empties.
-    Each row is labelled with its rank, address and the fold change it was ranked by; each crop carries the fold
-    change at its own timepoint, and the ranking timepoint's column is marked.
-    """
+    nanowells cut so far — a row not yet cut says so in each panel. *timepoints* are the columns (the well's every
+    timepoint when ``None``). Every crop is drawn on **one** brightness scale, as the enlarged crops are, so a
+    nanowell that fills with cells reads brighter than one that empties. Each row is labelled with its rank, address
+    and the fold change it was ranked by; under each crop is the fold change at its timepoint and *metrics*
+    (``site -> {timepoint: [items]}``, ``series_compute.crop_metric_lines``) packed to the crop's width, and the
+    ranking timepoint's column is marked.
+
+    The montage is laid out in inches to fill the figure (:func:`_extremes_layout`): square crops as large as the
+    figure holds, the Largest and Smallest blocks side by side whenever that gives larger crops than one above the
+    other, the whole centred."""
     fig.clear()
     _bg, ink, faint = _inks(fig.add_subplot(111))
     fig.clear()
     blocks = [(f"Largest {len(model.largest)}", model.largest), (f"Smallest {len(model.smallest)}", model.smallest)]
     blocks = [(title, rows) for title, rows in blocks if rows]
-    if not blocks or not model.timepoints:
+    columns = [tp for tp in (timepoints if timepoints is not None else model.timepoints) if tp in model.timepoints]
+    if not blocks or not columns:
         said = f"No nanowell in {model.well} has a {label.lower()} at {model.timepoint}, so none can be ranked."
         if model.excluded:
             said += " " + _sentence(caption(model, label).split("; ", 1)[-1]) + "."
         render_message(fig, said, gid="nw-extremes-missing")
         return {}
+    metrics = metrics or {}
     every = [crop.image for row in model.largest + model.smallest
-             for crop in (crops.get(row.site) or {}).values()]
+             for tp, crop in (crops.get(row.site) or {}).items() if tp in columns or tp == ""]
     lo, hi = _one_scale(every)
-    heights = []
-    for k, (_title, rows) in enumerate(blocks):
-        heights += ([0.45] if k else []) + [1.0] * len(rows)          # a gap between the two blocks
-    cols = len(model.timepoints)
-    grid = fig.add_gridspec(len(heights), cols, height_ratios=heights, left=0.17, right=0.98, top=0.9,
-                            bottom=0.1, wspace=0.06, hspace=0.32)
+    layout = _extremes_layout(fig, blocks, len(columns),
+                              [metrics.get(row.site, {}).get(tp, []) for _t, rows in blocks for row in rows
+                               for tp in columns])
+    draw = _ExtremesDrawing(fig, layout, model, metrics, lo, hi, cells, ink, faint)
     hits: dict = {}
-    notes: set = set()
-    sources: set = set()
-    pending = False
-    line = 0
     for k, (title, rows) in enumerate(blocks):
-        line += 1 if k else 0
+        bx, by = draw.block_origin(k, blocks, len(columns))
+        draw.block_header(bx, by, f"{title} · {label} at {model.timepoint}", columns)
         for i, row in enumerate(rows):
-            site_crops = crops.get(row.site)
-            for j, tp in enumerate(model.timepoints):
-                ax = fig.add_subplot(grid[line, j])
-                ax._aw_image_panel = True                         # pixel for pixel: no typed axis range on it
-                # Its labels (rank and address, the value under the crop, the timepoint) are a crop's caption:
-                # drawn at the Properties sizes they overprinted the next row's crops.
-                ax._aw_type_scale = EXTREMES_TYPE_SCALE
-                ax.set_box_aspect(1)                              # a panel without a crop keeps the crops' shape
-                ax.set_xticks([])
-                ax.set_yticks([])
-                hits[ax] = row.site
-                # A read that failed whole stores its reason under "" (``controller._fetch``).
-                crop = (site_crops or {}).get(tp) or (site_crops or {}).get("")
-                if crop is not None and crop.image is not None:
-                    ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi,
-                              gid="nw-extremes-image")
-                    sources.add(crop.source)
-                    if crop.source == "montage":
-                        notes.add(crop.note)
-                else:
-                    pending = pending or site_crops is None
-                    said = "Cutting…" if site_crops is None else (crop.note if crop is not None else
-                                                                  f"No row at {tp}.")
-                    _ink(ax.text(0.5, 0.5, said, ha="center", va="center", wrap=True, fontsize=5.5,
-                                 transform=ax.transAxes, color=faint, gid="nw-extremes-missing"), muted=True)
-                if tp == model.timepoint:
-                    for spine in ax.spines.values():
-                        spine.set_linewidth(1.6)
-                _ink(ax.set_xlabel(format_value(model.column, row.values.get(tp, math.nan)),
-                                   fontsize=_PREF_PT * EXTREMES_TYPE_SCALE,
-                                   color=ink if tp == model.timepoint else faint, labelpad=1,
-                                   gid="nw-extremes-value"), muted=tp != model.timepoint)
-                if i == 0:
-                    _ink(ax.set_title(tp + (" · ranked" if tp == model.timepoint else ""),
-                                      fontsize=_PREF_PT * EXTREMES_TYPE_SCALE,
-                                      color=ink, gid="nw-extremes-tp"))
-                if j == 0:
-                    _ink(ax.set_ylabel(f"#{row.rank}  q {row.site[1]}, r {row.site[2]}\n"
-                                       f"{format_value(model.column, row.value)}", rotation=0, ha="right",
-                                       va="center", fontsize=_PREF_PT * EXTREMES_TYPE_SCALE, color=ink, labelpad=6,
-                                       gid="nw-extremes-row"))
-                if i == 0 and j == 0:
-                    top = ax.get_position().y1
-                    _ink(fig.text(0.02, top + 0.035, f"{title} · {label} at {model.timepoint}", fontsize=8.5,
-                                  color=ink, fontweight="bold", gid="nw-extremes-block"))
-            line += 1
-    _ink(fig.text(0.02, 0.965, f"{model.well} · the nanowells with the largest and smallest {label.lower()}",
-                  fontsize=10, color=ink, gid="nw-extremes-title"))
-    origin = ("cut from each owner tile at full resolution" if sources == {"tile"} else
-              "cut from the montage, at its lower resolution" if sources == {"montage"} else
-              "cut from each owner tile, or the montage where it had to be" if sources else
-              "still being cut" if pending else "none could be cut")
-    said = [caption(model, label) + ".",
-            f"Crops {origin}; every crop on one brightness scale ({lo:.4g} to {hi:.4g})."
-            + "".join(f" {_sentence(n_)}." for n_ in sorted(notes))]
-    if note:
-        said.insert(0, note)
-    _ink(fig.text(0.02, 0.012, " ".join(said), fontsize=7, color=faint, gid="nw-extremes-caption", wrap=True),
-         muted=True)
+            y_crop_top = by - _EXT_HEADER - i * draw.row_h
+            draw.row_label(bx, y_crop_top, row)
+            for j, tp in enumerate(columns):
+                x0 = bx + _EXT_LABELS_W + j * draw.cell_w
+                hits[draw.crop(x0, y_crop_top, crops.get(row.site), tp)] = row.site
+                draw.crop_text(x0, y_crop_top, row, tp)
+    _ink(fig.text(0.02, 1 - 0.2 / draw.h_in,
+                  f"{model.well} · the nanowells with the largest and smallest {label.lower()}",
+                  fontsize=10, color=ink, va="top", gid="nw-extremes-title"))
+    _ink(fig.text(0.02, 0.012, draw.caption(label, columns, note), fontsize=7, color=faint,
+                  gid="nw-extremes-caption", wrap=True), muted=True)
     return hits
+
+
+class _ExtremesDrawing:
+    """One Extremes montage being drawn: its sizes in inches from the layout, the figure's inks, and what the crops
+    drawn so far said about themselves (their sources, montage notes, cells), which the caption reports."""
+
+    def __init__(self, fig, layout: _ExtremesLayout, model, metrics: dict, lo: float, hi: float, cells: bool,
+                 ink, faint) -> None:
+        self.fig, self.layout, self.model, self.metrics = fig, layout, model, metrics
+        self.lo, self.hi, self.cells, self.ink, self.faint = lo, hi, cells, ink, faint
+        self.w_in, self.h_in = fig.get_size_inches()
+        s = layout.side
+        text_h = _ext_text_h(layout.text_lines)
+        self.cell_w = s + _EXT_GAP + (layout.text_w + _EXT_GAP if layout.right else 0.0)
+        self.row_h = (max(s, text_h) if layout.right else s + text_h) + _EXT_GAP
+        self.notes: set = set()
+        self.sources: set = set()
+        self.pending = False
+        self.tally: dict = {}
+
+    def text(self, x_in: float, y_in: float, said: str, *, color, **kw):
+        """Figure text at a position in inches."""
+        return _ink(self.fig.text(x_in / self.w_in, y_in / self.h_in, said, color=color, **kw),
+                    muted=color == self.faint)
+
+    def block_origin(self, k: int, blocks, n_columns: int) -> tuple[float, float]:
+        """The top-left corner of block *k*, the montage centred both ways in the room between title and caption."""
+        rows = [len(r) for _t, r in blocks]
+        block_w = _EXT_LABELS_W + n_columns * self.cell_w
+        n_beside = len(blocks) if self.layout.beside else 1
+        total_w = n_beside * block_w + (n_beside - 1) * _EXT_BLOCK_GAP
+        total_h = ((1 if self.layout.beside else len(blocks)) * _EXT_HEADER
+                   + (max(rows) if self.layout.beside else sum(rows)) * self.row_h)
+        x_start = max((self.w_in - total_w) / 2, 0.1)
+        y_top = self.h_in - _EXT_TOP - max((self.h_in - _EXT_TOP - _EXT_BOTTOM - total_h) / 2, 0.0)
+        if self.layout.beside:
+            return x_start + k * (block_w + _EXT_BLOCK_GAP), y_top
+        return x_start, y_top - sum(_EXT_HEADER + n * self.row_h for n in rows[:k])
+
+    def block_header(self, bx: float, by: float, title: str, columns) -> None:
+        self.text(bx, by - 0.16, title, color=self.ink, fontsize=8.5, fontweight="bold", gid="nw-extremes-block")
+        for j, tp in enumerate(columns):
+            self.text(bx + _EXT_LABELS_W + j * self.cell_w + self.layout.side / 2, by - _EXT_HEADER + 0.04,
+                      tp + (" · ranked" if tp == self.model.timepoint else ""), color=self.ink, ha="center",
+                      va="bottom", fontsize=_EXT_VALUE_PT, gid="nw-extremes-tp")
+
+    def row_label(self, bx: float, y_crop_top: float, row) -> None:
+        self.text(bx + _EXT_LABELS_W - 0.08, y_crop_top - self.layout.side / 2,
+                  f"#{row.rank}  q {row.site[1]}, r {row.site[2]}\n{format_value(self.model.column, row.value)}",
+                  color=self.ink, ha="right", va="center", fontsize=_EXT_LABEL_PT, gid="nw-extremes-row")
+
+    def crop(self, x0: float, y_crop_top: float, site_crops, tp: str):
+        """One crop's panel, or why it has none; returns the axes, which a click on selects its nanowell."""
+        s = self.layout.side
+        ax = self.fig.add_axes([x0 / self.w_in, (y_crop_top - s) / self.h_in, s / self.w_in, s / self.h_in])
+        ax._aw_image_panel = True                         # pixel for pixel: no typed axis range on it
+        ax.set_xticks([])
+        ax.set_yticks([])
+        # A read that failed whole stores its reason under "" (``controller._fetch``).
+        crop = (site_crops or {}).get(tp) or (site_crops or {}).get("")
+        if crop is not None and crop.image is not None:
+            ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=self.lo, vmax=self.hi,
+                      gid="nw-extremes-image")
+            if self.cells:
+                _draw_crop_cells(ax, crop, self.tally, size=max(5.0, 9.0 * s))
+            self.sources.add(crop.source)
+            if crop.source == "montage":
+                self.notes.add(crop.note)
+        else:
+            self.pending = self.pending or site_crops is None
+            said = "Cutting…" if site_crops is None else (crop.note if crop is not None else f"No row at {tp}.")
+            _ink(ax.text(0.5, 0.5, said, ha="center", va="center", wrap=True, fontsize=5.5, transform=ax.transAxes,
+                         color=self.faint, gid="nw-extremes-missing"), muted=True)
+        if tp == self.model.timepoint:
+            for spine in ax.spines.values():
+                spine.set_linewidth(1.6)
+        return ax
+
+    def crop_text(self, x0: float, y_crop_top: float, row, tp: str) -> None:
+        """The crop's fold change and metrics: under it, centred, or in the column to its right, top-aligned."""
+        s, layout = self.layout.side, self.layout
+        ranked = tp == self.model.timepoint
+        tx, ty, ha = ((x0 + s + _EXT_GAP, y_crop_top, "left") if layout.right else
+                      (x0 + s / 2, y_crop_top - s - 0.03, "center"))
+        self.text(tx, ty, format_value(self.model.column, row.values.get(tp, math.nan)),
+                  color=self.ink if ranked else self.faint, ha=ha, va="top", fontsize=_EXT_VALUE_PT,
+                  fontweight="bold" if ranked else "normal", gid="nw-extremes-value")
+        if layout.metrics_left_out:
+            return
+        lines = _pack(self.metrics.get(row.site, {}).get(tp, []), (layout.text_w if layout.right else s) * 72,
+                      _EXT_METRIC_PT)
+        if lines:
+            self.text(tx, ty - _EXT_VALUE_PT * 1.3 / 72, "\n".join(lines), color=self.faint, ha=ha, va="top",
+                      fontsize=_EXT_METRIC_PT, linespacing=1.15, gid="nw-extremes-metrics")
+
+    def caption(self, label: str, columns, note: str) -> str:
+        """What the montage says about itself: the ranking, where the crops came from, the cells, the timepoints left
+        out, and the metrics when they had to be."""
+        sources = self.sources
+        origin = ("cut from each owner tile at full resolution" if sources == {"tile"} else
+                  "cut from the montage, at its lower resolution" if sources == {"montage"} else
+                  "cut from each owner tile, or the montage where it had to be" if sources else
+                  "still being cut" if self.pending else "none could be cut")
+        hidden = [tp for tp in self.model.timepoints if tp not in columns]
+        said = [caption(self.model, label) + ".",
+                f"Crops {origin}; every crop on one brightness scale ({self.lo:.4g} to {self.hi:.4g})."
+                + "".join(f" {_sentence(n_)}." for n_ in sorted(self.notes))
+                + (f" {_sentence(_cells_clause(self.tally))}." if self.tally else "")
+                + (f" Timepoints not shown: {', '.join(hidden)}." if hidden else "")
+                + (" Each crop's metrics are left out at this size, to keep the crops large enough to read: show "
+                   "fewer timepoints or nanowells, widen the window, or pop out a nanowell to read them."
+                   if self.layout.metrics_left_out else "")]
+        return " ".join(([note] if note else []) + said)
 
 
 def _states_line(frame) -> str:

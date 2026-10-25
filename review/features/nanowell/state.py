@@ -118,6 +118,12 @@ class NanowellState:
     thresholds: dict = field(default_factory=dict)
     #: How many nanowells each of the Extremes view's two blocks shows (the largest and the smallest fold changes).
     extremes_n: int = EXTREMES_DEFAULT_N
+    #: The timepoints the Extremes montage shows as columns; empty shows every timepoint of the well. The ranking
+    #: timepoint is always shown, chosen or not, since the rows are ordered by it.
+    extremes_tps: list = field(default_factory=list)
+    #: The counted cells drawn as dots on every crop the page shows — the site detail's strip, the pop-out and the
+    #: Extremes montage — as the Array view's Cells layer draws them on the array.
+    crop_cells: bool = False
     #: The *Starting cells* filter: the fewest and the most cells a nanowell may have held at the baseline to be
     #: used (``None``: no bound on that side; both ``None``: no filter). See ``starting_cells_compute``.
     start_min: int | None = None
@@ -185,7 +191,7 @@ class NanowellState:
     def to_config(self) -> dict:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
-                "extremes_n": self.extremes_n,
+                "extremes_n": self.extremes_n, "extremes_tps": list(self.extremes_tps), "crop_cells": self.crop_cells,
                 "start_min": self.start_min, "start_max": self.start_max, "layers": self.layers.to_config(),
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
@@ -205,6 +211,9 @@ class NanowellState:
         count = config.get("extremes_n")
         self.extremes_n = (count if isinstance(count, int) and not isinstance(count, bool)
                            and 1 <= count <= EXTREMES_MAX_N else fresh.extremes_n)
+        self.crop_cells = config.get("crop_cells") is True
+        tps = config.get("extremes_tps")
+        self.extremes_tps = [str(tp) for tp in tps if isinstance(tp, str)] if isinstance(tps, list) else []
         self.layers = _layers_from(config)
         sites = []
         for item in config.get("selected_sites") or []:

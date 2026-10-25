@@ -5097,7 +5097,8 @@ use them.
   every view, so a timepoint chosen on one carries to the next wherever it exists.
 - **Well**, **Timepoint** and **Largest & smallest** (on *Extremes*) — the well whose nanowells are ranked, the
   timepoint they are ranked at (the well's latest by default), and how many each block shows (1 to 12, 5 by
-  default).
+  default). **Timepoints** chooses which of the well's timepoints the montage shows (all by default), and
+  **Cells** draws the cells the run counted on every crop (see *Site detail*).
 
 **Reading the figure**
 
@@ -5146,8 +5147,13 @@ use them.
   biggest responders and the non-responders looked like over time. Every metric is ranked by its fold change
   against the Baseline — Cell count by the count fold change, Confluence by the confluence fold change, and so
   on; growth rate and occupancy have no fold change over time and are greyed. Each row is labelled with its
-  rank, address and the fold change it was ranked by, each crop with the fold change at its own timepoint, and
-  the ranking timepoint's column is outlined. All crops share one brightness scale, so a nanowell that filled
+  rank, address and the fold change it was ranked by, each crop with the fold change at its own timepoint and the
+  nanowell's measurements there (cell count, confluence, and the channel's brightness and site signal), and the
+  ranking timepoint's column is outlined. The montage fills the figure: the Largest and Smallest blocks sit side
+  by side whenever that gives bigger crops, and **Timepoints** (beside *Largest & smallest*) chooses which
+  timepoints are shown — fewer give bigger crops; the ranking timepoint is always shown. When the crops would be
+  too small to read with their measurements beside them, the measurements are left out and the caption says so;
+  the pop-out writes them under each of its panels. All crops share one brightness scale, so a nanowell that filled
   with cells reads brighter than one that emptied. Nanowells without a fold change at the ranking timepoint
   (occluded, seeded later, and so on) are not ranked and are counted by reason in the caption; a well with
   fewer nanowells than both blocks need splits them between the two and never shows one twice. Click any crop
@@ -5222,7 +5228,10 @@ the crop is cut from the lower-resolution montage instead, and the caption under
 timepoint with no crop says why. **Pop out**, above the strip, opens the crops large in a window of their own —
 one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a change
 between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
-it like any window.
+it like any window. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted on every
+crop — the strip, the pop-out and the Extremes montage — as the Array view's *Cells* layer does on the array (the
+run keeps no cell outlines). It is one setting, also offered on the Extremes view, and kept with the page's
+settings. The caption counts the dots, and a well without a cell table is named there rather than shown as empty.
 Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it

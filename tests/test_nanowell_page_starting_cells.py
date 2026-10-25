@@ -165,8 +165,8 @@ def test_trajectories_and_position_carry_the_note(page):
 def test_extremes_ranks_only_the_nanowells_in_the_filter(page):
     _view(page, "extremes")
     page.widgets.get("_nw_extremes_spin").setValue(1)
-    rows = lambda: [ax.yaxis.label.get_text().split("\n")[0] for ax in page.widgets.get("_nw_fig").axes  # noqa: E731
-                    if ax.yaxis.label.get_gid() == "nw-extremes-row"]
+    rows = lambda: [t.get_text().split("\n")[0] for t in page.widgets.get("_nw_fig").texts  # noqa: E731
+                    if t.get_gid() == "nw-extremes-row"]
     assert rows() == ["#1  q 0, r 0", "#1  q 1, r 0"]
     _choose(page, "single")
     assert rows() == ["#1  q 0, r 0", "#1  q 2, r 0"]

@@ -25,6 +25,7 @@ from analyze.domain.nanowell_fields import (
     SEGMENT_SCOPE_CHOICES, SCAN_CHOICES,
     nanowell_enabled, nanowell_option_errors,
 )
+from analyze.domain.well_list import incremental_is_moot
 
 _REGISTRATION_TIP = (
     "An earlier nanowell run's output folder whose tile registration this run reuses, so a second analysis with "
@@ -571,7 +572,10 @@ class AnalyzeNanowellSectionMixin:
         problems = nanowell_option_errors(opts, need_phase=not self._auto_detect_on())
         # Only for a run: Test detection runs on this computer whatever host the run would go to (X30).
         remote = for_run and self._remote_cb.currentData() is not None
-        if remote and self._existing_output_cb.value() == "incremental":
+        # Not when every well the run touches is forced: Incremental then changes nothing, and the run drops it
+        # before the remote sees it (``run_spec._nanowell_remote_resume_by_well``).
+        if (remote and self._existing_output_cb.value() == "incremental"
+                and not incremental_is_moot(opts)):
             from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
 
             problems.append(NANOWELL_REMOTE_INCREMENTAL_REFUSAL)

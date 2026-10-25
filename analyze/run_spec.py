@@ -26,7 +26,7 @@ from PySide6.QtWidgets import QPushButton, QWidget
 
 from analyze.domain.job_edit import AnalyzeJobEditMixin
 from analyze.run_problems import AnalyzeRunProblemsMixin, RunProblem
-from analyze.domain.well_list import only_wells_note
+from analyze.domain.well_list import incremental_is_moot, only_wells_note
 from core.safe import swallowed
 from services.pipeline_service import find_pipeline_script
 from services.run_detect import (
@@ -431,13 +431,22 @@ def _nanowell_remote_resume_by_well(spec, remote) -> tuple:
     output. So the incremental is dropped and the note says what will happen. ``force`` and a run on this computer
     are left as they are, and so is an Incremental the user ticked, which the form refuses before this. The key is
     read directly rather than through the nanowell field rules, which ship with the removable Nanowells feature.
+
+    An Incremental that changes nothing is dropped too, ticked or not: under Force, or when every well the run
+    touches is in *Force these wells* (``incremental_is_moot`` — QC triage's *Re-run wells* hands over exactly
+    that), each well is rebuilt in full anyway, so the run is the same without it — and with it the remote runner
+    refuses the run (``refuse_remote_nanowell_incremental``). The form lets that case through for this reason.
     """
     import dataclasses
 
     opts = spec.opts or {}
     nanowell = bool(str(opts.get("nanowell_format") or "").strip())
-    if remote is None or not nanowell or not opts.get("incremental") or opts.get("force"):
+    if remote is None or not nanowell or not opts.get("incremental"):
         return spec, ""
+    if incremental_is_moot(opts):
+        note = ("[nanowell] Incremental is off for this remote run: every well it runs is forced, so each is "
+                "analysed again in full either way, and a remote host cannot add to a nanowell well part-way.\n")
+        return dataclasses.replace(spec, opts={**opts, "incremental": False}), note
     note = ("[resume] A nanowell run cannot add to a well part-way on a remote host, so this one goes well by well: "
             "every well whose results here cover all its timepoints under these settings is skipped, and every "
             "other well — left part way, or never finished — is sent whole and analysed again in full.\n")

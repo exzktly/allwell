@@ -11,8 +11,10 @@ the path that already owns it, so triage adds no second way to do anything:
 * **Accept** and **Reopen** write ``ctx.state.dataset.triage_decisions``.
 * **Re-run wells** hands the dataset to Analyze through Home's own hand-off
   (``review.core.analyze_handoff.open_in_analyze``), with the chosen wells both forced and
-  the only wells run, so nothing else on the plate is touched. Nothing is run
-  from here: Analyze opens configured, and the user presses Run.
+  the only wells run, so nothing else on the plate is touched — and not
+  incremental, which a fully forced run does not need and a remote nanowell
+  run refuses. Nothing is run from here: Analyze opens configured, and the
+  user presses Run.
 
 Each change reaches the provenance log by the route every analysis change does
 (``review/persistence/provenance.py``): the exclusion and decision blocks are
@@ -115,7 +117,9 @@ def rerun_wells(ctx, rows) -> list[str]:
     if not wells:
         return []
     from review.core.analyze_handoff import open_in_analyze
-    if not open_in_analyze(ctx, force_wells=wells, only_wells=wells):
+    # Not incremental: every well run is forced, so it would change nothing — and a remote nanowell run refuses
+    # an Incremental tick, which refused this very re-run of the wells QC found missing fields in.
+    if not open_in_analyze(ctx, force_wells=wells, only_wells=wells, incremental=False):
         # No Analyze pane in this build, or a folder Analyze cannot open: the
         # caller must not say a rerun is set up when nothing was.
         return []

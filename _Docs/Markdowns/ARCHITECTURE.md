@@ -3110,7 +3110,9 @@ row gets a row of its own, with Reopen.
 which goes through Review's one door into Analyze
 (`review.core.analyze_handoff.open_in_analyze`, also what *Finish this run* uses) with the
 selected wells both forced and the only wells run, so nothing else on the plate
-is touched; Analyze opens configured and the user presses Run. The hand-off
+is touched, and not incremental — every well run is forced, so it would change
+nothing, and a remote nanowell run refuses it; Analyze opens configured and the
+user presses Run. The hand-off
 answers whether it happened, and a build with no Analyze pane is told so rather
 than told a rerun is set up. An *acquisition*
 row (a field the run measured as unlike the plate) offers **Exclude field…**,
@@ -10642,7 +10644,10 @@ not the sidecar's summary, which each batch of a batched run writes over the las
 (`missing_nanowell_tables`), which keeps the remote copy. An incremental nanowell run is refused on a remote host
 when the user chose Fill in what's missing, in Analyze and as a backstop in the runner and the run record
 (`NANOWELL_REMOTE_INCREMENTAL_REFUSAL`): the remote would analyse only the new timepoints, without the earlier
-ones' roster and template, and its tables would replace the local ones. A run the *app* makes incremental — a
+ones' roster and template, and its tables would replace the local ones. An Incremental that changes nothing is
+not refused: under Force, or when every well in *Only these wells* is also in *Force these wells*
+(`analyze.domain.well_list.incremental_is_moot`), each well is rebuilt in full anyway, so the form lets the run
+through and `_nanowell_remote_resume_by_well` drops the flag before the argv is built. A run the *app* makes incremental — a
 resume, or a plate with an unfinished run behind it — goes well by well instead
 (`analyze.run_spec._nanowell_remote_resume_by_well` drops the incremental and logs why): the finished-wells step
 skips every well whose tables here cover all its archive's timepoints (each with a verdict in its grid record —

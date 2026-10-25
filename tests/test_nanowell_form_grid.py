@@ -131,6 +131,74 @@ def test_an_incremental_nanowell_run_on_a_remote_host_is_refused(tab, refused, t
     assert tab._validate_run_request() is not None                   # the remote plate in full: fine
 
 
+def _remote(tab):  # noqa: F811
+    tab._remote_cb.addItem("bench-box", userData="bench-box")
+    tab._remote_cb.setCurrentIndex(tab._remote_cb.findData("bench-box"))
+
+
+def test_a_remote_nanowell_rerun_with_every_well_forced_is_not_refused_for_incremental(
+        tab, refused, tmp_path, monkeypatch):  # noqa: F811
+    """QC triage's *Re-run wells* forced the wells a QC pass found missing fields in, limited the run to them and
+    set Incremental; a remote nanowell run refused that, so the re-run could not start however it was forced.
+    Incremental changes nothing when every well run is forced, so the form lets it through and the run reaches the
+    runner with it off — the remote runner refuses an incremental nanowell argv outright."""
+    import services.remote_config as remote_config
+    from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
+
+    root, _ = _plate(tmp_path)
+    _use_nanowell_schema(tab)
+    tab._input_edit.setText(str(root))
+    tab._nanowell_cb.setChecked(True)
+    tab._existing_output_cb.setValue("incremental")
+    _remote(tab)
+    tab._only_wells_edit.setText("A1")
+    tab._force_wells_edit.setText("A01")             # spelled differently: matched canonically
+    assert tab._validate_run_request() is not None, refused[-1:] if refused else None
+    assert not any(NANOWELL_REMOTE_INCREMENTAL_REFUSAL in r[1] for r in refused)
+
+    monkeypatch.setattr(remote_config, "get_remote", lambda name: object())
+    sent: list[dict] = []
+
+    class Launched(Exception):
+        """The run reached the runner: past every refusal."""
+
+    def launch(_pipeline, opts, **_kwargs):
+        sent.append(dict(opts))
+        raise Launched
+
+    monkeypatch.setattr(tab, "_set_running_ui_state", lambda **_k: None)
+    monkeypatch.setattr(tab._runner, "start", launch)
+    with pytest.raises(Launched):
+        tab.start_run(tab._collect_run_spec())
+    assert sent and sent[-1]["incremental"] is False
+
+
+def test_a_remote_nanowell_incremental_run_with_an_unforced_well_is_still_refused(tab, refused, tmp_path):  # noqa: F811
+    """The moot case is only the moot case: one well run and not forced still needs the refusal."""
+    from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
+
+    root, _ = _plate(tmp_path)
+    _use_nanowell_schema(tab)
+    tab._input_edit.setText(str(root))
+    tab._nanowell_cb.setChecked(True)
+    tab._existing_output_cb.setValue("incremental")
+    _remote(tab)
+    tab._only_wells_edit.setText("A01, B02")
+    tab._force_wells_edit.setText("A01")
+    assert tab._validate_run_request() is None
+    assert NANOWELL_REMOTE_INCREMENTAL_REFUSAL in refused[-1][1]
+
+
+def test_incremental_is_moot_only_when_every_run_well_is_forced():
+    from analyze.domain.well_list import incremental_is_moot
+
+    assert incremental_is_moot({"force": True})
+    assert incremental_is_moot({"only_wells": ["a1", "C08"], "force_wells": ["A01", "c8", "D04"]})
+    assert not incremental_is_moot({"only_wells": ["A01", "B02"], "force_wells": ["A01"]})
+    assert not incremental_is_moot({"force_wells": ["A01"]})          # no subset: every other well runs too
+    assert not incremental_is_moot({})
+
+
 def test_a_partial_grid_is_refused_with_what_it_lacks(tab, refused, tmp_path):  # noqa: F811
     _use_nanowell_schema(tab)
     tab._input_edit.setText(str(tmp_path))

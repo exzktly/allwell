@@ -6962,13 +6962,16 @@ listing can hold a single channel token. A slot with one distinct value is not
 recognised as the channel slot at all, so a prefix sample reports *no* channels
 on exactly the largest plates.
 
-**The channel slot is the one that changes within a tile.** A tile — one well,
-field and timepoint — is imaged once per channel, so `_pick_channel_slot` prefers a
-categorical slot that takes more than one value among the names of one tile
-(`_varies_within_a_tile`, keyed on the well, field and timepoint slots found
-before it); an experiment prefix is the same for every image of a tile. Only when
-no slot varies within a tile (a single-channel plate) does the fewest-distinct
-rule decide alone. Without it a plate holding two prefixes — a Concatenate of two
+**On a tie, the channel slot is the one that changes within a tile.**
+`_pick_channel_slot` takes the categorical slot with the fewest distinct values;
+between slots with as many, it prefers one that takes more than one value among
+the names of one tile — one well, field and timepoint (`_varies_within_a_tile`,
+keyed on the slots found before it) — since a tile is imaged once per channel and
+an experiment prefix is the same for every image of a tile. It is only a
+tie-break because the names are a strided sample of each archive and an
+unclaimed slot such as ImageXpress's `s<n>` site also varies within a tile: ranked
+first, it took a 4-site, 3-channel per-well zip plate's sites for its channels.
+Without the tie-break a plate holding two prefixes — a Concatenate of two
 acquisitions, each named by its own run — read `expA`/`expB` against
 `PHASE`/`GFP`, two values each, and the leftmost, the prefix, was confidently
 taken for the channel, so no image matched the phase token and the run stopped

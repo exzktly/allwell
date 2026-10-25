@@ -645,4 +645,17 @@ def test_no_image_groups_says_why(tmp_path):
     wrong = no_groups_reason(archive, "PHASE", ["GFP"], ["channel", "ignore", "well", "fov", "timepoint"], "_")
     assert "no image has the phase channel 'PHASE'" in wrong and "'expA' (2), 'expB' (2)" in wrong
     right = no_groups_reason(archive, "PHASE", ["RFP"], ["experiment", "channel", "well", "fov", "timepoint"], "_")
-    assert "no RFP image" in right and "'expA_RFP_A01_F0_0h'" in right
+    assert "no RFP image" in right and "'expA_RFP_A01_F0_0h.tif'" in right
+
+
+def test_no_image_groups_names_a_partner_that_differs_only_by_extension(tmp_path):
+    """The grouper looks the partner up by its whole name, extension included, so ``.tif`` beside ``.TIF`` is no
+    pair; the reason must name that partner rather than fall through to a bare list of channel values."""
+    from pipeline.nanowell_task import no_groups_reason
+
+    archive = tmp_path / "A01.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("exp_PHASE_A01_F0_0h.tif", b"x")
+        zf.writestr("exp_GFP_A01_F0_0h.TIF", b"x")
+    reason = no_groups_reason(archive, "PHASE", ["GFP"], ["experiment", "channel", "well", "fov", "timepoint"], "_")
+    assert "no GFP image" in reason and "'exp_GFP_A01_F0_0h.tif'" in reason

@@ -730,7 +730,8 @@ def no_groups_reason(zip_path, nuclear_token: str, fluor_tokens, schema, sep: st
             names = sorted({Path(n).name for n in zf.namelist()})
     except (OSError, zipfile.BadZipFile) as exc:
         return f"the archive cannot be read ({exc})"
-    stems = [Path(n).stem for n in names if not n.startswith(".") and Path(n).suffix.lower() in GROUP_IMAGE_EXTS]
+    images = [n for n in names if not n.startswith(".") and Path(n).suffix.lower() in GROUP_IMAGE_EXTS]
+    stems = [Path(n).stem for n in images]
     if not stems:
         return "it holds no images"
     if "channel" not in fields:
@@ -742,12 +743,16 @@ def no_groups_reason(zip_path, nuclear_token: str, fluor_tokens, schema, sep: st
     if nuclear_token not in held:
         return (f"no image has the phase channel {nuclear_token!r} at the channel's {where}; that position holds "
                 f"{shown or 'nothing'}. Check the filename schema and the channel names on the form")
-    for stem in stems:
+    present = set(images)
+    for name in images:
+        stem, suffix = Path(name).stem, Path(name).suffix
         parts = stem.split(sep)
         if len(parts) > at and parts[at] == nuclear_token:
             for token in fluor_tokens:
-                partner = sep.join([*parts[:at], token, *parts[at + 1:]])
-                if partner not in stems:
+                # The grouper looks the partner up by its whole name, the phase image's extension included
+                # (process_microscopy._derive_fluor_filename), so .tif beside .TIF is no pair.
+                partner = sep.join([*parts[:at], token, *parts[at + 1:]]) + suffix
+                if partner not in present:
                     return (f"the {nuclear_token} images have no {token} image named the same but for the channel "
                             f"(looked for {partner!r}, beside {stem!r}); the channel position holds {shown}")
     return f"the channel position ({where}) holds {shown}"

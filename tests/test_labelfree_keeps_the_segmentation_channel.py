@@ -137,3 +137,80 @@ def test_label_free_hides_the_segmentation_channel_s_label_too(tab):
     _method(tab, "stardist_nuclei")
     assert [w.text() for w in tab.findChildren(QLabel)
             if w.text() == "Segmentation channel" and w.isVisibleTo(tab)] == ["Segmentation channel"]
+
+
+# ── the parameter area's height ─────────────────────────────────────────────
+#
+# Under the app's own stylesheet, because the defect is made of wrapped text:
+# without it the fonts are smaller, no page's text wraps at this width, and the
+# stack lays out correctly with or without the fix.
+
+
+@pytest.fixture
+def styled_tab(qtbot, monkeypatch, qapp):
+    from ui import theme
+
+    before = qapp.styleSheet()
+    qapp.setStyleSheet(theme.qss())
+    try:
+        import analyze.form
+
+        monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+        from analyze.tab import AnalyzeTab
+
+        t = AnalyzeTab()
+        qtbot.addWidget(t)
+        t.resize(400, 1600)
+        t.show()
+        qtbot.waitExposed(t)
+        yield t
+    finally:
+        qapp.setStyleSheet(before)   # app-wide: left applied, it changes later tests' layout
+
+
+def _gap_above_and_below(tab) -> tuple[int, int]:
+    """Pixels between "+ Add channel" and the parameter area, and between the
+    area and the row after it — laid out, as drawn."""
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.processEvents()
+    stack = tab._seg_param_stack
+    lay = stack.parentWidget().layout()
+    i = lay.indexOf(stack)
+    before = lay.itemAt(i - 1).widget()
+    after = next(lay.itemAt(j).widget() for j in range(i + 1, lay.count())
+                 if lay.itemAt(j).widget() is not None and lay.itemAt(j).widget().isVisibleTo(tab))
+    return (stack.geometry().top() - before.geometry().bottom() - 1,
+            after.geometry().top() - stack.geometry().bottom() - 1)
+
+
+def test_label_free_leaves_no_gap_below_add_channel(styled_tab):
+    """Reported: a tall blank gap below "+ Add channel" with Label-free chosen.
+    The stack was laid out at its tallest page's wrapped-text height (Cellpose's)
+    with Label-free's short page centred in it: 45 px blank above and below.
+    Visiting Cellpose first, since that is the page whose height it kept."""
+    tab = styled_tab
+    stack = tab._seg_param_stack
+    spacing = stack.parentWidget().layout().spacing()
+    _method(tab, "cellpose")
+    _method(tab, "cellpose_labelfree")
+    assert _gap_above_and_below(tab) == (spacing, spacing)
+    # And no blank inside the area either: it is as tall as the page showing
+    # needs, not as tall as Cellpose's. (With the area vertically Preferred, a
+    # stale height shows up here rather than between the widgets.)
+    needed = stack.currentWidget().heightForWidth(stack.width())
+    assert stack.height() == needed, f"the area is {stack.height()} px for a {needed} px page"
+
+
+def test_nanowell_mode_s_rows_are_not_clipped(styled_tab):
+    """The label-free page grows in nanowell mode, and its wrapped heading needs
+    more height at the sidebar's width than its plain size hint: the stack must
+    give it that, not cut it off."""
+    from PySide6.QtWidgets import QApplication
+
+    tab = styled_tab
+    tab._nanowell_cb.setChecked(True)
+    QApplication.processEvents()
+    stack = tab._seg_param_stack
+    needed = stack.currentWidget().heightForWidth(stack.width())
+    assert stack.height() >= needed, f"the page needs {needed} px and was given {stack.height()}"

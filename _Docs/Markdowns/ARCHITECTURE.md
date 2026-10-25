@@ -6852,8 +6852,9 @@ pipeline writes that *before* any image work, so on a failure it would describe
 a plate that was never produced.
 
 The per-method segmentation parameters are their own mixin,
-`analyze.seg_params.AnalyzeSegParamsMixin`: the `NamedPageStack` of
-per-routine pages (StarDist / watershed / Cellpose / label-free / classical) plus
+`analyze.seg_params.AnalyzeSegParamsMixin`: the stack of per-routine pages
+(`_ParamStack`, a `NamedPageStack`; StarDist / watershed / Cellpose / label-free
+/ classical) plus
 two rows that sit *below* the stack because more than one routine reads them:
 the Cellpose cell diameter (both Cellpose routines) and the StarDist detection
 thresholds (both StarDist routines). Each rides the stack's own
@@ -6861,7 +6862,20 @@ thresholds (both StarDist routines). Each rides the stack's own
 `_refresh_segmentation_hints` is needed. The
 hints and per-method validation (`_refresh_segmentation_hints` /
 `_segmentation_validation_errors` / `_collapse_seg_param_stack`) live here too,
-beside the panel they drive. Every widget still lands on the `AnalyzeTab`
+beside the panel they drive. **The stack is as tall as the page showing, at the
+width it has.** `_collapse_seg_param_stack` gives the hidden pages an Ignored
+vertical policy, which `QStackedLayout.sizeHint` honours and its height-for-width
+does not — that is the tallest page's whatever the policies, and a box layout
+asks a widget with a layout for it straight from that layout. Every page holds
+wrapping text, so Label-free's 42 px page sat in a 132 px slot (a blank gap below
+"+ Add channel"). Each page is a `_ParamPage`, whose height-for-width is 0 while
+hidden. The stack stays vertically Fixed, so it never takes spare height from the
+section (Preferred let it grow to 173 px), and `_ParamStack.sizeHint` reports the
+layout's height-for-width at the stack's own width, re-asked on a width change,
+because Fixed caps a widget at its size hint and nanowell mode's wrapped count
+rows needed 210 px against a 194 px plain hint
+(`tests/test_labelfree_keeps_the_segmentation_channel.py`, under the app
+stylesheet — without it no page's text wraps and the defect does not occur). Every widget still lands on the `AnalyzeTab`
 instance under the attribute name it had when this lived in the form, so
 `analyze.pinfo` and `_collect_run_options` reach them unchanged.
 

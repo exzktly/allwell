@@ -15,6 +15,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QComboBox, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from util.channel_roles import LABELFREE_METHODS, phase_role_conflicts
+from widgets.page_stack import NamedPageStack
 
 # The two routines that run StarDist, and therefore take its thresholds. Kept
 # next to the controls that depend on it rather than imported from the pipeline:
@@ -59,6 +60,45 @@ def _threshold_help() -> tuple[str, str]:
     return PROB_THRESH_HELP, NMS_THRESH_HELP
 
 
+class _ParamPage(QWidget):
+    """One method's parameter page: no height while it is not the page showing.
+
+    ``_collapse_seg_param_stack`` gives every page but the current one an Ignored vertical policy, which
+    ``QStackedLayout.sizeHint`` honours. Its *height-for-width* does not: it is the tallest page's, whatever the
+    policies, and a box layout asks a widget with a layout for its height-for-width straight from that layout, so
+    no override on the stack is consulted. Every page here holds wrapping text, so that is the height the stack
+    was laid out at — measured with Label-free's 42 px page showing, a 132 px slot with the page centred in it,
+    drawn as a blank gap above and below. ``QStackedLayout`` hides the pages it is not showing, so a hidden page
+    answers 0 here and the stack's height-for-width is the showing page's, at the width it actually has.
+    """
+
+    def heightForWidth(self, width: int) -> int:  # Qt naming
+        return 0 if self.isHidden() else super().heightForWidth(width)
+
+
+class _ParamStack(NamedPageStack):
+    """The per-method parameter stack: its size hint is as tall as the showing page needs at its width.
+
+    The stack is vertically Fixed, so it never takes spare height from the section — Preferred let it grow to
+    173 px around Label-free's 42 px page. Fixed caps a widget at its size hint, though, and the plain hint is
+    measured at the page's preferred width: nanowell mode's count rows wrap at the sidebar's width and needed
+    210 px against a 194 px hint, so their first row was clipped. The hint's height is therefore the layout's
+    height-for-width at the width the stack has, re-asked whenever that width changes.
+    """
+
+    def sizeHint(self):  # Qt naming
+        hint = super().sizeHint()
+        lay = self.layout()
+        if lay is not None and lay.hasHeightForWidth() and self.width() > 0:
+            hint.setHeight(lay.heightForWidth(self.width()))
+        return hint
+
+    def resizeEvent(self, event) -> None:  # Qt naming
+        super().resizeEvent(event)
+        if event.oldSize().width() != event.size().width():
+            self.updateGeometry()
+
+
 class AnalyzeSegParamsMixin:
     """Builds the per-method segmentation parameter controls."""
 
@@ -71,13 +111,18 @@ class AnalyzeSegParamsMixin:
         """
         # Per-method parameter panel — swapped by _refresh_segmentation_hints so
         # only the selected routine's controls are shown.
-        from widgets.page_stack import NamedPageStack
-        self._seg_param_stack = NamedPageStack(sec)
+        self._seg_param_stack = _ParamStack(sec)
         # A QStackedWidget's height is the max over *all* pages, so the short
         # default (StarDist, no params) would still reserve the tall Cellpose
         # page's height — a big empty gap under the channel-tokens section.
         # Collapse it to the current page by giving the hidden pages a vertical
-        # size policy of Ignored, re-applied on every page switch.
+        # size policy of Ignored, re-applied on every page switch — which covers
+        # the plain size hint — and by building every page as a ``_ParamPage``,
+        # whose height-for-width is 0 while hidden, which covers the height the
+        # pages' wrapping text makes the layout use instead. Vertically Fixed so
+        # the stack never takes spare height from the section, with a size hint
+        # that is the showing page's height at the stack's width
+        # (``_ParamStack``), since Fixed caps the stack at its size hint.
         self._seg_param_stack.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self._seg_param_stack.currentChanged.connect(
             lambda _=None: self._collapse_seg_param_stack())
@@ -91,7 +136,7 @@ class AnalyzeSegParamsMixin:
         sec.layout().addWidget(self._seg_param_stack)
 
         def _page() -> QWidget:
-            p = QWidget()
+            p = _ParamPage()
             v = QVBoxLayout(p)
             v.setContentsMargins(0, 0, 0, 0)
             v.setSpacing(2)

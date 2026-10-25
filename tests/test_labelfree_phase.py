@@ -155,24 +155,35 @@ def test_analyze_phase_checkbox(qapp):
         tab._fluor_add_row("BF")
     (e0, _s0, p0, _b0) = tab._fluor_rows[0]
     (e1, s1, p1, _b1) = tab._fluor_rows[1]
-    # Layout regression: the smFISH/Phase checkboxes are pinned to their natural
-    # width so a narrow sidebar can't shrink them into overlapping text.
-    for (_e, _sm, _ph, _b) in tab._fluor_rows:
-        assert _sm.minimumWidth() > 0 and _ph.minimumWidth() > 0
-        assert _sm.minimumWidth() >= _sm.sizeHint().width() - 1
+    # The rows show each channel's role in one dropdown (Quantify / smFISH /
+    # Phase); the checkboxes below are its state, hidden, and the dropdown
+    # follows them and drives them.
+    from widgets.value_combo import ValueCombo
+
+    def role(edit):
+        return edit.parentWidget().findChild(ValueCombo).value()
+
     e0.setText("BF")
     e1.setText("GFP")
 
     p0.setChecked(True)
     assert tab._phase_token() == "BF"
+    assert (role(e0), role(e1)) == ("phase", "quantify")
     # Phase is mutually exclusive across rows.
     p1.setChecked(True)
     assert not p0.isChecked()
     assert tab._phase_token() == "GFP"
+    assert (role(e0), role(e1)) == ("quantify", "phase")
     # A channel can't be both Phase and smFISH.
     s1.setChecked(True)
     assert not p1.isChecked()
     assert tab._phase_token() == ""
+    assert role(e1) == "smfish"
+    # And the dropdown drives the state: choosing Phase on row 0 takes it.
+    e0.parentWidget().findChild(ValueCombo).setValue("phase")
+    assert p0.isChecked() and tab._phase_token() == "BF"
+    e0.parentWidget().findChild(ValueCombo).setValue("quantify")
+    assert not p0.isChecked() and tab._phase_token() == ""
 
     # The label-free preset requires a Phase channel; general Cellpose does not.
     _set_method(tab, "cellpose_labelfree")

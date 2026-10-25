@@ -101,12 +101,18 @@ def test_saving_the_banner_queues_the_whole_form_and_returns_to_the_queue(
 def test_a_form_run_would_refuse_is_not_queued_and_stays_open(panes, monkeypatch):
     """The banner's Save is the same act as "+ Queue", so it takes the same
     gate. Without it a mistyped number was queued and failed at dequeue."""
-    import analyze.tab as analyze_tab_mod
+    import analyze.run_problems as rp
 
     analyze_tab, _datasets, jq, calls, _notes = panes
     refused: list[str] = []
-    monkeypatch.setattr(analyze_tab_mod.QMessageBox, "critical",
-                        lambda _parent, title, _text: refused.append(title))
+    original = rp.AnalyzeRunProblemsMixin._report_run_problems
+
+    def _record(self, problems):
+        if problems:
+            refused.append(problems[0].title)
+        return original(self, problems)
+
+    monkeypatch.setattr(rp.AnalyzeRunProblemsMixin, "_report_run_problems", _record)
     _click_add_analyze(jq)
     analyze_tab._qc_remove_debris_cb.setChecked(True)
     analyze_tab._qc_min_area_edit.setText("5oo")

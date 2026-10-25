@@ -204,7 +204,7 @@ def test_a_long_reason_is_cut_for_the_headline_and_kept_on_the_tooltip(tab):
 
 def test_a_refusal_unfolds_the_section_it_names(tab, tmp_path, monkeypatch):
     """Naming a remedy the user cannot see is the same dead end as not naming
-    one. The disk check points at Compute Options, which folds by default.
+    one. The disk check points at Advanced, which folds by default.
 
     The message comes from the real ``preflight_scratch_space`` rather than
     being written out here. The whole mechanism is a text match between what
@@ -226,10 +226,10 @@ def test_a_refusal_unfolds_the_section_it_names(tab, tmp_path, monkeypatch):
 
     folded_before = {t: b.isVisibleTo(tab)
                      for t, (b, _c) in tab._collapsible_sections.items()}
-    assert folded_before["Compute options"] is False
+    assert folded_before["Advanced"] is False
     _end_run(tab, message=message)
-    assert tab._collapsible_sections["Compute options"][0].isVisibleTo(tab) is True
-    # And nothing it did not name: the message points at Compute Options and
+    assert tab._collapsible_sections["Advanced"][0].isVisibleTo(tab) is True
+    # And nothing it did not name: the message points at Advanced and
     # the scratch field, not at every folded section on the form.
     unfolded = {t for t, (b, _c) in tab._collapsible_sections.items()
                 if b.isVisibleTo(tab) and not folded_before[t]}

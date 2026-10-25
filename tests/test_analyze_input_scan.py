@@ -185,7 +185,7 @@ def test_a_schema_the_scan_is_unsure_of_is_not_applied(qapp, tmp_path):
     # the real dashboard the real handler wrote to, not a stand-in.
     said = tab._dashboard._status.text()
     assert "left as you set it" in said, said
-    assert "channel tokens not recognised" in said, said
+    assert "channels not recognised" in said, said
 
 
 def test_a_confident_schema_is_still_applied(qapp, tmp_path):

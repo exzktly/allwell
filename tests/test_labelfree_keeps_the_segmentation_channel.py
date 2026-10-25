@@ -169,8 +169,11 @@ def styled_tab(qtbot, monkeypatch, qapp):
 
 
 def _gap_above_and_below(tab) -> tuple[int, int]:
-    """Pixels between "+ Add channel" and the parameter area, and between the
-    area and the row after it — laid out, as drawn."""
+    """Pixels between the visible widget above the parameter area and the area,
+    and between the area and the visible row after it — laid out, as drawn.
+    (Above it sits the Segmentation channel row, which Label-free hides, so the
+    nearest *visible* widget is the one that counts; it was "+ Add channel"
+    before the method settings moved into their own Segmentation section.)"""
     from PySide6.QtWidgets import QApplication
 
     # Settled, as drawn (see the nanowell test below): two turns for the stack
@@ -180,7 +183,8 @@ def _gap_above_and_below(tab) -> tuple[int, int]:
     stack = tab._seg_param_stack
     lay = stack.parentWidget().layout()
     i = lay.indexOf(stack)
-    before = lay.itemAt(i - 1).widget()
+    before = next(lay.itemAt(j).widget() for j in range(i - 1, -1, -1)
+                  if lay.itemAt(j).widget() is not None and lay.itemAt(j).widget().isVisibleTo(tab))
     after = next(lay.itemAt(j).widget() for j in range(i + 1, lay.count())
                  if lay.itemAt(j).widget() is not None and lay.itemAt(j).widget().isVisibleTo(tab))
     return (stack.geometry().top() - before.geometry().bottom() - 1,

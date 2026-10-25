@@ -38,15 +38,11 @@ PHASE_REFERENCE_TIP = (
     "as before. Measurements are identical either way.")
 
 SOURCE_DTYPE_TIP = (
-    "Ticked, each background-corrected image (_tophat) is saved in the bit "
-    "depth its input was recorded at (8- or 16-bit), rounded to the nearest "
-    "count, instead of as 32-bit floating point — about half the bytes before "
-    "compression and far less after it. A frame whose corrected values do not "
-    "fit (a flat-field correction can lift pixels above the camera's maximum), "
-    "or whose input was already floating point, is kept as 32-bit. "
-    "Measurements are computed before saving and are identical either way; "
-    "only images viewed in Review differ, by at most half a count. smFISH and "
-    "cytoplasm intermediates always stay 32-bit.")
+    "Ticked, corrected images are saved at the input's bit depth (8- or "
+    "16-bit) instead of 32-bit float — about half the size. A frame whose "
+    "values do not fit, or a floating-point input, stays 32-bit. Measurements "
+    "are identical either way; images viewed in Review differ by at most half "
+    "a count.")
 
 
 def build_storage_rows(form, sec: QWidget) -> None:

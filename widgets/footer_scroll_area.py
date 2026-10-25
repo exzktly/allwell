@@ -11,7 +11,8 @@ change what every one of those calls returns.
 The footer's height follows its contents. A footer whose layout wraps (a
 ``FlowLayout`` of buttons) is asked for its height at the area's width, and a
 child shown, hidden or resized inside it re-lays the footer on the next event
-loop pass.
+loop pass: the footer's changed size hint arrives as a LayoutRequest on the
+area itself.
 """
 
 from __future__ import annotations
@@ -34,7 +35,6 @@ class FooterScrollArea(QScrollArea):
     def setFooter(self, footer: QWidget) -> None:
         """Pin *footer* under the viewport. The area takes ownership of it."""
         footer.setParent(self)
-        footer.installEventFilter(self)
         self._footer = footer
         footer.show()
         self._layout_footer()
@@ -88,10 +88,12 @@ class FooterScrollArea(QScrollArea):
         super().resizeEvent(event)
         self._layout_footer()
 
-    def eventFilter(self, obj, event) -> bool:  # Qt naming
-        if obj is self._footer and event.type() in (
-                QEvent.LayoutRequest, QEvent.Show, QEvent.Hide):
+    def event(self, event) -> bool:  # Qt naming
+        # A child whose size hint changes posts LayoutRequest to a parent that
+        # has no layout of its own — this area — so the footer growing or
+        # shrinking arrives here. Nothing is installed on the footer: a Python
+        # hook on a child is called while the tree is being destroyed, and
+        # crashed the process when the pane was deleted.
+        if event.type() == QEvent.LayoutRequest:
             self._schedule_layout()
-        if obj is self._footer:
-            return False      # observed, never consumed
-        return super().eventFilter(obj, event)
+        return super().event(event)

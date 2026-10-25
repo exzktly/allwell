@@ -55,29 +55,27 @@ BACKGROUND_OPTIONS = (
     ("fft_bandpass", "FFT band-pass"),
 )
 
-#: What a fresh form runs with: no correction of either kind. Both corrections
-#: change the measured values, and the one that used to lead (flat-field from a
-#: blank well) cannot run at all until a blank well is named — so a fresh form
-#: refused to start over a field in a section the user had never opened. A
-#: correction is now something a user turns on, knowing what it reads.
+#: What a fresh form runs with: the command line's own defaults, so a run
+#: started here and one started from ``process_microscopy.py`` with no flags
+#: correct the same way — no flat-field, and a rolling-disk background. Neither
+#: needs a blank well; the flat-field default used to be ``empty_well``, which
+#: refused to run until one was named, in a section a new user had never opened.
 DEFAULT_FLATFIELD = "none"
-DEFAULT_BACKGROUND = "none"
+DEFAULT_BACKGROUND = "sliding_disk"
 
 
 class AnalyzeQCSectionMixin:
     """The Image correction & QC section's builders. Binds to the ``AnalyzeTab``."""
 
-    def _build_qc_section(self, parent: QWidget) -> None:
+    def _build_image_correction_section(self, parent: QWidget) -> None:
         sec = self._section(
-            parent, "Image correction & QC",
-            collapsible=True, collapsed=True,
-            info="Optional pre-measurement clean-up, applied per channel at "
-                 "quantification time. Two independent correction stages — "
-                 "flat-field (divide out uneven illumination) then background "
-                 "subtraction (remove a baseline) — plus a size/shape debris "
-                 "filter. The pixel corrections change the measured values, so "
-                 "they can only be changed by re-running; debris removal is "
-                 "editable later in Segmentation.",
+            parent, "Image correction",
+            collapsible=True, collapsed=False,
+            summary=self._image_correction_summary,
+            info="Applied per channel before measuring: flat-field (divide out "
+                 "uneven illumination), then background subtraction (remove a "
+                 "baseline). Both change the measured values, so they can only "
+                 "be changed by re-running.",
         )
 
         r = self._row(sec, "Flat-field correction")
@@ -86,21 +84,14 @@ class AnalyzeQCSectionMixin:
         # use; reprocessing a dataset still restores its saved pipeline_info value.
         self._flatfield_cb.setValue(DEFAULT_FLATFIELD)
         self._flatfield_cb.setToolTip(
-            "Illumination (flat-field) correction — divides each channel by a "
-            "mean-1 illumination field F (corrected = image / F) to even out "
-            "vignetting / uneven excitation, applied before background "
-            "subtraction. The field is floored so amplification of dim regions "
-            "is capped at 10x.\n"
-            "• None — no illumination correction (the default).\n"
-            "• From blank well(s) — F is the smoothed per-pixel median of the Background "
-            "well (that well's intensity is the illumination profile). Needs a "
-            "Background well.\n"
-            "• Self (Gaussian blur) — per-image, self-referential: F is the heavily "
-            "Gaussian-blurred image itself. No reference well needed.\n"
-            "• Whole plate (BaSiC) — pure-numpy BaSiC: F is the smoothed per-pixel median of a "
-            "whole-plate sample of the channel (one field per channel).\n"
-            "(If both corrections are From blank well(s), the two combine "
-            "into one (raw-B)/(B/mean(B)) pass.)")
+            "Evens out uneven illumination by dividing each channel by a "
+            "smooth, mean-1 field, before background subtraction.\n"
+            "• None — no correction (the default).\n"
+            "• From blank well(s) — the field is the Background well's own "
+            "intensity. Needs a Background well.\n"
+            "• Self (Gaussian blur) — each image's own heavy blur; no reference.\n"
+            "• Whole plate (BaSiC) — the median of a sample across the plate, "
+            "one field per channel.")
         r.layout().addWidget(self._flatfield_cb)
         r.layout().addStretch(1)
 
@@ -114,26 +105,17 @@ class AnalyzeQCSectionMixin:
         # None. It is not the default: see DEFAULT_BACKGROUND.
         self._background_cb.setValue(DEFAULT_BACKGROUND)
         self._background_cb.setToolTip(
-            "How background is subtracted (per channel, where enabled below):\n"
-            "• None — no background subtraction (the default).\n"
-            "• Robust local mesh — sigma-clipped local background on a coarse grid "
-            "(SExtractor/Background2D style), bicubically interpolated. Robust to "
-            "bright/confluent objects on uneven background where morphological "
-            "methods fail; uses the radius below as the background scale. The "
-            "recommended method when background needs removing.\n"
-            "• Rolling disk — smooth isotropic disk baseline; no square halos.\n"
-            "• Top-hat — fast square morphological; leaves square halos/hotspots "
-            "on uneven background.\n"
-            "• Field median — subtract a single scalar, the median intensity of the "
-            "whole field of view (a uniform offset; robust to bright cells, but "
-            "does NOT flatten spatial gradients). No radius/reference needed.\n"
-            "• From blank well(s) — subtract a measured per-channel background from "
-            "the Background well. (If flat-field is *also* From blank well(s), the "
-            "two are combined into one correct (raw−B)/(B/mean(B)) pass.)\n"
-            "• FFT band-pass — 2-D FFT Butterworth high-pass: removes the "
-            "low-frequency background (illumination, gradients, large blobs) "
-            "regardless of object size. Radius below = large-structure cutoff; "
-            "small-structure (px) = optional high-frequency denoise (0 = off).")
+            "How a baseline is removed from each channel:\n"
+            "• None — nothing removed.\n"
+            "• Robust local mesh — a sigma-clipped background on a coarse grid; "
+            "best on uneven background with bright or confluent objects.\n"
+            "• Rolling disk — a smooth disk baseline (the default, as on the "
+            "command line).\n"
+            "• Top-hat — fast, but leaves square halos on uneven background.\n"
+            "• Field median — one number per image; does not flatten gradients.\n"
+            "• From blank well(s) — the Background well's measured background.\n"
+            "• FFT band-pass — removes low frequencies whatever the object size.\n"
+            "The radius below sets each method's scale.")
         rbg.layout().addWidget(self._background_cb)
         rbg.layout().addStretch(1)
 
@@ -206,19 +188,10 @@ class AnalyzeQCSectionMixin:
         self._background_well_edit = self._entry(rbw, "", width=160)
         self._background_well_edit.setPlaceholderText("H12, G12 or H01:H12")
         self._background_well_edit.setToolTip(
-            "Well label(s) of empty/background well(s) used as the reference for "
-            "either correction set to From blank well(s) above. Enter one (e.g. H12), several "
-            "comma-separated (e.g. H12, G12), or a rectangular block written "
-            "with a colon (H01:H12 is the whole of row H, A01:D12 the top half) "
-            "— and you can mix them (H01:H12, A01). Multiple wells are pooled "
-            "for a cleaner estimate, unless Pair blanks… assigns each one its "
-            "own block of wells. Their smoothed per-pixel median supplies the "
-            "illumination field (flat-field) and/or the measured additive "
-            "background, computed PER TIMEPOINT (background drifts over time); a "
-            "timepoint the blank wells lack falls back to the all-timepoint "
-            "pooled median. Read from whichever input layout holds the well "
-            "(per-well zip, per-well folder, or loose TIFs); shown only when "
-            "a correction is From blank well(s).")
+            "The empty well(s) a From blank well(s) correction reads: one (H12), "
+            "several (H12, G12) or a block (H01:H12), mixed freely. Several are "
+            "pooled, per timepoint, unless Pair blanks… gives each its own "
+            "wells.")
         rbw.layout().addStretch(1)
         self._background_well_row = rbw.parentWidget()
         # Stated while the field is shown and empty: a correction that reads a
@@ -259,6 +232,25 @@ class AnalyzeQCSectionMixin:
         self._background_well_edit.textChanged.connect(_sync_bg)
         _sync_bg()
 
+        self._refresh_section_summary("Image correction")
+
+    def _image_correction_summary(self) -> str:
+        """The folded header's line: the two corrections, by their labels."""
+        return (f"{self._flatfield_cb.currentText()} · "
+                f"{self._background_cb.currentText()}")
+
+    def _build_measurements_section(self, parent: QWidget) -> None:
+        """What is measured beyond intensity, and what is filtered out: shape
+        metrics, the debris gate and the per-cell focus measurement."""
+        sec = self._section(
+            parent, "Measurements & filters",
+            collapsible=True, collapsed=True,
+            summary=lambda: self._changed_summary("Measurements & filters"),
+            info="Per-cell shape metrics, a size / solidity filter for debris "
+                 "(editable later in Review's Segmentation tab), and the "
+                 "per-cell focus measurement.",
+        )
+        self._build_shape_metrics_row(sec)
         self._qc_remove_debris_cb = WrapCheckBox(
             "Remove debris (drop regions outside the size / solidity bounds)", sec)
         sec.layout().addWidget(self._qc_remove_debris_cb)
@@ -289,6 +281,22 @@ class AnalyzeQCSectionMixin:
         _sync_debris()
 
         self._build_focus_rows(sec)
+
+    def _build_shape_metrics_row(self, sec: QWidget) -> None:
+        """The shape-metric dropdown: per-cell morphology features (emitted as
+        ``shape_…`` columns; cell centroids are always recorded)."""
+        import pipeline.shape_features as _sfc
+        from widgets.checkable_dropdown import CheckableDropdown
+
+        row = self._row(sec, "Shape metrics", tooltip=(
+            "Per-cell morphology features to measure, written as shape_… "
+            "columns. Cell centroids are always recorded."))
+        self._shape_chips = CheckableDropdown(row, noun="metrics selected",
+                                              empty_text="No metrics selected")
+        for key in _sfc.SELECTABLE_KEYS:
+            self._shape_chips.addItem(_sfc.BY_KEY[key].label, data=key)
+        self._shape_chips.setCheckedData(list(self._SHAPE_DEFAULTS))
+        row.layout().addWidget(self._shape_chips, 1)
 
     def _build_focus_rows(self, sec: QWidget) -> None:
         """Per-cell focus: measure it by default, and state a cut without
@@ -333,41 +341,23 @@ class AnalyzeQCSectionMixin:
             "Measure per-cell focus (boundary sharpness)", sec)
         self._focus_metric_cb.setChecked(True)
         self._focus_metric_cb.setToolTip(
-            "Adds one column per cell, measured at each nucleus's own "
-            "outline: how far the intensity takes to travel from inside the "
-            "cell to outside it. Defocus widens that transition; brightness "
-            "changes its height and not its width, so the number is a "
-            "distance in pixels rather than an amount of contrast.\n"
-            "\n"
-            "That is what makes it comparable between cells, fields, wells "
-            "and plates, and so what lets Review flag a soft PART of a field "
-            "— a focus gradient or a coverslip tilt — instead of only whole "
-            "fields. A score relative to its own frame cannot see a frame "
-            "that is uniformly soft, because every cell in it deviates from "
-            "its neighbours by nothing. Clipping is the one thing that "
-            "biases it: a flat-topped nucleus reads sharper than it is.\n"
-            "\n"
-            "Costs a few percent of quantification time. Turning it off means a "
-            "dataset carries no focus evidence at all, and asking the question "
-            "later needs a re-run.")
+            "Adds one column per cell: how sharp the nucleus's own boundary is, "
+            "in pixels, so it compares across cells, fields and plates and can "
+            "flag a soft part of a field. Costs a few percent of the run; off, "
+            "the dataset carries no focus evidence and asking later needs a "
+            "re-run.")
         sec.layout().addWidget(self._focus_metric_cb)
 
         rf = self._row(sec, "Out of focus below")
         self._focus_min_edit = self._entry(rf, "", width=80)
         self._focus_min_edit.setPlaceholderText("none")
         self._focus_min_edit.setToolTip(
-            "The per-cell focus value below which a cell is out of focus. "
-            "RECORDED with the dataset, NOT applied by this run — Review's Cell "
-            "Gating tab is what excludes the cells, so a cut chosen wrongly "
-            "costs a tick rather than a re-run.\n"
-            "\n"
-            "Leave blank unless you have measured one. The number depends "
-            "mostly on your microscope rather than on the plate, so a cut "
-            "carries between plates taken the same way — clipping is the "
-            "exception, and a saturated plate reads sharper than it is. "
-            "Nothing here can guess it. Review ▸ Home ▸ Cell Gating draws a "
-            "well's own distribution with a live count of what a cut would "
-            "keep and drop, which is where the number comes from.")
+            "The focus value below which a cell is out of focus. Recorded with "
+            "the dataset, not applied here: Review's Cell Gating excludes the "
+            "cells and can undo it. Leave blank unless you have measured one — "
+            "it depends mostly on the microscope, though clipping is the "
+            "exception (a saturated nucleus reads sharper), and Review ▸ Cell "
+            "Gating shows where to cut.")
         rf.layout().addStretch(1)
 
         focus_hint = QLabel(

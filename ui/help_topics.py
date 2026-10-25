@@ -98,17 +98,17 @@ SECTION_BY_PAGE: dict[str, str] = {
 #: ``analyze/form.py``) -> manual heading. The manual's Analyze block is
 #: numbered in the order the form builds its sections, so these read in step.
 ANALYZE_SECTION_HELP: dict[str, str] = {
-    "Folders": "1. Folders",
+    "Data": "1. Data",
     "Filename schema": "2. Filename schema",
-    "Channels & segmentation": "3. Channels & segmentation",
-    "Image correction & QC": "5. Image correction & QC — field flatness & background correction",
-    "Auto-threshold": '6. Auto-threshold — picking each channel\'s "on" cut',
-    "Shape metrics": "7. Shape metrics",
-    "Output options": "8. Output options",
-    "Compute options": "9. Compute options",
-    "Scratch disk": "10. Scratch disk",
-    "Remote options": "11. Running on a remote host",
-    "Nanowells": "Nanowell arrays (Analyze ▸ Nanowells, or the command line)",
+    "Channels": "3. Channels",
+    "Segmentation": "4. Segmentation",
+    "Nanowell array": "Nanowell arrays (Analyze ▸ Plate type, or the command line)",
+    "Image correction": "5. Image correction — field flatness & background",
+    "Measurements & filters": "6. Measurements & filters",
+    "Auto-threshold": '7. Auto-threshold — picking each channel\'s "on" cut',
+    "Run scope": "8. Run scope",
+    "Advanced": "9. Advanced — output, performance, scratch folder",
+    "Remote options": "10. Running on a remote host",
 }
 
 #: Datasets rail label (the ``_Feature.name`` values in ``datasets/tab.py``,

@@ -214,9 +214,14 @@ clipping thresholds below which a nanowell carries its state but no cell count. 
 
 With **Nanowell arrays** ticked, the **Segmentation** section at the top of the form is set to label-free and shows
 the cell count's own settings in place of its usual ones: **Cellpose model**, **Segment on**, **Segment**,
-**Resize** and **Cell diameter (µm)** (the typical cell size, which sets the scale the model looks for cells at). The cell diameter
-starts at 19.5 µm: at 0.65 µm per pixel that is Cellpose's own 30 px, so Cellpose segments without resizing, about
-four times faster than at the pipeline's 15 µm, which it enlarged; blank uses that 15 µm default. The count
+**Resize** and **Cell diameter (µm)**. The cell diameter sets the scale the model looks for cells at: with Resize
+*To the cell diameter*, Cellpose resizes each image so that a cell of that diameter becomes its own 30 px. It is not
+necessarily your cells' real size. It starts at 19.5 µm, which at 0.65 µm per pixel is exactly 30 px, so Cellpose
+segments the images as imaged, without resizing — about four times faster than at the cells' real ~10 µm, which it
+enlarged ×1.95 — and on a plate imaged at 0.65 µm per pixel it counted as well. At another pixel size, enter
+**30 × your pixel size** (0.325 µm per pixel → 9.75 µm) for the same no-resize speed, or set **Resize** to *None*,
+which does the same at any pixel size; or enter the cells' real diameter to have Cellpose enlarge them to its scale,
+which is slower. Either way, check the counts on one well first. A blank field uses the pipeline's 15 µm default. The count
 reads only these — not the pixel diameter label-free shows outside nanowell mode. When a pixel diameter was set there
 and the µm field is empty or still holds the 19.5 µm it starts with (not typed by you), ticking **Nanowell arrays** converts it with the pixel size the dataset's acquisition record
 gives and fills the µm field, and a note under it says so; a µm size you entered is never replaced. Without a record
@@ -462,12 +467,14 @@ at least four of the plate's wells are in the run; otherwise click each timepoin
 Concatenate carry the anchors of the wells and timepoints they keep, renamed as they rename them.
 
 `--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile
-record recomputes the timepoint. An incremental nanowell run is refused on a remote host for now — the remote
-would analyse the new timepoints without the earlier ones — so run it on this computer, or run the remote plate
-in full. The same holds when the app would make the run incremental on its own — a plate with an unfinished
-earlier run: the run is refused before anything is sent, and Force runs the plate in full. Wells already
-brought home from an earlier remote run are analysed again with the rest. Test detection is not affected: it
-runs on this computer. A remote nanowell run keeps every well's files on the remote until the run ends, because the
+record recomputes the timepoint. Ticking **Incremental** for a nanowell run on a remote host is refused for now —
+the remote would analyse the new timepoints without the earlier ones — so run it on this computer, or run the
+remote plate in full. Resuming one is not refused: when a remote nanowell run stopped part way (or the app finds an
+unfinished earlier run of the plate), pressing Run or Resume goes well by well. Every well whose results here
+cover all of its timepoints under the same settings is skipped; every other well — left part way, never finished,
+or given new timepoints since — is uploaded whole and analysed again in full, and its tables replace the partial
+ones when it comes back. The log says so before anything is sent. Test detection is not affected: it runs on this
+computer. A remote nanowell run keeps every well's files on the remote until the run ends, because the
 end-of-run re-anchoring may re-run a well, and then brings the final tables home with the re-anchored wells.
 
 **Datasets tools and nanowell results.** *Subset* carries the nanowell tables of the wells and timepoints it
@@ -1738,6 +1745,15 @@ and by `remote_fetch_report.txt` in the output folder.
   incrementally on its own, and the log says so. **Force reprocess all wells**
   overrides that: every well is recomputed from scratch, and on a remote run
   every well is uploaded whole, even one that is already complete locally.
+  Without Force, a remote run — like a run on this computer — skips every well
+  already finished in the output folder under the same settings: it is not
+  uploaded or recomputed, the log names it (*already finished here under these
+  settings*), and the plate shows it complete. A well named in **Force wells**
+  is redone, and so is a well measured under different settings or one its
+  completeness record says was left part way. A plate with nothing left to do
+  ends without uploading anything. When only part of a plate is sent, the
+  cell-gating thresholds are computed on this computer afterwards, over every
+  well, so they are the plate's rather than the part's.
   A remote run in batches that is restarted — after Stop, Suspend, or a lost
   node — first checks what the host still holds from the earlier attempt with
   the same settings. A well that finished there but had not been downloaded

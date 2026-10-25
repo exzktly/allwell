@@ -64,6 +64,12 @@ from services.remote_scratch import (
 
 
 
+def _without_finished(well_zips: tuple[Path, ...], wells: Iterable[str]) -> tuple[Path, ...]:
+    """*well_zips* without the archives of *wells* (canonical labels)."""
+    skip = set(wells)
+    return tuple(p for p in well_zips if (_canonical_well_label(p.stem) or p.stem) not in skip)
+
+
 @carry_staged_record
 def stage_local_zips(
     input_dir: Path,
@@ -80,6 +86,7 @@ def stage_local_zips(
     csv_prefix: str = "measurements",
     force_wells: Iterable[str] | None = None,
     background_wells: Iterable[str] | str | None = None,
+    skip_wells: Iterable[str] = (),
 ) -> ZippedInput:
     """Return a directory of per-well zips for ``input_dir``.
 
@@ -92,6 +99,12 @@ def stage_local_zips(
     selective filter rewrites each well's zip to keep only the requested
     channels — cutting upload by the unused-channel fraction. The nuclear
     token is always kept (segmentation needs it).
+
+    *skip_wells* are wells already finished locally
+    (``services.remote_finished_wells``): in zip layout their archives are left
+    out before anything is planned or rewritten. The caller removes them from
+    the other layouts' result (``drop_finished``), which also lists them as up
+    to date.
     """
     from services.input_resolution_service import run_zipper
 
@@ -177,6 +190,7 @@ def stage_local_zips(
             raise RuntimeError(
                 f"Input dir reports zip-mode but contains no A01.zip-style files: {input_dir}"
             )
+        well_zips = _without_finished(well_zips, skip_wells)
         if fluor_tokens is None and not incremental:
             # No filtering — use the user's zips directly (read-only).
             return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)

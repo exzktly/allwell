@@ -48,8 +48,10 @@ VIEWPORT_H = 700
 def qapp():
     app = QApplication.instance() or QApplication([])
     from ui import theme
+    before = app.styleSheet()
     app.setStyleSheet(theme.qss())
-    return app
+    yield app
+    app.setStyleSheet(before)        # app-wide: left applied, it changed later tests' layout (phone view's 361 px)
 
 
 @pytest.fixture(scope="module")

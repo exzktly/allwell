@@ -6,7 +6,11 @@ remote host yet". ``resume_aware_spec`` turned on Incremental because *some* ear
 whichever wells it had touched, and the remote nanowell check then refused the run — for every subset, until a full
 run finished. A run limited to named wells can be left half-done only in those wells, so only they decide now:
 :func:`pipeline.run_report.wells_left_part_way` asks which have output in the unfinished run's folder and no
-completion seal, and the run is made incremental only when one does — and the refusal then names it.
+completion seal, and the run is made incremental only when one does.
+
+A remote nanowell run that is made incremental is no longer refused at all: it goes well by well
+(``analyze.run_spec._nanowell_remote_resume_by_well``) — the wells finished here are skipped, every other is sent
+whole and analysed in full (``tests/test_a_remote_rerun_skips_finished_wells.py``).
 """
 
 from __future__ import annotations
@@ -58,13 +62,17 @@ def remote_nanowell_run(tab, tmp_path, monkeypatch):  # noqa: F811
     logged = []
     monkeypatch.setattr(tab, "_log_line", lambda text, tag="INFO": logged.append(text))
 
-    class Launched(Exception):
-        """The run got as far as the running UI state: past every refusal."""
+    sent: list[dict] = []
 
-    def launch(**_kwargs):
+    class Launched(Exception):
+        """The run reached the runner: past every refusal. What it was handed is in ``sent``."""
+
+    def launch(_pipeline, opts, **_kwargs):
+        sent.append(dict(opts))
         raise Launched
 
-    monkeypatch.setattr(tab, "_set_running_ui_state", launch)
+    monkeypatch.setattr(tab, "_set_running_ui_state", lambda **_k: None)
+    monkeypatch.setattr(tab._runner, "start", launch)
 
     def start():
         try:
@@ -72,6 +80,7 @@ def remote_nanowell_run(tab, tmp_path, monkeypatch):  # noqa: F811
         except Launched:
             return "launched"
 
+    start.sent = sent
     return tab, out, start, logged
 
 
@@ -90,22 +99,27 @@ def test_a_subset_whose_well_the_unfinished_run_left_whole_runs_on_the_remote(re
     assert start() == "launched"
 
 
-def test_a_subset_with_a_part_way_well_is_refused_naming_it_and_what_force_does(remote_nanowell_run):
-    from services.remote_run_state import nanowell_remote_resume_refusal_for
-
-    tab, out, start, _logged = remote_nanowell_run
+def test_a_subset_with_a_part_way_well_runs_well_by_well_on_the_remote(remote_nanowell_run):
+    """It was refused, naming the well and what Force does. It now runs, not incrementally: the part-way well is
+    sent whole and analysed in full on the remote, and the log says so."""
+    tab, out, start, logged = remote_nanowell_run
     _write(out / "nanowells" / "A01_grid.json")
     tab._only_wells_edit.setText("A01")
-    refusal = start()
-    assert refusal == nanowell_remote_resume_refusal_for(["A01"])
-    assert refusal.startswith("An earlier run of this plate did not finish and left A01 part-way")
-    assert "only those wells" in refusal
+    assert start() == "launched"
+    assert start.sent[-1]["incremental"] is False
+    assert any("goes well by well" in line for line in logged)
+
+
+def test_the_whole_plate_after_an_unfinished_run_runs_well_by_well(remote_nanowell_run):
+    """The reported case: a stopped remote nanowell run, started again, was refused with Force as the only way on."""
+    _tab, _out, start, logged = remote_nanowell_run
+    assert start() == "launched"
+    assert start.sent[-1]["incremental"] is False
+    assert any("goes well by well" in line for line in logged)
+
+
+def test_a_forced_resume_stays_forced(remote_nanowell_run):
+    tab, _out, start, _logged = remote_nanowell_run
     tab._force_cb.setChecked(True)
     assert start() == "launched"
-
-
-def test_the_whole_plate_after_an_unfinished_run_is_still_refused_as_before(remote_nanowell_run):
-    from services.remote_run_state import NANOWELL_REMOTE_RESUME_REFUSAL
-
-    _tab, _out, start, _logged = remote_nanowell_run
-    assert start() == NANOWELL_REMOTE_RESUME_REFUSAL
+    assert start.sent[-1].get("force") is True

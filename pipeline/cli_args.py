@@ -555,7 +555,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "registering would give. The output folder's own earlier registration is reused the same "
                          "way without this flag."))
     p.add_argument("--nanowell_cell_diameter_um", type=float, default=15.0,
-                   help="Typical cell diameter in micrometres, the scale the label-free segmenter is given.")
+                   help=("The scale the cell count looks for cells at, micrometres: Cellpose resizes each image so a cell "
+                         "of this diameter becomes 30 px. 30 x the pixel size means no resize (the fastest); the "
+                         "cells' real diameter enlarges them to that scale. Ignored with --nanowell_resize none."))
     p.add_argument("--nanowell_margin_um", type=float, default=None,
                    help=("Margin around a nanowell's disk that must lie inside one tile for that tile to own it. "
                          "Default: a tenth of the nanowell diameter."))
@@ -739,3 +741,42 @@ def qc_options_from_args(args) -> dict:
         # theirs).
         "focus_min": float(args.focus_min or 0.0),
     }
+
+
+def apply_labelfree_preset(args) -> bool:
+    """A label-free method segments the phase channel with Cellpose-SAM: the phase token takes the nuclear slot
+    the grouping and segmentation machinery reads, and the model is set. ``True`` when *args* asked for one.
+
+    The caller validates first (``process_microscopy.main`` refuses a label-free run without a phase token)."""
+    from util.channel_roles import LABELFREE_METHODS
+
+    if args.segmentation_method not in LABELFREE_METHODS:
+        return False
+    args.nuclear_token = str(args.phase_token or "").strip()
+    # pipeline.cellpose.DEFAULT_MODEL, not imported: a StarDist-only build lacks that module.
+    args.cellpose_model = "cpsam"
+    return True
+
+
+def settings_key_from_argv(argv) -> str | None:
+    """The settings key ``process_microscopy.main`` computes for a run given *argv* (its flags, from the first),
+    or ``None`` when *argv* cannot be parsed or would be refused.
+
+    The same normalisation, in the same order, so the key matches what the pipeline records beside each well
+    (``pipeline.settings_record``): the label-free preset, then the nanowell options (which pin the method and the
+    nuclear slot). It is what a caller outside the pipeline asks "was this well made under these settings?" with —
+    the remote runner, deciding which wells it need not upload. ``None`` must be read as "cannot tell", never passed
+    on as an empty key, which ``settings_match`` accepts as matching everything.
+    """
+    from util.settings_digest import settings_key_for
+
+    def refuse(message: str) -> None:
+        raise ValueError(message)
+
+    try:
+        args = build_parser().parse_known_args([str(a) for a in argv])[0]
+        apply_labelfree_preset(args)
+        nanowell_options_from_args(args, refuse)
+    except (SystemExit, ValueError):
+        return None
+    return settings_key_for(vars(args)) or None

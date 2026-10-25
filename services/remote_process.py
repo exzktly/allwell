@@ -36,7 +36,6 @@ from services.remote_config import (
 )
 from util.channel_roles import LABELFREE_METHODS, quantified_channel_tokens
 from util.aw_safe import swallow, swallowed
-from util.csv_gz import existing_csv
 from services.remote_run_state import (
     OutputFilter,
     _RemoteRun,
@@ -74,7 +73,7 @@ from services.remote_run_id import (
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import release_batch
 from services.remote_batch_resume import (
-    announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
+    _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
     reattach_output_dir, stage_leftovers, take_from_remote)
 from util.well_token import canonical_well_label
 from services.remote_scratch import (
@@ -977,70 +976,33 @@ class _BatchedRemoteProcess:
             self._blank_stems = _empty_well_blanks(self._pipeline_argv, all_zips)
             blank_zips = [z for z in all_zips if z.stem in self._blank_stems]
 
-            # v5.4.7: local-completion filter. The remote pipeline's
-            # own skip check (``output_exists_for_well``) looks at the
-            # REMOTE output dir — but per-well Fetcher cleanup deletes
-            # outputs there as soon as they land locally, so a batched
-            # re-run never sees a cache hit on the remote side. Instead
-            # check the LOCAL ``output_dir`` up front.
-            #
-            # v5.4.8: relaxed from "both ``{well}_out.zip`` AND the CSV"
-            # to "CSV only". The zip's local presence depends on the
-            # output mode the Fetcher used to materialize it:
-            #
-            # * ZIP / FLAT mode → ``shutil.copyfile`` lands the zip
-            #   verbatim at ``local_output_dir/{well}_out.zip``.
-            # * FOLDER mode → ``zipfile.extractall`` extracts the zip
-            #   contents (loose QC files) and the zip itself is
-            #   discarded.
-            # * CSV_ONLY mode → the zip is dropped on the floor
-            #   entirely.
-            #
-            # So the zip exists locally in only ONE of three Fetcher
-            # paths — requiring it broke the filter for the other two
-            # and the user saw "wells were re-processed even though
-            # output already existed". The per-well CSV is written by
-            # the pipeline regardless of mode and pulled by the
-            # Fetcher unconditionally, so it's the canonical
-            # "this well is done" signal.
-            #
-            # ``--force`` in the pipeline argv short-circuits the
-            # filter (matches the single-shot path and
-            # ``process_microscopy.py``'s own ``force`` semantics).
+            # Local-completion filter: the host's own skip looks at the REMOTE output dir, which the Fetcher
+            # empties as wells land here, so a batched re-run never finds a well done there. The answer is the
+            # one every remote run uses (`services.remote_finished_wells`): the per-well CSV present (not the
+            # out.zip, which only a zip-layout full fetch keeps), recorded under these settings, and not forced
+            # by --force or --force_wells. Staging has already left out every other finished well, so what is
+            # found here is a finished empty-well blank: not processed again, though `_upload_blanks` still
+            # sends it as the correction's input.
+            from services.remote_finished_wells import finished_here
+
+            extras_of = getattr(getattr(self, "_runner", None), "_host_argv_extras", None)
+            # The flags every batch's host argv carries beyond the run's own: the host's extras, and the blank's
+            # `--background_dir` in this run's directory with each earlier attempt's as an alias, so a well an
+            # earlier attempt measured against its own copy of the blank still matches (`_blank_argv`).
+            extras = [*(extras_of(getattr(self, "_output_filter", None)) if callable(extras_of) else ()),
+                      *_blank_argv(self)]
+            # An incremental run's archives carry only their new fields, and its wells have a local CSV by
+            # definition: it is never asked (its staging split already decided).
+            done = set() if self._zipped.incremental else set(finished_here(
+                self._local_output_dir, self._pipeline_argv, [p.stem for p in all_zips], extras=extras))
+            if done:
+                skipped = [p for p in all_zips if (canonical_well_label(p.stem) or p.stem.upper()) in done]
+                all_zips = [p for p in all_zips if p not in skipped]
+                self._log(f"[remote] batched mode: {len(skipped)} well(s) already complete locally under these "
+                          f"settings — skipping upload + compute: {', '.join(p.stem for p in skipped[:8])}"
+                          f"{' …' if len(skipped) > 8 else ''}. Tick Force (or name them in Force wells) to "
+                          f"reprocess.\n")
             force = "--force" in self._pipeline_argv
-            csv_prefix = "measurements"
-            it = iter(self._pipeline_argv)
-            for arg in it:
-                if arg == "--csv_prefix":
-                    csv_prefix = next(it, csv_prefix)
-                    break
-            # Incremental already split client-side: the staged set holds only
-            # wells with genuinely-new FOVs (up-to-date wells were dropped during
-            # staging), and each kept zip carries only its new-FOV members. The
-            # local-CSV "already complete" skip would wrongly drop these touched
-            # wells (they DO have a local CSV), so bypass it for incremental.
-            if not force and not self._zipped.incremental:
-                kept: list[Path] = []
-                for p in all_zips:
-                    well = p.stem.upper()
-                    if (found := existing_csv(self._local_output_dir / f"{csv_prefix}_{well}.csv")) and found.stat().st_size > 0:
-                        skipped.append(p)
-                    else:
-                        kept.append(p)
-                if skipped:
-                    self._log(
-                        f"[remote] batched mode: {len(skipped)} well(s) "
-                        f"already complete locally (per-well CSV present "
-                        f"under {self._local_output_dir.name}/) — skipping "
-                        f"upload + compute. Pass --force to reprocess.\n"
-                    )
-                    if len(skipped) <= 8:
-                        self._log(
-                            "[remote] skipped wells: "
-                            + ", ".join(p.stem for p in skipped)
-                            + "\n"
-                        )
-                    all_zips = kept
             # Before anything is sent: what the remote already holds — finished wells to download instead, and
             # uploaded archives to put into this run's batches (`remote_batch_resume`).
             all_zips, adopted = take_from_remote(self, all_zips, force=force)
@@ -1314,67 +1276,8 @@ class _BatchedRemoteProcess:
         return "--no_auto_threshold" in list(self._pipeline_argv or [])
 
     def _run_local_auto_threshold(self) -> None:
-        """Re-run the pipeline's auto-threshold pass locally against
-        the full ``local_output_dir`` after every batch has drained.
-        Failures are logged but non-fatal (matches the remote
-        pipeline's "informational only" stance on auto-threshold).
-
-        The pass reports itself through the ``logging`` module — "Auto-threshold:
-        scanning N well(s)", then "completed well i/N (WELL)" as it goes — and
-        the GUI parses exactly those strings off the run's line stream to drive
-        the Threshold stage. In a *subprocess* run they reach it because the
-        pipeline's stdout is that stream. Here the pass runs in-process, so its
-        records went to a logger nobody was reading and the only things on the
-        line stream were this method's own two bookends: one line as it started
-        and one when it finished. Over a full plate that is a long silence right
-        at the end of a run, with the rail sitting still. Forwarding the records
-        onto the same stream closes it, and the regexes that were always there
-        start matching."""
-        try:
-            # Late import: the threshold pass pulls in the imaging stack.
-            # Don't pay that cost on every import of the remote client.
-            sys.path.insert(0, str(repo_root()))
-            from pipeline.auto_threshold_pass import run_auto_threshold_pass
-            import logging
-            log_pylog = logging.getLogger("allwell.local_auto_threshold")
-            self._log(
-                "[remote] running auto-threshold pass locally over "
-                f"{self._local_output_dir} (full plate, all batches drained)\n"
-            )
-            args = _auto_threshold_args_from_argv(self._pipeline_argv)
-            forwarder = _LogToLineStream(self._log)
-            log_pylog.addHandler(forwarder)
-            log_pylog.setLevel(logging.INFO)
-            log_pylog.propagate = False
-            try:
-                written = run_auto_threshold_pass(
-                    args,
-                    self._local_output_dir,
-                    quantified_channel_tokens(
-                        args.fluor_tokens,
-                        nuclear_token=args.nuclear_token,
-                        segmentation_method=args.segmentation_method,
-                        cytoplasm_token=args.cytoplasm_token,
-                    ),
-                    log_pylog,
-                )
-            finally:
-                log_pylog.removeHandler(forwarder)
-            if written:
-                self._log(
-                    "[remote] local auto-threshold defaults written for "
-                    f"{len(written)} channel(s): "
-                    + ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items())
-                    + "\n"
-                )
-            else:
-                self._log(
-                    "[remote] local auto-threshold pass produced no new defaults.\n"
-                )
-        except Exception as exc:  # informational, never fatal
-            self._log(
-                f"[remote] warn: local auto-threshold pass failed: {exc}\n"
-            )
+        """The plate's cell-gating thresholds, computed here over every downloaded well (``run_local_auto_threshold``)."""
+        run_local_auto_threshold(self._local_output_dir, self._pipeline_argv, self._log)
 
 
 class _QueueLineIterator:
@@ -1392,3 +1295,67 @@ class _QueueLineIterator:
         if item is None:
             raise StopIteration
         return item
+
+
+def run_local_auto_threshold(local_output_dir, pipeline_argv, log) -> None:
+    """Re-run the pipeline's auto-threshold pass locally against
+    the full ``local_output_dir`` after every batch has drained.
+    Failures are logged but non-fatal (matches the remote
+    pipeline's "informational only" stance on auto-threshold).
+
+    The pass reports itself through the ``logging`` module — "Auto-threshold:
+    scanning N well(s)", then "completed well i/N (WELL)" as it goes — and
+    the GUI parses exactly those strings off the run's line stream to drive
+    the Threshold stage. In a *subprocess* run they reach it because the
+    pipeline's stdout is that stream. Here the pass runs in-process, so its
+    records went to a logger nobody was reading and the only things on the
+    line stream were this method's own two bookends: one line as it started
+    and one when it finished. Over a full plate that is a long silence right
+    at the end of a run, with the rail sitting still. Forwarding the records
+    onto the same stream closes it, and the regexes that were always there
+    start matching."""
+    try:
+        # Late import: the threshold pass pulls in the imaging stack.
+        # Don't pay that cost on every import of the remote client.
+        sys.path.insert(0, str(repo_root()))
+        from pipeline.auto_threshold_pass import run_auto_threshold_pass
+        import logging
+        log_pylog = logging.getLogger("allwell.local_auto_threshold")
+        log(
+            "[remote] running auto-threshold pass locally over "
+            f"{local_output_dir} (the whole plate)\n"
+        )
+        args = _auto_threshold_args_from_argv(pipeline_argv)
+        forwarder = _LogToLineStream(log)
+        log_pylog.addHandler(forwarder)
+        log_pylog.setLevel(logging.INFO)
+        log_pylog.propagate = False
+        try:
+            written = run_auto_threshold_pass(
+                args,
+                local_output_dir,
+                quantified_channel_tokens(
+                    args.fluor_tokens,
+                    nuclear_token=args.nuclear_token,
+                    segmentation_method=args.segmentation_method,
+                    cytoplasm_token=args.cytoplasm_token,
+                ),
+                log_pylog,
+            )
+        finally:
+            log_pylog.removeHandler(forwarder)
+        if written:
+            log(
+                "[remote] local auto-threshold defaults written for "
+                f"{len(written)} channel(s): "
+                + ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items())
+                + "\n"
+            )
+        else:
+            log(
+                "[remote] local auto-threshold pass produced no new defaults.\n"
+            )
+    except Exception as exc:  # informational, never fatal
+        log(
+            f"[remote] warn: local auto-threshold pass failed: {exc}\n"
+        )

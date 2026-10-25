@@ -98,12 +98,12 @@ from services.remote_wire import (
     _well_xfer_line,
 )
 from services.remote_transport import (
-    _fmt_secs,
-    _rsync_ssh_transport,
+    _fmt_secs, _rsync_ssh_transport,
     _rsync_with_retry,
     delete_remote_paths,
     pull_small_file,
 )
+from services.remote_finished_wells import pull_settings_marker
 from services.remote_scratch import (
     _new_transit_dir,
     _transit_dir,
@@ -1248,8 +1248,8 @@ class Fetcher:
         materialised, so a well whose fetch failed is not credited with output
         it does not have.
         """
-        pull_small_file(
-            self.host,
+        pull_settings_marker(
+            pull_small_file, self.host,
             f"{self.run.remote_output_dir}/{SETTINGS_DIRNAME}/{well}.json",
             self.run.local_output_dir / SETTINGS_DIRNAME / f"{well}.json",
             stop_event=self._stop, what=f"the settings marker for {well}",
@@ -1772,8 +1772,8 @@ class FetchedOutputVerifier:
             # brings (`Fetcher._pull_settings_marker`): without it a well
             # recovered here reads as grandfathered, and a later run with
             # different settings would keep its numbers as though they matched.
-            pull_small_file(
-                host, f"{run.remote_output_dir}/{SETTINGS_DIRNAME}/{well}.json",
+            pull_settings_marker(
+                pull_small_file, host, f"{run.remote_output_dir}/{SETTINGS_DIRNAME}/{well}.json",
                 run.local_output_dir / SETTINGS_DIRNAME / f"{well}.json",
                 stop_event=self._cancelled, what=f"the settings marker for {well}")
         # Whether any of this actually recovered a well is not decided here —

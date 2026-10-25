@@ -855,9 +855,6 @@ class AnalyzeSuspendMixin:
         skipped as complete for ever. That is the defect this is for; the
         suspend case was only the half that already had a record.
         """
-        # Which named wells this call found left part-way, for the remote nanowell refusal to name; reset on every
-        # call so a later run never reports an earlier one's wells.
-        self._resume_part_way_wells = ()
         try:
             raw = str((spec.opts or {}).get("raw") or "").strip()
             # Force means recompute from scratch, and this function's own log
@@ -883,7 +880,6 @@ class AnalyzeSuspendMixin:
                         f"({', '.join(sorted(named))}) was left part-way by it — running them as asked.\n",
                         "INFO")
                     return spec
-                self._resume_part_way_wells = tuple(part_way)
             opts = dict(spec.opts)
             opts["incremental"] = True
             self._log_line(

@@ -19,14 +19,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from analyze.advanced_section import AnalyzeAdvancedSectionMixin
 from analyze.form_chrome import AnalyzeFormChromeMixin
-from analyze.storage_options import build_storage_rows, storage_options
-from analyze.well_scope import build_well_scope_rows, well_scope_options
+from analyze.storage_options import storage_options
+from analyze.well_scope import AnalyzeRunScopeMixin, well_scope_options
 from analyze.domain.fields import (  # noqa: F401 — re-exported for analyze.tab
     _INT_FIELDS,
     _numeric_option_errors,
@@ -36,11 +38,8 @@ from analyze.nanowell_hook import nanowell_section_mixin
 from analyze.qc_section import AnalyzeQCSectionMixin
 from analyze.run_footer import AnalyzeRunFooterMixin
 from analyze.schema_section import AnalyzeSchemaSectionMixin
+from analyze.section_summaries import AnalyzeSectionSummaryMixin
 from analyze.seg_params import AnalyzeSegParamsMixin
-from widgets.checkable_dropdown import CheckableDropdown
-from widgets.wrap_checkbox import WrapCheckBox
-import pipeline.shape_features as _sfc
-from pipeline.capacity import ALLOW_LOW_DISK_HELP
 
 # ---------------------------------------------------------------------------
 # Schema vocabulary — shared with process_microscopy and well_plate_zipper via
@@ -51,7 +50,6 @@ from pipeline.capacity import ALLOW_LOW_DISK_HELP
 # Loose Folder page — see widgets/schema_picker.py.
 # ---------------------------------------------------------------------------
 from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP  # noqa: F401 (re-export)
-from util.state_dir import default_scratch_label
 from util.well_token import canonical_well_label, is_valid_well_name
 
 
@@ -59,94 +57,125 @@ from util.well_token import canonical_well_label, is_valid_well_name
 AnalyzeNanowellSectionMixin = nanowell_section_mixin()
 
 
-class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
+class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
+                          AnalyzeNanowellSectionMixin, AnalyzeSectionSummaryMixin,
                           AnalyzePipelineInfoMixin, AnalyzeQCSectionMixin,
-                          AnalyzeRunFooterMixin, AnalyzeSchemaSectionMixin,
+                          AnalyzeRunFooterMixin, AnalyzeRunScopeMixin,
+                          AnalyzeSchemaSectionMixin,
                           AnalyzeSegParamsMixin):
     """The Analyze-tab Qt form builders. Mixed into ``AnalyzeTab`` (with
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
 
     def _build_form(self, parent: QWidget) -> None:
-        # Banners, then "Load settings from a run…" (it sets the input folder),
-        # then Folders, which leads the sections (open from launch).
+        """The form, one section per question a run asks, in the order a user
+        answers them: what data, how its files are named, which channels, how
+        to segment, how to correct, what to measure, which wells, and the
+        rarely-changed rest. The run controls are not a section: they are the
+        footer pinned under the form (``analyze.run_footer``)."""
         self._build_banner_strips(parent)
-        self._build_open_pinfo_row(parent)
-        self._build_folders_section(parent)
+        self._build_data_section(parent)
         self._build_schema_section(parent)
-        self._build_channel_tokens_section(parent)
+        self._build_channels_section(parent)
+        self._build_segmentation_section(parent)
         self._refresh_schema_preview()
-        # Image correction & QC leads the optional sections; it and Nanowells
-        # after it are folded, since a fresh form corrects nothing and most
-        # plates are not nanowell arrays.
-        self._build_qc_section(parent)
+        # Shown only for a nanowell plate (Plate type, in Channels).
         self._build_nanowell_section(parent)
+        self._build_image_correction_section(parent)
+        self._build_measurements_section(parent)
         self._build_auto_threshold_section(parent)
-        self._build_shape_features_section(parent)
-        self._build_output_options_section(parent)
-        self._build_compute_options_section(parent)
-        self._build_scratch_section(parent)
-        # Shown only while a remote is chosen in the run footer, which the tab
-        # builds under the scroll area (analyze.run_footer).
+        self._build_run_scope_section(parent)
+        self._build_advanced_section(parent)
+        # Shown only while a remote is chosen in the run footer.
         self._build_remote_options_section(parent)
         parent.layout().addStretch(1)
+        self._normalise_field_widths(parent)
+        self._snapshot_form_defaults()
 
-    def _build_channel_tokens_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Channels & segmentation")
+    def _build_data_section(self, parent: QWidget) -> None:
+        """The input folder, what it resolves to, and the one shortcut that
+        fills the whole form: the settings of a previous run."""
+        sec = self._section(parent, "Data")
 
-        seg_row = self._row(sec, "Segmentation")
-        self._seg_method_cb = QComboBox(seg_row)
-        # Cellpose is a removable, torch-backed segmenter (profiles/full.toml). A
-        # profile that doesn't list "Cellpose" (e.g. the StarDist-only thin build)
-        # ships no torch/cellpose, so its methods can't run — drop them from the
-        # picker instead of offering a choice that would fail at pipeline start.
-        from core.profile import active_profile
-        _prof = active_profile()
-        _cellpose_ok = _prof.features is None or "Cellpose" in _prof.features
-        for _value, _label in self._SEG_METHODS:
-            if not _cellpose_ok and _value.startswith("cellpose"):
-                continue
-            self._seg_method_cb.addItem(_label, userData=_value)
-        # Narrower than the longest item ("Label-free (Cellpose, brightfield)")
-        # — Qt elides the closed box's text; the tooltip carries the full label.
-        self._seg_method_cb.setFixedWidth(self._SEG_METHOD_CB_W)
-        self._seg_method_cb.currentIndexChanged.connect(
-            lambda _i: self._seg_method_cb.setToolTip(self._seg_method_cb.currentText()))
-        self._seg_method_cb.setToolTip(self._seg_method_cb.currentText())
-        seg_row.layout().addWidget(self._seg_method_cb)
-        seg_row.layout().addStretch(1)
-        # The method's "use when…" line sits under the picker it describes, not
-        # below the channel list and the method's own settings, where it read as
-        # a second footnote to the StarDist thresholds. It turns into the
-        # segmentation error, in the error style, while the method cannot run.
-        self._segmentation_hint_lbl = QLabel("", sec)
-        self._segmentation_hint_lbl.setObjectName("Muted")
-        self._segmentation_hint_lbl.setWordWrap(True)
-        sec.layout().addWidget(self._segmentation_hint_lbl)
-        self._seg_method_cb.currentIndexChanged.connect(lambda _: self._refresh_segmentation_hints())
+        # Restore a prior run's settings (input path included) from its
+        # pipeline_info.json — to re-run a failed run or append new data. First
+        # in the section, above the folder it sets (as asked for), and inside
+        # it rather than floating above every section as it used to.
+        self._open_pinfo_btn = QPushButton("Use settings from a previous run…", sec)
+        self._open_pinfo_btn.setProperty("variant", "secondary")
+        self._open_pinfo_btn.setToolTip(
+            "Open a run's pipeline_info.json and fill the whole form from it, "
+            "input folder included.")
+        self._open_pinfo_btn.clicked.connect(self._open_pipeline_info)
+        pin_row = QWidget(sec)
+        prl = QHBoxLayout(pin_row)
+        prl.setContentsMargins(0, 0, 0, 4)
+        prl.addWidget(self._open_pinfo_btn)
+        prl.addStretch(1)
+        sec.layout().addWidget(pin_row)
 
-        nuc_row = self._row(sec, "Segmentation channel")
-        # The whole row, not the right-hand cell ``_row`` returns: the label lives
-        # in the cell's parent, so hiding the cell alone (Label-free mode) left
-        # "Segmentation channel" floating beside nothing.
-        self._nuclear_row_widget = nuc_row.parentWidget()
-        self._nuclear_token_edit = self._entry(nuc_row, "NIR")
-        nuc_row.layout().addStretch(1)
-        self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_schema_preview())
-        self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
+        in_lbl = QLabel("Input folder", sec)
+        in_lbl.setObjectName("Muted")
+        in_lbl.setWordWrap(True)
+        sec.layout().addWidget(in_lbl)
 
-        fl_header = QWidget(sec)
-        fl_hl = QHBoxLayout(fl_header)
-        fl_hl.setContentsMargins(0, 6, 0, 2)
-        fl_hl.setSpacing(4)
-        fl_title = QLabel("Fluorescent channels", fl_header)
-        fl_hl.addWidget(fl_title)
-        fl_hl.addWidget(self._info_icon(
-            fl_header,
-            "Mark smFISH channels, or one channel as Phase for label-free "
-            "segmentation, with the checkboxes on each row.",
-        ))
-        fl_hl.addStretch(1)
-        sec.layout().addWidget(fl_header)
+        in_pick = QWidget(sec)
+        ipl = QHBoxLayout(in_pick)
+        ipl.setContentsMargins(0, 0, 0, 4)
+        ipl.setSpacing(4)
+        self._input_edit = QLineEdit(in_pick)
+        self._input_edit.setReadOnly(True)
+        self._input_edit.setPlaceholderText("(not set)")
+        self._input_edit.setMinimumWidth(0)
+        self._input_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        ipl.addWidget(self._input_edit, 1)
+        # Never disabled: choosing a folder is what lets the schema be detected,
+        # so a lock on the folder until the schema was valid pointed each half
+        # of the form at the other. A schema problem stops Run instead.
+        self._browse_btn = QPushButton("Browse…", in_pick)
+        self._browse_btn.setProperty("variant", "secondary")
+        self._browse_btn.clicked.connect(self._browse_input)
+        ipl.addWidget(self._browse_btn)
+        sec.layout().addWidget(in_pick)
+
+        # Where the run writes, once the input resolves to an output folder:
+        # "—" on its own said nothing, so the row is hidden until then.
+        self._output_row = QWidget(sec)
+        orl = QHBoxLayout(self._output_row)
+        orl.setContentsMargins(0, 0, 0, 0)
+        orl.setSpacing(4)
+        out_cap = QLabel("Output to", self._output_row)
+        out_cap.setObjectName("Muted")
+        orl.addWidget(out_cap, 0, Qt.AlignTop)
+        self._output_lbl = QLabel("—", self._output_row)
+        self._output_lbl.setWordWrap(True)
+        self._output_lbl.setMinimumWidth(0)
+        orl.addWidget(self._output_lbl, 1)
+        sec.layout().addWidget(self._output_row)
+        self._output_row.setVisible(False)
+
+        self._layout_lbl = QLabel("", sec)
+        self._layout_lbl.setWordWrap(True)
+        sec.layout().addWidget(self._layout_lbl)
+        self._set_status(self._layout_lbl, "", quiet="")
+
+
+        self._input_edit.textChanged.connect(lambda _: self._refresh_output())
+
+    def _build_channels_section(self, parent: QWidget) -> None:
+        """What the plate is, and its channels: one row each, with its role."""
+        sec = self._section(parent, "Channels")
+        # Standard plate / Nanowell array, from the nanowell section when the
+        # build has one (``analyze.nanowell_section``).
+        plate_type = getattr(self, "_build_plate_type_row", None)
+        if callable(plate_type):
+            plate_type(sec)
+
+        fl_header = self._subheading(
+            sec, "Channels in the filenames",
+            info="One row per channel name as it appears in the filenames. "
+                 "Every channel is quantified; mark smFISH channels for spot "
+                 "counting, and at most one Phase (brightfield) channel, which "
+                 "skips correction and is what Label-free segments.")
         self._fluor_header = fl_header  # for an OME-mode hide nothing performs yet
 
         self._fluor_frame = QWidget(sec)
@@ -163,261 +192,49 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         sec.layout().addWidget(add_btn)
         self._fluor_add_btn = add_btn  # for an OME-mode hide nothing performs yet
 
+    def _build_segmentation_section(self, parent: QWidget) -> None:
+        """The method, the channel it segments, and the method's own settings."""
+        sec = self._section(parent, "Segmentation")
+
+        seg_row = self._row(sec, "Method")
+        self._seg_method_cb = QComboBox(seg_row)
+        # Cellpose is a removable, torch-backed segmenter (profiles/full.toml). A
+        # profile that doesn't list "Cellpose" (e.g. the StarDist-only thin build)
+        # ships no torch/cellpose, so its methods can't run — drop them from the
+        # picker instead of offering a choice that would fail at pipeline start.
+        from core.profile import active_profile
+        _prof = active_profile()
+        _cellpose_ok = _prof.features is None or "Cellpose" in _prof.features
+        for _value, _label in self._SEG_METHODS:
+            if not _cellpose_ok and _value.startswith("cellpose"):
+                continue
+            self._seg_method_cb.addItem(_label, userData=_value)
+        self._seg_method_cb.currentIndexChanged.connect(
+            lambda _i: self._seg_method_cb.setToolTip(self._seg_method_cb.currentText()))
+        self._seg_method_cb.setToolTip(self._seg_method_cb.currentText())
+        seg_row.layout().addWidget(self._seg_method_cb, 1)
+        # The method's "use when…" line sits under the picker it describes. It
+        # turns into the segmentation error, in the error style, while the
+        # method cannot run.
+        self._segmentation_hint_lbl = QLabel("", sec)
+        self._segmentation_hint_lbl.setObjectName("Muted")
+        self._segmentation_hint_lbl.setWordWrap(True)
+        sec.layout().addWidget(self._segmentation_hint_lbl)
+        self._seg_method_cb.currentIndexChanged.connect(lambda _: self._refresh_segmentation_hints())
+
+        nuc_row = self._row(sec, "Segmentation channel")
+        # The whole row, not the field cell ``_row`` returns: the label lives in
+        # the cell's parent, so hiding the cell alone (Label-free mode) left
+        # "Segmentation channel" floating beside nothing.
+        self._nuclear_row_widget = nuc_row.parentWidget()
+        self._nuclear_token_edit = self._entry(nuc_row, "NIR", width=160)
+        self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_schema_preview())
+        self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
+
         # Per-method parameter pages + the shared StarDist thresholds
         # (analyze.seg_params.AnalyzeSegParamsMixin).
         self._build_seg_param_stack(sec)
-
         self._refresh_segmentation_hints()
-
-    def _build_open_pinfo_row(self, parent: QWidget) -> None:
-        """Button above Folders: restore a prior run's settings (incl. input/output
-        paths) from its pipeline_info.json sidecar — to re-run a failed run or
-        append new data."""
-        row = QWidget(parent)
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(12, 8, 12, 0)
-        rl.setSpacing(4)
-        self._open_pinfo_btn = QPushButton("Load settings from a run…", row)
-        self._open_pinfo_btn.setProperty("variant", "secondary")
-        self._open_pinfo_btn.clicked.connect(self._open_pipeline_info)
-        rl.addWidget(self._open_pinfo_btn)
-        rl.addStretch(1)
-        parent.layout().addWidget(row)
-
-    def _build_folders_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Folders")
-
-        in_lbl = QLabel("Input folder", sec)
-        in_lbl.setWordWrap(True)
-        sec.layout().addWidget(in_lbl)
-
-        in_pick = QWidget(sec)
-        ipl = QHBoxLayout(in_pick)
-        ipl.setContentsMargins(0, 0, 0, 4)
-        ipl.setSpacing(4)
-        self._input_edit = QLineEdit(in_pick)
-        self._input_edit.setReadOnly(True)
-        self._input_edit.setPlaceholderText("(not set)")
-        self._input_edit.setEnabled(False)
-        self._input_edit.setMinimumWidth(0)
-        self._input_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        ipl.addWidget(self._input_edit, 1)
-        self._browse_btn = QPushButton("Browse…", in_pick)
-        self._browse_btn.setProperty("variant", "secondary")
-        self._browse_btn.setEnabled(False)
-        self._browse_btn.clicked.connect(self._browse_input)
-        ipl.addWidget(self._browse_btn)
-        sec.layout().addWidget(in_pick)
-
-        self._folder_lock_lbl = QLabel("", sec)
-        self._folder_lock_lbl.setWordWrap(True)
-        sec.layout().addWidget(self._folder_lock_lbl)
-        self._set_status(self._folder_lock_lbl, "")
-
-        out_lbl = QLabel("Output folder (auto)", sec)
-        out_lbl.setContentsMargins(0, 6, 0, 0)
-        out_lbl.setWordWrap(True)
-        sec.layout().addWidget(out_lbl)
-        self._output_lbl = QLabel("—", sec)
-        self._output_lbl.setObjectName("Muted")
-        self._output_lbl.setWordWrap(True)
-        sec.layout().addWidget(self._output_lbl)
-
-        self._layout_lbl = QLabel("", sec)
-        self._layout_lbl.setWordWrap(True)
-        sec.layout().addWidget(self._layout_lbl)
-        self._set_status(self._layout_lbl, "", quiet="")
-
-        self._input_edit.textChanged.connect(lambda _: self._refresh_output())
-
-    def _build_shape_features_section(self, parent: QWidget) -> None:
-        sec = self._section(
-            parent, "Shape metrics",
-            collapsible=True, collapsed=True,
-            info="Per-cell morphology features to measure (emitted as shape_… "
-                 "columns; cell centroids are always recorded).",
-        )
-
-        # A compact checkbox dropdown rather than a wide chip grid — the
-        # selectable-feature list is long enough to overflow the narrow
-        # Analyze sidebar. ``checkedData()`` / ``setCheckedData()`` keep the
-        # same contract the chip group exposed, so _collect_run_options needs
-        # no change.
-        self._shape_chips = CheckableDropdown(sec, noun="metrics selected",
-                                              empty_text="No metrics selected")
-        for key in _sfc.SELECTABLE_KEYS:
-            feat = _sfc.BY_KEY[key]
-            self._shape_chips.addItem(feat.label, data=key)
-        self._shape_chips.setCheckedData(list(self._SHAPE_DEFAULTS))
-        # Constrain width to match the other controls (e.g. the segmentation
-        # combo's 230 px). Added directly to the section's QVBoxLayout the dropdown
-        # button's Preferred policy stretched it to the full ~414 px sidebar, which
-        # looked oversized; cap it and left-align with a trailing stretch.
-        self._shape_chips.setMaximumWidth(self._SHAPE_CHIPS_MAX_W)
-        chip_row = QWidget(sec)
-        crl = QHBoxLayout(chip_row)
-        crl.setContentsMargins(0, 0, 0, 0)
-        crl.setSpacing(4)
-        crl.addWidget(self._shape_chips)
-        crl.addStretch(1)
-        sec.layout().addWidget(chip_row)
-
-    def _build_output_options_section(self, parent: QWidget) -> None:
-        sec = self._section(
-            parent, "Output options",
-            collapsible=True, collapsed=True,
-            info="Inputs are always grouped into per-well .zip files and outputs "
-                 "are always written as per-well .zip files.",
-        )
-
-        r = self._row(sec, "CSV prefix")
-        self._csv_prefix_edit = self._entry(r, "measurements", width=160)
-        r.layout().addStretch(1)
-
-        # On by default. The check reads back what the run wrote and records
-        # whether each well's output covers its input, which is what the Review
-        # Home page reports — without it a dataset carries no record of its own
-        # completeness and a partly-failed well is indistinguishable from a
-        # whole one on disk.
-        self._run_check_cb = WrapCheckBox(
-            "Check completeness when the run finishes", sec)
-        self._run_check_cb.setChecked(True)
-        self._run_check_cb.setToolTip(
-            "After the last well, compare what each well's input held against "
-            "what its CSV and output archive actually cover, and record the "
-            "result in pipeline_info.json. Costs seconds — the files were just "
-            "written, so they are still in the page cache. Turning it off "
-            "leaves the dataset with no completeness record; Review then says "
-            "the check was turned off rather than guessing.")
-        sec.layout().addWidget(self._run_check_cb)
-        build_storage_rows(self, sec)
-
-    def _build_compute_options_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Compute options", collapsible=True, collapsed=True)
-
-        tf_row = self._row(
-            sec, "Threads per worker",
-            tooltip="TensorFlow threads each worker may use. 0 picks 4 (2 on a "
-                    "Mac using Metal), capped at the cores available.")
-        self._tf_threads_edit = self._entry(tf_row, "0", width=40)
-        self._field_note(tf_row, "0 = auto")
-        tf_row.layout().addStretch(1)
-
-        w_row = self._row(
-            sec, "Wells in parallel",
-            tooltip="How many worker processes run at once, each on one well. "
-                    "0 divides the available cores by the threads per worker.")
-        self._workers_edit = self._entry(w_row, "0", width=40)
-        self._field_note(w_row, "0 = auto")
-        w_row.layout().addStretch(1)
-
-        # StarDist prediction tiling — caps per-worker peak RAM on large frames
-        # (an untiled ~4K predict can use several GB/worker, so parallel workers
-        # exhaust memory). The value is the MAX pixels per tile SIDE (not the
-        # number of tiles), 0 = off (default). Label kept short so it fits the
-        # row label column; the px/side meaning is in the info-icon tooltip.
-        tile_row = self._row(sec, "Max tile size")
-        # Same width as the TF threads / Workers entries above it — these three
-        # small integer fields read as one uniform column.
-        self._stardist_tile_px_edit = self._entry(tile_row, "0", width=40)
-        self._field_note(tile_row, "px · 0 = off")
-        tile_row.layout().addWidget(self._info_icon(
-            tile_row,
-            "Max pixels per tile SIDE for StarDist prediction — NOT the number "
-            "of tiles. StarDist splits the frame into as many tiles as needed so "
-            "no block exceeds this size, then stitches the result. 0 = off "
-            "(predict the whole frame at once). On large frames (~4K) an untiled "
-            "predict can use several GB per worker, so a few parallel workers "
-            "exhaust RAM; e.g. 2048 splits a 4096-px frame into a 2×2 grid, 1024 "
-            "into 4×4. Smaller = less RAM per worker, slightly slower."))
-        tile_row.layout().addStretch(1)
-
-        self._cpu_only_cb = QCheckBox("CPU only (disable GPU)", sec)
-        sec.layout().addWidget(self._cpu_only_cb)
-        self._allow_low_disk_cb = QCheckBox(
-            "Start even if the disk looks too small", sec)
-        self._allow_low_disk_cb.setToolTip(ALLOW_LOW_DISK_HELP)
-        sec.layout().addWidget(self._allow_low_disk_cb)
-        self._force_cb = QCheckBox("Force reprocess all wells", sec)
-        self._force_cb.setToolTip(
-            "Reprocess every well from scratch, even one whose output already "
-            "exists. Overrides the incremental option below — the pipeline "
-            "ignores --incremental when --force is given.")
-        sec.layout().addWidget(self._force_cb)
-        # The run mode that finishes a partial run. Without it, a well whose
-        # <well>_out.zip and CSV both exist is SKIPPED whole, however few of its
-        # FOV-groups actually made it in — which is why a crashed run cannot be
-        # completed by simply pressing Run again. Datasets → Validate & Repair's
-        # "Complete this run in Analyze" ticks this on the way in.
-        self._incremental_cb = QCheckBox("Incremental — process only missing FOVs", sec)
-        self._incremental_cb.setToolTip(
-            "Fill in the gaps a partial or crashed run left, instead of "
-            "skipping any well that already has output. Each well's already-"
-            "recorded (FOV, timepoint) pairs are read from the output folder "
-            "and only the missing ones are processed, then merged into the "
-            "existing per-well CSV and <well>_out.zip. Wells with no output at "
-            "all process in full; wells that are already complete are left "
-            "untouched.")
-        sec.layout().addWidget(self._incremental_cb)
-        # Per-well scope — Only these wells / Force these wells — as visible
-        # fields; see analyze/well_scope.py.
-        build_well_scope_rows(self, sec)
-
-    def _build_scratch_section(self, parent: QWidget) -> None:
-        """Scratch-disk picker — the very last option before the Run controls.
-
-        Per-well working files (zip extraction + intermediate images + FOV
-        checkpoints) are written here. It defaults to ``scratch`` in the app's
-        folder — ``~/.allwell/scratch``, or ``%LOCALAPPDATA%\\allwell\\scratch``
-        on Windows (``pipeline.io.scratch_base_for``) — and **no longer tracks the input
-        folder**: seeding it with ``<input>/Temp`` put the run's whole GB-scale
-        temporary I/O on the input volume, which is the configuration behind
-        "Bad file descriptor" well failures when that volume is a network mount
-        — a dropped SMB session invalidates every open handle. Keep this on
-        local storage.
-        """
-        sec = self._section(
-            parent, "Scratch disk",
-            collapsible=True, collapsed=True,
-            info="Where per-well working files (zip extraction + intermediate "
-                 "images) are written during a run. Leave blank to use "
-                 f"{default_scratch_label()}, the scratch folder in the app's "
-                 "own folder. Keep it on fast LOCAL storage — pointing "
-                 "it at a network drive (NAS / SMB share) puts the run's "
-                 "GB-scale temporary I/O on a volume whose dropped sessions "
-                 "make wells fail with 'Bad file descriptor'.",
-        )
-        pick = QWidget(sec)
-        pl = QHBoxLayout(pick)
-        pl.setContentsMargins(0, 0, 0, 4)
-        pl.setSpacing(4)
-        self._scratch_edit = QLineEdit(pick)
-        self._scratch_edit.setPlaceholderText(f"(defaults to {default_scratch_label()})")
-        self._scratch_edit.setMinimumWidth(0)
-        self._scratch_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        pl.addWidget(self._scratch_edit, 1)
-        self._scratch_browse_btn = QPushButton("Browse…", pick)
-        self._scratch_browse_btn.setProperty("variant", "secondary")
-        self._scratch_browse_btn.clicked.connect(self._browse_scratch)
-        pl.addWidget(self._scratch_browse_btn)
-        sec.layout().addWidget(pick)
-        # Typing / browsing pins the value; blank means the pipeline default
-        # (the app folder's scratch/). The field no longer follows the input dir — see
-        # the docstring above for why that default was harmful.
-        self._scratch_user_set = False
-        self._scratch_edit.textEdited.connect(self._on_scratch_edited)
-
-    def _on_scratch_edited(self, _text: str = "") -> None:
-        self._scratch_user_set = True
-
-    def _browse_scratch(self) -> None:
-        d = QFileDialog.getExistingDirectory(
-            self, "Select scratch folder", "",
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks,
-        )
-        if d:
-            self._scratch_edit.setText(d)
-            self._scratch_user_set = True
 
     def _build_auto_threshold_section(self, parent: QWidget) -> None:
         """Auto-threshold — every threshold-related control in one place.
@@ -430,9 +247,19 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         the wells are filled, so switching back to Otsu does not lose them.
         Collapsed by default, like the other optional sections.
         """
+        # The switch sits in the section header, so whether thresholds will be
+        # calculated can be read — and changed — with the section folded.
+        self._auto_threshold_cb = QCheckBox("On")
+        self._auto_threshold_cb.setChecked(True)
+        self._auto_threshold_cb.setToolTip(
+            "Calculate cell-gating thresholds when the run finishes. On "
+            "(default): a per-channel threshold is written with the dataset. "
+            "Off: none are written and Cell Gating starts from its own defaults.")
         sec = self._section(
             parent, "Auto-threshold",
             collapsible=True, collapsed=True,
+            switch=self._auto_threshold_cb,
+            summary=self._auto_threshold_summary,
             info="After a run finishes, All-Well can pick a default 'on' "
                  "threshold for each channel and store it with the dataset, so "
                  "the Cell Gating tab opens with sensible values. Otsu (the "
@@ -445,25 +272,11 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
                  "not something to gate on.",
         )
 
-        self._auto_threshold_cb = WrapCheckBox(
-            "Calculate cell-gating thresholds when the run finishes", sec,
-        )
-        self._auto_threshold_cb.setChecked(True)
-        self._auto_threshold_cb.setToolTip(
-            "On (default): the pipeline writes a default per-channel threshold "
-            "into pipeline_info.json at the end of the run. Off: no thresholds "
-            "are written and the Cell Gating tab starts from its own defaults."
-        )
-        sec.layout().addWidget(self._auto_threshold_cb)
-
         rmethod = self._row(sec, "Method")
         self._auto_threshold_method_cb = QComboBox(rmethod)
         self._auto_threshold_method_cb.addItem("Otsu (whole dataset)", "otsu")
         self._auto_threshold_method_cb.addItem("Positive / negative controls",
                                                "controls")
-        # Narrower than "Positive / negative controls" — Qt elides the closed
-        # box's text; the tooltip below spells out both options regardless.
-        self._auto_threshold_method_cb.setFixedWidth(self._AUTO_THRESHOLD_METHOD_CB_W)
         self._auto_threshold_method_cb.setToolTip(
             "Otsu: split each channel's per-cell signal from image background, "
             "pooled across the dataset — no controls needed, but it cannot tell "
@@ -501,6 +314,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         def _sync_auto_threshold(_=None) -> None:
             on = self._auto_threshold_cb.isChecked()
             self._auto_threshold_method_row.setVisible(on)
+            self._refresh_section_summary("Auto-threshold")
             # Text is left alone — switching to Otsu and back must not cost the
             # user their wells.
             wells = on and self._auto_threshold_method() == "controls"
@@ -510,6 +324,12 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         self._auto_threshold_cb.toggled.connect(_sync_auto_threshold)
         self._auto_threshold_method_cb.currentIndexChanged.connect(_sync_auto_threshold)
         _sync_auto_threshold()
+
+    def _auto_threshold_summary(self) -> str:
+        """The folded header's line: what the pass will do."""
+        if not self._auto_threshold_cb.isChecked():
+            return ""
+        return self._auto_threshold_method_cb.currentText()
 
     def _auto_threshold_method(self) -> str:
         """``"otsu"`` or ``"controls"`` — the selected estimator."""
@@ -590,13 +410,13 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
             compress_output_well_folders=True,
             move_source_tifs=True,
             remote_batch_size=self._remote_batch_size_edit.text(),
-            force=self._force_cb.isChecked(),
+            force=self._existing_output_cb.value() == "force",
             # services.input_resolution_service.select_incremental_scope may
             # still override this during input resolution (it forces a full
             # reprocess when loose images land under a cross-well flat-field /
             # background model), but it never clears a True the form set: with
             # nothing appended it returns before touching the key.
-            incremental=self._incremental_cb.isChecked(),
+            incremental=self._existing_output_cb.value() == "incremental",
             **well_scope_options(self),
             **storage_options(self),
             cpu_only=self._cpu_only_cb.isChecked(),

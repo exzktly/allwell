@@ -230,7 +230,7 @@ def preflight_scratch_space(
     scratch_need = per_well * max(1, int(concurrent_wells))
     move_it = (
         "Scratch is not the dataset volume: set ALLWELL_SCRATCH_DIR (or the "
-        "Analyze tab's Scratch disk field) to move it."
+        "Analyze tab's Scratch folder, under Advanced) to move it."
     )
     where = (
         f"{_gib(free)} free on {scratch_base} — the run needs about "
@@ -259,7 +259,7 @@ def preflight_scratch_space(
             # a GUI run sees the control it can tick, named exactly as the form
             # labels it, and the flag it corresponds to.
             f"To start anyway, pass --allow_low_disk on the command line, or "
-            f"in Analyze tick Compute Options → “Start even if the disk looks "
+            f"in Analyze tick Advanced → “Start even if the disk looks "
             f"too small”."
         )
 

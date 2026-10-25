@@ -278,7 +278,10 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 870
 # extraction -- the whole method moved, and its queue-aware rules live there.
 # 737 -> 729: the Stop button's slot `_stop` moved to AnalyzeRunMixin, beside
 # the queue's `stop` hook and the `_build_run_row` that wires the button.
-ANALYZE_TAB_BUDGET = 729
+# 729 -> 620: the channel rows (_fluor_add_row and the readers beside it) moved
+# to analyze.channel_rows.AnalyzeChannelRowsMixin when each row gained its Role
+# dropdown. Genuine extraction -- the whole group moved.
+ANALYZE_TAB_BUDGET = 620
 
 # analyze/form.py carried no budget while analyze/tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it
@@ -310,7 +313,11 @@ ANALYZE_TAB_BUDGET = 729
 # to gain, so the choice was an extraction or a raised budget, and the ratchet
 # only moves down. Genuine extraction -- the whole builder moved, nothing was
 # duplicated, and new Quality Control work goes in that module.
-ANALYZE_TAB_FORM_BUDGET = 729
+# 729 -> 459: the Output / Compute / Scratch builders moved to
+# analyze.advanced_section.AnalyzeAdvancedSectionMixin, the run controls to
+# analyze.run_footer, and Run scope to analyze.well_scope, when the form was
+# re-sectioned. Genuine extraction -- whole builders moved.
+ANALYZE_TAB_FORM_BUDGET = 459
 
 
 def _line_count(rel: str) -> int:

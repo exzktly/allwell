@@ -22,10 +22,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QMessageBox, QPushButton, QWidget
+from PySide6.QtWidgets import QPushButton, QWidget
 
-from analyze.domain.fields import _numeric_option_errors
 from analyze.domain.job_edit import AnalyzeJobEditMixin
+from analyze.run_problems import AnalyzeRunProblemsMixin, RunProblem
 from analyze.domain.well_list import only_wells_note
 from core.safe import swallowed
 from services.pipeline_service import find_pipeline_script
@@ -38,7 +38,7 @@ from services.run_spec import RunSpec, RunSpecError
 from widgets.flow_layout import FlowLayout
 
 
-class AnalyzeRunMixin(AnalyzeJobEditMixin):
+class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
     """Splits run-collection (``_collect_run_spec``) from run-starting
     (``start_run``) so a :class:`RunSpec` can be persisted and started later,
     independent of the form state at collection time."""
@@ -257,9 +257,12 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         return bool(box is not None and box.isChecked())
 
     def _validate_run_request(self, *, for_queue: bool = False) -> Path | None:
-        """Refuse a form that cannot run, in a dialog naming the field.
+        """Refuse a form that cannot run, saying every reason where Run is.
 
-        Returns the pipeline script, or ``None`` after reporting why not.
+        Returns the pipeline script, or ``None`` after reporting why not —
+        all the problems at once, under the Run button, with the first one's
+        section unfolded and scrolled to (``analyze.run_problems``). It used to
+        stop at the first problem and raise it in a modal dialog.
 
         *for_queue* is the "+ Queue" / queue-banner path, and it defers what a
         queued job cannot know yet. Its input may be a folder an earlier job
@@ -271,60 +274,14 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         path, because the values they would check are about to be replaced:
         ``services.run_detect`` re-asks them of the detected layout.
         """
-        raw = self._input_edit.text().strip()
-        detect = self._auto_detect_on()
-        if not raw and not for_queue:
-            QMessageBox.critical(self, "Input Error", "No input folder selected.")
-            return None
-        # The Run button asks everything of whatever the field names, as it
-        # always has; only a queued job may name a folder not written yet.
-        input_known = bool(raw) and (not for_queue or Path(raw).exists())
-        packed_hint = self._packed_input_hint() if input_known else None
-        if packed_hint is not None:
-            QMessageBox.critical(self, "Packed File Input", packed_hint)
-            return None
-        schema_errors = [] if detect else self._schema_errors()
-        if schema_errors:
-            QMessageBox.critical(self, "Schema Error", "Invalid filename schema:\n\n" + "\n".join(schema_errors))
-            return None
-        if not detect and not self._fluor_tokens_list():
-            QMessageBox.critical(self, "Channel Error", "At least one fluorescent channel token is required.")
-            return None
-        seg_errors = self._segmentation_validation_errors(channels=not detect)
-        if seg_errors:
-            QMessageBox.critical(self, "Segmentation Error", "\n".join(seg_errors))
-            return None
-        # Numeric fields — block a bad value at the boundary rather than
-        # silently dropping the flag or dividing by zero downstream.
-        num_errors = _numeric_option_errors(self._collect_run_options())
-        if num_errors:
-            QMessageBox.critical(self, "Input Error", "\n".join(num_errors))
-            return None
-        # Empty-well flat-field / background reads its references from a named
-        # background well — require it to exist in the input before starting,
-        # rather than letting the run no-op or fail mid-pipeline. The parts of
-        # both checks that parse the input's filenames with the form's schema
-        # cannot be asked of an input that is not there yet, or of a schema
-        # detection is about to replace; the rest still is.
-        check_input = input_known and not detect
-        bw_err = self._background_well_validation_error(check_input=check_input)
-        if bw_err:
-            QMessageBox.critical(self, "Background Well Error", bw_err)
-            return None
-        at_err = self._auto_threshold_validation_error(check_input=check_input)
-        if at_err:
-            QMessageBox.critical(self, "Control Well Error", at_err)
-            return None
-        nanowell_err = self._nanowell_validation_error(check_input=check_input)
-        if nanowell_err:
-            QMessageBox.critical(self, "Nanowell Error", nanowell_err)
-            return None
+        problems = self._run_problems(for_queue=for_queue)
         pipeline = find_pipeline_script()
         if pipeline is None:
-            QMessageBox.critical(self, "Configuration Error",
-                "process_microscopy.py not found next to allwell.py.")
-            return None
-        return pipeline
+            problems.append(RunProblem(
+                "", "Configuration Error",
+                "process_microscopy.py not found next to allwell.py."))
+        self._report_run_problems(problems)
+        return None if problems else pipeline
 
     def collect_spec(self) -> dict:
         """The current form's run, as a job queue's JSON spec."""

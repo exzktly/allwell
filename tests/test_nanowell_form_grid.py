@@ -121,13 +121,13 @@ def test_an_incremental_nanowell_run_on_a_remote_host_is_refused(tab, refused, t
     _use_nanowell_schema(tab)
     tab._input_edit.setText(str(root))
     tab._nanowell_cb.setChecked(True)
-    tab._incremental_cb.setChecked(True)
+    tab._existing_output_cb.setValue("incremental")
     assert tab._validate_run_request() is not None                   # on this computer: fine
     tab._remote_cb.addItem("bench-box", userData="bench-box")
     tab._remote_cb.setCurrentIndex(tab._remote_cb.findData("bench-box"))
     assert tab._validate_run_request() is None
     assert NANOWELL_REMOTE_INCREMENTAL_REFUSAL in refused[-1][1]
-    tab._incremental_cb.setChecked(False)
+    tab._existing_output_cb.setValue("skip")
     assert tab._validate_run_request() is not None                   # the remote plate in full: fine
 
 
@@ -188,7 +188,7 @@ def test_a_remote_nanowell_run_the_app_makes_incremental_runs_well_by_well(tab, 
     _use_nanowell_schema(tab)
     tab._input_edit.setText(str(root))
     tab._nanowell_cb.setChecked(True)
-    assert not tab._incremental_cb.isChecked()
+    assert not (tab._existing_output_cb.value() == "incremental")
     tab._remote_cb.addItem("bench-box", userData="bench-box")
     tab._remote_cb.setCurrentIndex(tab._remote_cb.findData("bench-box"))
     monkeypatch.setattr(remote_config, "get_remote", lambda name: object())

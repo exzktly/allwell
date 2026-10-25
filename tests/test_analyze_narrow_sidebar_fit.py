@@ -136,8 +136,8 @@ def test_run_controls_fit_the_rail_with_the_queue_button_shown(qapp):
 
 def test_a_channel_row_and_the_run_time_detect_box_can_narrow_to_one_control(qapp):
     """Reported (phone layout): on the Analyze form many fields were cut off.
-    Two rows could not get narrower than their whole content: a fluorescent
-    channel row (field, ✕, smFISH, Phase in an unbreakable QHBoxLayout) and
+    Two rows could not get narrower than their whole content: a channel row
+    (then field, ✕, smFISH, Phase in an unbreakable QHBoxLayout) and
     "Detect schema & channels at run time" (a QCheckBox reports its whole label
     as its minimum width). At phone layout's touch size those two pinned the
     form 14 px wider than the drawer on a 432 px screen, so every section was
@@ -152,16 +152,17 @@ def test_a_channel_row_and_the_run_time_detect_box_can_narrow_to_one_control(qap
     try:
         for _ in range(5):
             qapp.processEvents()
-        edit, smfish, phase, remove = tab._fluor_rows[0]
+        # A channel row is now three controls — the name (which shrinks to
+        # nothing), the Role dropdown and ✕ — so it no longer needs to wrap
+        # to fit: it has to fit the form's column with its margins, at the
+        # desk, which leaves the phone drawer (wider than rail_w) room too.
+        from ui import theme
+        edit, _smfish, _phase, remove = tab._fluor_rows[0]
         row = edit.parentWidget()
-        widest = max(w.minimumSizeHint().width() if w.minimumSizeHint().isValid() else 0
-                     for w in (edit, smfish, phase, remove))
-        widest = max(widest, edit.width(), smfish.minimumWidth(), phase.minimumWidth())
-        all_in_a_line = sum(max(w.minimumWidth(), w.minimumSizeHint().width())
-                            for w in (edit, smfish, phase, remove))
-        assert row.minimumSizeHint().width() <= widest < all_in_a_line, (
-            f"a channel row needs {row.minimumSizeHint().width()} px; its widest "
-            f"control is {widest} px — it does not wrap")
+        assert row.minimumSizeHint().width() <= theme.Metrics.rail_w - 24, (
+            f"a channel row needs {row.minimumSizeHint().width()} px, more than "
+            f"the form's {theme.Metrics.rail_w - 24} px column")
+        assert remove.parentWidget() is row
 
         detect = tab._auto_detect_cb
         one_line = detect.fontMetrics().horizontalAdvance(detect.text())

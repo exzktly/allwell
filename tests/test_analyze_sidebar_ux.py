@@ -4,7 +4,7 @@ Each test here pins one finding of the sidebar UX review against the real
 ``AnalyzeTab``, and each is built so the form as it stood before the cleanup
 fails it — the assertion names the value, not a property the old form also had:
 
-* a fresh form corrects nothing, so it can run without a blank well;
+* a fresh form corrects as the command line does, and can run without a blank well;
 * the Background well rows are hidden, not greyed, while nothing reads them,
   and say they are required while a correction does and the field is empty;
 * Label-free mode hides the whole "Segmentation channel" row, label included;
@@ -47,9 +47,11 @@ def _settle(qtbot) -> None:
 
 # ── defaults ────────────────────────────────────────────────────────────────
 
-def test_a_fresh_form_corrects_nothing_and_needs_no_blank_well(tab):
+def test_a_fresh_form_corrects_as_the_command_line_does_and_needs_no_blank_well(tab):
+    # The command line's own defaults (pipeline/cli_args.py): no flat-field, a
+    # rolling-disk background — neither reads a blank well.
     assert tab._flatfield_cb.value() == "none"
-    assert tab._background_cb.value() == "none"
+    assert tab._background_cb.value() == "sliding_disk"
     # The old default (flat-field from a blank well) returned "Empty-well
     # flat-field correction requires a Background well." here.
     assert tab._background_well_validation_error(check_input=False) is None
@@ -145,7 +147,7 @@ def test_a_segmentation_problem_is_drawn_as_an_error(tab):
 
 
 def test_an_empty_status_line_takes_no_room(tab, tmp_path):
-    for lbl in (tab._layout_lbl, tab._folder_lock_lbl, tab._schema_err_lbl):
+    for lbl in (tab._layout_lbl, tab._schema_err_lbl):
         assert lbl.isHidden(), lbl.text()
     (tmp_path / "in").mkdir()
     tab._input_edit.setText(str(tmp_path / "in"))
@@ -209,3 +211,129 @@ def test_the_footer_is_drawn_apart_from_the_form(tab, qtbot, qapp):
         assert img.pixelColor(x, footer.height() // 2).name().lower() == theme.Colors.panel.lower()
     finally:
         qapp.setStyleSheet(before)
+
+
+# ── every run problem at once, beside Run (F1) ──────────────────────────────
+
+def _numbers_and_schema_wrong(tab):
+    tab._input_edit.setText("")
+    tab._schema_picker.setSchema("well:well")             # does not parse
+    tab._tf_threads_edit.setText("four")                   # not a number
+
+
+def test_every_problem_is_collected_with_its_section(tab):
+    _numbers_and_schema_wrong(tab)
+    got = [(p.section, p.title) for p in tab._run_problems()]
+    # In the order a user fixes them; the old chain stopped at the first.
+    assert got[:3] == [("Data", "Input Error"),
+                       ("Filename schema", "Schema Error"),
+                       ("Advanced", "Input Error")]
+
+
+def test_run_lists_the_problems_under_it_and_opens_the_first_one(tab, qtbot):
+    _numbers_and_schema_wrong(tab)
+    tab.reveal_section("Advanced")
+    body = tab._collapsible_sections["Filename schema"][0]
+    body.setVisible(False)                                 # folded again
+    assert tab._validate_run_request() is None             # no dialog: the
+    lbl = tab._run_problems_lbl                            # autouse guard would raise
+    assert not lbl.isHidden() and lbl.objectName() == "Error"
+    assert lbl.text().startswith("No input folder selected.")
+    assert "(+2 more)" in lbl.text()
+    tab._input_edit.setText("/somewhere")                 # fix the first
+    tab._go_to_run_problem(tab._run_problems()[0])
+    assert body.isVisibleTo(tab)                           # the schema's section opened
+
+
+def test_the_live_list_is_quiet_until_run_is_pressed(tab, qtbot):
+    _numbers_and_schema_wrong(tab)
+    tab._live_run_check()
+    assert tab._run_problems_lbl.objectName() == "Muted"
+    tab._validate_run_request()
+    tab._live_run_check()
+    assert tab._run_problems_lbl.objectName() == "Error"   # stays red while fixing
+    tab._input_edit.setText("/somewhere")
+    tab._schema_picker.setSchema("experiment:channel:well:fov:timepoint")
+    tab._tf_threads_edit.setText("0")
+    tab._live_run_check()
+    assert tab._run_problems_lbl.isHidden()
+
+
+def test_an_invalid_schema_does_not_lock_the_input_folder(tab):
+    tab._schema_picker.setSchema("well:well")
+    assert tab._input_edit.isEnabled() and tab._browse_btn.isEnabled()
+
+
+# ── one choice for existing output (E1) ─────────────────────────────────────
+
+@pytest.mark.parametrize("value, force, incremental", [
+    ("skip", False, False), ("incremental", False, True), ("force", True, False)])
+def test_the_existing_output_choice_is_the_pipeline_s_two_flags(tab, value, force, incremental):
+    tab._existing_output_cb.setValue(value)
+    opts = tab._collect_run_options()
+    assert (opts["force"], opts["incremental"]) == (force, incremental)
+
+
+def test_a_sidecar_with_both_flags_restores_redo_it(tab):
+    """The pipeline ignores --incremental under --force; so does the form."""
+    tab._apply_pipeline_info({"schema_version": 2, "execution_options": {
+        "force": True, "incremental": True}}, set_input_path=False)
+    assert tab._existing_output_cb.value() == "force"
+
+
+# ── folded sections say what they hold (B4), switch in the header (B3) ─────
+
+def test_a_folded_section_says_what_it_holds(tab, qtbot):
+    tab._existing_output_cb.setValue("incremental")
+    tab._only_wells_edit.setText("B02")
+    assert tab._run_scope_summary() == "Fill in what's missing · only B02"
+    assert tab._changed_summary("Advanced") == ""
+    tab._tf_threads_edit.setText("8")
+    tab._cpu_only_cb.setChecked(True)
+    assert tab._changed_summary("Advanced") == "2 changed"
+    assert tab._image_correction_summary() == "None · Rolling disk"
+
+
+def test_auto_threshold_is_switched_from_its_folded_header(tab):
+    body, _caret = tab._collapsible_sections["Auto-threshold"]
+    assert not body.isVisibleTo(tab)                       # folded
+    switch = tab._auto_threshold_cb
+    assert not body.isAncestorOf(switch)                   # in the header
+    assert switch.isVisibleTo(tab)
+    switch.click()
+    assert not switch.isChecked() and not body.isVisibleTo(tab)   # did not unfold it
+
+
+# ── layout (D4, D5) and copy (C1) ───────────────────────────────────────────
+
+def test_a_row_label_sits_above_its_field(tab, qtbot):
+    _settle(qtbot)
+    row = tab._seg_method_cb.parentWidget().parentWidget()
+    label = row.layout().itemAt(0).widget()
+    assert label.text() == "Method"
+    assert label.geometry().bottom() < tab._seg_method_cb.parentWidget().geometry().top()
+
+
+def test_dropdowns_take_the_field_width_and_numbers_one_width(tab, qtbot):
+    _settle(qtbot)
+    combos = (tab._seg_method_cb, tab._flatfield_cb, tab._background_cb)
+    assert len({c.width() for c in combos}) == 1           # one right edge
+    nums = (tab._tophat_radius_nir_edit, tab._tf_threads_edit,
+            tab._stardist_prob_thresh_edit, tab._qc_min_area_edit)
+    assert {n.maximumWidth() for n in nums} == {tab._NUM_FIELD_W}
+
+
+def test_scan_orders_read_as_words(tab):
+    labels = {tab._nanowell_scan_cb.itemData(i): tab._nanowell_scan_cb.itemText(i)
+              for i in range(tab._nanowell_scan_cb.count())}
+    assert labels["top-left-row"] == "Top-left corner, by row"
+    assert labels["bottom-right-column-serpentine"] == "Bottom-right corner, by column, serpentine"
+
+
+def test_the_phase_storage_option_shows_only_with_a_phase_channel(tab):
+    box = tab._phase_reference_cb
+    assert box.isHidden()
+    tab._fluor_rows[0][2].setChecked(True)
+    assert not box.isHidden()
+    tab._fluor_rows[0][2].setChecked(False)
+    assert box.isHidden()

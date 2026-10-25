@@ -797,6 +797,11 @@ QFrame#HRule, QFrame#VRule {{
     background-color: {c.border_subtle};
     border: none;
 }}
+/* The rule under an Analyze form section title: the default control border,
+   because border_subtle is near-invisible against the grey theme's canvas. */
+QFrame#Separator[section="true"] {{
+    background-color: {c.border};
+}}
 QFrame#HRule {{
     min-height: 1px;
     max-height: 1px;
@@ -818,6 +823,12 @@ QLabel#Title {{
 QLabel#Heading {{
     font-size: {t.h3_size}px;
     font-weight: {t.semibold};
+}}
+/* A group heading inside an Analyze form section ("Output", "Performance"):
+   body size, semibold, so it reads below a section title and above a row label. */
+QLabel#FormSubheading {{
+    font-weight: {t.semibold};
+    color: {c.text_primary};
 }}
 /* Section titles from ui_helpers.build_section_header (role="section") — a
    labelled band above each divided section, e.g. on the Cell Gating / Stats

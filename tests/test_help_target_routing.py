@@ -66,9 +66,9 @@ def test_datasets_falls_back_to_its_own_overview(pane):
 # ── Analyze ──────────────────────────────────────────────────────────────────
 
 def test_analyze_lands_on_the_scrolled_to_section():
-    pane = types.SimpleNamespace(current_help_section=lambda: "Scratch disk")
+    pane = types.SimpleNamespace(current_help_section=lambda: "Advanced")
     shell = _shell("analyze", analyze=pane)
-    assert shell._help_section_for_current_page() == "10. Scratch disk"
+    assert shell._help_section_for_current_page() == "9. Advanced — output, performance, scratch folder"
 
 
 @pytest.mark.parametrize("pane", [

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from core.safe import swallowed
 from review.core.plot_annotations import value_label_settings
-from review.core.plot_style import apply_export_style_to_current
+from review.core.plot_style import apply_export_style_to_current, figure_prefs
 from review.features.scatter._annotations import note_sampled, note_value_labels_unavailable
 from review.features.scatter.collect import gate_filter_title_suffix
 from review.features.scatter.gating import (
@@ -117,7 +117,8 @@ def _render_scatter_faceted(ctx, scatter_data, col_x, col_y, tps_list) -> None:
     """
     items = list(scatter_data.items())
     axes = _setup_scatter_axes(ctx, len(items))
-    prefs = ctx.state.export_prefs.style_prefs or {}
+    # The scatter figure's own Properties settings (density, log axes, marker size).
+    prefs = figure_prefs(ctx, ctx.widgets.get_or_none("_scatter_fig"))
     density_on = bool(prefs.get("scatter_density", False))
     x_log = bool(prefs.get("scatter_x_log", True))
     y_log = bool(prefs.get("scatter_y_log", True))

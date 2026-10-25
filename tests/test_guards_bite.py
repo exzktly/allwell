@@ -5434,3 +5434,31 @@ def test_hold_literal_guard_clears_the_constant_and_the_empty_default(tmp_path, 
     assert _run_scan(monkeypatch, "tests.test_plot_hold_reasons_are_named",
                      "test_no_reader_compares_the_hold_to_a_bare_reason_string",
                      [good]) is None
+
+
+# ── the app-wide Properties style ────────────────────────────────────────────
+
+APP_WIDE_STYLE_VIOLATIONS = {
+    # What Batch Export's Style Preset did: write a preset into the dict every plot reads.
+    "write_through_helper": ("from review.core.plot_style import _ensure_export_style_prefs\n"
+                             "def apply(ctx, overrides):\n    _ensure_export_style_prefs(ctx).update(overrides)\n"),
+    # What Scatter did: read the shared dict instead of its own figure's.
+    "read_the_field": "def size(ctx):\n    return (ctx.state.export_prefs.style_prefs or {}).get('marker_size')\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(APP_WIDE_STYLE_VIOLATIONS))
+def test_app_wide_style_guard_catches_a_reach(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_style.py", APP_WIDE_STYLE_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_app_wide_style_is_read_only",
+                    "test_nothing_but_its_owners_reaches_the_app_wide_style", [bad])
+    assert exc is not None, f"the {shape} reach went uncaught"
+    assert "bad_style.py" in str(exc)
+
+
+def test_app_wide_style_guard_clears_a_figure_s_own_style(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_style.py", (
+        "from review.core.plot_style import figure_prefs\n"
+        "def size(ctx, fig):\n    return figure_prefs(ctx, fig)['marker_size']\n"))
+    assert _run_scan(monkeypatch, "tests.test_app_wide_style_is_read_only",
+                     "test_nothing_but_its_owners_reaches_the_app_wide_style", [good]) is None

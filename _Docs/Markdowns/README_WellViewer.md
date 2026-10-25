@@ -3433,12 +3433,19 @@ row, holding five actions:
   the powers — the Response Curves dose axis, which ticks the concentrations
   you gave — because a subdivision belongs to the power beneath it, so under
   ticks that are something else the marks fall unevenly between one label and
-  the next and say nothing about either. Axis **limits**, **log-scale** and the
-  **line / marker styling** are scoped to the one plot — the Scatter tab's Cells and
-  Wells views are separate plots here, so sizing markers for five
-  aggregate points won't blow up a fifty-thousand-cell cloud. **Typography,
-  grid, legend and ticks stay shared** across tabs, so one setting still gives
-  a whole figure set a consistent look. On the Bar Plots tab (a Value /
+  the next and say nothing about either. **Every setting applies only to the
+  plot you edit it on** — sizes, fonts, grid, legend, ticks, limits, log scale,
+  line and marker styling, layout and the export profile. Raising the axis-label
+  size on Line Graphs leaves Bar Plots as it was; the Scatter tab's Cells and
+  Wells views are separate plots here, so sizing markers for five aggregate
+  points won't blow up a fifty-thousand-cell cloud; and each Nanowells view
+  (Distribution, Array, Trajectories, Position, Extremes) keeps its own
+  settings, so a range typed on the Distribution never reaches the Array map.
+  A plot you have never styled keeps the look saved by an earlier version of
+  All-Well, until you change it there. A **Batch Export** run draws each figure
+  with the style of the plot it comes from, and the **Style Preset** chosen in
+  the Batch Export panel applies to that run's figures only, never to the plots
+  on screen. On the Bar Plots tab (a Value /
   Fraction / Events panel stack) axis limits are stored **per panel**, so a
   limit set on the Fraction or Events panel sticks instead of that panel
   auto-scaling. **Auto scale**, in the same Limits & Scale section, gives the

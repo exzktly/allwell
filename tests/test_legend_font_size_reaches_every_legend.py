@@ -242,4 +242,6 @@ def test_typing_a_size_into_the_panel_resizes_the_aggregate_keys(qtbot, monkeypa
     sizes = sorted({t.get_fontsize()
                     for leg in legends_on(ax) for t in leg.get_texts()})
     assert sizes == [WANTED], sizes
-    assert app._app_state.export_prefs.style_prefs["legend_font_size"] == WANTED
+    # Stored on this figure alone: an edit in the Properties bar restyles only the plot it was made on.
+    assert app._app_state.export_prefs.axis_prefs["scatter_agg"]["legend_font_size"] == WANTED
+    assert (app._app_state.export_prefs.style_prefs or {}).get("legend_font_size") != WANTED

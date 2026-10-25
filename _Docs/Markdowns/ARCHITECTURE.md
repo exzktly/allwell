@@ -4045,13 +4045,17 @@ sharing re-bases on the first panel that survived, since unticking the top one
 would otherwise leave the rest sharing an axis that is not on the figure.
 
 **The limits ride in the preferences; the scale is pinned on the axes.** Every
-batch figure passes through `apply_export_style_prefs` on its way to disk, and
-that pass re-reads the *application's* export preferences — so a limit stamped
-on the axes at render time is one autoscale away from being replaced by the
-app's, silently. `AxesSpec.prefs_overlay` therefore hands that pass the run's
-own numbers, as a **copy**: `_ensure_export_style_prefs` returns the live
-dictionary the Export Style sidebar reads and writes, and merging into it would
-leave a batch run's numbers sitting in the sidebar afterwards. A stacked mode
+batch figure passes through `apply_export_style_prefs` on its way to disk with
+the panel's `_batch_style()`: the source plot's Properties style
+(`plot_style.plot_style_of(ctx, _mode_key())`, less its on-screen limits and
+log scales) with the panel's **Style Preset** laid over it. The preset lives on
+the panel (`_profile_overrides`) and is never written into any plot's settings,
+so choosing one restyles that run's figures and nothing on screen. A limit
+stamped on the axes at render time is one autoscale away from being replaced,
+silently, so `AxesSpec.prefs_overlay` hands that pass the run's own numbers, as
+a **copy**: the style's nested values are the source plot's live ones, and
+merging into them would leave a batch run's numbers in that plot's Properties
+panel afterwards. A stacked mode
 writes `axis_buckets` keyed by the kept panels' positions on the figure; a
 single-panel mode writes flat preferences with `axis_target` "All", because its
 one logical plot can be several axes — the faceted scatter draws one per group
@@ -5894,20 +5898,39 @@ gets, and `tests/test_properties_panel_frame.py` the header and footer buttons
 prefs view via `_bind_getter_setter`, so changes flow:
 
 ```
-Properties widget → figure_prefs(ctx, fig)  ── shared style ─→ export_prefs.style_prefs
-                        │                   └─ scoped keys ──→ export_prefs.axis_prefs[fig_key]
+Properties widget → figure_prefs(ctx, fig)  ── every write ──→ export_prefs.axis_prefs[fig_key(:scope)]
+                        │                   └─ unset key reads ─→ export_prefs.style_prefs (legacy, read-only)
                         ↓
                   apply_export_style_prefs(fig, prefs)
                         ↓
                   canvas.draw_idle()
 ```
 
-**What is shared and what is per figure.** Typography, grid, legend and ticks
-are deliberately app-wide: one setting gives a whole figure set a consistent
-look for a paper. Two families are per figure instead, keyed by
-`figure_pref_key` (`line` / `bar` / `scatter_cells` / `scatter_agg` / `heatmap`
-/ `distribution` / `spatial` / `multivariate` / `stats` / `response`) — see
-`plot_style.FIGURE_SCOPED_PREF_KEYS`:
+**Every preference is the figure's own.** A Properties edit restyles the plot
+it was made on and no other: `_FigurePrefs` writes every key to the figure's
+entry in `export_prefs.axis_prefs`, keyed by `figure_pref_key` (`line` / `bar` /
+`scatter_cells` / `scatter_agg` / `heatmap` / `distribution` / `spatial` /
+`nanowell` / `multivariate` / `stats` / `response` …), and
+`plot_style.FIGURE_SCOPED_PREF_KEYS` is every key the panel sets. The app-wide
+`export_prefs.style_prefs` is read-only: an unset non-axis key reads it before
+the stock default, so a style saved app-wide by an earlier build keeps applying
+to every plot the user has not restyled since. Only `plot_style` (seeding and
+the fallback read) and `persistence/view_state` (restoring it from disk) reach
+it; `tests/test_app_wide_style_is_read_only.py` holds every other module to
+`figure_prefs` / `plot_style_of`, and `tests/test_properties_per_plot.py` drives
+the real panel and checks a second plot, a second view and a Batch Export run.
+
+**A figure that draws several views keys its prefs per view.** The Nanowells
+page draws Distribution, Array, Trajectories, Position and Extremes on one
+figure. Its `redraw` calls `set_pref_scope(ctx, fig, view)` ("" for
+Distribution, which keeps the figure's own key and the settings saved under it),
+and `_FigurePrefs` resolves `<key>:<scope>` from the figure on every access, so
+the Properties panel — built once per figure and cached — follows the view. When
+the scope changes, `set_pref_scope` calls `_resync_pref_fields` on an open panel
+bound to that figure, so its fields show (and its next edit writes) the view on
+screen.
+
+Two key families carry extra rules:
 
 - `AXIS_SCOPED_PREF_KEYS` — limits, log scaling, and the per-axis bucket
   bookkeeping. A bar chart's y-limit means nothing on the scatter tab, so an
@@ -5924,10 +5947,8 @@ look for a paper. Two families are per figure instead, keyed by
   The right mark size is a property of what the plot draws: five aggregate
   points want an 8pt marker, a 50,000-cell per-cell cloud wants 2pt, and
   sharing one value meant restyling the Scatter tab's aggregate sub-tab
-  restyled its per-cell sub-tab into illegibility. Unlike the axis keys, an
-  unset mark key falls back to the shared dict before the default — nothing
-  writes those globals now, so that is the value saved before marks became
-  per-figure, and it keeps applying until the user gives a figure its own.
+  restyled its per-cell sub-tab into illegibility. Like every non-axis key, an
+  unset mark key falls back to the app-wide dict before the default.
 
 
 **A figure is shown only the sections it can change.** The panel is built once
@@ -16593,9 +16614,9 @@ its own bounds again.
 `view_state.restore` rebuilds `axis_prefs` as `{str(k): dict(v)}` and
 `reset_for_new_dataset` rebuilds it without the entries that emptied, so every
 dict inside it is a different object after a dataset load. `figure_prefs`
-therefore returns a `_FigurePrefs` that resolves both the global style dict and
-the figure's own entry **per access**, from a key fixed at construction; it
-never captures the dicts. The Properties sidebar is what makes that load-bearing
+therefore returns a `_FigurePrefs` that resolves both the app-wide fallback
+dict and the figure's own entry **per access**, from the figure's key (and its
+current view scope); it never captures the dicts. The Properties sidebar is what makes that load-bearing
 — it is built once per figure and cached for the life of the process, so a view
 that captured its entry went on writing every axis limit, log toggle, log base
 and per-axis tick size into a dict nothing read, and reported success: the
@@ -18484,9 +18505,10 @@ builders never run from the background drain.
 
 ### 12.6 "The figure's Properties panel doesn't stick"
 
-Every figure-styling toggle writes into the shared prefs dict
-(`core/export_prefs_state.py`, reached as `app._export_style_prefs`; the panel
-itself is `features/export/sidebar_view.py`). Every controller ends its redraw
+Every figure-styling toggle writes into that figure's own prefs
+(`plot_style.figure_prefs`, stored in `core/export_prefs_state.py`'s
+`axis_prefs` under the figure's key; the panel itself is
+`features/export/sidebar_view.py`). Every controller ends its redraw
 with `core.plot_style.apply_export_style_to_current(ctx, fig, canvas)`.
 If a new redraw entry point you added is "losing" the user's toggles, it's
 missing that call at the end.
@@ -18633,7 +18655,7 @@ writing into the repository.
 | **Sidebar** | The left rail in the Review pane. Hosts the rail nav + the well picker + per-tab control panels. |
 | **Ctxbar** | The horizontal contextual control row above each plot card. Hosts channel / metric / timepoint combos + action buttons. |
 | **PlotCard** | The framed container around each matplotlib figure. Provides the screen↔publication toggle, the custom toolbar, and the stats chip slot. |
-| **Properties sidebar / Export Style sidebar** | The right-side dock that slides out when the user clicks the Properties button on a plot card. Backed by `app._export_style_prefs`. |
+| **Properties sidebar / Export Style sidebar** | The right-side dock that slides out when the user clicks the Properties button on a plot card. Backed by `plot_style.figure_prefs(ctx, fig)` — that figure's own prefs. |
 | **Selection** | A named, persisted subset of wells. Lives in `ctx.state.selection.selections` (schema v2). Surfaced in the UI as a **group** on Home → Sample Map → Replicates. |
 | **Group** | *Which wells are replicates of one condition?* A `Selection` as the user meets it on Home → Sample Map → Replicates: a named well set with a colour, a hidden flag and a place in the plot order. **It pools.** Every plot, Statistics and Batch Export draw one member per visible group, and a saved fold-change `ControlRef` is keyed on its name. |
 | **Replicate set** | The `ReplicateSet` a group becomes when a plot asks what to pool. On Home → Sample Map → Groups a group **is** exactly one replicate set — its `wells` are its replicate members (or a single well); there is no `replicates` sub-partition (the field is reserved/`None`). "Quick Replicates" auto-builds groups of a chosen size N (spinbox) along rows/columns, naming each one from the sample variables its wells hold (`HeLa · 10 µM`) and falling back to the well tokens where the variables cannot say. `domain/plot_members.plot_replicate_sets` is the one place the sets a plot pools into are decided, and a sample variable chosen as *Group by* substitutes for the user's groups there. (The separate batch-export `BarGroup` can still hold multiple member sets + solo wells; that is a distinct feature.) |

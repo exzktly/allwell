@@ -314,7 +314,7 @@ def redraw(ctx) -> None:
     set_pref_scope(ctx, fig, "" if st.view == "distribution" else st.view)
     if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
         return                                           # the right metrics are on their way
-    metric, channel, note = resolve_metric(st.view, st.metric, ctx.state.channel.active_channel, st.data.channels)
+    metric, channel, note = resolve_metric(st.view, st.metric, page_channel_name(ctx), st.data.channels)
     well = page_well(ctx)
     st.extreme_axes = {}
     if st.view == "extremes":
@@ -368,11 +368,45 @@ def resolve_metric(view: str, metric: str, active_channel, channels) -> tuple[st
                                    f"the nanowells are ranked by {METRICS[ec.FALLBACK][0].lower()}.")
     if metric in _CHANNEL_METRICS and channel is None:
         drawn = ec.FALLBACK if view == "extremes" else "n"
-        return drawn, None, (f"{metric.replace('_', ' ')} needs a channel with site intensities; the shared "
-                             f"channel ({active_channel}) has none, so {METRICS[drawn][0]} is shown.")
+        return drawn, None, (f"{metric.replace('_', ' ')} needs a channel with site intensities; the channel "
+                             f"({active_channel or 'none chosen'}) has none, so {METRICS[drawn][0]} is shown.")
     if view == "extremes":
         return ec.fold_change_metric(metric)[0], channel, ""
     return metric, channel, ""
+
+
+def page_channel_name(ctx) -> str:
+    """The channel the page's Brightness and Site signal are for, as the user named it: the page's own *Channel*
+    choice when it is set; else the app's shared channel selector when the tables carry that channel; else the
+    tables' first fluorescence channel. The shared selector lives on the Plotting band, which this page does not
+    show, so a shared channel the tables lack (the phase channel, a ratio) must not leave every fluorescence metric
+    greyed with no control on the page to change it. The callers resolve the name with :func:`match_channel`."""
+    st = _state(ctx)
+    shared = ctx.state.channel.active_channel or ""
+    if st is None:
+        return shared
+    if st.channel:
+        return st.channel
+    channels = list(st.data.channels) if st.data is not None else []
+    if match_channel(shared, channels) is None and channels:
+        return channels[0]
+    return shared
+
+
+def page_channel(ctx) -> str | None:
+    """The page's channel spelled as the data spells it, or ``None`` when the data has no site intensities for it."""
+    st = _state(ctx)
+    if st is None or st.data is None:
+        return None
+    return match_channel(page_channel_name(ctx), st.data.channels)
+
+
+def page_image_channel(st) -> str:
+    """The channel the page's pictures are of: ``""`` for the phase image, or one of the run's fluorescence channels
+    spelled as the data spells it. A saved choice the dataset does not have falls back to phase."""
+    if st is None or st.data is None or not st.image_channel:
+        return ""
+    return match_channel(st.image_channel, getattr(st.data, "image_channels", ())) or ""
 
 
 def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
@@ -539,22 +573,27 @@ def _array_image(ctx, st, well: str, timepoint: str) -> tuple[object, str]:
     """``(image, what to say about it)`` for the Array view's image layer at (*well*, *timepoint*): the run's
     montage, read on a worker once; or the raw tiles, held in a store whose tiles are read as the view asks."""
     kind = st.layers.image if not st.layers.lattice() else "off"
-    if kind != "tiles" or st.tile_key != (well, timepoint):
-        st.release_tiles()                               # another well or timepoint, or no tiles: let them go
+    channel = page_image_channel(st)
+    if kind != "tiles" or st.tile_key != (well, timepoint, channel):
+        st.release_tiles()                               # another well, timepoint or channel, or no tiles: let them go
     if kind == "off":
         return None, ""
     if kind == "montage":
+        # The run kept a phase montage only: said on the figure, so a fluorescence choice is never shown phase
+        # pixels without a word (CLAUDE.md §7).
+        phase_only = (f"The run montage is the phase image; choose Full resolution to see {channel}."
+                      if channel else "")
         if (well, timepoint) in st.montages:
             montage, why = st.montages[(well, timepoint)]
-            return montage, ("" if montage is not None else why)
+            return montage, " ".join(filter(None, [phase_only, "" if montage is not None else why]))
         # The montage is a PNG of up to 4096 px in a zip: read it on a worker, and draw it when it arrives.
         data = st.data
         _fetch(ctx, "montages", (well, timepoint), lambda: read_montage(data, well, timepoint),
                failed=lambda message: (None, f"The montage could not be read: {message}"))
-        return None, "Reading the montage…"
+        return None, " ".join(filter(None, [phase_only, "Reading the montage…"]))
     if st.tile_key is None:
-        st.tile_key = (well, timepoint)
-        source, st.tile_why = fmc.montage_source(st.data, well, timepoint)
+        st.tile_key = (well, timepoint, channel)
+        source, st.tile_why = fmc.montage_source(st.data, well, timepoint, channel)
         st.tile_store = fmc.TileStore(source) if source is not None else None
         if source is not None:
             _load_tiles(ctx, [t.tile for t in source.tiles], level=None)
@@ -563,7 +602,7 @@ def _array_image(ctx, st, well: str, timepoint: str) -> tuple[object, str]:
         return None, st.tile_why
     source, failed = store.source, dict(store.failed)
     total, read = len(source.tiles), store.loaded()
-    said = [f"Full resolution, from the raw tiles in {source.archive.name}."]
+    said = [f"Full resolution, {channel or 'phase'}, from the raw tiles in {source.archive.name}."]
     if read + len(failed) < total:
         said.append(f"Reading tiles: {read} of {total}…")
     placed = {str(t.get("tile")) for t in ((st.data.grids.get(well) or {}).get(timepoint) or {}).get("tiles") or []}
@@ -959,20 +998,22 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
         note = " ".join(filter(None, [ss.note(filtered), note]))
     model = ec.extremes(metrics, well, timepoint, column, st.extremes_n, st.data.channels)
     missing = tuple(sorted(site for site in model.sites() if site not in st.crops))
+    image_channel = page_image_channel(st)
     if missing:
         data, metrics = st.data, st.metrics
 
         def deliver(found) -> None:
             st.crops.update(found)
 
-        _fetch(ctx, "extreme_crops", missing, lambda: crops_for_sites(data, metrics, missing),
+        _fetch(ctx, "extreme_crops", missing,
+               lambda: crops_for_sites(data, metrics, missing, channel=image_channel),
                failed=lambda message: {site: {"": Crop(None, "", f"The crops could not be cut: {message}")}
                                        for site in missing},
                deliver=deliver)
     st.extreme_axes = render_extremes(fig, model, {site: st.crops[site] for site in model.sites()
                                                    if site in st.crops},
                                       label=_label(metric, channel), note=note, cells=st.crop_cells,
-                                      numbers=st.crop_metrics,
+                                      image_channel=image_channel, numbers=st.crop_metrics,
                                       timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
                                       metrics=crop_metrics(st, model.sites(), channel))
     apply_export_style_to_current(ctx, fig, canvas)
@@ -1041,13 +1082,13 @@ def draw_popout(ctx) -> None:
     if site is None:
         render_message(fig, "Select a nanowell on the plot to see its crops here.", gid="nw-popout-empty")
     else:
+        image_channel = page_image_channel(st)
         if site not in st.crops:
             data, metrics = st.data, st.metrics
-            _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site),
+            _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site, channel=image_channel),
                    failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
-        channel = match_channel(ctx.state.channel.active_channel, st.data.channels)
         render_crop_grid(fig, st.crops.get(site), site, cells=st.crop_cells,
-                         metrics=crop_metrics(st, [site], channel).get(site))
+                         metrics=crop_metrics(st, [site], page_channel(ctx)).get(site), image_channel=image_channel)
     canvas.draw_idle()
 
 
@@ -1070,19 +1111,20 @@ def redraw_detail(ctx) -> None:
     draw_popout(ctx)
     if not series:
         return
-    channel = match_channel(ctx.state.channel.active_channel, st.data.channels)
+    channel = page_channel(ctx)
+    image_channel = page_image_channel(st)
     first = tuple(series[0][0])
     crops = st.crops.get(first)
     if crops is None:
         data, metrics = st.data, st.metrics
-        _fetch(ctx, "crops", first, lambda: site_crops(data, metrics, first),
+        _fetch(ctx, "crops", first, lambda: site_crops(data, metrics, first, channel=image_channel),
                failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
     render_site_detail(fig, series, channel=channel, time_source=st.data.time_source,
                        outside=_outside_badges(st, [site for site, _frame in series]))
     canvas.draw_idle()
     strip_fig, strip_canvas = ctx.widgets.get_or_none("_nw_strip_fig"), ctx.widgets.get_or_none("_nw_strip_canvas")
     if strip_fig is not None and strip_canvas is not None:
-        render_crop_strip(strip_fig, crops, first, cells=st.crop_cells)
+        render_crop_strip(strip_fig, crops, first, cells=st.crop_cells, image_channel=image_channel)
         strip_canvas.draw_idle()
 
 
@@ -1102,6 +1144,10 @@ def _outside_badges(st, sites) -> dict:
 MONTAGES_KEPT = 6
 
 
+#: The reads that cut crops, which are of the page's image channel.
+_CROP_KINDS = ("crops", "extreme_crops")
+
+
 def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
     """Read ``st.<kind>[key]`` on a worker, once, and redraw when it arrives.
 
@@ -1113,7 +1159,10 @@ def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
     from core.worker_bridge import run_off_thread
 
     st = _state(ctx)
-    tag = (kind, key)
+    # Crops are of one channel: the tag carries it, and crops cut for a channel since left are dropped, never stored
+    # under the channel chosen now (:func:`set_image_channel` empties the store).
+    image_channel = page_image_channel(st) if kind in _CROP_KINDS else None
+    tag = (kind, key, image_channel)
     if tag in st.fetching:
         return
     st.fetching.add(tag)
@@ -1123,6 +1172,10 @@ def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
         if st.data is not data:
             return
         st.fetching.discard(tag)
+        if image_channel is not None and page_image_channel(st) != image_channel:
+            if holder and holder[0] in st.fetch_bridges:
+                st.fetch_bridges.remove(holder[0])
+            return
         if holder and holder[0] in st.fetch_bridges:
             st.fetch_bridges.remove(holder[0])
         if deliver is not None:
@@ -1313,6 +1366,26 @@ def set_crop_cells(ctx, on: bool) -> None:
     redraw(ctx)
 
 
+def set_channel(ctx, channel: str) -> None:
+    """The fluorescence channel the page's Brightness and Site signal are drawn for."""
+    _set(ctx, "channel", channel or "")
+
+
+def set_image_channel(ctx, channel: str) -> None:
+    """The channel every picture on the page is of (``""``: phase). The crops cut so far, the reads in flight and the
+    full-resolution tiles are of the old channel, so they are let go and cut again."""
+    st = _state(ctx)
+    if st is None or st.image_channel == (channel or ""):
+        return
+    st.image_channel = channel or ""
+    st.crops = {}
+    st.fetching = {tag for tag in st.fetching if tag[0] not in _CROP_KINDS}
+    st.release_tiles()
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
+
+
 def set_crop_metrics(ctx, on: bool) -> None:
     """Write the numbers on the Extremes montage's crops (each one's fold change and metrics line), or leave them
     bare."""
@@ -1359,7 +1432,7 @@ def drawn_metric_column(ctx) -> str | None:
     st = _state(ctx)
     if st is None or st.data is None:
         return None
-    metric, channel, _note = resolve_metric(st.view, st.metric, ctx.state.channel.active_channel, st.data.channels)
+    metric, channel, _note = resolve_metric(st.view, st.metric, page_channel_name(ctx), st.data.channels)
     return metric_column(metric, channel)
 
 

@@ -258,7 +258,7 @@ def test_full_resolution_draws_each_tile_where_it_was_placed_and_says_why_the_ti
     for tile, (x, y) in LEFT_TOP.items():
         assert _shade_at(st, x + 60, y + 60) == SHADE[tile], tile
     footer = _footer(ctx)
-    assert "Full resolution, from the raw tiles in A01.zip." in footer
+    assert "Full resolution, phase, from the raw tiles in A01.zip." in footer
     assert "A01 at t_a: unaddressed. No accepted fiducial, array centre, or plate-rigid prediction" in footer
     assert any(line.startswith("Turn on Set anchor and click the central square") for line in footer)
     assert ctx.widgets.get("_nw_anchor_btn").isEnabled() and not ctx.widgets.get("_nw_clear_anchor_btn").isEnabled()

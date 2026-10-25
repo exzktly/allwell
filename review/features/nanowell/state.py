@@ -127,6 +127,12 @@ class NanowellState:
     #: The counted cells drawn as dots on every crop the page shows — the site detail's strip, the pop-out and the
     #: Extremes montage — as the Array view's Cells layer draws them on the array.
     crop_cells: bool = False
+    #: The fluorescence channel Brightness and Site signal are drawn for, as the page's *Channel* control names it;
+    #: ``""`` follows the app's shared channel selector, as the page did before it had a control of its own.
+    channel: str = ""
+    #: The channel every picture on the page is of — the crop strip, the pop-out, the Extremes montage and the Array
+    #: view's full-resolution montage: ``""`` for the phase image, or a fluorescence channel the run read.
+    image_channel: str = ""
     #: The numbers written on each crop of the Extremes montage (its fold change and its metrics line); off leaves the
     #: crops bare, the row labels and the caption still giving the ranking.
     crop_metrics: bool = True
@@ -198,6 +204,7 @@ class NanowellState:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
                 "extremes_n": self.extremes_n, "extremes_tps": list(self.extremes_tps), "crop_cells": self.crop_cells,
+                "channel": self.channel, "image_channel": self.image_channel,
                 "crop_metrics": self.crop_metrics,
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
@@ -210,7 +217,7 @@ class NanowellState:
         self.baseline = config.get("baseline") if config.get("baseline") in BASELINES else fresh.baseline
         self.axis = config.get("axis") if config.get("axis") in AXES else fresh.axis
         self.metric = config.get("metric") if config.get("metric") in METRIC_KEYS else fresh.metric
-        for name in ("well", "timepoint", "control"):
+        for name in ("well", "timepoint", "control", "channel", "image_channel"):
             value = config.get(name)
             setattr(self, name, value if isinstance(value, str) else getattr(fresh, name))
         self.cohort = config.get("cohort") is True

@@ -5068,8 +5068,13 @@ use them.
   (integrated intensity above the empty nanowells' background), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
   ln count against time, per hour, over at least three timepoints with cells) and occupancy at baseline.
-  Brightness and site signal use the channel chosen in the app's channel selector, and are greyed when that
-  channel has no site intensities.
+  Brightness and site signal, and their fold changes, are of the fluorescence channel chosen in **Channel**.
+- **Channel** — beside Metric, on every view: the fluorescence channel Brightness and Site signal are drawn for,
+  in the figures, the site detail and the crop captions. It starts on the channel the Plotting tabs use when the
+  run measured it, else on the first channel it measured. A channel the run read but did not measure in the
+  nanowells is listed greyed, as *(not measured)*; its tooltip says to re-run the wells with it among the
+  fluorescence channels. When the run measured no fluorescence at all, the list is empty and the fluorescence
+  metrics are greyed, saying so.
 - **Along x** — *Time*: one panel per well, or per replicate set with each member well side by side,
   timepoints along the axis and each well's median joined over time. *Wells*: one timepoint (the latest by
   default), wells and replicate sets along the axis. Growth rate and occupancy have one value per nanowell,
@@ -5119,9 +5124,10 @@ use them.
   every view, so a timepoint chosen on one carries to the next wherever it exists.
 - **Well**, **Timepoint** and **Largest & smallest** (on *Extremes*) — the well whose nanowells are ranked, the
   timepoint they are ranked at (the well's latest by default), and how many each block shows (1 to 12, 5 by
-  default). **Timepoints** chooses which of the well's timepoints the montage shows (all by default), and
-  **Cells** draws the cells the run counted on every crop (see *Site detail*); **Metrics** shows or hides the
-  numbers written on each crop (its fold change and its line of measurements).
+  default). **Timepoints** chooses which of the well's timepoints the montage shows (all by default),
+  **Cells** draws the cells the run counted on every crop (see *Site detail*), **Metrics** shows or hides the
+  numbers written on each crop (its fold change and its line of measurements), and the box after it chooses the
+  image the crops are cut from — *Phase* or a fluorescence channel (see *Site detail*).
 
 **Reading the figure**
 
@@ -5187,8 +5193,11 @@ use them.
   a QC picture and a full-resolution montage each did:
   - **Image** — what is drawn under the nanowells: *Off*; *Run montage*, the downsampled stitched phase
     montage the run kept (read in the background: the footer says *Reading the montage…* meanwhile); or *Full
-    resolution*, drawn from the raw images in `in/` where the run placed each tile, sharpening as the tiles in
-    view are read (the footer says how many are read, and names any that could not be). Where tiles overlap,
+    resolution*, drawn from the raw images in `in/` where the run placed each tile — of the channel chosen in the
+    box beside Image: *Phase*, or any fluorescence channel the run read — sharpening as the tiles in
+    view are read (the footer names the channel, says how many tiles are read, and names any that could not be).
+    The run montage is phase only: with a fluorescence channel chosen, the footer says so and points to Full
+    resolution. Where tiles overlap,
     the later tile is shown, not a blend. Full resolution needs the dataset's `in/` folder beside its results.
   - **Positions** — *Measured*: each nanowell where the run found it, over the image. *Lattice*: each
     nanowell in its place on an ideal lattice of the well's pitch, so it keeps its place as you move the
@@ -5256,6 +5265,12 @@ it like any window. **Cells**, beside *Pop out*, draws a dot at the centre of ea
 crop — the strip, the pop-out and the Extremes montage — as the Array view's *Cells* layer does on the array (the
 run keeps no cell outlines). It is one setting, also offered on the Extremes view, and kept with the page's
 settings. The caption counts the dots, and a well without a cell table is named there rather than shown as empty.
+The box beside **Cells** chooses what the crops are an image of: *Phase* (the image the run segmented), or any
+fluorescence channel the run read — EGFP, say — cut from that channel's image of the same tile, at the same place.
+It is one setting for every picture on the page: the strip, the pop-out, the Extremes montage and the Array view's
+Full resolution, and is offered on each and kept with the page's settings. Each caption names the channel. A
+fluorescence crop is never cut from the run montage, which is phase only: a timepoint whose archive holds no image
+of that channel, or whose archive is not beside the dataset, says so in its place.
 Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it

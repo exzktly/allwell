@@ -909,7 +909,7 @@ def _draw_crop_view(ctx, st, fig, canvas) -> bool:
     return True
 
 
-def _crop_view_site(st):
+def _crop_view_site(st) -> tuple | None:
     """The nanowell the crop view enlarges: the first selected one with a series, the one the site detail beside
     it leads with (:func:`redraw_detail`); ``None`` when no selected nanowell has one."""
     if st.metrics is None:

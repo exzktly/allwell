@@ -380,7 +380,7 @@ class AnalyzeSegParamsMixin:
         if nanowell is not None and nanowell.isChecked():
             # The method selector is hidden in nanowell mode, so a hint on when to pick it is a hint about
             # nothing on screen. What still matters — no channel marked Phase — is an error, shown above.
-            self._segmentation_hint_lbl.setText("")
+            self._set_status(self._segmentation_hint_lbl, "")
             return
         # Each hint leads with *when to use this* so a first-time user can pick.
         hint = {

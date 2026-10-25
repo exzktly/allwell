@@ -1,4 +1,4 @@
-"""The Analyze form's **Filename Schema** section: its widgets and its preview.
+"""The Analyze form's **Filename schema** section: its widgets and its preview.
 
 One section of the form, gathered into one module. The controls were built in
 ``analyze/form.py`` and the preview that refreshes them lived in
@@ -40,7 +40,7 @@ _PREVIEW_TOKENS = {
 
 
 class AnalyzeSchemaSectionMixin:
-    """Builds the Filename Schema section and keeps its preview current."""
+    """Builds the Filename schema section and keeps its preview current."""
 
     def _build_schema_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Filename schema")

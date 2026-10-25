@@ -399,12 +399,15 @@ the image* does on the form; without it (`hex_circle`) the array is a hexagonal 
 Cellpose 3 install), as **Cellpose model** does on the form. `--nanowell_registration_from <folder>` reuses an earlier run's tile registration, as **Reuse
 registration** does on the form. Wells must be zips.
 
-Besides the usual per-cell CSV (one row per cell, with the owner tile as `fov` and the nanowell's address
+Besides the usual per-cell CSV (one row per cell, with the owner tile as `fov`, the timepoint both as its label
+and in hours as `timepoint_hours`, and the nanowell's address
 `nw_q`, `nw_r`, `nw_ring`, `nw_label` and its position `well_x_um`, `well_y_um`), the run writes
 `nanowells/<well>.csv`, one row per nanowell and timepoint (its address, position, state, imaged and visible
 fractions, cell count, confluence, and fluorescence over the nanowell floor's background), and
 `nanowells/<well>_grid.json`, the registration, lattice and status of every timepoint. A nanowell no tile could
-see, or that was hidden, has a row with its state and **no number**, never a zero.
+see, or that was hidden, has a row with its state and **no number**, never a zero. The per-cell Scatter selects cells by `timepoint_hours`, so a nanowell plate
+analysed before the per-cell CSV carried that column shows no points there (the line and bar plots are
+unaffected); re-analyse it with **Redo it** (`--force`) to rewrite its tables.
 
 Four columns of that table say what Cellpose was actually shown, for when a nanowell's count looks wrong next to
 its neighbours'. Before counting, each nanowell is brought to a common brightness (`level_offset`, `level_gain`),

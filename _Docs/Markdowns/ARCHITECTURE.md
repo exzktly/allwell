@@ -10426,7 +10426,13 @@ anew. Grid records written before the key existed carry no `registration` block 
 drives the reuse through `process_microscopy.main`.
 
 **Outputs** (`pipeline/nanowell_task.py`). The per-cell CSV keeps the existing columns (`fov` is the owner
-tile) and adds `nw_q`, `nw_r`, `nw_ring`, `nw_label`, `well_x_um`, `well_y_um`; it is written with its header and
+tile) and adds `nw_q`, `nw_r`, `nw_ring`, `nw_label`, `well_x_um`, `well_y_um`. `timepoint_hours` sits beside the
+`timepoint` label and is derived from it by the per-field path's rule (`nanowell_task.timepoint_hours`: an empty
+token is `0.0`, one `util.timepoint.parse_hours` cannot read is `nan`), because Review views that select cells by
+`timepoint_hours` — the per-cell Scatter's `scatter/_cells.well_cloud` among them — find no cell in a table without
+it, while the line and bar aggregates parse the label (`data_loading.resolved_timepoints`) and still draw. Rows an
+incremental run keeps from an older CSV that lacks the column gain it on the way back in
+(`nanowell_task.with_timepoint_hours`), since the writer takes its header from the first row. It is written with its header and
 no rows for a well none of whose nanowells holds a cell, because a missing CSV reads as an unfinished well
 everywhere else. Like any finished well's CSV it is gzipped once written (`pipeline/io.write_well_csv`,
 `compress_well_csv` for the empty one), and an incremental run reads the kept timepoints' cells back from

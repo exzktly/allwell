@@ -4983,8 +4983,9 @@ use them.
   draws it as a dashed line and states each group's fraction responding — the mean of its wells' fractions —
   at the latest timepoint, or at the timepoint drawn along wells. With the field empty no fraction is
   computed, and the footer says so: there is no default.
-- **Well** and the **Timepoint** slider (on *Array*) — the one well drawn, from the wells selected, and its
-  timepoint; the view starts at the well's first timepoint. One timepoint is shared by
+- **Well** and **Timepoint** (on *Array*) — the one well drawn, from the wells selected, and its timepoint; the
+  view starts at the well's first timepoint. The Timepoint control is the same as on the Plotting tabs: the
+  timepoints in time order, named by their hours (or by name when a timepoint has no recorded time). One timepoint is shared by
   every view, so a timepoint chosen on one carries to the next wherever it exists.
 - **Well**, **Timepoint** and **Largest & smallest** (on *Extremes*) — the well whose nanowells are ranked, the
   timepoint they are ranked at (the well's latest by default), and how many each block shows (1 to 12, 5 by

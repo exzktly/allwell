@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSlider, QSpinBox, QSplitter, QToolButton,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QSplitter, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -27,6 +27,7 @@ from review.features.nanowell.distribution_compute import (
 )
 from review.features.nanowell.state import EXTREMES_MAX_N
 from widgets.control_band import ControlBand
+from widgets.labeled_combo import LabeledComboBox
 from widgets.owned_action import owned_action
 
 #: The views the page draws, in the order the switch lists them.
@@ -77,7 +78,6 @@ _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their 
                "one set of nanowells. Off, each timepoint's median is over whichever nanowells could be measured "
                "then. The others are counted as outside the fixed cohort.")
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
-_SLIDER_TIP = "The timepoint the Array view shows; drag to step through the well's timepoints."
 _METRIC_TIP = ("What each dot is. Brightness and site signal use the channel chosen in the app's channel "
                "selector; they are greyed when that channel has no site intensities.")
 _AXIS_TIP = ("Time: one panel per well (or replicate set), timepoints along x, the well medians joined.\n"
@@ -86,8 +86,9 @@ _AXIS_TIP = ("Time: one panel per well (or replicate set), timepoints along x, t
 _BASELINE_TIP = ("The timepoint a fold change and the occupancy class are measured from.\n"
                  "Earliest: the well's first timepoint; a nanowell unmeasurable there has no fold change.\n"
                  "First measurable: each nanowell's first timepoint at which the measurement exists.")
-_TP_TIP = ("The timepoint drawn on Along x: Wells and Position, and the one Extremes ranks the nanowells at (the "
-           "latest by default).")
+_TP_TIP = ("The timepoint drawn on Along x: Wells and Position (the latest by default), the one Extremes ranks the "
+           "nanowells at (the well's latest by default), and the one the Array view shows (the well's first by "
+           "default).")
 _RESPONDING_TIP = ("A nanowell counts as responding when its value is above this number. Set one for each metric — "
                    "a fold change, a count, a confluence, an intensity — and the figure states each group's fraction "
                    "responding at it; empty, no fraction is computed. Kept per metric and channel.")
@@ -183,23 +184,14 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
 
     array_controls = _build_array_controls(ctx, band)
 
-    tp_slider = QSlider(Qt.Horizontal)
-    tp_slider.setToolTip(_SLIDER_TIP)
-    tp_slider.setMinimum(0)
-    tp_slider.setPageStep(1)
-    tp_slider_label = QLabel("")
-    tp_slider_label.setObjectName("NanowellSliderLabel")
-    slider_tps: list = []
-    tp_slider.valueChanged.connect(
-        lambda v: nwc.set_timepoint(ctx, slider_tps[v]) if 0 <= v < len(slider_tps) else None)
-    reg.register("_nw_tp_slider", tp_slider)
-    grp_slider = band.add_scope("Timepoint", tp_slider, tp_slider_label)
-
-    tp_cb = QComboBox()
+    # The Plotting tabs' timepoint control (Distribution, Heat Map): a LabeledComboBox painting its own
+    # "Timepoint:" prefix, the timepoints in time order and named by their hours. One control for every view that
+    # draws one timepoint — the Array view's included, which had a slider of its own.
+    tp_cb = LabeledComboBox("Timepoint")
     tp_cb.setToolTip(_TP_TIP)
     tp_cb.currentIndexChanged.connect(lambda _i: nwc.set_timepoint(ctx, tp_cb.currentData() or ""))
     reg.register("_nw_tp_cb", tp_cb)
-    grp_tp = band.add_scope("Timepoint", tp_cb)
+    grp_tp = band.add_scope("", tp_cb)
 
     extremes_spin = QSpinBox()
     extremes_spin.setRange(1, EXTREMES_MAX_N)
@@ -289,7 +281,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     def page_visible() -> bool:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
-    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box, responding_edit,
+    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, responding_edit,
                 extremes_spin, *array_controls.signalling)
 
     def refresh_controls() -> None:
@@ -310,15 +302,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             baseline_cb.setEnabled((st.metric in BASELINE_METRICS or view in RANKED_WELL_VIEWS)
                                    and _metric_reaches_figure(st, view))
             tps, shown = nwc.shown_timepoint(ctx)
-            tp_cb.clear()
-            for tp in reversed(tps):
-                tp_cb.addItem(tp, tp)
+            _fill_timepoints(tp_cb, tps, st.data.times_h if st.data else {})
             _select(tp_cb, shown)
-            slider_tps[:] = tps
-            tp_slider.setMaximum(max(len(tps) - 1, 0))
-            tp_slider.setValue(tps.index(shown) if shown in tps else 0)
-            tp_slider.setEnabled(len(tps) > 1)
-            tp_slider_label.setText(shown)
             well_cb.clear()
             for well in nwc.page_wells(ctx) if st.data else []:
                 well_cb.addItem(well, well)
@@ -349,11 +334,11 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             cut = st.thresholds.get(column) if column else None
             responding_edit.setText("" if cut is None else format_cut(cut))
             grp_responding.setVisible(distribution)
-            grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position" or view in RANKED_WELL_VIEWS)
+            grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position" or view in RANKED_WELL_VIEWS
+                              or view in ONE_WELL_VIEWS)
             grp_well.setVisible(view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS)
             extremes_spin.setValue(st.extremes_n)
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
-            grp_slider.setVisible(view in ONE_WELL_VIEWS)
         finally:
             for w, b in zip(controls, blocked):
                 w.blockSignals(b)
@@ -363,6 +348,23 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_page_visible", page_visible)
     reg.register("_nw_refresh_controls", refresh_controls)
     refresh_controls()
+
+
+def timepoint_text(tp: str, times_h: dict) -> str:
+    """How the timepoint control names *tp*: by its hours, as the Plotting tabs' control does (``24 h``), or by its
+    own name when the acquisition record gives it no time."""
+    hours = times_h.get(tp)
+    return f"{hours:g} h" if isinstance(hours, (int, float)) and hours == hours else str(tp)
+
+
+def _fill_timepoints(combo, tps, times_h: dict) -> None:
+    """Fill the timepoint control with *tps* in time order, each named by its hours and carrying its own name as
+    data (what the page's state holds) and as its tooltip."""
+    combo.clear()
+    for tp in tps:
+        combo.addItem(timepoint_text(tp, times_h), tp)
+        combo.setItemData(combo.count() - 1, f"Timepoint {tp}", Qt.ToolTipRole)
+    combo.setEnabled(len(tps) > 1)
 
 
 def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:

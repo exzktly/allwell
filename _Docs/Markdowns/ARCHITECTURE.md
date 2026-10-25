@@ -10838,10 +10838,13 @@ and the read is not relaunched on every redraw; a result for a dataset loaded si
 the new dataset's bookkeeping; each worker bridge is kept on the state until it delivers, then released.
 
 **The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (the five
-views; U3 planned the first four), Metric, Along x, Baseline, Timepoint and *vs* (both shown on *Along x: Wells*), Well and a
-timepoint slider (on the one-well view, `ONE_WELL_VIEWS`), the Array view's Image combo, Positions switch,
+views; U3 planned the first four), Metric, Along x, Baseline, Timepoint (on *Along x: Wells*, Position, Extremes and the Array view), *vs* (on
+*Along x: Wells*), Well (on the one-well views), the Array view's Image combo, Positions switch,
 *Layers* menu (each switch, the colouring, and *Show as* for the presets), *Fit* / *1:1* and the anchor's
-three buttons, Save and Properties; `refresh_controls` shows each view only the controls it uses (Metric and
+three buttons, Save and Properties. The Timepoint control is the Plotting tabs' own — a `LabeledComboBox("Timepoint")`
+painting its prefix, the timepoints in time order named by their hours (`tab_view.timepoint_text`: `24 h`, or the
+timepoint's name when the record gives it no time), each item's data the timepoint name the state holds — one
+control for every view that draws one timepoint, the Array view's included. `refresh_controls` shows each view only the controls it uses (Metric and
 Baseline leave the Array view when nothing is filled by the metric). The *Show as* submenu is built from Python
 with its parent (`QMenu(title, menu)`), never by `addMenu(title)`: a menu Qt creates is a top-level widget whose
 owner the binding does not know, and deleting the page and then it crashed the test harness's widget reaper. One `timepoint` on the state serves every view: `shown_timepoint` gives the

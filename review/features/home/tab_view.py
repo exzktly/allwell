@@ -26,7 +26,7 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
-    QScrollArea, QTabWidget, QVBoxLayout, QWidget,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -38,6 +38,7 @@ from widgets.icon_button import IconButton
 from widgets.page_body import build_page_body
 
 from . import collect as hc
+from ._phone import SIDE_BY_SIDE, HomeScroll, watch_layout
 from .plate_panel import STATE_COLORS, STATE_LABELS, build_home_plate
 
 #: The em-dash a figure the page could not obtain renders as.
@@ -205,7 +206,9 @@ def build_home_overview(ctx, parent: QWidget) -> None:
     outer = parent.layout() or QVBoxLayout(parent)
     outer.setContentsMargins(0, 0, 0, 0)
 
-    scroll = QScrollArea(parent)
+    # Its own class for phone layout: it re-fits the page when its width
+    # changes (``_phone.HomeScroll``).
+    scroll = reg.register("_home_scroll", HomeScroll(parent))
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.NoFrame)
     scroll.setObjectName("HomeScroll")
@@ -251,6 +254,7 @@ def build_home_overview(ctx, parent: QWidget) -> None:
     # So the rail has to be put into Home's state here, or the page looks one
     # way on launch and another way every time after.
     hide_rail_body(ctx)
+    watch_layout(ctx, scroll)
     refresh_home(ctx)
 
 
@@ -259,6 +263,7 @@ def build_home_overview(ctx, parent: QWidget) -> None:
 def _build_masthead(ctx, page: QWidget, reg) -> QWidget:
     host = QWidget(page)
     row = QHBoxLayout(host)
+    row.setObjectName(SIDE_BY_SIDE)
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(theme.Spacing.lg)
 
@@ -301,8 +306,13 @@ def _build_next_step(ctx, page: QWidget, reg) -> QWidget:
     frame, layout = _card(page)
     frame.setObjectName("HomeNextStep")
     row = QHBoxLayout()
+    row.setObjectName(SIDE_BY_SIDE)
     row.setSpacing(theme.Spacing.md)
-    row.addWidget(reg.register("_home_next_text", QLabel("", frame)), 1)
+    # Wraps: the sentence is the page's longest line, and unwrapped it held the
+    # whole page 770 px wide in phone layout.
+    text = reg.register("_home_next_text", QLabel("", frame))
+    text.setWordWrap(True)
+    row.addWidget(text, 1)
     button = reg.register("_home_next_button", QPushButton("", frame))
     button.clicked.connect(lambda _c=False: _run_next_step(ctx))
     row.addWidget(button)
@@ -319,10 +329,12 @@ def _run_next_step(ctx) -> None:
 
 def _build_plate_and_notes(ctx, page: QWidget, reg) -> QHBoxLayout:
     row = QHBoxLayout()
+    row.setObjectName(SIDE_BY_SIDE)
     row.setSpacing(theme.Spacing.lg)
 
     plate_card, plate_layout = _card(page, "Plate")
     plate_row = QHBoxLayout()
+    plate_row.setObjectName(SIDE_BY_SIDE)
     plate_row.setSpacing(theme.Spacing.lg)
     plate = reg.register("_home_plate", build_home_plate(plate_card))
     from .controller import _paint_plate, on_home_plate_selection
@@ -447,6 +459,7 @@ def _tile_strip(page: QWidget) -> QWidget:
 
 def _build_health_and_receipt(ctx, page: QWidget, reg) -> QHBoxLayout:
     row = QHBoxLayout()
+    row.setObjectName(SIDE_BY_SIDE)
     row.setSpacing(theme.Spacing.lg)
 
     health_card, health_layout = _card(page, "Health")

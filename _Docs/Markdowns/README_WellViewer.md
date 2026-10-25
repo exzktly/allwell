@@ -7861,6 +7861,11 @@ Every tool's page fits the phone's width: fields that sit side by side at the
 desk are stacked, and long option labels wrap, so nothing needs a sideways
 scroll.
 
+**Home** reads top to bottom in phone layout: the dataset's name and path,
+the next step, the plate, its legend, your notes, the counts, Health, Run
+parameters, your work, saved plots and recent datasets, one under another, with
+nothing to scroll sideways for. Long folder paths and dataset names wrap.
+
 **The Image Table** opens on its images in phone layout, sized so the columns
 fill the screen; **−** and **+** zoom from there, and past 100 % the table
 scrolls sideways. The table builder and the Generate, Crop, ON threshold, Save and

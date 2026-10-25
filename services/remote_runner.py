@@ -80,7 +80,7 @@ from services.remote_process import (
     _BatchedRemoteProcess,
     _RemoteProcess,
     _UploadHeartbeat,
-    _record_remote_in_journal,
+    _run_prepared,
     _scheduler_handoff_lines,
 )
 from services.remote_jobs import close_remote_job, sweep_orphaned_allocation
@@ -591,10 +591,8 @@ class RemoteRunner:
         # remote run existed until this line: ``run_id`` was re-derivable only
         # for as long as the staged archives kept the same mtimes, which a
         # rewritten upload does not.
-        _record_remote_in_journal(
-            local_output_dir, run=self._run, host_alias=self.host.ssh_alias,
-            argv_digest=argv_digest, source_key=source_key,
-        )
+        _run_prepared(self._cache, self._run, zipped, log, host_alias=self.host.ssh_alias,
+                      argv_digest=argv_digest, source_key=source_key)
         return _PreparedRun(key=key, run_id=run_id, remote_input=remote_input,
                             remote_output=remote_output, paths=own)
 

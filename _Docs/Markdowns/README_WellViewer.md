@@ -467,9 +467,11 @@ run it. One click per well is enough when the rest of the plate is anchored: the
 addressed from it at the end of the run, through the plate's other wells. A timepoint that still cannot be
 addressed says so, and takes a click of its own. A click that is not on a nanowell (more than a quarter of the
 spacing from every one), or that is off the array (more than one and a half spacings from every nanowell
-found), is not used, and the well's record says how far off it was. On a remote host, a run
-limited to a few wells sees only those wells at its end, so it can carry a click to other timepoints only when
-at least four of the plate's wells are in the run; otherwise click each timepoint. Subset, Merge Plates and
+found), is not used, and the well's record says how far off it was. A run limited to a few wells — on this
+computer or on a remote host — carries the click through the rest of the plate as a whole-plate run does: a
+remote run is sent the other wells' grid records from your output folder before it starts, so it sees the plate
+the way a run here does. You do not need Force to use an anchor, either: a plain re-run runs again every well
+whose anchors changed (set, moved or cleared) since its last run, and skips the rest as usual. Subset, Merge Plates and
 Concatenate carry the anchors of the wells and timepoints they keep, renamed as they rename them.
 
 `--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile

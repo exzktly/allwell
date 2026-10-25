@@ -43,6 +43,7 @@ from services.remote_run_state import (
 from services.remote_staging import (
     ZippedInput,
 )
+from services.remote_plate_grids import seed_plate_grids
 from services.remote_fetch import (
     Fetcher,
     _snapshot_local_artifacts,
@@ -108,6 +109,14 @@ def _record_remote_in_journal(
     except OSError:
         swallowed(f"could not record the remote address in {local_output_dir}")
 
+
+
+def _run_prepared(cache, run: "_RemoteRun", zipped, log, **journal_keys) -> None:
+    """What both run paths do once a run's remote directories exist: write down where it went
+    (:func:`_record_remote_in_journal`), and give a nanowell host the rest of the plate's grid records
+    (``services.remote_plate_grids``) before its pipeline starts."""
+    _record_remote_in_journal(run.local_output_dir, run=run, **journal_keys)
+    seed_plate_grids(cache, run, [Path(p).stem for p in zipped.well_zips], log)
 
 def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
     """The lines announcing that the run is now waiting on a scheduler.
@@ -552,7 +561,7 @@ class _BatchedRemoteProcess:
         # complete, and had output with no tophat images fetched back as its
         # own — and in the other direction, after a batched run on a host with
         # overrides, the two never matched and re-attach silently never fired.
-        _record_remote_in_journal(local_output_dir, run=runner._run, **self._journal_keys)
+        _run_prepared(runner._cache, runner._run, zipped, self._log, **self._journal_keys)
 
         # One Fetcher persisting across batches. Pre-set the total well
         # count: each batch's pipeline banner reports just THAT

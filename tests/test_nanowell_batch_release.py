@@ -127,14 +127,16 @@ def test_a_run_that_is_not_nanowell_is_left_to_the_per_well_delete(tmp_path, mon
 
 
 def test_verification_does_not_pull_a_released_well_again(tmp_path):
-    """Its files are gone from the remote; asking for them only prints a 'not pulled' note per file."""
+    """Its files are gone from the remote; asking for them only prints a 'not pulled' note per file. Nor a well
+    this run never ran (C03), whose record the local folder holds: its files were never on this run's host."""
     folder = tmp_path / "nanowells"
     _grid(folder, "A01", ["plate_rigid"])
     _grid(folder, "B02", ["plate_rigid"])
+    _grid(folder, "C03", ["plate_rigid"])          # another run's well: the local folder holds the whole plate
     pulled: list[str] = []
     verifier = SimpleNamespace(
         _run=SimpleNamespace(local_output_dir=tmp_path, remote_output_dir="/r/out", nanowell=True,
-                             nanowell_released={"A01"}),
+                             nanowell_released={"A01"}, fetched_wells={"A01", "B02"}),
         host=SimpleNamespace(ssh_alias="gpu"),
         _rsync_optional=lambda src, dest, *, log_fn, absent_note="": pulled.append(src))
     pull_nanowell_results(verifier, log=lambda _m: None)

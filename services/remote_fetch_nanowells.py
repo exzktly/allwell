@@ -104,6 +104,10 @@ def pull_nanowell_results(verifier, *, log) -> None:
     for well in reanchored_wells(local / NANOWELL_DIR):
         if well in run.nanowell_released:          # pulled again and deleted when its batch ended
             continue
+        if well not in run.fetched_wells:
+            # Not a well of this run: the local folder holds the whole plate's grid records (and the run was sent
+            # the others', ``services.remote_plate_grids``), and the re-anchoring re-runs only this run's wells.
+            continue
         verifier._rsync_optional(f"{remote}/{well}_out.zip", local / f"{well}_out.zip", log_fn=log)
         verifier._rsync_optional(f"{remote}/*_{well}.csv.gz", local, log_fn=log)
         retire_superseded_csvs([str(p) for p in local.glob(f"*_{well}.csv.gz")], local)

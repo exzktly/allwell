@@ -10863,19 +10863,18 @@ timepoint shown — the well's every timepoint, or those chosen in the view's *T
 (`NanowellState.extremes_tps`, persisted; `controller.extremes_columns`, which always keeps the ranking timepoint,
 since it orders the rows; the caption names those left out) — every crop on one brightness scale (`_one_scale`,
 shared with the enlarged crops), the ranking timepoint's column outlined, each row labelled with rank, address and
-value and each crop with the fold change at its timepoint (`format_value`: `2.31×`, or a signed difference on log₂)
-and the nanowell's metrics there (`series_compute.crop_metric_lines`: count, confluence as a percentage, the shared
-channel's brightness and site signal, `compact_number` for thousands; a state without numbers by name; a missing
-measurement left out, never zero), packed into as few lines as the room allows (`renderer._pack`). **The layout is
-computed in inches** (`_extremes_layout` / `_fit_extremes`), the panels placed with `fig.add_axes` and every label
-as figure text: each arrangement — the Largest and Smallest blocks side by side or one above the other, each crop's
-text under it or in a column to its right whose width is what the crop leaves — is tried at every crop size, and
-the one reaching the largest square crop wins; the montage is then centred both ways. Stacked with the text under
-the crops, a page-wide figure was limited by its height and left most of its width empty. When even the best
-arrangement with metrics would draw crops under `_EXT_MIN_SIDE_WITH_METRICS` (0.6 in) and leaving them out gains
-more than 15 %, the metrics are left out — the fold change stays under each crop — and the caption says so and how
-to get them back (fewer timepoints or nanowells, a wider window, or the pop-out, which writes each panel's metrics
-under it, `render_crop_grid(…, metrics=…)`, `controller.crop_metrics`). It returns `{axes: site}`, kept on `st.extreme_axes`, and `on_click` selects the
+value, and **every word a crop carries is written inside it**, on a translucent band of the ground: the fold change
+at its timepoint in its top-left corner (`format_value`: `2.31×`, or a signed difference on log₂), and along its
+foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines`: count, confluence as a
+percentage, the shared channel's site signal and brightness, in that order of importance, `compact_number` for
+thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
+crop's width (`renderer._one_line`), the caption saying when some were left for the pop-out, which writes each
+panel's full metrics under it (`render_crop_grid(…, metrics=…)`, `controller.crop_metrics`). Text under or beside
+each crop took more of the figure than the crops did, and three lines over a crop covered the lower third of the
+nanowell, where the cells are. **The layout is computed in inches** (`_extremes_layout`), the panels placed with
+`fig.add_axes`: the Largest and Smallest blocks side by side or one above the other, whichever gives the larger
+square crops, centred both ways. A crop under `_EXT_MIN_SIDE_WITH_METRICS` (0.6 in) writes its fold change only,
+and the caption says how to read the rest. It returns `{axes: site}`, kept on `st.extreme_axes`, and `on_click` selects the
 row's nanowell (Shift adds), which opens the site detail. The crops of the nanowells not yet in `st.crops` are
 read in one worker fetch (`_fetch(…, deliver=…)` merges the result into `st.crops`, the store the site detail
 reads) through `image_compute.crops_for_sites`; a failed read stores its reason under `""`, which each panel

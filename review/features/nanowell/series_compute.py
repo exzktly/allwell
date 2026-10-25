@@ -203,8 +203,9 @@ def site_series(metrics: pd.DataFrame, well: str, q: int, r: int) -> pd.DataFram
 
 def crop_metric_lines(row, channel: str | None = None) -> list[str]:
     """What a crop of one nanowell at one timepoint is captioned with, one short item each: its computed
-    measurements there — the cell count, the confluence as a percentage, and the shared channel's brightness and site
-    signal when the run measured them. The renderer packs the items into as few lines as the crop's width allows. A
+    measurements there — the cell count, the confluence as a percentage, and the shared channel's site signal and
+    brightness when the run measured them — in that order of importance, since a crop with room for one line writes
+    as many as fit and the pop-out writes them all. A
     timepoint whose state carries no number says its state instead, and a measurement that is missing is left out
     rather than written as zero.
 
@@ -225,10 +226,10 @@ def crop_metric_lines(row, channel: str | None = None) -> list[str]:
         items.append(f"{100 * c:.0f}% conf.")
     if channel:
         b, sig = value(f"brightness_{channel}"), value(f"signal_{channel}")
-        if b is not None:
-            items.append(f"bright {compact_number(b)}")
         if sig is not None:
             items.append(f"signal {compact_number(sig)}")
+        if b is not None:
+            items.append(f"bright {compact_number(b)}")
     return items
 
 

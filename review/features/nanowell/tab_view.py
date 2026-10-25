@@ -25,6 +25,7 @@ from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
     BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut, match_channel,
 )
+from review.features.nanowell import starting_cells_compute as sc
 from review.features.nanowell.state import EXTREMES_MAX_N
 from widgets.control_band import ControlBand
 from widgets.owned_action import owned_action
@@ -73,7 +74,17 @@ _EXTREMES_TIP = ("How many nanowells each block shows: this many with the larges
                  "smallest. A well with fewer shares them between the blocks, never showing one twice.")
 _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their well, so each line over time follows "
                "one set of nanowells. Off, each timepoint's median is over whichever nanowells could be measured "
-               "then. The others are counted as outside the fixed cohort.")
+               "then. The others are counted as outside the fixed cohort. See also Starting cells, which chooses "
+               "nanowells by how many cells they held at the baseline.")
+_START_TIP = ("Use only the nanowells that held this many cells at the Baseline — at the well's earliest timepoint, "
+              "or at each nanowell's first measurable one. A nanowell whose count there is unknown is left out "
+              "whenever a bound is set. Every figure states how many were kept; the Array view dims the others "
+              "instead of hiding them, and Save nanowell data… keeps every row and flags them.\n"
+              "For clonality, use the Earliest baseline: a count taken later may follow a division.")
+_START_MIN_TIP = "The fewest cells a nanowell may have held at the baseline (0: no minimum)."
+_START_MAX_TIP = "The most cells a nanowell may have held at the baseline (any: no maximum)."
+#: The most cells either bound can be set to: well above any nanowell's seeding.
+_START_LIMIT = 999
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
 _SLIDER_TIP = "The timepoint the Array view shows; drag to step through the well's timepoints."
 _METRIC_TIP = ("What each dot is. Brightness and site signal use the channel chosen in the app's channel "
@@ -166,6 +177,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         lambda _i: nwc.set_page_baseline(ctx, baseline_cb.currentData() or "earliest"))
     reg.register("_nw_baseline_cb", baseline_cb)
     grp_baseline = band.add_scope("Baseline", baseline_cb)
+
+    start = _build_starting_cells(ctx, band)
 
     cohort_box = QCheckBox("Fixed cohort")
     cohort_box.setToolTip(_COHORT_TIP)
@@ -290,7 +303,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
     controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box, responding_edit,
-                extremes_spin, *array_controls.signalling)
+                extremes_spin, *start.signalling, *array_controls.signalling)
 
     def refresh_controls() -> None:
         channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None
@@ -339,6 +352,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_baseline.setVisible(True)
             grp_axis.setVisible(distribution)
             cohort_box.setChecked(st.cohort)
+            start.refresh(st)
             _refresh_array_controls(ctx, st, array, array_controls)
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
@@ -363,6 +377,68 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_page_visible", page_visible)
     reg.register("_nw_refresh_controls", refresh_controls)
     refresh_controls()
+
+
+def _build_starting_cells(ctx, band) -> SimpleNamespace:
+    """*Starting cells*: a preset combo (Any, ≥1, 1, 1–2, ≥2, Custom…) right after Baseline, on every view, with a
+    minimum and a maximum shown while Custom is chosen. The combo is outlined in the accent while a bound is set,
+    so a filter restored with the page's settings is never forgotten."""
+    reg = ctx.widgets
+    combo = QComboBox()
+    for key, label, _lo, _hi in sc.PRESETS:
+        combo.addItem(label, key)
+    combo.addItem("Custom…", sc.CUSTOM)
+    combo.setToolTip(_START_TIP)
+    lo_spin, hi_spin = QSpinBox(), QSpinBox()
+    lo_spin.setRange(0, _START_LIMIT)
+    hi_spin.setRange(-1, _START_LIMIT)
+    hi_spin.setSpecialValueText("any")                   # shown at -1: no maximum
+    hi_spin.setValue(-1)
+    for spin, tip in ((lo_spin, _START_MIN_TIP), (hi_spin, _START_MAX_TIP)):
+        spin.setToolTip(tip)
+        spin.setKeyboardTracking(False)                  # one change per value typed, not per keystroke
+    custom = {"open": False}                             # Custom stays chosen while its bounds are being typed
+
+    def typed(_value=None) -> None:
+        hi = hi_spin.value()
+        nwc.set_starting_cells(ctx, lo_spin.value() or None, None if hi < 0 else hi)
+
+    def chosen(_index=None) -> None:
+        key = combo.currentData()
+        custom["open"] = key == sc.CUSTOM
+        if custom["open"]:
+            refresh(ctx.state.feature_slice("nanowell"))  # shows the bounds that are set, changing nothing
+            return
+        _key, _label, lo, hi = next(p for p in sc.PRESETS if p[0] == key)
+        nwc.set_starting_cells(ctx, lo, hi)
+
+    def refresh(st) -> None:
+        lo, hi = st.start_min, st.start_max
+        blocked = [w.blockSignals(True) for w in (combo, lo_spin, hi_spin)]
+        try:
+            _select(combo, sc.CUSTOM if custom["open"] else sc.preset_of(lo, hi))
+            lo_spin.setValue(lo or 0)
+            hi_spin.setValue(-1 if hi is None else hi)
+            show = combo.currentData() == sc.CUSTOM
+            lo_spin.setVisible(show)
+            hi_spin.setVisible(show)
+            active = sc.is_active(lo, hi)
+            if combo.property("filterActive") != active:
+                combo.setProperty("filterActive", active)
+                combo.style().unpolish(combo)
+                combo.style().polish(combo)
+        finally:
+            for w, b in zip((combo, lo_spin, hi_spin), blocked):
+                w.blockSignals(b)
+
+    combo.currentIndexChanged.connect(chosen)
+    lo_spin.valueChanged.connect(typed)
+    hi_spin.valueChanged.connect(typed)
+    reg.register("_nw_start_cb", combo)
+    reg.register("_nw_start_min", lo_spin)
+    reg.register("_nw_start_max", hi_spin)
+    group = band.add_scope("Starting cells", combo, lo_spin, hi_spin)
+    return SimpleNamespace(group=group, refresh=refresh, signalling=())
 
 
 def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:

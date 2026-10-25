@@ -29,11 +29,13 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QLabel,
     QHBoxLayout,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -64,6 +66,8 @@ _parse_threshold = _lazy("review.features.nanowell.controller", "parse_threshold
 _load_nanowell_data = _lazy("review.features.nanowell.collect", "load_nanowell_data")
 _site_metrics = _lazy("review.features.nanowell.series_compute", "site_metrics")
 _render_message = _lazy("review.features.nanowell.renderer", "render_message")
+_apply_starting_cells = _lazy("review.features.nanowell.starting_cells_compute", "apply")
+_starting_note = _lazy("review.features.nanowell.starting_cells_compute", "note")
 
 _logger = logging.getLogger("review")
 
@@ -128,6 +132,24 @@ class NanowellBatchExportPanel(BatchExportPanel):
         self._cohort_box.setToolTip("Distribution and Trajectories: only the nanowells with a value at every "
                                     "timepoint of their well, as the page's Fixed cohort box.")
         row.addWidget(self._cohort_box)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(12, 2, 12, 2)
+        self._add_bold_label(row, "Starting cells:", min_width=_FIELD_LABEL_W)
+        self._start_min, self._start_max = QSpinBox(), QSpinBox()
+        self._start_min.setRange(0, 999)
+        self._start_max.setRange(-1, 999)
+        self._start_max.setSpecialValueText("any")      # shown at -1: no maximum
+        self._start_max.setValue(-1)                    # no filter until the page's is seeded on show
+        self._start_min.setToolTip("Use only the nanowells that held at least this many cells at the Baseline "
+                                   "(0: no minimum), as the page's Starting cells. Seeded from the page each "
+                                   "time this panel is shown.")
+        self._start_max.setToolTip("…and at most this many (any: no maximum).")
+        row.addWidget(self._start_min)
+        row.addWidget(QLabel("to"))
+        row.addWidget(self._start_max)
         row.addStretch(1)
         layout.addLayout(row)
 
@@ -246,6 +268,21 @@ class NanowellBatchExportPanel(BatchExportPanel):
         super().showEvent(event)
         self._refresh_timepoints()
         self._rebuild_thresholds()
+        self._seed_starting_cells()
+
+    def _seed_starting_cells(self) -> None:
+        """The page's Starting cells, each time the panel is shown; changed here, they stay this run's own."""
+        st = self._ctx.state.feature_slice("nanowell")
+        self._start_min.setValue(getattr(st, "start_min", None) or 0)
+        hi = getattr(st, "start_max", None)
+        self._start_max.setValue(-1 if hi is None else hi)
+
+    def _starting_cells(self) -> tuple:
+        """``(min, max)`` as the filter takes them; a minimum above the maximum is read as no maximum, and the
+        figure's note states the bounds used."""
+        lo = self._start_min.value() or None
+        hi = None if self._start_max.value() < 0 else self._start_max.value()
+        return (lo, None) if lo is not None and hi is not None and lo > hi else (lo, hi)
 
     # ── the run summary ──────────────────────────────────────────────────
     _SUMMARY_FIGURE_LEAD = "One figure per ticked metric"
@@ -271,7 +308,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
                 "baseline": self._baseline_cb.currentData(), "timepoint": self._tp_cb.currentData(),
                 "cohort": self._cohort_box.isChecked(), "metrics": self._selected_metrics(),
                 "fmt": self._fmt_cb.currentText(), "channel": self._ctx.state.channel.active_channel,
-                "thresholds": self._thresholds()[0]}
+                "thresholds": self._thresholds()[0], "start_cells": self._starting_cells()}
 
     def _load(self, baseline: str, wells) -> tuple | None:
         """``(data, metrics)`` for the open dataset's *wells* at *baseline*, or ``None`` with the user told why.
@@ -389,21 +426,30 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                    axis=settings["axis"], timepoint=self._timepoint_for(data, wells, settings),
                                    control="", baseline=settings["baseline"], cohort=settings["cohort"],
                                    well=well or "", well_timepoint=shown if well else "",
-                                   note=note, tableless=tableless, responding_above=cut)
+                                   note=note, tableless=tableless, responding_above=cut,
+                                   start_cells=settings["start_cells"])
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
-                                         "well": well or "", "timepoint": shown}
+                                         "well": well or "", "timepoint": shown,
+                                         "start_min": settings["start_cells"][0],
+                                         "start_max": settings["start_cells"][1]}
                     if view == "array":                  # a gallery record restores the layers it was drawn with
                         self._figure_view["layers"] = _batch_array_layers()
                     self._save_figure(fig, self._out_path(write_dir, f"{stem}.{fmt}"), fmt, group=grp,
                                       title=f"{grp.name} — {labels[drawn]}" + (f" — {well}" if well else ""))
                 except Exception as exc:
                     return f"{grp.name} {metric} figure: {exc}"
-            table = _wells_summary(metrics, wells, drawn, channels=data.channels, channel=channel,
-                                   cohort=settings["cohort"] and view in ("distribution", "trajectories"),
-                                   responding_above=cut)
-            tables.append(table.assign(metric=drawn, channel=channel or "", requested_metric=metric,
-                                       group=grp.name, note=note, responding_above=cut))
+            # The summary is of the nanowells the figure drew: the Starting cells filter first, as on the page.
+            lo, hi = settings["start_cells"]
+            kept, filtered = _apply_starting_cells(metrics, lo, hi, settings["baseline"], wells)
+            said = " ".join(filter(None, [_starting_note(filtered) if filtered is not None else "", note]))
+            table = (_wells_summary(kept, wells, drawn, channels=data.channels, channel=channel,
+                                    cohort=settings["cohort"] and view in ("distribution", "trajectories"),
+                                    responding_above=cut)
+                     if filtered is None or filtered.kept else None)
+            if table is not None:
+                tables.append(table.assign(metric=drawn, channel=channel or "", requested_metric=metric,
+                                           group=grp.name, note=said, responding_above=cut))
         try:
             self._write_summary(self._out_path(write_dir, f"{safe}_summary.csv"), tables, grp, tableless,
                                 settings)
@@ -460,10 +506,11 @@ class NanowellBatchExportPanel(BatchExportPanel):
             frame["excluded"] = ["; ".join(f"{reason}: {n}" for reason, n in sorted(d.items())) for d in
                                  frame["excluded"]]
         frame["baseline"] = settings["baseline"]
+        frame["starting_cells_min"], frame["starting_cells_max"] = settings["start_cells"]
         rows = [frame] + [pd.DataFrame([{"group": grp.name, "well": w, "note": "no nanowell table"}])
                           for w in tableless]
         out = pd.concat(rows, ignore_index=True)
-        for column in ("n_sites", "n_used", "tp_order"):       # counts stay counts beside the rows with none
+        for column in ("n_sites", "n_used", "tp_order", "starting_cells_min", "starting_cells_max"):   # counts stay counts
             if column in out.columns:
                 out[column] = out[column].astype("Int64")
         lead = ["group", "metric", "channel", "well", "timepoint", "time_h", "baseline"]

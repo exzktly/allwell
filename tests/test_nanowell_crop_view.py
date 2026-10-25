@@ -96,3 +96,27 @@ def test_a_click_on_the_crop_view_selects_nothing(page, qtbot, known_crops):  # 
     qtbot.mouseClick(canvas, Qt.LeftButton, pos=canvas.rect().center())
     st = page.state.feature_slice("nanowell")
     assert st.selected_sites == [["A01", 1, 0]] and st.crop_view is True
+
+
+def test_every_crop_is_drawn_whole_whatever_range_the_card_was_given(page, qtbot, known_crops):  # noqa: F811
+    """Reported: the enlarged crops showed a strip about ten pixels tall rather than the whole crop. The card's
+    typed y range (0 to 10, a sensible range for a count) was being applied by the style pass to every crop panel,
+    which drew ten rows of each. Both routes into the style pass are driven: the page's own redraw, and the
+    Properties sidebar restyling the figure directly."""
+    from review.core import plot_style
+
+    _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    fig = page.widgets.get("_nw_fig")
+    plot_style._ensure_axis_prefs_store(page)[plot_style.figure_pref_key(page, fig)].update(
+        {"y_lim_min": "0", "y_lim_max": "10", "x_lim_min": "2", "x_lim_max": "5", "y_log": True})
+    _press_enlarge(qtbot, page)
+    qtbot.waitUntil(lambda: len(_grid_images(page)) == 2, timeout=10000)
+
+    def extents():
+        return [(im.axes.get_xlim(), im.axes.get_ylim(), im.axes.get_yscale()) for im in _grid_images(page)]
+
+    whole = [((-0.5, 19.5), (19.5, -0.5), "linear")] * 2
+    assert extents() == whole
+    plot_style.apply_export_style_to_current(page, fig, page.widgets.get("_nw_canvas"))    # the sidebar's route
+    assert extents() == whole

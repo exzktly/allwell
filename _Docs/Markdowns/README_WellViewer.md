@@ -883,6 +883,10 @@ Any string  preserved as-is and sorted lexicographically
 - **Top-hat radii.** Nuclear and per-fluor radii in pixels. `0` or
   `--no_tophat_*` flags disable per-channel.
 - **Min nucleus area** in pixels (rejects garbage detections).
+- **Label-free** segments the channel marked **Phase**, so the *Segmentation
+  channel* field is hidden while it is chosen. The channel that field named is
+  not dropped: it moves into **Fluorescent channels**, so it is still measured,
+  and it moves back if you switch to another method.
 - **Cell diameter (px, 0=model's 30)** — shown for both Cellpose methods, general
   and label-free. Cellpose's models were trained on cells about 30 px across, and
   Cellpose resizes each image so that cells of the diameter you enter become

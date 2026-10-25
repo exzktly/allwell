@@ -259,11 +259,19 @@ class AnalyzePipelineInfoMixin:
         if method:
             idx = self._seg_method_cb.findData(method)
             if idx >= 0:
-                self._seg_method_cb.setCurrentIndex(idx)
+                # The channels below are about to be replaced, so the label-free handover waits for them.
+                self._seg_handover_paused = True
+                try:
+                    self._seg_method_cb.setCurrentIndex(idx)
+                finally:
+                    self._seg_handover_paused = False
 
         # Channel tokens.
         s("_nuclear_token_edit", d.get("nuclear_token"))
+        if d.get("nuclear_token"):
+            self._seg_channel_known = True      # named by the input or a run, not the form's default
         self._restore_channel_rows(d)
+        self._settle_labelfree_handover()
 
         # Cellpose / watershed params.
         combo("_cellpose_model_cb", d.get("cellpose_model"))

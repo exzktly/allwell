@@ -21,13 +21,13 @@ is deleted by the PR that closes its last row.
 | S2 | 1053 | Med | two prefixes on coinciding tiles still taken for the channel | declined | not decidable from names alone: each prefix has a sibling too; documented in the docstring |
 | S3 | 1053 | Low | no-groups reason misses a partner differing only by extension | done | `pipeline/nanowell_task.no_groups_reason`; `test_nanowell_cli` |
 | S4 | 1054 | Low | a log with only horizontal range is a dead spot for the page drag | done | `ui/phone_shell._inner_area_owns_drag`; `test_phone_form_swipe` |
-| S5 | 1054 | ? | a log as tall as the viewport may take every page drag | open | unverified |
+| S5 | 1054 | ? | a log as tall as the viewport may take every page drag | deferred | unverified; needs a measurement of the real Progress page in phone layout, which no fast-lane fixture builds |
 | P1 | 1049 | Med | `levelled` levels by the interior median, shifting crowded nanowells' floors | done | `nanowell_measure._level_interiors`; `test_nanowell_segment_crops` |
 | P2 | 1044 | Med-Low | overlapping crops can count one cell twice (custom pitch < ~2.42 r) | done | `nanowell_measure._own_labels`; `test_nanowell_segment_crops` |
 | P3 | 1044 | Low | Cellpose drops a mask over 40 % of a crop: a nanowell-filling object counted empty | done | `max_size_fraction=1.0` for crops (`accepts_size_cap`); `test_cellpose_versions`, `test_nanowell_segment_crops` |
-| P4 | 1045 | Low | network/mask timing breakdown missing for single-image calls | open | `pipeline/cellpose.py`, `nanowell_task._log_sites` |
+| P4 | 1045 | Low | network/mask timing breakdown missing for single-image calls | done | `CELLPOSE_SECONDS["timed"]`, `_log_sites` divides by it; `test_well_dial_progress_lines`, `test_cellpose_versions` |
 | P5 | 1045 | Low | MEASURE_VERSION not bumped when the count's normalisation changed | done | bumped to 6 with P1 |
-| P6 | 1047 | Low | a previous run's segmenter-input sheet left beside newer results | open | `nanowell_inspect.write_sheet` |
+| P6 | 1047 | Low | a previous run's segmenter-input sheet left beside newer results | declined | a sheet is left only when every timepoint was kept, and a timepoint is kept only under the same settings key (`load_prior`), so it still describes those images under those settings |
 | R1 | 1052 | High | a nanowell well resent alone cannot be re-anchored from the plate | done | `remote_finished_wells._nanowell_coverage` counts a reached timepoint (any verdict) as finished, so it is never resent alone; the test that pinned ok-only was asserting the bug and is rewritten |
 | R2 | 1052 | Med | field-mode "finished here" ignores fields/timepoints the input gained | done | `remote_finished_wells._field_coverage`; `test_a_remote_rerun_skips_finished_wells`. Images replaced under the same names are still not seen (nor by a local run) |
 | R3 | 1052 | Med | host wells computed with `--no_auto_threshold` miss every later local reuse | done | `util/settings_digest.settings_key_for`; `test_a_half_finished_well_resumes_across_builds` |
@@ -38,4 +38,4 @@ is deleted by the PR that closes its last row.
 | C2 | 1049 | High | runs routed to the Cellpose env even when its install failed | done | `remote_conda.aw_cellpose_env_ready`; `test_remote_cellpose_env` (3 states) |
 | C3 | 1043 | Med | an old nanowell plate's key never matched: `cellpose_model` kept as cpsam | done | `util/settings_digest._before_cpsam`; pinned to 1355778^1's normalised digests in `test_a_half_finished_well_resumes_across_builds` |
 | C4 | 1043 | Med | Batch Export nanowell mode: `KeyError: 'state'` on a group with no table | done | `nanowell_panel._load`; `test_batch_export_nanowell_mode` |
-| C5 | 1049 | Low | precision (bf16/TF32/fp32) is in no reuse key | open | doc |
+| C5 | 1049 | Low | precision (bf16/TF32/fp32) is in no reuse key | done | stated in ARCHITECTURE's Cellpose-env section (a design point, not a code change) |

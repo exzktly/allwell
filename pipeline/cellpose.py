@@ -149,9 +149,11 @@ def _cellpose_model(model_type: str = DEFAULT_MODEL):
 
 #: Seconds this process's Cellpose calls have spent, by Cellpose's own clock: running the network on the images
 #: (``network``) and turning its flows into masks (``masks``). ``_CellposeChatter`` adds to it from the two INFO lines
-#: Cellpose 4 logs per call; the nanowell count's progress lines report the share of each per nanowell
-#: (``pipeline.nanowell_task._log_sites``). Cellpose 3 logs neither, and it stays at zero there.
-CELLPOSE_SECONDS = {"network": 0.0, "masks": 0.0}
+#: Cellpose 4 logs for a call given more than one image, and only then; ``timed`` counts the images of those calls,
+#: so the nanowell count's progress lines divide each by the nanowells it actually timed
+#: (``pipeline.nanowell_task._log_sites``) rather than by every one segmented, a lone crop's call included. Cellpose
+#: 3 logs neither, and it stays at zero there.
+CELLPOSE_SECONDS = {"network": 0.0, "masks": 0.0, "timed": 0.0}
 
 
 class _CellposeChatter(logging.Filter):
@@ -374,5 +376,6 @@ def _segment_cellpose_many(
     capped = {} if max_size_fraction is None else {"max_size_fraction": float(max_size_fraction)}
     result = model.eval(stack, diameter=diam, flow_threshold=flow_threshold, cellprob_threshold=cellprob_threshold,
                         normalize=False, **capped)
+    CELLPOSE_SECONDS["timed"] += len(images)              # a call of several images is one Cellpose 4 times
     masks = np.asarray(result[0], dtype=np.int32).reshape(len(images), h, w)
     return [masks[i, y:y + im.shape[0], x:x + im.shape[1]] for i, (im, (y, x)) in enumerate(zip(images, at))]

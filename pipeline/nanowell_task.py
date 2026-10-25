@@ -119,7 +119,7 @@ def _cellpose_seconds() -> dict:
     try:
         from pipeline.cellpose import CELLPOSE_SECONDS
     except ImportError:
-        return {"network": 0.0, "masks": 0.0}
+        return {"network": 0.0, "masks": 0.0, "timed": 0.0}
     return dict(CELLPOSE_SECONDS)
 
 
@@ -141,9 +141,12 @@ def _log_sites(well_label: str, timepoint, done: int, total: int, *, clock=time.
     timing = (f"in {_duration(elapsed)}, {each:.1f} s each" if done >= total
               else f"{each:.1f} s each, about {_duration(each * (total - done))} left")
     spent = {k: v - cellpose_then.get(k, 0.0) for k, v in _cellpose_seconds().items()}
-    if spent["network"] > 0 or spent["masks"] > 0:
-        timing += (f"; per nanowell, Cellpose's network {spent['network'] / done:.2f} s, "
-                   f"its masks {spent['masks'] / done:.2f} s")
+    timed = spent.get("timed", 0.0)
+    # Divided by the nanowells Cellpose timed, not by every one segmented: it times only a call of several images,
+    # so a lone crop's call (a tile's last) or a whole-tile call adds nothing and read as a cheaper nanowell.
+    if timed > 0 and (spent["network"] > 0 or spent["masks"] > 0):
+        timing += (f"; per nanowell, Cellpose's network {spent['network'] / timed:.2f} s, "
+                   f"its masks {spent['masks'] / timed:.2f} s")
     log.info("Well %s — %s: %d/%d nanowells segmented (%s)", well_label, timepoint, done, total, timing)
 
 

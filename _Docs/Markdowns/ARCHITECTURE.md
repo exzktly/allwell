@@ -12922,7 +12922,12 @@ env before it installs into it, non-fatally, so an env that merely exists is not
 one a run can import in), `allwell` otherwise with a line saying so, and the guard's usual failure when neither is. `conda run -p`
 then reads the prefix the guard resolved (`remote_transport.AW_PREFIX_ARG`,
 `"$AW_PREFIX"`, the one argument `_remote_quote` passes through unquoted), so a host
-not yet bootstrapped for the Cellpose env still runs, in float32.
+not yet bootstrapped for the Cellpose env still runs, in float32. The precision a
+count ran at (bfloat16 in the Cellpose env on a GPU that computes in it, TF32 or
+float32 otherwise) is in no reuse key — neither `NanowellSettings.key()` nor the
+settings digest — since it depends on the host rather than on the options: a
+half-finished well resumed after a bootstrap installed the Cellpose env holds
+timepoints counted at two precisions, and nothing in its tables says so.
 `tests/test_bootstrap_cellpose_env.py` and `tests/test_remote_cellpose_env.py` hold
 both halves, the second running the guard under bash against a stub conda. Version drift — a package present
 at the wrong pin — is not detected; pip resolves that only when the install

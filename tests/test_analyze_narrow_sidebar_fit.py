@@ -41,8 +41,10 @@ from PySide6.QtWidgets import QApplication, QLabel
 def qapp():
     app = QApplication.instance() or QApplication([])
     from ui import theme
+    before = app.styleSheet()
     app.setStyleSheet(theme.qss())
-    return app
+    yield app
+    app.setStyleSheet(before)        # app-wide: left applied, it changed later tests' layout (phone view's 361 px)
 
 
 def _expand_every_collapsible_section(tab) -> None:

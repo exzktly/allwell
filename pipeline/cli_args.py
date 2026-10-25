@@ -555,7 +555,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "registering would give. The output folder's own earlier registration is reused the same "
                          "way without this flag."))
     p.add_argument("--nanowell_cell_diameter_um", type=float, default=15.0,
-                   help="Typical cell diameter in micrometres, the scale the label-free segmenter is given.")
+                   help=("The scale the cell count looks for cells at, micrometres: Cellpose resizes each image so a cell "
+                         "of this diameter becomes 30 px. 30 x the pixel size means no resize (the fastest); the "
+                         "cells' real diameter enlarges them to that scale. Ignored with --nanowell_resize none."))
     p.add_argument("--nanowell_margin_um", type=float, default=None,
                    help=("Margin around a nanowell's disk that must lie inside one tile for that tile to own it. "
                          "Default: a tenth of the nanowell diameter."))

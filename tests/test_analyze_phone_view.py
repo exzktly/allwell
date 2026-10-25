@@ -128,10 +128,14 @@ def test_progress_on_a_short_screen_scrolls_rather_than_covering_the_plate(tab):
     try:
         host.resize(390, 360)
         tab.setParent(host)
-        tab.setGeometry(0, 0, 390, 360)
         host.show()
         phone_layout.set_on(True)
         dash.setStacked(True)   # the shell's half of phone layout
+        _pump()
+        # Placed once phone layout is on, as the shell lays the pane into the page. Placed before, the geometry is
+        # clamped to the *desktop* layout's minimum, which under the app's stylesheet is 361 px — so this read 361
+        # whenever an earlier test in the worker had left that stylesheet applied.
+        tab.setGeometry(0, 0, 390, 360)
         _pump()
         assert tab.height() == 360
         view.show_view(PROGRESS)

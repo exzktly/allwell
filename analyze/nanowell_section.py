@@ -36,7 +36,10 @@ _REGISTRATION_TIP = (
 #: field key -> (row label, edit attribute, tooltip). The edits' placeholders are the pipeline's defaults.
 _FIELDS = (
     ("nanowell_cell_diameter_um", "Cell diameter (µm)", "_nanowell_cell_diameter_edit",
-     "Typical cell diameter. It sets the scale the label-free segmenter looks for cells at."),
+     "The scale the cell count looks for cells at: Cellpose resizes each image so a cell of this diameter becomes its "
+     "own 30 px. 30 × the pixel size (19.5 µm at 0.65 µm/px, the starting value) means no resize, the fastest; the "
+     "cells' real diameter has them enlarged to that scale, which is slower. Resize: None skips the resize at any "
+     "pixel size. Blank: 15 µm."),
     ("nanowell_margin_um", "Margin (µm)", "_nanowell_margin_edit",
      "How far inside a tile a nanowell must lie for that tile to own it, and so for its cells to be counted "
      "from that tile. Blank: a tenth of the nanowell diameter."),

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
-from util.channel_roles import phase_role_conflicts
+from util.channel_roles import LABELFREE_METHODS, phase_role_conflicts
 from widgets.value_combo import ValueCombo
 
 #: General-Cellpose models, ``(--cellpose_model value, label)``. The label says
@@ -177,6 +177,100 @@ class AnalyzeSegParamsMixin:
 
         self._build_cellpose_diameter_row(sec)
         self._build_stardist_threshold_rows(sec)
+        self._watch_labelfree_handover()
+
+    # ── the segmentation channel across a switch to label-free ───────────────
+
+    def _watch_labelfree_handover(self) -> None:
+        """Keep the segmentation channel in the run when the method becomes label-free.
+
+        A label-free run segments the channel marked Phase, and the pipeline puts that channel in the
+        segmentation slot (``pipeline.cli_args.apply_labelfree_preset``), overwriting whatever the
+        "Segmentation channel" field held. That field is hidden for label-free, and a folder scan never lists
+        the segmentation channel among the fluorescent channels as well, so a channel that was only there —
+        EGFP, on a plate whose scan made it the segmentation channel and put Bright in the list — vanished
+        from the screen *and* from the run: never segmented, never measured, with nothing saying so.
+
+        So switching to label-free moves that channel into the fluorescent-channel rows
+        (:meth:`_hand_segmentation_channel_to_rows`), and switching back takes the row away again
+        (:meth:`_take_segmentation_channel_back`); the hidden field keeps its value throughout. Only a channel
+        that is real moves: one a folder scan or a loaded run put there, or one the user typed
+        (``_seg_channel_known``). The field's starting text is a default, not a channel this input is known to
+        carry, and listing it would ask the run for images that may not exist.
+        """
+        self._last_seg_method = self._seg_method()
+        self._seg_method_cb.currentIndexChanged.connect(lambda _i: self._on_seg_method_switched())
+        self._nuclear_token_edit.textEdited.connect(lambda _t: setattr(self, "_seg_channel_known", True))
+
+    def _on_seg_method_switched(self) -> None:
+        old, new = getattr(self, "_last_seg_method", ""), self._seg_method()
+        self._last_seg_method = new
+        if getattr(self, "_seg_handover_paused", False):
+            return
+        if new in LABELFREE_METHODS and old not in LABELFREE_METHODS:
+            self._hand_segmentation_channel_to_rows()
+        elif old in LABELFREE_METHODS and new not in LABELFREE_METHODS:
+            self._take_segmentation_channel_back()
+
+    def _hand_segmentation_channel_to_rows(self) -> None:
+        """List the segmentation channel among the fluorescent channels, if it is real and not there yet."""
+        token = self._nuclear_token_edit.text().strip()
+        if not token or not getattr(self, "_seg_channel_known", False):
+            return
+        if token.lower() in {t.lower() for t in self._fluor_tokens_list()}:
+            return
+        first = self._fluor_rows[0][0] if self._fluor_rows else None
+        if first is not None and len(self._fluor_rows) == 1 and not first.text().strip():
+            first.setText(token)
+        else:
+            self._fluor_add_row(token)
+        self._labelfree_moved_token = token
+
+    def _take_segmentation_channel_back(self) -> None:
+        """Remove the row :meth:`_hand_segmentation_channel_to_rows` added, unless the user has marked it since."""
+        token = getattr(self, "_labelfree_moved_token", "")
+        self._labelfree_moved_token = ""
+        if not token or len(self._fluor_rows) <= 1:
+            return
+        for edit, smfish, phase, remove_btn in self._fluor_rows:
+            if edit.text().strip() == token and not smfish.isChecked() and not phase.isChecked():
+                self._fluor_remove_row(edit.parentWidget(), remove_btn)
+                return
+
+    def _restore_seg_method(self, method) -> None:
+        """Set the method a scan, a saved run or a queued job states, without a label-free handover.
+
+        The restore replaces the channels right after setting the method, so a handover here would move the
+        *previous* dataset's segmentation channel into rows that are about to be overwritten;
+        :meth:`_settle_labelfree_handover` runs once the new channels are in.
+        """
+        idx = self._seg_method_cb.findData(method) if method else -1
+        if idx < 0:
+            return
+        self._seg_handover_paused = True
+        try:
+            self._seg_method_cb.setCurrentIndex(idx)
+        finally:
+            self._seg_handover_paused = False
+
+    def _note_seg_channel(self, token) -> None:
+        """A segmentation channel a scan or a run named is real, not the field's starting default."""
+        if token:
+            self._seg_channel_known = True
+
+    def _settle_labelfree_handover(self, *, hand_over: bool = False) -> None:
+        """After the channels were rewritten: start the handover afresh from them.
+
+        A row moved for the previous dataset means nothing for this one. With *hand_over* — a folder scan, which
+        names the segmentation channel and leaves it out of the fluorescent list — an input scanned while the
+        method is already label-free has that channel listed now, since no switch will come to do it. A queued
+        job or a saved run being loaded passes no *hand_over*: the channels it records are the ones that run
+        used, and the edit-a-job round trip must reproduce them exactly (``tests/test_analyze_job_edit.py``).
+        """
+        self._labelfree_moved_token = ""
+        self._last_seg_method = self._seg_method()
+        if hand_over and self._last_seg_method in LABELFREE_METHODS:
+            self._hand_segmentation_channel_to_rows()
 
     def _build_cellpose_diameter_row(self, sec: QWidget) -> None:
         """The cell diameter, shared by both Cellpose methods.
@@ -371,7 +465,12 @@ class AnalyzeSegParamsMixin:
         # Segmentation-channel field doesn't apply there (it's taken at runtime).
         phase_locked = method == "cellpose_labelfree"
         if hasattr(self, "_nuclear_row_widget"):
-            self._nuclear_row_widget.setVisible(not phase_locked)
+            # ``_row`` returns the right-hand cell; the words "Segmentation channel" are in its parent, so the parent
+            # row is what is hidden. Hiding the cell alone left that label standing under the method selector with
+            # no field beside it.
+            cell = self._nuclear_row_widget
+            row = cell.parentWidget()
+            (row if row is not None and row.objectName() == "AnalyzeFormRow" else cell).setVisible(not phase_locked)
         errors = self._segmentation_validation_errors(channels=not self._auto_detect_on())
         if errors:
             self._set_status(self._segmentation_hint_lbl, "  ".join(errors), error=True)

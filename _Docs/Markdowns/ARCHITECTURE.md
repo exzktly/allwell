@@ -11596,7 +11596,21 @@ noted:
   channel is designated by a per-row checkbox (`analyze.tab._phase_token()`,
   mutually exclusive, not also smFISH) → `--phase_token`; `main()` remaps the
   phase token onto the nuclear slot (only for this method) so all per-FOV grouping
-  is reused. Phase is a first-class role (`image_identity.Role.PHASE`, suffix
+  is reused. **That remap overwrites the segmentation channel**, whose field the
+  form hides for label-free, and a folder scan never lists the segmentation
+  channel among the fluorescent channels — so a channel that was only there was
+  dropped from the run, never segmented or measured. Switching the method to
+  label-free therefore moves it into the fluorescent-channel rows, and switching
+  back removes that row again unless it was marked smFISH or Phase since
+  (`seg_params._watch_labelfree_handover`); a folder scanned while label-free is
+  already chosen is handed over at once (`_settle_labelfree_handover(hand_over=True)`,
+  from `_autofill_from_input_scan`). A queued job or saved run being loaded is not:
+  the channels it records are the ones it ran with, and the edit-a-job round trip
+  reproduces them exactly. Only a real channel moves — one a scan or a loaded run
+  named, or one typed (`_seg_channel_known`) — never the field's starting text,
+  which no input is known to carry. The hidden field is hidden with its label
+  (the parent `AnalyzeFormRow`), not only its cell
+  (`tests/test_labelfree_keeps_the_segmentation_channel.py`). Phase is a first-class role (`image_identity.Role.PHASE`, suffix
   `_phase`) recorded as `phase_token` in `pipeline_info.json`. Its one exposed
   parameter is the **cell diameter**: `build_pipeline_args` sends
   `--cellpose_diameter` for both Cellpose methods when it is above 0, and

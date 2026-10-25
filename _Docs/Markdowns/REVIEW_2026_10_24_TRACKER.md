@@ -29,9 +29,9 @@ is deleted by the PR that closes its last row.
 | P5 | 1045 | Low | MEASURE_VERSION not bumped when the count's normalisation changed | done | bumped to 6 with P1 |
 | P6 | 1047 | Low | a previous run's segmenter-input sheet left beside newer results | open | `nanowell_inspect.write_sheet` |
 | R1 | 1052 | High | a nanowell well resent alone cannot be re-anchored from the plate | open | `services/remote_finished_wells`, `pipeline_runner` |
-| R2 | 1052 | Med | field-mode "finished here" ignores fields/timepoints the input gained | open | `remote_finished_wells.py:74-77` |
+| R2 | 1052 | Med | field-mode "finished here" ignores fields/timepoints the input gained | done | `remote_finished_wells._field_coverage`; `test_a_remote_rerun_skips_finished_wells`. Images replaced under the same names are still not seen (nor by a local run) |
 | R3 | 1052 | Med | host wells computed with `--no_auto_threshold` miss every later local reuse | done | `util/settings_digest.settings_key_for`; `test_a_half_finished_well_resumes_across_builds` |
-| R4 | 1052 | Low-Med | an `--only_wells` subset run gates the plate from the subset | open | `pipeline_runner._regate_locally` |
+| R4 | 1052 | Low-Med | an `--only_wells` subset run gates the plate from the subset | done | `pipeline_runner._regate_locally`; `test_a_remote_rerun_skips_finished_wells` |
 | R5 | 1051 | Low | `.AppleDouble`, `__MACOSX/`, `Icon\r` not treated as OS debris | done | `datasets/core/member_names.is_os_junk_member` |
 | R6 | 1051 | Low | `.DS_Store` still makes a destination "already has unrelated files" | done | `datasets/core/dataset_paths.destination_has_content`; `test_concatenate_raw` |
 | C1 | 1049 | High | the Cellpose env's pip resolves numpy 2, breaking imagecodecs | done | `requirements-remote-cellpose.txt` pins numpy 1.24, opencv < 4.11 (pip dry-run resolves numpy-1.24.4 opencv-4.10.0.84); probe covers both; `test_bootstrap_cellpose_env` |

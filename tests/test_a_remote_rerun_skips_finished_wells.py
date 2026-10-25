@@ -441,3 +441,32 @@ def test_a_batched_run_s_blank_measured_against_its_run_directory_copy_is_finish
     proc._run_batches()
     skip_lines = [ln for ln in logged if "skipping upload + compute" in ln]
     assert len(skip_lines) == 1 and "A01, H12" in skip_lines[0], logged[:6]
+
+
+def test_a_field_mode_well_whose_archive_gained_a_field_or_timepoint_is_sent(tmp_path):
+    """Reported by review: the field-mode check read the settings and the CSV, never the input, so a well whose
+    archive gained a field or a timepoint since (a re-export, a Concatenate in place) was reported up to date and
+    the new images were never analysed."""
+    inp, out = _plate(tmp_path)
+    for well in ("A01", "B02"):
+        _record(out, well, _opts())
+    with zipfile.ZipFile(inp / "A01.zip", "a") as zf:
+        for ch in ("DAPI", "GFP"):
+            zf.writestr(f"e_{ch}_A01_1_T02.tif", b"x")
+    sent, _lines = _run(inp, out, _opts())
+    assert sent == ["A01"]
+
+
+def test_an_only_wells_subset_leaves_the_plate_s_gating_to_this_computer(tmp_path, monkeypatch):
+    """Reported by review: staging narrows the finished wells to the named ones, so a subset none of whose wells
+    was finished sent no --no_auto_threshold, and the host gated the plate from the subset."""
+    import services.pipeline_runner as pr
+
+    regated: list = []
+    monkeypatch.setattr(pr, "run_local_auto_threshold", lambda out, argv, log: regated.append(list(argv)))
+    inp, out = _plate(tmp_path)
+    for well in ("A01", "B02"):
+        (out / f"measurements_{well}.csv").unlink()
+    argv: list = []
+    sent, _lines = _run(inp, out, _opts(only_wells=["A01"]), argv_sent=argv)
+    assert sent == ["A01"] and "--no_auto_threshold" in argv[-1] and len(regated) == 1

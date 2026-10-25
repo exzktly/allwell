@@ -113,10 +113,10 @@ class AxesSpec:
                       *, x_keys: tuple[str, ...] | None = None) -> dict:
         """*base* with this run's limits merged in, as a **copy**.
 
-        Never in place. ``_ensure_export_style_prefs`` hands back the
-        application's own live preferences dictionary — the one the Export
-        Style sidebar reads and writes — so merging into it would leave a batch
-        run's numbers sitting in the sidebar afterwards, applied to every plot
+        Never in place. *base* is built from the source plot's Properties
+        style (``plot_style.plot_style_of``), whose nested values are that
+        plot's live ones, so merging into it could leave a batch run's numbers
+        sitting in the plot's Properties panel afterwards, applied to the plot
         the user drew next. The nested ``axis_buckets`` is deep-copied for the
         same reason: a shallow copy shares it.
 

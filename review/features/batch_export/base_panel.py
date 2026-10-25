@@ -81,6 +81,7 @@ from review.core.channel_state_controller import (
 from core.process import write_owner
 from util.state_dir import gui_temp_dir
 from util.well_token import canonical_well_label
+from review.core.plot_style import plot_style_of
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -389,12 +390,16 @@ class BatchExportPanel(QWidget):
 
         _ds = ctx.state.dataset
         default_out = str(_ds.data_dir) if _ds.data_dir else ""
-        export_prefs = ctx.state.export_prefs.style_prefs or {}
+        # The source plot's own Properties style: what a batch figure of that plot is drawn with.
+        export_prefs = plot_style_of(ctx, self._mode_key())
         default_fmt = str(export_prefs.get("format", "png")).lower()
         if default_fmt not in {"png", "svg", "eps", "pdf"}:
             default_fmt = "png"
         default_profile = str(export_prefs.get("export_profile", "Custom"))
 
+        #: The Style Preset chosen here, as the preferences it overrides: laid over the source plot's style for this
+        #: panel's figures only, never written into any plot's settings.
+        self._profile_overrides: dict = {}
         self._out_dir_value: str = default_out
         self._fmt_value: str = default_fmt
         self._export_profile_value: str = default_profile
@@ -1129,20 +1134,26 @@ class BatchExportPanel(QWidget):
         return names or ["Custom"]
 
     def _apply_export_profile_to_prefs(self, profile_name: str) -> None:
+        """Take the Style Preset *profile_name* for this panel's figures.
+
+        Kept on the panel (``_profile_overrides``) and laid over the source plot's style when a figure is drawn
+        (:meth:`_batch_style`). It used to be written into the app-wide preferences, which put a batch preset —
+        Helvetica 22 at every size — on every plot in the app, and kept it there after the preset was set back."""
         from review.features.export.style import EXPORT_PROFILES
-        from review.core.plot_style import _ensure_export_style_prefs
 
         name = str(profile_name or "Custom")
-        prefs = _ensure_export_style_prefs(self._ctx)
         custom_profiles = _ensure_custom_export_profiles(self._ctx)
         overrides = EXPORT_PROFILES.get(name) or custom_profiles.get(name) or {}
-        prefs["export_profile"] = name
-        for key, value in overrides.items():
-            prefs[key] = value
-        fmt = str(prefs.get("format", self._fmt_cb.currentText() or "png")).lower()
+        self._profile_overrides = {**overrides, "export_profile": name}
+        fmt = str(self._batch_style().get("format", self._fmt_cb.currentText() or "png")).lower()
         if fmt in {"png", "svg", "eps", "pdf"}:
             self._fmt_cb.setCurrentText(fmt)
             self._on_fmt_change(fmt)
+
+    def _batch_style(self) -> dict:
+        """The style this panel's figures are drawn with: the source plot's Properties style, and the Style Preset
+        chosen here over it."""
+        return {**plot_style_of(self._ctx, self._mode_key()), **self._profile_overrides}
 
     def _on_export_profile_selected(self, text: str) -> None:
         self._export_profile_value = text
@@ -2992,15 +3003,13 @@ class BatchExportPanel(QWidget):
         name. ``tests/test_batch_export_destinations.py`` holds every call site
         to passing both.
         """
-        from review.core.plot_style import _ensure_export_style_prefs
-
         spec = self._axes_spec()
         # Pinned on the axes; the limits ride in the preferences below. Two
         # mechanisms because ``apply_export_style_prefs`` honours two: it reads
         # ``_aw_force_*log`` before the shared ``x_log``, and it reads limits
         # only from what it is handed. See ``_panels``.
         pin_scales(self._axes_pairs(fig, spec), spec, x_keys=self._X_PANELS)
-        prefs = spec.prefs_overlay(_ensure_export_style_prefs(self._ctx),
+        prefs = spec.prefs_overlay(self._batch_style(),
                                    spec.drawn_keys(), x_keys=self._X_PANELS)
 
         spool = self._spool

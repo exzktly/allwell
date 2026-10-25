@@ -1,4 +1,4 @@
-"""Mark styling is per figure; typography and friends stay shared.
+"""Every Properties preference is per figure — marks first, then everything.
 
 The Properties sidebar used to hold every style pref in one app-wide dict, so
 restyling the Scatter tab's Per-well aggregate restyled its Per-cell sub-tab —
@@ -6,10 +6,14 @@ and the line and bar plots — with it. Mark size in particular is a property of
 what a plot draws, not of the publication: five aggregate points want an 8pt
 marker, a 50,000-cell cloud wants 2pt.
 
-``plot_style.FIGURE_SCOPED_PREF_KEYS`` is now the axis keys plus the mark keys.
-These pin the resulting three-way behaviour: scoped writes, shared typography,
-and the global fallback that keeps a pre-split mark style applying until a
-figure is given its own.
+Then the request: "everywhere in the app, changes made to the Properties bar
+should affect only the plot for which it is edited." Typography, grid, legend,
+ticks, layout, the export profile and format had stayed app-wide "so one setting
+gives a whole figure set a consistent look", which is exactly what made a font
+raised on one plot rise on every plot. ``plot_style.FIGURE_SCOPED_PREF_KEYS``
+now holds every key. These pin scoped writes for every family, and the app-wide
+fallback that keeps a style saved before the change applying until a figure is
+given its own.
 """
 from __future__ import annotations
 
@@ -40,9 +44,9 @@ def _ctx(cells_fig, agg_fig, *, style_prefs=None):
     )
 
 
-def test_the_two_scoped_families_are_disjoint_and_combined():
+def test_every_preference_is_scoped_to_its_figure():
     assert not (AXIS_SCOPED_PREF_KEYS & MARK_SCOPED_PREF_KEYS)
-    assert FIGURE_SCOPED_PREF_KEYS == AXIS_SCOPED_PREF_KEYS | MARK_SCOPED_PREF_KEYS
+    assert FIGURE_SCOPED_PREF_KEYS >= set(DEFAULT_EXPORT_STYLE_PREFS) | AXIS_SCOPED_PREF_KEYS | MARK_SCOPED_PREF_KEYS
 
 
 def test_every_mark_key_has_a_neutral_default():
@@ -76,16 +80,31 @@ def test_each_figure_keeps_its_own_marker_shape():
     assert figure_prefs(ctx, cells)["marker_style"] == "."
 
 
-def test_typography_stays_shared_across_figures():
-    """Deliberately NOT per-figure: one setting styles a whole figure set for a
-    paper. Only the axis view and the marks are scoped."""
+def test_typography_grid_legend_ticks_layout_and_export_settings_stay_on_their_figure():
+    """The request: an edit in the Properties bar affects only the plot it was made on — the families that used to
+    be app-wide included."""
     cells, agg = _Fig(), _Fig()
     ctx = _ctx(cells, agg)
+    edits = {"axis_label_size": 24, "tick_label_size": 7, "title_size": 30, "legend_font_size": 5,
+             "legend_show": False, "grid_show": False, "tick_direction": "in", "layout_tight": True,
+             "x_tick_angle": 45, "format": "svg", "export_profile": "Helvetica 22"}
+    for key, value in edits.items():
+        assert DEFAULT_EXPORT_STYLE_PREFS[key] != value, key          # so an unscoped write would show
+        figure_prefs(ctx, agg)[key] = value
 
-    figure_prefs(ctx, agg)["axis_label_size"] = 24
+    for key, value in edits.items():
+        assert figure_prefs(ctx, agg)[key] == value, key
+        assert figure_prefs(ctx, cells)[key] == DEFAULT_EXPORT_STYLE_PREFS[key], key
+    assert ctx.state.export_prefs.style_prefs is None or all(
+        ctx.state.export_prefs.style_prefs.get(k) == DEFAULT_EXPORT_STYLE_PREFS[k] for k in edits)
 
-    assert figure_prefs(ctx, cells)["axis_label_size"] == 24
-    assert figure_prefs(ctx, agg)["axis_label_size"] == 24
+
+def test_a_style_saved_before_preferences_became_per_plot_still_applies_until_a_plot_is_restyled():
+    cells, agg = _Fig(), _Fig()
+    ctx = _ctx(cells, agg, style_prefs={**DEFAULT_EXPORT_STYLE_PREFS, "axis_label_size": 9})
+    assert figure_prefs(ctx, cells)["axis_label_size"] == 9 and figure_prefs(ctx, agg)["axis_label_size"] == 9
+    figure_prefs(ctx, agg)["axis_label_size"] = 14
+    assert figure_prefs(ctx, agg)["axis_label_size"] == 14 and figure_prefs(ctx, cells)["axis_label_size"] == 9
 
 
 def test_axis_limits_stay_scoped_and_never_read_the_global():

@@ -104,7 +104,7 @@ def test_position_s_two_panels_share_the_ring_axis(page, qtbot):  # noqa: F811
 
 
 def test_the_extremes_captions_keep_their_size_through_the_properties_pass(page, qtbot):  # noqa: F811
-    """The row labels, the fold changes and the metrics are figure text at the montage's own sizes: drawn as the
+    """The row labels, the fold changes and the metrics are free text at the montage's own sizes: drawn as the
     panels' axis labels at the Properties sizes, they overprinted the next row's crops."""
     from review.core import plot_style
 
@@ -113,7 +113,8 @@ def test_the_extremes_captions_keep_their_size_through_the_properties_pass(page,
     plot_style._ensure_export_style_prefs(page)["axis_label_size"] = 30
     nwc.redraw(page)
     fig = page.widgets.get("_nw_fig")
-    sizes = {t.get_gid(): t.get_fontsize() for t in fig.texts if str(t.get_gid()).startswith("nw-extremes-")}
+    every = list(fig.texts) + [t for ax in fig.axes for t in ax.texts]
+    sizes = {t.get_gid(): t.get_fontsize() for t in every if str(t.get_gid()).startswith("nw-extremes-")}
     assert (sizes["nw-extremes-row"], sizes["nw-extremes-value"]) == (renderer._EXT_LABEL_PT, renderer._EXT_VALUE_PT)
 
 

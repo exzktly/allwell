@@ -3433,12 +3433,19 @@ row, holding five actions:
   the powers — the Response Curves dose axis, which ticks the concentrations
   you gave — because a subdivision belongs to the power beneath it, so under
   ticks that are something else the marks fall unevenly between one label and
-  the next and say nothing about either. Axis **limits**, **log-scale** and the
-  **line / marker styling** are scoped to the one plot — the Scatter tab's Cells and
-  Wells views are separate plots here, so sizing markers for five
-  aggregate points won't blow up a fifty-thousand-cell cloud. **Typography,
-  grid, legend and ticks stay shared** across tabs, so one setting still gives
-  a whole figure set a consistent look. On the Bar Plots tab (a Value /
+  the next and say nothing about either. **Every setting applies only to the
+  plot you edit it on** — sizes, fonts, grid, legend, ticks, limits, log scale,
+  line and marker styling, layout and the export profile. Raising the axis-label
+  size on Line Graphs leaves Bar Plots as it was; the Scatter tab's Cells and
+  Wells views are separate plots here, so sizing markers for five aggregate
+  points won't blow up a fifty-thousand-cell cloud; and each Nanowells view
+  (Distribution, Array, Trajectories, Position, Extremes) keeps its own
+  settings, so a range typed on the Distribution never reaches the Array map.
+  A plot you have never styled keeps the look saved by an earlier version of
+  All-Well, until you change it there. A **Batch Export** run draws each figure
+  with the style of the plot it comes from, and the **Style Preset** chosen in
+  the Batch Export panel applies to that run's figures only, never to the plots
+  on screen. On the Bar Plots tab (a Value /
   Fraction / Events panel stack) axis limits are stored **per panel**, so a
   limit set on the Fraction or Events panel sticks instead of that panel
   auto-scaling. **Auto scale**, in the same Limits & Scale section, gives the
@@ -5103,8 +5110,9 @@ use them.
 - **Well**, **Timepoint** and **Largest & smallest** (on *Extremes*) — the well whose nanowells are ranked, the
   timepoint they are ranked at (the well's latest by default), and how many each block shows (1 to 12, 5 by
   default). **Timepoints** chooses which of the well's timepoints the montage shows (all by default),
-  **Cells** draws the cells the run counted on every crop, and the box after it chooses the image the crops are
-  cut from — *Phase* or a fluorescence channel (both described under *Site detail*).
+  **Cells** draws the cells the run counted on every crop (see *Site detail*), **Metrics** shows or hides the
+  numbers written on each crop (its fold change and its line of measurements), and the box after it chooses the
+  image the crops are cut from — *Phase* or a fluorescence channel (see *Site detail*).
 
 **Reading the figure**
 
@@ -5153,13 +5161,14 @@ use them.
   biggest responders and the non-responders looked like over time. Every metric is ranked by its fold change
   against the Baseline — Cell count by the count fold change, Confluence by the confluence fold change, and so
   on; growth rate and occupancy have no fold change over time and are greyed. Each row is labelled with its
-  rank, address and the fold change it was ranked by, each crop with the fold change at its own timepoint and the
-  nanowell's measurements there (cell count, confluence, and the channel's brightness and site signal), and the
-  ranking timepoint's column is outlined. The montage fills the figure: the Largest and Smallest blocks sit side
-  by side whenever that gives bigger crops, and **Timepoints** (beside *Largest & smallest*) chooses which
-  timepoints are shown — fewer give bigger crops; the ranking timepoint is always shown. When the crops would be
-  too small to read with their measurements beside them, the measurements are left out and the caption says so;
-  the pop-out writes them under each of its panels. All crops share one brightness scale, so a nanowell that filled
+  rank, address and the fold change it was ranked by, and the ranking timepoint's column is outlined. Each crop
+  carries its own numbers inside it, so they take no room from the crops: the fold change at that timepoint in its
+  top-left corner, and along its foot as many of the nanowell's measurements there as fit one line — cell count,
+  confluence, then the channel's site signal and brightness. The pop-out writes all of them under each panel. The
+  montage fills the figure: the Largest and Smallest blocks sit side by side whenever that gives bigger crops, and
+  **Timepoints** (beside *Largest & smallest*) chooses which timepoints are shown — fewer give bigger crops; the
+  ranking timepoint is always shown. Crops too small to hold a line of measurements show the fold change only, and
+  the caption says so. All crops share one brightness scale, so a nanowell that filled
   with cells reads brighter than one that emptied. Nanowells without a fold change at the ranking timepoint
   (occluded, seeded later, and so on) are not ranked and are counted by reason in the caption; a well with
   fewer nanowells than both blocks need splits them between the two and never shows one twice. Click any crop

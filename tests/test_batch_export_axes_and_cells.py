@@ -35,6 +35,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 from matplotlib.figure import Figure  # noqa: E402
+from review.core.export_prefs_state import ExportPrefsState  # noqa: E402
 
 from review.features.batch_export._panels import (  # noqa: E402
     AxesSpec, Panel, PanelAxis, figure_height, panel_axes, pin_scales,
@@ -570,15 +571,20 @@ class _SaveStub:
     _axes_pairs = BatchExportPanel._axes_pairs
     _axes_spec = BatchExportPanel._axes_spec
     _capture_group_params = BatchExportPanel._capture_group_params
+    _batch_style = BatchExportPanel._batch_style
     _PANELS = (Panel("plot", "Plot"),)
     _X_PANELS = None
+
+    def _mode_key(self):
+        return "line"
 
     def __init__(self, spec):
         self._spool = None
         self._run_axes = spec
+        self._profile_overrides = {}
         self._ctx = SimpleNamespace(
             state=SimpleNamespace(
-                export_prefs=SimpleNamespace(style_prefs={}),
+                export_prefs=ExportPrefsState(),
                 channel=SimpleNamespace(active_val_col="gfp_mean_intensity"),
             ),
         )

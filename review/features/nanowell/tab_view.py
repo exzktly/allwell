@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QSplitter, QToolButton,
@@ -105,6 +105,10 @@ _BASELINE_TIP = ("The timepoint a fold change and the occupancy class are measur
                  "First measurable: each nanowell's first timepoint at which the measurement exists.")
 _EXTREMES_TPS_TIP = ("The timepoints the montage shows as columns. Fewer columns give larger crops; the ranking "
                      "timepoint is always shown.")
+#: How long the page's canvas must hold one size before the Array view is re-fitted to it, in milliseconds.
+_REFIT_MS = 60
+_CROP_METRICS_TIP = ("Write each crop's numbers on it: its fold change in the corner and a line of its metrics along "
+                     "its foot. Off leaves the crops bare; the row labels still give each nanowell's rank and value.")
 _CROP_CELLS_TIP = ("Draw a dot at the centre of each cell the run counted on every crop — the strip, the pop-out and "
                    "the Extremes montage — as the Array view's Cells layer does. The run keeps no cell outlines, so "
                    "a dot is all there is to draw.")
@@ -232,8 +236,13 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     extremes_cells = _cells_box(ctx, "_nw_extremes_cells_box")
     extremes_image = _image_channel_combo(ctx, "_nw_extremes_image_channel_cb")
     extremes_tps = _extremes_timepoints_button(ctx, band)
+    extremes_numbers = QCheckBox("Metrics")
+    extremes_numbers.setToolTip(_CROP_METRICS_TIP)
+    extremes_numbers.setChecked(st.crop_metrics)
+    extremes_numbers.toggled.connect(lambda on: nwc.set_crop_metrics(ctx, on))
+    reg.register("_nw_extremes_metrics_box", extremes_numbers)
     grp_extremes = band.add_scope("Largest & smallest", extremes_spin, extremes_tps.button, extremes_cells,
-                                  extremes_image)
+                                  extremes_numbers, extremes_image)
 
     responding_edit = QLineEdit()
     responding_edit.setPlaceholderText("not set")
@@ -272,6 +281,15 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     card.canvas.mpl_connect("button_release_event", lambda event: nwc.on_release(ctx, event))
     card.canvas.mpl_connect("motion_notify_event", lambda event: nwc.on_motion(ctx, event))
     card.canvas.mpl_connect("scroll_event", lambda event: nwc.on_scroll(ctx, event))
+    # The Array view fits the region it shows to its axes' shape when it draws, so square pixels and round nanowells
+    # hold only at that size; a resize (the window, the site detail opening beside it, the band re-flowing) re-fits
+    # it, once the resizing has settled.
+    refit = QTimer(card)
+    refit.setSingleShot(True)
+    refit.setInterval(_REFIT_MS)
+    refit.timeout.connect(lambda: nwc.on_canvas_resized(ctx))
+    card.canvas.mpl_connect("resize_event", lambda _event: refit.start())
+    reg.register("_nw_refit_timer", refit)
     computing = QLabel("Computing…", card)
     computing.setObjectName("NanowellComputing")
     computing.setAlignment(Qt.AlignCenter)
@@ -316,7 +334,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
     controls = (metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box,
-                responding_edit, extremes_spin, extremes_cells, *start.signalling, *array_controls.signalling)
+                responding_edit, extremes_spin, extremes_cells, extremes_numbers, *start.signalling,
+                *array_controls.signalling)
 
     def refresh_controls() -> None:
         channel = nwc.page_channel(ctx)
@@ -379,6 +398,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_well.setVisible(view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS)
             extremes_spin.setValue(st.extremes_n)
             extremes_cells.setChecked(st.crop_cells)
+            extremes_numbers.setChecked(st.crop_metrics)
             extremes_tps.refresh()
             strip_cells = reg.get_or_none("_nw_strip_cells_box")
             if strip_cells is not None:

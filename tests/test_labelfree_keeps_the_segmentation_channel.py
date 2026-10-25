@@ -173,7 +173,10 @@ def _gap_above_and_below(tab) -> tuple[int, int]:
     area and the row after it — laid out, as drawn."""
     from PySide6.QtWidgets import QApplication
 
-    QApplication.processEvents()
+    # Settled, as drawn (see the nanowell test below): two turns for the stack
+    # to refit to its page and for the section to lay out around it.
+    for _ in range(3):
+        QApplication.processEvents()
     stack = tab._seg_param_stack
     lay = stack.parentWidget().layout()
     i = lay.indexOf(stack)
@@ -202,15 +205,17 @@ def test_label_free_leaves_no_gap_below_add_channel(styled_tab):
     assert stack.height() == needed, f"the area is {stack.height()} px for a {needed} px page"
 
 
-def test_nanowell_mode_s_rows_are_not_clipped(styled_tab):
+def test_nanowell_mode_s_rows_are_not_clipped(styled_tab, qtbot):
     """The label-free page grows in nanowell mode, and its wrapped heading needs
     more height at the sidebar's width than its plain size hint: the stack must
     give it that, not cut it off."""
-    from PySide6.QtWidgets import QApplication
-
     tab = styled_tab
     tab._nanowell_cb.setChecked(True)
-    QApplication.processEvents()
+    # Read once the layout has settled, which is what is drawn: the stack refits
+    # to its page on the page's own layout request, a turn after the rows are
+    # added. Read after a single turn, it measured 193 px of a 209 px page under
+    # CI's wider DejaVu Sans — a frame that is never painted.
+    qtbot.wait(100)
     stack = tab._seg_param_stack
     needed = stack.currentWidget().heightForWidth(stack.width())
     assert stack.height() >= needed, f"the page needs {needed} px and was given {stack.height()}"

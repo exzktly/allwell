@@ -100,7 +100,10 @@ def _log_steps(well_label: str, done: int, total: int) -> None:
     (``services.pipeline_runner``: ``_RE_WELL_FOV_TOTAL`` / ``_RE_WELL_FOV_DONE``). A nanowell well is processed a
     timepoint at a time, never a field at a time, so without them it printed nothing the dial could follow."""
     if done == 0:
-        log.info("Well %s — %d step(s): each timepoint located, then measured", well_label, total)
+        # Two steps a timepoint, so say how many timepoints that is: "4 steps" read as four timepoints on a plate
+        # with two. The count stays first, where the run reader's _RE_WELL_FOV_TOTAL looks for it.
+        log.info("Well %s — %d step(s): its %d timepoint(s), each located, then measured", well_label, total,
+                 total // 2)
     else:
         log.info("Well %s — step %d/%d done", well_label, done, total)
 

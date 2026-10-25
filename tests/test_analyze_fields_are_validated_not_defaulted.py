@@ -32,9 +32,9 @@ from analyze.tab import _numeric_option_errors            # noqa: E402
 
 @pytest.fixture
 def tab(qtbot, monkeypatch):
-    import analyze.form
+    import analyze.run_footer
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     from analyze.tab import AnalyzeTab
 
     t = AnalyzeTab()
@@ -296,7 +296,7 @@ def test_a_blank_input_queues_for_chaining_and_is_refused_if_never_filled(
     than handing the pipeline an input of ``.``.
     """
     tab._input_edit.setText("")
-    tab._flatfield_cb.setCurrentText("gaussian")    # the default needs a blank well
+    tab._flatfield_cb.setValue("gaussian")    # the default needs a blank well
     jobs = _queued(tab)
     assert len(jobs) == 1, f"a blank job could not be queued: {refusals!r}"
     assert not refusals

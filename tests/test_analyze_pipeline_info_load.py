@@ -74,9 +74,9 @@ def test_apply_pipeline_info_populates_form(qtbot, tmp_path):
     assert tab._seg_method_cb.currentData() == "cellpose"
     assert tab._fluor_tokens_list() == ["GFP", "RFP"]
     assert tab._smfish_tokens_list() == ["RFP"]
-    assert tab._background_cb.currentText() == "top_hat"
-    assert tab._flatfield_cb.currentText() == "gaussian"
-    assert tab._cellpose_model_cb.currentText() == "cyto2"
+    assert tab._background_cb.value() == "top_hat"
+    assert tab._flatfield_cb.value() == "gaussian"
+    assert tab._cellpose_model_cb.value() == "cyto2"
     assert tab._csv_prefix_edit.text() == "meas2"
     assert tab._scratch_edit.text() == str(tmp_path / "scratch")
     assert tab._scratch_user_set is True
@@ -108,7 +108,7 @@ def test_apply_pipeline_info_v1_fallback_no_exec_options(qtbot, tmp_path):
 
     assert tab._nuclear_token_edit.text() == "NIR"
     assert tab._schema_picker.separator() == "-"
-    assert tab._background_cb.currentText() == "sliding_disk"
+    assert tab._background_cb.value() == "sliding_disk"
     assert tab._seg_method_cb.currentData() == "stardist_nuclei"
     assert tab._fluor_tokens_list() == ["GFP"]
 

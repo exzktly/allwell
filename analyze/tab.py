@@ -24,7 +24,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QFileDialog, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+    QCheckBox, QFileDialog, QLineEdit, QMessageBox, QPushButton,
     QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
@@ -38,6 +38,7 @@ from services.pipeline_runner import (
 )
 from ui import theme
 from widgets.flow_layout import FlowLayout
+from widgets.footer_scroll_area import FooterScrollArea
 from core.safe import swallowed
 from analyze.bg_map import AnalyzeBackgroundMapMixin
 from analyze.domain.input import AnalyzeInputMixin
@@ -158,17 +159,17 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         outer.addWidget(splitter, 1)
 
         # Left — scrollable form
-        scroll = QScrollArea()
+        scroll = FooterScrollArea()  # the run footer pins under it (analyze/run_footer.py)
         scroll.setWidgetResizable(True)
         # Fixed, not just a minimum: theme.Metrics.rail_w (review/core/app_shell_view.py)
         # is the one width shared by Review's rail, Datasets' sidebar, and this
-        # panel, so switching modes never visibly resizes the window. It was
-        # widened here twice before landing at its current value (280→350→438)
-        # because the schema string and per-channel rows clipped below it — that
-        # history is *why* this is the value the other two modes' panels match,
-        # not the other way around; don't narrow it without re-checking those
-        # rows. A QSplitter child still respects setFixedWidth's equal min/max,
-        # so the handle can't be dragged past it either.
+        # panel, so switching modes never visibly resizes the window. The form
+        # is laid out to fit it — the narrow label column and the capped combo
+        # widths in analyze/form_chrome.py are that fit, and
+        # tests/test_analyze_narrow_sidebar_fit.py holds it with every section
+        # open — so a change to either side has to re-check the other. A
+        # QSplitter child still respects setFixedWidth's equal min/max, so the
+        # handle can't be dragged past it either.
         scroll.setFixedWidth(theme.Metrics.rail_w)
         form_host = QWidget()
         self._form_layout = QVBoxLayout(form_host)
@@ -180,6 +181,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         splitter.setStretchFactor(0, 0)
 
         self._build_form(form_host)
+        self._mount_run_footer(scroll)
 
         # Right — log panel
         right = QWidget()
@@ -237,7 +239,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
             is_remote and self._cleanup_remote_cb.isChecked())
 
     def _open_manage_remotes(self) -> None:
-        """Open the Manage Remotes dialog and rebuild "Run on:" from disk after.
+        """Open the Manage Remotes dialog and rebuild "Run on" from disk after.
 
         The dialog is deleted once it closes. Left alive it stayed a child of
         this tab, holding its ``remotes_changed`` connection and every child
@@ -255,7 +257,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
             dlg.deleteLater()
 
     def _reload_remotes_combo(self) -> None:
-        """Refresh the "Run on:" combobox from remotes.toml.
+        """Refresh the "Run on" combobox from remotes.toml.
 
         Called after every add / edit / delete in the Manage Remotes dialog —
         and after a *failed* bootstrap, which emits ``remotes_changed`` too.
@@ -477,7 +479,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
             return
         raw_str = self._input_edit.text().strip()
         if not raw_str:
-            self._output_lbl.setText("—"); self._layout_lbl.setText("")
+            self._output_lbl.setText("—"); self._set_status(self._layout_lbl, "", quiet="")
             self._refresh_folder_banners(None, immediate=immediate)
             return
         # The form's schema goes with it, so the fold-loose readout counts the
@@ -491,7 +493,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         )
         self._output_lbl.setText(
             str(plan.output_dir) if plan.output_dir is not None else "—")
-        self._layout_lbl.setText(plan.message)
+        self._set_status(self._layout_lbl, plan.message, error=not plan.runnable, quiet="")
         # The same planner that names the output folder is what makes a pre-run
         # report possible at all: it resolves that path without writing
         # anything, so what an earlier run left there can be read while the
@@ -526,9 +528,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         self._eta_deadline = None
         self._dashboard.set_eta("ETA")
         self._pipeline_started_at = _time.monotonic()
-        self._run_btn.setEnabled(False)
-        self._stop_btn.setEnabled(True)
-        self._suspend_btn.setEnabled(True)
+        self._show_run_buttons(running=True)
         self.refresh_resume_banner()      # hidden while a run is going
         self.suspend_preflight()          # ...and so is the pre-run report
         self._dashboard.set_status("Running…")
@@ -665,9 +665,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
                         self._surface_run_failure(str(payload))
                 elif kind == "finished":
                     self._running = False
-                    self._run_btn.setEnabled(True)
-                    self._stop_btn.setEnabled(False)
-                    self._suspend_btn.setEnabled(False)
+                    self._show_run_buttons(running=False)
                     self._on_run_settled()
                     self._dashboard.set_status("")
                     self._dashboard.set_eta("")

@@ -236,17 +236,50 @@ class AnalyzeFormChromeMixin:
         if tooltip:
             row.setToolTip(tooltip)
             lbl.setToolTip(tooltip)
-        rl.addWidget(lbl, 0, Qt.AlignTop)
+        # Centred on the field rather than top-aligned: a field is about 28 px
+        # tall and a label line about 16, so a top-aligned label sat ~6 px above
+        # the text of the value it names, on every row. A label that wraps to
+        # two lines is about as tall as the field and lands in the same place.
+        rl.addWidget(lbl, 0, Qt.AlignVCenter)
 
         right = QWidget(row)
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         rr = QHBoxLayout(right)
         rr.setContentsMargins(0, 0, 0, 0)
         rr.setSpacing(4)
-        rl.addWidget(right, 0, Qt.AlignTop)
+        rl.addWidget(right, 0, Qt.AlignVCenter)
 
         parent.layout().addWidget(row)
         return right
+
+    @staticmethod
+    def _set_status(label: QLabel, text: str, *, error: bool = False,
+                    quiet: str = "Muted") -> None:
+        """Show *text* on a form status *label*, styled for what it says.
+
+        An empty label is hidden, not left blank: a blank label still takes its
+        line and margins, which is how the Folders section came to carry two
+        unexplained gaps. A label carrying a problem takes the ``Error`` style
+        and anything else the *quiet* one, because a refusal set in the same
+        muted grey as the help paragraph beside it reads as more help.
+        """
+        label.setText(text)
+        label.setVisible(bool(text))
+        name = "Error" if error else quiet
+        if label.objectName() != name:
+            label.setObjectName(name)
+            label.style().unpolish(label)
+            label.style().polish(label)
+
+    @staticmethod
+    def _field_note(cell: QWidget, text: str) -> QLabel:
+        """A short muted note after a field in a ``_row`` cell — a unit, or what
+        ``0`` means. It sits after the field rather than in the label, so the
+        label stays a name and does not wrap mid-parenthesis at the rail width."""
+        note = QLabel(text, cell)
+        note.setObjectName("Muted")
+        cell.layout().addWidget(note)
+        return note
 
     def _entry(self, parent: QWidget, default: str = "", width: int = 80) -> QLineEdit:
         """Create a QLineEdit, add it to *parent*'s layout, and return it."""

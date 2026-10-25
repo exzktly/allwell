@@ -74,10 +74,10 @@ def _shell_with(analyze):
 
 @pytest.fixture
 def analyze(qtbot, monkeypatch):
-    import analyze.form
+    import analyze.run_footer
     from analyze.tab import AnalyzeTab
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     tab = AnalyzeTab()
     qtbot.addWidget(tab)
     return tab

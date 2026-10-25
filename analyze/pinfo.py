@@ -241,9 +241,14 @@ class AnalyzePipelineInfoMixin:
                 w.setChecked(bool(val))
 
         def combo(attr, val):
+            # The recorded value is the pipeline's id; a ValueCombo shows a
+            # label for it, so it is selected by value, never by its text.
             w = getattr(self, attr, None)
             if w is not None and val:
-                w.setCurrentText(str(val))
+                if hasattr(w, "setValue"):
+                    w.setValue(str(val))
+                else:
+                    w.setCurrentText(str(val))
 
         # Schema first (separator, then the string → the picker syncs its own
         # per-field combos from it).

@@ -15,7 +15,7 @@ find it.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QEvent, QSize, Signal
 from PySide6.QtWidgets import QStackedWidget, QWidget
 
 class NamedPageStack(QStackedWidget):
@@ -109,3 +109,66 @@ class NamedPageStack(QStackedWidget):
     def _emit_name(self, idx: int) -> None:
         if 0 <= idx < len(self._names):
             self.currentNameChanged.emit(self._names[idx])
+
+
+class CurrentPageStack(NamedPageStack):
+    """A :class:`NamedPageStack` that is exactly as tall as its current page.
+
+    A ``QStackedWidget`` is as tall as its tallest page, which is right for tab
+    bodies and wrong for a block of form rows that changes with a choice above
+    it: the short pages sit in the tall page's height with the spare space
+    spread between their rows. Setting the hidden pages' size policy to Ignored
+    is not enough, because ``QStackedLayout``'s height-for-width answer is the
+    maximum over every page whatever its policy — so a page holding a
+    word-wrapped label still reserved the tallest page's height. Every size
+    question is answered by the current page alone instead, and the maximum
+    height is held to the current page's: a parent layout asks the stack's
+    *layout* for its height-for-width, not the stack, so the overrides below
+    alone do not reach it, while the maximum bounds whatever it is told.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.currentChanged.connect(lambda _i: self._fit_to_current())
+
+    def addPage(self, name: str, widget: QWidget) -> int:
+        # A page whose own rows appear or disappear changes height without the
+        # current page changing, so each page reports its layout requests here.
+        widget.installEventFilter(self)
+        return super().addPage(name, widget)
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        if obj is self.currentWidget() and event.type() == QEvent.LayoutRequest:
+            self._fit_to_current()
+        return super().eventFilter(obj, event)
+
+    def _fit_to_current(self) -> None:
+        page = self.currentWidget()
+        if page is None:
+            self.setMaximumHeight(0)
+        elif page.hasHeightForWidth() and self.width() > 0:
+            self.setMaximumHeight(page.heightForWidth(self.width()))
+        else:
+            self.setMaximumHeight(page.sizeHint().height())
+        self.updateGeometry()
+
+    def resizeEvent(self, event) -> None:  # Qt naming
+        super().resizeEvent(event)
+        if event.size().width() != event.oldSize().width():
+            self._fit_to_current()
+
+    def sizeHint(self) -> QSize:  # Qt naming
+        page = self.currentWidget()
+        return page.sizeHint() if page is not None else QSize(0, 0)
+
+    def minimumSizeHint(self) -> QSize:  # Qt naming
+        page = self.currentWidget()
+        return page.minimumSizeHint() if page is not None else QSize(0, 0)
+
+    def hasHeightForWidth(self) -> bool:  # Qt naming
+        page = self.currentWidget()
+        return page is not None and page.hasHeightForWidth()
+
+    def heightForWidth(self, width: int) -> int:  # Qt naming
+        page = self.currentWidget()
+        return page.heightForWidth(width) if page is not None else 0

@@ -5,8 +5,9 @@ dimmed while its job is queued for a node, hidden otherwise. Its tooltip names
 the job and the node's specifications (``analyze.domain.slurm_job``).
 
 It sits at the right end of the run dashboard's header
-(``PlateProgress.add_header_widget``), because that header is what is on screen
-while a run is going — the *Run on:* row in the form, where it used to be, is not.
+(``PlateProgress.add_header_widget``), because that header is what a user watches
+while a run is going; the *Run on* row in the run footer under the form is where
+a target is chosen, not where a running job is followed.
 """
 
 from __future__ import annotations

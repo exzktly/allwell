@@ -506,7 +506,7 @@ def test_analyze_qc_section_present_and_gated():
                  "_qc_min_area_edit", "_qc_max_area_edit", "_qc_min_solidity_edit"):
         assert getattr(tab, attr, None) is not None
     titles = {l.text() for l in tab.findChildren(QLabel)}
-    assert "Quality Control" in titles
+    assert "Image correction & QC" in titles
 
     # Debris bounds hidden until the checkbox is on, then re-hidden when off.
     # (``isHidden`` is the offscreen-robust check — ``isVisible`` is False for
@@ -519,45 +519,56 @@ def test_analyze_qc_section_present_and_gated():
     tab._qc_remove_debris_cb.setChecked(False)
     assert ra.isHidden()
 
-    # Background well gates on the empty_well flat-field / background modes.
-    # Flat-field now defaults to empty_well, so the field starts enabled; drop to
-    # a non-empty_well pair to confirm the gate still disables it, then back.
-    assert tab._background_well_edit.isEnabled() is True
-    tab._flatfield_cb.setCurrentText("none")
-    tab._background_cb.setCurrentText("sliding_disk")
-    assert tab._background_well_edit.isEnabled() is False
-    tab._flatfield_cb.setCurrentText("empty_well")
-    assert tab._background_well_edit.isEnabled() is True
+    # Background well gates on the empty_well flat-field / background modes,
+    # and is hidden — the whole row, label included — rather than greyed while
+    # nothing reads it. A fresh form corrects nothing, so it starts hidden.
+    row = tab._background_well_row
+    assert row.isHidden() and tab._background_well_edit.isEnabled() is False
+    tab._flatfield_cb.setValue("empty_well")
+    assert not row.isHidden() and tab._background_well_edit.isEnabled() is True
+    tab._flatfield_cb.setValue("none")
+    tab._background_cb.setValue("sliding_disk")
+    assert row.isHidden() and tab._background_well_edit.isEnabled() is False
+    tab._background_cb.setValue("empty_well")
+    assert not row.isHidden()
+    tab._flatfield_cb.setValue("empty_well")
 
     # Radius rows show only for the radius-based methods, and the whole row —
     # the "Nuclear radius"/"Fluor radius" *labels* included — hides for the
     # others (regression: hiding only the entry cell stranded the labels).
-    radius_labels = {"Nuclear radius", "Fluor radius"}
-    tab._background_cb.setCurrentText("top_hat")
+    radius_labels = {"Segmentation-channel radius", "Other channels' radius"}
+    tab._background_cb.setValue("top_hat")
     assert all(not r.isHidden() for r in tab._bg_radius_rows)
     for method in ("none", "fov_median", "empty_well"):
-        tab._background_cb.setCurrentText(method)
+        tab._background_cb.setValue(method)
         assert all(r.isHidden() for r in tab._bg_radius_rows), method
         shown = {l.text() for r in tab._bg_radius_rows
                  for l in r.findChildren(QLabel) if not r.isHidden()}
         assert not (radius_labels & shown), f"labels stranded for {method}"
-    tab._background_cb.setCurrentText("sliding_disk")
+    tab._background_cb.setValue("sliding_disk")
     assert all(not r.isHidden() for r in tab._bg_radius_rows)
 
 
-def test_analyze_default_background_is_robust_mesh_end_to_end(qapp):
-    """Regression: the dropdown defaults to robust_mesh (sigma-clipped local
-    background on a coarse grid) and that selection survives all the way to the
-    CLI args — so a default run uses the configured default, not a stale one."""
+def test_analyze_default_corrections_are_none_end_to_end(qapp):
+    """A fresh form corrects nothing, and says so all the way to the CLI args.
+
+    Background is passed explicitly as ``none`` — the CLI's own default is
+    ``sliding_disk``, so an omitted flag would correct the run behind the
+    form's back. Flat-field ``none`` is the CLI default and is not passed. The
+    old default (flat-field from a blank well) could not run until a blank
+    well was named, so a fresh form refused to start."""
     from analyze.tab import AnalyzeTab
     from services.pipeline_service import build_pipeline_args
     tab = AnalyzeTab()
-    assert tab._background_cb.currentText() == "robust_mesh"
+    assert tab._flatfield_cb.value() == "none"
+    assert tab._background_cb.value() == "none"
     opts = tab._collect_run_options()
-    assert opts.get("background") == "robust_mesh"
+    assert (opts.get("flatfield"), opts.get("background")) == ("none", "none")
     a = build_pipeline_args(Path("/x/process_microscopy.py"),
                             Path("/in"), Path("/out"), opts)
-    assert a[a.index("--background") + 1] == "robust_mesh"
+    assert a[a.index("--background") + 1] == "none"
+    assert "--flatfield" not in a
+    assert tab._background_well_validation_error(check_input=False) is None
 
 
 # ── background-well presence (empty_well requires a real, existing well) ──────
@@ -628,12 +639,12 @@ def test_background_well_validation_blocks_run(tmp_path):
     tab._input_edit.setText(str(tmp_path))
 
     # neither uses empty_well → no error
-    tab._flatfield_cb.setCurrentText("none")
-    tab._background_cb.setCurrentText("top_hat")
+    tab._flatfield_cb.setValue("none")
+    tab._background_cb.setValue("top_hat")
     assert tab._background_well_validation_error() is None
 
     # empty_well background, blank well → required
-    tab._background_cb.setCurrentText("empty_well")
+    tab._background_cb.setValue("empty_well")
     tab._background_well_edit.setText("")
     err = tab._background_well_validation_error()
     assert err and "requires a Background well" in err
@@ -648,8 +659,8 @@ def test_background_well_validation_blocks_run(tmp_path):
     assert tab._background_well_validation_error() is None
 
     # empty_well flat-field path triggers it too (message names flat-field)
-    tab._background_cb.setCurrentText("top_hat")
-    tab._flatfield_cb.setCurrentText("empty_well")
+    tab._background_cb.setValue("top_hat")
+    tab._flatfield_cb.setValue("empty_well")
     tab._background_well_edit.setText("")
     err = tab._background_well_validation_error()
     assert err and "flat-field correction" in err

@@ -45,10 +45,10 @@ def test_the_run_button_hands_the_runner_the_incremental_spec(tmp_path, qtbot,
     entirely dead — left it and all 44 of its neighbours green. A source-text
     guard cannot tell a rule that is applied from one that is merely mentioned.
     """
-    import analyze.form
+    import analyze.run_footer
     from services import run_journal as J
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
 
     in_dir, out_dir = tmp_path / "in", tmp_path / "out"
@@ -151,11 +151,11 @@ def test_an_unfinished_run_is_found_when_the_input_was_resolved_to_in(
     import sys
     import time
 
-    import analyze.form
+    import analyze.run_footer
     from services import run_journal as J
     from services.pipeline_runner import PipelineRunner
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "state" / "idx.json")
     monkeypatch.setattr("services.suspend_record.record_path",
                         lambda: tmp_path / "state" / "suspended.json")

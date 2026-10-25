@@ -32,14 +32,14 @@ def _plate(root, channels=("DAPI", "GFP", "mCherry")):
 
 @pytest.fixture
 def tab(qtbot, monkeypatch, tmp_path):
-    import analyze.form
+    import analyze.run_footer
     from analyze.tab import AnalyzeTab
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     t = AnalyzeTab(parent=None)
     qtbot.addWidget(t)
     # The flat-field default needs a named blank well; not what is under test.
-    t._flatfield_cb.setCurrentText("gaussian")
+    t._flatfield_cb.setValue("gaussian")
     # A form whose layout differs from the plate's in every detected value.
     t._schema_picker.setSeparator("-")
     t._nuclear_token_edit.setText("NIR")
@@ -77,7 +77,7 @@ def test_the_checkbox_queues_a_job_whose_input_does_not_exist_yet(
                         staticmethod(lambda _p, title, *_a: refused.append(title)))
     tab._input_edit.setText(str(tmp_path / "not_written_yet"))
     tab._schema_picker.setSchema("well:well")            # invalid
-    tab._flatfield_cb.setCurrentText("empty_well")
+    tab._flatfield_cb.setValue("empty_well")
     tab._background_well_edit.setText("H12")             # absent from no input
 
     tab.set_queue_sink(lambda _spec: None)
@@ -101,7 +101,7 @@ def test_the_run_button_still_asks_the_input_about_the_blank_well(tab, tmp_path,
     monkeypatch.setattr(QMessageBox, "critical",
                         staticmethod(lambda _p, title, *_a: refused.append(title)))
     tab._input_edit.setText(str(_plate(tmp_path / "plate")))
-    tab._flatfield_cb.setCurrentText("empty_well")
+    tab._flatfield_cb.setValue("empty_well")
     tab._background_well_edit.setText("H12")
     assert tab._validate_run_request() is None
     assert refused == ["Background Well Error"]
@@ -313,7 +313,7 @@ def test_the_queue_accepts_an_unwritten_input_without_detection(tab, tmp_path,
     monkeypatch.setattr(QMessageBox, "critical",
                         staticmethod(lambda _p, title, *_a: refused.append(title)))
     tab._input_edit.setText(str(tmp_path / "not_written_yet"))
-    tab._flatfield_cb.setCurrentText("empty_well")
+    tab._flatfield_cb.setValue("empty_well")
     tab._background_well_edit.setText("H12")
     spec = _queue_from_form(tab)
     assert refused == []

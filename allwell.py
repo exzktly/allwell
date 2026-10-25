@@ -1991,7 +1991,7 @@ class AllWellApp(QMainWindow):
         if incremental or forced or only:
             reveal = getattr(self._analyze, "reveal_section", None)
             if callable(reveal):
-                reveal("Compute Options")
+                reveal("Compute options")
         refresh = getattr(self._analyze, "_refresh_output", None)
         if callable(refresh):
             refresh()

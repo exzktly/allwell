@@ -226,9 +226,9 @@ def test_a_refusal_unfolds_the_section_it_names(tab, tmp_path, monkeypatch):
 
     folded_before = {t: b.isVisibleTo(tab)
                      for t, (b, _c) in tab._collapsible_sections.items()}
-    assert folded_before["Compute Options"] is False
+    assert folded_before["Compute options"] is False
     _end_run(tab, message=message)
-    assert tab._collapsible_sections["Compute Options"][0].isVisibleTo(tab) is True
+    assert tab._collapsible_sections["Compute options"][0].isVisibleTo(tab) is True
     # And nothing it did not name: the message points at Compute Options and
     # the scratch field, not at every folded section on the form.
     unfolded = {t for t, (b, _c) in tab._collapsible_sections.items()

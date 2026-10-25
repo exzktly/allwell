@@ -202,7 +202,7 @@ def test_handoff_unfolds_the_section_holding_the_control_it_changed(qtbot, tmp_p
     """Regression guard: everything the handoff sets is either a field whose
     new value looks like the old one at a glance, or -- for Incremental, the
     setting that decides whether the run completes anything -- a checkbox
-    inside "Compute Options", which is collapsed by default. A correctly
+    inside "Compute options", which is collapsed by default. A correctly
     configured completion run was therefore indistinguishable from landing on
     an untouched Analyze tab."""
     from allwell import AllWellApp
@@ -212,7 +212,7 @@ def test_handoff_unfolds_the_section_holding_the_control_it_changed(qtbot, tmp_p
     info = json.loads((tmp_path / "out" / "pipeline_info.json").read_text())
     analyze = AnalyzeTab()
     qtbot.addWidget(analyze)
-    body, caret = analyze._collapsible_sections["Compute Options"]
+    body, caret = analyze._collapsible_sections["Compute options"]
     assert not body.isVisibleTo(analyze), "section starts folded (the premise)"
 
     AllWellApp._open_dataset_in_analyze(

@@ -258,7 +258,7 @@ def capture_review(app) -> None:
     _capture_cell_focus(app, w, rev)
     _capture_focus_distribution(app, w)
 
-    # 14c) The Analyze form's two new Quality Control controls, in both of
+    # 14c) The Analyze form's two new Image correction & QC controls, in both of
     # their states: the measurement on with its threshold row showing, and the
     # measurement off with the row hidden rather than greyed out.
     print("[analyze focus controls]")
@@ -526,7 +526,7 @@ def _capture_focus_distribution(app, w) -> None:
 
 
 def _capture_analyze_focus(app, w, rev) -> None:
-    """The Analyze form's Quality Control section, with the focus controls.
+    """The Analyze form's Image correction & QC section, with the focus controls.
 
     Both states, because the threshold row **hides** with the measurement
     rather than greying out, and a greyed-out orphan field is exactly what
@@ -539,6 +539,7 @@ def _capture_analyze_focus(app, w, rev) -> None:
         return
     # Index 1 is the Analyze pane, as the mode grab above establishes.
     rev._central_pane_stack.setCurrentIndex(1)
+    analyze.reveal_section("Image correction & QC")      # folded by default
     settle(app, 400)
     # The form is one tall scroll area and it opens at the top, so a grab
     # taken here shows the Filename Schema section and none of this. The
@@ -561,12 +562,12 @@ def _capture_analyze_focus(app, w, rev) -> None:
         analyze._focus_min_edit.setText("0.083")
         settle(app, 300)
         grab(w, "93-analyze-focus-on",
-             "Analyze ▸ Quality Control — per-cell focus measured by default, "
+             "Analyze ▸ Image correction & QC — per-cell focus measured by default, "
              "with a cut recorded rather than applied")
         analyze._focus_metric_cb.setChecked(False)
         settle(app, 300)
         grab(w, "93-analyze-focus-off",
-             "Analyze ▸ Quality Control — the measurement off, and the "
+             "Analyze ▸ Image correction & QC — the measurement off, and the "
              "threshold row hidden rather than left as a greyed-out orphan")
     finally:
         analyze._focus_metric_cb.setChecked(was_on)

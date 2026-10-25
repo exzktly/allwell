@@ -1,4 +1,4 @@
-"""The Analyze form's **Quality Control** section: its widgets and their rules.
+"""The Analyze form's **Image correction & QC** section: its widgets and their rules.
 
 One section of the form, gathered into one module, the way
 :mod:`analyze.schema_section` and :mod:`analyze.seg_params` already are. It
@@ -29,18 +29,48 @@ pane reaches for: ``analyze/pinfo.py`` restores them by name,
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QWidget
+from PySide6.QtWidgets import QCheckBox, QLabel, QWidget
 
+from widgets.value_combo import ValueCombo
 from widgets.wrap_checkbox import WrapCheckBox
+
+#: Flat-field choices, ``(pipeline value, label)``. The value is the
+#: ``--flatfield`` argument and what ``pipeline_info.json`` records; the label is
+#: what the form shows. ``none`` leads because it is the default.
+FLATFIELD_OPTIONS = (
+    ("none", "None"),
+    ("empty_well", "From blank well(s)"),
+    ("gaussian", "Self (Gaussian blur)"),
+    ("basic", "Whole plate (BaSiC)"),
+)
+
+#: Background-subtraction choices, ``(pipeline value, label)``, as above.
+BACKGROUND_OPTIONS = (
+    ("none", "None"),
+    ("robust_mesh", "Robust local mesh"),
+    ("sliding_disk", "Rolling disk"),
+    ("top_hat", "Top-hat"),
+    ("fov_median", "Field median"),
+    ("empty_well", "From blank well(s)"),
+    ("fft_bandpass", "FFT band-pass"),
+)
+
+#: What a fresh form runs with: no correction of either kind. Both corrections
+#: change the measured values, and the one that used to lead (flat-field from a
+#: blank well) cannot run at all until a blank well is named — so a fresh form
+#: refused to start over a field in a section the user had never opened. A
+#: correction is now something a user turns on, knowing what it reads.
+DEFAULT_FLATFIELD = "none"
+DEFAULT_BACKGROUND = "none"
 
 
 class AnalyzeQCSectionMixin:
-    """The Quality Control section's builders. Binds to the ``AnalyzeTab``."""
+    """The Image correction & QC section's builders. Binds to the ``AnalyzeTab``."""
 
     def _build_qc_section(self, parent: QWidget) -> None:
         sec = self._section(
-            parent, "Quality Control",
-            collapsible=False, collapsed=False,
+            parent, "Image correction & QC",
+            collapsible=True, collapsed=True,
             info="Optional pre-measurement clean-up, applied per channel at "
                  "quantification time. Two independent correction stages — "
                  "flat-field (divide out uneven illumination) then background "
@@ -51,61 +81,56 @@ class AnalyzeQCSectionMixin:
         )
 
         r = self._row(sec, "Flat-field correction")
-        self._flatfield_cb = QComboBox(r)
-        self._flatfield_cb.addItems(["none", "empty_well", "gaussian", "basic"])
-        # Default to empty_well (illumination from the Background well). The
-        # dropdown doesn't persist, so this build default is what fresh runs use;
-        # reprocessing a dataset still restores its saved pipeline_info value.
-        self._flatfield_cb.setCurrentText("empty_well")
+        self._flatfield_cb = ValueCombo(FLATFIELD_OPTIONS, r)
+        # The dropdown doesn't persist, so this build default is what fresh runs
+        # use; reprocessing a dataset still restores its saved pipeline_info value.
+        self._flatfield_cb.setValue(DEFAULT_FLATFIELD)
         self._flatfield_cb.setToolTip(
             "Illumination (flat-field) correction — divides each channel by a "
             "mean-1 illumination field F (corrected = image / F) to even out "
             "vignetting / uneven excitation, applied before background "
             "subtraction. The field is floored so amplification of dim regions "
             "is capped at 10x.\n"
-            "• none — no illumination correction.\n"
-            "• empty_well — F is the smoothed per-pixel median of the Background "
+            "• None — no illumination correction (the default).\n"
+            "• From blank well(s) — F is the smoothed per-pixel median of the Background "
             "well (that well's intensity is the illumination profile). Needs a "
             "Background well.\n"
-            "• gaussian — per-image, self-referential: F is the heavily "
+            "• Self (Gaussian blur) — per-image, self-referential: F is the heavily "
             "Gaussian-blurred image itself. No reference well needed.\n"
-            "• basic — pure-numpy BaSiC: F is the smoothed per-pixel median of a "
+            "• Whole plate (BaSiC) — pure-numpy BaSiC: F is the smoothed per-pixel median of a "
             "whole-plate sample of the channel (one field per channel).\n"
-            "(If both flat-field and background are empty_well, the two combine "
+            "(If both corrections are From blank well(s), the two combine "
             "into one (raw-B)/(B/mean(B)) pass.)")
         r.layout().addWidget(self._flatfield_cb)
         r.layout().addStretch(1)
 
         rbg = self._row(sec, "Background subtraction")
-        self._background_cb = QComboBox(rbg)
-        self._background_cb.addItems(
-            ["none", "top_hat", "sliding_disk", "fov_median", "empty_well",
-             "robust_mesh", "fft_bandpass"])
-        # Default to robust_mesh: a sigma-clipped local background on a coarse
-        # grid (SExtractor/Background2D style), robust to bright/confluent objects
-        # on uneven background where morphological methods (top_hat's square
-        # halos, sliding_disk) struggle. The dropdown doesn't persist, so this
-        # build default is what fresh runs use; reprocessing restores the saved
-        # pipeline_info value.
-        self._background_cb.setCurrentText("robust_mesh")
+        self._background_cb = ValueCombo(BACKGROUND_OPTIONS, rbg)
+        # Robust local mesh is the method to reach for when background needs
+        # removing — a sigma-clipped local background on a coarse grid
+        # (SExtractor/Background2D style), robust to bright/confluent objects on
+        # uneven background where the morphological methods (top-hat's square
+        # halos, rolling disk) struggle — which is why it is listed first after
+        # None. It is not the default: see DEFAULT_BACKGROUND.
+        self._background_cb.setValue(DEFAULT_BACKGROUND)
         self._background_cb.setToolTip(
             "How background is subtracted (per channel, where enabled below):\n"
-            "• none — no background subtraction.\n"
-            "• top_hat — fast square morphological; leaves square halos/hotspots "
-            "on uneven background.\n"
-            "• sliding_disk — smooth isotropic disk baseline (default; recommended "
-            "for structured/uneven background; no square halos).\n"
-            "• fov_median — subtract a single scalar, the median intensity of the "
-            "whole field of view (a uniform offset; robust to bright cells, but "
-            "does NOT flatten spatial gradients). No radius/reference needed.\n"
-            "• empty_well — subtract a measured per-channel background from the "
-            "Background well. (If flat-field is *also* empty_well, the two are "
-            "combined into one correct (raw−B)/(B/mean(B)) pass.)\n"
-            "• robust_mesh — sigma-clipped local background on a coarse grid "
+            "• None — no background subtraction (the default).\n"
+            "• Robust local mesh — sigma-clipped local background on a coarse grid "
             "(SExtractor/Background2D style), bicubically interpolated. Robust to "
             "bright/confluent objects on uneven background where morphological "
-            "methods fail; uses the radius below as the background scale.\n"
-            "• fft_bandpass — 2-D FFT Butterworth high-pass: removes the "
+            "methods fail; uses the radius below as the background scale. The "
+            "recommended method when background needs removing.\n"
+            "• Rolling disk — smooth isotropic disk baseline; no square halos.\n"
+            "• Top-hat — fast square morphological; leaves square halos/hotspots "
+            "on uneven background.\n"
+            "• Field median — subtract a single scalar, the median intensity of the "
+            "whole field of view (a uniform offset; robust to bright cells, but "
+            "does NOT flatten spatial gradients). No radius/reference needed.\n"
+            "• From blank well(s) — subtract a measured per-channel background from "
+            "the Background well. (If flat-field is *also* From blank well(s), the "
+            "two are combined into one correct (raw−B)/(B/mean(B)) pass.)\n"
+            "• FFT band-pass — 2-D FFT Butterworth high-pass: removes the "
             "low-frequency background (illumination, gradients, large blobs) "
             "regardless of object size. Radius below = large-structure cutoff; "
             "small-structure (px) = optional high-frequency denoise (0 = off).")
@@ -116,24 +141,26 @@ class AnalyzeQCSectionMixin:
         # "Top-Hat Background Subtraction" section. Shown only for the
         # radius-based methods (top_hat / sliding_disk); hidden for empty_well /
         # none, which take no radius.
-        nir_row = self._row(sec, "Nuclear radius")
+        nir_row = self._row(sec, "Segmentation-channel radius")
         self._tophat_radius_nir_edit = self._entry(nir_row, "100", width=60)
         self._no_tophat_nir_cb = QCheckBox("Disable", nir_row)
         nir_row.layout().addWidget(self._no_tophat_nir_cb)
         nir_row.layout().addStretch(1)
-        fluor_row = self._row(sec, "Fluor radius")
+        fluor_row = self._row(sec, "Other channels' radius")
         self._tophat_radius_fluor_edit = self._entry(fluor_row, "100", width=60)
         fluor_row.layout().addWidget(self._info_icon(
             fluor_row,
-            "Radius = background scale (px); Fluor radius applies to all "
-            "fluorescent channels. For fft_bandpass it is the large-structure "
-            "(low-frequency) cutoff; for robust_mesh it is the tile size.",
+            "Radius = background scale (px); the second radius applies to every "
+            "channel other than the segmentation channel. For FFT band-pass it is "
+            "the large-structure (low-frequency) cutoff; for Robust local mesh it "
+            "is the tile size.",
         ))
         self._no_tophat_fluor_cb = QCheckBox("Disable", fluor_row)
         fluor_row.layout().addWidget(self._no_tophat_fluor_cb)
         fluor_row.layout().addStretch(1)
-        # _row() returns the right-hand cell, not the full row — the "Nuclear
-        # radius" / "Fluor radius" label lives in the cell's parent. Toggle
+        # _row() returns the right-hand cell, not the full row — the
+        # "Segmentation-channel radius" / "Other channels' radius" label lives in
+        # the cell's parent. Toggle
         # visibility on the *parent* rows so the labels hide with their entries
         # (hiding only the cell left the labels stranded).
         self._bg_radius_rows = (nir_row.parentWidget(), fluor_row.parentWidget())
@@ -141,10 +168,10 @@ class AnalyzeQCSectionMixin:
         # fft_bandpass-only small-structure (high-frequency) cutoffs — the
         # optional low-pass that denoises for a true band-pass. 0 = high-pass
         # only (preserves signal; the default, faithful for quantification).
-        fft_nir_row = self._row(sec, "Nuclear small px")
+        fft_nir_row = self._row(sec, "Segmentation small px")
         self._fft_small_nir_edit = self._entry(fft_nir_row, "0", width=60)
         fft_nir_row.layout().addStretch(1)
-        fft_fluor_row = self._row(sec, "Fluor small px")
+        fft_fluor_row = self._row(sec, "Other small px")
         self._fft_small_fluor_edit = self._entry(fft_fluor_row, "0", width=60)
         fft_fluor_row.layout().addStretch(1)
         fft_hint = QLabel("Small-structure cutoff (px): 0 = high-pass only "
@@ -180,7 +207,7 @@ class AnalyzeQCSectionMixin:
         self._background_well_edit.setPlaceholderText("H12, G12 or H01:H12")
         self._background_well_edit.setToolTip(
             "Well label(s) of empty/background well(s) used as the reference for "
-            "any empty_well mode above. Enter one (e.g. H12), several "
+            "either correction set to From blank well(s) above. Enter one (e.g. H12), several "
             "comma-separated (e.g. H12, G12), or a rectangular block written "
             "with a colon (H01:H12 is the whole of row H, A01:D12 the top half) "
             "— and you can mix them (H01:H12, A01). Multiple wells are pooled "
@@ -190,17 +217,30 @@ class AnalyzeQCSectionMixin:
             "background, computed PER TIMEPOINT (background drifts over time); a "
             "timepoint the blank wells lack falls back to the all-timepoint "
             "pooled median. Read from whichever input layout holds the well "
-            "(per-well zip, per-well folder, or loose TIFs); enabled only when "
-            "flat-field or background is empty_well.")
+            "(per-well zip, per-well folder, or loose TIFs); shown only when "
+            "a correction is From blank well(s).")
         rbw.layout().addStretch(1)
+        self._background_well_row = rbw.parentWidget()
+        # Stated while the field is shown and empty: a correction that reads a
+        # blank well cannot run without one, and the run would otherwise refuse
+        # in a dialog about a field the user may never have looked at.
+        self._background_well_needed_lbl = QLabel(
+            "Required — name the blank well(s) this correction reads.", sec)
+        self._background_well_needed_lbl.setObjectName("Error")
+        self._background_well_needed_lbl.setWordWrap(True)
+        sec.layout().addWidget(self._background_well_needed_lbl)
         self._build_background_map_row(sec)
 
         def _sync_bg(_=None) -> None:
-            bg_method = self._background_cb.currentText()
-            # Background well feeds empty_well flat-field and/or empty_well bg.
-            self._background_well_edit.setEnabled(
-                self._flatfield_cb.currentText() == "empty_well"
-                or bg_method == "empty_well")
+            bg_method = self._background_cb.value()
+            # Background well feeds empty_well flat-field and/or empty_well bg,
+            # and is hidden — not greyed — when neither reads it, so a field that
+            # cannot change the run does not sit on screen looking like one.
+            uses_blank = "empty_well" in (self._flatfield_cb.value(), bg_method)
+            self._background_well_edit.setEnabled(uses_blank)
+            self._background_well_row.setVisible(uses_blank)
+            self._background_well_needed_lbl.setVisible(
+                uses_blank and not self._background_well_edit.text().strip())
             # Radius is the background scale for the morphological / sliding-disk
             # methods, the tile size for robust_mesh, and the large-structure
             # cutoff for fft_bandpass — shown for all of them.
@@ -216,6 +256,7 @@ class AnalyzeQCSectionMixin:
             self._sync_background_map_enabled()
         self._flatfield_cb.currentIndexChanged.connect(_sync_bg)
         self._background_cb.currentIndexChanged.connect(_sync_bg)
+        self._background_well_edit.textChanged.connect(_sync_bg)
         _sync_bg()
 
         self._qc_remove_debris_cb = WrapCheckBox(

@@ -147,7 +147,7 @@ class AnalyzeBackgroundMapMixin:
     #: shows two and a half of them is one the user cannot read.
     _BG_MAP_VISIBLE_ROWS = 4
 
-    # ── the row in the Quality Control section ───────────────────────────
+    # ── the row in the Image correction & QC section ───────────────────────────
     def _build_background_map_row(self, sec: QWidget) -> None:
         self._background_map = {}
         self._bg_map_active = 0
@@ -189,6 +189,7 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
         under_layout.addWidget(self._bg_map_summary, 1)
         sec.layout().addWidget(under)
+        self._bg_map_rows = (row.parentWidget(), under)
         # Connected here, not on the editor's first open: this label lives in
         # the form and has to track the field whether or not the window has ever
         # been shown. Wired lazily, naming a blank left the summary reading "No
@@ -199,10 +200,14 @@ class AnalyzeBackgroundMapMixin:
 
     def _sync_background_map_enabled(self) -> None:
         """Enabled on the same condition as the Background well field itself."""
-        on = "empty_well" in (self._flatfield_cb.currentText(),
-                              self._background_cb.currentText())
+        on = "empty_well" in (self._flatfield_cb.value(),
+                              self._background_cb.value())
         for widget in (self._bg_map_btn, self._bg_map_summary):
             widget.setEnabled(on)
+        # Hidden with the field, for the field's reason: a pairing nothing reads
+        # is not a control.
+        for row in self._bg_map_rows:
+            row.setVisible(on)
 
     # ── what the run and the sidecar see ─────────────────────────────────
     def _background_map_value(self) -> str:
@@ -349,7 +354,7 @@ class AnalyzeBackgroundMapMixin:
           correction that was not happening — the same shape of untruth the
           editor's own labels carried.
         * **It enumerated.** Eight blanks made a 141-character list that wrapped
-          this row from 42 pixels to 112 and pushed the rest of Quality Control
+          this row from 42 pixels to 112 and pushed the rest of Image correction & QC
           down the pane. The count is the summary; the list is the tooltip.
         * **It never said whether the pairing would run.** The uncovered count
           is the run's refusal, and it lived only inside the editor — so the one
@@ -1048,9 +1053,9 @@ class AnalyzeBackgroundMapMixin:
         the map as well as the field, and because that file is at its budget.
         """
         uses = []
-        if self._flatfield_cb.currentText() == "empty_well":
+        if self._flatfield_cb.value() == "empty_well":
             uses.append("flat-field correction")
-        if self._background_cb.currentText() == "empty_well":
+        if self._background_cb.value() == "empty_well":
             uses.append("background subtraction")
         if not uses:
             return None

@@ -856,6 +856,32 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
             remove_directory(staging)
 
 
+def prepare_nanowell_run(options: dict, args, well_zips, refuse, input_dir, info_path) -> None:
+    """Everything a nanowell run settles before any well is processed: refuse an input it cannot read
+    (:func:`refuse_nanowell_without_zips`), record its blocks in the sidecar (:func:`record_nanowell_info`), and
+    force the wells whose anchors changed since their last run (:func:`force_wells_with_new_anchors`)."""
+    refuse_nanowell_without_zips(options, well_zips, refuse)
+    record_nanowell_info(info_path, options, input_dir)
+    force_wells_with_new_anchors(options, args, input_dir, Path(info_path).parent)
+
+
+def force_wells_with_new_anchors(options: dict, args, input_dir, output_dir) -> None:
+    """Add to ``args.force_wells`` every well whose output was made under other anchors than the ones set now
+    (``util.nanowell_anchors.wells_with_unused_anchors``): a plain re-run would otherwise skip it as finished and
+    never use an anchor set since. Nothing for a run that is not in nanowell mode, nor under ``--force`` (every well
+    runs) or ``--incremental`` (no well is skipped up front, and the per-timepoint reuse is keyed on the anchors)."""
+    from util.nanowell_anchors import wells_with_unused_anchors
+
+    if not options or args.force or args.incremental:
+        return
+    changed = wells_with_unused_anchors(input_dir, output_dir)
+    if not changed:
+        return
+    log.info("Anchors set by hand changed since the last run of %s; running %s again.", ", ".join(changed),
+             "it" if len(changed) == 1 else "them")
+    args.force_wells = [*(args.force_wells or []), *changed]
+
+
 def record_nanowell_info(info_path, options: dict, input_dir) -> None:
     """Add the ``nanowell`` and ``acquisition`` blocks to ``pipeline_info.json``.
 

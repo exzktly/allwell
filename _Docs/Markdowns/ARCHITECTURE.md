@@ -3088,6 +3088,11 @@ plate. **It measures nothing.** `collect.triage_rows` reads three records other
 parts of the app already wrote: the completeness record (`run_check` — wells
 whose CSV is missing, wells staged and never processed, the field groups the
 run recorded as failed, the groups found missing, and dataset-wide findings),
+each nanowell timepoint the record lists as located but not addressed
+(`not_addressed`, with the reason read from `nanowells/<well>_grid.json`; such a
+timepoint is in `missing` too and is said once, as not addressed, and a well
+whose every timepoint is unaddressed covers nothing yet is not "never
+processed"),
 every needs-attention well state — a guard holds each state in
 `pipeline.completeness.NEEDS_ATTENTION` to a row, via `WELL_STATE_ROWS` — and
 the count of wells the check could not read), the traceback files in `errors/`
@@ -3122,7 +3127,19 @@ numbers. **Accept** marks a finding seen; **Reopen** undoes Accept and puts an
 excluded field back. Every button is enabled only when a selected row supports
 it. **Open in Segmentation** calls the `image_browser.show_field` service, the
 same jump the Cell Browser's click uses (`review_image/_navigate.py`), placed
-beside Segmentation because that sub-tab is the one no profile removes.
+beside Segmentation because that sub-tab is the one no profile removes. A
+nanowell timepoint whose grid status is `unaddressed` — the one status an anchor
+set by hand changes — offers **Set anchor…** (and opens on double-click), which
+calls the Nanowells page's `nanowell.open_anchor` service
+(`nanowell/controller.open_for_anchor`). Home's health card calls the same
+service from the well chips of its *Nanowell timepoints not addressed* row
+(`home/collect.unaddressed_targets` names each well's first anchorable
+timepoint). The service adds the well to the plate selection, puts the page on
+the Array view at that well and timepoint with the anchor layer on in the well
+frame, brings the page forward, and leaves `anchor_pending` on the state;
+`_apply_pending_anchor` turns *Set anchor* on once the well's tables are loaded
+(the grid status decides whether it can be), or says on the figure why it
+cannot.
 
 **The exclusion is an inclusion layer, not a triage feature.**
 `review/data/field_exclusions.py` projects `Excluded_Field_Pass` from
@@ -10551,6 +10568,14 @@ the file's bytes beside the archives (full upload and every batch), and both the
 neither served from the cache without the file nor re-attached to the run that left the well unaddressed. The
 cache key folds in only the anchors of the wells being uploaded, so a click on one well does not re-upload a run
 that does not include it; the whole file is still sent, so the remote reads what a local run would.
+**An anchor set since is never skipped.** The anchors are not among the run's settings, so the "already
+finished" skip — `process_microscopy`'s per-well pool locally, `remote_finished_wells.finished_here` remotely —
+would keep a well's output however the anchors changed. `util.nanowell_anchors.wells_with_unused_anchors`
+compares the anchors set now with the `manual_anchor_um` each grid block records and names every well where they
+differ (an anchor set, moved or cleared since); `pipeline.nanowell_task.force_wells_with_new_anchors` adds those
+wells to `--force_wells` before the pool runs (not under `--force` or `--incremental`, where nothing is skipped up
+front), and `finished_here` never counts them finished. An anchor the last run used — accepted or refused — is
+recorded and therefore no reason to run again.
 Subset, Merge Plates and Concatenate carry it through `datasets/core/nanowell_anchors_carry.py`: Subset keeps
 the anchors of what it keeps, Merge Plates renames dataset 2's wells by the remap, Concatenate shifts dataset
 2's timepoints (and an in-place addition preserves and restores the file with the record). Two sources that
@@ -10651,6 +10676,16 @@ validated and keyed.
 
 **Remote and Datasets tools.** The acquisition record already travels with the upload; the fetch brings
 `nanowells/<well>.csv`, `_grid.json` and the template back as each well finishes (`services/remote_fetch_nanowells`).
+**The host is given the rest of the plate.** The end-of-run re-anchoring fits the plate's motion from every grid
+record under the output's `nanowells/`, and a remote output directory is removed once its wells are fetched, so a
+later run of a few wells — *Re-run anchored wells…*, QC Triage's *Re-run wells…* — found no other well there, and a
+timepoint only the plate could address (one with no square and no anchor of its own) came back unaddressed.
+`services/remote_plate_grids.seed_plate_grids` therefore copies the local output's grid records of every well
+**not** in the run into the remote `nanowells/` (rsync `--update`) as soon as the run's output directory exists —
+`RemoteRunner._prepare_run` for a single-shot run, `_BatchedRemoteProcess.__init__` for a batched one — before the
+pipeline starts. The run's own wells are left out, so a forced well never finds its previous record in its place;
+the re-anchoring fits only records made under the run's settings and re-runs only the run's wells, so the copies
+are read and never rewritten. A copy that fails is said in the run log and costs only the plate's prediction.
 A nanowell well announces itself with the same `Well X — done.` marker a field-mode well does, which is what the
 Fetcher and Analyze's progress count. The run record knows it is a nanowell run from its argv
 (`_RemoteRun.nanowell`), and three things follow. Nothing of a well is deleted from the remote as it is
@@ -10665,8 +10700,9 @@ archive and cell CSVs, recording it in `_RemoteRun.nanowell_released`. A well th
 pull came up short, is kept for verification; `nanowells/` is never deleted mid-run, since every later batch's
 plate fit reads it. That is what lets the batch size bound a nanowell run's remote disk. At verification the
 whole `nanowells/` directory and every re-anchored well not already released have their CSV and
-`<well>_out.zip` pulled again — the wells with a timepoint anchored `plate_rigid` in their pulled grid records,
-not the sidecar's summary, which each batch of a batched run writes over the last —
+`<well>_out.zip` pulled again — the wells of this run (`fetched_wells`; the local folder holds the whole plate's
+records) with a timepoint anchored `plate_rigid` in their pulled grid records, not the sidecar's summary, which
+each batch of a batched run writes over the last —
 (`pull_nanowell_results`). A well whose sites table or grid record did not arrive fails verification
 (`missing_nanowell_tables`), which keeps the remote copy. An incremental nanowell run is refused on a remote host
 when the user chose Fill in what's missing, in Analyze and as a backstop in the runner and the run record
@@ -10678,8 +10714,8 @@ through and `_nanowell_remote_resume_by_well` drops the flag before the argv is 
 resume, or a plate with an unfinished run behind it — goes well by well instead
 (`analyze.run_spec._nanowell_remote_resume_by_well` drops the incremental and logs why): the finished-wells step
 skips every well whose tables here cover all its archive's timepoints (each with a verdict in its grid record —
-reached is enough: an `unaddressed` timepoint sent alone would lose the plate the end-of-run re-anchoring fits
-from — and its completeness record, when the sidecar has one, whole), and every other well is sent whole, analysed in
+reached is enough: an `unaddressed` timepoint is the run's verdict on those images, which sending the well again
+cannot change unless its anchors did — and its completeness record, when the sidecar has one, whole), and every other well is sent whole, analysed in
 full, and forced (`remote_finished_wells.nanowell_forced`, merged into the argv by `argv_forcing`) when it has
 output here, so an earlier attempt's partial tables on the host cannot be kept in its place. In
 `datasets/core/nanowell_tables`, `carry_nanowell_tables` copies a dataset's tables through a well map (canonical
@@ -12119,7 +12155,8 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_jobs.py` | The scheduler jobs a remote run holds, and making sure none outlives it. `close_remote_job` is the teardown backstop every exit the app survives goes through (it reads the job id from `<pidfile>.slurm` and `scancel`s it); `sweep_orphaned_allocation` is what the next run of the same plate does about an exit the app did not survive, and returns its verdict (`swept`, `owned`, `notmine`, `unknown`, `none`) because the batched path acts on it. Both refuse to cancel a job that is not the caller's (`_only_my_job`), and both are no-ops on a host with no `compute_launcher`. `RemoteRunner.close_remote_job` and `_sweep_orphaned_allocation` delegate here. Line-budgeted (`REMOTE_JOBS_BUDGET`). |
 | `remote_process.py` | The run as the GUI sees it: `_RemoteProcess` wraps the single ssh that runs the pipeline and `_BatchedRemoteProcess` the driver that holds one allocation and runs the plate batch by batch. Both present the `subprocess.Popen` surface `PipelineRunner` reads and tee every line to the `Fetcher`, so per-well downloads start the moment a well is announced done; `wait` flushes the `Fetcher` and `terminate`/`kill` cancel it, and every exit path ends the run heartbeat (`_UploadHeartbeat`) exactly once. A batch whose driver vanished marks the run failed (1); a stopped one reports 130. `tests/test_remote_process.py` drives the single-launch wrapper against a real child process. Line-budgeted (`REMOTE_PROCESS_BUDGET`). |
 | `remote_staging.py` | Turning the user's input into the per-well archives a remote run uploads: `stage_local_zips` detects the layout (one zip per well, well folders, loose TIFs, or a mix left by an interrupted zip-up), zips folders and loose TIFs **into the input directory itself** so the next run finds zips and skips the zip-up (a folder's archived TIFs are removed the moment its own zip is published), and returns a `ZippedInput`. The channel filter and an incremental run's split are both planned from each archive's member list before any image data is read, and only archives that change are written — to a staging directory beside the input, never over the user's archives. `ZippedInput.cleanup` removes every staging directory a run made (the filter's and the split's, joined), a failure part way through removes its own before the error propagates, and a filter that matches no image in any well is refused before anything moves, on both the ZIP and the MIXED path. Line-budgeted (`REMOTE_STAGING_BUDGET`); `tests/test_remote_staging.py` pins the cleanup contract. |
-| `remote_finished_wells.py` | Which wells a remote run need not send: `finished_here` answers, before staging, with the pipeline's own rule — the per-well CSV present, recorded under the key `pipeline.cli_args.settings_key_from_argv` gives this run's argv plus the host's flags, not forced, its completeness record whole, never an empty-well blank, and for a nanowell well every timepoint of its archive reached, with a verdict in its grid record — and `drop_finished` removes them from a staged `ZippedInput` into its `up_to_date_wells`; `nanowell_forced` and `argv_forcing` force a nanowell well sent again over partial output here, and `pull_settings_marker` writes `UNKNOWN_SETTINGS` when a well's marker cannot be fetched. Called by `PipelineRunner._finished_here` and by batched mode's local-completion filter (see *What is finished here is not sent again*). |
+| `remote_finished_wells.py` | Which wells a remote run need not send: `finished_here` answers, before staging, with the pipeline's own rule — the per-well CSV present, recorded under the key `pipeline.cli_args.settings_key_from_argv` gives this run's argv plus the host's flags, not forced, its completeness record whole, never an empty-well blank, and for a nanowell well every timepoint of its archive reached, with a verdict in its grid record, and its anchors those its last run used (`util.nanowell_anchors.wells_with_unused_anchors`) — and `drop_finished` removes them from a staged `ZippedInput` into its `up_to_date_wells`; `nanowell_forced` and `argv_forcing` force a nanowell well sent again over partial output here, and `pull_settings_marker` writes `UNKNOWN_SETTINGS` when a well's marker cannot be fetched. Called by `PipelineRunner._finished_here` and by batched mode's local-completion filter (see *What is finished here is not sent again*). |
+| `remote_plate_grids.py` | `seed_plate_grids`: before a remote nanowell run's pipeline starts, copies the local output's grid records of every well not in the run into the remote `nanowells/`, so the end-of-run re-anchoring can fit the plate's motion as a local run does. Called by `RemoteRunner._prepare_run` and `_BatchedRemoteProcess.__init__` (see *The host is given the rest of the plate*). |
 | `remote_fetch.py` | Bringing a remote run's output home, and proving it arrived. `Fetcher` pulls each well's output the moment the pipeline announces it done (overlapping download with later wells' compute), merges an incremental run's partial zip and CSV into the local ones rather than overwriting them, keeps the mid-run `pipeline_info.json` current, and removes a well's remote files only once its local artefact is in place. `FetchedOutputVerifier` runs after the pipeline exits: it pulls the top-level artefacts, merges the fetched sidecar's run-report, field-quality and user blocks with the local ones, writes the client-side completeness record, checks every expected well's CSV and non-empty `<well>_out.zip` are present (and replaced, for a forced well), re-pulls what is missing, and returns a `FetchVerification`. It never deletes the run's remote directory — `RemoteRunner.verify_and_cleanup` does that, on a passing verdict only. Its collaborators (host, run record, the dataset cache whose ssh it borrows, the stop flag) are passed in, never read off the runner. Line-budgeted (`REMOTE_FETCH_BUDGET`). |
 | `remote_fetch_place.py` | The Fetcher's second thread. For an incremental run, a downloaded well's merge into the local output — partial CSV into the `.csv.gz`, partial `<well>_out.zip` into the local one — and everything after it (marking the well fetched, deleting its remote copy) run on `Placer`, not on the transfer thread, so one large well's merge does not hold every later download and remote copy behind it. The queue is bounded (`MAX_PENDING`), since each waiting well holds its download in the local transit directory; a remote copy is still deleted only after its well is in place. `Fetcher.flush_and_join` drains it before the run is reported done. A well with no local CSV or `<well>_out.zip` — one new to this run — has nothing to merge with, so its download is moved into place unchanged (`place_whole`, and `pipeline.io._place_fetched_csv` for the CSV) rather than parsed and rewritten. **A Stop part-way through a download leaves nothing that reads as finished.** The end-of-run retry pulls into the output folder with `--partial-dir=.allwell-partial`, so a cut-off transfer is never under the real name; and a truncated file an earlier build left there (it used `--partial`) is treated as absent wherever it is read: the retry re-pulls a zip that fails `_zip_is_complete` and a CSV that fails `util.csv_gz.csv_is_whole`, `_materialize_incremental` places a download whole over an unreadable local zip, `merge_images_into_zip` writes a whole archive rather than re-reading a corrupt one, and `merge_fetched_csvs` sets an unreadable local `.csv.gz` aside as `.<name>.truncated` (kept, never deleted) and rebuilds the well's CSV from its readable rows plus the download (`_merge_onto_cut_csv`) — a gzip error being the one failure that means a cut-off copy, where an `OSError` still leaves the local file untouched. The readable rows matter because an incremental download holds only the new field groups: placing it alone dropped every earlier group's rows, and the well's done-set, which also reads its `<well>_out.zip`, never computed them again. Only whole groups are kept (`_salvage_cut_csv`): the group the cut fell in is dropped rather than kept short, and unless the download carries that group the loss is written to `errors/<WELL>_local_csv_cut_short.txt` beside the run's own failure records, with an `Exception type:` header and the `--force` remedy, as well as logged. `tests/test_a_slow_merge_does_not_hold_the_next_download.py` drives the real worker loop with a merge that blocks. |
 | `remote_run_state.py` | `_RemoteRun`, the record one remote run carries from staging through fetch, and the two enums in it the user chooses — `LocalInputMode` and `OutputFilter`. Shared by the runner, the process wrappers and the `Fetcher`, so it lives in none of them and none has to import another to reach it. |

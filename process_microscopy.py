@@ -198,7 +198,7 @@ from pipeline.run_report import (
 )
 from pipeline.completeness import record_run_check
 from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
-from pipeline.nanowell_task import nanowell_endgame, record_nanowell_info, refuse_nanowell_without_zips
+from pipeline.nanowell_task import nanowell_endgame, prepare_nanowell_run
 
 
 def _report_worker_failure(well_label: str, output_dir: Path | None, exc: BaseException) -> None:
@@ -3370,8 +3370,8 @@ def main() -> None:
     consolidate_mixed_to_zips(input_dir, log_fn=lambda m: log.info("%s", m.rstrip()))
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
-    refuse_nanowell_without_zips(nanowell, well_zips, parser.error)
-    record_nanowell_info(output_dir / PIPELINE_INFO_FILENAME, nanowell, input_dir)
+    prepare_nanowell_run(nanowell, args, well_zips, parser.error, input_dir,
+                         output_dir / PIPELINE_INFO_FILENAME)
     if well_zips:
         refuse_images_only_in_ignored_folders(input_dir, well_zips)
     refuse_uncovered_wells(blank_groups, well_zips, well_folders)

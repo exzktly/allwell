@@ -410,7 +410,8 @@ def refresh_home(ctx) -> None:
     _paint_next_step(ctx)
     _paint_plate(ctx)
     _paint_tiles(ctx)
-    _paint_rows(ctx, "_home_health", hc.health_rows(ctx), kind="health")
+    _paint_rows(ctx, "_home_health", hc.health_rows(ctx), kind="health",
+                on_anchor=lambda well, tp: _open_anchor(ctx, well, tp))
     _paint_rows(ctx, "_home_receipt", hc.run_parameters(ctx), kind="receipt")
     _paint_rows(ctx, "_home_work", hc.your_work(ctx), kind="work")
     _paint_saved_plots(ctx)
@@ -761,17 +762,47 @@ def open_saved_plot(ctx, plot_id: str) -> None:
                 "deleted. Open Saved Plots to see what is there.")
 
 
-def _paint_rows(ctx, widget_name: str, rows, *, kind: str) -> None:
+def _open_anchor(ctx, well: str, timepoint: str) -> None:
+    """A not-addressed well's chip: Nanowells → Array on its timepoint, with *Set anchor* on."""
+    with swallow("open the Nanowells page to set an anchor"):
+        if not ctx.features.query("nanowell.open_anchor", ctx, well, timepoint, default=False):
+            ctx.notify.set_status("Could not open Nanowells → Array: this build has no Nanowells page.")
+
+
+def _paint_rows(ctx, widget_name: str, rows, *, kind: str, on_anchor=None) -> None:
     host = _widget(ctx, widget_name)
     if host is None:
         return
     _clear(host)
     layout = host.layout()
     for row in rows:
-        layout.addWidget(_row_widget(host, row, kind=kind))
+        layout.addWidget(_row_widget(host, row, kind=kind, on_anchor=on_anchor))
 
 
-def _row_widget(parent: QWidget, row: dict, *, kind: str) -> QWidget:
+def _anchor_chips(parent: QWidget, wells, targets: dict, on_anchor) -> QWidget:
+    """The well chips of a not-addressed row: a well an anchor can fix is a button that opens it."""
+    from PySide6.QtWidgets import QPushButton
+
+    box = QWidget(parent)
+    line = QHBoxLayout(box)
+    line.setContentsMargins(0, 0, 0, 0)
+    line.setSpacing(theme.Spacing.xs)
+    for well in wells:
+        tp = targets.get(well)
+        if tp is None:
+            line.addWidget(QLabel(well, box))
+            continue
+        chip = QPushButton(well, box)
+        chip.setObjectName("HomeWellChip")
+        chip.setFlat(True)
+        chip.setCursor(Qt.PointingHandCursor)
+        chip.setToolTip(f"Open {well} at {tp} in Nanowells → Array with Set anchor on.")
+        chip.clicked.connect(lambda _=False, w=well, t=tp: on_anchor(w, t))
+        line.addWidget(chip)
+    return box
+
+
+def _row_widget(parent: QWidget, row: dict, *, kind: str, on_anchor=None) -> QWidget:
     host = QWidget(parent)
     line = QHBoxLayout(host)
     line.setContentsMargins(0, 0, 0, 0)
@@ -788,7 +819,9 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str) -> QWidget:
         value.setObjectName("Muted")
         value.setWordWrap(True)
         line.addWidget(value, 1)
-        if row.get("wells"):
+        if row.get("wells") and row.get("anchor") and on_anchor is not None:
+            line.addWidget(_anchor_chips(host, row["wells"][:8], row["anchor"], on_anchor))
+        elif row.get("wells"):
             wells = QLabel("  ".join(row["wells"][:8]), host)
             wells.setObjectName("HomeWellChips")
             line.addWidget(wells)

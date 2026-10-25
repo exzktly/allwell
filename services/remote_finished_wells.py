@@ -20,11 +20,15 @@ This is that step for a remote run, asked once, before staging, with the pipelin
   down part way, or with failed groups, writes a CSV and a settings record too;
 * **a forced well is never finished**, nor is any well under ``--force``, and an incremental run decides per field
   in staging instead, so it gets nothing from here;
+* **a nanowell well whose output was made under other anchors than the ones set now is never finished**
+  (``util.nanowell_anchors.wells_with_unused_anchors``) — an anchor set by hand since, moved, or cleared — as the
+  local run forces the same wells (``pipeline.nanowell_task.force_wells_with_new_anchors``);
 * **a field-mode well is finished only when its CSV holds every field and timepoint its input holds now**
   (``_field_coverage``), so a well whose archive gained fields or timepoints since is sent;
 * **a nanowell well is finished only when its tables cover every timepoint its archive holds** — each with a
   verdict in its grid record (``pipeline.completeness.nanowell_coverage``). Reached is enough: an ``unaddressed``
-  or ``no_lattice`` timepoint is the run's verdict on those images, which sending the well alone cannot change,
+  or ``no_lattice`` timepoint is the run's verdict on those images, which sending the well alone cannot change
+  (an anchor set since can, and is the line above),
   and alone it loses the plate the end-of-run re-anchoring fits from; only Force, re-running the plate, can. A remote nanowell run cannot add a well's
   missing timepoints to its earlier tables (the host never has them), so a well short of any — left part way by a
   run that stopped, or given new timepoints since — is not finished: it is sent whole and analysed again in full,
@@ -67,6 +71,12 @@ def finished_here(output_dir: Path, pipeline_argv: Sequence[str], wells: Iterabl
     if not key:
         return []
     never = _canonical_force_wells(args.force_wells) | {canonical_well_label(w) or w for w in keep}
+    if args.nanowell_format:
+        # A well whose output was made under other anchors than the ones set now is not finished, whatever its
+        # timepoints' verdicts: an anchor set since is exactly what can change them.
+        from util.nanowell_anchors import wells_with_unused_anchors
+
+        never |= set(wells_with_unused_anchors(_wells_directory(Path(args.input_dir)), output_dir))
     prefix = args.csv_prefix or "measurements"
     records = _completeness_records(output_dir)
     covered = _nanowell_coverage(output_dir, args) if args.nanowell_format else _field_coverage(output_dir, args)

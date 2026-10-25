@@ -178,6 +178,9 @@ class NanowellState:
     region_for: object = None
     press: object = None
     anchor_mode: bool = False
+    #: ``(well, timepoint)`` another page asked to set an anchor on (``controller.open_for_anchor``): *Set anchor* is
+    #: turned on there once the well's tables are loaded, since it can only be turned on with the grid status read.
+    anchor_pending: object = None
     #: The *Overlays* button: the coloured layers hidden for a look at the image beneath, without touching which
     #: layers are on. Not persisted — a page reopened with its overlays silently missing would look broken.
     overlays_hidden: bool = False

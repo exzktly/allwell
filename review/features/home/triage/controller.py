@@ -9,6 +9,10 @@ the path that already owns it, so triage adds no second way to do anything:
   ``qc.recompute_all`` — the same pass the Cell Gating panel runs — before the
   one redraw fan-out (``plot_orchestrator.redraw_app``).
 * **Accept** and **Reopen** write ``ctx.state.dataset.triage_decisions``.
+* **Set anchor…** opens Nanowells → Array on the row's well and timepoint with
+  *Set anchor* on, through the Nanowells page's own ``nanowell.open_anchor``
+  service; the click on the central square is saved there, by the page that
+  owns the anchors file.
 * **Re-run wells** hands the dataset to Analyze through Home's own hand-off
   (``review.core.analyze_handoff.open_in_analyze``), with the chosen wells both forced and
   the only wells run, so nothing else on the plate is touched — and not
@@ -132,3 +136,10 @@ def open_field(ctx, row) -> bool:
         return False
     return bool(ctx.features.call("image_browser.show_field", ctx,
                                   row.well, row.fov, row.timepoint))
+
+
+def open_anchor(ctx, row) -> bool:
+    """Open the Nanowells Array view on *row*'s unaddressed timepoint, ready to set its anchor by hand."""
+    if not (row.can_anchor and row.well):
+        return False
+    return bool(ctx.features.query("nanowell.open_anchor", ctx, row.well, row.timepoint, default=False))

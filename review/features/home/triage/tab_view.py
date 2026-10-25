@@ -70,6 +70,7 @@ def build_triage_subtab(ctx, parent: QWidget) -> None:
     accept_btn = QPushButton("Accept", parent)
     reopen_btn = QPushButton("Reopen", parent)
     rerun_btn = QPushButton("Re-run wells…", parent)
+    anchor_btn = QPushButton("Set anchor…", parent)
     for btn, tip in (
         (open_btn, "Show this field in Image Browser → Segmentation."),
         (exclude_btn, "Leave the selected fields out of every plot, statistic "
@@ -78,6 +79,8 @@ def build_triage_subtab(ctx, parent: QWidget) -> None:
         (reopen_btn, "Undo Accept, and put excluded fields back."),
         (rerun_btn, "Open Analyze set up to re-segment the selected wells "
                     "from scratch, leaving every other well alone."),
+        (anchor_btn, "Open this well's timepoint in Nanowells → Array with Set "
+                     "anchor on: click its central square, then re-run the well."),
     ):
         btn.setToolTip(tip)
         buttons.addWidget(btn)
@@ -99,6 +102,7 @@ def build_triage_subtab(ctx, parent: QWidget) -> None:
         accept_btn.setEnabled(tc.STATE_OPEN in states)
         reopen_btn.setEnabled(any(s != tc.STATE_OPEN for s in states))
         rerun_btn.setEnabled(bool(tc.rerun_wells(sel)))
+        anchor_btn.setEnabled(len(sel) == 1 and sel[0].can_anchor)
 
     def refresh() -> None:
         rows = tc.triage_rows(ctx)
@@ -155,7 +159,21 @@ def build_triage_subtab(ctx, parent: QWidget) -> None:
         if sel and not tcc.open_field(ctx, sel[0]):
             ctx.notify.set_status("Image Browser is not part of this build.")
 
+    def _on_anchor() -> None:
+        sel = _selected()
+        if sel and not tcc.open_anchor(ctx, sel[0]):
+            ctx.notify.set_status("Could not open Nanowells → Array: this build "
+                                  "has no Nanowells page.")
+
+    def _on_double_click(item) -> None:
+        # A row an anchor can fix opens straight onto it: the action the row exists to offer.
+        row = rows_by_index[item.row()] if item is not None and item.row() < len(rows_by_index) else None
+        if row is not None and row.can_anchor:
+            _on_anchor()
+
     table.itemSelectionChanged.connect(_sync_buttons)
+    table.itemDoubleClicked.connect(_on_double_click)
+    anchor_btn.clicked.connect(_on_anchor)
     open_btn.clicked.connect(_on_open)
     exclude_btn.clicked.connect(_on_exclude)
     accept_btn.clicked.connect(_on_accept)

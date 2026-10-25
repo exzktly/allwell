@@ -152,3 +152,51 @@ def well_anchors(anchors: dict[tuple[str, str], Anchor], well: str) -> dict[str,
     """``timepoint -> (x_um, y_um)`` for one well."""
     canonical = canonical_well_label(well) or well
     return {tp: a.position() for (w, tp), a in anchors.items() if w == canonical}
+
+
+def _recorded_anchors(output_dir: str | Path) -> dict[str, dict[str, tuple[float, float]]]:
+    """``well -> {timepoint -> position}`` of the anchors each grid record under ``<output_dir>/nanowells/`` says
+    its timepoint was located with (``manual_anchor_um``). A record that cannot be read records none."""
+    out: dict[str, dict[str, tuple[float, float]]] = {}
+    for path in sorted((Path(output_dir) / "nanowells").glob("*_grid.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        well = canonical_well_label(str(payload.get("well") or path.name[:-len("_grid.json")]))
+        blocks = payload.get("timepoints") if isinstance(payload, dict) else None
+        if well is None or not isinstance(blocks, dict):
+            continue
+        for tp, block in blocks.items():
+            used = block.get("manual_anchor_um") if isinstance(block, dict) else None
+            if isinstance(used, (list, tuple)) and len(used) == 2:
+                try:
+                    out.setdefault(well, {})[str(tp)] = (float(used[0]), float(used[1]))
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
+def wells_with_unused_anchors(input_dir: str | Path, output_dir: str | Path) -> list[str]:
+    """The wells whose output was made under other anchors than the ones set now: an anchor set (or moved) since
+    the well's last run, or one cleared since a run used it. Sorted canonical labels.
+
+    A plain re-run skips a well whose output exists under the run's settings, and the anchors are not among the
+    settings, so without this an anchor set on a finished well was never used: the well kept the timepoints the run
+    had left unaddressed, and said the same reason again. The local skip (``process_microscopy``) and the remote
+    one (``services.remote_finished_wells``) both force these wells. The grid record of each timepoint states the
+    anchor it was located with, so an anchor the last run already used — accepted or refused — is not a reason to
+    run the well again. A file that cannot be used names no well here: the run fails the wells on it, saying why."""
+    try:
+        anchors = read_anchors(anchors_path(input_dir))
+    except AnchorsFileError:
+        return []
+    wanted: dict[str, dict[str, tuple[float, float]]] = {}
+    for (well, tp), anchor in anchors.items():
+        wanted.setdefault(well, {})[tp] = anchor.position()
+    recorded = _recorded_anchors(output_dir)
+
+    def same(a: dict, b: dict) -> bool:
+        return a.keys() == b.keys() and all(math.dist(a[tp], b[tp]) < 1e-3 for tp in a)
+
+    return sorted(w for w in set(wanted) | set(recorded) if not same(wanted.get(w, {}), recorded.get(w, {})))

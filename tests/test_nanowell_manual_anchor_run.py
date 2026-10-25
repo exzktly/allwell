@@ -142,3 +142,84 @@ def test_the_anchor_is_read_in_the_well_frame_where_tiles_sit_far_from_its_origi
     off = nr.locate_timepoint("T0", record, "A01", rendered.images, settings,
                               manual_anchor_um=np.add(square, 40 * np.asarray(reference.fit.a1)))
     assert off.status == nr.UNADDRESSED and "from the nearest nanowell found" in off.reason
+
+
+def _only(monkeypatch, *flags):
+    """Make the next ``_run`` add *flags* to the command line, as Analyze adds them."""
+    real_main = pm.main
+
+    def main():
+        sys.argv += list(flags)
+        return real_main()
+
+    monkeypatch.setattr(pm, "main", main)
+
+
+def test_an_anchor_at_the_second_timepoint_reaches_the_first_from_the_other_wells_grid_records_alone(
+        tmp_path, monkeypatch):
+    """The reported case, as a remote re-run of one well now meets it: the anchor is at 24h, the well is run alone
+    into an output folder holding nothing of the plate but the other wells' grid records — what
+    ``services.remote_plate_grids`` sends to the host. 24h is addressed from the anchor and 0h from the plate's
+    motion. Without those records (what the host had before) 0h comes back unaddressed, with the reported reason."""
+    import shutil
+
+    plate, truth = _write_plate(tmp_path)
+    full = _run(monkeypatch, plate)                                        # the plate's first run, no anchor
+    square = truth["B02"].sites_um[truth["B02"].array.addresses.index((0, 0))]
+    set_anchor(anchors_path(plate / "in"), "B02", "24h", np.add(square, CLICK_ERROR_UM))
+    shutil.move(str(full), str(tmp_path / "first_run"))
+
+    def run_b02_alone(with_records: bool):
+        shutil.rmtree(plate / "out", ignore_errors=True)
+        (plate / "out" / "nanowells").mkdir(parents=True)
+        if with_records:
+            for well in ("A01", "A02", "B01"):
+                shutil.copy(tmp_path / "first_run" / "nanowells" / f"{well}_grid.json", plate / "out" / "nanowells")
+        _only(monkeypatch, "--only_wells", "B02", "--force_wells", "B02")
+        out = _run(monkeypatch, plate)
+        monkeypatch.undo()
+        return json.loads((out / "nanowells" / "B02_grid.json").read_text())["timepoints"]
+
+    alone = run_b02_alone(with_records=False)
+    assert (alone["24h"]["status"], alone["24h"]["origin_method"]) == ("ok", "manual")
+    assert alone["0h"]["status"] == "unaddressed"
+    assert alone["0h"]["reason"].startswith("No accepted fiducial, array centre, or precise plate-rigid prediction")
+    grid = run_b02_alone(with_records=True)
+    assert (grid["24h"]["status"], grid["24h"]["origin_method"]) == ("ok", "manual")
+    assert (grid["0h"]["status"], grid["0h"]["origin_method"]) == ("ok", "plate_rigid")
+    addressed, wrong = _wrong_addresses(plate / "out", build_well(rows=1, cols=1, tile=TILE, well="B02",
+                                                                  timepoint="0h", seed=11, radius_fraction=0.26)[0],
+                                        "0h")
+    assert addressed > 40 and wrong == 0
+
+
+def test_a_plain_re_run_forces_a_well_whose_anchor_was_set_since_and_the_anchor_is_used(tmp_path, monkeypatch):
+    """No Force: B02 has output under these settings, so a plain re-run skipped it and the anchor set since was
+    never read. ``main`` now hands the per-well loop B02 among the forced wells (``force_wells_with_new_anchors``),
+    and the run addresses it from the anchor. ``_run``'s serial loop runs every well it is handed, so the forced
+    list is asserted where ``main`` passes it, as well as the result."""
+    plate, truth = _write_plate(tmp_path)
+    out = _run(monkeypatch, plate)
+    assert json.loads((out / "nanowells" / "B02_grid.json").read_text())["timepoints"]["24h"]["status"] == "unaddressed"
+    square = truth["B02"].sites_um[truth["B02"].array.addresses.index((0, 0))]
+    set_anchor(anchors_path(plate / "in"), "B02", "24h", np.add(square, CLICK_ERROR_UM))
+    monkeypatch.undo()
+    forced = []
+    real_main = pm.main
+
+    def main():
+        loop = pm.process_well_zips                       # ``_run``'s serial loop, patched in before ``main`` runs
+
+        def recording(**kwargs):
+            forced.append(list(kwargs.get("force_wells") or []))
+            return loop(**kwargs)
+
+        monkeypatch.setattr(pm, "process_well_zips", recording)
+        return real_main()
+
+    monkeypatch.setattr(pm, "main", main)
+    out = _run(monkeypatch, plate)
+    assert forced == [["B02"]]
+    grid = json.loads((out / "nanowells" / "B02_grid.json").read_text())["timepoints"]
+    assert (grid["24h"]["status"], grid["24h"]["origin_method"]) == ("ok", "manual")
+    assert (grid["0h"]["status"], grid["0h"]["origin_method"]) == ("ok", "plate_rigid")

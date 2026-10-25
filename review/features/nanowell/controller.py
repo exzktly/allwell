@@ -276,6 +276,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
             st.well_parts, st.loaded_wells = read, wells
         for problem in (data.problems if data is not None else []):
             log.warning("Nanowells: %s", problem)
+        _apply_pending_anchor(ctx)
         _call(ctx, "_nw_refresh_controls")
         redraw(ctx)
 
@@ -981,6 +982,62 @@ def set_anchor_mode(ctx, on: bool) -> None:
         _call(ctx, "_nw_refresh_controls")
 
 
+def open_for_anchor(ctx, well: str, timepoint: str) -> bool:
+    """The ``nanowell.open_anchor`` service: show *well* at *timepoint* on the Array view, ready for *Set anchor*.
+
+    QC Triage and Home's health card offer it for a timepoint the run left unaddressed. The well is added to the
+    plate selection (never replacing it) so the page draws it; the view, well and timepoint are chosen; the anchor
+    layer is turned on in the well frame with the overlays shown, since an anchor is set only there; and the page
+    is brought forward. *Set anchor* itself waits for the well's tables (:func:`_apply_pending_anchor`), because
+    whether the timepoint can take an anchor is read from its grid record. Returns whether the page was shown."""
+    st = _state(ctx)
+    notebook = getattr(ctx.window, "_notebook", None)
+    if st is None or notebook is None or not well:
+        return False
+    selected = set(ctx.state.selection.selected_wells)
+    if well not in selected:
+        from review.core.selection_controller import set_selected_wells
+        set_selected_wells(ctx, selected | {well})
+    st.view, st.well, st.timepoint = "array", well, timepoint or ""
+    if not st.layers.anchor or st.layers.lattice():
+        st.layers = replace(st.layers, anchor=True, positions="measured" if st.layers.lattice() else
+                            st.layers.positions)
+    st.overlays_hidden, st.region, st.array_message = False, None, ""
+    st.anchor_pending = (well, timepoint or "")
+    _save_soon(ctx)
+    if not notebook.setCurrentByName("Nanowells"):
+        st.anchor_pending = None
+        return False
+    if ctx.widgets.get_or_none("_nw_canvas") is not None:
+        ensure_loaded(ctx)
+        _apply_pending_anchor(ctx)
+        _call(ctx, "_nw_refresh_controls")
+        redraw(ctx)
+    return True
+
+
+def _apply_pending_anchor(ctx) -> None:
+    """Turn *Set anchor* on for the timepoint :func:`open_for_anchor` was asked for, once its tables are loaded.
+
+    When the shown timepoint cannot take an anchor (its grid status is not one an anchor changes, the anchors file
+    has no place, the well is not drawn), the figure says why rather than leaving the button silently off."""
+    st = _state(ctx)
+    if st is None or st.anchor_pending is None or st.data is None or st.computing:
+        return
+    well, timepoint = st.anchor_pending
+    st.anchor_pending = None
+    if page_well(ctx) != well:
+        st.array_message = (f"{well} is not among the wells this page draws (a hidden set or a group-by variable "
+                            "may leave it out), so its anchor cannot be set here.")
+        return
+    if anchor_controls(ctx)[0]:
+        st.anchor_mode = True
+        return
+    status = ((st.data.grids.get(well) or {}).get(page_timepoint(ctx, well)) or {}).get("status") or "no status"
+    st.array_message = (f"{well} at {page_timepoint(ctx, well)} is {status.replace('_', ' ')}: an anchor set by hand "
+                        "cannot change that, so Set anchor is off.")
+
+
 def _anchor_change(ctx, change, failure: str) -> None:
     from util.nanowell_anchors import AnchorsFileError
 
@@ -1330,8 +1387,9 @@ def nw_on_activate(ctx) -> None:
     _load_config(ctx)
     if ctx.widgets.get_or_none("_nw_canvas") is None:
         return
-    _call(ctx, "_nw_refresh_controls")
     ensure_loaded(ctx)
+    _apply_pending_anchor(ctx)                   # the tables were already loaded: no load will land to apply it
+    _call(ctx, "_nw_refresh_controls")
     redraw(ctx)
 
 

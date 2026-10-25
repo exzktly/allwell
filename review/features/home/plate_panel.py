@@ -220,6 +220,8 @@ def well_tooltip(well: str, cells: dict, record_wells: dict,
         bits.append(f"{int(rec.get('covered_csv') or 0)} in the measurements CSV")
     if rec.get("failed"):
         bits.append(f"{len(rec['failed'])} failed group(s)")
+    if int(rec.get("not_addressed_count") or 0):
+        bits.append(f"{int(rec['not_addressed_count'])} nanowell timepoint(s) not addressed — set an anchor by hand")
     if quality:
         bits.append(quality)
     return " · ".join(bits)

@@ -185,16 +185,29 @@ def test_choosing_a_metric_in_the_real_combo_redraws_with_its_label(page, qtbot)
                       "occluded 2 · baseline occluded 1 · wells 2")
 
 
-def test_a_channel_metric_is_greyed_when_the_shared_channel_has_no_site_intensities(page, qtbot):
+def test_a_shared_channel_the_tables_lack_falls_back_to_the_page_s_channel_rather_than_greying(page, qtbot):
+    """This test once asserted that a shared channel the tables lack greys Brightness. That was the reported
+    defect: the shared selector is not on this page, so nothing here could un-grey it ("there is no channel selector
+    ... EGFP shows up nowhere"). The page now draws its own Channel, its first measured one by default."""
     _loaded(qtbot, page)
     page.state.channel.active_channel = "mcherry"
     nwc.nw_on_channel_changed(page)
     combo = page.widgets.get("_nw_metric_cb")
-    item = combo.model().item(combo.findData("brightness"))
-    assert not item.isEnabled() and "mcherry" in item.toolTip()
-    page.state.channel.active_channel = "gfp"
-    nwc.nw_on_channel_changed(page)
     assert combo.model().item(combo.findData("brightness")).isEnabled()
+    assert page.widgets.get("_nw_channel_cb").currentData() == "GFP"
+
+
+def test_a_channel_metric_is_greyed_when_the_run_measured_no_fluorescence(qtbot, tmp_path):
+    out = _write_nanowell_dataset(tmp_path)
+    for path in (out / "nanowells").glob("*.csv"):
+        pd.read_csv(path).drop(columns=["GFP_integrated", "GFP_mean_bg"]).to_csv(path, index=False)
+    ctx = _page(qtbot, out)
+    ctx.state.selection.selected_wells = {"A01"}
+    _loaded(qtbot, ctx)
+    combo = ctx.widgets.get("_nw_metric_cb")
+    item = combo.model().item(combo.findData("brightness"))
+    assert not item.isEnabled() and "measured no fluorescence" in item.toolTip()
+    assert ctx.widgets.get("_nw_channel_cb").count() == 0
 
 
 def test_along_wells_draws_one_timepoint_with_the_statistic_over_wells(page, qtbot):

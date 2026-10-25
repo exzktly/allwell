@@ -10694,7 +10694,12 @@ reader states which scheme versions it understands (`collect.SUPPORTED_SCHEMES`;
 pipeline's `SCHEME_VERSION` in it). A sidecar with another version refuses the whole dataset with
 `NanowellSchemeError`; a grid record with another version, or a table that repeats an address at one timepoint, leaves that well out
 and names it in `NanowellData.problems`. The phase channel's site intensities, which the pipeline writes like any other
-channel's, are not offered as fluorescence. Brightness is the mean `<token>_mean_intensity` of the cells the
+channel's, are not offered as fluorescence. `NanowellData.channels` are the channels with site intensities;
+`image_channels` are every fluorescence channel the run read (the sidecar's `fluor_tokens` less the phase token, then
+any the tables carry that it does not name, spelled as the tables spell them) — what the page's pictures can be cut
+from besides the phase image; and `unmeasured_channels` names, with why, each of those the tables of the wells read
+carry no `<token>_integrated` column for, so a channel the run read and did not measure is listed greyed on the page
+rather than missing without a word (`collect._image_channels`). Brightness is the mean `<token>_mean_intensity` of the cells the
 per-cell CSVs beside `nanowells/` place at each `(well, timepoint, q, r)`, whichever of the output folder and
 its parent was loaded; a CSV is read in either spelling through `util/csv_gz.glob_csvs`, the plain one winning
 when both exist.
@@ -10782,7 +10787,7 @@ as every plot tab does, with each well in no set standing alone.
 **The responding cut** (`state.NanowellState.thresholds`). One number per metrics column — `n`,
 `confluence_fc`, `brightness_fc_GFP` — so a cut chosen for one metric, or for one channel's brightness, is never
 applied to another. The page's *Responding above* field (shown on Distribution) edits the cut for the column the
-page draws now (`controller.drawn_metric_column`, the shared channel applied); `set_responding_above` clears it
+page draws now (`controller.drawn_metric_column`, the page's channel applied); `set_responding_above` clears it
 on an empty field and puts the field back on text that is not a number, rather than clearing a cut by accident.
 `draw_view(responding_above=…)` hands it to `distribution_model`, which keeps it on the model with each group's
 fraction (`model.responding`: over time, at the group's latest timepoint; along wells, at the timepoint drawn);
@@ -11024,7 +11029,13 @@ its artists, and that no other module assigns `STATE_COLOURS`, `FUSED_COLOUR` or
 **Crops.** `image_compute.site_crops` cuts a nanowell at each timepoint from its **owner tile**, read from
 the input archive the run segmented (`in/<well>.zip`; the member found by the run's filename schema, separator
 and phase token, which `collect` puts on `NanowellData`, judging only TIFF members so directory entries,
-sidecars and AppleDouble files cannot match), at full resolution: the tile-local centre is the well-frame
+sidecars and AppleDouble files cannot match; in a schema with no channel field the member must carry the phase token,
+as `process_microscopy._is_nuclear_filename` requires, or a fluorescence image of the same tile would pass for it).
+With a `channel`, the member is the one the pipeline paired with the phase image
+(`image_compute._channel_member`, mirroring `_derive_fluor_filename`: the channel field replaced, or the phase token
+in a schema without one, matched case-insensitively in the same folder), and `full_montage_compute.montage_source`
+takes the same `channel`. A fluorescence crop never falls back to the montage, which is phase only: a timepoint
+without the channel's tile is a `Crop` with no image saying why. Crops are cut at full resolution: the tile-local centre is the well-frame
 position less the tile's placement, over the x pixel size on both axes as the pipeline places them. A crop is
 a copy, so a cached crop does not keep its whole tile in memory. Without the archive (an output folder copied
 alone), with an archive that cannot be opened, for a nanowell with no owner tile (fused or shared), or when the
@@ -11059,8 +11070,29 @@ the first, Position and *Along x: Wells* offer every timepoint and start at the 
 the slider and the figure always agree. `page_well` is the chosen well when it is drawn, else the first drawn
 well. Wells are what `data_loading.plot_group_well_lists(ctx, fallback_to_all=False)` says every plotting tab
 draws — so a group-by variable, hidden sets and the solo-well toggles mean the same here as elsewhere — never
-every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and site signal follow the app's shared channel (U6); the Metric entries are greyed, with the
-reason, when that channel has no site intensities. `ensure_loaded` reads the tables of the wells the page draws
+every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and site signal, and
+their fold changes, are drawn for the page's own **Channel** (`_nw_channel_cb`, `NanowellState.channel`, persisted),
+beside Metric on every view: the app's shared channel selector sits on the Plotting band, which this page does not show,
+so the page cannot depend on it alone. `controller.page_channel_name` resolves it — the page's choice when set; else
+the shared channel when the tables carry it (U6); else the tables' first fluorescence channel, so a shared channel the
+tables lack (the phase channel, a ratio) never greys every fluorescence metric with no control here to change it —
+and `page_channel` spells it as the data does. Every caller that draws a channel (the views, Extremes, the site
+detail, the crop captions, the responding cut) asks these two, never `ctx.state.channel` directly. The Channel
+control lists `NanowellData.channels`, then each of `unmeasured_channels` greyed with its reason; the Metric entries
+are greyed, with the reason, only when the run measured no fluorescence in the nanowells at all. Batch Export's
+Nanowells mode still takes the shared channel.
+
+**The image channel** (`NanowellState.image_channel`, persisted; `controller.page_image_channel`). Every picture the
+page draws from the raw images — the site detail's crop strip, **Pop out**, the Extremes montage and the Array view's
+*Full resolution* montage — is of the phase image (`""`) or of one of `NanowellData.image_channels`. It is one
+setting offered by three combos (`tab_view._IMAGE_CHANNEL_COMBOS`: beside the strip's Cells box, in the Extremes
+group, beside the Array view's Image combo) that `_refresh_image_channels` keeps on it, each listing *Phase
+(<token>)* and the channels, greyed when the run read none. `set_image_channel` empties `st.crops`, drops the
+crop reads in flight from `st.fetching` and releases the tile store; `_fetch` tags a crop read with the channel it
+was started for and discards a result whose channel is no longer chosen, so a crop of one channel is never stored
+under another. The tile store's key is `(well, timepoint, channel)`. The run montage is phase only, so with a
+fluorescence channel chosen and *Image: Run montage* the footer says so and points at Full resolution. Each crop
+figure names its channel in its caption or title (`renderer._of_channel`). `ensure_loaded` reads the tables of the wells the page draws
 (`active_wells`) and computes the metrics on `core.worker_bridge.run_off_thread`. The wells read are kept
 (`state.well_parts`, for the data dir in `parts_for`; `loaded_wells` the wells asked for, a well without a table
 included), so a well selected again reads nothing and a deselection neither reads nor recomputes; the worker

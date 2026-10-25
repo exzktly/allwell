@@ -28,7 +28,7 @@ def known_crops(monkeypatch):
     each crop stretched to its own range draw differently."""
     crops = {"t_c": Crop(np.linspace(0, 10, 400).reshape(20, 20), "tile", ""),
              "t_a": Crop(np.linspace(0, 100, 400).reshape(20, 20), "tile", "")}
-    monkeypatch.setattr(nwc, "site_crops", lambda data, metrics, site: crops)
+    monkeypatch.setattr(nwc, "site_crops", lambda data, metrics, site, **_kw: crops)
     return crops
 
 
@@ -72,7 +72,7 @@ def test_pop_out_draws_every_timepoint_large_on_one_scale_and_leaves_the_page_s_
     window = _press_pop_out(qtbot, page)
     assert window.isVisible() and window.isWindow()
     qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
-    assert _popout_title(page) == ["A01 · q 1, r 0 over time"]
+    assert _popout_title(page) == ["A01 · q 1, r 0 over time · phase image"]
     combined = np.concatenate([c.image.ravel() for c in known_crops.values()])
     lo, hi = np.percentile(combined, [1, 99])
     for image in _images(page, "_nw_popout_fig"):
@@ -86,7 +86,7 @@ def test_the_pop_out_follows_the_selection_and_says_when_there_is_none(page, qtb
     _press_pop_out(qtbot, page)
     qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
     _click_dot(qtbot, page, ("A01", 0, 0))
-    qtbot.waitUntil(lambda: _popout_title(page) == ["A01 · q 0, r 0 over time"], timeout=10000)
+    qtbot.waitUntil(lambda: _popout_title(page) == ["A01 · q 0, r 0 over time · phase image"], timeout=10000)
     nwc._select(page, None, False)                                   # what a click on empty space does
     said = [t.get_text() for ax in page.widgets.get("_nw_popout_fig").axes for t in ax.texts
             if t.get_gid() == "nw-popout-empty"]

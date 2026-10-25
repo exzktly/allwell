@@ -6,8 +6,9 @@ central square of an array whose square the run could not find. This draws the s
 themselves, at whatever resolution the view asks for, down to one image pixel per screen pixel and beyond.
 
 **Where each tile goes.** Every tile is placed where the run's registration put it (the grid record's ``tiles``:
-``left_um``, ``top_um``, in the well frame), from the phase image of that tile in ``in/<well>.zip``
-(``image_compute._member_for``, the member the run read), at the x pixel size, as the pipeline places them
+``left_um``, ``top_um``, in the well frame), from the phase image of that tile in ``in/<well>.zip`` — or from a
+fluorescence channel's image of it, paired with the phase image as the pipeline pairs them
+(``image_compute._member_for``, the member the run read) — at the x pixel size, as the pipeline places them
 (``nanowell_run.locate_timepoint``). Overlaps are not blended: tiles are drawn in the record's order and a later
 tile covers an earlier one where they overlap, so every pixel shown is a pixel of one real image.
 
@@ -53,7 +54,7 @@ STRETCH_PERCENTILES = (1.0, 99.5)
 @dataclass(frozen=True)
 class PlacedTile:
     tile: str
-    member: str              # the archive member holding its phase image
+    member: str              # the archive member holding its image (phase, or the source's channel)
     left_um: float           # well frame
     top_um: float
 
@@ -70,6 +71,7 @@ class MontageSource:
     status: str                                # the grid record's status for this timepoint
     reason: str                                # and its reason, when it has one
     origin_method: str | None
+    channel: str = ""                          # the fluorescence channel drawn; "" for the phase image
 
     def extent_um(self) -> tuple[float, float, float, float]:
         """``(left, top, right, bottom)`` of every tile together, in the well frame."""
@@ -78,8 +80,9 @@ class MontageSource:
                 max(t.left_um for t in self.tiles) + w, max(t.top_um for t in self.tiles) + h)
 
 
-def montage_source(data, well: str, timepoint: str) -> tuple[MontageSource | None, str]:
-    """The full-resolution montage of *well* at *timepoint*, or ``(None, why not)``.
+def montage_source(data, well: str, timepoint: str, channel: str = "") -> tuple[MontageSource | None, str]:
+    """The full-resolution montage of *well* at *timepoint* — of the phase image, or of *channel*'s — or
+    ``(None, why not)``.
 
     Needs the grid record's tile placements, the acquisition block's pixel and tile size, and the input archive
     the run read. Each is a reason of its own when it is missing, because they are fixed in different places: a
@@ -108,13 +111,13 @@ def montage_source(data, well: str, timepoint: str) -> tuple[MontageSource | Non
         return None, f"{archive.name} could not be read ({exc})."
     tiles, unfound = [], []
     for row in placed:
-        member = _member_for(names, data, well, timepoint, str(row["tile"]))
+        member = _member_for(names, data, well, timepoint, str(row["tile"]), channel)
         if member is None:
             unfound.append(str(row["tile"]))
             continue
         tiles.append(PlacedTile(str(row["tile"]), member, float(row["left_um"]), float(row["top_um"])))
     if not tiles:
-        return None, f"{archive.name} holds no {data.phase_token} image of any tile of {well} at {timepoint}."
+        return None, f"{archive.name} holds no {channel or data.phase_token} image of any tile of {well} at {timepoint}."
     if not size.get("x") or not size.get("y"):
         # A plate placed from a scan pattern has no record to state a tile size; the run read it from the image.
         shape = _tile_shape(archive, tiles[0].member)
@@ -125,7 +128,7 @@ def montage_source(data, well: str, timepoint: str) -> tuple[MontageSource | Non
             if unfound else "")
     return MontageSource(well, timepoint, archive, px, tuple(tiles),
                          (float(size["x"]) * px, float(size["y"]) * px), str(block.get("status") or ""),
-                         str(block.get("reason") or "") + note, block.get("origin_method")), ""
+                         str(block.get("reason") or "") + note, block.get("origin_method"), channel), ""
 
 
 def _tile_shape(archive: Path, member: str) -> tuple[int, int] | None:

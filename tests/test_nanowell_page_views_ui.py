@@ -187,7 +187,7 @@ def test_clicking_a_nanowell_on_the_map_selects_it_and_cuts_its_crop_from_the_mo
     assert len(images) == 2
     # What the crops are is stated on the figure, not only on the state.
     caption = [t.get_text() for t in detail.texts if t.get_gid() == "nw-crop-caption"]
-    assert caption == ["Crops: A01 · q 1, r 0, from the montage, at its lower resolution; one brightness scale; "
+    assert caption == ["Crops (phase image): A01 · q 1, r 0, from the montage, at its lower resolution; one brightness scale; "
                        "from the montage: the input archive is not beside this dataset"]
     assert st.fetch_bridges == [] and st.fetching == set()           # nothing kept once delivered
 
@@ -195,7 +195,7 @@ def test_clicking_a_nanowell_on_the_map_selects_it_and_cuts_its_crop_from_the_mo
 def test_a_crop_job_that_fails_says_so_on_the_figure_and_is_not_relaunched(page, qtbot, monkeypatch):
     calls = []
 
-    def broken(*args):
+    def broken(*args, **_kw):
         calls.append(args)
         raise OSError("disk went away")
 

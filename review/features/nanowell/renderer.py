@@ -572,7 +572,12 @@ def _cells_clause(tally: dict) -> str:
     return "; ".join(said)
 
 
-def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False) -> None:
+def _of_channel(image_channel: str) -> str:
+    """What a set of crops is an image of, for its caption: the fluorescence channel, or the phase image."""
+    return f"{image_channel} image" if image_channel else "phase image"
+
+
+def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, image_channel: str = "") -> None:
     """The first selected nanowell's crops, one per timepoint, on the strip under the site detail's **Pop out**
     button: each titled with its timepoint, a timepoint without a crop saying why in its place, and where the crops
     were cut from said once in the caption. *crops* is ``None`` while they are being cut."""
@@ -609,12 +614,14 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False) -> 
     origin = ("from its owner tile at full resolution" if sources == {"tile"} else
               "from the montage, at its lower resolution" if sources == {"montage"} else
               "from its owner tile, or the montage where marked" if sources else "none could be cut")
-    caption = f"Crops: {site[0]} · q {site[1]}, r {site[2]}, {origin}; one brightness scale" + "".join(
+    caption = (f"Crops ({_of_channel(image_channel)}): {site[0]} · q {site[1]}, r {site[2]}, {origin}; "
+               "one brightness scale") + "".join(
         f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else "")
     _ink(fig.text(0.03, 0.03, caption, fontsize=6, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
 
 
-def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metrics: dict | None = None) -> None:
+def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metrics: dict | None = None,
+                     image_channel: str = "") -> None:
     """The selected nanowell at every timepoint, large: one panel per timepoint, filling the page's figure.
 
     Asked for: a larger view of a selected nanowell over time than the site detail's strip of small crops. Every
@@ -661,7 +668,8 @@ def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metr
             width_pt = ax.get_position().width * fig.get_size_inches()[0] * 72
             _ink(ax.text(0.5, -0.03, "\n".join(_pack(said, width_pt, 8.0)), ha="center", va="top", fontsize=8,
                          transform=ax.transAxes, color=faint, gid="nw-crop-grid-metrics"), muted=True)
-    _ink(fig.text(0.02, 0.955, f"{site[0]} · q {site[1]}, r {site[2]} over time", fontsize=11, color=ink,
+    _ink(fig.text(0.02, 0.955, f"{site[0]} · q {site[1]}, r {site[2]} over time · {_of_channel(image_channel)}",
+                  fontsize=11, color=ink,
                   gid="nw-crop-grid-title"))
     sources = {crop.source for _tp, crop in items if crop.image is not None}
     origin = ("cut from its owner tile at full resolution" if sources == {"tile"} else
@@ -782,7 +790,7 @@ def _fit_extremes(fig, blocks, cols: int, metric_items) -> _ExtremesLayout:
 
 
 def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cells: bool = False,
-                    timepoints=None, metrics: dict | None = None) -> dict:
+                    timepoints=None, metrics: dict | None = None, image_channel: str = "") -> dict:
     """The *N* nanowells with the largest fold change and the *N* with the smallest, each a row of its crops at the
     timepoints shown; returns ``{axes: (well, q, r)}`` so a click on a row selects its nanowell.
 
@@ -831,7 +839,7 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
     _ink(fig.text(0.02, 1 - 0.2 / draw.h_in,
                   f"{model.well} · the nanowells with the largest and smallest {label.lower()}",
                   fontsize=10, color=ink, va="top", gid="nw-extremes-title"))
-    _ink(fig.text(0.02, 0.012, draw.caption(label, columns, note), fontsize=7, color=faint,
+    _ink(fig.text(0.02, 0.012, draw.caption(label, columns, note, image_channel), fontsize=7, color=faint,
                   gid="nw-extremes-caption", wrap=True), muted=True)
     return hits
 
@@ -929,7 +937,7 @@ class _ExtremesDrawing:
             self.text(tx, ty - _EXT_VALUE_PT * 1.3 / 72, "\n".join(lines), color=self.faint, ha=ha, va="top",
                       fontsize=_EXT_METRIC_PT, linespacing=1.15, gid="nw-extremes-metrics")
 
-    def caption(self, label: str, columns, note: str) -> str:
+    def caption(self, label: str, columns, note: str, image_channel: str = "") -> str:
         """What the montage says about itself: the ranking, where the crops came from, the cells, the timepoints left
         out, and the metrics when they had to be."""
         sources = self.sources
@@ -939,7 +947,8 @@ class _ExtremesDrawing:
                   "still being cut" if self.pending else "none could be cut")
         hidden = [tp for tp in self.model.timepoints if tp not in columns]
         said = [caption(self.model, label) + ".",
-                f"Crops {origin}; every crop on one brightness scale ({self.lo:.4g} to {self.hi:.4g})."
+                f"Crops of the {_of_channel(image_channel)}, {origin}; every crop on one brightness scale "
+                f"({self.lo:.4g} to {self.hi:.4g})."
                 + "".join(f" {_sentence(n_)}." for n_ in sorted(self.notes))
                 + (f" {_sentence(_cells_clause(self.tally))}." if self.tally else "")
                 + (f" Timepoints not shown: {', '.join(hidden)}." if hidden else "")

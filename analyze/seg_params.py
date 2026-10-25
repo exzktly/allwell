@@ -12,10 +12,21 @@ pipeline-info restore in ``analyze/pinfo.py`` and the option collection in
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QComboBox, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from util.channel_roles import LABELFREE_METHODS, phase_role_conflicts
-from widgets.page_stack import NamedPageStack
+from widgets.value_combo import ValueCombo
+
+#: General-Cellpose models, ``(--cellpose_model value, label)``. The label says
+#: which Cellpose each model needs, which the old bare list left to a tooltip:
+#: the app installs Cellpose 4, and a run refuses the Cellpose 3 models by name.
+CELLPOSE_MODEL_OPTIONS = (
+    ("cpsam", "cpsam (Cellpose-SAM)"),
+    ("cyto3", "cyto3 (needs Cellpose 3)"),
+    ("cyto2", "cyto2 (needs Cellpose 3)"),
+    ("cyto", "cyto (needs Cellpose 3)"),
+    ("nuclei", "nuclei (needs Cellpose 3)"),
+)
 
 # The two routines that run StarDist, and therefore take its thresholds. Kept
 # next to the controls that depend on it rather than imported from the pipeline:
@@ -60,45 +71,6 @@ def _threshold_help() -> tuple[str, str]:
     return PROB_THRESH_HELP, NMS_THRESH_HELP
 
 
-class _ParamPage(QWidget):
-    """One method's parameter page: no height while it is not the page showing.
-
-    ``_collapse_seg_param_stack`` gives every page but the current one an Ignored vertical policy, which
-    ``QStackedLayout.sizeHint`` honours. Its *height-for-width* does not: it is the tallest page's, whatever the
-    policies, and a box layout asks a widget with a layout for its height-for-width straight from that layout, so
-    no override on the stack is consulted. Every page here holds wrapping text, so that is the height the stack
-    was laid out at — measured with Label-free's 42 px page showing, a 132 px slot with the page centred in it,
-    drawn as a blank gap above and below. ``QStackedLayout`` hides the pages it is not showing, so a hidden page
-    answers 0 here and the stack's height-for-width is the showing page's, at the width it actually has.
-    """
-
-    def heightForWidth(self, width: int) -> int:  # Qt naming
-        return 0 if self.isHidden() else super().heightForWidth(width)
-
-
-class _ParamStack(NamedPageStack):
-    """The per-method parameter stack: its size hint is as tall as the showing page needs at its width.
-
-    The stack is vertically Fixed, so it never takes spare height from the section — Preferred let it grow to
-    173 px around Label-free's 42 px page. Fixed caps a widget at its size hint, though, and the plain hint is
-    measured at the page's preferred width: nanowell mode's count rows wrap at the sidebar's width and needed
-    210 px against a 194 px hint, so their first row was clipped. The hint's height is therefore the layout's
-    height-for-width at the width the stack has, re-asked whenever that width changes.
-    """
-
-    def sizeHint(self):  # Qt naming
-        hint = super().sizeHint()
-        lay = self.layout()
-        if lay is not None and lay.hasHeightForWidth() and self.width() > 0:
-            hint.setHeight(lay.heightForWidth(self.width()))
-        return hint
-
-    def resizeEvent(self, event) -> None:  # Qt naming
-        super().resizeEvent(event)
-        if event.oldSize().width() != event.size().width():
-            self.updateGeometry()
-
-
 class AnalyzeSegParamsMixin:
     """Builds the per-method segmentation parameter controls."""
 
@@ -111,18 +83,14 @@ class AnalyzeSegParamsMixin:
         """
         # Per-method parameter panel — swapped by _refresh_segmentation_hints so
         # only the selected routine's controls are shown.
-        self._seg_param_stack = _ParamStack(sec)
+        from widgets.page_stack import CurrentPageStack
+        # Sized to the current method's page alone; see CurrentPageStack.
+        self._seg_param_stack = CurrentPageStack(sec)
         # A QStackedWidget's height is the max over *all* pages, so the short
         # default (StarDist, no params) would still reserve the tall Cellpose
         # page's height — a big empty gap under the channel-tokens section.
         # Collapse it to the current page by giving the hidden pages a vertical
-        # size policy of Ignored, re-applied on every page switch — which covers
-        # the plain size hint — and by building every page as a ``_ParamPage``,
-        # whose height-for-width is 0 while hidden, which covers the height the
-        # pages' wrapping text makes the layout use instead. Vertically Fixed so
-        # the stack never takes spare height from the section, with a size hint
-        # that is the showing page's height at the stack's width
-        # (``_ParamStack``), since Fixed caps the stack at its size hint.
+        # size policy of Ignored, re-applied on every page switch.
         self._seg_param_stack.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self._seg_param_stack.currentChanged.connect(
             lambda _=None: self._collapse_seg_param_stack())
@@ -136,7 +104,7 @@ class AnalyzeSegParamsMixin:
         sec.layout().addWidget(self._seg_param_stack)
 
         def _page() -> QWidget:
-            p = _ParamPage()
+            p = QWidget()
             v = QVBoxLayout(p)
             v.setContentsMargins(0, 0, 0, 0)
             v.setSpacing(2)
@@ -147,7 +115,7 @@ class AnalyzeSegParamsMixin:
 
         # StarDist + watershed: cytoplasm token + min nucleus area.
         ws = _page()
-        cyto_cell = self._row(ws, "Cytoplasm token")
+        cyto_cell = self._row(ws, "Cytoplasm channel")
         self._cytoplasm_edit = self._entry(cyto_cell, "", width=80)
         cyto_cell.layout().addStretch(1)
         self._cytoplasm_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
@@ -165,8 +133,8 @@ class AnalyzeSegParamsMixin:
         # channel above (fluorescent or brightfield).
         cp = _page()
         m_cell = self._row(cp, "Model")
-        self._cellpose_model_cb = QComboBox(cp)
-        self._cellpose_model_cb.addItems(["cpsam", "cyto3", "cyto2", "cyto", "nuclei"])
+        self._cellpose_model_cb = ValueCombo(CELLPOSE_MODEL_OPTIONS, cp)
+        self._cellpose_model_cb.setFixedWidth(self._SEG_METHOD_CB_W)
         self._cellpose_model_cb.setToolTip(
             "cpsam: Cellpose-SAM, Cellpose 4's model, which the app installs. cyto3, cyto2, cyto and nuclei are "
             "Cellpose 3's and run only where Cellpose 3 is installed; on Cellpose 4 a run refuses them by name.")
@@ -178,7 +146,7 @@ class AnalyzeSegParamsMixin:
         c_cell = self._row(cp, "Cell-prob threshold")
         self._cellpose_cellprob_thr_edit = self._entry(c_cell, "0.0", width=70)
         c_cell.layout().addStretch(1)
-        n_cell = self._row(cp, "Nucleus channel (opt)")
+        n_cell = self._row(cp, "Nucleus channel (optional)")
         self._cellpose_nuclei_channel_edit = self._entry(n_cell, "", width=80)
         n_cell.layout().addStretch(1)
         self._seg_param_stack.addPage("cellpose", cp)
@@ -303,9 +271,10 @@ class AnalyzeSegParamsMixin:
                "cells this size become the 30 px its model was trained on, so "
                "smaller values are slower (15 px: about 4x) and larger ones "
                "faster. 0 skips the resize and segments as if cells were 30 px.")
-        d_cell = self._row(sec, "Cell diameter (px, 0=model's 30)", tooltip=tip)
+        d_cell = self._row(sec, "Cell diameter", tooltip=tip)
         self._cellpose_diameter_edit = self._entry(d_cell, "0", width=70)
         self._cellpose_diameter_edit.setToolTip(tip)
+        self._field_note(d_cell, "px · 0 = 30")
         d_cell.layout().addStretch(1)
         # _row() returns the right-hand cell; the label is in its parent, so the
         # parent row is what gets hidden.
@@ -352,10 +321,11 @@ class AnalyzeSegParamsMixin:
         nms_cell.layout().addWidget(self._info_icon(nms_cell, nms_help))
         nms_cell.layout().addStretch(1)
 
-        hint = QLabel("Both blank = the pretrained model's own thresholds. Lower "
-                      "probability finds more (dimmer) nuclei; higher overlap "
-                      "keeps more touching nuclei apart. Tune them against a real "
-                      "frame in Review → Image Browser → Playground.", sec)
+        hint = QLabel(f"Probability starts at {DEFAULT_PROB_THRESH_TEXT}, more "
+                      "sensitive than the pretrained model; blank = the model's "
+                      "own threshold. Lower finds more (dimmer) nuclei; higher "
+                      "overlap keeps more touching nuclei apart. Tune against a "
+                      "real frame in Review → Image Browser → Playground.", sec)
         hint.setObjectName("Muted")
         hint.setWordWrap(True)
         sec.layout().addWidget(hint)
@@ -394,9 +364,9 @@ class AnalyzeSegParamsMixin:
             cyto = self._cytoplasm_edit.text().strip()
             nuc = self._nuclear_token_edit.text().strip()
             if not cyto:
-                errors.append("Watershed mode requires a cytoplasm token.")
+                errors.append("Watershed mode requires a cytoplasm channel.")
             if channels and cyto and cyto == nuc:
-                errors.append("Cytoplasm token must differ from nuclear token.")
+                errors.append("The cytoplasm channel must differ from the segmentation channel.")
             try:
                 area = int(self._min_nucleus_area_edit.text().strip())
                 if area <= 0:
@@ -440,7 +410,12 @@ class AnalyzeSegParamsMixin:
         A ``QStackedWidget`` reports the max sizeHint over all pages, so without
         this the empty StarDist page reserves the tall Cellpose page's height
         (the gap the user saw under channel tokens). Giving every non-current
-        page a vertically-Ignored policy drops it from the height calculation.
+        page a vertically-Ignored policy drops it from the size hint — but not
+        from the stacked layout's height-for-width, which still took the
+        maximum over every page, so a page holding a wrapped label (watershed,
+        label-free) kept the gap. The stack is a ``CurrentPageStack`` for that
+        reason, which answers every size question from the current page; the
+        policies here remain so a plain stack would still be sized sensibly.
         """
         stack = getattr(self, "_seg_param_stack", None)
         if stack is None:
@@ -456,7 +431,9 @@ class AnalyzeSegParamsMixin:
         stack.updateGeometry()
 
     def _refresh_segmentation_hints(self) -> None:
-        if not hasattr(self, "_segmentation_hint_lbl"):
+        # The hint label is built under the picker, before the method pages it
+        # validates against; the section's own last call is the first that runs.
+        if not hasattr(self, "_segmentation_hint_lbl") or not hasattr(self, "_cytoplasm_edit"):
             return
         method = self._seg_method()
         # Show only the selected routine's parameter page.
@@ -475,13 +452,13 @@ class AnalyzeSegParamsMixin:
             (row if row is not None and row.objectName() == "AnalyzeFormRow" else cell).setVisible(not phase_locked)
         errors = self._segmentation_validation_errors(channels=not self._auto_detect_on())
         if errors:
-            self._segmentation_hint_lbl.setText("  ".join(errors))
+            self._set_status(self._segmentation_hint_lbl, "  ".join(errors), error=True)
             return
         nanowell = getattr(self, "_nanowell_cb", None)
         if nanowell is not None and nanowell.isChecked():
             # The method selector is hidden in nanowell mode, so a hint on when to pick it is a hint about
             # nothing on screen. What still matters — no channel marked Phase — is an error, shown above.
-            self._segmentation_hint_lbl.setText("")
+            self._set_status(self._segmentation_hint_lbl, "")
             return
         # Each hint leads with *when to use this* so a first-time user can pick.
         hint = {
@@ -491,7 +468,7 @@ class AnalyzeSegParamsMixin:
             "cellpose_labelfree": "Use when there's no stain at all: Cellpose-SAM (cpsam) on the channel marked 'Phase' — label-free. Set the cell diameter when your cells are far from 30 px.",
             "classical_threshold": "Fast model-free fallback for clean, separated objects: Otsu threshold + watershed on the 'Segmentation channel' above.",
         }.get(method, "")
-        self._segmentation_hint_lbl.setText(hint)
+        self._set_status(self._segmentation_hint_lbl, hint)
 
     def _restore_stardist_thresholds(self, d: dict) -> None:
         """Put a prior run's recorded thresholds back into the two fields.

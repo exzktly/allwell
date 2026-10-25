@@ -27,12 +27,12 @@ def test_robust_mesh_param_fields_gated_and_collected(qapp):
     tab = AnalyzeTab()
 
     # Hidden for the radius-only / fft methods…
-    tab._background_cb.setCurrentText("sliding_disk")
+    tab._background_cb.setValue("sliding_disk")
     assert all(w.isHidden() for w in tab._mesh_param_rows)
-    tab._background_cb.setCurrentText("fft_bandpass")
+    tab._background_cb.setValue("fft_bandpass")
     assert all(w.isHidden() for w in tab._mesh_param_rows)
     # …shown for robust_mesh, with the fft cutoffs hidden in turn.
-    tab._background_cb.setCurrentText("robust_mesh")
+    tab._background_cb.setValue("robust_mesh")
     assert not any(w.isHidden() for w in tab._mesh_param_rows)
     assert all(w.isHidden() for w in tab._fft_small_rows)
 
@@ -110,7 +110,7 @@ def test_fluor_radius_info_icon_precedes_disable_checkbox(qapp):
     from analyze.tab import AnalyzeTab
 
     tab = AnalyzeTab()
-    tab._background_cb.setCurrentText("robust_mesh")  # reveals the radius rows
+    tab._background_cb.setValue("robust_mesh")  # reveals the radius rows
 
     row = tab._no_tophat_fluor_cb.parentWidget()
     lay = row.layout()

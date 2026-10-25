@@ -583,7 +583,7 @@ def get_remote(name: str, path: Path | None = None) -> RemoteHost | None:
 
 
 def default_remote_index(n_combo_items: int) -> int:
-    """Default index for the Analyze "Run on:" combo.
+    """Default index for the Analyze "Run on" combo.
 
     The combo is ``Local`` (index 0) followed by one item per configured remote.
     When at least one remote exists (``n_combo_items > 1``) the run defaults to

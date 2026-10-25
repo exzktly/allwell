@@ -750,10 +750,13 @@ allwell/
 │   ├── nanowell_preflight.py   ← what is checkable before a nanowell run without reading an
 │   │                              image: record, archives, grids, overlap and seam estimate
 │   ├── nanowell_preview.py     ← the Test detection window and the marks drawn on the montage
-│   ├── qc_section.py           ← the Quality Control section: the pixel
-│   │                              corrections, the debris gate, and the
-│   │                              per-cell focus measurement and its cut
-│   ├── schema_section.py       ← the Filename Schema section: picker, detection,
+│   ├── qc_section.py           ← the Image correction & QC section: the pixel
+│   │                              corrections (both default to none), the
+│   │                              debris gate, and the per-cell focus
+│   │                              measurement and its cut
+│   ├── run_footer.py           ← the run footer pinned under the form (Run on +
+│   │                              the run buttons) and the Remote options section
+│   ├── schema_section.py       ← the Filename schema section: picker, detection,
 │   │                            readout, and the preview that refreshes them
 │   ├── seg_params.py           ← per-method segmentation params + StarDist thresholds
 │   ├── well_scope.py           ← the Only these wells / Force these wells rows and the
@@ -1029,7 +1032,11 @@ allwell/
 ├── widgets/                     ← reusable Qt widgets (no app coupling) — including
 │                                  separator.py (the two divider builders every pane
 │                                  uses) and page_stack.py (NamedPageStack, the
-│                                  name-keyed QStackedWidget all three panes build on)
+│                                  name-keyed QStackedWidget all three panes build on,
+│                                  and CurrentPageStack, one as tall as its current page)
+│                                  and footer_scroll_area.py (a scroll area with a
+│                                  footer that does not scroll) and value_combo.py
+│                                  (a combo read and written by value, showing labels)
 │                                  and notice_badge.py (the "!" unread pip on the log button)
 │                                  and progress_popup.py (ProgressPopup, the application-modal
 │                                  progress bar the Cell Gating panel's jobs run behind)
@@ -2798,7 +2805,7 @@ superset — staging a well whole that turns out not to be a blank costs an uplo
 while missing one starves a whole block of its correction.
 
 **The map is written on a plate, not in a text box.** `analyze/bg_map.py` holds
-the editor — a non-modal window off the Quality Control section, built once and
+the editor — a non-modal window off the Image correction & QC section, built once and
 hidden rather than destroyed. One `WellPlateSelector` in paint mode carries the
 whole partition: a colour per blank, a ring on the block being edited, absent
 wells disabled so a drag cannot claim a well the folder does not have, and a
@@ -6714,6 +6721,60 @@ mixin, so the outcome path is not reached through the class named for form
 building. Verbose inline helper paragraphs are collapsed behind hover `ⓘ` icons
 (`_info_icon` / `_section(info=…)`).
 
+**The form's shape.** Sections in build order: Folders, Filename schema,
+Channels & segmentation (open), then Image correction & QC, Nanowells,
+Auto-threshold, Shape metrics, Output options, Compute options, Scratch disk
+(folded), then Remote options, shown only while a remote is chosen. Titles are
+sentence case, and `ui.help_topics.ANALYZE_SECTION_HELP` maps every one to its
+manual heading. The run controls are not a section: `analyze.run_footer`
+builds **Run on** and the run row into a footer that `AnalyzeTab` pins under the
+form's scroll area, which is a `widgets.footer_scroll_area.FooterScrollArea` —
+the scroll area stays the one widget the shell holds as `_left_sidebar`, so
+hiding it, fixing its width and reading its `viewport()` all behave as before,
+and the viewport is shortened by the footer's height so the form's last rows
+are never drawn under it. Run is therefore on screen however far the form is
+scrolled. The footer's fill and top edge are QSS (`QWidget#AnalyzeRunFooter`),
+and its two rows are made transparent by a child rule beside it: the app-wide
+`QWidget` rule otherwise fills every plain row with the canvas colour, over the
+footer's own paint, and the footer is laid out correctly and invisible.
+`test_analyze_sidebar_ux.py::test_the_footer_is_drawn_apart_from_the_form`
+reads the drawn pixels for that reason. `_show_run_buttons(running=…)` is the one place the run row changes:
+it sets the enabled state the run's start and end always set, and shows Run at
+idle and Suspend / Stop while a run is going. Phone layout still lends the run
+row to its bar at the foot of the pane (`analyze/phone_view.py`); it reads the
+row as `_run_btn.parentWidget()` and puts it back where it found it, which is
+now the footer.
+
+**A fresh form corrects nothing.** Flat-field and background subtraction both
+default to `none` (`analyze.qc_section.DEFAULT_FLATFIELD` /
+`DEFAULT_BACKGROUND`). The background is still passed to the pipeline
+explicitly — `--background none` — because the CLI's own default is
+`sliding_disk`, and an omitted flag would correct the run behind the form's back.
+The two correction combos and the general-Cellpose model combo are
+`widgets.value_combo.ValueCombo`s: they show a label ("Robust local mesh",
+"cyto3 (needs Cellpose 3)") and carry the pipeline's id as item data. Every
+reader goes through `value()` / `setValue()` — `_collect_run_options`,
+`bg_map`, and `pinfo`'s restore, which selects by value — because
+`currentText()` is now a sentence and a comparison against an id would quietly
+answer `False`.
+
+**Status lines say what kind of thing they say, and take no room when silent.**
+`AnalyzeFormChromeMixin._set_status(label, text, error=…)` is how the form's
+status labels are written — the folder readout, the schema lock and schema
+error, the segmentation hint. An empty label is hidden, since a blank label
+still takes its line and margins; a label carrying a problem takes the `Error`
+object name (QSS `QLabel#Error`, the danger colour) and anything else stays
+muted, because a refusal in the same grey as the help paragraph beside it reads
+as more help. The segmentation hint sits directly under the method picker.
+Rows that cannot matter are hidden whole rather than greyed: the Background
+well row and the blank-pairing rows show only while a correction is
+`empty_well`, with a red "Required" line while the field is empty; the
+Segmentation channel row (label included — `_nuclear_row_widget` is the row,
+not `_row`'s right-hand cell) hides for the label-free method. `_row` centres
+its label on the field, and a unit or the meaning of `0` goes after the field
+(`_field_note`) rather than into the label, which would wrap mid-parenthesis at
+`rail_w`.
+
 The form's own chrome — `_section` (a collapsible titled section), `_row`,
 `_entry`, `_info_icon`, and `reveal_section` — is `analyze.form_chrome.AnalyzeFormChromeMixin`,
 inherited by `AnalyzeTabFormMixin`. `reveal_section(title)` unfolds a folded
@@ -6852,30 +6913,25 @@ pipeline writes that *before* any image work, so on a failure it would describe
 a plate that was never produced.
 
 The per-method segmentation parameters are their own mixin,
-`analyze.seg_params.AnalyzeSegParamsMixin`: the stack of per-routine pages
-(`_ParamStack`, a `NamedPageStack`; StarDist / watershed / Cellpose / label-free
-/ classical) plus
+`analyze.seg_params.AnalyzeSegParamsMixin`: the `CurrentPageStack` of
+per-routine pages (StarDist / watershed / Cellpose / label-free / classical) plus
 two rows that sit *below* the stack because more than one routine reads them:
 the Cellpose cell diameter (both Cellpose routines) and the StarDist detection
 thresholds (both StarDist routines). Each rides the stack's own
 `currentChanged` for visibility, so no second hook in
 `_refresh_segmentation_hints` is needed. The
 hints and per-method validation (`_refresh_segmentation_hints` /
-`_segmentation_validation_errors` / `_collapse_seg_param_stack`) live here too,
-beside the panel they drive. **The stack is as tall as the page showing, at the
-width it has.** `_collapse_seg_param_stack` gives the hidden pages an Ignored
-vertical policy, which `QStackedLayout.sizeHint` honours and its height-for-width
-does not — that is the tallest page's whatever the policies, and a box layout
-asks a widget with a layout for it straight from that layout. Every page holds
-wrapping text, so Label-free's 42 px page sat in a 132 px slot (a blank gap below
-"+ Add channel"). Each page is a `_ParamPage`, whose height-for-width is 0 while
-hidden. The stack stays vertically Fixed, so it never takes spare height from the
-section (Preferred let it grow to 173 px), and `_ParamStack.sizeHint` reports the
-layout's height-for-width at the stack's own width, re-asked on a width change,
-because Fixed caps a widget at its size hint and nanowell mode's wrapped count
-rows needed 210 px against a 194 px plain hint
-(`tests/test_labelfree_keeps_the_segmentation_channel.py`, under the app
-stylesheet — without it no page's text wraps and the defect does not occur). Every widget still lands on the `AnalyzeTab`
+`_segmentation_validation_errors` / `_collapse_seg_param_stack`) live here too.
+The stack is a `widgets.page_stack.CurrentPageStack` because a plain stack is as
+tall as its tallest page: Ignored size policies on the hidden pages remove them
+from the size hint but not from `QStackedLayout`'s height-for-width, which is the
+maximum over every page, so the watershed and label-free pages (each holding a
+word-wrapped label) sat in the Cellpose page's height with the spare spread
+between their rows. `CurrentPageStack` answers every size question from the
+current page and holds its maximum height to that page's, refitting when the
+page itself re-lays out (nanowell mode adds rows to the label-free page). The
+rest of that list lives here too,
+beside the panel they drive. Every widget still lands on the `AnalyzeTab`
 instance under the attribute name it had when this lived in the form, so
 `analyze.pinfo` and `_collect_run_options` reach them unchanged.
 
@@ -7469,7 +7525,7 @@ the value alone and simply shows the box disabled.
 
 **Run-time detection.** A queued job freezes the form's filename schema,
 separator and channel tokens when it is queued, but the input they describe may
-not exist until an earlier job in the queue writes it. The Filename Schema
+not exist until an earlier job in the queue writes it. The Filename schema
 section's **Detect schema & channels at run time** checkbox
 (`AnalyzeSchemaSectionMixin._auto_detect_cb`) sets `RunSpec.auto_detect`, which
 lives beside `opts` so it can never reach the pipeline's argv; `hydrate_job`
@@ -7561,7 +7617,7 @@ the Run button asks all of them of whatever the field names, as before.
 **`_refresh_remote_controls` changes what is reachable, never what is set.** It
 shows the *Remote options* group only while a remote is selected and enables the
 dry-run checkbox only while auto-delete is checked — and it stops there. It used
-to force auto-delete back on whenever "Run on:" was `Local` and clear dry-run
+to force auto-delete back on whenever "Run on" was `Local` and clear dry-run
 whenever dry-run was disabled, both to a widget that was hidden at the time and
 neither undone on the way back. A user who ticked *Dry-run cleanup* to see what
 auto-delete would remove, flicked to `Local` and back, and pressed Run had the
@@ -7572,13 +7628,13 @@ lost by leaving them alone, because nothing reads either on a local run —
 `RemoteRunner.verify_and_cleanup` returns before touching anything when
 `cleanup_mode` is `"none"`.
 
-**"Run on:" keeps the target on screen.** `_reload_remotes_combo` rebuilds the
+**"Run on" keeps the target on screen.** `_reload_remotes_combo` rebuilds the
 combo from `remotes.toml` after every Manage-Remotes change — including a
 *failed* bootstrap, which emits `remotes_changed` all the same — and re-selects
 whatever was selected before, falling back to `Local` for a remote that has just
 been deleted (which is what its docstring had always promised). It does **not**
 re-apply `services.remote_config.default_remote_index`. That default decides the
-pane's opening state, in `_build_run_controls`, and a rebuild is not an opening
+pane's opening state, in `_build_run_footer`, and a rebuild is not an opening
 state: re-applying it read `None` — the `userData` of the `Local` item — as
 "nothing has been chosen yet" rather than as the target on screen, so any change
 in the dialog moved a deliberate local run onto the first configured SSH host.
@@ -8198,7 +8254,7 @@ came from this one.
 `OmeExplodeCancelled`) so the converter's worker can drive a progress bar and
 Cancel. Channel roles are *not* set in the converter — it writes the OME channel
 **names** as tokens; the user assigns nuclear/fluor/phase in Analyze's normal
-Channel Tokens section on the converted folder. `pipeline/ome_explode.py` and
+Channels & segmentation section on the converted folder. `pipeline/ome_explode.py` and
 `util/plate_grid.py` are in the remote manifest so it stays a complete mirror of
 `pipeline/` + `util/` (`test_remote_manifest.py`).
 
@@ -10415,7 +10471,7 @@ the module imports; `domain/fields.py` imports the field rules the same guarded 
 already means the mode off to every reader, so the stripped form's argv is the one it had before the section
 existed (`tests/test_nanowell_removable.py`). The pipeline's nanowell mode and the Datasets tools' table carrying
 stay in every build: Qt-free, sent to remote hosts, and what keeps a dataset with nanowell tables whole. The
-Nanowells section (`analyze/nanowell_section.py`, folded by default, directly below Quality Control) holds the mode
+Nanowells section (`analyze/nanowell_section.py`, folded by default, directly below Image correction & QC) holds the mode
 checkbox, the plate format, the array geometry (*Hexagonal lattice in a circle*, which sends no flag, or *Infer
 from the image*, which sends `--nanowell_geometry infer`; `GEOMETRY_CHOICES` in `domain/nanowell_fields.py`), the
 margin, the square's edge angle and the occlusion and
@@ -11319,8 +11375,8 @@ settings are recorded as a `qc_options` block in `pipeline_info.json`
 (`read_pipeline_info` defaults it to `{}` on legacy sidecars).
 
 **Segmentation routines + parameters.** `--segmentation_method` selects the
-segmenter in `process_image_group`'s dispatch; the Analyze "Channel Tokens"
-section shows a **per-method parameter panel** (a `NamedPageStack` swapped by
+segmenter in `process_image_group`'s dispatch; the Analyze "Channels &
+segmentation" section shows a **per-method parameter panel** (a `CurrentPageStack` swapped by
 `_refresh_segmentation_hints`) built by
 `analyze.seg_params.AnalyzeSegParamsMixin`, so only the chosen routine's
 controls appear. All routines segment the **Segmentation channel**
@@ -13231,7 +13287,7 @@ the picks into a minimal `pipeline_info`-shaped dict (`nuclear_token` /
 `fluor_tokens` / `phase_token`, with the phase channel remaining a member of
 `fluor_tokens` so Analyze has a row to carry its Phase checkbox)
 that the open-in-Analyze callback (`AllWellApp._open_dataset_in_analyze`) feeds
-to `AnalyzeTab._apply_pipeline_info`, so Analyze's Channel Tokens arrive
+to `AnalyzeTab._apply_pipeline_info`, so Analyze's channels arrive
 pre-filled. The channel names are written into the output filenames regardless
 of the roles.
 
@@ -13255,7 +13311,7 @@ it assigned, Validate & Repair passes the dataset's whole recorded sidecar with
 `incremental=True`. **It has to be legible on arrival.** Everything it changes
 is either a field whose new value is indistinguishable from the old one at a
 glance, or — for *Incremental*, the setting that decides whether the run
-completes anything at all — a checkbox inside **Compute Options**, which is one
+completes anything at all — a checkbox inside **Compute options**, which is one
 of the sections that fold by default. A correct handoff therefore looked exactly
 like landing on an untouched Analyze tab, which is how a working feature gets
 reported as doing nothing. So it unfolds that section
@@ -14609,7 +14665,7 @@ caught before conversion rather than mid-run. One `scan_folder` per change feeds
 both the readout and the plate preview: they ask the same question of the same
 folder with the same arguments, and walking a plate twice per keystroke is a
 stall on the GUI thread. The schema is described with the shared `SchemaPicker`
-(see the widgets table), the same control the Analyze form's Filename Schema
+(see the widgets table), the same control the Analyze form's Filename schema
 section mounts: this page's whole output is a dataset Analyze reads next, so the
 two ask about the same filenames with the same vocabulary.
 
@@ -15999,7 +16055,10 @@ skips emit no name line and contribute no bytes, so they never open a window at
 all — which is correct, since nothing about them is in flight.
 
 The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which used to come only from rsync's own per-file output. That is a poor thing to depend on: rsync says nothing on a cache hit (it moves nothing), nothing for files an incremental re-send skips, and nothing at all when the local rsync predates `--info=name1` — macOS still ships 2.6.9. In each case the transfer had succeeded and the rail sat at 0/N, reading as a stalled upload. Batched mode was worst, since `upload_subset` had no compensator at all where `ensure_uploaded` at least synthesised lines on a cache hit. `_log_wells_uploaded` now emits one line per archive from both paths' success branch, where the caller knows which archives it asked for and that rsync returned 0; the dashboard de-dupes into sets, so it costs nothing alongside live per-file lines, and a non-zero rc emits nothing rather than drawing a rail ahead of the data. Driven entirely by `pipeline_runner.ProgressTracker` events; tracks each stage as an independent well-set (so a server-side `threshold` can't make `download` read N/N before anything is fetched) and goes blue=computed-on-server vs green=downloaded-locally on remote runs. The raw colour log stays underneath, collapsible. |
-| `NamedPageStack` (in `core/centre_view.py`, not `widgets/` — but morally a widget) | A `QStackedWidget` keyed by page name; supports `detachPage`/`reattachPage` (Split View). |
+| `NamedPageStack` (`widgets/page_stack.py`) | A `QStackedWidget` keyed by page name; supports `detachPage`/`reattachPage` (Split View). |
+| `CurrentPageStack` (`widgets/page_stack.py`) | A `NamedPageStack` exactly as tall as its current page, for a block of form rows that changes with a choice above it. The Analyze form's per-method segmentation settings. |
+| `FooterScrollArea` (`widgets/footer_scroll_area.py`) | A `QScrollArea` with a pinned footer under the viewport; the viewport is shortened by the footer's height, which follows the footer's contents. The Analyze run footer. |
+| `ValueCombo` (`widgets/value_combo.py`) | A combo of `(value, label)` items, read and written by `value()` / `setValue()`, so the label can be copy while the value stays an argument. The Analyze correction and Cellpose-model combos. |
 | `RailNav` | The left-rail section navigator. |
 | `info_icon` (`widgets/info_icon.py`) | The `ⓘ` hover-for-more marker, styled by the `#InfoHint` QSS rule. A function rather than a class — it returns a configured `QLabel`. Shared by the Analyze form (`AnalyzeFormChromeMixin._info_icon` delegates to it) and the Playground's threshold rows, so the app has one "there is an explanation here" affordance rather than a copy per pane. Sets WhatsThis as well as the tooltip, which is the route that works for someone who cannot hold a hover. |
 | `SchemaPicker` (`widgets/schema_picker.py`) | The filename-schema builder: a separator box, one dropdown per filename position, and the colon-delimited schema string the two of them write. The dropdowns and the string are two views of one value and sync both ways, each write blocking the other's signals so they cannot chase each other. Vocabulary and validity come from `util.schema` — the module the pipeline parses schemas with — so the picker offers exactly the fields the pipeline understands, reads a string the way `parse_schema` reads it (empty tokens collapse, rather than the dropdowns showing a layout the run will not use), and reports errors in `validate_schema`'s own wording. `schema()` returns the typed string in preference to the dropdowns, since the string can express more positions than there are dropdowns. `row_factory(parent, label) -> cell` is the layout seam: the Analyze form passes its own `_row` so the picker sits inside that form's label column, and the Datasets pane's Zip Loose Folder page takes the default plain row. Mounted by both, because both ask the user about the same filenames — Zip Loose Folder produces the archives Analyze then reads. **Detection is opt-in**: passing `detect_label` builds a *Detect from filenames* button as the picker's first row, in the field column, with the two-register readout beneath it and the rows it fills below that, and a host that will not answer `detectRequested` therefore never shows a button that does nothing. `setDetection(text, note=…, problem=…)` takes sentences the picker neither composes nor understands; the neutral half is muted body text and the note is a `QLabel#Notice` panel, so a result the reader must not skim past differs in outline and not only in hue. |

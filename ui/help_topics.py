@@ -15,7 +15,7 @@ site makes it obvious that adding a page means adding a topic.
 Keys are what the app calls a page; values are the **exact heading text** in the
 manual. The two differ often enough that none of these can be an identity
 lookup: the Datasets rail says "Validate & Repair" where the manual says
-"Validate & Repair Dataset", and the Analyze form's "Scratch Disk" is the
+"Validate & Repair Dataset", and the Analyze form's "Scratch disk" is the
 manual's "10. Scratch disk". ``allwell._gh_slug`` turns the value into the
 GitHub-style anchor that ``allwell._render_manual_html`` injected at that
 heading.
@@ -99,14 +99,15 @@ SECTION_BY_PAGE: dict[str, str] = {
 #: numbered in the order the form builds its sections, so these read in step.
 ANALYZE_SECTION_HELP: dict[str, str] = {
     "Folders": "1. Folders",
-    "Filename Schema": "2. Filename schema",
-    "Channel Tokens": "3. Channel tokens",
-    "Quality Control": "5. Quality control — field flatness & background correction",
+    "Filename schema": "2. Filename schema",
+    "Channels & segmentation": "3. Channels & segmentation",
+    "Image correction & QC": "5. Image correction & QC — field flatness & background correction",
     "Auto-threshold": '6. Auto-threshold — picking each channel\'s "on" cut',
-    "Shape Metrics": "7. Shape metrics",
-    "Output Options": "8. Output options",
-    "Compute Options": "9. Compute options",
-    "Scratch Disk": "10. Scratch disk",
+    "Shape metrics": "7. Shape metrics",
+    "Output options": "8. Output options",
+    "Compute options": "9. Compute options",
+    "Scratch disk": "10. Scratch disk",
+    "Remote options": "11. Running on a remote host",
     "Nanowells": "Nanowell arrays (Analyze ▸ Nanowells, or the command line)",
 }
 

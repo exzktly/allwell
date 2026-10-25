@@ -39,10 +39,10 @@ def test_the_mode_sets_the_selector_to_label_free_locks_it_and_puts_the_choice_b
 
 
 def test_a_build_with_no_label_free_method_cannot_switch_the_mode_on(qtbot, monkeypatch):
-    import analyze.form
+    import analyze.run_footer
     from analyze.tab import AnalyzeTab
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     monkeypatch.setattr(AnalyzeTab, "_nanowell_label_free_index", lambda self: -1)
     t = AnalyzeTab(parent=None)
     qtbot.addWidget(t)

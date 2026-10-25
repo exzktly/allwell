@@ -149,9 +149,9 @@ def test_a_run_that_finishes_is_still_done(tmp_path, fake_pipeline, monkeypatch)
 
 @pytest.fixture
 def tab(qtbot, monkeypatch, tmp_path, fake_pipeline):
-    import analyze.form
+    import analyze.run_footer
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     monkeypatch.setattr("services.suspend_record.record_path",
                         lambda: tmp_path / "state" / "suspended.json")
     from analyze.tab import AnalyzeTab

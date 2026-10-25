@@ -522,9 +522,9 @@ def test_closing_the_form_mid_probe_does_not_reach_a_deleted_widget(qtbot, capfd
 
 def test_manage_remotes_dialogs_do_not_pile_up_on_the_tab(qtbot, monkeypatch):
     import analyze.remote_dialog as ard
-    import analyze.form
+    import analyze.run_footer
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     monkeypatch.setattr(ard, "load_remotes", lambda: {})
     monkeypatch.setattr(QDialog, "exec", lambda _self: QDialog.Rejected)
 

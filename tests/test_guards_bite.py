@@ -540,7 +540,7 @@ _FEATURES = (
 _FAKE_ANALYZE_FORM = '''
 class Form:
     def _build(self, parent):
-        self._section(parent, "Filename Schema")
+        self._section(parent, "Filename schema")
         self._section(parent, "Brand New Section", collapsible=True)
 '''
 

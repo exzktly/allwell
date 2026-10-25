@@ -186,7 +186,25 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
         layout.addWidget(self._stop_btn)
+        self._show_run_buttons(running=False)
         return row
+
+    def _show_run_buttons(self, *, running: bool) -> None:
+        """Run while idle; Suspend and Stop while a run is going.
+
+        Sets each button's enabled state, as the run's start and end always
+        did, and its visibility: at idle the two run-only buttons used to sit
+        beside Run disabled, and Stop's red label drew the eye before anything
+        had started. Enabling comes first, so Stop turning enabled — the one
+        signal the phone view's run-start watcher reads — still fires while
+        the button is on its way onto the screen.
+        """
+        self._run_btn.setEnabled(not running)
+        self._stop_btn.setEnabled(running)
+        self._suspend_btn.setEnabled(running)
+        self._run_btn.setVisible(not running)
+        self._suspend_btn.setVisible(running)
+        self._stop_btn.setVisible(running)
 
     def _build_queue_button(self, parent) -> QPushButton:
         self._queue_btn = QPushButton("+ Queue", parent)

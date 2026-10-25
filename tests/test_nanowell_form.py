@@ -24,13 +24,13 @@ from tests.test_nanowell_cli import SCHEMA, WELL, _write_plate  # noqa: E402
 
 @pytest.fixture
 def tab(qtbot, monkeypatch):
-    import analyze.form
+    import analyze.run_footer
     from analyze.tab import AnalyzeTab
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     t = AnalyzeTab(parent=None)
     qtbot.addWidget(t)
-    t._flatfield_cb.setCurrentText("gaussian")           # the default needs a named blank well; not under test
+    t._flatfield_cb.setValue("gaussian")           # the default needs a named blank well; not under test
     return t
 
 
@@ -426,9 +426,9 @@ def test_test_detection_offers_the_wells_the_run_will_read(tab, tmp_path):
 def test_the_nanowells_section_sits_directly_below_quality_control(tab):
     """The user's layout: Quality Control leads the optional sections, Nanowells follows it."""
     titles = list(tab._section_widgets)
-    layout = tab._section_widgets["Quality Control"].parentWidget().layout()
+    layout = tab._section_widgets["Image correction & QC"].parentWidget().layout()
     order = sorted(titles, key=lambda t: layout.indexOf(tab._section_widgets[t]))
-    assert order.index("Nanowells") == order.index("Quality Control") + 1, order
+    assert order.index("Nanowells") == order.index("Image correction & QC") + 1, order
 
 
 def test_an_uncounted_preview_draws_its_seen_sites_as_not_counted_rather_than_as_holding_cells():

@@ -10,7 +10,7 @@ Restoring a prior run's settings from its ``pipeline_info.json`` sidecar is its
 own cohesive job and lives in ``analyze/pinfo.py``; the form's own chrome
 (``_section``/``_row``/``_entry``/``_info_icon``/``reveal_section``) lives in
 ``analyze/form_chrome.py``; the per-method segmentation params, thresholds and
-hints in ``analyze/seg_params.py``; the Quality Control section in
+hints in ``analyze/seg_params.py``; the Image correction & QC section in
 ``analyze/qc_section.py``. This mixin inherits them all, so every
 name stays reachable on the form exactly where callers expect it.
 """
@@ -34,9 +34,9 @@ from analyze.domain.fields import (  # noqa: F401 — re-exported for analyze.ta
 from analyze.pinfo import AnalyzePipelineInfoMixin
 from analyze.nanowell_hook import nanowell_section_mixin
 from analyze.qc_section import AnalyzeQCSectionMixin
+from analyze.run_footer import AnalyzeRunFooterMixin
 from analyze.schema_section import AnalyzeSchemaSectionMixin
 from analyze.seg_params import AnalyzeSegParamsMixin
-from services.remote_config import default_remote_index, load_remotes
 from widgets.checkable_dropdown import CheckableDropdown
 from widgets.wrap_checkbox import WrapCheckBox
 import pipeline.shape_features as _sfc
@@ -61,7 +61,8 @@ AnalyzeNanowellSectionMixin = nanowell_section_mixin()
 
 class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
                           AnalyzePipelineInfoMixin, AnalyzeQCSectionMixin,
-                          AnalyzeSchemaSectionMixin, AnalyzeSegParamsMixin):
+                          AnalyzeRunFooterMixin, AnalyzeSchemaSectionMixin,
+                          AnalyzeSegParamsMixin):
     """The Analyze-tab Qt form builders. Mixed into ``AnalyzeTab`` (with
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
 
@@ -74,8 +75,9 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         self._build_schema_section(parent)
         self._build_channel_tokens_section(parent)
         self._refresh_schema_preview()
-        # Quality Control leads the optional sections and stays open (common tuning
-        # knobs); Nanowells follows it, folded, since most plates never use it.
+        # Image correction & QC leads the optional sections; it and Nanowells
+        # after it are folded, since a fresh form corrects nothing and most
+        # plates are not nanowell arrays.
         self._build_qc_section(parent)
         self._build_nanowell_section(parent)
         self._build_auto_threshold_section(parent)
@@ -83,11 +85,13 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         self._build_output_options_section(parent)
         self._build_compute_options_section(parent)
         self._build_scratch_section(parent)
-        self._build_run_controls(parent)
+        # Shown only while a remote is chosen in the run footer, which the tab
+        # builds under the scroll area (analyze.run_footer).
+        self._build_remote_options_section(parent)
         parent.layout().addStretch(1)
 
     def _build_channel_tokens_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Channel Tokens")
+        sec = self._section(parent, "Channels & segmentation")
 
         seg_row = self._row(sec, "Segmentation")
         self._seg_method_cb = QComboBox(seg_row)
@@ -110,10 +114,21 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         self._seg_method_cb.setToolTip(self._seg_method_cb.currentText())
         seg_row.layout().addWidget(self._seg_method_cb)
         seg_row.layout().addStretch(1)
+        # The method's "use when…" line sits under the picker it describes, not
+        # below the channel list and the method's own settings, where it read as
+        # a second footnote to the StarDist thresholds. It turns into the
+        # segmentation error, in the error style, while the method cannot run.
+        self._segmentation_hint_lbl = QLabel("", sec)
+        self._segmentation_hint_lbl.setObjectName("Muted")
+        self._segmentation_hint_lbl.setWordWrap(True)
+        sec.layout().addWidget(self._segmentation_hint_lbl)
         self._seg_method_cb.currentIndexChanged.connect(lambda _: self._refresh_segmentation_hints())
 
         nuc_row = self._row(sec, "Segmentation channel")
-        self._nuclear_row_widget = nuc_row
+        # The whole row, not the right-hand cell ``_row`` returns: the label lives
+        # in the cell's parent, so hiding the cell alone (Label-free mode) left
+        # "Segmentation channel" floating beside nothing.
+        self._nuclear_row_widget = nuc_row.parentWidget()
         self._nuclear_token_edit = self._entry(nuc_row, "NIR")
         nuc_row.layout().addStretch(1)
         self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_schema_preview())
@@ -152,10 +167,6 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         # (analyze.seg_params.AnalyzeSegParamsMixin).
         self._build_seg_param_stack(sec)
 
-        self._segmentation_hint_lbl = QLabel("", sec)
-        self._segmentation_hint_lbl.setObjectName("Muted")
-        self._segmentation_hint_lbl.setWordWrap(True)
-        sec.layout().addWidget(self._segmentation_hint_lbl)
         self._refresh_segmentation_hints()
 
     def _build_open_pinfo_row(self, parent: QWidget) -> None:
@@ -196,15 +207,12 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         self._browse_btn.setEnabled(False)
         self._browse_btn.clicked.connect(self._browse_input)
         ipl.addWidget(self._browse_btn)
-        # Balancing stretch: input field gets ~50% of the row width
-        # rather than stretching to fill the whole sidebar.
-        ipl.addStretch(1)
         sec.layout().addWidget(in_pick)
 
-        self._folder_lock_lbl = QLabel("Define the filename schema below first.", sec)
-        self._folder_lock_lbl.setObjectName("Muted")
+        self._folder_lock_lbl = QLabel("", sec)
         self._folder_lock_lbl.setWordWrap(True)
         sec.layout().addWidget(self._folder_lock_lbl)
+        self._set_status(self._folder_lock_lbl, "")
 
         out_lbl = QLabel("Output folder (auto)", sec)
         out_lbl.setContentsMargins(0, 6, 0, 0)
@@ -218,12 +226,13 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         self._layout_lbl = QLabel("", sec)
         self._layout_lbl.setWordWrap(True)
         sec.layout().addWidget(self._layout_lbl)
+        self._set_status(self._layout_lbl, "", quiet="")
 
         self._input_edit.textChanged.connect(lambda _: self._refresh_output())
 
     def _build_shape_features_section(self, parent: QWidget) -> None:
         sec = self._section(
-            parent, "Shape Metrics",
+            parent, "Shape metrics",
             collapsible=True, collapsed=True,
             info="Per-cell morphology features to measure (emitted as shape_… "
                  "columns; cell centroids are always recorded).",
@@ -255,7 +264,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
 
     def _build_output_options_section(self, parent: QWidget) -> None:
         sec = self._section(
-            parent, "Output Options",
+            parent, "Output options",
             collapsible=True, collapsed=True,
             info="Inputs are always grouped into per-well .zip files and outputs "
                  "are always written as per-well .zip files.",
@@ -284,34 +293,34 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         build_storage_rows(self, sec)
 
     def _build_compute_options_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Compute Options", collapsible=True, collapsed=True)
+        sec = self._section(parent, "Compute options", collapsible=True, collapsed=True)
 
-        # Hint below its row, not inline — matches the Mesh tile/sigma note below.
-        def _hint(text: str) -> None:
-            lbl = QLabel(text, sec)
-            lbl.setObjectName("Muted")
-            lbl.setWordWrap(True)
-            sec.layout().addWidget(lbl)
-
-        tf_row = self._row(sec, "TF threads (0=auto)")
+        tf_row = self._row(
+            sec, "Threads per worker",
+            tooltip="TensorFlow threads each worker may use. 0 picks 4 (2 on a "
+                    "Mac using Metal), capped at the cores available.")
         self._tf_threads_edit = self._entry(tf_row, "0", width=40)
+        self._field_note(tf_row, "0 = auto")
         tf_row.layout().addStretch(1)
-        _hint("(0 → auto-select 4)")
 
-        w_row = self._row(sec, "Workers (0=auto)")
+        w_row = self._row(
+            sec, "Wells in parallel",
+            tooltip="How many worker processes run at once, each on one well. "
+                    "0 divides the available cores by the threads per worker.")
         self._workers_edit = self._entry(w_row, "0", width=40)
+        self._field_note(w_row, "0 = auto")
         w_row.layout().addStretch(1)
-        _hint("(process count override)")
 
         # StarDist prediction tiling — caps per-worker peak RAM on large frames
         # (an untiled ~4K predict can use several GB/worker, so parallel workers
         # exhaust memory). The value is the MAX pixels per tile SIDE (not the
         # number of tiles), 0 = off (default). Label kept short so it fits the
         # row label column; the px/side meaning is in the info-icon tooltip.
-        tile_row = self._row(sec, "Max tile size (0=off)")
+        tile_row = self._row(sec, "Max tile size")
         # Same width as the TF threads / Workers entries above it — these three
         # small integer fields read as one uniform column.
         self._stardist_tile_px_edit = self._entry(tile_row, "0", width=40)
+        self._field_note(tile_row, "px · 0 = off")
         tile_row.layout().addWidget(self._info_icon(
             tile_row,
             "Max pixels per tile SIDE for StarDist prediction — NOT the number "
@@ -368,7 +377,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         local storage.
         """
         sec = self._section(
-            parent, "Scratch Disk",
+            parent, "Scratch disk",
             collapsible=True, collapsed=True,
             info="Where per-well working files (zip extraction + intermediate "
                  "images) are written during a run. Leave blank to use "
@@ -391,7 +400,6 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         self._scratch_browse_btn.setProperty("variant", "secondary")
         self._scratch_browse_btn.clicked.connect(self._browse_scratch)
         pl.addWidget(self._scratch_browse_btn)
-        pl.addStretch(1)
         sec.layout().addWidget(pick)
         # Typing / browsing pins the value; blank means the pipeline default
         # (the app folder's scratch/). The field no longer follows the input dir — see
@@ -410,104 +418,6 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
         if d:
             self._scratch_edit.setText(d)
             self._scratch_user_set = True
-
-    def _build_run_controls(self, parent: QWidget) -> None:
-        # Remote-execution selector. Populated from remotes.toml in the app folder
-        # so users can flip between Local and any configured SSH host
-        # without restarting the GUI.
-        remote_widget = QWidget(parent)
-        rl = QHBoxLayout(remote_widget)
-        rl.setContentsMargins(12, 6, 12, 0)
-        rl.setSpacing(8)
-        rl.addWidget(QLabel("Run on:", remote_widget))
-        self._remote_cb = QComboBox(remote_widget)
-        self._remote_cb.addItem("Local", userData=None)
-        try:
-            for name in load_remotes():
-                self._remote_cb.addItem(name, userData=name)
-        except (ValueError, OSError) as exc:
-            # Malformed remotes.toml shouldn't bring the GUI down — just
-            # surface the error in the log and stick with Local.
-            self._log_q.put((
-                "line",
-                f"[warn] could not load remotes.toml: {exc}\n",
-            ))
-        # Default to the first configured remote when any exist (else Local).
-        self._remote_cb.setCurrentIndex(
-            default_remote_index(self._remote_cb.count()))
-        rl.addWidget(self._remote_cb)
-        self._manage_remotes_btn = QPushButton("Manage…", remote_widget)
-        self._manage_remotes_btn.setProperty("variant", "secondary")
-        self._manage_remotes_btn.setToolTip(
-            "Add, edit, delete, test, or bootstrap remote-execution hosts."
-        )
-        self._manage_remotes_btn.clicked.connect(self._open_manage_remotes)
-        rl.addWidget(self._manage_remotes_btn)
-        rl.addStretch(1)
-        parent.layout().addWidget(remote_widget)
-
-        # ── Remote-only parameters, grouped in one place ─────────────────────
-        # Every knob that only matters for a remote run lives in this container:
-        # the batch size (folded in from the former Output-Options section), the
-        # auto-delete toggle, and its dry-run companion. The whole group is
-        # shown only when a remote is selected (see _refresh_remote_controls),
-        # so a Local run isn't cluttered with options that do nothing.
-        self._remote_params_widget = QWidget(parent)
-        rp = QVBoxLayout(self._remote_params_widget)
-        rp.setContentsMargins(12, 4, 12, 0)
-        rp.setSpacing(4)
-
-        rp_title = QLabel("Remote options", self._remote_params_widget)
-        rp_title.setObjectName("SectionTitle")
-        rp.addWidget(rp_title)
-
-        # Batched mode. ``0`` (default) uploads every well-zip up front and runs
-        # the pipeline once across the whole plate — lowest total runtime. Any
-        # positive integer processes that many wells at a time: peak remote disk
-        # ≈ batch_size wells of input + ~1 well of output (per-well Fetcher
-        # cleanup), at the cost of one StarDist reload per batch (~5–10 s
-        # overhead each). Pick based on the remote's free disk.
-        bs_row = self._row(self._remote_params_widget, "Batch size (0=off)")
-        self._remote_batch_size_edit = self._entry(bs_row, "0", width=40)
-        bs_hint = QLabel("(bounds peak disk to ~N wells of input)", bs_row)
-        bs_hint.setObjectName("Muted"); bs_hint.setWordWrap(True)
-        bs_row.layout().addWidget(bs_hint, 1)
-
-        # ON by default: a remote that accumulates every run fills up, and a full
-        # volume is how a run silently loses FOV-groups. Only deletes after a
-        # verified-successful run, never failed work.
-        self._cleanup_remote_cb = QCheckBox(
-            "Auto-delete remote files when done", self._remote_params_widget)
-        self._cleanup_remote_cb.setChecked(True)
-        self._cleanup_remote_cb.setToolTip(
-            "Checked (default) = after a verified-successful run, delete both the "
-            "per-run output dir AND the cached input on the remote, so a shared "
-            "machine does not fill up. Unchecked = leave it untouched.")
-        rp.addWidget(self._cleanup_remote_cb)
-
-        # Log what auto-delete WOULD remove without removing it. Only enabled
-        # when auto-delete is checked.
-        self._dry_run_cleanup_cb = WrapCheckBox(
-            "Dry-run cleanup (show what would be deleted, don't delete)",
-            self._remote_params_widget,
-        )
-        self._dry_run_cleanup_cb.setToolTip(
-            "With auto-delete enabled, log path + file count + total bytes for "
-            "each remote directory that WOULD be removed at end-of-run, without "
-            "removing anything. Useful for confirming what auto-delete will do "
-            "on a shared remote before committing to it."
-        )
-        rp.addWidget(self._dry_run_cleanup_cb)
-
-        parent.layout().addWidget(self._remote_params_widget)
-
-        # Show the remote-only group only when a remote is selected; dry-run
-        # only makes sense when auto-delete is on.
-        self._remote_cb.currentIndexChanged.connect(self._refresh_remote_controls)
-        self._cleanup_remote_cb.toggled.connect(self._refresh_remote_controls)
-        self._refresh_remote_controls()
-
-        parent.layout().addWidget(self._build_run_row(parent))
 
     def _build_auto_threshold_section(self, parent: QWidget) -> None:
         """Auto-threshold — every threshold-related control in one place.
@@ -700,8 +610,8 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
             filename_sep=self._schema_picker.separator(),
             smfish_tokens=self._smfish_tokens_list(),
             shape_features=list(self._shape_chips.checkedData()),
-            flatfield=self._flatfield_cb.currentText(),
-            background=self._background_cb.currentText(),
+            flatfield=self._flatfield_cb.value(),
+            background=self._background_cb.value(),
             background_well=self._background_well_edit.text().strip(),
             background_well_map=self._background_map_value(),
             auto_threshold=self._auto_threshold_cb.isChecked(),
@@ -719,7 +629,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeNanowellSectionMixin,
             segmentation_method=method,
             cytoplasm_token=cyto,
             min_nucleus_area_px=self._min_nucleus_area_edit.text().strip(),
-            cellpose_model=self._cellpose_model_cb.currentText(),
+            cellpose_model=self._cellpose_model_cb.value(),
             cellpose_diameter=self._cellpose_diameter_edit.text().strip(),
             cellpose_flow_threshold=self._cellpose_flow_thr_edit.text().strip(),
             cellpose_cellprob_threshold=self._cellpose_cellprob_thr_edit.text().strip(),

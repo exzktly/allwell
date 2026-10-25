@@ -310,10 +310,10 @@ def _pause_while_grouping(tmp_path, monkeypatch, qtbot, *, press):
     import zipfile
 
     import analyze.domain.input as analyze_input
-    import analyze.form
+    import analyze.run_footer
     from analyze.tab import AnalyzeTab
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     plate = tmp_path / "plate"
     (plate / "in").mkdir(parents=True)
     with zipfile.ZipFile(plate / "in" / "A01.zip", "w") as zf:

@@ -21,11 +21,11 @@ pytest.importorskip("PySide6")
 
 @pytest.fixture
 def panes(qtbot, tmp_path, monkeypatch):
-    import analyze.form
+    import analyze.run_footer
     from analyze.tab import AnalyzeTab
     from datasets.tab import DatasetsTab
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     analyze_tab = AnalyzeTab(parent=None)
     qtbot.addWidget(analyze_tab)
     calls: list[str] = []
@@ -81,7 +81,7 @@ def test_saving_the_banner_queues_the_whole_form_and_returns_to_the_queue(
     # Off its default, so a job carrying only the input folder would differ
     # (and so the default empty-well flat-field's background-well check does
     # not refuse the form).
-    analyze_tab._flatfield_cb.setCurrentText("gaussian")
+    analyze_tab._flatfield_cb.setValue("gaussian")
     expected = analyze_tab.collect_spec()
 
     _banner_on(analyze_tab).confirmed.emit()
@@ -150,11 +150,11 @@ def test_without_a_shell_the_click_says_it_could_not_open_analyze(
         qtbot, tmp_path, monkeypatch):
     """No pane switch available (a Datasets-only build, or no shell): refuse
     and say so, rather than opening a session behind a banner nobody sees."""
-    import analyze.form
+    import analyze.run_footer
     from analyze.tab import AnalyzeTab
     from datasets.tab import DatasetsTab
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     analyze_tab = AnalyzeTab(parent=None)
     qtbot.addWidget(analyze_tab)
     datasets = DatasetsTab(analyze_controller=analyze_tab,

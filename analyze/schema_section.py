@@ -1,4 +1,4 @@
-"""The Analyze form's **Filename Schema** section: its widgets and its preview.
+"""The Analyze form's **Filename schema** section: its widgets and its preview.
 
 One section of the form, gathered into one module. The controls were built in
 ``analyze/form.py`` and the preview that refreshes them lived in
@@ -40,10 +40,10 @@ _PREVIEW_TOKENS = {
 
 
 class AnalyzeSchemaSectionMixin:
-    """Builds the Filename Schema section and keeps its preview current."""
+    """Builds the Filename schema section and keeps its preview current."""
 
     def _build_schema_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Filename Schema")
+        sec = self._section(parent, "Filename schema")
 
         # The separator, the five position dropdowns and the schema string they
         # write are one reusable control (`widgets.schema_picker`), because the
@@ -163,16 +163,18 @@ class AnalyzeSchemaSectionMixin:
             self._input_edit.setEnabled(schema_valid)
             self._browse_btn.setEnabled(schema_valid)
         if hasattr(self, "_folder_lock_lbl"):
-            self._folder_lock_lbl.setText("" if schema_valid else "Define the filename schema below first.")
+            self._set_status(self._folder_lock_lbl,
+                             "" if schema_valid else "Define the filename schema below first.",
+                             error=not schema_valid)
 
         if errors:
-            self._schema_err_lbl.setText("  ".join(errors))
+            self._set_status(self._schema_err_lbl, "  ".join(errors), error=True)
             self._schema_preview_lbl.setText("")
             if hasattr(self, "_run_btn"):
                 self._run_btn.setEnabled(False)
             return
 
-        self._schema_err_lbl.setText("")
+        self._set_status(self._schema_err_lbl, "", error=True)
         if detect:
             self._schema_preview_lbl.setText(
                 "Read from the input's filenames when the run starts.")

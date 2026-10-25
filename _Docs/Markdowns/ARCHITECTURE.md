@@ -10362,8 +10362,15 @@ says once that the host registers every tile (`_nanowell_log_once`). Its option 
 the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's
 `execution_options` all name the same things and the edit-a-queued-job round trip and the sidecar restore
 need no translation; a sidecar that states `nanowell_format: null` switches the mode off, and one that
-predates the keys leaves it alone. Switching the mode on sets the segmentation selector to label-free and locks it (the
-choice returns when the mode goes off); a build with no label-free method disables the mode. Run validation adds
+predates the keys leaves it alone. Switching the mode on sets the segmentation selector to label-free, locks it and
+**hides its row** (the selector's `AnalyzeFormRow`; the choice returns, and the row is shown, when the mode goes off). A nanowell run
+never runs the per-image segmentation the selector chooses between — each well goes to `nanowell_task.run_zip_task`,
+and `pipeline/cli_args` sets the method to label-free itself — so the selector is set only so the form's checks for
+the other methods (a StarDist tile size, a watershed cytoplasm channel) do not refuse a run over settings it ignores;
+shown as well, it read as a second segmentation to configure beside the count's own. The count box carries the
+form's one **Segmentation** row in this mode ("Nanowell cell count (Cellpose, on the Phase channel)"), and the hint
+under the section names no method then, keeping only what stops the run (no channel marked Phase)
+(`tests/test_nanowell_count_settings_sit_with_segmentation.py`). A build with no label-free method disables the mode. Run validation adds
 `nanowell_option_errors` (bounds; a Phase channel only when channel auto-detection is off, since detection names it
 at run time) to the numeric checks, then, with an input folder, `nanowell_input_report`: **problems** stop the run (no
 well zips, no acquisition record and no tile grid, a tile the record names that an archive lacks, a grid that

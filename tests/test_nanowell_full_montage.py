@@ -368,8 +368,8 @@ def test_moving_to_another_timepoint_stops_the_old_reads_and_turning_the_image_o
     ctx, _in_dir = montage_page
     st = _full(qtbot, ctx)
     first = st.tile_store
-    slider = ctx.widgets.get("_nw_tp_slider")
-    slider.setValue([slider.value() - 1, slider.value() + 1][slider.value() == 0])
+    tp_cb = ctx.widgets.get("_nw_tp_cb")
+    tp_cb.setCurrentIndex(tp_cb.findData("t_c"))
     assert st.timepoint == "t_c" and first.cancelled and st.tile_store is not first
     second = st.tile_store
     image_cb = ctx.widgets.get("_nw_image_cb")

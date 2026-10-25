@@ -29,6 +29,7 @@ import numpy as np
 from review.features.nanowell.array_compute import padded
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
+from review.features.nanowell.extremes_compute import caption, format_value
 from review.features.nanowell.full_montage_compute import fit_region
 
 #: A dot's diameter, in points.
@@ -485,8 +486,6 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "") -> d
     Each row is labelled with its rank, address and the fold change it was ranked by; each crop carries the fold
     change at its own timepoint, and the ranking timepoint's column is marked.
     """
-    from review.features.nanowell.extremes_compute import caption, format_value
-
     fig.clear()
     _bg, ink, faint = _inks(fig.add_subplot(111))
     fig.clear()

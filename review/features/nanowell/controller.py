@@ -886,10 +886,14 @@ def rerun_anchored(ctx) -> bool:
 def _draw_crop_view(ctx, st, fig, canvas) -> bool:
     """Draw the first selected nanowell's crops at every timepoint, large, on the page's figure, when the crop view
     is on; ``True`` when it drew. The crops are the site detail's (``st.crops``), read on a worker the first time."""
-    if not (st.crop_view and st.selected_sites):
-        st.crop_view = False
+    site = _crop_view_site(st) if st.crop_view else None
+    if site is None:
+        if st.crop_view:
+            # Leaving it because nothing is left to enlarge: the button must say so too, or it stays on "Back
+            # to the plot" and the next press only un-checks it.
+            st.crop_view = False
+            _call(ctx, "_nw_refresh_crop_view")
         return False
-    site = tuple(st.selected_sites[0])
     st.hits, st.drawn = None, None                       # nothing on the figure answers a click or a zoom
     if site not in st.crops:
         data, metrics = st.data, st.metrics
@@ -903,6 +907,17 @@ def _draw_crop_view(ctx, st, fig, canvas) -> bool:
     _call(ctx, "_nw_refresh_crop_view")
     redraw_detail(ctx)
     return True
+
+
+def _crop_view_site(st):
+    """The nanowell the crop view enlarges: the first selected one with a series, the one the site detail beside
+    it leads with (:func:`redraw_detail`); ``None`` when no selected nanowell has one."""
+    if st.metrics is None:
+        return None
+    for well, q, r in st.selected_sites:
+        if len(site_series(st.metrics, well, q, r)):
+            return (well, q, r)
+    return None
 
 
 def set_crop_view(ctx, on: bool) -> None:

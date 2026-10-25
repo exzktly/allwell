@@ -5000,8 +5000,9 @@ use them.
   draws it as a dashed line and states each group's fraction responding — the mean of its wells' fractions —
   at the latest timepoint, or at the timepoint drawn along wells. With the field empty no fraction is
   computed, and the footer says so: there is no default.
-- **Well** and the **Timepoint** slider (on *Array*) — the one well drawn, from the wells selected, and its
-  timepoint; the view starts at the well's first timepoint. One timepoint is shared by
+- **Well** and **Timepoint** (on *Array*) — the one well drawn, from the wells selected, and its timepoint; the
+  view starts at the well's first timepoint. The Timepoint control is the same as on the Plotting tabs: the
+  timepoints in time order, named by their hours (or by name when a timepoint has no recorded time). One timepoint is shared by
   every view, so a timepoint chosen on one carries to the next wherever it exists.
 - **Well**, **Timepoint** and **Largest & smallest** (on *Extremes*) — the well whose nanowells are ranked, the
   timepoint they are ranked at (the well's latest by default), and how many each block shows (1 to 12, 5 by
@@ -5015,7 +5016,15 @@ use them.
 - Counts and occupancy are whole numbers, so hundreds of nanowells share a value; their dots are packed into
   a band within ±0.4 of the value, starting on the value itself, and the footer says so.
 - A swarm with more dots than its slot can hold says how many were not drawn under it — "+N at 0", or
-  "+N at 0–4" — beside its exclusions. Every nanowell with a value is either a dot or counted there.
+  "+N at 0–4" — beside its exclusions. Every nanowell with a value is either a dot or counted there. When the
+  window is too narrow to write those under each swarm, only the number used is written above it and the footer
+  says the rest are in its totals; widen the window to see them per swarm.
+- The panels share one y scale, written on the left column, so wells read against each other. Over time the
+  axis is in hours (*Time (h)*, under the bottom row), and the footer names the timepoint at each hour; if any
+  timepoint has no recorded time, the axis is ticked by timepoint name instead. Fold changes carry a dotted line
+  at no change (1×, or 0 on log₂).
+- Text on this page is drawn at a share of the **Properties** font sizes, scaled to the size of a panel, so a
+  grid of wells stays legible; raising a size in Properties still raises it here.
 - A replicate set of more than four wells is drawn as one density per well, with its median, instead of dots;
   select fewer wells to see (and click) single nanowells.
 - **Nothing without a number is drawn, and nothing is dropped silently.** Under each swarm, "excl. N" counts
@@ -5113,15 +5122,16 @@ use them.
 
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
 brightness and site signal against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
-six nanowells to compare; clicking empty space clears them, as does *Clear selection*. A timepoint where the
+six nanowells to compare; clicking empty space on the plot clears them. A timepoint where the
 nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
 Under the plots, a strip of crops shows the first selected nanowell at each timepoint, cut at full resolution
 from the image the run segmented (the well's archive in `in/`). When that archive is not beside the dataset
 (an output folder copied on its own), cannot be read, or the nanowell has no single owner tile (a fused one),
 the crop is cut from the lower-resolution montage instead, and the caption under the strip says so and why; a
-timepoint with no crop says why. **Enlarge crops**, above the site detail, shows those crops large in place of the
-plot — one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a
-change between panels; **Back to the plot** (the same button) returns, and so does clearing the selection.
+timepoint with no crop says why. **Pop out**, above the strip, opens the crops large in a window of their own —
+one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a change
+between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
+it like any window.
 Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it

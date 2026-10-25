@@ -116,6 +116,7 @@ class TrajectoryPanel:
     lines: list                           # (site, occupancy, y over the times) — NaN where no value
     class_medians: dict                   # occupancy class -> median at each time (NaN where none)
     n_without_value: int                  # nanowells with no value at any timepoint (not drawn)
+    in_hours: bool = False                # the times are recorded hours, not the timepoints' order
 
 
 def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool = False) -> list[TrajectoryPanel]:
@@ -150,7 +151,7 @@ def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool
                 with np.errstate(all="ignore"):
                     medians[cls] = np.array([np.nanmedian(col) if np.isfinite(col).any() else np.nan
                                              for col in ys.T])
-        out.append(TrajectoryPanel(well, xs, tps, lines, medians, empty))
+        out.append(TrajectoryPanel(well, xs, tps, lines, medians, empty, in_hours=bool(use_time)))
     return out
 
 

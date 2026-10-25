@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSlider, QSpinBox, QSplitter, QToolButton,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QSplitter, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -28,6 +28,7 @@ from review.features.nanowell.distribution_compute import (
 from review.features.nanowell import starting_cells_compute as sc
 from review.features.nanowell.state import EXTREMES_MAX_N
 from widgets.control_band import ControlBand
+from widgets.labeled_combo import LabeledComboBox
 from widgets.owned_action import owned_action
 
 #: The views the page draws, in the order the switch lists them.
@@ -60,7 +61,9 @@ _PRESETS = (("map", "Array map — lattice places, filled by the metric"),
 _AXES = (("time", "Time"), ("wells", "Wells"))
 _BASELINES = (("earliest", "Earliest"), ("first_measurable", "First measurable"))
 _FIG_W, _FIG_H = 8.0, 6.4
-_DETAIL_W, _DETAIL_H = 4.2, 6.4
+_DETAIL_W, _DETAIL_H = 4.2, 5.0
+#: The crop strip under the site detail, below its **Pop out** button.
+_STRIP_H = 1.7
 _METRIC_CB_MIN_W = 220
 
 _VIEW_TIP = ("Distribution: one dot per nanowell, per well and timepoint.\n"
@@ -86,7 +89,6 @@ _START_MAX_TIP = "The most cells a nanowell may have held at the baseline (any: 
 #: The most cells either bound can be set to: well above any nanowell's seeding.
 _START_LIMIT = 999
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
-_SLIDER_TIP = "The timepoint the Array view shows; drag to step through the well's timepoints."
 _METRIC_TIP = ("What each dot is. Brightness and site signal use the channel chosen in the app's channel "
                "selector; they are greyed when that channel has no site intensities.")
 _AXIS_TIP = ("Time: one panel per well (or replicate set), timepoints along x, the well medians joined.\n"
@@ -95,8 +97,9 @@ _AXIS_TIP = ("Time: one panel per well (or replicate set), timepoints along x, t
 _BASELINE_TIP = ("The timepoint a fold change and the occupancy class are measured from.\n"
                  "Earliest: the well's first timepoint; a nanowell unmeasurable there has no fold change.\n"
                  "First measurable: each nanowell's first timepoint at which the measurement exists.")
-_TP_TIP = ("The timepoint drawn on Along x: Wells and Position, and the one Extremes ranks the nanowells at (the "
-           "latest by default).")
+_TP_TIP = ("The timepoint drawn on Along x: Wells and Position (the latest by default), the one Extremes ranks the "
+           "nanowells at (the well's latest by default), and the one the Array view shows (the well's first by "
+           "default).")
 _RESPONDING_TIP = ("A nanowell counts as responding when its value is above this number. Set one for each metric — "
                    "a fold change, a count, a confluence, an intensity — and the figure states each group's fraction "
                    "responding at it; empty, no fraction is computed. Kept per metric and channel.")
@@ -194,23 +197,14 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
 
     array_controls = _build_array_controls(ctx, band)
 
-    tp_slider = QSlider(Qt.Horizontal)
-    tp_slider.setToolTip(_SLIDER_TIP)
-    tp_slider.setMinimum(0)
-    tp_slider.setPageStep(1)
-    tp_slider_label = QLabel("")
-    tp_slider_label.setObjectName("NanowellSliderLabel")
-    slider_tps: list = []
-    tp_slider.valueChanged.connect(
-        lambda v: nwc.set_timepoint(ctx, slider_tps[v]) if 0 <= v < len(slider_tps) else None)
-    reg.register("_nw_tp_slider", tp_slider)
-    grp_slider = band.add_scope("Timepoint", tp_slider, tp_slider_label)
-
-    tp_cb = QComboBox()
+    # The Plotting tabs' timepoint control (Distribution, Heat Map): a LabeledComboBox painting its own
+    # "Timepoint:" prefix, the timepoints in time order and named by their hours. One control for every view that
+    # draws one timepoint — the Array view's included, which had a slider of its own.
+    tp_cb = LabeledComboBox("Timepoint")
     tp_cb.setToolTip(_TP_TIP)
     tp_cb.currentIndexChanged.connect(lambda _i: nwc.set_timepoint(ctx, tp_cb.currentData() or ""))
     reg.register("_nw_tp_cb", tp_cb)
-    grp_tp = band.add_scope("Timepoint", tp_cb)
+    grp_tp = band.add_scope("", tp_cb)
 
     extremes_spin = QSpinBox()
     extremes_spin.setRange(1, EXTREMES_MAX_N)
@@ -266,23 +260,21 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     detail = QWidget(splitter)
     detail_layout = QVBoxLayout(detail)
     detail_layout.setContentsMargins(0, 0, 0, 0)
-    clear_btn = QPushButton("Clear selection", detail)
-    clear_btn.setProperty("variant", "secondary")
-    clear_btn.setToolTip("Clear the nanowells selected for the site detail (the plate selection is not touched).")
-    clear_btn.clicked.connect(lambda _=False: _clear_sites(ctx))
-    reg.register("_nw_clear_btn", clear_btn)
     detail_card = PlotCard(detail, figsize=(_DETAIL_W, _DETAIL_H), constrained=False, header=False)
     detail_card.setFigureTitle("")
+    detail_card.setToolTip("The selected nanowells over time. Click a dot to select one, Shift-click to add one, "
+                           "and click empty space on the plot to clear the selection.")
     reg.register("_nw_detail_card", detail_card)
     reg.register("_nw_detail_fig", detail_card.figure)
     reg.register("_nw_detail_canvas", detail_card.canvas)
-    crops_btn = _crops_button(ctx, detail)
-    buttons = QHBoxLayout()
-    buttons.addStretch(1)
-    buttons.addWidget(crops_btn)
-    buttons.addWidget(clear_btn)
-    detail_layout.addLayout(buttons)
-    detail_layout.addWidget(detail_card, 1)
+    detail_layout.addWidget(detail_card, 3)
+    detail_layout.addLayout(_crops_header(ctx, detail))
+    strip_card = PlotCard(detail, figsize=(_DETAIL_W, _STRIP_H), constrained=False, header=False)
+    strip_card.setFigureTitle("")
+    reg.register("_nw_strip_card", strip_card)
+    reg.register("_nw_strip_fig", strip_card.figure)
+    reg.register("_nw_strip_canvas", strip_card.canvas)
+    detail_layout.addWidget(strip_card, 1)
     detail.hide()
     reg.register("_nw_detail_pane", detail)
     splitter.addWidget(card)
@@ -302,7 +294,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     def page_visible() -> bool:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
-    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box, responding_edit,
+    controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, responding_edit,
                 extremes_spin, *start.signalling, *array_controls.signalling)
 
     def refresh_controls() -> None:
@@ -323,15 +315,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             baseline_cb.setEnabled((st.metric in BASELINE_METRICS or view in RANKED_WELL_VIEWS)
                                    and _metric_reaches_figure(st, view))
             tps, shown = nwc.shown_timepoint(ctx)
-            tp_cb.clear()
-            for tp in reversed(tps):
-                tp_cb.addItem(tp, tp)
+            _fill_timepoints(tp_cb, tps, st.data.times_h if st.data else {})
             _select(tp_cb, shown)
-            slider_tps[:] = tps
-            tp_slider.setMaximum(max(len(tps) - 1, 0))
-            tp_slider.setValue(tps.index(shown) if shown in tps else 0)
-            tp_slider.setEnabled(len(tps) > 1)
-            tp_slider_label.setText(shown)
             well_cb.clear()
             for well in nwc.page_wells(ctx) if st.data else []:
                 well_cb.addItem(well, well)
@@ -363,11 +348,11 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             cut = st.thresholds.get(column) if column else None
             responding_edit.setText("" if cut is None else format_cut(cut))
             grp_responding.setVisible(distribution)
-            grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position" or view in RANKED_WELL_VIEWS)
+            grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position" or view in RANKED_WELL_VIEWS
+                              or view in ONE_WELL_VIEWS)
             grp_well.setVisible(view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS)
             extremes_spin.setValue(st.extremes_n)
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
-            grp_slider.setVisible(view in ONE_WELL_VIEWS)
         finally:
             for w, b in zip(controls, blocked):
                 w.blockSignals(b)
@@ -377,6 +362,23 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_page_visible", page_visible)
     reg.register("_nw_refresh_controls", refresh_controls)
     refresh_controls()
+
+
+def timepoint_text(tp: str, times_h: dict) -> str:
+    """How the timepoint control names *tp*: by its hours, as the Plotting tabs' control does (``24 h``), or by its
+    own name when the acquisition record gives it no time."""
+    hours = times_h.get(tp)
+    return f"{hours:g} h" if isinstance(hours, (int, float)) and hours == hours else str(tp)
+
+
+def _fill_timepoints(combo, tps, times_h: dict) -> None:
+    """Fill the timepoint control with *tps* in time order, each named by its hours and carrying its own name as
+    data (what the page's state holds) and as its tooltip."""
+    combo.clear()
+    for tp in tps:
+        combo.addItem(timepoint_text(tp, times_h), tp)
+        combo.setItemData(combo.count() - 1, f"Timepoint {tp}", Qt.ToolTipRole)
+    combo.setEnabled(len(tps) > 1)
 
 
 def _build_starting_cells(ctx, band) -> SimpleNamespace:
@@ -456,29 +458,58 @@ def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:
                         f"channel.")
 
 
-def _crops_button(ctx, parent) -> QPushButton:
-    """**Enlarge crops**: the first selected nanowell at every timepoint, large, in place of the page's view
-    (``controller.set_crop_view``); it reads **Back to the plot** while that is shown."""
-    reg = ctx.widgets
-    button = QPushButton("Enlarge crops", parent)
+def _crops_header(ctx, parent) -> QHBoxLayout:
+    """The row above the site detail's crop strip: what the strip is, and **Pop out**, which opens the crops large in
+    a window of their own (:func:`_popout_window`, ``controller.pop_out_crops``)."""
+    row = QHBoxLayout()
+    row.setContentsMargins(0, 0, 0, 0)
+    title = QLabel("Crops over time", parent)
+    title.setObjectName("Caption")
+    button = QPushButton("Pop out", parent)
     button.setProperty("variant", "secondary")
-    button.setCheckable(True)
-    button.setToolTip("Show the first selected nanowell at every timepoint, large, in place of the plot — on one "
-                      "brightness scale, so changes between timepoints read as changes. Press again to go back.")
-    button.toggled.connect(lambda on: nwc.set_crop_view(ctx, on))
-    reg.register("_nw_crops_btn", button)
+    button.setToolTip("Open the first selected nanowell's crops at every timepoint, large, in a window of their own "
+                      "— on one brightness scale, so changes between timepoints read as changes. The window "
+                      "follows the selection.")
+    button.clicked.connect(lambda _=False: nwc.pop_out_crops(ctx))
+    ctx.widgets.register("_nw_popout_btn", button)
+    ctx.widgets.register("_nw_open_popout", lambda: _popout_window(ctx).show_raised())
+    row.addWidget(title)
+    row.addStretch(1)
+    row.addWidget(button)
+    return row
 
-    def refresh() -> None:
-        st = ctx.state.feature_slice("nanowell")
-        on = bool(st is not None and st.crop_view)
-        if button.isChecked() != on:
-            button.blockSignals(True)
-            button.setChecked(on)
-            button.blockSignals(False)
-        button.setText("Back to the plot" if on else "Enlarge crops")
 
-    reg.register("_nw_refresh_crop_view", refresh)
-    return button
+def _popout_window(ctx):
+    """The pop-out crops window, built on first use and kept: a top-level window owned by the app's window, so it
+    closes with it, holding one :class:`PlotCard` the controller draws the crops on."""
+    window = ctx.widgets.get_or_none("_nw_popout")
+    if window is not None:
+        return window
+    from widgets.plot_card import PlotCard
+
+    window = _PopoutWindow(ctx.window)
+    window.setWindowTitle("Nanowell crops")
+    layout = QVBoxLayout(window)
+    layout.setContentsMargins(0, 0, 0, 0)
+    card = PlotCard(window, figsize=(_FIG_W, _FIG_H * 0.8), constrained=False, header=False)
+    card.setFigureTitle("")
+    layout.addWidget(card)
+    window.resize(900, 640)
+    ctx.widgets.register("_nw_popout", window)
+    ctx.widgets.register("_nw_popout_fig", card.figure)
+    ctx.widgets.register("_nw_popout_canvas", card.canvas)
+    card.plotThemeChanged.connect(lambda _m: nwc.draw_popout(ctx))
+    return window
+
+
+class _PopoutWindow(QWidget):
+    def __init__(self, parent) -> None:
+        super().__init__(parent, Qt.Window)
+
+    def show_raised(self) -> None:
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
 
 def _button(text: str, tip: str, on_click) -> QPushButton:
@@ -642,10 +673,3 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
         anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn, overlays_btn=overlays_btn,
         signalling=(image_cb, positions_seg, anchor_btn, overlays_btn, *layer_actions.values(),
                     *colour_actions.values()))
-
-
-def _clear_sites(ctx) -> None:
-    st = ctx.state.feature_slice("nanowell")
-    if st is not None and st.selected_sites:
-        st.selected_sites = []
-        nwc.selection_changed(ctx)

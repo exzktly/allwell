@@ -85,7 +85,7 @@ def _choose_view(ctx, key, preset=None):
 
 def _visible_scopes(ctx):
     names = {"_nw_metric_cb": "Metric", "_nw_axis_seg": "Along x", "_nw_baseline_cb": "Baseline",
-             "_nw_tp_cb": "Timepoint", "_nw_control_cb": "vs", "_nw_well_cb": "Well", "_nw_tp_slider": "Slider",
+             "_nw_tp_cb": "Timepoint", "_nw_control_cb": "vs", "_nw_well_cb": "Well",
              "_nw_extremes_spin": "Extremes"}
     return {label for name, label in names.items() if ctx.widgets.get(name).isVisibleTo(ctx.window)}
 
@@ -98,13 +98,13 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
                                                                     "Extremes"]
     assert _visible_scopes(page) == {"Metric", "Along x", "Baseline"}
     _choose_view(page, "array")
-    assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Slider"}
+    assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}
     # Outlined by state with no values written, the metric reaches nothing on the figure: its controls are greyed,
     # not hidden, so the controls beside them stay where they were (asked for: "the buttons should be frozen in
     # their position regardless of layer selection").
     page.widgets.get("_nw_colour_state").trigger()
     page.widgets.get("_nw_layer_values").trigger()
-    assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Slider"}
+    assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}
     assert not page.widgets.get("_nw_metric_cb").isEnabled()
     page.widgets.get("_nw_layer_values").trigger()                   # the values written: the metric is drawn again
     assert page.widgets.get("_nw_metric_cb").isEnabled()
@@ -117,7 +117,7 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
 
 
 # ── V2: the Array view as the lattice map ────────────────────────────────────
-def test_the_map_draws_the_chosen_well_and_the_slider_steps_its_timepoints(page, qtbot):
+def test_the_map_draws_the_chosen_well_and_the_timepoint_control_steps_its_timepoints(page, qtbot):
     _loaded(qtbot, page)
     _choose_view(page, "array", "map")
     st = page.state.feature_slice("nanowell")
@@ -125,9 +125,12 @@ def test_the_map_draws_the_chosen_well_and_the_slider_steps_its_timepoints(page,
     assert "A01 · t_c" in title                                       # the first well, at its first timepoint
     footer = _fig_texts(page, "nw-array-footer")
     assert footer[0] == "4 nanowells in the roster · with a value 3 · measured 2 · empty 1 · occluded 1"
-    slider = page.widgets.get("_nw_tp_slider")
-    assert (slider.minimum(), slider.maximum(), slider.value()) == (0, 1, 0)
-    slider.setValue(1)
+    tp_cb = page.widgets.get("_nw_tp_cb")
+    # The Plotting tabs' control: the timepoints in time order, named by their hours, the first one shown.
+    assert [tp_cb.itemText(i) for i in range(tp_cb.count())] == ["0 h", "5 h"]
+    assert [tp_cb.itemData(i) for i in range(tp_cb.count())] == ["t_c", "t_a"] and tp_cb.currentIndex() == 0
+    assert tp_cb.isVisibleTo(page.window)
+    tp_cb.setCurrentIndex(1)
     assert st.timepoint == "t_a"
     title = [ax._left_title.get_text() for ax in page.widgets.get("_nw_fig").axes]
     assert "A01 · t_a" in title
@@ -179,13 +182,13 @@ def test_clicking_a_nanowell_on_the_map_selects_it_and_cuts_its_crop_from_the_mo
         "t_c": ("montage", "from the montage: the input archive is not beside this dataset"),
         "t_a": ("montage", "from the montage: the input archive is not beside this dataset")}
     assert crops["t_c"].image.max() == 255                    # centred on the bright square at (100, 100) µm
-    detail = page.widgets.get("_nw_detail_fig")
+    detail = page.widgets.get("_nw_strip_fig")                    # the strip under the Pop out button
     images = [im for ax in detail.axes for im in ax.images]
     assert len(images) == 2
     # What the crops are is stated on the figure, not only on the state.
     caption = [t.get_text() for t in detail.texts if t.get_gid() == "nw-crop-caption"]
-    assert caption == ["Crops: A01 · q 1, r 0, from the montage, at its lower resolution; from the montage: the "
-                       "input archive is not beside this dataset"]
+    assert caption == ["Crops: A01 · q 1, r 0, from the montage, at its lower resolution; one brightness scale; "
+                       "from the montage: the input archive is not beside this dataset"]
     assert st.fetch_bridges == [] and st.fetching == set()           # nothing kept once delivered
 
 
@@ -202,7 +205,7 @@ def test_a_crop_job_that_fails_says_so_on_the_figure_and_is_not_relaunched(page,
     _click_site(qtbot, page, ("A01", 1, 0))
     st = page.state.feature_slice("nanowell")
     qtbot.waitUntil(lambda: ("A01", 1, 0) in st.crops, timeout=20000)
-    detail = page.widgets.get("_nw_detail_fig")
+    detail = page.widgets.get("_nw_strip_fig")
     missing = [t.get_text() for ax in detail.axes for t in ax.texts if t.get_gid() == "nw-crop-missing"]
     assert len(missing) == 1 and missing[0].startswith("The crops could not be cut: ")
     assert "disk went away" in missing[0]
@@ -218,7 +221,8 @@ def test_trajectories_draw_one_line_per_nanowell_with_a_value(page, qtbot):
     footer = _fig_texts(page, "nw-traj-footer")
     assert any(t.startswith("8 nanowells drawn, one line each; 0 with no value at any timepoint not drawn.")
                for t in footer)
-    assert [ax._left_title.get_text() for ax in page.widgets.get("_nw_fig").axes] == ["A01", "B01"]
+    panels = [ax._left_title.get_text() for ax in page.widgets.get("_nw_fig").axes if ax._left_title.get_text()]
+    assert panels == ["A01", "B01"]                                   # and the occupancy key's axes beside them
 
 
 def test_a_per_nanowell_metric_on_trajectories_is_greyed_and_says_what_is_drawn(page, qtbot):
@@ -273,7 +277,8 @@ def test_array_qc_draws_the_montage_the_tiles_by_how_they_were_placed_and_the_st
     status = _fig_texts(page, "nw-array-record")
     assert status[:2] == ["t_c: ok", "pitch 143.0 µm · angle 0.50° · overlap 40.0 µm · 4 detected of 4"]
     assert status[2:] == ["template: own, 2 of 4 sites", "t_a: ok — template suspect"]
-    page.widgets.get("_nw_tp_slider").setValue(1)
+    tp_cb = page.widgets.get("_nw_tp_cb")
+    tp_cb.setCurrentIndex(tp_cb.findData("t_a"))
     qtbot.waitUntil(lambda: ("A01", "t_a") in page.state.feature_slice("nanowell").montages, timeout=20000)
     assert _fig_texts(page, "nw-array-record")[2] == (
         "template: own, 1 of 4 sites — its floor moved 3.0-fold against t_c's: most nanowells may hold cells, so "

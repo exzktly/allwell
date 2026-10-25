@@ -31,7 +31,7 @@ from tests.test_nanowell_page_array_layers import _drawn, _toggle, qc_page  # no
 _BAND = ("_nw_view_seg", "_nw_metric_cb", "_nw_axis_seg", "_nw_baseline_cb", "_nw_cohort_box", "_nw_well_cb",
          "_nw_image_cb", "_nw_positions_seg", "_nw_layers_btn", "_nw_overlays_btn", "_nw_zoom_out_btn",
          "_nw_zoom_lbl", "_nw_zoom_in_btn", "_nw_fit_btn", "_nw_one_btn", "_nw_anchor_btn", "_nw_clear_anchor_btn",
-         "_nw_rerun_btn", "_nw_tp_slider", "_nw_tp_cb", "_nw_responding_edit", "_nw_control_cb")
+         "_nw_rerun_btn", "_nw_tp_cb", "_nw_responding_edit", "_nw_control_cb")
 
 
 def _shown_on_band(ctx) -> list:
@@ -49,7 +49,7 @@ def _labels(ctx) -> list[str]:
 def test_no_layer_choice_shows_or_hides_a_control_on_the_band(qc_page):
     ctx = qc_page
     before = _shown_on_band(ctx)
-    assert {"_nw_metric_cb", "_nw_baseline_cb", "_nw_anchor_btn", "_nw_tp_slider"} <= set(before)
+    assert {"_nw_metric_cb", "_nw_baseline_cb", "_nw_anchor_btn", "_nw_tp_cb"} <= set(before)
     for key in ("nanowells", "addresses", "values", "tiles", "anchor", "record"):
         _toggle(ctx, key)
         assert _shown_on_band(ctx) == before, key

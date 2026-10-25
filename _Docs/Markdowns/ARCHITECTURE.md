@@ -10601,6 +10601,29 @@ and the footer states the cohort as kept of sites. `well_summary(reasons=…)`, 
 and `views_compute.trajectory_panels(cohort=…)` all apply it, so the beeswarm, the summaries and the trajectory
 medians follow the same nanowells.
 
+**The starting-cells filter** (`starting_cells_compute`, `NanowellState.start_min` / `start_max`, the *Starting
+cells* control). It keeps only the nanowells whose count at the baseline — `n0`, the number the occupancy colours
+are drawn from, so the filter and the key always agree — lies within the bounds; `None` is no bound on that side,
+a minimum of 0 is no minimum, and with a bound set a nanowell whose count at baseline is unknown is outside.
+`controller.draw_view` applies it first (`apply`, over the drawn wells), before any exclusion is worked out and
+before the fixed cohort, so a filtered nanowell is never counted twice: under `≥1`, "empty at baseline" no longer
+appears among a fold change's exclusions, because those nanowells were filtered first. The filtered nanowells are
+not given a reason per swarm (hundreds against every swarm would drown the reasons a reader acts on); every figure
+carries one sentence (`note`) with the bounds, the baseline, the nanowells kept of all, those outside the range and
+those with no count, the kept nanowells counted after the earliest timepoint under *First measurable* (their
+cells may have divided, so a "single cell" filter there is not a clonality filter), and each drawn well keeping
+fewer than `FEW_BELOW`, since wells are the replicate unit. A filter that keeps nothing draws `empty_text`.
+Distribution, Trajectories, Position and Extremes draw only the kept nanowells, and the fraction responding is
+over them; Position does not name a well the filter emptied as one without addresses. The Array view draws every
+nanowell and veils the ones outside in the figure's ground (`renderer._dim_nanowells`, a theme-paired colour, still
+clickable), counting them in its footer; the occupancy key fades the classes the filter removes whole
+(`occupancy_in_filter`); the site detail draws a selected nanowell outside the filter and says so. *Save nanowell
+data…* keeps every row and flags it (`in_starting_cells_filter`, `starting_cells_min` / `_max` / `_baseline`).
+Batch Export's Nanowells mode has its own minimum and maximum, seeded from the page each time the panel is shown;
+its figures pass them to `draw_view` and its summary CSV is of the kept nanowells, with the bounds in two columns.
+The bounds persist with the page's settings and in Saved Plots; a saved pair that is not a filter (a minimum above
+the maximum, a value that is not a whole number) restores as no filter rather than half of one.
+
 **Summaries** (`summary_compute`). `well_summary` describes one well per timepoint: median, interquartile
 range, fraction responding — the share of the nanowells used whose value is strictly above
 `responding_above`, the cut the user set for that metric, and undefined when none is set (there is no default:
@@ -10863,8 +10886,11 @@ and the read is not relaunched on every redraw; a result for a dataset loaded si
 the new dataset's bookkeeping; each worker bridge is kept on the state until it delivers, then released.
 
 **The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (the five
-views; U3 planned the first four), Metric, Along x, Baseline, Timepoint (on *Along x: Wells*, Position, Extremes and the Array view), *vs* (on
-*Along x: Wells*), Well (on the one-well views), the Array view's Image combo, Positions switch,
+views; U3 planned the first four), Metric, Along x, Baseline, *Starting cells* (`_build_starting_cells`: a preset
+combo — Any, ≥1, 1, 1–2, ≥2, Custom… — on every view, with a minimum and a maximum shown while Custom is chosen,
+the combo outlined in the accent through the `filterActive` QSS property while a bound is set), Timepoint (on
+*Along x: Wells*, Position, Extremes and the Array view), *vs* (on *Along x: Wells*), Well (on the one-well views),
+the Array view's Image combo, Positions switch,
 *Layers* menu (each switch, the colouring, and *Show as* for the presets), *Fit* / *1:1* and the anchor's
 three buttons, Save and Properties. The Timepoint control is the Plotting tabs' own — a `LabeledComboBox("Timepoint")`
 painting its prefix, the timepoints in time order named by their hours (`tab_view.timepoint_text`: `24 h`, or the

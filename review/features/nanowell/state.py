@@ -118,6 +118,10 @@ class NanowellState:
     thresholds: dict = field(default_factory=dict)
     #: How many nanowells each of the Extremes view's two blocks shows (the largest and the smallest fold changes).
     extremes_n: int = EXTREMES_DEFAULT_N
+    #: The *Starting cells* filter: the fewest and the most cells a nanowell may have held at the baseline to be
+    #: used (``None``: no bound on that side; both ``None``: no filter). See ``starting_cells_compute``.
+    start_min: int | None = None
+    start_max: int | None = None
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
@@ -181,7 +185,8 @@ class NanowellState:
     def to_config(self) -> dict:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
-                "extremes_n": self.extremes_n, "layers": self.layers.to_config(),
+                "extremes_n": self.extremes_n,
+                "start_min": self.start_min, "start_max": self.start_max, "layers": self.layers.to_config(),
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -196,6 +201,7 @@ class NanowellState:
             value = config.get(name)
             setattr(self, name, value if isinstance(value, str) else getattr(fresh, name))
         self.cohort = config.get("cohort") is True
+        self.start_min, self.start_max = _start_bounds(config.get("start_min"), config.get("start_max"))
         count = config.get("extremes_n")
         self.extremes_n = (count if isinstance(count, int) and not isinstance(count, bool)
                            and 1 <= count <= EXTREMES_MAX_N else fresh.extremes_n)
@@ -210,6 +216,17 @@ class NanowellState:
         self.thresholds = {k: float(v) for k, v in (thresholds.items() if isinstance(thresholds, dict) else ())
                            if isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool)
                            and math.isfinite(v)}
+
+
+def _start_bounds(lo, hi) -> tuple:
+    """The saved *Starting cells* bounds, or no filter at all when either is not a whole number ≥ 0 or the minimum
+    is above the maximum: half a filter restored would be a different filter than the one saved."""
+    def ok(v):
+        return v is None or (isinstance(v, int) and not isinstance(v, bool) and v >= 0)
+
+    if not (ok(lo) and ok(hi)) or (lo is not None and hi is not None and lo > hi):
+        return None, None
+    return (None if lo == 0 else lo), hi
 
 
 def _layers_from(config: dict) -> ArrayLayers:

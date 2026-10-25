@@ -131,8 +131,9 @@ def test_a_nanowell_run_deletes_nothing_of_a_well_mid_run():
 
 class _Verifier:
     def __init__(self, local, *, nanowell=True):
+        # The wells this run fetched, as ``_RemoteRun.fetched_wells`` holds them. D04 is not among them.
         self._run = SimpleNamespace(local_output_dir=local, remote_output_dir="/r/out", nanowell=nanowell,
-                                    nanowell_released=set())
+                                    nanowell_released=set(), fetched_wells={"A01", "B02", "C03"})
         self.host = SimpleNamespace(ssh_alias="gpu")
         self.pulled = []
 
@@ -154,13 +155,14 @@ def test_verification_pulls_the_final_tables_and_every_re_anchored_well_again(tm
     _grid(folder, "A01", ["fiducial", "plate_rigid"])          # an earlier batch's re-anchored well
     _grid(folder, "B02", ["plate_rigid"])
     _grid(folder, "C03", ["fiducial", "array_centre"])         # anchored on its own: not re-run
+    _grid(folder, "D04", ["fiducial", "plate_rigid"])          # another run's well, in the local folder only
     verifier, lines = _Verifier(tmp_path), []
     pull_nanowell_results(verifier, log=lines.append)
     assert verifier.pulled == [
         ("gpu:/r/out/nanowells/", str(folder)),
         ("gpu:/r/out/A01_out.zip", str(tmp_path / "A01_out.zip")), ("gpu:/r/out/*_A01.csv.gz", str(tmp_path)),
         ("gpu:/r/out/B02_out.zip", str(tmp_path / "B02_out.zip")), ("gpu:/r/out/*_B02.csv.gz", str(tmp_path))]
-    assert reanchored_wells(folder) == ["A01", "B02"]
+    assert reanchored_wells(folder) == ["A01", "B02", "D04"]
     plain = _Verifier(tmp_path, nanowell=False)
     pull_nanowell_results(plain, log=lines.append)
     assert plain.pulled == []

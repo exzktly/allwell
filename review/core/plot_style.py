@@ -12,6 +12,7 @@ card), falls back directly to ``theme.CPub`` (publication-style).
 
 from __future__ import annotations
 
+import math
 import re
 
 import logging
@@ -1166,12 +1167,26 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
     _apply_layout_engine(fig, prefs)
 
 
+def _type_scale(ax) -> float:
+    """The factor *ax* asks its Properties font sizes to be drawn at (``_aw_type_scale``), 1 when it asks none."""
+    try:
+        scale = float(getattr(ax, "_aw_type_scale", 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+    return scale if math.isfinite(scale) and scale > 0 else 1.0
+
+
 def _style_axis_typography(ax, idx: int, axis_prefs: _AxisPrefs) -> str:
     """Sizes, colours and font family of the axis text; returns the title ink,
     which the legend pass uses for its own text."""
-    tick_sz = axis_prefs.font_size(idx, "tick_label_size", 10)
-    label_sz = axis_prefs.font_size(idx, "axis_label_size", 12)
-    title_sz = axis_prefs.font_size(idx, "title_size", 14)
+    # ``_aw_type_scale`` scales the chosen sizes for one axes: the defaults are sized for one plot filling its
+    # card, and a panel of a small-multiples figure (the Nanowells page's grid of wells, its colour bar, its crop
+    # captions) drew its 18 pt ticks larger than the panel's own title and ran them into each other. Scaling
+    # rather than replacing keeps the Properties sizes working there: raising one raises every panel with it.
+    scale = _type_scale(ax)
+    tick_sz = axis_prefs.font_size(idx, "tick_label_size", 10) * scale
+    label_sz = axis_prefs.font_size(idx, "axis_label_size", 12) * scale
+    title_sz = axis_prefs.font_size(idx, "title_size", 14) * scale
     # Theme-aware chrome: this function used to hardcode "black" everywhere
     # (publication-ink), which was correct on export but overrode the
     # PlotCard's screen-theme styling whenever it was called from a redraw.
@@ -1541,7 +1556,7 @@ def _apply_legend_prefs(ax, prefs: dict, title_fg: str) -> None:
     if primary is not None and show_leg:
         _place_legend(primary, str(prefs.get("legend_loc", "best")))
     for leg in legends:
-        font_size = float(prefs.get("legend_font_size", 9))
+        font_size = float(prefs.get("legend_font_size", 9)) * _type_scale(ax)
         for txt in leg.get_texts():
             txt.set_fontsize(font_size)
             txt.set_color(title_fg)

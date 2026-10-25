@@ -158,6 +158,7 @@ class DistributionModel:
     control: str = ""
     baseline: str = "earliest"
     notes: list = field(default_factory=list)          # sentences printed in the footer
+    x_label: str = ""                                  # what the x axis is, written once under the bottom row
     #: The cut the user set for this metric (tracker I9), or ``None``: then no fraction responding is computed.
     responding_above: float | None = None
     #: ``(group, fraction, timepoint)`` per group: the mean of its wells' fractions responding at *timepoint*.
@@ -278,22 +279,39 @@ def _order(frame: pd.DataFrame) -> list[str]:
     return list(tps["timepoint"])
 
 
-def _time_label(frame: pd.DataFrame, tp: str) -> str:
+def _hours(frame: pd.DataFrame, tp: str) -> float:
     hours = frame.loc[frame["timepoint"] == tp, "time_h"]
-    h = hours.iloc[0] if len(hours) else np.nan
-    return f"{h:g} h · {tp}" if pd.notna(h) and f"{h:g} h" != tp and f"{h:g}h" != tp else str(tp)
+    return float(hours.iloc[0]) if len(hours) and pd.notna(hours.iloc[0]) else math.nan
+
+
+def _time_axis(model, frame) -> dict:
+    """``timepoint -> tick label`` for the time panels, and the axis label on *model*. Hours alone when every
+    timepoint has a recorded time — the timepoint names beside them ran five labels into one another in a panel a
+    few centimetres wide — with the names said once in the footer when they are not the hours themselves; the
+    names when any time is unknown, since hours for some and names for others would be two scales on one axis."""
+    tps = _order(frame)
+    hours = {tp: _hours(frame, tp) for tp in tps}
+    if tps and all(math.isfinite(h) for h in hours.values()):
+        model.x_label = "Time (h)"
+        named = [tp for tp in tps if tp not in (f"{hours[tp]:g} h", f"{hours[tp]:g}h", f"{hours[tp]:g}")]
+        if named:
+            model.notes.append("Timepoints: " + " · ".join(f"{hours[tp]:g} h {tp}" for tp in tps) + ".")
+        return {tp: f"{hours[tp]:g}" for tp in tps}
+    model.x_label = "Timepoint"
+    return {tp: str(tp) for tp in tps}
 
 
 def _time_panels(model, frame, column, reasons, groups, channels) -> None:
     summary = (well_summary(frame, column, channels, reasons=reasons, responding_above=model.responding_above)
                if len(frame) else None)
+    labels = _time_axis(model, frame)
     for name, members in groups.items():
         rows = frame[frame["well"].isin(members)]
         tps = _order(rows)
         k = len(members)
         width = 1.0 / k
         panel = Panel(title=name if k == 1 else f"{name} ({k} wells)", swarms=[],
-                      ticks=[(float(i), _time_label(rows, tp)) for i, tp in enumerate(tps)])
+                      ticks=[(float(i), labels.get(tp, str(tp))) for i, tp in enumerate(tps)])
         for i, tp in enumerate(tps):
             for j, well in enumerate(members):
                 sel = (rows["timepoint"] == tp) & (rows["well"] == well)
@@ -321,7 +339,10 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
         frame = frame[frame["timepoint"] == timepoint]
         reasons = reasons[frame.index]
     model.timepoint = timepoint if model.metric not in PER_NANOWELL else ""
-    panel = Panel(title=(f"{timepoint}" if model.timepoint else "One value per nanowell"), swarms=[], ticks=[])
+    at = _hours(frame, timepoint) if model.timepoint else math.nan
+    panel = Panel(title=((f"At {timepoint}" + (f" · {at:g} h" if math.isfinite(at) and f"{at:g}" not in timepoint
+                                                 else "")) if model.timepoint else "One value per nanowell"),
+                  swarms=[], ticks=[])
     summary = (well_summary(frame, column, channels, reasons=reasons, responding_above=model.responding_above)
                if len(frame) else pd.DataFrame(columns=["well", "timepoint", "median", "n_used", "excluded", "time_h",
                                                         "tp_order", "fraction_responding"]))

@@ -61,7 +61,7 @@ _BASELINES = (("earliest", "Earliest"), ("first_measurable", "First measurable")
 _FIG_W, _FIG_H = 8.0, 6.4
 _DETAIL_W, _DETAIL_H = 4.2, 5.0
 #: The crop strip under the site detail, below its **Pop out** button.
-_STRIP_H = 1.4
+_STRIP_H = 1.7
 _METRIC_CB_MIN_W = 220
 
 _VIEW_TIP = ("Distribution: one dot per nanowell, per well and timepoint.\n"

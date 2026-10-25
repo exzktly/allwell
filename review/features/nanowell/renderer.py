@@ -125,8 +125,63 @@ def selection_colours() -> list[str]:
 
 
 def _grid(n: int) -> tuple[int, int]:
-    cols = min(max(n, 1), MAX_COLUMNS)
-    return int(math.ceil(max(n, 1) / cols)), cols
+    """``(rows, columns)`` for *n* panels: as few rows as ``MAX_COLUMNS`` allows, the panels spread evenly over them
+    (six wells are two rows of three, not a row of four over a row of two beside two empty cells)."""
+    n = max(n, 1)
+    rows = int(math.ceil(n / MAX_COLUMNS))
+    return rows, int(math.ceil(n / rows))
+
+
+#: The share of the Properties font sizes this page's figures are drawn at (``plot_style`` reads it from each axes
+#: as ``_aw_type_scale``). Its defaults, 18 pt, are sized for one plot filling its card; a panel of a grid of wells
+#: drew its ticks larger than its own title and ran neighbouring tick labels into one another. At the defaults a
+#: grid's ticks and labels come out at 9 pt and a single plot's at 11 pt, and raising a size in Properties still
+#: raises it here.
+GRID_TYPE_SCALE = 0.5
+SINGLE_TYPE_SCALE = 0.62
+#: The Extremes montage's crop captions and the Array view's colour bar: 18 → 8 pt.
+EXTREMES_TYPE_SCALE = 0.45
+#: The Properties default tick size the scales above are measured against, for drawing before the style pass runs.
+_PREF_PT = 18.0
+#: The page's own annotation sizes — counts, keys, footers — in points: below the axes' type, above legibility.
+ANNOTATION_PT = 7.0
+CROWDED_PT = 6.0
+FOOTER_PT = 8.0
+
+
+def _prepare_axes(ax, scale: float) -> None:
+    """Theme *ax* and give it the page's type scale, before anything is drawn on it."""
+    _theme_axes(ax)
+    ax._aw_type_scale = scale
+    ax.tick_params(labelsize=_PREF_PT * scale)
+    ax.yaxis.label.set_fontsize(_PREF_PT * scale)
+    ax.xaxis.label.set_fontsize(_PREF_PT * scale)
+
+
+def _no_offset(ax) -> None:
+    """Plain tick numbers on y: matplotlib's offset ("1e−6+1" over the axis) overprinted the counts above a panel and
+    hid the values a reader came for."""
+    from matplotlib.ticker import ScalarFormatter
+
+    formatter = ScalarFormatter(useOffset=False)
+    formatter.set_scientific(False)
+    ax.yaxis.set_major_formatter(formatter)
+
+
+def _below(ax, points: float):
+    """A transform for text by *ax*'s x axis: x in data, y in axes fractions moved *points* down (up when negative),
+    so text keeps its distance from the axis whatever size the panel is drawn at."""
+    from matplotlib.transforms import offset_copy
+
+    return offset_copy(ax.get_xaxis_transform(), fig=ax.figure, x=0, y=-points, units="points")
+
+
+def _reference_line(ax, metric: str, muted) -> None:
+    """The no-change line on a fold change: 1× on a ratio, 0 on a log₂ ratio."""
+    if not metric.endswith("_fc"):
+        return
+    _ink(ax.axhline(0.0 if "log2" in metric else 1.0, color=muted, lw=0.8, ls=":", zorder=0.5, gid="nw-no-change"),
+         muted=True)
 
 
 def _dot_units(ax, fig) -> tuple[float, float]:
@@ -149,7 +204,10 @@ def _y_limits(model: DistributionModel, panel) -> tuple[float, float]:
     if not len(every):
         return 0.0, 1.0
     lo, hi = float(np.min(every)), float(np.max(every))
-    pad = 0.6 if model.integer else max((hi - lo) * 0.06, 1e-6)
+    # A near-constant metric (a fold change of 1 everywhere) still gets a readable range: padded by a share of its
+    # magnitude, it is drawn against ticks of two decimals rather than seven, which pushed the axis label off the
+    # figure.
+    pad = 0.6 if model.integer else max((hi - lo) * 0.06, 0.05 * max(abs(lo), abs(hi)), 1e-6)
     return lo - pad, hi + pad
 
 
@@ -167,20 +225,39 @@ def render_distribution(fig, model: DistributionModel, *, selected=()) -> HitMap
     panels = model.panels[:MAX_PANELS]
     rows, cols = _grid(len(panels))
     bottom = 0.10 + _FOOTER_BASE + _LINE * _FOOTER_LINES
-    fig.subplots_adjust(left=0.07, right=0.98, top=0.88, bottom=bottom, wspace=0.18, hspace=0.42)
+    fig.subplots_adjust(left=0.07, right=0.98, top=0.86, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
+                        hspace=0.62)
     axes = [fig.add_subplot(rows, cols, i + 1) for i in range(len(panels))] if panels else []
     rings = {tuple(site): colour for site, colour in zip(map(tuple, selected), selection_colours())}
     inks = _inks(axes[0]) if axes else _inks(fig.add_subplot(1, 1, 1))
     if not axes:
         fig.axes[0].set_axis_off()
+    scale = GRID_TYPE_SCALE if len(panels) > 1 else SINGLE_TYPE_SCALE
+    # One y scale for every panel, so wells read against each other and a tick label in the gap between two panels
+    # belongs to the one on its right; the labels are written on the left column only.
+    limits = [_y_limits(model, panel) for panel in panels]
+    shared = (min(lo for lo, _hi in limits), max(hi for _lo, hi in limits)) if limits else None
     densities = hidden = 0
-    for ax, panel in zip(axes, panels):
-        d, u = _draw_panel(fig, ax, model, panel, hits, rings, inks)
+    for i, (ax, panel) in enumerate(zip(axes, panels)):
+        _prepare_axes(ax, scale)
+        d, u = _draw_panel(fig, ax, model, panel, hits, rings, inks, ylim=shared)
         densities, hidden = densities + d, hidden + u
-    if axes:
-        _ink(axes[0].set_ylabel(model.label, color=inks[1]))
-    _footer(fig, model, inks, panels, densities, hidden)
+        if i % cols:
+            ax.tick_params(labelleft=False)
+        else:
+            _ink(ax.set_ylabel(_wrap_label(model.label, rows), color=inks[1]))
+        if i + cols >= len(panels) and model.x_label:
+            _ink(ax.set_xlabel(model.x_label, color=inks[1], labelpad=ax._aw_gutter_pt))
+    _footer(fig, model, inks, panels, densities, hidden,
+            crowded=any(getattr(ax, "_aw_crowded", False) for ax in axes))
     return hits
+
+
+def _wrap_label(label: str, rows: int) -> str:
+    """A y label short enough for its panel: on a grid of more than one row it is broken onto two lines."""
+    import textwrap
+
+    return label if rows < 2 or len(label) <= 26 else "\n".join(textwrap.wrap(label, 26)[:2])
 
 
 def _members_per_tick(model, panel) -> int:
@@ -189,63 +266,90 @@ def _members_per_tick(model, panel) -> int:
     return max((len({s.well for s in panel.swarms if round(s.x) == round(t[0])}) for t in panel.ticks), default=1)
 
 
-def _draw_panel(fig, ax, model, panel, hits, rings, inks) -> tuple[int, int]:
+def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple[int, int]:
     """Draw one panel; return how many of its sub-swarms were drawn as densities (U2), and how many dots with a
-    value did not fit their slot (each swarm's are counted under it; the footer gives the total)."""
+    value did not fit their slot (each swarm's are counted under it; the footer gives the total).
+
+    The counts under a swarm are placed in points below the axis — under the tick labels, whatever size those are
+    drawn at — and the depth they take is kept on the axes (``_aw_gutter_pt``) for the axis label beneath them."""
     _bg, ink, muted = inks
     xs_all = [t[0] for t in panel.ticks] or [0.0]
     ax.set_xlim(min(xs_all) - 0.6, max(xs_all) + 0.6)
-    ax.set_ylim(*_y_limits(model, panel))
+    ax.set_ylim(*(ylim or _y_limits(model, panel)))
+    ax.yaxis.set_major_locator(_y_locator(model.integer))
+    _no_offset(ax)
+    _reference_line(ax, model.metric, muted)
     if model.responding_above is not None and math.isfinite(model.responding_above):
         # The cut the fraction responding is counted above (tracker I9), in the muted ink behind the dots.
         _ink(ax.axhline(model.responding_above, color=muted, lw=0.8, ls="--", zorder=0.5, gid="nw-responding"),
              muted=True)
     ax.set_xticks([t[0] for t in panel.ticks])
-    ax.set_xticklabels([t[1] for t in panel.ticks], fontsize=8)
+    ax.set_xticklabels([t[1] for t in panel.ticks])
     dot_w, dot_h = _dot_units(ax, fig)
     k = _members_per_tick(model, panel)
     half = (0.9 if model.axis == TIME else 0.7) / (2 * k)
     density = k > DENSITY_ABOVE
-    # How wide one swarm's slot is on the page decides how its counts are written: level and labelled when
-    # there is room, rotated and bare when there is not, so neighbouring counts never overprint.
+    # How wide one swarm's slot is on the page decides how its counts are written: each swarm's used, excluded and
+    # hidden counts when there is room; when there is not, only the bare number used above it, and the footer says
+    # the rest are in its totals — written rotated, they ran into the next row's title and into the footer.
     slot_pt = 2 * half / dot_w * DOT_PT
     crowded = slot_pt < _ROOM_FOR_LABEL_PT
+    size = CROWDED_PT if crowded else ANNOTATION_PT
     # The title sits above the counts, higher when they stand rotated.
-    _ink(ax.set_title(panel.title, fontsize=9, loc="left", color=ink, pad=22 if crowded else 12))
+    ax._aw_crowded = crowded
+    _ink(ax.set_title(panel.title, fontsize=10, fontweight="bold", loc="left", color=ink, pad=14))
+    subwells = model.axis != TIME and any(
+        sum(1 for o in panel.swarms if round(o.x) == round(s.x)) > 1 for s in panel.swarms)
+    tick_pt = ax.xaxis.get_tick_params(which="major").get("labelsize", _PREF_PT * GRID_TYPE_SCALE)
+    tick_pt = float(tick_pt) if isinstance(tick_pt, (int, float)) else _PREF_PT * GRID_TYPE_SCALE
+    if subwells:
+        # The member wells' names sit directly under the axis and the group names below them.
+        ax.tick_params(axis="x", pad=4 + ANNOTATION_PT + 2)
+    gutter = 4 + (ANNOTATION_PT + 2 if subwells else 0) + 4 + tick_pt + 3     # under the tick labels
+    line = (size + 2) if not crowded else 0
     hidden = 0
-    gutter = -0.13 if model.axis == TIME else -0.10
+    lines_used = 0
     for swarm in panel.swarms:
+        rows_here = 0
         if density:
             _draw_density(ax, swarm, half, ink)
         else:
             layout = _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink)
-            if layout.n_hidden:
-                # Under the swarm, in the gutter beside its exclusions: one line per swarm, so it can never
-                # overprint a neighbour, and it says which values the hidden dots have.
+            hidden += layout.n_hidden
+            if layout.n_hidden and not crowded:
+                # Under the swarm, below its exclusions: one line per swarm, so it can never overprint a
+                # neighbour, and it says which values the hidden dots have.
                 values = sorted(layout.overflow_range or layout.overflow)
                 where = f"{values[0]:.3g}" if values[0] == values[-1] else f"{values[0]:.3g}–{values[-1]:.3g}"
-                _ink(ax.text(swarm.x, gutter - (0.035 if swarm.n_excluded else 0.0),
-                             f"+{layout.n_hidden:,}" if crowded else f"+{layout.n_hidden:,} at {where}",
-                             transform=ax.get_xaxis_transform(), ha="center", va="top",
-                             rotation=90 if crowded else 0, fontsize=5.5 if crowded else 6.5, color=ink,
-                             gid="nw-hidden"))
-                hidden += layout.n_hidden
-        _ink(ax.text(swarm.x, 1.01, f"{len(swarm.values):,}" if crowded else f"n = {len(swarm.values):,}",
-                     transform=ax.get_xaxis_transform(), ha="center", va="bottom", rotation=90 if crowded else 0,
-                     fontsize=5.5 if crowded else 6.5, color=muted, gid="nw-used"), muted=True)
-        if swarm.n_excluded:
-            _ink(ax.text(swarm.x, gutter,
-                         f"−{swarm.n_excluded:,}" if crowded else f"excl. {swarm.n_excluded:,}",
-                         transform=ax.get_xaxis_transform(), ha="center", va="top", rotation=90 if crowded else 0,
-                         fontsize=5.5 if crowded else 6.5, color=muted, gid="nw-excluded"), muted=True)
-        if model.axis != TIME and sum(1 for s in panel.swarms if round(s.x) == round(swarm.x)) > 1:
-            _ink(ax.text(swarm.x, -0.055, swarm.well, transform=ax.get_xaxis_transform(), ha="center", va="top",
-                         fontsize=6.5, color=muted, gid="nw-subwell"), muted=True)
+                _ink(ax.text(swarm.x, 0, f"+{layout.n_hidden:,} at {where}",
+                             transform=_below(ax, gutter + (line if swarm.n_excluded else 0)), ha="center",
+                             va="top", fontsize=size, color=ink, gid="nw-hidden"))
+                rows_here += 1
+        _ink(ax.text(swarm.x, 1.0, f"{len(swarm.values):,}" if crowded else f"n = {len(swarm.values):,}",
+                     transform=_below(ax, -2), ha="center", va="bottom",       # 2 pt above the panel
+                     fontsize=size, color=muted, gid="nw-used"), muted=True)
+        if swarm.n_excluded and not crowded:
+            _ink(ax.text(swarm.x, 0, f"excl. {swarm.n_excluded:,}", transform=_below(ax, gutter), ha="center",
+                         va="top", fontsize=size, color=muted, gid="nw-excluded"), muted=True)
+            rows_here += 1
+        lines_used = max(lines_used, rows_here)
+        if subwells and sum(1 for s in panel.swarms if round(s.x) == round(swarm.x)) > 1:
+            _ink(ax.text(swarm.x, 0, swarm.well, transform=_below(ax, 4), ha="center", va="top",
+                         fontsize=ANNOTATION_PT, color=muted, gid="nw-subwell"), muted=True)
+    # The axis label goes under whatever the swarms wrote below the ticks.
+    ax._aw_gutter_pt = lines_used * line + (ANNOTATION_PT + 4 if subwells else 0) + 4
+    _draw_centres(ax, model, panel, ink)
+    ax.grid(axis="y", alpha=0.3)
+    return (len(panel.swarms) if density else 0), hidden
+
+
+def _draw_centres(ax, model, panel, ink) -> None:
+    """Each well's median joined over time, and each group's centre, interval and comparison with the control."""
     for _well, points in panel.medians.items():
         pts = [(px, py) for px, py in points if math.isfinite(py)]
         if pts:
-            for line in ax.plot(*zip(*pts), color=ink, linewidth=1.2, marker="D", markersize=3.5, zorder=4):
-                _ink(line)
+            for line_ in ax.plot(*zip(*pts), color=ink, linewidth=1.2, marker="D", markersize=3.5, zorder=4):
+                _ink(line_)
     for stat in panel.stats:
         if not math.isfinite(stat.centre):
             continue
@@ -255,9 +359,7 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks) -> tuple[int, int]:
         _ink(ax.plot([sx], [stat.centre], marker="D", markersize=5, color=ink, zorder=4)[0])
         if math.isfinite(stat.vs_control):
             text = (f" {stat.vs_control:+.3g}" if "log2" in model.metric else f" ×{stat.vs_control:.3g}")
-            _ink(ax.text(sx, stat.centre, text, fontsize=6.5, va="center", color=ink, gid="nw-vs-control"))
-    ax.grid(axis="y", alpha=0.3)
-    return (len(panel.swarms) if density else 0), hidden
+            _ink(ax.text(sx, stat.centre, text, fontsize=ANNOTATION_PT, va="center", color=ink, gid="nw-vs-control"))
 
 
 def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):
@@ -298,9 +400,9 @@ def _draw_density(ax, swarm, half, ink) -> None:
                      zorder=4)[0])
 
 
-def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden: int) -> None:
+def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden: int, *,
+            crowded: bool = False) -> None:
     """The sums the figure owes the reader, over the panels drawn; what was left out is stated beside them."""
-    from widgets.plot_card import theme_paired_colours
 
     _bg, ink, muted = inks
     drawn = [s for p in panels for s in p.swarms]
@@ -322,7 +424,12 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
         n = sum(s.n_roster for p in left_out for s in p.swarms)
         lines.append(f"{len(left_out)} more panel(s) not drawn ({n:,} values, not in the counts above); "
                      "select fewer wells to see them.")
-    if hidden:
+    if crowded:
+        lines.append("Too narrow to write each swarm's exclusions and undrawn dots under it; the totals above count "
+                     "them.")
+    if hidden and crowded:
+        lines.append(f"{hidden:,} values in all are used but not drawn as dots, for lack of room.")
+    elif hidden:
         lines.append(f"+N under a swarm: {hidden:,} values in all are used but not drawn as dots, for lack of "
                      "room; widen the window or select fewer wells to see them.")
     if densities:
@@ -333,25 +440,34 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
         # grows to hold them rather than cutting the last (roll-up review X11).
         fig.subplots_adjust(bottom=0.10 + _FOOTER_BASE + _LINE * len(lines))
     for i, text in enumerate(reversed(lines)):
-        _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=7.5, color=ink if text is line1 else muted,
+        _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=ink if text is line1 else muted,
                       gid="nw-footer-used" if text is line1 else "nw-footer"), muted=text is not line1)
     # The occupancy key (U5): the colours decode only with it, and its title names the baseline in use.
-    key = fig.add_axes([0.62, 0.955, 0.36, _LINE * 0.9])        # top right, above the panels' titles
+    _occupancy_key(fig, "Cells at baseline (" + ("first measurable" if model.baseline == "first_measurable"
+                                                  else "earliest") + "):")
+
+
+def _occupancy_key(fig, title: str) -> None:
+    """The occupancy colours' key at the figure's top right: every figure coloured by occupancy class carries one,
+    or its colours decode to nothing."""
+    from widgets.plot_card import theme_paired_colours
+
+    key = fig.add_axes([0.6, 0.955, 0.38, _LINE * 0.9])        # top right, above the panels' titles
     key.set_axis_off()
     key.set_xlim(0, 10)
     key.set_ylim(0, 1)
     classes = ["0", "1", "2", "3+", None]
     screen, publication = _occupancy_colours(classes)
     faces, edges = publication if _is_publication(key) else screen
-    coll = key.scatter([4.2, 5.4, 6.6, 7.8, 9.0], [0.5] * 5, s=(DOT_PT * 1.1) ** 2, facecolors=faces,
+    coll = key.scatter([4.2, 5.4, 6.6, 7.8, 9.0], [0.5] * 5, s=(DOT_PT * 1.3) ** 2, facecolors=faces,
                        edgecolors=edges, linewidths=0.8)
     theme_paired_colours(coll, screen=screen, publication=publication)
-    title = ("Cells at baseline (" + ("first measurable" if model.baseline == "first_measurable" else "earliest")
-             + "):")
-    _ink(key.text(4.0, 0.5, title, ha="right", va="center", fontsize=7, color=muted, gid="nw-legend"), muted=True)
+    muted = _inks(key)[2]
+    _ink(key.text(4.0, 0.5, title, ha="right", va="center", fontsize=ANNOTATION_PT + 0.5, color=muted,
+                  gid="nw-legend"), muted=True)
     for xk, label in zip([4.2, 5.4, 6.6, 7.8, 9.0], ["0", "1", "2", "3+", "?"]):
-        _ink(key.text(xk + 0.2, 0.5, label, ha="left", va="center", fontsize=7, color=muted, gid="nw-legend"),
-             muted=True)
+        _ink(key.text(xk + 0.2, 0.5, label, ha="left", va="center", fontsize=ANNOTATION_PT + 0.5,
+                      color=muted, gid="nw-legend"), muted=True)
 
 
 # ── site detail ──────────────────────────────────────────────────────────────
@@ -373,7 +489,7 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     if not series:
         return
     header = 0.035 * len(series)
-    grid = fig.add_gridspec(len(rows), 1, left=0.2, right=0.96, top=0.95 - header, bottom=0.1, hspace=0.18)
+    grid = fig.add_gridspec(len(rows), 1, left=0.24, right=0.96, top=0.96 - header, bottom=0.1, hspace=0.18)
     axes = [fig.add_subplot(grid[0, 0])]
     axes += [fig.add_subplot(grid[i, 0], sharex=axes[0]) for i in range(1, len(rows))]
     _bg, ink, faint = _inks(axes[0])
@@ -391,9 +507,8 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
                 if state not in ("measured", "empty"):
                     ax.axvspan(xi - _band(x), xi + _band(x), facecolor="none", edgecolor=colour, hatch="///",
                                alpha=0.35, linewidth=0, zorder=1)
-        states = ", ".join(f"{tp}: {_state_text(row)}" for tp, row in zip(frame["timepoint"], frame.to_dict("records")))
-        fig.text(0.03, 0.985 - 0.035 * k, f"{site[0]} · q {site[1]}, r {site[2]} — {states}", fontsize=7,
-                 color=colour, va="top", wrap=True, gid="nw-detail-states")     # a selection colour: data ink
+        fig.text(0.03, 0.985 - 0.035 * k, f"{site[0]} · q {site[1]}, r {site[2]} — {_states_line(frame)}",
+                 fontsize=7, color=colour, va="top", gid="nw-detail-states")     # a selection colour: data ink
     for ax, (column, label) in zip(axes, rows):
         _ink(ax.set_ylabel(label + (f"\n{channel}" if channel and column.endswith(f"_{channel}") else ""),
                            fontsize=7.5, color=faint), muted=True)
@@ -428,7 +543,7 @@ def render_crop_strip(fig, crops: dict | None, site) -> None:
     lo, hi = _one_scale(c.image for _tp, c in items)
     notes: set = set()
     mixed = len({c.source for _tp, c in items if c.image is not None}) > 1
-    sub = fig.add_gridspec(1, len(items), left=0.03, right=0.97, top=0.8, bottom=0.2, wspace=0.08)
+    sub = fig.add_gridspec(1, len(items), left=0.03, right=0.97, top=0.84, bottom=0.36, wspace=0.08)
     for k, (tp, crop) in enumerate(items):
         ax = fig.add_subplot(sub[0, k])
         ax._aw_image_panel = True
@@ -449,7 +564,7 @@ def render_crop_strip(fig, crops: dict | None, site) -> None:
               "from its owner tile, or the montage where marked" if sources else "none could be cut")
     caption = f"Crops: {site[0]} · q {site[1]}, r {site[2]}, {origin}; one brightness scale" + "".join(
         f"; {note}" for note in sorted(notes))
-    _ink(fig.text(0.03, 0.03, caption, fontsize=6.5, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
+    _ink(fig.text(0.03, 0.03, caption, fontsize=6, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
 
 
 def render_crop_grid(fig, crops: dict | None, site) -> None:
@@ -556,6 +671,9 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "") -> d
             for j, tp in enumerate(model.timepoints):
                 ax = fig.add_subplot(grid[line, j])
                 ax._aw_image_panel = True                         # pixel for pixel: no typed axis range on it
+                # Its labels (rank and address, the value under the crop, the timepoint) are a crop's caption:
+                # drawn at the Properties sizes they overprinted the next row's crops.
+                ax._aw_type_scale = EXTREMES_TYPE_SCALE
                 ax.set_box_aspect(1)                              # a panel without a crop keeps the crops' shape
                 ax.set_xticks([])
                 ax.set_yticks([])
@@ -577,16 +695,19 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "") -> d
                 if tp == model.timepoint:
                     for spine in ax.spines.values():
                         spine.set_linewidth(1.6)
-                _ink(ax.set_xlabel(format_value(model.column, row.values.get(tp, math.nan)), fontsize=6.5,
+                _ink(ax.set_xlabel(format_value(model.column, row.values.get(tp, math.nan)),
+                                   fontsize=_PREF_PT * EXTREMES_TYPE_SCALE,
                                    color=ink if tp == model.timepoint else faint, labelpad=1,
                                    gid="nw-extremes-value"), muted=tp != model.timepoint)
                 if i == 0:
-                    _ink(ax.set_title(tp + (" · ranked" if tp == model.timepoint else ""), fontsize=7.5,
+                    _ink(ax.set_title(tp + (" · ranked" if tp == model.timepoint else ""),
+                                      fontsize=_PREF_PT * EXTREMES_TYPE_SCALE,
                                       color=ink, gid="nw-extremes-tp"))
                 if j == 0:
                     _ink(ax.set_ylabel(f"#{row.rank}  q {row.site[1]}, r {row.site[2]}\n"
                                        f"{format_value(model.column, row.value)}", rotation=0, ha="right",
-                                       va="center", fontsize=7, color=ink, labelpad=6, gid="nw-extremes-row"))
+                                       va="center", fontsize=_PREF_PT * EXTREMES_TYPE_SCALE, color=ink, labelpad=6,
+                                       gid="nw-extremes-row"))
                 if i == 0 and j == 0:
                     top = ax.get_position().y1
                     _ink(fig.text(0.02, top + 0.035, f"{title} · {label} at {model.timepoint}", fontsize=8.5,
@@ -606,6 +727,15 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "") -> d
     _ink(fig.text(0.02, 0.012, " ".join(said), fontsize=7, color=faint, gid="nw-extremes-caption", wrap=True),
          muted=True)
     return hits
+
+
+def _states_line(frame) -> str:
+    """What a nanowell's state was over time, short enough for one line of the detail's header: the timepoints whose
+    state was not plainly ``measured`` by name, or that it was measured at every one. A line listing every timepoint
+    wrapped onto the next nanowell's line once two were selected."""
+    odd = [f"{tp}: {_state_text(row)}" for tp, row in zip(frame["timepoint"], frame.to_dict("records"))
+           if _state_text(row) != "measured"]
+    return "; ".join(odd) if odd else "measured at every timepoint"
 
 
 def _band(x) -> float:
@@ -866,8 +996,10 @@ def _fill_by_metric(fig, ax, sites, fused, outline: float, label: str) -> None:
         place = ax.get_position()
         cax = fig.add_axes([place.x1 + 0.012, place.y0 + 0.1 * place.height, 0.012, 0.8 * place.height])
         bar = fig.colorbar(coll, cax=cax)
-        _ink(bar.ax.set_ylabel(label, fontsize=8, color=ink))
-        bar.ax.tick_params(labelsize=7, colors=muted)
+        cax._aw_colorbar = True                           # a key for the fill, not a plot axis (plot_style)
+        cax._aw_type_scale = GRID_TYPE_SCALE              # sized beside one map, not as a plot of its own
+        _ink(bar.ax.set_ylabel(label, fontsize=_PREF_PT * GRID_TYPE_SCALE, color=ink))
+        bar.ax.tick_params(labelsize=_PREF_PT * GRID_TYPE_SCALE, colors=muted)
     states = np.array(sites.state, dtype=object)
     groups = [(~has & np.isin(states, ["measured", "empty"]), "", "solid")] + [
         (~has & (states == s), hatch, style) for s, (hatch, style) in _STATE_STYLE.items()]
@@ -982,21 +1114,29 @@ def _ring(x, y, radius, colour):
 # ── trajectories (V4) ────────────────────────────────────────────────────────
 def render_trajectories(fig, panels, *, label: str, time_source: str | None = None, note: str = "",
                         cohort: bool = False) -> None:
-    """One panel per well: a thin line per nanowell, a thick median per occupancy class at baseline."""
+    """One panel per well: a thin line per nanowell, a thick median per occupancy class at baseline.
+
+    The panels share one y scale, labelled on the left column, and one time axis: recorded hours as numbers, the
+    axis labelled once per column under the bottom row — the timepoint names at their true hours ran into each
+    other wherever two were imaged close together — and the occupancy key at the top right."""
     from matplotlib.collections import LineCollection
+    from matplotlib.ticker import MaxNLocator
 
     from widgets.plot_card import theme_paired_colours
 
     fig.clear()
     shown = panels[:MAX_PANELS]
     rows, cols = _grid(len(shown))
-    fig.subplots_adjust(left=0.07, right=0.98, top=0.88, bottom=0.10 + _FOOTER_BASE + 2 * _LINE, wspace=0.2,
-                        hspace=0.45)
+    fig.subplots_adjust(left=0.07, right=0.98, top=0.88, bottom=0.10 + _FOOTER_BASE + 2 * _LINE, wspace=0.12,
+                        hspace=0.42)
     axes = [fig.add_subplot(rows, cols, i + 1) for i in range(len(shown))]
     inks = _inks(axes[0] if axes else fig.add_subplot(1, 1, 1))
     _bg, ink, muted = inks
+    scale = GRID_TYPE_SCALE if len(shown) > 1 else SINGLE_TYPE_SCALE
+    in_hours = bool(shown) and all(p.in_hours for p in shown)
     drawn = without = 0
     for ax, panel in zip(axes, shown):
+        _prepare_axes(ax, scale)
         segments, occupancy = [], []
         for _site, occ, y in panel.lines:
             segments.append(np.column_stack([panel.times, y]))
@@ -1007,7 +1147,6 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
             coll = LineCollection(segments, colors=edges, linewidths=0.5, alpha=0.45)
             ax.add_collection(coll)
             theme_paired_colours(coll, screen=("none", screen[1]), publication=("none", publication[1]))
-            ax.autoscale_view()
         for cls, median in panel.class_medians.items():
             # A paired collection, like the thin lines, so a capture repaints it: drawn as a plain line it kept its
             # screen shade on publication white, where the 3+ median nearly vanished (roll-up review X14).
@@ -1017,38 +1156,75 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
                                    zorder=4, label=f"{cls} at baseline")
             ax.add_collection(thick)
             theme_paired_colours(thick, screen=("none", screen[1]), publication=("none", publication[1]))
-        ax.set_xticks(panel.times)
-        ax.set_xticklabels(panel.labels, fontsize=7, rotation=0)
-        _ink(ax.set_title(panel.well, fontsize=9, loc="left", color=ink))
+        if in_hours:
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=6, integer=True, min_n_ticks=3))
+        else:
+            ax.set_xticks(panel.times)
+            ax.set_xticklabels(panel.labels)
+        _no_offset(ax)
+        _ink(ax.set_title(panel.well, fontsize=10, fontweight="bold", loc="left", color=ink))
         ax.grid(alpha=0.3)
         drawn += len(panel.lines)
         without += panel.n_without_value
+    _share_limits(axes)
+    for i, ax in enumerate(axes):
+        if i % cols:
+            ax.tick_params(labelleft=False)
+        else:
+            _ink(ax.set_ylabel(_wrap_label(label, rows), color=ink))
+        if i + cols >= len(axes):
+            _ink(ax.set_xlabel("Time (h)" if in_hours else "Timepoint (order; times unknown)", color=ink))
     if axes:
-        _ink(axes[0].set_ylabel(label, color=ink))
+        _occupancy_key(fig, "Thick lines · cells at baseline:")
     lines = [(f"Fixed cohort: {drawn:,} nanowells with a value at every timepoint drawn, one line each; {without:,} "
               "without one at some timepoint not drawn." if cohort else
               f"{drawn:,} nanowells drawn, one line each; {without:,} with no value at any timepoint not drawn. "
               "A gap in a line is a timepoint without a value."),
              "Thick lines: the median of each occupancy class at baseline, over the nanowells with a value at each "
              "timepoint." + (" Times read from the timepoint labels." if time_source == "label" else "")]
+    if in_hours and shown:
+        names = dict(zip(shown[0].labels, shown[0].times))
+        if any(tp not in (f"{h:g} h", f"{h:g}h", f"{h:g}") for tp, h in names.items()):
+            lines.append("Timepoints: " + " · ".join(f"{h:g} h {tp}" for tp, h in names.items()) + ".")
     if len(panels) > len(shown):
         lines.append(f"{len(panels) - len(shown)} more well(s) not drawn; select fewer wells.")
     if note:
         lines.insert(0, note)
     for i, text in enumerate(reversed(lines)):
-        _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=7.5, color=muted, gid="nw-traj-footer"),
+        _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=muted, gid="nw-traj-footer"),
              muted=True)
+
+
+def _share_limits(axes) -> None:
+    """One x and one y range over *axes*, each the union of what their data asked for."""
+    if not axes:
+        return
+    for ax in axes:
+        ax.autoscale_view()
+    xs = [ax.get_xlim() for ax in axes]
+    ys = [ax.get_ylim() for ax in axes]
+    for ax in axes:
+        ax.set_xlim(min(x[0] for x in xs), max(x[1] for x in xs))
+        ax.set_ylim(min(y[0] for y in ys), max(y[1] for y in ys))
 
 
 # ── position effects (V6) ────────────────────────────────────────────────────
 def render_position(fig, series, *, label: str, timepoint: str, note: str = "") -> None:
-    """Metric against ring, per well (median and interquartile band), with each ring's excluded share below."""
+    """Metric against ring, per well (median and interquartile band), with each ring's excluded share below.
+
+    The two panels share the ring axis, so a ring's bars stand under its points, and the wells' key sits outside the
+    plot on the right, on the card's ground."""
+    from matplotlib.ticker import MaxNLocator, PercentFormatter
+
     from ui.theme import WELL_COLORS_TUPLE
 
     fig.clear()
-    grid = fig.add_gridspec(2, 1, height_ratios=(3, 1), hspace=0.15)
-    ax, share = fig.add_subplot(grid[0]), fig.add_subplot(grid[1])
-    fig.subplots_adjust(left=0.09, right=0.97, top=0.90, bottom=0.10 + _FOOTER_BASE + _LINE)
+    grid = fig.add_gridspec(2, 1, height_ratios=(3, 1), hspace=0.12)
+    ax = fig.add_subplot(grid[0])
+    share = fig.add_subplot(grid[1], sharex=ax)
+    fig.subplots_adjust(left=0.08, right=0.88, top=0.90, bottom=0.10 + _FOOTER_BASE + _LINE)
+    for panel in (ax, share):
+        _prepare_axes(panel, SINGLE_TYPE_SCALE)
     _bg, ink, muted = _inks(ax)
     width = 0.8 / max(len(series), 1)
     for k, s in enumerate(series):
@@ -1057,19 +1233,29 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
         ax.plot(s.rings, s.median, color=colour, marker="o", markersize=3, linewidth=1.4, label=s.well)
         share.bar(s.rings + (k - (len(series) - 1) / 2) * width, s.excluded_share, width=width, color=colour)
     ax.set_ylabel(label, color=ink)
-    _ink(ax.set_title(f"By ring from the central nanowell · {timepoint}", fontsize=9, loc="left", color=ink))
+    _no_offset(ax)
+    _ink(ax.set_title(f"By ring from the central nanowell · {timepoint}", fontsize=10, fontweight="bold", loc="left",
+                      color=ink))
     ax.tick_params(labelbottom=False)
     ax.grid(alpha=0.3)
     if series:
-        ax.legend(fontsize=7, frameon=False)
-    share.set_ylabel("excluded", fontsize=7.5, color=muted)
+        legend = ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=_PREF_PT * 0.5,
+                           title="Well")
+        legend.get_title().set_color(ink)
+        for text in legend.get_texts():
+            text.set_color(ink)
+    share.set_ylabel("Excluded", color=muted)
     share.set_ylim(0, 1)
+    share.yaxis.set_major_locator(MaxNLocator(nbins=2))
+    share.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+    share.xaxis.set_major_locator(MaxNLocator(integer=True))
     share.set_xlabel("Ring (lattice steps from the central nanowell)", color=ink)
     share.grid(alpha=0.3)
+    fig.align_ylabels([ax, share])
     lines = ["Median and interquartile range over the nanowells with a value in each ring; the bars are the share "
              "of each ring's nanowells without one. Descriptive: no test is made."]
     if note:
         lines.insert(0, note)
     for i, text in enumerate(reversed(lines)):
-        _ink(fig.text(0.09, _FOOTER_BASE + i * _LINE, text, fontsize=7.5, color=muted, gid="nw-position-footer"),
+        _ink(fig.text(0.08, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=muted, gid="nw-position-footer"),
              muted=True)

@@ -237,7 +237,7 @@ def test_clicking_a_dot_selects_that_nanowell_and_shift_click_adds_another(page,
     assert st.selected_sites == [["A01", 1, 0]]
     assert page.widgets.get("_nw_detail_pane").isVisible()
     detail_texts = [t.get_text() for t in page.widgets.get("_nw_detail_fig").texts]
-    assert detail_texts == ["A01 · q 1, r 0 — t_c: measured, t_a: measured"]
+    assert detail_texts == ["A01 · q 1, r 0 — measured at every timepoint"]
     _click_dot(qtbot, page, ("B01", 0, 0), Qt.ShiftModifier)
     assert st.selected_sites == [["A01", 1, 0], ["B01", 0, 0]]
     assert set(page.state.selection.selected_wells) == before                  # not a plate selection

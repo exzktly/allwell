@@ -4998,7 +4998,15 @@ use them.
 - Counts and occupancy are whole numbers, so hundreds of nanowells share a value; their dots are packed into
   a band within ±0.4 of the value, starting on the value itself, and the footer says so.
 - A swarm with more dots than its slot can hold says how many were not drawn under it — "+N at 0", or
-  "+N at 0–4" — beside its exclusions. Every nanowell with a value is either a dot or counted there.
+  "+N at 0–4" — beside its exclusions. Every nanowell with a value is either a dot or counted there. When the
+  window is too narrow to write those under each swarm, only the number used is written above it and the footer
+  says the rest are in its totals; widen the window to see them per swarm.
+- The panels share one y scale, written on the left column, so wells read against each other. Over time the
+  axis is in hours (*Time (h)*, under the bottom row), and the footer names the timepoint at each hour; if any
+  timepoint has no recorded time, the axis is ticked by timepoint name instead. Fold changes carry a dotted line
+  at no change (1×, or 0 on log₂).
+- Text on this page is drawn at a share of the **Properties** font sizes, scaled to the size of a panel, so a
+  grid of wells stays legible; raising a size in Properties still raises it here.
 - A replicate set of more than four wells is drawn as one density per well, with its median, instead of dots;
   select fewer wells to see (and click) single nanowells.
 - **Nothing without a number is drawn, and nothing is dropped silently.** Under each swarm, "excl. N" counts

@@ -12,13 +12,17 @@ from dataclasses import dataclass, field, replace
 
 BASELINES = ("earliest", "first_measurable")
 AXES = ("time", "wells")            # what the Distribution view's x-axis carries
-VIEWS = ("distribution", "trajectories", "array", "position")
+VIEWS = ("distribution", "trajectories", "array", "position", "extremes")
 #: Views of earlier versions, and the view each is now. A page saved on Array map or Array QC opens on the Array
 #: view with the layers that view drew (:meth:`ArrayLayers.preset`).
 _RENAMED_VIEWS = {"array_map": "array", "array_qc": "array"}
 #: The page's metrics (``distribution_compute.METRICS`` holds their labels; a test holds the two equal).
 METRIC_KEYS = ("n", "c", "brightness", "signal", "count_fc", "log2_count_fc", "confluence_fc", "brightness_fc",
                "signal_fc", "growth_rate", "occupancy_class")
+
+#: How many nanowells each of the Extremes view's blocks shows by default, and the most it can show: a figure of two
+#: dozen rows of crops is already small on a laptop screen.
+EXTREMES_DEFAULT_N, EXTREMES_MAX_N = 5, 12
 
 
 #: What the Array view draws under the nanowells: nothing, the run's downsampled montage, or the raw tiles at
@@ -112,6 +116,8 @@ class NanowellState:
     #: The user's "responding above" cut per metric column (``brightness_fc_GFP``, ``n``; tracker I9). A metric
     #: with none has no fraction responding: there is no default cut.
     thresholds: dict = field(default_factory=dict)
+    #: How many nanowells each of the Extremes view's two blocks shows (the largest and the smallest fold changes).
+    extremes_n: int = EXTREMES_DEFAULT_N
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
@@ -138,6 +144,8 @@ class NanowellState:
     #: The page's figure shows the first selected nanowell's crops at every timepoint, large, in place of the view
     #: (``renderer.render_crop_grid``); off again when the selection is cleared. Never persisted.
     crop_view: bool = False
+    #: The Extremes view's crop panels on screen, ``{axes: (well, q, r)}``: a click on a row selects its nanowell.
+    extreme_axes: dict = field(default_factory=dict)
     # The Array view's interaction, never persisted: where it is zoomed to (``(left, top, right, bottom)`` in the
     # frame it draws, for the ``(well, positions)`` in ``region_for``), the press a drag or click started with,
     # whether a click sets the anchor, and what the last draw put on screen (``renderer.ArrayDrawn``).
@@ -171,12 +179,13 @@ class NanowellState:
         self.region = self.region_for = self.press = self.drawn = None
         self.anchor_mode, self.array_message = False, ""
         self.crop_view = False                           # a new dataset opens on its view, not a crop view
+        self.extreme_axes = {}
         self.release_tiles()
 
     def to_config(self) -> dict:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
-                "layers": self.layers.to_config(),
+                "extremes_n": self.extremes_n, "layers": self.layers.to_config(),
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -191,6 +200,9 @@ class NanowellState:
             value = config.get(name)
             setattr(self, name, value if isinstance(value, str) else getattr(fresh, name))
         self.cohort = config.get("cohort") is True
+        count = config.get("extremes_n")
+        self.extremes_n = (count if isinstance(count, int) and not isinstance(count, bool)
+                           and 1 <= count <= EXTREMES_MAX_N else fresh.extremes_n)
         self.layers = _layers_from(config)
         sites = []
         for item in config.get("selected_sites") or []:

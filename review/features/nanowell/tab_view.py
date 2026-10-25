@@ -15,8 +15,8 @@ from types import SimpleNamespace
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSlider, QSplitter, QToolButton, QVBoxLayout,
-    QWidget,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSlider, QSpinBox, QSplitter, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from review.features.export.service import export_cell_data_from
@@ -25,14 +25,19 @@ from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
     BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut, match_channel,
 )
+from review.features.nanowell.state import EXTREMES_MAX_N
 from widgets.control_band import ControlBand
 from widgets.owned_action import owned_action
 
 #: The views the page draws, in the order the switch lists them.
 VIEWS = (("distribution", "Distribution"), ("array", "Array"), ("trajectories", "Trajectories"),
-         ("position", "Position"))
+         ("position", "Position"), ("extremes", "Extremes"))
 #: The views that show one well, and so offer the well picker and the timepoint slider.
 ONE_WELL_VIEWS = ("array",)
+#: The views that show one well at one timepoint chosen from a list: the well picker and the timepoint combo.
+RANKED_WELL_VIEWS = ("extremes",)
+#: The views that draw values over time, where a metric with one value per nanowell has nothing to draw.
+_OVER_TIME_VIEWS = ("trajectories", "extremes")
 #: The Array view's image layer, as its combo lists it.
 _IMAGES = (("off", "Off"), ("montage", "Run montage"), ("tiles", "Full resolution"))
 _POSITIONS = (("measured", "Measured"), ("lattice", "Lattice"))
@@ -61,7 +66,11 @@ _VIEW_TIP = ("Distribution: one dot per nanowell, per well and timepoint.\n"
              "Array: one well's nanowells over its montage or at their lattice places — every element a layer\n"
              "you turn on or off (Image, Positions, Layers).\n"
              "Trajectories: each nanowell's metric over time, with the median of each occupancy class.\n"
-             "Position: the metric by ring from the central nanowell — an edge-effect check.")
+             "Position: the metric by ring from the central nanowell — an edge-effect check.\n"
+             "Extremes: one well's nanowells with the largest and the smallest fold change of the Metric at the\n"
+             "Timepoint, each a row of its crops over every timepoint. Click a row for its detail.")
+_EXTREMES_TIP = ("How many nanowells each block shows: this many with the largest fold change and this many with the "
+                 "smallest. A well with fewer shares them between the blocks, never showing one twice.")
 _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their well, so each line over time follows "
                "one set of nanowells. Off, each timepoint's median is over whichever nanowells could be measured "
                "then. The others are counted as outside the fixed cohort.")
@@ -75,7 +84,8 @@ _AXIS_TIP = ("Time: one panel per well (or replicate set), timepoints along x, t
 _BASELINE_TIP = ("The timepoint a fold change and the occupancy class are measured from.\n"
                  "Earliest: the well's first timepoint; a nanowell unmeasurable there has no fold change.\n"
                  "First measurable: each nanowell's first timepoint at which the measurement exists.")
-_TP_TIP = "The timepoint drawn on Along x: Wells (the latest by default)."
+_TP_TIP = ("The timepoint drawn on Along x: Wells and Position, and the one Extremes ranks the nanowells at (the "
+           "latest by default).")
 _RESPONDING_TIP = ("A nanowell counts as responding when its value is above this number. Set one for each metric — "
                    "a fold change, a count, a confluence, an intensity — and the figure states each group's fraction "
                    "responding at it; empty, no fraction is computed. Kept per metric and channel.")
@@ -189,6 +199,14 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_tp_cb", tp_cb)
     grp_tp = band.add_scope("Timepoint", tp_cb)
 
+    extremes_spin = QSpinBox()
+    extremes_spin.setRange(1, EXTREMES_MAX_N)
+    extremes_spin.setValue(st.extremes_n)
+    extremes_spin.setToolTip(_EXTREMES_TIP)
+    extremes_spin.valueChanged.connect(lambda value: nwc.set_extremes_n(ctx, value))
+    reg.register("_nw_extremes_spin", extremes_spin)
+    grp_extremes = band.add_scope("Largest & smallest", extremes_spin)
+
     responding_edit = QLineEdit()
     responding_edit.setPlaceholderText("not set")
     responding_edit.setToolTip(_RESPONDING_TIP)
@@ -272,7 +290,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
     controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, tp_slider, cohort_box, responding_edit,
-                *array_controls.signalling)
+                extremes_spin, *array_controls.signalling)
 
     def refresh_controls() -> None:
         channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None
@@ -281,23 +299,16 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             _select(metric_cb, st.metric)
             view = st.view if st.view in dict(VIEWS) else VIEWS[0][0]
             view_seg.setCurrentByData(view)
-            for i in range(metric_cb.count()):
-                key = metric_cb.itemData(i)
-                has_channel = not METRICS[key][1] or channel is not None
-                over_time = not (view == "trajectories" and key in PER_NANOWELL)
-                item = metric_cb.model().item(i)
-                item.setEnabled(has_channel and over_time)
-                item.setToolTip("" if has_channel and over_time else
-                                "One value per nanowell: nothing to follow over time." if has_channel else
-                                f"No site intensities for the shared channel "
-                                f"({ctx.state.channel.active_channel}); pick a fluorescence channel.")
+            _grey_metrics(metric_cb, view, channel, ctx.state.channel.active_channel)
             per_nanowell = st.metric in PER_NANOWELL
             axis_seg.setCurrentByData("wells" if per_nanowell else st.axis)
             axis_seg.setSegmentEnabled(0, not per_nanowell)
             axis_seg.setToolTip(_AXIS_TIP + ("\n\n(Time is greyed: this metric has one value per nanowell.)"
                                              if per_nanowell else ""))
             _select(baseline_cb, st.baseline)
-            baseline_cb.setEnabled(st.metric in BASELINE_METRICS and _metric_reaches_figure(st, view))
+            # Extremes ranks every metric by its fold change, so the baseline always matters there.
+            baseline_cb.setEnabled((st.metric in BASELINE_METRICS or view in RANKED_WELL_VIEWS)
+                                   and _metric_reaches_figure(st, view))
             tps, shown = nwc.shown_timepoint(ctx)
             tp_cb.clear()
             for tp in reversed(tps):
@@ -338,8 +349,10 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             cut = st.thresholds.get(column) if column else None
             responding_edit.setText("" if cut is None else format_cut(cut))
             grp_responding.setVisible(distribution)
-            grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position")
-            grp_well.setVisible(view in ONE_WELL_VIEWS)
+            grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position" or view in RANKED_WELL_VIEWS)
+            grp_well.setVisible(view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS)
+            extremes_spin.setValue(st.extremes_n)
+            grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
             grp_slider.setVisible(view in ONE_WELL_VIEWS)
         finally:
             for w, b in zip(controls, blocked):
@@ -350,6 +363,21 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_page_visible", page_visible)
     reg.register("_nw_refresh_controls", refresh_controls)
     refresh_controls()
+
+
+def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:
+    """Grey each Metric entry *view* cannot draw, with the reason as its tooltip: a channel metric with no site
+    intensities for the shared channel, and a metric with one value per nanowell on a view of values over time."""
+    for i in range(metric_cb.count()):
+        key = metric_cb.itemData(i)
+        has_channel = not METRICS[key][1] or channel is not None
+        over_time = not (view in _OVER_TIME_VIEWS and key in PER_NANOWELL)
+        item = metric_cb.model().item(i)
+        item.setEnabled(has_channel and over_time)
+        item.setToolTip("" if has_channel and over_time else
+                        "One value per nanowell: no fold change to follow over time." if has_channel else
+                        f"No site intensities for the shared channel ({active_channel}); pick a fluorescence "
+                        f"channel.")
 
 
 def _crops_button(ctx, parent) -> QPushButton:

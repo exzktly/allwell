@@ -146,11 +146,36 @@ def _cut(image: np.ndarray, cx: float, cy: float, half: float) -> np.ndarray | N
 
 def site_crops(data, metrics, site, *, pad: float = 1.4) -> dict:
     """``timepoint -> Crop`` for the nanowell *site* ``(well, q, r)``, over every timepoint of its well."""
+    well, q, r = site
+    return crops_for_sites(data, metrics, [(well, q, r)], pad=pad).get((well, q, r), {})
+
+
+def crops_for_sites(data, metrics, sites, *, pad: float = 1.4) -> dict:
+    """``(well, q, r) -> {timepoint: Crop}`` for every nanowell in *sites*, each over every timepoint of its well.
+
+    The same crops :func:`site_crops` cuts one nanowell at a time, read in one pass: each well's input archive is
+    opened once, and the rows are taken in (timepoint, owner tile) order so an owner tile shared by several of
+    the nanowells is decoded once and only one tile is held at a time. The Extremes view cuts up to two dozen
+    nanowells over every timepoint, which one site at a time would decode the same tiles over and over.
+    """
     import tifffile
 
-    well, q, r = site
-    rows = metrics[(metrics["well"] == well) & (metrics["nw_q"] == q) & (metrics["nw_r"] == r)]
-    rows = rows.sort_values("tp_order")
+    wanted = {(str(w), int(q), int(r)) for w, q, r in sites}
+    out: dict = {site: {} for site in wanted}
+    if not wanted or metrics is None or not len(metrics):
+        return out
+    keys = list(zip(metrics["well"], metrics["nw_q"], metrics["nw_r"]))
+    picked = metrics[[(w, q, r) in wanted for w, q, r in keys]]
+    for well, rows in picked.groupby("well", sort=True):
+        records = rows.sort_values("tp_order").to_dict("records")
+        # Timepoint first, then owner tile: rows that share a tile at a timepoint come one after another.
+        records.sort(key=lambda row: (row["tp_order"], str(row.get("owner") or "")))
+        _cut_well(data, str(well), records, pad, out, tifffile)
+    return out
+
+
+def _cut_well(data, well: str, records, pad: float, out: dict, tifffile) -> None:
+    """Cut *records* (one well's rows, in timepoint and owner order) into *out*."""
     zf, why_not = None, "the input archive is not beside this dataset"
     archive = Path(data.in_dir) / f"{well}.zip" if data.in_dir is not None else None
     if archive is not None and archive.is_file():
@@ -159,23 +184,30 @@ def site_crops(data, metrics, site, *, pad: float = 1.4) -> dict:
         except (OSError, zipfile.BadZipFile) as exc:
             log.warning("Nanowells: %s could not be opened for crops: %s", archive, exc)
             why_not = f"{archive.name} could not be read ({exc})"
-    out = {}
+    tile_held: list = [None, None]           # [(timepoint, owner), decoded tile or None]: the one tile held
+    montage_held: list = [None, None]        # [timepoint, (Montage | None, why)]
     try:
         names = zf.namelist() if zf is not None else []
-        for row in rows.to_dict("records"):
+        for row in records:
             tp = row["timepoint"]
+            site = (well, int(row["nw_q"]), int(row["nw_r"]))
+            crops = out[site]
             if not (isinstance(row.get("well_x_um"), float) and math.isfinite(row["well_x_um"])):
-                out[tp] = Crop(None, "", f"No position at {tp} ({row.get('state')}).")
+                crops[tp] = Crop(None, "", f"No position at {tp} ({row.get('state')}).")
                 continue
             half_um = pad * float(row.get("radius_um") or 50.0)
             crop, owner = None, row.get("owner")
             owned = isinstance(owner, str) and owner != ""
             if zf is not None and owned:
-                crop = _tile_crop(zf, names, data, tp, owner, row, half_um, tifffile)
+                if tile_held[0] != (tp, owner):
+                    tile_held[:] = [(tp, owner), _owner_tile(zf, names, data, well, tp, owner, tifffile)]
+                crop = _tile_crop(tile_held[1], data, row, owner, half_um)
             if crop is None:
-                montage, why = read_montage(data, well, tp)
+                if montage_held[0] != tp:
+                    montage_held[:] = [tp, read_montage(data, well, tp)]
+                montage, why = montage_held[1]
                 if montage is None:
-                    out[tp] = Crop(None, "", why)
+                    crops[tp] = Crop(None, "", why)
                     continue
                 cx = (row["well_x_um"] - montage.origin_um[0]) / montage.um_per_px
                 cy = (row["well_y_um"] - montage.origin_um[1]) / montage.um_per_px
@@ -184,24 +216,33 @@ def site_crops(data, metrics, site, *, pad: float = 1.4) -> dict:
                                                 "the nanowell has no owner tile (it is fused or shared)"
                                                 if not owned else "the owner tile's image could not be found"))
                 crop = Crop(image, "montage", note) if image is not None else Crop(None, "", "Off the montage.")
-            out[tp] = crop
+            crops[tp] = crop
     finally:
         if zf is not None:
             zf.close()
-    return out
 
 
-def _tile_crop(zf, names, data, tp, owner, row, half_um, tifffile) -> Crop | None:
+def _owner_tile(zf, names, data, well, tp, owner, tifffile) -> np.ndarray | None:
+    """The phase image of tile *owner* at *tp*, as the input archive holds it; ``None`` when it cannot be found
+    or read."""
+    member = _member_for(names, data, well, tp, owner)
+    if member is None:
+        return None
+    try:
+        return np.asarray(tifffile.imread(io.BytesIO(zf.read(member))))
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile, tifffile.TiffFileError) as exc:
+        log.warning("Nanowells: could not read %s for a crop: %s", member, exc)
+        return None
+
+
+def _tile_crop(image, data, row, owner, half_um) -> Crop | None:
+    if image is None:
+        return None
+    tp = row["timepoint"]
     block = (data.grids.get(row["well"]) or {}).get(tp) or {}
     tile = next((t for t in block.get("tiles") or [] if str(t.get("tile")) == owner), None)
     px = ((data.acquisition or {}).get(tp) or {}).get("pixel_size_um") or {}
-    member = _member_for(names, data, row["well"], tp, owner)
-    if tile is None or not px.get("x") or member is None:
-        return None
-    try:
-        image = np.asarray(tifffile.imread(io.BytesIO(zf.read(member))))
-    except (OSError, ValueError, KeyError, zipfile.BadZipFile, tifffile.TiffFileError) as exc:
-        log.warning("Nanowells: could not read %s for a crop: %s", member, exc)
+    if tile is None or not px.get("x"):
         return None
     # The pipeline places tiles and sites with the x pixel size on both axes (``nanowell_run.locate_timepoint``),
     # so the crop does too: a y size that differed would put the crop off the nanowell the run measured.

@@ -103,6 +103,9 @@ class Crop:
     image: np.ndarray | None
     source: str                            # "tile" (full resolution) or "montage"
     note: str                              # why there is no image, or what the image is
+    #: The cells the run counted inside the crop, as ``(column, row)`` pixel positions in it (N × 2), from the
+    #: well's cell table; ``None`` when the well has no cell table, so "no table" never reads as "no cell".
+    cells: np.ndarray | None = None
 
 
 _IMAGE_SUFFIXES = (".tif", ".tiff")
@@ -135,13 +138,32 @@ def _member_for(names, data, well: str, timepoint: str, tile: str) -> str | None
 
 
 def _cut(image: np.ndarray, cx: float, cy: float, half: float) -> np.ndarray | None:
+    cut = _cut_at(image, cx, cy, half)
+    return None if cut is None else cut[0]
+
+
+def _cut_at(image: np.ndarray, cx: float, cy: float, half: float) -> tuple[np.ndarray, int, int] | None:
+    """The crop of *image* about ``(cx, cy)`` and the image pixel ``(x0, y0)`` its top-left corner is at."""
     h, w = image.shape[:2]
     x0, x1 = int(math.floor(cx - half)), int(math.ceil(cx + half))
     y0, y1 = int(math.floor(cy - half)), int(math.ceil(cy + half))
     if x1 <= 0 or y1 <= 0 or x0 >= w or y0 >= h:
         return None
     # A copy, not a view: a view keeps the whole tile alive for as long as the crop is cached.
-    return np.array(image[max(y0, 0):min(y1, h), max(x0, 0):min(x1, w)], copy=True)
+    left, top = max(x0, 0), max(y0, 0)
+    return np.array(image[top:min(y1, h), left:min(x1, w)], copy=True), left, top
+
+
+def _cells_in(cells, left_um: float, top_um: float, um_per_px: float, shape) -> np.ndarray | None:
+    """The counted cells (*cells*, a frame of ``well_x_um`` / ``well_y_um``) that fall inside a crop whose top-left
+    pixel is at ``(left_um, top_um)`` in the well frame, as pixel positions in the crop; ``None`` without a table."""
+    if cells is None:
+        return None
+    h, w = shape[:2]
+    x = (cells["well_x_um"].to_numpy(dtype=float) - left_um) / um_per_px
+    y = (cells["well_y_um"].to_numpy(dtype=float) - top_um) / um_per_px
+    inside = (x >= -0.5) & (x <= w - 0.5) & (y >= -0.5) & (y <= h - 0.5)
+    return np.column_stack([x[inside], y[inside]])
 
 
 def site_crops(data, metrics, site, *, pad: float = 1.4) -> dict:
@@ -184,6 +206,16 @@ def _cut_well(data, well: str, records, pad: float, out: dict, tifffile) -> None
         except (OSError, zipfile.BadZipFile) as exc:
             log.warning("Nanowells: %s could not be opened for crops: %s", archive, exc)
             why_not = f"{archive.name} could not be read ({exc})"
+    from review.features.nanowell.collect import cell_positions
+
+    held_cells: dict = {}
+
+    def cells_at(tp):
+        """The well's counted cells at *tp* (read once per timepoint); ``None`` when it has no cell table."""
+        if tp not in held_cells:
+            held_cells[tp] = cell_positions(data, well, tp) if hasattr(data, "cell_tables") else None
+        return held_cells[tp]
+
     tile_held: list = [None, None]           # [(timepoint, owner), decoded tile or None]: the one tile held
     montage_held: list = [None, None]        # [timepoint, (Montage | None, why)]
     try:
@@ -201,7 +233,7 @@ def _cut_well(data, well: str, records, pad: float, out: dict, tifffile) -> None
             if zf is not None and owned:
                 if tile_held[0] != (tp, owner):
                     tile_held[:] = [(tp, owner), _owner_tile(zf, names, data, well, tp, owner, tifffile)]
-                crop = _tile_crop(tile_held[1], data, row, owner, half_um)
+                crop = _tile_crop(tile_held[1], data, row, owner, half_um, cells_at(tp))
             if crop is None:
                 if montage_held[0] != tp:
                     montage_held[:] = [tp, read_montage(data, well, tp)]
@@ -211,11 +243,16 @@ def _cut_well(data, well: str, records, pad: float, out: dict, tifffile) -> None
                     continue
                 cx = (row["well_x_um"] - montage.origin_um[0]) / montage.um_per_px
                 cy = (row["well_y_um"] - montage.origin_um[1]) / montage.um_per_px
-                image = _cut(montage.image, cx, cy, half_um / montage.um_per_px)
+                cut = _cut_at(montage.image, cx, cy, half_um / montage.um_per_px)
+                image = None if cut is None else cut[0]
                 note = ("from the montage: " + (why_not if zf is None else
                                                 "the nanowell has no owner tile (it is fused or shared)"
                                                 if not owned else "the owner tile's image could not be found"))
-                crop = Crop(image, "montage", note) if image is not None else Crop(None, "", "Off the montage.")
+                crop = (Crop(image, "montage", note,
+                             _cells_in(cells_at(tp), montage.origin_um[0] + cut[1] * montage.um_per_px,
+                                       montage.origin_um[1] + cut[2] * montage.um_per_px, montage.um_per_px,
+                                       image.shape))
+                        if image is not None else Crop(None, "", "Off the montage."))
             crops[tp] = crop
     finally:
         if zf is not None:
@@ -235,7 +272,7 @@ def _owner_tile(zf, names, data, well, tp, owner, tifffile) -> np.ndarray | None
         return None
 
 
-def _tile_crop(image, data, row, owner, half_um) -> Crop | None:
+def _tile_crop(image, data, row, owner, half_um, cells=None) -> Crop | None:
     if image is None:
         return None
     tp = row["timepoint"]
@@ -249,5 +286,10 @@ def _tile_crop(image, data, row, owner, half_um) -> Crop | None:
     scale = float(px["x"])
     cx = (row["well_x_um"] - float(tile["left_um"])) / scale
     cy = (row["well_y_um"] - float(tile["top_um"])) / scale
-    cut = _cut(image, cx, cy, half_um / scale)
-    return Crop(cut, "tile", f"{owner}, full resolution") if cut is not None else None
+    cut = _cut_at(image, cx, cy, half_um / scale)
+    if cut is None:
+        return None
+    pixels, left, top = cut
+    return Crop(pixels, "tile", f"{owner}, full resolution",
+                _cells_in(cells, float(tile["left_um"]) + left * scale, float(tile["top_um"]) + top * scale, scale,
+                          pixels.shape))

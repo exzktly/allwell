@@ -97,6 +97,9 @@ _AXIS_TIP = ("Time: one panel per well (or replicate set), timepoints along x, t
 _BASELINE_TIP = ("The timepoint a fold change and the occupancy class are measured from.\n"
                  "Earliest: the well's first timepoint; a nanowell unmeasurable there has no fold change.\n"
                  "First measurable: each nanowell's first timepoint at which the measurement exists.")
+_CROP_CELLS_TIP = ("Draw a dot at the centre of each cell the run counted on every crop — the strip, the pop-out and "
+                   "the Extremes montage — as the Array view's Cells layer does. The run keeps no cell outlines, so "
+                   "a dot is all there is to draw.")
 _TP_TIP = ("The timepoint drawn on Along x: Wells and Position (the latest by default), the one Extremes ranks the "
            "nanowells at (the well's latest by default), and the one the Array view shows (the well's first by "
            "default).")
@@ -212,7 +215,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     extremes_spin.setToolTip(_EXTREMES_TIP)
     extremes_spin.valueChanged.connect(lambda value: nwc.set_extremes_n(ctx, value))
     reg.register("_nw_extremes_spin", extremes_spin)
-    grp_extremes = band.add_scope("Largest & smallest", extremes_spin)
+    extremes_cells = _cells_box(ctx, "_nw_extremes_cells_box")
+    grp_extremes = band.add_scope("Largest & smallest", extremes_spin, extremes_cells)
 
     responding_edit = QLineEdit()
     responding_edit.setPlaceholderText("not set")
@@ -295,7 +299,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
     controls = (metric_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, responding_edit,
-                extremes_spin, *start.signalling, *array_controls.signalling)
+                extremes_spin, extremes_cells, *start.signalling, *array_controls.signalling)
 
     def refresh_controls() -> None:
         channel = match_channel(ctx.state.channel.active_channel, st.data.channels) if st.data else None
@@ -352,6 +356,12 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
                               or view in ONE_WELL_VIEWS)
             grp_well.setVisible(view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS)
             extremes_spin.setValue(st.extremes_n)
+            extremes_cells.setChecked(st.crop_cells)
+            strip_cells = reg.get_or_none("_nw_strip_cells_box")
+            if strip_cells is not None:
+                blocked_strip = strip_cells.blockSignals(True)
+                strip_cells.setChecked(st.crop_cells)
+                strip_cells.blockSignals(blocked_strip)
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
         finally:
             for w, b in zip(controls, blocked):
@@ -458,6 +468,18 @@ def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:
                         f"channel.")
 
 
+def _cells_box(ctx, name: str) -> QCheckBox:
+    """**Cells**: the counted cells drawn as dots on every crop the page shows — the strip, the pop-out and the
+    Extremes montage — as the Array view's Cells layer draws them. One setting (``NanowellState.crop_cells``), offered
+    beside the strip and on the Extremes view; ``refresh_controls`` keeps both boxes on it."""
+    box = QCheckBox("Cells")
+    box.setToolTip(_CROP_CELLS_TIP)
+    box.setChecked(bool(ctx.state.feature_slice("nanowell").crop_cells))
+    box.toggled.connect(lambda on: nwc.set_crop_cells(ctx, on))
+    ctx.widgets.register(name, box)
+    return box
+
+
 def _crops_header(ctx, parent) -> QHBoxLayout:
     """The row above the site detail's crop strip: what the strip is, and **Pop out**, which opens the crops large in
     a window of their own (:func:`_popout_window`, ``controller.pop_out_crops``)."""
@@ -475,6 +497,7 @@ def _crops_header(ctx, parent) -> QHBoxLayout:
     ctx.widgets.register("_nw_open_popout", lambda: _popout_window(ctx).show_raised())
     row.addWidget(title)
     row.addStretch(1)
+    row.addWidget(_cells_box(ctx, "_nw_strip_cells_box"))
     row.addWidget(button)
     return row
 

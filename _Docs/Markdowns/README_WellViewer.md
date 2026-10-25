@@ -5050,7 +5050,7 @@ use them.
   every view, so a timepoint chosen on one carries to the next wherever it exists.
 - **Well**, **Timepoint** and **Largest & smallest** (on *Extremes*) — the well whose nanowells are ranked, the
   timepoint they are ranked at (the well's latest by default), and how many each block shows (1 to 12, 5 by
-  default).
+  default). **Cells** beside them draws the cells the run counted on every crop (see *Site detail*).
 
 **Reading the figure**
 
@@ -5175,7 +5175,10 @@ the crop is cut from the lower-resolution montage instead, and the caption under
 timepoint with no crop says why. **Pop out**, above the strip, opens the crops large in a window of their own —
 one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a change
 between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
-it like any window.
+it like any window. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted on every
+crop — the strip, the pop-out and the Extremes montage — as the Array view's *Cells* layer does on the array (the
+run keeps no cell outlines). It is one setting, also offered on the Extremes view, and kept with the page's
+settings. The caption counts the dots, and a well without a cell table is named there rather than shown as empty.
 Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it

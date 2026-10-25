@@ -543,7 +543,38 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     fig.align_ylabels(axes)
 
 
-def render_crop_strip(fig, crops: dict | None, site) -> None:
+def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
+    """The counted cells inside *crop*, as the Array view's Cells layer draws them: a light dot with a dark rim at
+    each centre (the run keeps no outlines). *tally* adds up what was drawn and which crops had no cell table, for
+    the caption."""
+    from ui.nanowell_sites import CELL_COLOUR, CELL_EDGE_COLOUR
+
+    if crop is None or crop.image is None:
+        return
+    if crop.cells is None:
+        tally["no_table"] = tally.get("no_table", 0) + 1
+        return
+    tally["drawn"] = tally.get("drawn", 0) + len(crop.cells)
+    if len(crop.cells):
+        ax.scatter(crop.cells[:, 0], crop.cells[:, 1], s=size or CELL_DOT_PT2, c=CELL_COLOUR,
+                   edgecolors=CELL_EDGE_COLOUR, linewidths=0.4, zorder=5, gid="nw-crop-cells")
+        h, w = crop.image.shape[:2]
+        ax.set_xlim(-0.5, w - 0.5)                      # the dots must not widen the image's own extent
+        ax.set_ylim(h - 0.5, -0.5)
+
+
+def _cells_clause(tally: dict) -> str:
+    """What the cell dots on a set of crops are, for its caption: how many were drawn, and that a crop without a
+    cell table has none drawn because none could be read — never that it holds no cells."""
+    if not tally:
+        return ""
+    said = [f"dots: the {tally.get('drawn', 0):,} cells the run counted in view"] if "drawn" in tally else []
+    if tally.get("no_table"):
+        said.append(f"{tally['no_table']} crop(s) of a well without a cell table, so no cells drawn there")
+    return "; ".join(said)
+
+
+def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False) -> None:
     """The first selected nanowell's crops, one per timepoint, on the strip under the site detail's **Pop out**
     button: each titled with its timepoint, a timepoint without a crop saying why in its place, and where the crops
     were cut from said once in the caption. *crops* is ``None`` while they are being cut."""
@@ -559,6 +590,7 @@ def render_crop_strip(fig, crops: dict | None, site) -> None:
     notes: set = set()
     mixed = len({c.source for _tp, c in items if c.image is not None}) > 1
     sub = fig.add_gridspec(1, len(items), left=0.03, right=0.97, top=0.84, bottom=0.36, wspace=0.08)
+    tally: dict = {}
     for k, (tp, crop) in enumerate(items):
         ax = fig.add_subplot(sub[0, k])
         ax._aw_image_panel = True
@@ -566,6 +598,8 @@ def render_crop_strip(fig, crops: dict | None, site) -> None:
         ax.set_yticks([])
         if crop.image is not None:
             ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi)
+            if cells:
+                _draw_crop_cells(ax, crop, tally, size=6.0)
             if crop.source == "montage":
                 notes.add(crop.note)
         else:
@@ -578,11 +612,11 @@ def render_crop_strip(fig, crops: dict | None, site) -> None:
               "from the montage, at its lower resolution" if sources == {"montage"} else
               "from its owner tile, or the montage where marked" if sources else "none could be cut")
     caption = f"Crops: {site[0]} · q {site[1]}, r {site[2]}, {origin}; one brightness scale" + "".join(
-        f"; {note}" for note in sorted(notes))
+        f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else "")
     _ink(fig.text(0.03, 0.03, caption, fontsize=6, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
 
 
-def render_crop_grid(fig, crops: dict | None, site) -> None:
+def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False) -> None:
     """The selected nanowell at every timepoint, large: one panel per timepoint, filling the page's figure.
 
     Asked for: a larger view of a selected nanowell over time than the site detail's strip of small crops. Every
@@ -604,6 +638,7 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
     grid = fig.add_gridspec(rows, cols, left=0.02, right=0.98, top=0.87, bottom=0.08, wspace=0.05, hspace=0.18)
     notes: set = set()
     mixed = len({c.source for _tp, c in items if c.image is not None}) > 1
+    tally: dict = {}
     for k, (tp, crop) in enumerate(items):
         ax = fig.add_subplot(grid[k // cols, k % cols])
         # An image, pixel for pixel: the style pass must not put the card's typed axis range on it.
@@ -612,6 +647,8 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
         ax.set_yticks([])
         if crop.image is not None:
             ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi, gid="nw-crop-grid-image")
+            if cells:
+                _draw_crop_cells(ax, crop, tally, size=CELL_DOT_PT2 * 2)
             if crop.source == "montage":
                 notes.add(crop.note)
         else:
@@ -626,7 +663,7 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
               "cut from the montage, at its lower resolution" if sources == {"montage"} else
               "cut from its owner tile, or the montage where marked" if sources else "none could be cut")
     caption = (f"{origin}; every panel on one brightness scale ({lo:.4g} to {hi:.4g})"
-               + "".join(f"; {note}" for note in sorted(notes)))
+               + "".join(f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else ""))
     _ink(fig.text(0.02, 0.015, caption, fontsize=8, color=faint, gid="nw-crop-grid-caption", wrap=True), muted=True)
 
 
@@ -644,7 +681,7 @@ def _sentence(text: str) -> str:
     return text[:1].upper() + text[1:]
 
 
-def render_extremes(fig, model, crops: dict, *, label: str, note: str = "") -> dict:
+def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cells: bool = False) -> dict:
     """The *N* nanowells with the largest fold change and the *N* with the smallest, each a row of its crops at
     every timepoint of the well; returns ``{axes: (well, q, r)}`` so a click on a row selects its nanowell.
 
@@ -678,6 +715,7 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "") -> d
     notes: set = set()
     sources: set = set()
     pending = False
+    tally: dict = {}
     line = 0
     for k, (title, rows) in enumerate(blocks):
         line += 1 if k else 0
@@ -698,6 +736,8 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "") -> d
                 if crop is not None and crop.image is not None:
                     ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi,
                               gid="nw-extremes-image")
+                    if cells:
+                        _draw_crop_cells(ax, crop, tally, size=5.0)
                     sources.add(crop.source)
                     if crop.source == "montage":
                         notes.add(crop.note)
@@ -736,7 +776,8 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "") -> d
               "still being cut" if pending else "none could be cut")
     said = [caption(model, label) + ".",
             f"Crops {origin}; every crop on one brightness scale ({lo:.4g} to {hi:.4g})."
-            + "".join(f" {_sentence(n_)}." for n_ in sorted(notes))]
+            + "".join(f" {_sentence(n_)}." for n_ in sorted(notes))
+            + (f" {_sentence(_cells_clause(tally))}." if tally else "")]
     if note:
         said.insert(0, note)
     _ink(fig.text(0.02, 0.012, " ".join(said), fontsize=7, color=faint, gid="nw-extremes-caption", wrap=True),

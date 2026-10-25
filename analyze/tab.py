@@ -25,7 +25,7 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QFileDialog, QLineEdit, QMessageBox, QPushButton,
-    QSizePolicy, QSplitter, QVBoxLayout, QWidget,
+    QSplitter, QVBoxLayout, QWidget,
 )
 
 from analyze.phone_view import AnalyzePhoneView
@@ -37,10 +37,10 @@ from services.pipeline_runner import (
     is_transient_progress,
 )
 from ui import theme
-from widgets.flow_layout import FlowLayout
 from widgets.footer_scroll_area import FooterScrollArea
 from core.safe import swallowed
 from analyze.bg_map import AnalyzeBackgroundMapMixin
+from analyze.channel_rows import AnalyzeChannelRowsMixin
 from analyze.domain.input import AnalyzeInputMixin
 from analyze.preflight import AnalyzePreflightMixin
 from analyze.progress import AnalyzeProgressMixin
@@ -74,7 +74,7 @@ _POLL_MAX_LINES = 500
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
-class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
+class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInputMixin,
                  AnalyzeLogPaneMixin, AnalyzePreflightMixin,
                  AnalyzeProgressMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
                  AnalyzeTabFormMixin, QWidget):
@@ -304,115 +304,6 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         # silenced the signal during the rebuild.
         self._refresh_remote_controls()
 
-    # ------------------------------------------------------------------
-    # Fluorescent channel helpers
-    # ------------------------------------------------------------------
-    def _fluor_add_row(self, default_token: str = "") -> None:
-        row = QWidget(self._fluor_frame)
-        # A flow, so the checkboxes wrap under the field when phone layout's
-        # drawer is too narrow for one line (an unbreakable row clipped the form).
-        rl = FlowLayout(row, h_spacing=8, v_spacing=4)
-
-        edit = QLineEdit(default_token, row)
-        edit.setFixedWidth(theme.Metrics.num_field_w_lg)
-        edit.textChanged.connect(lambda _: self._refresh_channel_dependents())
-        rl.addWidget(edit)
-
-        remove_btn = QPushButton("✕", row)
-        remove_btn.setFixedWidth(self._REMOVE_BTN_W)   # wide enough that the button padding doesn't clip ✕
-        remove_btn.setProperty("variant", "secondary")
-        rl.addWidget(remove_btn)
-
-        # Pin each checkbox to a width derived from font metrics + a fixed
-        # indicator/spacing allowance, NOT sizeHint(): sizeHint() underreports
-        # the label width before the global stylesheet is polished, so the
-        # layout reserved too little and the "Phase" indicator painted on top
-        # of the "smFISH" label. Minimum policy floors the width at this value.
-        def _pin_checkbox(text: str) -> QCheckBox:
-            cb = QCheckBox(text, row)
-            cb.setMinimumWidth(cb.fontMetrics().horizontalAdvance(text)
-                               + theme.Metrics.checkbox_chrome_w)
-            cb.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-            rl.addWidget(cb)
-            return cb
-
-        smfish_cb = _pin_checkbox("smFISH")
-        phase_cb = _pin_checkbox("Phase")
-        phase_cb.setToolTip(
-            "Mark this channel as phase/brightfield: it skips all background "
-            "correction and is resaved from the original image. With the "
-            "Label-free method it is also the Cellpose segmentation input."
-        )
-
-        self._fluor_rows.append((edit, smfish_cb, phase_cb, remove_btn))
-
-        # Phase is single across the experiment (mutually exclusive across rows)
-        # and cannot coexist with smFISH on the same channel.
-        def _on_phase_toggled(checked: bool, this_cb=phase_cb, this_sm=smfish_cb) -> None:
-            if checked:
-                this_sm.setChecked(False)
-                for _e, _s, _p, _b in self._fluor_rows:
-                    if _p is not this_cb:
-                        _p.setChecked(False)
-            self._refresh_segmentation_hints()
-
-        def _on_smfish_toggled(checked: bool, this_ph=phase_cb) -> None:
-            if checked:
-                this_ph.setChecked(False)
-
-        phase_cb.toggled.connect(_on_phase_toggled)
-        smfish_cb.toggled.connect(_on_smfish_toggled)
-        remove_btn.clicked.connect(
-            lambda _=False, r=row, b=remove_btn: self._fluor_remove_row(r, b)
-        )
-        self._fluor_frame_layout.addWidget(row)
-        self._fluor_refresh_remove_buttons()
-        # The same call the other two sites make. Adding a row is as much a
-        # change to the channel set as removing one or retyping a token, and
-        # leaving this one on the older, narrower refresh gave the file two
-        # definitions of "the rows changed" — which is how the segmentation
-        # hint went stale in the first place.
-        self._refresh_channel_dependents()
-
-    def _fluor_remove_row(self, row: QWidget, remove_btn: QPushButton) -> None:
-        if len(self._fluor_rows) <= 1:
-            return
-        self._fluor_rows = [(e, s, p, b) for e, s, p, b in self._fluor_rows if b is not remove_btn]
-        row.deleteLater()
-        self._fluor_refresh_remove_buttons()
-        self._refresh_channel_dependents()
-
-    def _refresh_channel_dependents(self) -> None:
-        """Everything downstream of the fluorescent-channel rows.
-
-        Both readouts are derived from those rows and both have to move with
-        them. Removing the row marked "Phase", or clearing its token, leaves the
-        Label-free routine with no channel to segment — and the hint went on
-        reading "Use when there's no stain at all…" because only the schema
-        preview was refreshed. The run was correctly refused at Run; the live
-        feedback said it would succeed.
-        """
-        self._refresh_schema_preview()
-        self._refresh_segmentation_hints()
-
-    def _fluor_refresh_remove_buttons(self) -> None:
-        only_one = len(self._fluor_rows) == 1
-        for _, _, _, btn in self._fluor_rows:
-            btn.setEnabled(not only_one)
-
-    def _fluor_tokens_list(self) -> list[str]:
-        return [e.text().strip() for e, _, _, _ in self._fluor_rows if e.text().strip()]
-
-    def _smfish_tokens_list(self) -> list[str]:
-        return [e.text().strip() for e, s, _, _ in self._fluor_rows if s.isChecked() and e.text().strip()]
-
-    def _phase_token(self) -> str:
-        """The single channel token flagged as the phase/brightfield image (or '')."""
-        for e, _s, p, _b in self._fluor_rows:
-            if p.isChecked() and e.text().strip():
-                return e.text().strip()
-        return ""
-
     # Segmentation hints (_segmentation_validation_errors /
     # _collapse_seg_param_stack / _refresh_segmentation_hints) live in
     # analyze.seg_params.AnalyzeSegParamsMixin, beside the parameter panel
@@ -480,6 +371,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         raw_str = self._input_edit.text().strip()
         if not raw_str:
             self._output_lbl.setText("—"); self._set_status(self._layout_lbl, "", quiet="")
+            self._output_row.setVisible(False)
             self._refresh_folder_banners(None, immediate=immediate)
             return
         # The form's schema goes with it, so the fold-loose readout counts the
@@ -493,6 +385,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeInputMixin,
         )
         self._output_lbl.setText(
             str(plan.output_dir) if plan.output_dir is not None else "—")
+        self._output_row.setVisible(plan.output_dir is not None)
         self._set_status(self._layout_lbl, plan.message, error=not plan.runnable, quiet="")
         # The same planner that names the output folder is what makes a pre-run
         # report possible at all: it resolves that path without writing

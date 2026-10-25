@@ -718,7 +718,7 @@ def test_the_summary_reads_under_the_button_not_beside_it(tab):
     button = tab._bg_map_btn.mapTo(tab, tab._bg_map_btn.rect().topLeft())
     summary = tab._bg_map_summary.mapTo(tab, tab._bg_map_summary.rect().topLeft())
     assert summary.y() > button.y(), "the summary is not below the button"
-    assert summary.x() < button.x(), "the summary is still indented into the row"
+    assert summary.x() <= button.x(), "the summary is still indented into the row"
 
     # And the button's own row no longer grows with what the summary says.
     row = tab._bg_map_btn.parentWidget()

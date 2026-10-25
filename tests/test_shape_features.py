@@ -175,8 +175,10 @@ def test_analyze_shape_selector_is_dropdown(qapp):
 
     sel.setCheckedData(["eccentricity", "solidity"])
     assert tab._collect_run_options()["shape_features"] == ["eccentricity", "solidity"]
-    # width is capped (was stretching to the full sidebar, looking oversized)
-    assert sel.maximumWidth() <= 230
+    # It is a dropdown in a labelled row of its own ("Shape metrics", in
+    # Measurements & filters), taking the field width like every other dropdown
+    # on the form, rather than a capped widget floating in its own section.
+    assert sel.parentWidget().parentWidget().objectName() == "AnalyzeFormRow"
 
 
 # ── Full-app regressions: shape features survive sub-tab switch + reach scatter ─

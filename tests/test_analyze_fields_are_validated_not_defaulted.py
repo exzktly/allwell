@@ -266,15 +266,9 @@ def test_a_stale_tile_size_does_not_block_a_cellpose_run(tab):
 # valid one and failed at dequeue time, where there is no dialog to report it.
 
 @pytest.fixture
-def refusals(monkeypatch):
-    """Record every critical box instead of opening one (they are modal)."""
-    from PySide6.QtWidgets import QMessageBox
-
-    seen: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        QMessageBox, "critical",
-        staticmethod(lambda _p, title, text, *a, **k: seen.append((title, text))))
-    return seen
+def refusals(run_refusals):
+    """What each refused press led with (``conftest.run_refusals``)."""
+    return run_refusals
 
 
 def _queued(tab):

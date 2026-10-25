@@ -131,16 +131,15 @@ class CurrentPageStack(NamedPageStack):
         super().__init__(parent)
         self.currentChanged.connect(lambda _i: self._fit_to_current())
 
-    def addPage(self, name: str, widget: QWidget) -> int:
+    def event(self, event) -> bool:  # Qt naming
         # A page whose own rows appear or disappear changes height without the
-        # current page changing, so each page reports its layout requests here.
-        widget.installEventFilter(self)
-        return super().addPage(name, widget)
-
-    def eventFilter(self, obj, event) -> bool:  # Qt naming
-        if obj is self.currentWidget() and event.type() == QEvent.LayoutRequest:
+        # current page changing; its size change re-lays this stack, which
+        # arrives here as a LayoutRequest. Overriding the stack's own event
+        # rather than filtering each page's: a Python filter on a child is
+        # called while the tree is being destroyed, and crashed the process.
+        if event.type() == QEvent.LayoutRequest:
             self._fit_to_current()
-        return super().eventFilter(obj, event)
+        return super().event(event)
 
     def _fit_to_current(self) -> None:
         page = self.currentWidget()

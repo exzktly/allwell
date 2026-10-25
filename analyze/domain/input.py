@@ -276,8 +276,8 @@ class AnalyzeInputMixin:
         parts = [f"schema {schema}" if schema
                  else "schema not recognised, left as you set it"]
         if tokens is None:
-            parts.append("channel tokens not recognised — check the Channel "
-                         "Tokens rows")
+            parts.append("channels not recognised — check the rows under "
+                         "Channels")
         else:
             named = ", ".join(tokens.fluor_tokens) or "none"
             part = f"channels {named}"

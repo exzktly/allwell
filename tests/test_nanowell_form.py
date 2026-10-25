@@ -12,7 +12,6 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QMessageBox  # noqa: E402
 
 from analyze.nanowell_preflight import nanowell_input_report, seam_site_estimate  # noqa: E402
 from analyze.nanowell_preview import MIN_LABEL_DIAMETER_PX, render_montage, site_marks, summary_text  # noqa: E402
@@ -111,10 +110,8 @@ def test_a_sidecar_of_a_nanowell_run_turns_the_mode_on_and_a_plain_one_turns_it_
 
 # ── the run is refused, with the reason, before it starts ────────────────────
 @pytest.fixture
-def refused(monkeypatch):
-    messages: list[tuple[str, str]] = []
-    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda _p, title, text, *_a: messages.append((title, text))))
-    return messages
+def refused(run_refusals):
+    return run_refusals
 
 
 def test_run_is_refused_for_a_bad_number_and_for_a_missing_phase_channel(tab, refused, tmp_path):
@@ -423,12 +420,21 @@ def test_test_detection_offers_the_wells_the_run_will_read(tab, tmp_path):
     assert (wells, timepoints, problem) == ({"A01": lower}, {"A01": ["0h"]}, "")
 
 
-def test_the_nanowells_section_sits_directly_below_quality_control(tab):
-    """The user's layout: Quality Control leads the optional sections, Nanowells follows it."""
+def test_the_nanowell_section_sits_directly_below_segmentation(tab):
+    """Nanowell mode is chosen in Channels (Plate type) and replaces the
+    Segmentation section's settings, so its own settings follow Segmentation —
+    and appear only for a nanowell plate."""
     titles = list(tab._section_widgets)
-    layout = tab._section_widgets["Image correction & QC"].parentWidget().layout()
+    layout = tab._section_widgets["Segmentation"].parentWidget().layout()
     order = sorted(titles, key=lambda t: layout.indexOf(tab._section_widgets[t]))
-    assert order.index("Nanowells") == order.index("Image correction & QC") + 1, order
+    assert order.index("Nanowell array") == order.index("Segmentation") + 1, order
+    section = tab._section_widgets["Nanowell array"]
+    assert section.isHidden()
+    tab._nanowell_cb.setChecked(True)
+    assert not section.isHidden()
+    assert tab._plate_type_seg.currentData() is True
+    tab._plate_type_seg.setCurrentIndex(0)                # the control drives the mode too
+    assert not tab._nanowell_cb.isChecked() and section.isHidden()
 
 
 def test_an_uncounted_preview_draws_its_seen_sites_as_not_counted_rather_than_as_holding_cells():

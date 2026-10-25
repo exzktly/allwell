@@ -1291,6 +1291,8 @@ class PhoneShell(QObject):
         lay = row.layout()
         if not isinstance(lay, QBoxLayout) or lay.count() == 0:
             return
+        if row.property("stackedAtDesk"):
+            return              # label-above-field at the desk too; nothing to do
         label = lay.itemAt(0).widget()
         want = QBoxLayout.TopToBottom if on else QBoxLayout.LeftToRight
         if lay.direction() == want:

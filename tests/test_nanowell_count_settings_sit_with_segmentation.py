@@ -42,12 +42,12 @@ def test_out_of_nanowell_mode_label_free_keeps_its_own_diameter(tab):  # noqa: F
 
 
 def _segmentation_entries(tab) -> list[str]:  # noqa: F811
-    """The form's rows labelled "Segmentation" that a user can see, each named by what it holds."""
+    """The Segmentation section's rows labelled "Method" that a user can see, each named by what it holds."""
     from PySide6.QtWidgets import QComboBox, QLabel, QWidget
 
     out = []
     for row in tab.findChildren(QWidget, "AnalyzeFormRow"):
-        labels = [w for w in row.findChildren(QLabel) if w.text() == "Segmentation"]
+        labels = [w for w in row.findChildren(QLabel) if w.text() == "Method"]
         if labels and row.isVisibleTo(tab):
             combo = row.findChild(QComboBox)
             out.append("method selector" if combo is not None else "nanowell cell count")
@@ -57,7 +57,7 @@ def _segmentation_entries(tab) -> list[str]:  # noqa: F811
 def test_nanowell_mode_has_one_segmentation_entry_not_two(tab):  # noqa: F811
     """Reported: in nanowell mode the form showed a locked "Segmentation: Label-free" selector *and* the
     count's own settings, two entries for one thing — and only one of them is what a nanowell run reads.
-    The selector is hidden in nanowell mode and the count's box carries the one "Segmentation" row."""
+    The selector is hidden in nanowell mode and the count's box carries the section's one "Method" row."""
     assert _segmentation_entries(tab) == ["method selector"]
     stardist = tab._seg_method_cb.findData("stardist_nuclei")
     tab._seg_method_cb.setCurrentIndex(stardist)

@@ -34,7 +34,7 @@ def test_defaults_are_valid():
 
 def test_non_integer_radius_is_rejected():
     errs = _numeric_option_errors(_ok_opts(tophat_radius_nir="100.5"))
-    assert any("Nuclear tophat radius" in e for e in errs)
+    assert any("Segmentation-channel radius" in e for e in errs)
 
 
 def test_negative_count_rejected():

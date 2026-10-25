@@ -266,7 +266,7 @@ def test_resume_shows_the_resumed_run_s_settings_on_the_form(tmp_path, qtbot,
     assert fresh._nuclear_token_edit.text() == "Hoechst"
     assert fresh._csv_prefix_edit.text() == "cells"
     assert fresh._remote_batch_size_edit.text() == "12"
-    assert fresh._incremental_cb.isChecked(), (
+    assert (fresh._existing_output_cb.value() == "incremental"), (
         "the run is forced incremental, so the form must say so too")
 
 
@@ -394,7 +394,7 @@ def test_a_resume_the_run_refuses_leaves_the_user_s_form_alone(tmp_path, qtbot, 
     _point_at(fresh, plate)
     fresh._nuclear_token_edit.setText("MyNuclei")
     fresh._csv_prefix_edit.setText("mine")
-    assert not fresh._incremental_cb.isChecked()
+    assert not (fresh._existing_output_cb.value() == "incremental")
     refused = "An earlier run on this plate is still running."
     monkeypatch.setattr(run_spec_mod, "_earlier_run_still_alive", lambda spec: refused)
     shown: list[str] = []
@@ -410,7 +410,7 @@ def test_a_resume_the_run_refuses_leaves_the_user_s_form_alone(tmp_path, qtbot, 
     assert fresh._nuclear_token_edit.text() == "MyNuclei", "a refused resume replaced the user's settings"
     assert fresh._csv_prefix_edit.text() == "mine"
     assert fresh._input_edit.text() == str(plate)
-    assert not fresh._incremental_cb.isChecked(), "a refused resume left Incremental ticked on the form"
+    assert not (fresh._existing_output_cb.value() == "incremental"), "a refused resume left Incremental ticked on the form"
     assert not any("saving will move it" in line for line in logged), (
         "a job-queue editor's warning was logged for a resume that never started")
     assert fresh._resumable() is not None, "the offer must survive a resume that did not start"

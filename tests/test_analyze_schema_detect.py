@@ -145,7 +145,8 @@ def test_the_control_says_what_it_is_for_before_it_is_pressed(qapp):
     user in their first ten seconds that the feature does not work.
     """
     tab = _tab()
-    assert "Pick an input folder" in tab._schema_picker.detectionText()
+    assert tab._schema_picker.detectionText() == (
+        "Detect reads the layout from the input folder's filenames.")
     assert tab._schema_picker.detectionNoteText() == "", "a hint is not a problem"
 
 
@@ -202,6 +203,7 @@ def test_detect_is_the_first_row_of_the_analyze_schema_section(qapp, tmp_path):
     every row it rewrites — and where its own refusal had to say "above"."""
     _plate(tmp_path / "ds" / "in")
     tab = _tab()
+    tab.reveal_section("Filename schema")              # folded by default
     _shown(qapp, tab, 900)
     picker = tab._schema_picker
     _assert_detect_heads_the_picker(picker)
@@ -254,6 +256,7 @@ def test_a_refusal_points_at_the_settings_where_they_are(qapp, tmp_path):
     for i in range(6):
         (src / f"scan{i}.tif").write_bytes(b"")
     tab = _tab()
+    tab.reveal_section("Filename schema")              # folded by default
     _shown(qapp, tab, 900)
     picker = tab._schema_picker
     tab._input_edit.setText(str(tmp_path / "ds"))

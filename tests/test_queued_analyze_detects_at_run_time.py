@@ -70,11 +70,17 @@ def test_the_checkbox_queues_a_job_whose_input_does_not_exist_yet(
         tab, tmp_path, monkeypatch):
     """Everything detection replaces, and everything that reads the input, is
     deferred. Each of these would refuse the form without the checkbox."""
-    from PySide6.QtWidgets import QMessageBox
+    import analyze.run_problems as rp
 
     refused: list[str] = []
-    monkeypatch.setattr(QMessageBox, "critical",
-                        staticmethod(lambda _p, title, *_a: refused.append(title)))
+    original = rp.AnalyzeRunProblemsMixin._report_run_problems
+
+    def _record(self, problems):
+        if problems:
+            refused.append(problems[0].title)
+        return original(self, problems)
+
+    monkeypatch.setattr(rp.AnalyzeRunProblemsMixin, "_report_run_problems", _record)
     tab._input_edit.setText(str(tmp_path / "not_written_yet"))
     tab._schema_picker.setSchema("well:well")            # invalid
     tab._flatfield_cb.setValue("empty_well")
@@ -95,11 +101,17 @@ def test_the_checkbox_queues_a_job_whose_input_does_not_exist_yet(
 def test_the_run_button_still_asks_the_input_about_the_blank_well(tab, tmp_path,
                                                                    monkeypatch):
     """Only the queue may name a folder not written yet."""
-    from PySide6.QtWidgets import QMessageBox
+    import analyze.run_problems as rp
 
     refused: list[str] = []
-    monkeypatch.setattr(QMessageBox, "critical",
-                        staticmethod(lambda _p, title, *_a: refused.append(title)))
+    original = rp.AnalyzeRunProblemsMixin._report_run_problems
+
+    def _record(self, problems):
+        if problems:
+            refused.append(problems[0].title)
+        return original(self, problems)
+
+    monkeypatch.setattr(rp.AnalyzeRunProblemsMixin, "_report_run_problems", _record)
     tab._input_edit.setText(str(_plate(tmp_path / "plate")))
     tab._flatfield_cb.setValue("empty_well")
     tab._background_well_edit.setText("H12")
@@ -107,17 +119,22 @@ def test_the_run_button_still_asks_the_input_about_the_blank_well(tab, tmp_path,
     assert refused == ["Background Well Error"]
 
 
-def test_the_picker_greys_out_and_run_stays_armed_with_an_invalid_schema(tab):
+def test_the_picker_greys_out_and_the_schema_stops_being_a_problem(tab):
+    """Run stays pressable with an invalid schema — the schema is one of the
+    problems it reports — and with run-time detection on the schema is not a
+    problem at all, since detection replaces it."""
     tab._schema_picker.setSchema("well:well")          # invalid on purpose
-    assert not tab._run_btn.isEnabled()
+    titles = [p.title for p in tab._run_problems(live=True)]
+    assert "Schema Error" in titles
     tab._auto_detect_cb.setChecked(True)
     assert not tab._schema_picker.isEnabled()
     assert tab._nuclear_row_widget.isEnabled()          # still a choice
+    assert "Schema Error" not in [p.title for p in tab._run_problems(live=True)]
     assert tab._run_btn.isEnabled()
     assert tab._input_edit.isEnabled()
     tab._auto_detect_cb.setChecked(False)
     assert tab._schema_picker.isEnabled()
-    assert not tab._run_btn.isEnabled()
+    assert "Schema Error" in [p.title for p in tab._run_problems(live=True)]
 
 
 def test_start_from_queue_hands_the_runner_the_detected_layout(tab, tmp_path):
@@ -307,11 +324,17 @@ def test_the_queue_accepts_an_unwritten_input_without_detection(tab, tmp_path,
                                                                 monkeypatch):
     """A job with a fixed layout, queued after the converter that will write
     its input: nothing that reads the input can be asked yet."""
-    from PySide6.QtWidgets import QMessageBox
+    import analyze.run_problems as rp
 
     refused: list[str] = []
-    monkeypatch.setattr(QMessageBox, "critical",
-                        staticmethod(lambda _p, title, *_a: refused.append(title)))
+    original = rp.AnalyzeRunProblemsMixin._report_run_problems
+
+    def _record(self, problems):
+        if problems:
+            refused.append(problems[0].title)
+        return original(self, problems)
+
+    monkeypatch.setattr(rp.AnalyzeRunProblemsMixin, "_report_run_problems", _record)
     tab._input_edit.setText(str(tmp_path / "not_written_yet"))
     tab._flatfield_cb.setValue("empty_well")
     tab._background_well_edit.setText("H12")

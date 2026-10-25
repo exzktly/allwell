@@ -575,6 +575,30 @@ def _no_modal_dialogs(monkeypatch):
 # ``runtime_app.py`` before this harness existed.
 
 @pytest.fixture
+def run_refusals(monkeypatch):
+    """What each refused Run / + Queue press on the Analyze form led with.
+
+    The form reports every problem at once, under the Run button
+    (``analyze.run_problems``); it used to raise only the first, in a modal
+    dialog, and tests recorded those dialogs. This records the same thing —
+    the first problem of each refused press, as ``(title, message)`` — so a
+    test can keep asking ``refusals[-1]`` about the press it just made.
+    """
+    import analyze.run_problems as rp
+
+    seen: list[tuple[str, str]] = []
+    original = rp.AnalyzeRunProblemsMixin._report_run_problems
+
+    def _record(self, problems):
+        if problems:
+            seen.append((problems[0].title, problems[0].message))
+        return original(self, problems)
+
+    monkeypatch.setattr(rp.AnalyzeRunProblemsMixin, "_report_run_problems", _record)
+    return seen
+
+
+@pytest.fixture
 def mini_dataset(tmp_path):
     """Materialise the deterministic mini dataset; returns its directory."""
     from tests.fixtures.mini_dataset import build_mini_dataset

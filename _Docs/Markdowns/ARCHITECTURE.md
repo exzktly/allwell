@@ -743,17 +743,20 @@ allwell/
 │   │   └── slurm_job.py        ← the run's Slurm job as none / queued / open, folded
 │   │                              from the run's events, and the indicator's tooltip
 │   ├── nanowell_hook.py        ← picks the section or a stand-in by the build's profile
-│   ├── nanowell_section.py     ← the Nanowells section: mode, plate format, the numeric
+│   ├── nanowell_section.py     ← Plate type (in Channels) and the Nanowell array section: plate format, the numeric
 │   │                              fields, Reuse registration, Test detection, and the run
 │   │                              validation; builds the count's model, input and cell
 │   │                              size into the Segmentation section's label-free page
 │   ├── nanowell_preflight.py   ← what is checkable before a nanowell run without reading an
 │   │                              image: record, archives, grids, overlap and seam estimate
 │   ├── nanowell_preview.py     ← the Test detection window and the marks drawn on the montage
-│   ├── qc_section.py           ← the Image correction & QC section: the pixel
-│   │                              corrections (both default to none), the
-│   │                              debris gate, and the per-cell focus
-│   │                              measurement and its cut
+│   ├── qc_section.py           ← the Image correction section (the pixel
+│   │                              corrections) and Measurements & filters
+│   │                              (shape metrics, debris gate, per-cell focus)
+│   ├── advanced_section.py     ← the Advanced section: output, performance, scratch folder
+│   ├── channel_rows.py         ← the channel rows: name, Role dropdown, ✕
+│   ├── run_problems.py         ← every reason the form cannot run, listed under Run
+│   ├── section_summaries.py    ← a folded section's summary line and "N changed"
 │   ├── run_footer.py           ← the run footer pinned under the form (Run on +
 │   │                              the run buttons) and the Remote options section
 │   ├── schema_section.py       ← the Filename schema section: picker, detection,
@@ -1998,14 +2001,11 @@ not be in. An earlier pass set `rail_w` to whichever mode's content needed the
 most room (Analyze's, at 438) and let the other two panes — neither of which
 needs anywhere near that width — inherit it unchanged; the result read as an
 oversized sidebar with no content to justify it in Review and Datasets.
-`rail_w` is now 329 (438 reduced 25%) with Analyze's own form narrowed to fit
-it instead: `analyze/form.py`'s row label column shrank
-(`_row()`'s `_ROW_LABEL_W`, 150→108) and word-wraps instead of clipping a
-label that doesn't fit on one line, its two widest fixed-width combos
-(segmentation method, auto-threshold method) shrank to 165 and rely on Qt's
-built-in text eliding plus a tooltip carrying the full label, and the Compute
-Options page's inline "(…)" hints moved to their own wrapped line below the
-row instead of squeezing in beside a narrow field. `tests/test_analyze_narrow_sidebar_fit.py`
+`rail_w` is 329 (438 reduced 25%), and Analyze's form fits it by being one
+column: `_row()` puts each label above its field, so a field has the panel's
+whole width rather than what a label column left it, and
+`_normalise_field_widths` gives every dropdown and text field that full width
+and every number one width (`_NUM_FIELD_W`). `tests/test_analyze_narrow_sidebar_fit.py`
 drives every collapsible section open (a real `QTest.mouseClick`, since a
 collapsed section contributes nothing to the form's measured width until
 expanded) and asserts the form's laid-out minimum width fits inside `rail_w`.
@@ -2805,7 +2805,7 @@ superset — staging a well whole that turns out not to be a blank costs an uplo
 while missing one starves a whole block of its correction.
 
 **The map is written on a plate, not in a text box.** `analyze/bg_map.py` holds
-the editor — a non-modal window off the Image correction & QC section, built once and
+the editor — a non-modal window off the Image correction section, built once and
 hidden rather than destroyed. One `WellPlateSelector` in paint mode carries the
 whole partition: a colour per blank, a ring on the block being edited, absent
 wells disabled so a drag cannot claim a well the folder does not have, and a
@@ -3110,7 +3110,7 @@ row gets a row of its own, with Reopen.
 which goes through Review's one door into Analyze
 (`review.core.analyze_handoff.open_in_analyze`, also what *Finish this run* uses) with the
 selected wells both forced and the only wells run, so nothing else on the plate
-is touched, and *Incremental* off — every well run is forced, so it would change
+is touched, and not incremental — every well run is forced, so it would change
 nothing, and a remote nanowell run refuses it; Analyze opens configured and the
 user presses Run. The hand-off
 answers whether it happened, and a build with no Analyze pane is told so rather
@@ -5775,7 +5775,7 @@ survey. The areas it lists, how each is measured and how each is cleared are
   folder with a prefix in `SYSTEM_TEMP_PREFIXES`;
 - unticked by default, the run scratch (`SCRATCH_KEY`): the entries of
   `util.state_dir.default_scratch_dir()` — the app folder's own `scratch/`, never
-  a *Scratch disk* the user chose — that no live `owner.pid` names and in which
+  a *Scratch folder* the user chose — that no live `owner.pid` names and in which
   nothing has been written within `UNOWNED_GRACE_S`, judged by the newest file
   anywhere inside (`_newest_mtime`; a folder's own time moves only when its
   direct entries change, so a run writing deep inside one would otherwise look
@@ -6723,12 +6723,65 @@ mixin, so the outcome path is not reached through the class named for form
 building. Verbose inline helper paragraphs are collapsed behind hover `ⓘ` icons
 (`_info_icon` / `_section(info=…)`).
 
-**The form's shape.** Sections in build order: Folders, Filename schema,
-Channels & segmentation (open), then Image correction & QC, Nanowells,
-Auto-threshold, Shape metrics, Output options, Compute options, Scratch disk
-(folded), then Remote options, shown only while a remote is chosen. Titles are
+**The form's shape.** One section per question a run asks, in the order a user
+answers them (`AnalyzeTabFormMixin._build_form`): **Data** (input folder,
+Output to, and "Use settings from a previous run…" as its first row), **Filename
+schema** (folded; a schema that does not parse unfolds it), **Channels** (Plate
+type, then one row per channel), **Segmentation** (method, its hint, the
+segmentation channel, the method's page), **Nanowell array** (shown only for a
+nanowell plate), **Image correction** (open), then folded **Measurements &
+filters** (shape metrics, debris, focus), **Auto-threshold**, **Run scope** and
+**Advanced** (`analyze/advanced_section.py`: output, performance, scratch
+folder), and **Remote options**, shown only while a remote is chosen. Titles are
 sentence case, and `ui.help_topics.ANALYZE_SECTION_HELP` maps every one to its
-manual heading. The run controls are not a section: `analyze.run_footer`
+manual heading, which the manual numbers in the same order.
+
+**The form is one column.** `_row` returns the field cell of a row whose label
+sits above it (a `QBoxLayout` top-to-bottom, object name `AnalyzeFormRow`,
+property `stackedAtDesk` so phone layout's restack leaves it alone). A unit or
+the meaning of `0` goes after the field (`_field_note`), never into the label.
+`_normalise_field_widths` runs once after the build: dropdowns and text or path
+fields take the row's whole width, numbers take `_NUM_FIELD_W`, and a field
+narrower than 40 px (the separator box) keeps its own. It is one pass rather than
+forty call sites because the builders were written for a label column and each
+pinned its own width.
+
+**A section header can carry a switch and a summary.** `_section(switch=…)`
+puts a section's own on/off control beside the title (Auto-threshold's), so it
+can be read and changed folded; its clicks are its own and do not fold the
+section. `_section(summary=…)` takes a callable whose line shows, muted and
+elided, after the title while the section is folded: Image correction names its
+two choices, Run scope names anything that is not "every well, skip what is
+done", the schema shows itself, Auto-threshold its method, and Measurements &
+filters and Advanced say how many settings differ from a new form's
+(`analyze.section_summaries`, against a snapshot taken at the end of the build).
+That snapshot and its comparison look only at line edits, combos, checkable
+buttons and checkable dropdowns, found by type: `findChildren(QWidget)` wraps
+widgets Qt builds inside controls for itself, and a wrapper left behind when Qt
+deleted one crashed the interpreter when the pane was torn down. Every header
+reserves the caret's gutter (`_CARET_GUTTER_W`) whether or not it folds, so all
+titles align, and the rule under it is the stronger section rule
+(`QFrame#Separator[section="true"]`), since the in-panel hairline is
+near-invisible on the grey theme. Groups inside a section ("Output",
+"Performance") are `_subheading`s, one style for all.
+
+**What stops a run is listed under Run, all at once** (`analyze.run_problems`).
+`_run_problems` asks every check `_validate_run_request` used to stop at the
+first of — input, packed file, schema, channels, segmentation, numbers, blank
+well, control wells, nanowell — and returns them all, in that order, each a
+`RunProblem` naming the section that holds the control to change (numbers are
+grouped one problem per section). The footer's `_run_problems_lbl` shows the
+first in full with a count of the rest, every one in its tooltip. A timer
+(`_LIVE_CHECK_MS`, only while the pane is on screen and no run is going) re-asks
+the checks that read nothing from disk and draws the list muted; once Run or +
+Queue has been pressed with problems outstanding it is drawn in the error
+colour until it empties. Pressing Run with a problem open unfolds the first
+problem's section and scrolls it into view; clicking the line does the same.
+There is no dialog: `_validate_run_request` returns `None` and the problems are
+on screen, and `_last_run_problems` keeps what the last press reported. The
+same timer redraws the folded summaries. Run is never greyed out for a form
+problem — an invalid schema included — and the input folder is never locked on
+the schema, which pointed the Data and Filename schema sections at each other. The run controls are not a section: `analyze.run_footer`
 builds **Run on** and the run row into a footer that `AnalyzeTab` pins under the
 form's scroll area, which is a `widgets.footer_scroll_area.FooterScrollArea` —
 the scroll area stays the one widget the shell holds as `_left_sidebar`, so
@@ -6747,12 +6800,13 @@ row to its bar at the foot of the pane (`analyze/phone_view.py`); it reads the
 row as `_run_btn.parentWidget()` and puts it back where it found it, which is
 now the footer.
 
-**A fresh form corrects nothing.** Flat-field and background subtraction both
-default to `none` (`analyze.qc_section.DEFAULT_FLATFIELD` /
-`DEFAULT_BACKGROUND`). The background is still passed to the pipeline
-explicitly — `--background none` — because the CLI's own default is
-`sliding_disk`, and an omitted flag would correct the run behind the form's back.
-The two correction combos and the general-Cellpose model combo are
+**A fresh form corrects as the command line does.** Flat-field defaults to
+`none` and background subtraction to `sliding_disk`
+(`analyze.qc_section.DEFAULT_FLATFIELD` / `DEFAULT_BACKGROUND`), the defaults in
+`pipeline/cli_args.py`, so a run from the form and one from
+`process_microscopy.py` with no flags correct the same way; neither needs a blank
+well. The two correction combos, the general-Cellpose model combo, the Run scope
+choice and each channel row's Role are
 `widgets.value_combo.ValueCombo`s: they show a label ("Robust local mesh",
 "cyto3 (needs Cellpose 3)") and carry the pipeline's id as item data. Every
 reader goes through `value()` / `setValue()` — `_collect_run_options`,
@@ -6762,8 +6816,8 @@ answer `False`.
 
 **Status lines say what kind of thing they say, and take no room when silent.**
 `AnalyzeFormChromeMixin._set_status(label, text, error=…)` is how the form's
-status labels are written — the folder readout, the schema lock and schema
-error, the segmentation hint. An empty label is hidden, since a blank label
+status labels are written — the folder readout, the schema error, the
+segmentation hint, the run-problems line. An empty label is hidden, since a blank label
 still takes its line and margins; a label carrying a problem takes the `Error`
 object name (QSS `QLabel#Error`, the danger colour) and anything else stays
 muted, because a refusal in the same grey as the help paragraph beside it reads
@@ -6772,10 +6826,23 @@ Rows that cannot matter are hidden whole rather than greyed: the Background
 well row and the blank-pairing rows show only while a correction is
 `empty_well`, with a red "Required" line while the field is empty; the
 Segmentation channel row (label included — `_nuclear_row_widget` is the row,
-not `_row`'s right-hand cell) hides for the label-free method. `_row` centres
-its label on the field, and a unit or the meaning of `0` goes after the field
-(`_field_note`) rather than into the label, which would wrap mid-parenthesis at
-`rail_w`.
+not `_row`'s field cell) hides for the label-free method, the nanowell section
+is hidden rather than greyed while the plate is standard, and "Reference the
+phase input image" shows only while a channel's Role is Phase.
+
+**Plate type and channel roles are views over unchanged state.** The Plate type
+`SegmentedControl` at the head of Channels (`_build_plate_type_row`, in the
+nanowell section, so a build without Nanowells has none) drives and follows
+`_nanowell_cb`, which stays the mode's one state as a hidden checkbox — the
+sidecar restore, the job-edit round trip and the run options read it
+unchanged. Each channel row (`analyze/channel_rows.py`) is name, Role dropdown
+(Quantify / smFISH / Phase) and ✕; `_fluor_rows` still holds
+`(edit, smfish_cb, phase_cb, remove_btn)`, the two checkboxes hidden, and the
+dropdown follows and drives them, so the exclusivity rules stay where they were.
+**Run scope's "If a well already has output"** (`analyze/well_scope.py`) is one
+choice — Skip it / Fill in what's missing / Redo it — collected as the
+pipeline's `incremental` / `force` pair; a sidecar carrying both restores Redo
+it, as the pipeline always resolved them.
 
 The form's own chrome — `_section` (a collapsible titled section), `_row`,
 `_entry`, `_info_icon`, and `reveal_section` — is `analyze.form_chrome.AnalyzeFormChromeMixin`,
@@ -6948,7 +7015,7 @@ snapshot the pipeline records) and falls back to the top-level/`qc_options` keys
 for older sidecars; `None`-valued keys are dropped so a sparse sidecar can't
 clobber widget defaults with blanks.
 It restores settings and never resumes: nothing here reads the run journal or
-the suspend record, ticks Incremental or starts a run — resuming is the resume
+the suspend record, chooses Fill in what's missing or starts a run — resuming is the resume
 banner's job (`analyze.suspend`). **A sidecar can describe another machine.** A
 remote run's is written by the host from the host's argv and fetched home as
 is, so its `input_dir`, `output_dir` and `scratch_dir` name the host's run
@@ -6960,15 +7027,15 @@ from the file's own location and leaves the scratch disk and the completeness
 check as the form has them. Host `extra_args` baked into the argv cannot be told
 apart from the user's own settings and are restored like any other.
 
-The **Incremental — process only missing FOVs** checkbox in Output & Compute
-carries `--incremental` into the run: each well's already-recorded
+Run scope's **Fill in what's missing** carries `--incremental` into the run: each well's already-recorded
 `(fov, timepoint)` pairs are read from the output folder and only the missing
 ones are processed, then merged into the existing per-well CSV and
 `<WELL>_out.zip`. Without it a well whose out-zip and CSV both exist is skipped
 whole however few of its FOV-groups landed, which is why a crashed run cannot be
-completed by pressing Run again — the checkbox is the run mode Validate &
-Repair's completion handoff ticks on the way in, and the pipeline ignores it
-when `--force` is also set. `select_incremental_scope` may still switch a run to
+completed by pressing Run again — it is the run mode Validate & Repair's
+completion handoff chooses on the way in. **Redo it** carries `--force`; the
+form cannot send both, and the pipeline ignored `--incremental` under `--force`
+anyway. `select_incremental_scope` may still switch a run to
 a full `--force` reprocess during input resolution (loose images landing under a
 cross-well flat-field/background model), but it never clears a `True` the form
 set: with nothing appended it returns before touching the key.
@@ -8256,7 +8323,7 @@ came from this one.
 `OmeExplodeCancelled`) so the converter's worker can drive a progress bar and
 Cancel. Channel roles are *not* set in the converter — it writes the OME channel
 **names** as tokens; the user assigns nuclear/fluor/phase in Analyze's normal
-Channels & segmentation section on the converted folder. `pipeline/ome_explode.py` and
+Channels section on the converted folder. `pipeline/ome_explode.py` and
 `util/plate_grid.py` are in the remote manifest so it stays a complete mirror of
 `pipeline/` + `util/` (`test_remote_manifest.py`).
 
@@ -10473,8 +10540,8 @@ the module imports; `domain/fields.py` imports the field rules the same guarded 
 already means the mode off to every reader, so the stripped form's argv is the one it had before the section
 existed (`tests/test_nanowell_removable.py`). The pipeline's nanowell mode and the Datasets tools' table carrying
 stay in every build: Qt-free, sent to remote hosts, and what keeps a dataset with nanowell tables whole. The
-Nanowells section (`analyze/nanowell_section.py`, folded by default, directly below Image correction & QC) holds the mode
-checkbox, the plate format, the array geometry (*Hexagonal lattice in a circle*, which sends no flag, or *Infer
+Nanowell array section (`analyze/nanowell_section.py`, shown only while Channels ▸ Plate type is Nanowell array,
+directly below Segmentation) holds the plate format, the array geometry (*Hexagonal lattice in a circle*, which sends no flag, or *Infer
 from the image*, which sends `--nanowell_geometry infer`; `GEOMETRY_CHOICES` in `domain/nanowell_fields.py`), the
 margin, the square's edge angle and the occlusion and
 clipping thresholds; a blank number sends no flag and the pipeline's default applies. **The count's own settings sit
@@ -10503,7 +10570,7 @@ never runs the per-image segmentation the selector chooses between — each well
 and `pipeline/cli_args` sets the method to label-free itself — so the selector is set only so the form's checks for
 the other methods (a StarDist tile size, a watershed cytoplasm channel) do not refuse a run over settings it ignores;
 shown as well, it read as a second segmentation to configure beside the count's own. The count box carries the
-form's one **Segmentation** row in this mode ("Nanowell cell count (Cellpose, on the Phase channel)"), and the hint
+Segmentation section's one **Method** row in this mode ("Nanowell cell count (Cellpose, on the Phase channel)"), and the hint
 under the section names no method then, keeping only what stops the run (no channel marked Phase)
 (`tests/test_nanowell_count_settings_sit_with_segmentation.py`). A build with no label-free method disables the mode. Run validation adds
 `nanowell_option_errors` (bounds; a Phase channel only when channel auto-detection is off, since detection names it
@@ -10575,7 +10642,7 @@ whole `nanowells/` directory and every re-anchored well not already released hav
 not the sidecar's summary, which each batch of a batched run writes over the last —
 (`pull_nanowell_results`). A well whose sites table or grid record did not arrive fails verification
 (`missing_nanowell_tables`), which keeps the remote copy. An incremental nanowell run is refused on a remote host
-when the user ticked Incremental, in Analyze and as a backstop in the runner and the run record
+when the user chose Fill in what's missing, in Analyze and as a backstop in the runner and the run record
 (`NANOWELL_REMOTE_INCREMENTAL_REFUSAL`): the remote would analyse only the new timepoints, without the earlier
 ones' roster and template, and its tables would replace the local ones. An Incremental that changes nothing is
 not refused: under Force, or when every well in *Only these wells* is also in *Force these wells*
@@ -11852,7 +11919,7 @@ parent process supervises the per-well worker pool:
   genuinely gone every remaining group fails the same way: the run continues,
   logging a failure per group, and produces a full complement of
   complete-looking per-well outputs. Point `$ALLWELL_SCRATCH_DIR` (or the
-  Analyze tab's *Scratch disk* field) at a roomier volume when the home volume
+  Analyze tab's *Scratch folder* field) at a roomier volume when the home volume
   is tight.
 - **A well's extracted inputs are reclaimed before its zip-up.** Building
   `<well>_out.zip` while the staging directory still holds every intermediate is
@@ -12836,7 +12903,7 @@ Linux, at a path the user had never chosen and could not find.
 **Scratch (bulk, transient).** `pipeline.io.scratch_base_for(output_dir)` decides
 where per-well working files go: the extracted input TIFs, every intermediate
 image, and the per-FOV checkpoints. Resolution order is `$ALLWELL_SCRATCH_DIR`
-(set by `--scratch_dir` or the Analyze tab's *Scratch disk* field) →
+(set by `--scratch_dir` or the Analyze tab's *Scratch folder* field) →
 **`scratch/` in the app's folder** (the default: `~/.allwell/scratch`, or
 `%LOCALAPPDATA%\allwell\scratch` on Windows — §5's local-files section) →
 `output_dir` (last resort, warned).
@@ -13315,9 +13382,9 @@ flag, and both of its callers use them: the converter passes the channel roles
 it assigned, Validate & Repair passes the dataset's whole recorded sidecar with
 `incremental=True`. **It has to be legible on arrival.** Everything it changes
 is either a field whose new value is indistinguishable from the old one at a
-glance, or — for *Incremental*, the setting that decides whether the run
-completes anything at all — a checkbox inside **Compute options**, which is one
-of the sections that fold by default. A correct handoff therefore looked exactly
+glance, or — for *Fill in what's missing*, the setting that decides whether the
+run completes anything at all — a choice inside **Run scope**, which is one of
+the sections that fold by default. A correct handoff therefore looked exactly
 like landing on an untouched Analyze tab, which is how a working feature gets
 reported as doing nothing. So it unfolds that section
 (`AnalyzeFormChromeMixin.reveal_section`) and `_announce_analyze_handoff` states
@@ -18968,7 +19035,7 @@ the log now says so rather than leaving it to be guessed:
 - **A local run.** Check the `Scratch  :` line at the top of the run log — it
   must **not** be a network path (it defaults to `~/.allwell/scratch`, or
   `%LOCALAPPDATA%\allwell\scratch` on Windows; set
-  Analyze → *Scratch disk* or `--scratch_dir` to a local SSD if it isn't). That
+  Analyze → Advanced → *Scratch folder* or `--scratch_dir` to a local SSD if it isn't). That
   line carries the bulk of the run's I/O. What remains on the output dir is the
   two per-well result writes, which retry through the transient; if they still
   exhaust the budget the message names the volume. Lower `--workers` to cut the

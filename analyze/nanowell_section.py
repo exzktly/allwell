@@ -81,6 +81,14 @@ _GRID_FIELDS = (
 )
 
 
+def _scan_label(value: str) -> str:
+    """``"top-left-row-serpentine"`` as a person reads it: ``"Top-left corner, by row, serpentine"``."""
+    parts = value.split("-")
+    corner, major = f"{parts[0]}-{parts[1]}", parts[2]
+    serpentine = ", serpentine" if len(parts) > 3 else ""
+    return f"{corner.capitalize()} corner, by {major}{serpentine}"
+
+
 def settings_from_opts(opts: dict):
     """The pipeline's ``NanowellSettings`` for the form's run options (blank numeric fields take the defaults)."""
     from pipeline.nanowell_run import NanowellSettings
@@ -108,18 +116,47 @@ def settings_from_opts(opts: dict):
 class AnalyzeNanowellSectionMixin:
     """The Nanowells section's builders and rules. Binds to the ``AnalyzeTab``."""
 
+    def _build_plate_type_row(self, sec: QWidget) -> None:
+        """"Plate type: Standard plate | Nanowell array" at the head of Channels.
+
+        Nanowell mode is a statement about the whole plate, and turning it on
+        changes the Segmentation section and the channels a run needs, so it is
+        chosen where those are — not inside a folded section at the foot of the
+        form, where it used to be a checkbox that rewrote controls a screen
+        away. ``_nanowell_cb`` stays the mode's one state (a checkbox nothing
+        shows), so everything that reads or sets the mode — the sidecar
+        restore, the job-edit round trip, the run options — is unchanged; the
+        segmented control is a view of it, kept in step both ways.
+        """
+        from widgets.segmented_control import SegmentedControl
+
+        row = self._row(sec, "Plate type")
+        self._plate_type_seg = SegmentedControl(row)
+        self._plate_type_seg.addSegment("Standard plate", data=False)
+        self._plate_type_seg.addSegment("Nanowell array", data=True)
+        row.layout().addWidget(self._plate_type_seg, 1)
+        self._nanowell_cb = QCheckBox("Nanowell array", row)
+        self._nanowell_cb.setToolTip("Process each well at each timepoint as a tiled array of nanowells.")
+        self._nanowell_cb.hide()
+        self._plate_type_seg.currentChanged.connect(
+            lambda _i: self._nanowell_cb.setChecked(bool(self._plate_type_seg.currentData())))
+        self._nanowell_cb.toggled.connect(
+            lambda on: self._plate_type_seg.setCurrentIndex(1 if on else 0))
+        self._nanowell_cb.toggled.connect(lambda _on: self._refresh_section_summary("Channels"))
+
     def _build_nanowell_section(self, parent: QWidget) -> None:
         sec = self._section(
-            parent, "Nanowells", collapsible=True, collapsed=True,
+            parent, "Nanowell array",
             info="Analyse tiled phase images of a nanowell array: each well at each timepoint is processed as one "
                  "unit (every tile together), nanowells are addressed on the lattice and measured label-free, with "
                  "fluorescence where present. Needs the dataset's acquisition record (written by the converters) "
                  "and a Phase channel. Use Test detection before a plate-wide run.")
-        row = self._row(sec, "Mode")
-        self._nanowell_cb = QCheckBox("Nanowell arrays", row)
-        self._nanowell_cb.setToolTip("Process each well at each timepoint as a tiled array of nanowells.")
-        row.layout().addWidget(self._nanowell_cb)
-        row.layout().addStretch(1)
+        self._nanowell_section = sec.parentWidget()
+        if not hasattr(self, "_nanowell_cb"):
+            # A form without a Channels plate-type row (none today) still gets
+            # the mode's state, as the checkbox it always was.
+            self._nanowell_cb = QCheckBox("Nanowell array", sec)
+            sec.layout().addWidget(self._nanowell_cb)
 
         row = self._row(sec, "Plate format")
         self._nanowell_format_cb = QComboBox(row)
@@ -156,7 +193,7 @@ class AnalyzeNanowellSectionMixin:
         row = self._row(sec, "Scan order", tooltip="Only with a tile grid: where the stage started and how it ran.")
         self._nanowell_scan_cb = QComboBox(row)
         for value in SCAN_CHOICES:
-            self._nanowell_scan_cb.addItem(value.replace("-", " "), userData=value)
+            self._nanowell_scan_cb.addItem(_scan_label(value), userData=value)
         # "bottom right column serpentine" is wider than the sidebar's field column: the closed combo elides
         # it, the list shows it whole, and the tooltip names the current choice.
         self._nanowell_scan_cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -191,8 +228,12 @@ class AnalyzeNanowellSectionMixin:
             # A build without Cellpose (a profile that leaves it out) cannot segment label-free, which is the
             # only segmentation nanowell mode has: say so instead of offering a mode that cannot run.
             self._nanowell_cb.setEnabled(False)
-            self._nanowell_status.setText("Nanowell mode needs label-free (Cellpose) segmentation, which this build "
-                                          "does not include.")
+            reason = "Nanowell mode needs label-free (Cellpose) segmentation, which this build does not include."
+            self._nanowell_status.setText(reason)
+            seg = getattr(self, "_plate_type_seg", None)
+            if seg is not None:
+                seg.setSegmentEnabled(1, False)
+                seg.setToolTip(reason)
         self._nanowell_cb.toggled.connect(self._refresh_nanowell_enabled)
         self._refresh_nanowell_enabled()
 
@@ -225,7 +266,7 @@ class AnalyzeNanowellSectionMixin:
         box = getattr(self, "_nanowell_count_box", None) or sec
         # Stands where the method selector stood: in nanowell mode that selector is hidden
         # (``_nanowell_pin_segmentation``), so this is the form's one Segmentation entry.
-        row = self._row(box, "Segmentation", tooltip=(
+        row = self._row(box, "Method", tooltip=(
             "A nanowell run does not run the per-image segmentation the methods above choose between: it counts the "
             "cells in each nanowell with its own Cellpose call, on the channel marked 'Phase', with the settings "
             "below."))
@@ -248,13 +289,10 @@ class AnalyzeNanowellSectionMixin:
         row.layout().addStretch(1)
         self._nanowell_field_rows.append(row.parentWidget())
         row = self._row(box, "Segment on", tooltip=(
-            "What the cell count's model is given. Raw image: each tile as it was imaged — what Cellpose's models, "
-            "Cellpose-SAM's among them, were trained on. A cell found on a nanowell's rim is still not counted: only "
-            "a cell whose centre lies inside a nanowell's interior is. Rim-removed: each nanowell divided by the "
-            "well's empty-nanowell picture, which takes the rim away but is a ratio image no model was trained on, "
-            "and stretches the faint noise of an empty nanowell. Confluence is measured on the rim-removed image "
-            "either way. Compare the two on one well with Test detection, whose crops show the image the model was "
-            "given."))
+            "What the cell count's model is given. Raw image: each tile as imaged, what Cellpose's models were "
+            "trained on; only a cell centred inside a nanowell is counted. Rim-removed: each nanowell divided by the "
+            "empty-nanowell picture, which removes the rim but is a ratio image no model was trained on. Compare the "
+            "two on one well with Test detection."))
         self._nanowell_segment_on_cb = QComboBox(row)
         for value, label in SEGMENT_ON_CHOICES:
             self._nanowell_segment_on_cb.addItem(label, userData=value)
@@ -326,8 +364,13 @@ class AnalyzeNanowellSectionMixin:
             row.setVisible(custom)
 
     def _refresh_nanowell_enabled(self, *_: object) -> None:
-        """The controls below the mode checkbox mean nothing while it is off, so they are disabled, not hidden."""
+        """The section is shown only for a nanowell plate: its controls mean nothing on a standard one, and greyed
+        out they were all but indistinguishable from live ones. They are also disabled while hidden, so nothing that
+        reads ``isEnabled`` treats a standard plate's form as carrying nanowell settings."""
         on = self._nanowell_cb.isChecked()
+        section = getattr(self, "_nanowell_section", None)
+        if section is not None:
+            section.setVisible(on)
         self._nanowell_format_cb.setEnabled(on)
         self._nanowell_geometry_cb.setEnabled(on)
         self._nanowell_model_cb.setEnabled(on)
@@ -412,12 +455,12 @@ class AnalyzeNanowellSectionMixin:
         the label-free page's count box, and ``pipeline.cli_args`` sets the method to label-free itself. The
         selector is still set — the form's own checks (a StarDist tile size, a watershed cytoplasm channel)
         would otherwise refuse a run over a setting the run ignores — but it is hidden, because a second,
-        locked "Segmentation" entry above the count's own read as two segmentations to configure. The count
-        box carries the one "Segmentation" row in this mode. The user's choice is put back, and the selector
+        locked "Method" entry above the count's own read as two segmentations to configure. The count box
+        carries the section's one "Method" row in this mode. The user's choice is put back, and the selector
         shown, when the mode is switched off.
         """
         # ``_row`` puts the selector in the row's right-hand cell; the label is in that cell's parent, so the parent
-        # is the row to hide — hiding the cell alone would strand the word "Segmentation".
+        # is the row to hide — hiding the cell alone would strand the word "Method".
         cell = self._seg_method_cb.parentWidget()
         row = cell.parentWidget() if cell is not None else None
         if row is not None and row.objectName() == "AnalyzeFormRow":
@@ -531,7 +574,8 @@ class AnalyzeNanowellSectionMixin:
         remote = for_run and self._remote_cb.currentData() is not None
         # Not when every well the run touches is forced: Incremental then changes nothing, and the run drops it
         # before the remote sees it (``run_spec._nanowell_remote_resume_by_well``).
-        if remote and self._incremental_cb.isChecked() and not incremental_is_moot(opts):
+        if (remote and self._existing_output_cb.value() == "incremental"
+                and not incremental_is_moot(opts)):
             from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
 
             problems.append(NANOWELL_REMOTE_INCREMENTAL_REFUSAL)

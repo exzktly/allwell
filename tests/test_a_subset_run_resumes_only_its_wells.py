@@ -120,6 +120,6 @@ def test_the_whole_plate_after_an_unfinished_run_runs_well_by_well(remote_nanowe
 
 def test_a_forced_resume_stays_forced(remote_nanowell_run):
     tab, _out, start, _logged = remote_nanowell_run
-    tab._force_cb.setChecked(True)
+    tab._existing_output_cb.setValue("force")
     assert start() == "launched"
     assert start.sent[-1].get("force") is True

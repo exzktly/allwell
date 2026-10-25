@@ -35,14 +35,14 @@ from pipeline.field_quality_record import FOCUS_SCORE_CEILING
 #: Whole-number fields where ``0`` is a meaningful value ("off" / "no bound"):
 #: key -> label.
 _INT_FIELDS = {
-    "tophat_radius_nir": "Nuclear tophat radius",
-    "tophat_radius_fluor": "Fluor tophat radius",
-    "fft_small_nir": "Nuclear FFT small-object px",
-    "fft_small_fluor": "Fluor FFT small-object px",
-    "tf_threads": "TF threads",
-    "workers": "Workers",
-    "remote_batch_size": "Remote batch size",
-    "stardist_tile_px": "StarDist tile px",
+    "tophat_radius_nir": "Segmentation-channel radius",
+    "tophat_radius_fluor": "Other channels' radius",
+    "fft_small_nir": "Segmentation small px",
+    "fft_small_fluor": "Other small px",
+    "tf_threads": "Threads per worker",
+    "workers": "Wells in parallel",
+    "remote_batch_size": "Batch size",
+    "stardist_tile_px": "Max tile size",
 }
 
 #: Whole-number fields that only matter under one segmentation method, so a

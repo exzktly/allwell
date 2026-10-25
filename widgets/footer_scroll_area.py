@@ -92,4 +92,6 @@ class FooterScrollArea(QScrollArea):
         if obj is self._footer and event.type() in (
                 QEvent.LayoutRequest, QEvent.Show, QEvent.Hide):
             self._schedule_layout()
+        if obj is self._footer:
+            return False      # observed, never consumed
         return super().eventFilter(obj, event)

@@ -1734,6 +1734,11 @@ QWidget#AnalyzeRunFooter {{
     background-color: {c.panel};
     border-top: 1px solid {c.border};
 }}
+/* Its two rows are plain QWidgets, which the app-wide QWidget rule fills with
+   the canvas colour; left to it they paint over the footer's own fill and edge. */
+QWidget#AnalyzeRunFooter > QWidget {{
+    background-color: transparent;
+}}
 QToolButton#PhoneMenuButton, QToolButton#PhonePageButton,
 QToolButton#PhoneOptionsButton, QToolButton#PhoneControlsButton {{
     background-color: transparent;

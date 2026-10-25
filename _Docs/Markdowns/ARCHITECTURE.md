@@ -6733,7 +6733,12 @@ the scroll area stays the one widget the shell holds as `_left_sidebar`, so
 hiding it, fixing its width and reading its `viewport()` all behave as before,
 and the viewport is shortened by the footer's height so the form's last rows
 are never drawn under it. Run is therefore on screen however far the form is
-scrolled. `_show_run_buttons(running=…)` is the one place the run row changes:
+scrolled. The footer's fill and top edge are QSS (`QWidget#AnalyzeRunFooter`),
+and its two rows are made transparent by a child rule beside it: the app-wide
+`QWidget` rule otherwise fills every plain row with the canvas colour, over the
+footer's own paint, and the footer is laid out correctly and invisible.
+`test_analyze_sidebar_ux.py::test_the_footer_is_drawn_apart_from_the_form`
+reads the drawn pixels for that reason. `_show_run_buttons(running=…)` is the one place the run row changes:
 it sets the enabled state the run's start and end always set, and shows Run at
 idle and Suspend / Stop while a run is going. Phone layout still lends the run
 row to its bar at the foot of the pane (`analyze/phone_view.py`); it reads the

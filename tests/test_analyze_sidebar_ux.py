@@ -189,3 +189,23 @@ def test_remote_options_show_only_for_a_remote(tab):
     tab._remote_cb.addItem("gpu-box", userData="gpu-box")
     tab._remote_cb.setCurrentIndex(tab._remote_cb.count() - 1)
     assert not section.isHidden()
+
+
+def test_the_footer_is_drawn_apart_from_the_form(tab, qtbot, qapp):
+    """Measured in pixels, because the first version passed every geometry
+    check here while drawing nothing: the app-wide ``QWidget`` rule filled the
+    footer's two rows with the canvas colour, over the footer's own fill and
+    its top edge, so the footer was indistinguishable from the form."""
+    from ui import theme
+
+    before = qapp.styleSheet()
+    qapp.setStyleSheet(theme.qss())
+    try:
+        _settle(qtbot)
+        footer = tab._left_sidebar.footer()
+        img = footer.grab().toImage()
+        x = footer.width() - 4                    # right of every control in both rows
+        assert img.pixelColor(x, 0).name().lower() == theme.Colors.border.lower()
+        assert img.pixelColor(x, footer.height() // 2).name().lower() == theme.Colors.panel.lower()
+    finally:
+        qapp.setStyleSheet(before)

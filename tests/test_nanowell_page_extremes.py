@@ -173,7 +173,8 @@ def _row_labels(ctx):
 
 def test_the_view_draws_the_ranked_rows_at_the_latest_timepoint_with_their_crops_over_time(page, qtbot):
     _choose_extremes(qtbot, page)
-    assert page.widgets.get("_nw_tp_cb").currentText() == "t_d"          # the well's latest
+    assert page.widgets.get("_nw_tp_cb").currentData() == "t_d"          # the well's latest
+    assert page.widgets.get("_nw_tp_cb").currentText() == "10 h"         # named by its hours, as on Plotting
     # Six ranked for the default five a block: three each, the largest first and the smallest first.
     assert _row_labels(page) == ["#1  q 0, r 0\n4×", "#2  q 4, r 0\n3×", "#3  q 2, r 0\n2×",
                                  "#1  q 1, r 0\n0.5×", "#2  q 3, r 0\n1×", "#3  q 5, r 0\n1.5×"]
@@ -204,7 +205,7 @@ def test_the_spin_box_and_the_timepoint_combo_change_what_is_ranked(page, qtbot)
     assert [label.split("\n")[0] for label in _row_labels(page)] == ["#1  q 0, r 0", "#2  q 4, r 0",
                                                                     "#1  q 1, r 0", "#2  q 3, r 0"]
     tp_cb = page.widgets.get("_nw_tp_cb")
-    tp_cb.setCurrentIndex([tp_cb.itemText(i) for i in range(tp_cb.count())].index("t_a"))
+    tp_cb.setCurrentIndex(tp_cb.findData("t_a"))
     assert [label.split("\n")[0] for label in _row_labels(page)] == ["#1  q 2, r 0", "#2  q 0, r 0",
                                                                     "#1  q 1, r 0", "#2  q 3, r 0"]
 

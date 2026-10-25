@@ -34,7 +34,7 @@ from review.features.nanowell.renderer import (
     render_position, render_site_detail, render_trajectories,
 )
 from review.features.nanowell.state import IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS
-from review.features.nanowell.series_compute import long_format, site_metrics, site_series
+from review.features.nanowell.series_compute import crop_metric_lines, long_format, site_metrics, site_series
 
 log = logging.getLogger("review")
 
@@ -955,10 +955,43 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                deliver=deliver)
     st.extreme_axes = render_extremes(fig, model, {site: st.crops[site] for site in model.sites()
                                                    if site in st.crops},
-                                      label=_label(metric, channel), note=note, cells=st.crop_cells)
+                                      label=_label(metric, channel), note=note, cells=st.crop_cells,
+                                      timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
+                                      metrics=crop_metrics(st, model.sites(), channel))
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
     redraw_detail(ctx)
+
+
+def extremes_columns(timepoints, ranked: str, chosen) -> list:
+    """The timepoints the Extremes montage shows, in the well's order: those *chosen* (every one when none is), and
+    always the ranking timepoint *ranked*, which orders the rows."""
+    chosen = set(chosen or ())
+    return [tp for tp in timepoints if not chosen or tp in chosen or tp == ranked]
+
+
+def crop_metrics(st, sites, channel) -> dict:
+    """``site -> {timepoint: [caption lines]}``: each nanowell's computed measurements at each timepoint, for the
+    captions under its crops (``series_compute.crop_metric_lines``)."""
+    out: dict = {}
+    if st.metrics is None:
+        return out
+    for site in sites:
+        well, q, r = site
+        frame = site_series(st.metrics, well, q, r)
+        out[tuple(site)] = {str(row["timepoint"]): crop_metric_lines(row, channel)
+                            for row in frame.to_dict("records")}
+    return out
+
+
+def set_extremes_timepoints(ctx, timepoints) -> None:
+    """Show these timepoints as the Extremes montage's columns (every one when empty)."""
+    st = _state(ctx)
+    if st is None:
+        return
+    st.extremes_tps = [str(tp) for tp in timepoints]
+    _save_soon(ctx)
+    redraw(ctx)
 
 
 def crops_site(st) -> tuple | None:
@@ -995,7 +1028,9 @@ def draw_popout(ctx) -> None:
             data, metrics = st.data, st.metrics
             _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site),
                    failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
-        render_crop_grid(fig, st.crops.get(site), site, cells=st.crop_cells)
+        channel = match_channel(ctx.state.channel.active_channel, st.data.channels)
+        render_crop_grid(fig, st.crops.get(site), site, cells=st.crop_cells,
+                         metrics=crop_metrics(st, [site], channel).get(site))
     canvas.draw_idle()
 
 

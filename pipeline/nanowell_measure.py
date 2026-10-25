@@ -92,7 +92,9 @@ MIN_LEVEL_CONTRAST = 0.05
 #: its gain already was (``nanowell_run._smoothed_offsets``): one misread surround moved one nanowell's floor alone.
 #: 6: the ``levelled`` segmenter scale levels each nanowell by its modal floor (:func:`modal_level`), not its
 #: interior's median, which in a nanowell more than half covered by cells is the cells' level; and the count's
-#: input no longer carries the Cellpose normalisation earlier crop builds gave it, so their counts are not reused.
+#: input no longer carries the Cellpose normalisation earlier crop builds gave it, so their counts are not reused;
+#: a crop no longer pastes the part of a neighbour's cell it saw (``_own_labels``), and Cellpose no longer drops a
+#: mask filling a crop.
 MEASURE_VERSION = 6
 #: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
 MIN_TEXTURE_THRESHOLD = 0.02
@@ -802,14 +804,17 @@ def cellpose_segmenter(diameter_px: float = 0.0, **options):
     cell size in pixels (0 lets Cellpose use its model's own scale); *options* go to
     ``pipeline.cellpose._segment_cellpose`` (``model_type``: ``nanowell_run.CELLPOSE_MODELS``).
     """
-    def segment(image, lowhigh=None):
+    def segment(image, lowhigh=None, max_size_fraction=None):
         from pipeline.cellpose import _segment_cellpose
-        return _segment_cellpose(image, diameter=diameter_px, lowhigh=lowhigh, **options)
+        return _segment_cellpose(image, diameter=diameter_px, lowhigh=lowhigh, max_size_fraction=max_size_fraction,
+                                 **options)
 
-    def segment_many(images, lowhigh):
+    def segment_many(images, lowhigh, max_size_fraction=None):
         from pipeline.cellpose import _segment_cellpose_many
-        return _segment_cellpose_many(images, diameter=diameter_px, lowhigh=lowhigh, **options)
+        return _segment_cellpose_many(images, diameter=diameter_px, lowhigh=lowhigh,
+                                      max_size_fraction=max_size_fraction, **options)
     segment.accepts_range = True              # segment_sites hands it the tile's scale for each crop
+    segment.accepts_size_cap = True           # and lifts the area cap on a mask for a crop
     segment.segment_many = segment_many       # and several crops at once (CROP_BATCH)
     return segment
 
@@ -862,23 +867,27 @@ def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: 
         lowhigh = None
     elif lowhigh is None and finite.size:
         lowhigh = tuple(float(v) for v in np.percentile(finite, SEGMENTER_PERCENTILES))
-    windows = [win for g in geometries if (win := crop_window(g, pixel_size_um, (h, w), reach)) is not None]
+    placed = [(g, win) for g in geometries if (win := crop_window(g, pixel_size_um, (h, w), reach)) is not None]
     many = getattr(segmenter, "segment_many", None) if lowhigh is not None else None
     batch = CROP_BATCH if many is not None else 1
+    # A crop is a nanowell's whole world, so an object filling it is a cell, not an outlier to drop by area
+    # (Cellpose drops a mask over 40 % of its image by default: a nanowell-filling object was counted empty).
+    whole = {"max_size_fraction": 1.0} if getattr(segmenter, "accepts_size_cap", False) else {}
     out = np.zeros((h, w), dtype=np.int64)
     next_id = 0
-    for start in range(0, len(windows), batch):
-        chunk = windows[start:start + batch]
-        crops = [image[win] for win in chunk]
+    for start in range(0, len(placed), batch):
+        chunk = placed[start:start + batch]
+        crops = [image[win] for _g, win in chunk]
         if many is not None:
-            found = many(crops, lowhigh)
+            found = many(crops, lowhigh, **whole)
         else:
-            found = [segmenter(c) if lowhigh is None else segmenter(c, lowhigh=lowhigh) for c in crops]
-        for win, crop, labels in zip(chunk, crops, found):
+            found = [segmenter(c, **whole) if lowhigh is None else segmenter(c, lowhigh=lowhigh, **whole)
+                     for c in crops]
+        for (g, win), crop, labels in zip(chunk, crops, found):
             labels = np.asarray(labels)
             if labels.shape != crop.shape:
                 raise ValueError("The segmenter returned a label image of a different shape")
-            labels = labels.astype(np.int64)
+            labels = _own_labels(labels.astype(np.int64), win, g, geometries, pixel_size_um)
             window = out[win]
             free = (labels > 0) & (window == 0)
             window[free] = labels[free] + next_id
@@ -886,6 +895,29 @@ def segment_sites(image, pixel_size_um: float, geometries, segmenter, *, reach: 
             if on_site is not None:
                 on_site()
     return out
+
+
+def _own_labels(labels, win, own, geometries, pixel_size_um: float):
+    """*labels* (one crop's, at *win* of the tile) without the objects whose centroid lies in another nanowell's
+    counting circle (:func:`count_cells`'s ``INTERIOR_FRACTION``). A crop reaches past its own nanowell's rim, so on a
+    lattice whose pitch is under about 2.4 radii it holds part of a neighbour's circle; the part of a neighbour's
+    cell it sees, pasted first, kept those pixels from that cell's own crop, and the cell was counted twice. The
+    neighbour's own crop answers for it. Objects between nanowells stay, as the left-out cells the sheet draws."""
+    others = [g for g in geometries if g.index != own.index]
+    if not others or not labels.any():
+        return labels
+    ids, centroids = _label_centroids(labels)
+    y0, x0 = win[0].start, win[1].start
+    drop = []
+    for label, (x, y) in zip(ids, centroids):
+        for g in others:
+            cx, cy = g.centre_um[0] / pixel_size_um - 0.5, g.centre_um[1] / pixel_size_um - 0.5
+            if math.hypot(x + x0 - cx, y + y0 - cy) <= INTERIOR_FRACTION * g.radius_um / pixel_size_um:
+                drop.append(label)
+                break
+    if drop:
+        labels = np.where(np.isin(labels, drop), 0, labels)
+    return labels
 
 
 def crop_window(g, pixel_size_um: float, shape, reach: float = CROP_REACH) -> tuple[slice, slice] | None:

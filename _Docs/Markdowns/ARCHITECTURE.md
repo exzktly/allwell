@@ -10034,12 +10034,20 @@ new run, gives it each owned nanowell's crop, `CROP_REACH` (1.2) radii around th
 (`nanowell_measure.segment_sites`) — `CROP_BATCH` (32) crops a call to a segmenter that offers `segment_many`
 (Cellpose's: `pipeline.cellpose._segment_cellpose_many` centres them in a common shape padded with 0 and makes one
 Cellpose 4 `eval` of the `(N, H, W, 1)` stack, which runs 8 crops' network tiles per pass and computes each crop's
-masks on its own; on Cellpose 3 it is one call per crop), one call per crop otherwise — renumbers each crop's labels and pastes them into a whole-tile label image, so
-`count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's) is given one
+masks on its own; on Cellpose 3 it is one call per crop), one call per crop otherwise — drops from each crop the
+objects whose centroid lies in another nanowell's counting circle (`_own_labels`: at a pitch under about 2.4 radii a
+crop reaches into its neighbour's circle, and the part of a neighbour's cell it saw, pasted first, kept those pixels
+from that cell's own crop, which then counted it a second time), renumbers each crop's labels and pastes them into a
+whole-tile label image, so `count_cells` and the rest read it unchanged; a segmenter that declares
+`accepts_size_cap` (Cellpose's) is told `max_size_fraction=1.0` for a crop, since Cellpose 4 drops a mask over 40 %
+of its image by default and a nanowell's counting circle is 44 % of its crop, so an object filling the nanowell was
+deleted and the nanowell counted empty; a segmenter that declares `accepts_range` (Cellpose's) is given one
 range for every crop of a tile, because a crop scaled to its own range would stretch an empty nanowell's noise. Which
 range is `segment_scale` (`nanowell_measure.SEGMENT_SCALES`, applied by `segmenter_scale` in `_tile_contents` and in
 Test detection's `_tile_segmented`, for either scope): `levelled`, the default for a new run, first shifts each
-nanowell's interior by a constant so its median is the median of the tile's nanowells' medians (`_level_interiors`),
+nanowell's interior by a constant so its floor — its modal level (`modal_level`), not its median, which in a
+nanowell more than half covered by cells is the cells' level — is the median of the tile's nanowells' floors
+(`_level_interiors`),
 then does what `nanowells` does — on brightfield a few nanowells are far brighter than the rest, and under one pooled
 range such a nanowell either lay above it (a rare one) or widened it and squashed every other nanowell's cells (a
 common one), and was counted empty; the shift moves brightness, not contrast. `nanowells` takes the pooled

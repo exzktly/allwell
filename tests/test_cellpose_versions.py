@@ -254,3 +254,18 @@ def test_tf32_is_switched_on_for_a_model_on_a_gpu_and_said_in_the_load_line(monk
     assert backends.cuda.matmul.allow_tf32 is cuda and backends.cudnn.allow_tf32 is cuda
     line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Cellpose cpsam on"))
     assert ("TF32" in line) is cuda and "float32" in line
+
+
+def test_a_crop_s_area_cap_reaches_cellpose_4_on_both_paths_and_a_tile_keeps_cellpose_s_own(monkeypatch):
+    """Cellpose 4 drops a mask over 40 % of its image's pixels. On a nanowell crop the counting circle is 44 % of
+    the crop, so an object filling its nanowell was deleted and the nanowell counted empty: a computed zero where
+    nothing was measured. A crop is given 1.0; a call that names no cap (a whole tile) leaves Cellpose's own."""
+    _install(monkeypatch, 4)
+    model = _BatchModel()
+    monkeypatch.setattr(cp, "_cellpose_model", lambda model_type=None: model)
+    crops = [np.full((3, 4), 250.0), np.full((2, 5), 10.0)]
+    cp._segment_cellpose_many(crops, lowhigh=(10.0, 250.0), model_type="cpsam", max_size_fraction=1.0)
+    cp._segment_cellpose(crops[0], model_type="cpsam", lowhigh=(10.0, 250.0), max_size_fraction=1.0)
+    cp._segment_cellpose(crops[0], model_type="cpsam", lowhigh=(10.0, 250.0))
+    caps = [kw.get("max_size_fraction") for _x, kw in model.calls]
+    assert caps == [1.0, 1.0, None]

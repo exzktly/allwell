@@ -23,8 +23,8 @@ is deleted by the PR that closes its last row.
 | S4 | 1054 | Low | a log with only horizontal range is a dead spot for the page drag | done | `ui/phone_shell._inner_area_owns_drag`; `test_phone_form_swipe` |
 | S5 | 1054 | ? | a log as tall as the viewport may take every page drag | open | unverified |
 | P1 | 1049 | Med | `levelled` levels by the interior median, shifting crowded nanowells' floors | done | `nanowell_measure._level_interiors`; `test_nanowell_segment_crops` |
-| P2 | 1044 | Med-Low | overlapping crops can count one cell twice (custom pitch < ~2.42 r) | open | `nanowell_measure.segment_sites` |
-| P3 | 1044 | Low | Cellpose drops a mask over 40 % of a crop: a nanowell-filling object counted empty | open | `pipeline/cellpose.py` crop calls |
+| P2 | 1044 | Med-Low | overlapping crops can count one cell twice (custom pitch < ~2.42 r) | done | `nanowell_measure._own_labels`; `test_nanowell_segment_crops` |
+| P3 | 1044 | Low | Cellpose drops a mask over 40 % of a crop: a nanowell-filling object counted empty | done | `max_size_fraction=1.0` for crops (`accepts_size_cap`); `test_cellpose_versions`, `test_nanowell_segment_crops` |
 | P4 | 1045 | Low | network/mask timing breakdown missing for single-image calls | open | `pipeline/cellpose.py`, `nanowell_task._log_sites` |
 | P5 | 1045 | Low | MEASURE_VERSION not bumped when the count's normalisation changed | done | bumped to 6 with P1 |
 | P6 | 1047 | Low | a previous run's segmenter-input sheet left beside newer results | open | `nanowell_inspect.write_sheet` |

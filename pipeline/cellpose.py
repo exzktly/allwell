@@ -266,6 +266,7 @@ def _segment_cellpose(
     cellprob_threshold: float = 0.0,
     nucleus_image: np.ndarray | None = None,
     lowhigh: tuple[float, float] | None = None,
+    max_size_fraction: float | None = None,
 ) -> np.ndarray:
     """Segment *image* with Cellpose. Works on any channel (fluorescent or
     brightfield) — the caller chooses the input. ``diameter=0`` passes none, so
@@ -291,6 +292,9 @@ def _segment_cellpose(
     of 0 — an input no model was trained on, which Cellpose-SAM answered with no
     cells. Its own percentile path leaves a flat channel at 0, as here. Only a
     single image takes a range; with a *nucleus_image* it is refused.
+
+    *max_size_fraction*, when given, replaces Cellpose 4's cap on a mask's share of the image (0.4): a nanowell
+    crop is given 1.0, since an object filling its nanowell fills most of the crop. Cellpose 3 is not told.
     """
     model = _cellpose_model(model_type)
     diam = float(diameter) if diameter and diameter > 0 else None
@@ -304,6 +308,8 @@ def _segment_cellpose(
         extra = {"normalize": False}
     major = cellpose_major()
     if major is not None and major >= 4:
+        if max_size_fraction is not None:
+            extra["max_size_fraction"] = float(max_size_fraction)
         if nucleus_image is not None:
             stacked = np.stack([seg, np.asarray(nucleus_image)], axis=-1)  # (Y, X, 2)
             result = model.eval(stacked, diameter=diam, channel_axis=-1, flow_threshold=flow_threshold,
@@ -333,6 +339,7 @@ def _segment_cellpose_many(
     diameter: float = 0.0,
     flow_threshold: float = 0.4,
     cellprob_threshold: float = 0.0,
+    max_size_fraction: float | None = None,
 ) -> list[np.ndarray]:
     """Segment several single-channel *images* in one Cellpose 4 call; one label image per input, its shape.
 
@@ -351,7 +358,8 @@ def _segment_cellpose_many(
     major = cellpose_major()
     if major is None or major < 4 or len(images) == 1:
         return [_segment_cellpose(im, model_type=model_type, diameter=diameter, flow_threshold=flow_threshold,
-                                  cellprob_threshold=cellprob_threshold, lowhigh=lowhigh) for im in images]
+                                  cellprob_threshold=cellprob_threshold, lowhigh=lowhigh,
+                                  max_size_fraction=max_size_fraction) for im in images]
     model = _cellpose_model(model_type)
     lo, hi = float(lowhigh[0]), float(lowhigh[1])
     h = max(im.shape[0] for im in images)
@@ -363,7 +371,8 @@ def _segment_cellpose_many(
     for i, (im, (y, x)) in enumerate(zip(images, at)):
         stack[i, y:y + im.shape[0], x:x + im.shape[1], 0] = (im.astype(np.float32) - lo) / (hi - lo if hi > lo else 1.0)
     diam = float(diameter) if diameter and diameter > 0 else None
+    capped = {} if max_size_fraction is None else {"max_size_fraction": float(max_size_fraction)}
     result = model.eval(stack, diameter=diam, flow_threshold=flow_threshold, cellprob_threshold=cellprob_threshold,
-                        normalize=False)
+                        normalize=False, **capped)
     masks = np.asarray(result[0], dtype=np.int32).reshape(len(images), h, w)
     return [masks[i, y:y + im.shape[0], x:x + im.shape[1]] for i, (im, (y, x)) in enumerate(zip(images, at))]

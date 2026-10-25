@@ -265,7 +265,7 @@ class AnalyzeNanowellSectionMixin:
         box = getattr(self, "_nanowell_count_box", None) or sec
         # Stands where the method selector stood: in nanowell mode that selector is hidden
         # (``_nanowell_pin_segmentation``), so this is the form's one Segmentation entry.
-        row = self._row(box, "Segmentation", tooltip=(
+        row = self._row(box, "Method", tooltip=(
             "A nanowell run does not run the per-image segmentation the methods above choose between: it counts the "
             "cells in each nanowell with its own Cellpose call, on the channel marked 'Phase', with the settings "
             "below."))
@@ -454,12 +454,12 @@ class AnalyzeNanowellSectionMixin:
         the label-free page's count box, and ``pipeline.cli_args`` sets the method to label-free itself. The
         selector is still set — the form's own checks (a StarDist tile size, a watershed cytoplasm channel)
         would otherwise refuse a run over a setting the run ignores — but it is hidden, because a second,
-        locked "Segmentation" entry above the count's own read as two segmentations to configure. The count
-        box carries the one "Segmentation" row in this mode. The user's choice is put back, and the selector
+        locked "Method" entry above the count's own read as two segmentations to configure. The count box
+        carries the section's one "Method" row in this mode. The user's choice is put back, and the selector
         shown, when the mode is switched off.
         """
         # ``_row`` puts the selector in the row's right-hand cell; the label is in that cell's parent, so the parent
-        # is the row to hide — hiding the cell alone would strand the word "Segmentation".
+        # is the row to hide — hiding the cell alone would strand the word "Method".
         cell = self._seg_method_cb.parentWidget()
         row = cell.parentWidget() if cell is not None else None
         if row is not None and row.objectName() == "AnalyzeFormRow":

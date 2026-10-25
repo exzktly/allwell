@@ -38,7 +38,7 @@ def _controls(container: QWidget) -> list[QWidget]:
     return found
 
 
-def _state(w: QWidget):
+def _state(w: QWidget) -> object | None:
     """A comparable value for *w*, or ``None`` for a widget that holds none."""
     if isinstance(w, QLineEdit):
         return w.text()

@@ -355,8 +355,9 @@ class AnalyzeQCSectionMixin:
             "The focus value below which a cell is out of focus. Recorded with "
             "the dataset, not applied here: Review's Cell Gating excludes the "
             "cells and can undo it. Leave blank unless you have measured one — "
-            "it depends mostly on the microscope, and Review ▸ Cell Gating "
-            "shows where to cut.")
+            "it depends mostly on the microscope, though clipping is the "
+            "exception (a saturated nucleus reads sharper), and Review ▸ Cell "
+            "Gating shows where to cut.")
         rf.layout().addStretch(1)
 
         focus_hint = QLabel(

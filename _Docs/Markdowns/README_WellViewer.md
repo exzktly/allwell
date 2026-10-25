@@ -212,11 +212,11 @@ and, optionally, the margin around a nanowell that must lie inside one tile
 for that tile to own it, the angle of the central square's edges to a lattice row, and the occlusion and
 clipping thresholds below which a nanowell carries its state but no cell count. A blank field uses the default.
 
-With **Nanowell arrays** ticked, the form has one **Segmentation** entry, **Nanowell cell count (Cellpose, on the
+With **Plate type: Nanowell array**, the Segmentation section's **Method** is **Nanowell cell count (Cellpose, on the
 Phase channel)**: a nanowell run does not use the segmentation methods the selector offers, so the selector is
 hidden, and the cell count's own settings are shown in place of their parameters: **Cellpose model**,
-**Segment on**, **Segment**, **Resize** and **Cell diameter (µm)**. Mark the channel the tiles are imaged in as
-**Phase**. Untick **Nanowell arrays** and the selector comes back with the method you had chosen. The cell diameter sets the scale the model looks for cells at: with Resize
+**Segment on**, **Segment**, **Resize** and **Cell diameter (µm)**. Set the Role of the channel the tiles are imaged in to
+**Phase**. Set Plate type back to **Standard plate** and the selector comes back with the method you had chosen. The cell diameter sets the scale the model looks for cells at: with Resize
 *To the cell diameter*, Cellpose resizes each image so that a cell of that diameter becomes its own 30 px. It is not
 necessarily your cells' real size. It starts at 19.5 µm, which at 0.65 µm per pixel is exactly 30 px, so Cellpose
 segments the images as imaged, without resizing — about four times faster than at the cells' real ~10 µm, which it
@@ -225,7 +225,7 @@ enlarged ×1.95 — and on a plate imaged at 0.65 µm per pixel it counted as we
 which does the same at any pixel size; or enter the cells' real diameter to have Cellpose enlarge them to its scale,
 which is slower. Either way, check the counts on one well first. A blank field uses the pipeline's 15 µm default. The count
 reads only these — not the pixel diameter label-free shows outside nanowell mode. When a pixel diameter was set there
-and the µm field is empty or still holds the 19.5 µm it starts with (not typed by you), ticking **Nanowell arrays** converts it with the pixel size the dataset's acquisition record
+and the µm field is empty or still holds the 19.5 µm it starts with (not typed by you), choosing **Nanowell array** converts it with the pixel size the dataset's acquisition record
 gives and fills the µm field, and a note under it says so; a µm size you entered is never replaced. Without a record
 that gives the pixel size, the note says the pixel diameter is not used and asks for the size in µm.
 

@@ -93,7 +93,7 @@ class AnalyzeRunScopeMixin:
         """Set the choice from the pipeline's two flags, as a sidecar records
         them: ``force`` wins, as it does in the pipeline. ``None`` for both
         leaves the choice alone."""
-        if force is None and incremental is None:
+        if (force is None and incremental is None) or not hasattr(self, "_existing_output_cb"):
             return
         if force:
             self._existing_output_cb.setValue("force")

@@ -10603,6 +10603,28 @@ palette — so a capture, which flips the theme without a redraw, puts the publi
 against recorded time, a timepoint without a number as a gap and a hatched band, with each timepoint's state
 written above, and a strip of crops of the first selected nanowell, one per timepoint. **Enlarge crops** (`_nw_crops_btn`, `controller.set_crop_view`, `NanowellState.crop_view`, never persisted) draws the same crops large in place of the page's view (`renderer.render_crop_grid`): one panel per timepoint, all on one brightness scale (the 1st–99th percentile of every crop together) so a change between timepoints reads as a change, with the source and scale in the caption. `redraw` hands the figure to it before any view is drawn (`_draw_crop_view`), the figure answers no click or zoom meanwhile (`st.hits`/`st.drawn` cleared, `on_click` returns), the crops arrive by the site detail's own worker fetch, and clearing the selection leaves the view. Each panel carries `_aw_image_panel`, so the style pass (the page's redraw, the Properties sidebar, an export) leaves its limits and scale at the crop's own extent rather than applying the card's typed axis range.
 
+**The Extremes view** (`extremes_compute`, `renderer.render_extremes`, `controller._draw_extremes`) is a montage
+of one well's nanowells with the largest and the smallest fold change of the Metric. `extremes_compute.extremes`
+ranks the page well's nanowells by one metrics column at one timepoint — `shown_timepoint` gives the well's
+timepoints and starts at its latest, as *Along x: Wells* does (U13) — and takes `NanowellState.extremes_n`
+(persisted, 1 to `EXTREMES_MAX_N`, the *Largest & smallest* spin box) from each end, ties in address order so
+a draw never reorders. Ranking is per well because one well's nanowells share a baseline, an exposure and a
+plate position. Every page metric is ranked by its fold change (`FOLD_CHANGE_OF`): `resolve_metric` turns the
+chosen metric into its fold change on this view, a per-nanowell metric (growth rate, occupancy) into the count
+fold change with a note — and the Metric combo greys those, as on Trajectories — and the Baseline control is
+enabled whatever the metric. A nanowell without a value at the ranking timepoint is not ranked and is counted
+by `reason_label(exclusion_reason(…))`, computed over the whole well because a fold change's reason reads the
+baseline row; a well with fewer than `2 N` ranked splits them between the blocks, the odd one to the largest,
+so none is drawn twice, and the caption says so. The renderer draws one row per nanowell and one column per
+timepoint of the well, each panel an `_aw_image_panel` with a square box, every crop on one brightness scale
+(`_one_scale`, shared with the enlarged crops), the ranking timepoint's column outlined, each row labelled with
+rank, address and value and each crop with the fold change at its timepoint (`format_value`: `2.31×`, or a
+signed difference on log₂). It returns `{axes: site}`, kept on `st.extreme_axes`, and `on_click` selects the
+row's nanowell (Shift adds), which opens the site detail. The crops of the nanowells not yet in `st.crops` are
+read in one worker fetch (`_fetch(…, deliver=…)` merges the result into `st.crops`, the store the site detail
+reads) through `image_compute.crops_for_sites`; a failed read stores its reason under `""`, which each panel
+of those rows prints. Batch Export does not offer this view, since it reads the input archives.
+
 **The other views.** `views_compute` holds what they draw as data. `lattice_xy` places an address on an ideal
 lattice of the well's measured pitch (`well_pitch`, the median of its timepoints' grid records) and kind
 (`lattice_kind`: what the timepoint's own grid record says, hexagonal when it says nothing — per timepoint,
@@ -10750,7 +10772,10 @@ position less the tile's placement, over the x pixel size on both axes as the pi
 a copy, so a cached crop does not keep its whole tile in memory. Without the archive (an output folder copied
 alone), with an archive that cannot be opened, for a nanowell with no owner tile (fused or shared), or when the
 owner tile's image cannot be found, it cuts from the montage and the crop's note says which; the strip's
-caption carries the note and where the crops came from. A timepoint with no position or off the montage is a
+caption carries the note and where the crops came from. `crops_for_sites` cuts many nanowells in one pass and
+`site_crops` is that pass for one: each well's archive is opened once and its rows taken in (timepoint, owner
+tile) order, so a tile shared by several nanowells is decoded once and only one tile, and one montage, is held
+at a time. A timepoint with no position or off the montage is a
 `Crop` with no image and the reason.
 
 **Reads on a worker.** `controller._fetch` reads crops and montages off the UI thread, once per key: the
@@ -10758,8 +10783,8 @@ result goes on the state and the figure is redrawn; a failure stores a value say
 and the read is not relaunched on every redraw; a result for a dataset loaded since is dropped without touching
 the new dataset's bookkeeping; each worker bridge is kept on the state until it delivers, then released.
 
-**The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (the four
-views, U3), Metric, Along x, Baseline, Timepoint and *vs* (both shown on *Along x: Wells*), Well and a
+**The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (the five
+views; U3 planned the first four), Metric, Along x, Baseline, Timepoint and *vs* (both shown on *Along x: Wells*), Well and a
 timepoint slider (on the one-well view, `ONE_WELL_VIEWS`), the Array view's Image combo, Positions switch,
 *Layers* menu (each switch, the colouring, and *Show as* for the presets), *Fit* / *1:1* and the anchor's
 three buttons, Save and Properties; `refresh_controls` shows each view only the controls it uses (Metric and

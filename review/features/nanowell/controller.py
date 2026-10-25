@@ -26,10 +26,11 @@ from review.features.nanowell.distribution_compute import (
 )
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, one_to_one
-from review.features.nanowell.image_compute import Crop, read_montage, site_crops
+from review.features.nanowell import extremes_compute as ec
+from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
-    ArrayDrawn, render_array, render_crop_grid, render_distribution, render_message, render_position,
-    render_site_detail, render_trajectories,
+    ArrayDrawn, render_array, render_crop_grid, render_distribution, render_extremes, render_message,
+    render_position, render_site_detail, render_trajectories,
 )
 from review.features.nanowell.state import IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS
 from review.features.nanowell.series_compute import long_format, site_metrics, site_series
@@ -306,6 +307,10 @@ def redraw(ctx) -> None:
         return
     metric, channel, note = resolve_metric(st.view, st.metric, ctx.state.channel.active_channel, st.data.channels)
     well = page_well(ctx)
+    st.extreme_axes = {}
+    if st.view == "extremes":
+        _draw_extremes(ctx, st, fig, canvas, metric=metric, channel=channel, well=well, note=note)
+        return
     tableless = tableless_wells(ctx)
     array = {}
     if st.view == "array":
@@ -348,9 +353,15 @@ def resolve_metric(view: str, metric: str, active_channel, channels) -> tuple[st
     if view == "trajectories" and metric in PER_NANOWELL:
         return "n", None, (f"{METRICS[metric][0]} has one value per nanowell, not one per timepoint, so "
                            f"Trajectories shows Cell count.")
+    if view == "extremes" and metric in PER_NANOWELL:
+        return ec.FALLBACK, None, (f"{METRICS[metric][0]} has one value per nanowell, so no fold change over time: "
+                                   f"the nanowells are ranked by {METRICS[ec.FALLBACK][0].lower()}.")
     if metric in _CHANNEL_METRICS and channel is None:
-        return "n", None, (f"{metric.replace('_', ' ')} needs a channel with site intensities; the shared channel "
-                           f"({active_channel}) has none, so Cell count is shown.")
+        drawn = ec.FALLBACK if view == "extremes" else "n"
+        return drawn, None, (f"{metric.replace('_', ' ')} needs a channel with site intensities; the shared "
+                             f"channel ({active_channel}) has none, so {METRICS[drawn][0]} is shown.")
+    if view == "extremes":
+        return ec.fold_change_metric(metric)[0], channel, ""
     return metric, channel, ""
 
 
@@ -444,6 +455,10 @@ def shown_timepoint(ctx) -> tuple[list, str]:
     if st.view == "array":
         well = page_well(ctx)
         return list(st.data.timepoints(well)), page_timepoint(ctx, well)
+    if st.view == "extremes":
+        # One well's nanowells, ranked at one of its timepoints: its latest unless one is chosen (as U13).
+        tps = list(st.data.timepoints(page_well(ctx)))
+        return tps, st.timepoint if st.timepoint in tps else (tps[-1] if tps else "")
     tps = list(st.data.timepoints())
     if st.view == "distribution" and st.axis == "wells":
         # The figure draws the drawn wells' timepoints, so the combo offers those and names the one drawn — not
@@ -883,6 +898,37 @@ def rerun_anchored(ctx) -> bool:
     return False
 
 
+# ── the Extremes view ───────────────────────────────────────────────────────
+def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, well: str, note: str) -> None:
+    """The page well's *N* largest and *N* smallest fold changes at the page's timepoint, each a row of crops over
+    every timepoint (``extremes_compute``, ``renderer.render_extremes``). The crops of the nanowells not yet cut
+    are read on a worker, all in one pass, into ``st.crops`` — the store the site detail reads, so a row clicked
+    opens its detail with nothing more to cut."""
+    from review.core.plot_style import apply_export_style_to_current
+
+    st.hits, st.drawn = None, None                       # no dots to hit and nothing to zoom: rows are clicked
+    timepoint = shown_timepoint(ctx)[1]
+    column = metric_column(metric, channel)
+    model = ec.extremes(st.metrics, well, timepoint, column, st.extremes_n, st.data.channels)
+    missing = tuple(sorted(site for site in model.sites() if site not in st.crops))
+    if missing:
+        data, metrics = st.data, st.metrics
+
+        def deliver(found) -> None:
+            st.crops.update(found)
+
+        _fetch(ctx, "extreme_crops", missing, lambda: crops_for_sites(data, metrics, missing),
+               failed=lambda message: {site: {"": Crop(None, "", f"The crops could not be cut: {message}")}
+                                       for site in missing},
+               deliver=deliver)
+    st.extreme_axes = render_extremes(fig, model, {site: st.crops[site] for site in model.sites()
+                                                   if site in st.crops},
+                                      label=_label(metric, channel), note=note)
+    apply_export_style_to_current(ctx, fig, canvas)
+    canvas.draw_idle()
+    redraw_detail(ctx)
+
+
 def _draw_crop_view(ctx, st, fig, canvas) -> bool:
     """Draw the first selected nanowell's crops at every timepoint, large, on the page's figure, when the crop view
     is on; ``True`` when it drew. The crops are the site detail's (``st.crops``), read on a worker the first time."""
@@ -962,12 +1008,13 @@ def redraw_detail(ctx) -> None:
 MONTAGES_KEPT = 6
 
 
-def _fetch(ctx, kind: str, key, job, *, failed) -> None:
+def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
     """Read ``st.<kind>[key]`` on a worker, once, and redraw when it arrives.
 
     A failed read stores ``failed(message)`` — a value that says why — so the figure states the failure and
     the read is not relaunched on every redraw. A result for a dataset loaded since is dropped without
-    touching the new dataset's bookkeeping.
+    touching the new dataset's bookkeeping. With *deliver*, the value is handed to it instead of stored under
+    *key* (a read of many nanowells' crops at once puts each into ``st.crops``).
     """
     from core.worker_bridge import run_off_thread
 
@@ -984,10 +1031,13 @@ def _fetch(ctx, kind: str, key, job, *, failed) -> None:
         st.fetching.discard(tag)
         if holder and holder[0] in st.fetch_bridges:
             st.fetch_bridges.remove(holder[0])
-        store = getattr(st, kind)
-        store[key] = value
-        while kind == "montages" and len(store) > MONTAGES_KEPT:
-            store.pop(next(iter(store)))
+        if deliver is not None:
+            deliver(value)
+        else:
+            store = getattr(st, kind)
+            store[key] = value
+            while kind == "montages" and len(store) > MONTAGES_KEPT:
+                store.pop(next(iter(store)))
         (redraw_detail if kind == "crops" and not st.crop_view else redraw)(ctx)
 
     def on_failed(message) -> None:
@@ -1005,6 +1055,10 @@ def on_click(ctx, event) -> None:
     :func:`on_release` tells apart. The plate selection is never touched. The crop view answers no click."""
     st = _state(ctx)
     if st is not None and st.crop_view:
+        return
+    if st is not None and st.view == "extremes":
+        if event.button == 1:
+            _select(ctx, st.extreme_axes.get(event.inaxes), _adding(event))
         return
     if st is not None and st.view == "array":
         if event.dblclick and event.button == 1 and not st.anchor_mode:
@@ -1113,6 +1167,11 @@ def nw_on_channel_changed(ctx) -> None:
 
 def set_view(ctx, view: str) -> None:
     _set(ctx, "view", view)
+
+
+def set_extremes_n(ctx, count: int) -> None:
+    """How many nanowells each of the Extremes view's two blocks shows."""
+    _set(ctx, "extremes_n", ec.clamp_n(count))
 
 
 def set_cohort(ctx, on: bool) -> None:

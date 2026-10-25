@@ -4958,8 +4958,8 @@ use them.
 
 **Controls**
 
-- **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories* and *Position*. Each view
-  shows only the controls it uses.
+- **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position* and
+  *Extremes*. Each view shows only the controls it uses.
 - **Metric** — what each dot is: cell count, confluence, brightness (mean per-cell intensity), site signal
   (integrated intensity above the empty nanowells' background), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
@@ -4986,6 +4986,9 @@ use them.
 - **Well** and the **Timepoint** slider (on *Array*) — the one well drawn, from the wells selected, and its
   timepoint; the view starts at the well's first timepoint. One timepoint is shared by
   every view, so a timepoint chosen on one carries to the next wherever it exists.
+- **Well**, **Timepoint** and **Largest & smallest** (on *Extremes*) — the well whose nanowells are ranked, the
+  timepoint they are ranked at (the well's latest by default), and how many each block shows (1 to 12, 5 by
+  default).
 
 **Reading the figure**
 
@@ -5020,6 +5023,19 @@ use them.
   interquartile band, and below it the share of each ring's nanowells without a value — including those not
   seen at that timepoint. It checks for an edge effect, and makes no test. A selected well with no addressed
   nanowells at the timepoint is named in the footer.
+- **Extremes** — a montage of one well's nanowells with the largest and the smallest fold change of the
+  Metric at the chosen timepoint: the top block holds the largest, most extreme first, the bottom block the
+  smallest, and each nanowell is a row of its crops at every timepoint of the well, so you can see what the
+  biggest responders and the non-responders looked like over time. Every metric is ranked by its fold change
+  against the Baseline — Cell count by the count fold change, Confluence by the confluence fold change, and so
+  on; growth rate and occupancy have no fold change over time and are greyed. Each row is labelled with its
+  rank, address and the fold change it was ranked by, each crop with the fold change at its own timepoint, and
+  the ranking timepoint's column is outlined. All crops share one brightness scale, so a nanowell that filled
+  with cells reads brighter than one that emptied. Nanowells without a fold change at the ranking timepoint
+  (occluded, seeded later, and so on) are not ranked and are counted by reason in the caption; a well with
+  fewer nanowells than both blocks need splits them between the two and never shows one twice. Click any crop
+  to open that nanowell's site detail. The crops are cut from the run's raw images as for the site detail, in
+  one pass for the whole montage, so it fills in a moment after the ranking is drawn.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
   a QC picture and a full-resolution montage each did:
   - **Image** — what is drawn under the nanowells: *Off*; *Run montage*, the downsampled stitched phase

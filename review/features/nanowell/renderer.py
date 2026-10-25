@@ -430,10 +430,7 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
                       va="center", color=faint, gid="nw-crop-grid-pending"), muted=True)
         return
     items = list(crops.items())
-    images = [np.asarray(c.image, dtype=float) for _tp, c in items if c.image is not None]
-    finite = np.concatenate([im[np.isfinite(im)].ravel() for im in images]) if images else np.empty(0)
-    lo, hi = (np.percentile(finite, [1, 99]) if finite.size else (0.0, 1.0))
-    hi = hi if hi > lo else lo + 1.0
+    lo, hi = _one_scale(c.image for _tp, c in items)
     cols = int(min(len(items), max(1, np.ceil(np.sqrt(len(items) * 1.6)))))
     rows = int(np.ceil(len(items) / cols))
     grid = fig.add_gridspec(rows, cols, left=0.02, right=0.98, top=0.93, bottom=0.07, wspace=0.05, hspace=0.18)
@@ -462,6 +459,116 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
     caption = (f"{origin}; every panel on one brightness scale ({lo:.4g} to {hi:.4g})"
                + "".join(f"; {note}" for note in sorted(notes)))
     _ink(fig.text(0.02, 0.015, caption, fontsize=8, color=faint, gid="nw-crop-grid-caption", wrap=True), muted=True)
+
+
+def _one_scale(images) -> tuple[float, float]:
+    """``(low, high)``: the 1st and 99th percentiles of every finite pixel of *images* together (``None`` skipped),
+    so a set of crops is drawn on one brightness scale rather than each stretched to its own range."""
+    arrays = [np.asarray(im, dtype=float) for im in images if im is not None]
+    finite = np.concatenate([a[np.isfinite(a)].ravel() for a in arrays]) if arrays else np.empty(0)
+    lo, hi = (np.percentile(finite, [1, 99]) if finite.size else (0.0, 1.0))
+    return float(lo), float(hi if hi > lo else lo + 1.0)
+
+
+# ── the Extremes view ────────────────────────────────────────────────────────
+def _sentence(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
+def render_extremes(fig, model, crops: dict, *, label: str, note: str = "") -> dict:
+    """The *N* nanowells with the largest fold change and the *N* with the smallest, each a row of its crops at
+    every timepoint of the well; returns ``{axes: (well, q, r)}`` so a click on a row selects its nanowell.
+
+    *model* is ``extremes_compute.ExtremesModel``; *crops* is ``(well, q, r) -> {timepoint: Crop}`` for the
+    nanowells cut so far — a row not yet cut says so in each panel. Every crop is drawn on **one** brightness
+    scale, as the enlarged crops are, so a nanowell that fills with cells reads brighter than one that empties.
+    Each row is labelled with its rank, address and the fold change it was ranked by; each crop carries the fold
+    change at its own timepoint, and the ranking timepoint's column is marked.
+    """
+    from review.features.nanowell.extremes_compute import caption, format_value
+
+    fig.clear()
+    _bg, ink, faint = _inks(fig.add_subplot(111))
+    fig.clear()
+    blocks = [(f"Largest {len(model.largest)}", model.largest), (f"Smallest {len(model.smallest)}", model.smallest)]
+    blocks = [(title, rows) for title, rows in blocks if rows]
+    if not blocks or not model.timepoints:
+        said = f"No nanowell in {model.well} has a {label.lower()} at {model.timepoint}, so none can be ranked."
+        if model.excluded:
+            said += " " + _sentence(caption(model, label).split("; ", 1)[-1]) + "."
+        render_message(fig, said, gid="nw-extremes-missing")
+        return {}
+    every = [crop.image for row in model.largest + model.smallest
+             for crop in (crops.get(row.site) or {}).values()]
+    lo, hi = _one_scale(every)
+    heights = []
+    for k, (_title, rows) in enumerate(blocks):
+        heights += ([0.45] if k else []) + [1.0] * len(rows)          # a gap between the two blocks
+    cols = len(model.timepoints)
+    grid = fig.add_gridspec(len(heights), cols, height_ratios=heights, left=0.17, right=0.98, top=0.9,
+                            bottom=0.1, wspace=0.06, hspace=0.32)
+    hits: dict = {}
+    notes: set = set()
+    sources: set = set()
+    pending = False
+    line = 0
+    for k, (title, rows) in enumerate(blocks):
+        line += 1 if k else 0
+        for i, row in enumerate(rows):
+            site_crops = crops.get(row.site)
+            for j, tp in enumerate(model.timepoints):
+                ax = fig.add_subplot(grid[line, j])
+                ax._aw_image_panel = True                         # pixel for pixel: no typed axis range on it
+                ax.set_box_aspect(1)                              # a panel without a crop keeps the crops' shape
+                ax.set_xticks([])
+                ax.set_yticks([])
+                hits[ax] = row.site
+                # A read that failed whole stores its reason under "" (``controller._fetch``).
+                crop = (site_crops or {}).get(tp) or (site_crops or {}).get("")
+                if crop is not None and crop.image is not None:
+                    ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi,
+                              gid="nw-extremes-image")
+                    sources.add(crop.source)
+                    if crop.source == "montage":
+                        notes.add(crop.note)
+                else:
+                    pending = pending or site_crops is None
+                    said = "Cutting…" if site_crops is None else (crop.note if crop is not None else
+                                                                  f"No row at {tp}.")
+                    _ink(ax.text(0.5, 0.5, said, ha="center", va="center", wrap=True, fontsize=5.5,
+                                 transform=ax.transAxes, color=faint, gid="nw-extremes-missing"), muted=True)
+                if tp == model.timepoint:
+                    for spine in ax.spines.values():
+                        spine.set_linewidth(1.6)
+                _ink(ax.set_xlabel(format_value(model.column, row.values.get(tp, math.nan)), fontsize=6.5,
+                                   color=ink if tp == model.timepoint else faint, labelpad=1,
+                                   gid="nw-extremes-value"), muted=tp != model.timepoint)
+                if i == 0:
+                    _ink(ax.set_title(tp + (" · ranked" if tp == model.timepoint else ""), fontsize=7.5,
+                                      color=ink, gid="nw-extremes-tp"))
+                if j == 0:
+                    _ink(ax.set_ylabel(f"#{row.rank}  q {row.site[1]}, r {row.site[2]}\n"
+                                       f"{format_value(model.column, row.value)}", rotation=0, ha="right",
+                                       va="center", fontsize=7, color=ink, labelpad=6, gid="nw-extremes-row"))
+                if i == 0 and j == 0:
+                    top = ax.get_position().y1
+                    _ink(fig.text(0.02, top + 0.035, f"{title} · {label} at {model.timepoint}", fontsize=8.5,
+                                  color=ink, fontweight="bold", gid="nw-extremes-block"))
+            line += 1
+    _ink(fig.text(0.02, 0.965, f"{model.well} · the nanowells with the largest and smallest {label.lower()}",
+                  fontsize=10, color=ink, gid="nw-extremes-title"))
+    origin = ("cut from each owner tile at full resolution" if sources == {"tile"} else
+              "cut from the montage, at its lower resolution" if sources == {"montage"} else
+              "cut from each owner tile, or the montage where it had to be" if sources else
+              "still being cut" if pending else "none could be cut")
+    said = [caption(model, label) + ".",
+            f"Crops {origin}; every crop on one brightness scale ({lo:.4g} to {hi:.4g})."
+            + "".join(f" {_sentence(n_)}." for n_ in sorted(notes))]
+    if note:
+        said.insert(0, note)
+    _ink(fig.text(0.02, 0.012, " ".join(said), fontsize=7, color=faint, gid="nw-extremes-caption", wrap=True),
+         muted=True)
+    return hits
 
 
 def _band(x) -> float:

@@ -85,7 +85,8 @@ def _choose_view(ctx, key, preset=None):
 
 def _visible_scopes(ctx):
     names = {"_nw_metric_cb": "Metric", "_nw_axis_seg": "Along x", "_nw_baseline_cb": "Baseline",
-             "_nw_tp_cb": "Timepoint", "_nw_control_cb": "vs", "_nw_well_cb": "Well", "_nw_tp_slider": "Slider"}
+             "_nw_tp_cb": "Timepoint", "_nw_control_cb": "vs", "_nw_well_cb": "Well", "_nw_tp_slider": "Slider",
+             "_nw_extremes_spin": "Extremes"}
     return {label for name, label in names.items() if ctx.widgets.get(name).isVisibleTo(ctx.window)}
 
 
@@ -93,7 +94,8 @@ def _visible_scopes(ctx):
 def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(page, qtbot):
     _loaded(qtbot, page)
     seg = page.widgets.get("_nw_view_seg")
-    assert [seg.segmentText(i) for i in range(seg.count())] == ["Distribution", "Array", "Trajectories", "Position"]
+    assert [seg.segmentText(i) for i in range(seg.count())] == ["Distribution", "Array", "Trajectories", "Position",
+                                                                    "Extremes"]
     assert _visible_scopes(page) == {"Metric", "Along x", "Baseline"}
     _choose_view(page, "array")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Slider"}
@@ -110,6 +112,8 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
     assert _visible_scopes(page) == {"Metric", "Baseline"}
     _choose_view(page, "position")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Timepoint"}
+    _choose_view(page, "extremes")
+    assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint", "Extremes"}
 
 
 # ── V2: the Array view as the lattice map ────────────────────────────────────

@@ -30,7 +30,7 @@ is deleted by the PR that closes its last row.
 | P6 | 1047 | Low | a previous run's segmenter-input sheet left beside newer results | open | `nanowell_inspect.write_sheet` |
 | R1 | 1052 | High | a nanowell well resent alone cannot be re-anchored from the plate | open | `services/remote_finished_wells`, `pipeline_runner` |
 | R2 | 1052 | Med | field-mode "finished here" ignores fields/timepoints the input gained | open | `remote_finished_wells.py:74-77` |
-| R3 | 1052 | Med | host wells computed with `--no_auto_threshold` miss every later local reuse | open | `util/settings_digest` |
+| R3 | 1052 | Med | host wells computed with `--no_auto_threshold` miss every later local reuse | done | `util/settings_digest.settings_key_for`; `test_a_half_finished_well_resumes_across_builds` |
 | R4 | 1052 | Low-Med | an `--only_wells` subset run gates the plate from the subset | open | `pipeline_runner._regate_locally` |
 | R5 | 1051 | Low | `.AppleDouble`, `__MACOSX/`, `Icon\r` not treated as OS debris | open | `datasets/core/member_names.is_os_junk_member` |
 | R6 | 1051 | Low | `.DS_Store` still makes a destination "already has unrelated files" | open | `datasets/core/dataset_paths.destination_has_content` |

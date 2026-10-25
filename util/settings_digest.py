@@ -299,6 +299,7 @@ def legacy_settings_digests(opts) -> tuple[str, ...]:
         aliases = []
     if aliases and opts.get("background_dir"):
         variants += [{**opts, "background_dir": alias} for alias in aliases]
+
     found = []
     for variant in variants:
         digests = [] if variant is opts else [settings_digest(variant)]
@@ -319,7 +320,18 @@ def settings_key_for(opts) -> str:
     earlier build recorded for the same options is recognised as this run's. Only the first part is ever
     *written* (:func:`primary_settings_key`); the rest are accepted, never recorded.
     """
-    return KEY_ALIAS_SEP.join((settings_digest(opts), *legacy_settings_digests(opts)))
+    parts = [settings_digest(opts), *legacy_settings_digests(opts)]
+    try:
+        gated = "no_auto_threshold" in opts
+    except TypeError:
+        gated = False
+    if gated:
+        # The one keyed option no well's own output depends on: it switches only the plate-level gating pass
+        # (pipeline/auto_threshold_pass.py). A batched host, and a remote run that sends part of a plate, are always
+        # given it, so a well they computed is this run's either way, and a later local run reuses it.
+        toggled = {**opts, "no_auto_threshold": not opts.get("no_auto_threshold")}
+        parts += [d for d in (settings_digest(toggled), *legacy_settings_digests(toggled)) if d and d not in parts]
+    return KEY_ALIAS_SEP.join(parts)
 
 
 def primary_settings_key(key: str) -> str:

@@ -46,7 +46,19 @@ def test_the_legacy_digest_is_the_one_9_12_5_recorded():
     opts = _opts(_ARGV_9125)
     assert settings_digest(opts) != _DIGEST_9125, "the fixture must reproduce the definition change"
     assert legacy_settings_digests(opts)[-1] == _DIGEST_9125                  # the oldest definition's
-    assert settings_key_for(opts).split("~") == [settings_digest(opts), *legacy_settings_digests(opts)]
+    head = [settings_digest(opts), *legacy_settings_digests(opts)]
+    assert settings_key_for(opts).split("~")[:len(head)] == head
+
+
+def test_a_well_computed_with_or_without_the_plate_gating_pass_is_this_run_s():
+    """``--no_auto_threshold`` switches only the plate-level gating pass; a remote host sending part of a plate is
+    always given it. A well the host computed so must not read as other settings to a later local run."""
+    plain = _opts(_ARGV_9125)
+    host = _opts([*_ARGV_9125, "--no_auto_threshold"])
+    assert settings_digest(host) != settings_digest(plain)
+    record_dir_key = settings_digest(host)
+    assert record_dir_key in settings_key_for(plain).split("~")
+    assert settings_digest(plain) in settings_key_for(host).split("~")
 
 
 def test_a_well_recorded_by_the_earlier_build_is_not_rerun(tmp_path):

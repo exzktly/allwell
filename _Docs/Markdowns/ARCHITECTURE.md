@@ -299,13 +299,26 @@ and the dashboards on it, `ControlBand`) takes it; any other horizontal box row
 wider than its room is turned top-to-bottom, outermost first, re-measuring after
 each pass so a pair of fields stacks while each keeps its browse button beside
 it; a button (checkbox, radio or push) whose label still does not fit gets
-line breaks — measured line by line, and broken again from its original text if
-it still does not fit — a `QLabel` that does not wrap (a section heading) is set
-to wrap, and a `QComboBox` sized to its longest entry is let shrink to a few
+line breaks — after a space, a path separator, an underscore or a hyphen, each
+of the author's own lines broken on its own, measured line by line, and broken
+again from its original text if it still does not fit — a `QLabel` that does not
+wrap (a section heading) is set to wrap, a wrapped one that still does not fit
+gets a zero-width space after each `\` and `_` (Qt breaks after `/` and `-` but
+not after those, so a Windows path or a joined-up dataset name wrapped as one
+word), and a `QComboBox` sized to its longest entry is let shrink to a few
 characters (`AdjustToMinimumContentsLengthWithIcon`; a `StyleChange` event then
 clears the minimum size hint QComboBox caches). A label or combo is judged
 against the tighter of its centred room and the room to its right less the
-content's right margin. The fonts matter: CI's runner has no Inter and draws in
+content's right margin. Text the fit replaced is restored by `unfit` only while
+it is still the text the fit set (`_awPhoneTextSet`): a page that has repainted
+the widget since keeps its new text. Before measuring, the fit shows every
+widget Qt would show on the next event-loop turn — one added to an
+already-visible layout is shown by a queued call, and is hidden and measured as
+nothing until then — so a page that repaints and fits in one go measures the
+rows it just built; a widget hidden on purpose, a window (a menu, a dialog) and
+a child no layout manages are left alone. `fit_content(widget, width)` /
+`unfit_content` are the same pass for a widget that is not in a scroll area.
+The fonts matter: CI's runner has no Inter and draws in
 DejaVu Sans, which runs wider — it found Zip Loose Folder's heading and Convert
 ND2's position-name combo each holding the page a few pixels wide where this
 container fitted them — so `tests/test_phone_fit.py` holds every tool of the
@@ -315,6 +328,30 @@ fontconfig (a `FONTCONFIG_FILE` with a `rejectfont` for it) reproduces CI's
 measurements locally. A tool added tomorrow is covered by being in the pane; its pane is module-scoped because force-deleting a shown `DatasetsTab`
 (the fast lane's reaper) crashes inside Shiboken's wrapper release with or
 without any fitting, while the app's own quit exits cleanly.
+
+**Home's Overview reads top to bottom.** At the desk the Overview sets blocks
+side by side and was over 800 px wide at a 400 px phone width before a path was
+drawn into it. Review is not under `fit_roots` — its pages are plots, not forms —
+so Home owns its phone form, in `review/features/home/_phone.py`: the five rows
+that sit side by side at the desk (masthead, next step, plate beside notes,
+plate beside legend, Health beside Run parameters) are named `HomeSideBySide`
+where they are built and turned top-to-bottom; the stat tiles and the saved-plot
+thumbnails are one column (`grid_columns`, which the painters ask); and the page
+is then fitted with `ui/phone_fit` for whatever is still too wide — a health
+row's well list, a recent dataset's folder. It is applied at the end of every
+`refresh_home` and of the recents repaint, from a `phone_layout` listener
+(deferred one turn, so it measures the phone's type scale rather than the
+desk's), and when the width changes, through `HomeScroll`'s own `resizeEvent` —
+an override, not an event filter (`widgets/removable_row`). The no-dataset
+placeholder is the other page of the same stack, and a stack is as wide as its
+widest page whether that page is showing or not: three recent-dataset rows held
+it 653 px wide. In phone layout the placeholder takes an `Ignored` horizontal
+policy and its rows are fitted to the stack's width (`fit_placeholder`). The
+placeholder is fitted when the page is, not on its own resize — `EmptyState` is a
+`widgets/` class with no phone knowledge — so a phone turned narrower while it is
+showing keeps its earlier breaks until the next repaint.
+`tests/test_home_phone_layout.py` holds the page, with a Windows path in the
+masthead and long recent datasets, to a 400 px phone with no sideways scroll.
 
 **Datasets' tool picker.** In Datasets mode the page button (Review's
 "Bar Plots ▾") reads "‹tool› ▾" and lists the tools (`_fill_tool_menu`, from the
@@ -2177,10 +2214,18 @@ over the row (`widgets/removable_row`) and styled from one definition,
 Ten rows each wearing a permanent delete control read as a page about deleting
 rather than a page about opening — and the space for it is reserved in both
 states, because a control that appears by *widening* the row shifts the label at
-the one moment it must not. Hover is counted across the row and every child of
-it rather than sampled from `underMouse`: crossing from the row onto the × is a
-Leave on one and an Enter on the other, so hiding on any Leave takes the button
-away exactly as the user reaches for it.
+the one moment it must not. Hover is the row's own `enterEvent`/`leaveEvent`:
+Qt sends the row one Enter on arrival and one Leave when the pointer leaves its
+whole area, and crossing from the entry onto the × moves Enter/Leave between
+those children without the row seeing a Leave, so the × stays up as the user
+reaches for it. **It is never a Python `eventFilter`.** Both lists rebuild by
+dropping their rows synchronously, and Qt delivers Hide, ParentChange,
+ChildRemoved and Destroy to an object's event filters while that object is being
+destroyed; a Python filter on the row's children had PySide wrapping
+half-destroyed widgets on every rebuild, and crashed the app on Windows with an
+access violation at `event.type()`. `tests/test_home_empty_state.py::test_a_row_runs_no_python_event_filter`
+holds it. `review/core/split_view.py` records the same crash from an app-global
+filter.
 
 A row whose folder is not reachable is **drawn, disabled, with the reason on its
 tooltip** rather than dropped. Hiding it says the user's history was lost when

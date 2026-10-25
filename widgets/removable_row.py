@@ -15,19 +15,29 @@ label shifts the instant the pointer arrives — the one moment it must not. The
 × lives inside a fixed-width slot and only the button inside that slot is
 hidden, so the geometry is the same in both states.
 
-**Hover is counted, not sampled.** ``QWidget.underMouse`` is a state Qt keeps
-for the widget the pointer entered, and moving from the row onto the × is a
-Leave on one and an Enter on the other; a handler that hid on any Leave would
-take the button away as the user reached for it. So Enter and Leave are counted
-across the row and every child of it, and the × shows while the count is
-positive. The count is order-independent, which matters because Qt does not
-promise Enter-before-Leave when the pointer crosses between a parent and its
-child.
+**Hover is the row's own Enter and Leave, never an event filter.** Qt sends a
+widget one Enter when the pointer arrives anywhere over it and one Leave when
+the pointer leaves its whole area; crossing between the row and one of its
+children (the entry onto the ×) sends Enter/Leave to the children only, so the
+row stays entered and the × stays reachable. The row therefore overrides its own
+``enterEvent``/``leaveEvent`` and nothing else watches anything.
+
+An earlier version did this with a Python ``eventFilter`` installed on the row
+and its three children, and that crashed the app with an access violation on
+Windows (``event.type()`` inside the filter). Both lists that use these rows
+rebuild themselves by dropping the old rows synchronously, and Qt keeps
+delivering events to an object's event filters *while that object is being
+destroyed* — Hide, ParentChange, ChildRemoved and finally Destroy, on a button
+whose C++ type has already been demoted to a bare ``QWidget``. A Python filter
+there means PySide wrapping half-destroyed objects on every rebuild.
+``review/core/split_view.py`` records the same crash from an app-global filter.
+An override on the row itself is not reached once its destructor has started,
+because the Python subclass's part of the object is gone first.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from ui import theme
@@ -49,35 +59,27 @@ _ROW_MARK = "aw_removable_row"
 _ROW_REMOVE_NAME = "aw_removable_row_x"
 
 
-class _HoverReveal(QObject):
-    """Shows *target* while the pointer is anywhere over the watched widgets.
+class _RemovableRow(QWidget):
+    """The row container: shows *target* while the pointer is over the row.
 
-    The watcher is parented to the row, so it lives exactly as long as the row
-    does. It keeps its count on the object rather than on the row, and nothing
-    else reads it: a row that is hidden while the pointer is over it (a repaint
-    replacing the whole list is the ordinary way that happens) is destroyed
-    along with its watcher, so a stale count cannot outlive anything.
+    Over the row means over any part of it, children included — see the module
+    docstring for why the row's own Enter/Leave are enough and why this must
+    not be an event filter.
     """
 
-    def __init__(self, row: QWidget, target: QWidget) -> None:
-        super().__init__(row)
-        self._target = target
-        self._depth = 0
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._target: QWidget | None = None
 
-    def eventFilter(self, obj, event) -> bool:  # Qt naming
-        kind = event.type()
-        if kind == QEvent.Enter:
-            self._depth += 1
-        elif kind == QEvent.Leave:
-            # Clamped at zero: an unpaired Leave — a widget hidden under the
-            # pointer, then shown again — would otherwise push the count
-            # negative and leave the × unreachable for the rest of the row's
-            # life.
-            self._depth = max(0, self._depth - 1)
-        else:
-            return False
-        self._target.setVisible(self._depth > 0)
-        return False
+    def enterEvent(self, event) -> None:  # Qt naming
+        if self._target is not None:
+            self._target.setVisible(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # Qt naming
+        if self._target is not None:
+            self._target.setVisible(False)
+        super().leaveEvent(event)
 
 
 def remove_button(parent: QWidget, object_name: str, tooltip: str) -> QPushButton:
@@ -110,7 +112,7 @@ def removable_row(widget: QWidget, on_remove, *, object_name: str,
     the row a user most wants off a recent-datasets list is the one whose
     folder is gone, and that row's open button is disabled.
     """
-    row = QWidget(parent)
+    row = _RemovableRow(parent)
     layout = QHBoxLayout(row)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(theme.Spacing.xs)
@@ -134,9 +136,7 @@ def removable_row(widget: QWidget, on_remove, *, object_name: str,
     row.setProperty(_ROW_MARK, True)
     row.setProperty(_ROW_REMOVE_NAME, object_name)
 
-    watcher = _HoverReveal(row, button)
-    for watched in (row, widget, slot, button):
-        watched.installEventFilter(watcher)
+    row._target = button
     return row
 
 

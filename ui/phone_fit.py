@@ -38,9 +38,9 @@ Qt-only and pane-free: it reads layouts and widths, never a feature.
 
 from __future__ import annotations
 
-import textwrap
+import re
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QBoxLayout, QComboBox, QLabel, QScrollArea, QWidget,
 )
@@ -49,6 +49,11 @@ from PySide6.QtWidgets import (
 #: the labels re-broken.
 _P_STACKED = "_awPhoneStacked"
 _P_TEXT = "_awPhoneText"
+#: The text :func:`fit` put on a widget, beside :data:`_P_TEXT`'s original. A widget
+#: whose text no longer matches was re-set by its page since — Home repaints
+#: its labels from the record — so that text is the original now, and
+#: :func:`unfit` must not put the stale one back.
+_P_SET = "_awPhoneTextSet"
 _P_OWN_FORM = "_awPhoneOwnForm"
 _P_WRAPPED = "_awPhoneWrapped"
 _P_COMBO = "_awPhoneCombo"
@@ -101,6 +106,44 @@ def _overflowing_rows(content: QWidget, width: int) -> list[QWidget]:
     return [r for r in rows if not any(o is not r and o.isAncestorOf(r) for o in rows)]
 
 
+def _show_pending(content: QWidget) -> None:
+    """Show now what Qt would show on the next event-loop turn.
+
+    A widget added to a layout whose parent is already showing is not shown at
+    once: Qt queues ``_q_showIfNotHidden`` for it, and until that runs the
+    widget is hidden and every width here passes over it. A page that repaints
+    and then fits in one go — Home's Overview, whose rows are rebuilt from the
+    record — was therefore fitted without the rows it had just built, which
+    appeared a moment later at their full width (a recent-dataset row 590 px
+    wide on a 400 px phone). This does what that queued call will do, now,
+    and only where it would: to a widget a layout manages, never hidden on
+    purpose (``WA_WState_ExplicitShowHide``), and not a window — a menu or a
+    dialog parented here is a child too, and showing one would open it. A
+    child added without a layout is never shown by Qt, so it is left alone.
+    """
+    for w in content.findChildren(QWidget):
+        if (w.isHidden() and not w.isWindow()
+                and not w.testAttribute(Qt.WA_WState_ExplicitShowHide)
+                and _in_a_layout(w)):
+            w.show()
+
+
+def _in_a_layout(w: QWidget) -> bool:
+    """Is *w* an item of its parent's layout, at any depth of nesting?"""
+    parent = w.parentWidget()
+    lay = parent.layout() if parent is not None else None
+    pending = [lay] if lay is not None else []
+    while pending:
+        lay = pending.pop()
+        for i in range(lay.count()):
+            item = lay.itemAt(i)
+            if item.widget() is w:
+                return True
+            if item.layout() is not None:
+                pending.append(item.layout())
+    return False
+
+
 def _activate(content: QWidget) -> None:
     for w in [content, *content.findChildren(QWidget)]:
         lay = w.layout()
@@ -129,29 +172,55 @@ def _widest_line(fm, text: str) -> int:
     return max(fm.horizontalAdvance(line) for line in text.split("\n"))
 
 
+#: Where a label may be broken: after a space, and after the characters a
+#: folder or file name is joined with instead — a path separator, an underscore,
+#: a hyphen. A path has no spaces to break at, and a dataset is often named
+#: ``2026-10-21_HeLa_DAPI_plate07``; Home's recent-datasets rows are one over the
+#: other. Each break keeps its character at the end of the line, so the name
+#: still reads as one.
+_BREAK_AFTER = re.compile(r"[^ /\\_-]*(?:[ /\\_-]+|$)")
+
+#: The break points Qt's own line breaking lacks: it already breaks after a
+#: space, ``/`` and ``-``, but treats ``\`` as a prefix character and ``_`` as
+#: part of a word. :func:`_soften_breaks` adds a zero-width space after each.
+_UNBREAKABLE = ("\\", "_")
+
+
+def _wrap_line(fm, line: str, usable: int) -> list[str]:
+    """One line of text broken greedily at :data:`_BREAK_AFTER` points so each
+    piece fits *usable* px, measured piece by piece — an average character width
+    underestimates a line of wide letters, and a font that runs wider than this
+    machine's (CI's DejaVu Sans against Inter) left a broken label still too
+    wide. A single unbreakable piece wider than *usable* is kept whole."""
+    pieces: list[str] = []
+    current = ""
+    for token in (t for t in _BREAK_AFTER.findall(line) if t):
+        if current and fm.horizontalAdvance((current + token).rstrip()) > usable:
+            pieces.append(current.rstrip())
+            current = token
+        else:
+            current += token
+    pieces.append(current.rstrip())
+    return pieces
+
+
 def _wrap_to(fm, text: str, usable: int) -> str:
-    """*text* broken at spaces into the fewest lines whose widest fits
-    *usable* px, measured line by line — an average character width
-    underestimates a line of wide letters, and a font that runs wider than
-    this machine's (CI's DejaVu Sans against Inter) left a broken label
-    still too wide. The narrowest breaking when nothing fits."""
-    wrapped = text
-    for chars in range(len(text), 0, -1):
-        wrapped = textwrap.fill(text, width=chars, break_long_words=False)
-        if _widest_line(fm, wrapped) <= usable:
-            return wrapped
-    return wrapped
+    """*text* broken into lines whose widest fits *usable* px. A line break
+    already in *text* is the author's and is kept; each of its lines is broken
+    on its own."""
+    return "\n".join(piece for line in text.split("\n")
+                     for piece in _wrap_line(fm, line, usable))
 
 
 def _break_label(button: QAbstractButton, room: int) -> bool:
     """Break *button*'s label to fit *room*. A label already broken here is
-    broken again from its original text; one whose own text has a line
-    break is the author's and is left alone."""
-    original = button.property(_P_TEXT)
+    broken again from its original text. A line break in the original is the
+    author's and is kept — a recent-datasets row is a name over a folder — and
+    each of its lines is broken on its own."""
     current = button.text()
-    if not current or (original is None and "\n" in current):
+    if not current:
         return False
-    text = original if original is not None else current
+    text = _original_text(button)
     fm = button.fontMetrics()
     chrome = _min_width(button) - _widest_line(fm, current)
     usable = room - max(0, chrome)
@@ -160,9 +229,43 @@ def _break_label(button: QAbstractButton, room: int) -> bool:
     wrapped = _wrap_to(fm, text, usable)
     if wrapped == current:
         return False
-    if original is None:
-        button.setProperty(_P_TEXT, text)
-    button.setText(wrapped)
+    _set_fitted_text(button, text, wrapped)
+    return True
+
+
+def _original_text(w) -> str:
+    """*w*'s text before :func:`fit` changed it — or its text now, when it was
+    never changed or its page has set a new one since (:data:`_P_SET`)."""
+    original = w.property(_P_TEXT)
+    current = w.text()
+    if original is None or w.property(_P_SET) != current:
+        return current
+    return original
+
+
+def _set_fitted_text(w, original: str, text: str) -> None:
+    w.setProperty(_P_TEXT, original)
+    w.setProperty(_P_SET, text)
+    w.setText(text)
+
+
+def _soften_breaks(label: QLabel) -> bool:
+    """Let a word-wrapped label break inside a path or a joined-up name.
+
+    ``C:\\Users\\…\\plate07`` and ``HeLa_DAPI_plate07`` each wrap as one
+    unbreakable word (:data:`_UNBREAKABLE`). A zero-width space after each of
+    those characters gives them the break points ``/`` already has, and draws
+    as nothing.
+    """
+    text = _original_text(label)
+    if label.textFormat() == Qt.RichText or not any(c in text for c in _UNBREAKABLE):
+        return False
+    softened = text
+    for c in _UNBREAKABLE:
+        softened = softened.replace(c, c + "\u200b")
+    if label.text() == softened:
+        return False
+    _set_fitted_text(label, text, softened)
     return True
 
 
@@ -193,9 +296,19 @@ def fit(area: QScrollArea, *, max_passes: int = 40) -> bool:
     content = area.widget()
     if content is None:
         return True
-    width = area.viewport().width()
+    return fit_content(content, area.viewport().width(), max_passes=max_passes)
+
+
+def fit_content(content: QWidget, width: int, *, max_passes: int = 40) -> bool:
+    """Narrow *content* to *width* px. ``True`` when it fits.
+
+    :func:`fit` for a widget that is not in a scroll area — Home's no-dataset
+    placeholder, whose recent-dataset rows sit in the same stack as the page
+    and would otherwise hold the whole stack wider than the phone.
+    """
     if width <= 0:
         return False
+    _show_pending(content)
     for _ in range(max_passes):
         _activate(content)
         if _min_width(content) <= width:
@@ -216,7 +329,7 @@ def fit(area: QScrollArea, *, max_passes: int = 40) -> bool:
         for label in content.findChildren(QLabel):
             if (label.isVisibleTo(content)
                     and _min_width(label) > _label_room(label, content, width)):
-                broke |= _wrap_label(label)
+                broke |= _wrap_label(label) or _soften_breaks(label)
         for combo in content.findChildren(QComboBox):
             if (combo.isVisibleTo(content)
                     and _min_width(combo) > _label_room(combo, content, width)):
@@ -230,8 +343,12 @@ def fit(area: QScrollArea, *, max_passes: int = 40) -> bool:
 def unfit(area: QScrollArea) -> None:
     """Give *area*'s content back its desk form."""
     content = area.widget()
-    if content is None:
-        return
+    if content is not None:
+        unfit_content(content)
+
+
+def unfit_content(content: QWidget) -> None:
+    """Give *content* back its desk form — :func:`unfit` for :func:`fit_content`."""
     for w in [content, *content.findChildren(QWidget)]:
         if w.property(_P_OWN_FORM):
             w.setStacked(False)
@@ -251,7 +368,9 @@ def unfit(area: QScrollArea) -> None:
             w.setWordWrap(False)
             w.setProperty(_P_WRAPPED, None)
         text = w.property(_P_TEXT)
-        if text is not None and isinstance(w, QAbstractButton):
-            w.setText(text)
+        if text is not None and isinstance(w, (QAbstractButton, QLabel)):
+            if w.text() == w.property(_P_SET):
+                w.setText(text)
             w.setProperty(_P_TEXT, None)
+            w.setProperty(_P_SET, None)
     _activate(content)

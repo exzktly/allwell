@@ -271,3 +271,84 @@ def test_every_datasets_tool_fits_with_wider_type(qapp, datasets_pane):
         theme.apply_ui_scale(before)
         qapp.setStyleSheet(theme.qss())
     assert not too_wide, f"Datasets tools wider than a phone at large type: {too_wide}"
+
+
+# ── what Home's Overview needed from the fit ────────────────────────────────
+
+
+def test_a_name_over_a_folder_is_broken_line_by_line(qtbot):
+    """A recent-dataset row is a name over a folder, two lines the author wrote.
+    Each is broken on its own — after a separator, an underscore or a hyphen,
+    since neither has spaces — and the author's line break is kept."""
+    from PySide6.QtWidgets import QPushButton
+
+    from ui.phone_fit import _break_label
+
+    b = QPushButton("2026-10-21_HeLa_DAPI_plate07\nC:\\Users\\lab\\Microscopy\\October")
+    qtbot.addWidget(b)
+    assert _break_label(b, 120)
+    lines = b.text().split("\n")
+    assert lines[0].startswith("2026-") and lines[-1].endswith("October")
+    assert "".join(lines) == "2026-10-21_HeLa_DAPI_plate07C:\\Users\\lab\\Microscopy\\October", (
+        "breaking lost or reordered characters")
+    assert len(lines) > 2, "the two author lines were not broken any further"
+
+
+def test_unfit_does_not_put_back_text_the_page_has_replaced(qtbot):
+    """Home repaints its labels from the record. A fitted button whose page has
+    since set a new label must keep the new one when the fit is undone —
+    restoring the original would show the previous dataset's text."""
+    from PySide6.QtWidgets import QPushButton, QScrollArea, QVBoxLayout, QWidget
+
+    from ui.phone_fit import _break_label, unfit
+
+    area = QScrollArea()
+    qtbot.addWidget(area)
+    content = QWidget()
+    QVBoxLayout(content)
+    b = QPushButton("first label that is long enough to be broken here")
+    content.layout().addWidget(b)
+    area.setWidget(content)
+
+    assert _break_label(b, 80), "premise: the label was broken"
+    b.setText("second label")              # the page repaints
+    unfit(area)
+    assert b.text() == "second label"
+
+
+def test_a_row_built_after_the_page_showed_is_fitted_at_once(qtbot):
+    """Qt shows a widget added to an already-visible layout on the next turn;
+    a fit straight after building it must still see it. One that is a window,
+    or hidden on purpose, is not shown."""
+    from PySide6.QtWidgets import (
+        QDialog, QHBoxLayout, QLineEdit, QScrollArea, QVBoxLayout, QWidget,
+    )
+
+    from ui.phone_fit import fit
+
+    area = QScrollArea()
+    area.setWidgetResizable(True)
+    qtbot.addWidget(area)
+    content = QWidget()
+    QVBoxLayout(content)
+    area.setWidget(content)
+    area.resize(320, 400)
+    area.show()
+    qtbot.waitExposed(area)
+
+    row = QWidget()
+    h = QHBoxLayout(row)
+    for _ in range(3):
+        e = QLineEdit()
+        e.setMinimumWidth(160)
+        h.addWidget(e)
+    content.layout().addWidget(row)          # shown by Qt only next turn
+    hidden = QWidget()
+    content.layout().addWidget(hidden)
+    hidden.hide()
+    dialog = QDialog(content)
+
+    assert fit(area)
+    assert h.direction() == QHBoxLayout.TopToBottom, (
+        "the row built after the page showed was not seen by the fit")
+    assert hidden.isHidden() and not dialog.isVisible()

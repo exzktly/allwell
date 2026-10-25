@@ -2239,7 +2239,12 @@ What is on it:
   output archive is gone (cyan), staged but never processed (grey). A nanowell
   well whose timepoints ran but could not be addressed (no central square found)
   is partial, not "never processed", and the health card lists it under
-  *Nanowell timepoints not addressed* with what to do about it. Those
+  *Nanowell timepoints not addressed* — and only there, not among the partial
+  wells as well — with what to do about it. Each well named in that row is a
+  link: clicking it opens **Nanowells → Array** on that well's first timepoint
+  without an address, with **Set anchor** already on, so the next click on the
+  central square sets the anchor. The well's tooltip on the plate counts its
+  timepoints not addressed. Those
   colours are the ones every other well map in the app uses for the same
   things, so a colour you have learnt once reads the same here. A well the record says nothing about — because no completeness check has
   been run, or because it produced nothing at all — is left plain, uncoloured:
@@ -3149,7 +3154,10 @@ many findings there are and how many are still open.
 It reports the dataset's existing records and measures nothing new: the
 completeness record the run writes at its end (wells with missing or failed
 field groups, missing measurements, measurements with no output archive, wells
-never processed, wells the check could not read, folder-level findings), the traceback files the *last* run left in `errors/` (older files
+never processed, wells the check could not read, folder-level findings), each
+nanowell timepoint the run located but could not address — with the reason its
+grid record gives, such as *No accepted fiducial, array centre, or plate-rigid
+prediction* — the traceback files the *last* run left in `errors/` (older files
 are not listed, because that folder is never emptied), and the run's
 field-quality flags. When one of those cannot answer — no completeness record,
 a check that was turned off, a plate too partly measured to score — that is a
@@ -3174,6 +3182,13 @@ What you can do depends on the row:
   the Segmentation overlay outlines the field's cells in white, and **Reopen**
   puts the field back. A field in a well whose filenames do not identify its
   fields cannot be excluded; the Decision column says so.
+- **Set anchor…** (a nanowell timepoint left *unaddressed*) opens **Nanowells →
+  Array** on that well and timepoint with **Set anchor** on: click the central
+  square there, then re-run the well (the row's **Re-run wells…**, or **Re-run
+  anchored wells…** on the Nanowells page). Double-clicking the row does the
+  same. A timepoint not addressed for another reason (a refused orientation, no
+  lattice found) says so and does not offer it, because an anchor set by hand
+  cannot change those.
 - **Accept** marks a finding as seen and acceptable; **Reopen** undoes it.
 - **Open in Segmentation** shows the row's field in Image Browser.
 

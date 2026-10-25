@@ -300,6 +300,11 @@ def _nanowell_view_state_io():
     return snapshot_nanowell, apply_nanowell
 
 
+def _svc_nanowell_open_anchor():
+    from review.features.nanowell.controller import open_for_anchor
+    return open_for_anchor
+
+
 def _redraw_nanowell():
     from review.features.nanowell.controller import redraw
     return redraw
@@ -1106,6 +1111,8 @@ def _features() -> list[FeatureDescriptor]:
             redraw=_redraw_nanowell,
             view_state_io=_nanowell_view_state_io,
             per_well_selection=True,
+            # QC Triage's and Home's *Set anchor…* for a timepoint the run left unaddressed.
+            services={"nanowell.open_anchor": _svc_nanowell_open_anchor},
         ),
         # ── Images ────────────────────────────────────────────────────────
         FeatureDescriptor(

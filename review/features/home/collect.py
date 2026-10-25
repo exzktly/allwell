@@ -480,6 +480,22 @@ def channel_chips(ctx) -> list:
     return chips
 
 
+def unaddressed_targets(record_wells: dict) -> dict[str, str]:
+    """``well -> timepoint`` for each well with a timepoint the run left ``unaddressed`` (no central square
+    accepted): the first such timepoint, which a click on the well opens with *Set anchor* on. A well whose
+    not-addressed timepoints all carry another status (a refused orientation, no lattice) is not here: an anchor
+    set by hand cannot change those."""
+    out = {}
+    for well, rec in sorted((record_wells or {}).items()):
+        if not isinstance(rec, dict):
+            continue
+        tps = sorted(str(p[0]) for p in (rec.get("not_addressed") or [])
+                     if isinstance(p, (list, tuple)) and len(p) == 2 and p[1] == "unaddressed")
+        if tps:
+            out[well] = tps[0]
+    return out
+
+
 def health_rows(ctx) -> list:
     """What needs attention, and nothing else.
 
@@ -503,8 +519,17 @@ def health_rows(ctx) -> list:
     wells = block.get("wells") or {}
     cells = plate_cells(ctx)
 
+    def _fully_unaddressed(well) -> bool:
+        # A nanowell well whose whole shortfall is timepoints located but not addressed: its own row below names
+        # it with that reason, and "their CSVs cover fewer field groups" would hide the reason behind a symptom.
+        rec = wells.get(well)
+        return (isinstance(rec, dict) and int(rec.get("not_addressed_count") or 0) > 0
+                and int(rec.get("not_addressed_count") or 0) >= int(rec.get("missing_count") or 0)
+                and not rec.get("failed"))
+
     def _named(state_name):
-        return sorted(w for w, s in cells.items() if s == state_name)
+        named = sorted(w for w, s in cells.items() if s == state_name)
+        return [w for w in named if not _fully_unaddressed(w)] if state_name == CELL_PARTIAL else named
 
     for state_name, severity, label, detail in (
         (CELL_FAILED, "danger", "Wells with failures",
@@ -527,9 +552,11 @@ def health_rows(ctx) -> list:
         count = sum(int(wells[w].get("not_addressed_count") or 0) for w in not_addressed)
         rows.append({"severity": "warn", "label": "Nanowell timepoints not addressed",
                      "value": f"{count} timepoint(s) were processed but their nanowells could not be told apart (no "
-                              "central square found, say); set an anchor in Nanowells → Array (Layers → Anchor, Set anchor), "
+                              "central square found, say); click a well to set its anchor in Nanowells → Array, "
                               "then re-run those wells",
-                     "wells": not_addressed})
+                     "wells": not_addressed,
+                     # well -> the timepoint a click opens: its first one an anchor can address.
+                     "anchor": unaddressed_targets(wells)})
 
     errors = block.get("errors") if isinstance(block.get("errors"), dict) else {}
     if int(errors.get("files") or 0):

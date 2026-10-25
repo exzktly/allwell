@@ -984,6 +984,15 @@ QLabel#HomeWellChips {{
     font-size: {t.small_size}px;
     color: {c.text_primary};
 }}
+QPushButton#HomeWellChip {{
+    font-family: {t.family_mono};
+    font-size: {t.small_size}px;
+    color: {c.accent};
+    background: transparent;
+    border: none;
+    text-decoration: underline;
+    padding: 0px;
+}}
 QPushButton#HomeAction {{
     background: {c.panel_elevated};
     border: 1px solid {c.border};

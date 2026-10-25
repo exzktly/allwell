@@ -12,7 +12,10 @@ part of the app has already written, and each says which record it came from:
   since the recorded run began, because that folder is never cleared and an
   older run's failure is not this run's;
 * the run's own field-quality verdicts (``pipeline_info.json::field_quality``,
-  scored by :mod:`review.domain.field_quality_scores`).
+  scored by :mod:`review.domain.field_quality_scores`);
+* for a nanowell well, the timepoints the completeness record lists as
+  located but not addressed (``not_addressed``), each with the reason its grid
+  record (``nanowells/<well>_grid.json``) gives.
 
 Qt-free and pure over ``ctx.state`` plus one directory listing, so the whole
 table is exercised in the fast lane.
@@ -29,7 +32,11 @@ again over that well, so its row offers a rerun. An acquisition problem (a
 field the run measured as out of focus or unlike the rest of the plate) has
 data that exists and is suspect, so its row offers to exclude the field. A
 missing field has no rows to exclude, and re-running a well whose pictures are
-blurred produces the same blurred numbers, so neither offers the other.
+blurred produces the same blurred numbers, so neither offers the other. A
+nanowell timepoint left unaddressed (no central square accepted) is fixed by
+neither on its own: re-running finds the same nothing, so its row offers *Set
+anchor…* — the square clicked by hand on the Array view — and the rerun that
+then uses the anchor.
 """
 
 from __future__ import annotations
@@ -65,6 +72,11 @@ KIND_NO_ARCHIVE = "no_output_archive"
 KIND_PARTIAL = "partial_well"
 KIND_UNREADABLE = "unreadable_wells"
 KIND_EXCLUDED = "excluded_field"
+KIND_UNADDRESSED = "nanowell_not_addressed"
+
+#: The one grid status an anchor set by hand can fix (``nanowell_run.UNADDRESSED``). The other statuses a
+#: not-addressed timepoint can carry (a refused orientation, no lattice) fail before an origin is chosen.
+ANCHORABLE_STATUS = "unaddressed"
 
 #: The row a well in each needs-attention state gets beyond its per-group rows,
 #: keyed by ``pipeline.completeness.HEALTH_STATES``. ``tests/test_qc_triage.py``
@@ -106,6 +118,8 @@ class TriageRow:
     can_exclude: bool = False
     #: Why a field the user might expect to exclude cannot be, or "".
     exclude_refusal: str = ""
+    #: A nanowell timepoint an anchor set by hand can address (*Set anchor…*).
+    can_anchor: bool = False
 
 
 def _key(kind: str, well: str = "", fov: str = "", tp: str = "", extra: str = "") -> str:
@@ -146,6 +160,49 @@ def _failed_address(name: str, schema) -> tuple[str, str]:
     return parsed.fields.get("fov", "") or "", parsed.fields.get("timepoint", "") or ""
 
 
+def _grid_reasons(ctx, well: str) -> dict[str, str]:
+    """``timepoint -> reason`` from *well*'s nanowell grid record, or ``{}`` when it cannot be read (the row then
+    says the grid record gives no reason)."""
+    import json
+
+    out = output_dir(ctx)
+    if out is None:
+        return {}
+    try:
+        blocks = json.loads((out / "nanowells" / f"{well}_grid.json").read_text(encoding="utf-8")).get("timepoints")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    if not isinstance(blocks, dict):
+        return {}
+    return {str(tp): str(b.get("reason") or "") for tp, b in blocks.items() if isinstance(b, dict)}
+
+
+def _not_addressed_rows(ctx, well: str, rec: dict) -> tuple[list[TriageRow], set[str]]:
+    """One row per timepoint the run located but could not address, and those timepoints.
+
+    They are in the record's ``missing`` too (an incremental run redoes them), where they would read as "absent
+    from the measurements CSV" — true, and no help: the run reached them and said why it stopped. Its reason is
+    what the row says, and an unaddressed one offers the anchor that addresses it."""
+    pairs = [p for p in (rec.get("not_addressed") or []) if isinstance(p, (list, tuple)) and len(p) == 2]
+    if not pairs:
+        return [], set()
+    reasons = _grid_reasons(ctx, well)
+    rows = []
+    for tp, status in pairs:
+        tp, status = str(tp), str(status or "")
+        anchorable = status == ANCHORABLE_STATUS
+        reason = reasons.get(tp, "").strip().rstrip(".")
+        why = reason or "the grid record gives no reason"
+        then = ("Set an anchor on its central square by hand (Set anchor…), then re-run the well." if anchorable
+                else "An anchor set by hand cannot change this; re-running the well redoes it.")
+        rows.append(TriageRow(
+            key=_key(KIND_UNADDRESSED, well, "", tp), kind=KIND_UNADDRESSED,
+            stage=STAGE_PROCESSING, severity="warn", well=well, fov="", timepoint=tp,
+            can_rerun=True, can_anchor=anchorable,
+            detail=f"Nanowells not addressed ({status.replace('_', ' ') or 'no status'}): {why}. {then}"))
+    return rows, {str(tp) for tp, _status in pairs}
+
+
 def _well_rows(ctx) -> list[TriageRow]:
     wells = _record(ctx).get("wells")
     if not isinstance(wells, dict):
@@ -163,7 +220,10 @@ def _well_rows(ctx) -> list[TriageRow]:
                 key=_key(kind, well), kind=kind, stage=STAGE_PROCESSING,
                 severity="warn", well=well, fov="", timepoint="",
                 can_rerun=True, detail=detail))
-        elif health == "partial" and not int(rec.get("covered_any") or 0):
+        elif (health == "partial" and not int(rec.get("covered_any") or 0)
+              and not int(rec.get("not_addressed_count") or 0)):
+            # A nanowell well whose every timepoint was located but none addressed also covers nothing, and it was
+            # processed: its rows below say why, as Home's plate calls it partial rather than never processed.
             rows.append(TriageRow(
                 key=_key(KIND_UNSTARTED, well), kind=KIND_UNSTARTED,
                 stage=STAGE_PROCESSING, severity="warn", well=well, fov="",
@@ -179,7 +239,11 @@ def _well_rows(ctx) -> list[TriageRow]:
                 detail=f"The run recorded this field group as failed ({name})."))
         listed = [p for p in (rec.get("missing") or [])
                   if isinstance(p, (list, tuple)) and len(p) == 2]
+        located, reached = _not_addressed_rows(ctx, well, rec)
+        rows.extend(located)
         for fov, tp in listed:
+            if not str(fov) and str(tp) in reached:
+                continue                     # said above, with the run's reason
             rows.append(TriageRow(
                 key=_key(KIND_MISSING, well, str(fov), str(tp)), kind=KIND_MISSING,
                 stage=STAGE_PROCESSING, severity="warn", well=well, fov=str(fov),

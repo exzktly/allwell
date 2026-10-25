@@ -3088,6 +3088,11 @@ plate. **It measures nothing.** `collect.triage_rows` reads three records other
 parts of the app already wrote: the completeness record (`run_check` — wells
 whose CSV is missing, wells staged and never processed, the field groups the
 run recorded as failed, the groups found missing, and dataset-wide findings),
+each nanowell timepoint the record lists as located but not addressed
+(`not_addressed`, with the reason read from `nanowells/<well>_grid.json`; such a
+timepoint is in `missing` too and is said once, as not addressed, and a well
+whose every timepoint is unaddressed covers nothing yet is not "never
+processed"),
 every needs-attention well state — a guard holds each state in
 `pipeline.completeness.NEEDS_ATTENTION` to a row, via `WELL_STATE_ROWS` — and
 the count of wells the check could not read), the traceback files in `errors/`
@@ -3122,7 +3127,19 @@ numbers. **Accept** marks a finding seen; **Reopen** undoes Accept and puts an
 excluded field back. Every button is enabled only when a selected row supports
 it. **Open in Segmentation** calls the `image_browser.show_field` service, the
 same jump the Cell Browser's click uses (`review_image/_navigate.py`), placed
-beside Segmentation because that sub-tab is the one no profile removes.
+beside Segmentation because that sub-tab is the one no profile removes. A
+nanowell timepoint whose grid status is `unaddressed` — the one status an anchor
+set by hand changes — offers **Set anchor…** (and opens on double-click), which
+calls the Nanowells page's `nanowell.open_anchor` service
+(`nanowell/controller.open_for_anchor`). Home's health card calls the same
+service from the well chips of its *Nanowell timepoints not addressed* row
+(`home/collect.unaddressed_targets` names each well's first anchorable
+timepoint). The service adds the well to the plate selection, puts the page on
+the Array view at that well and timepoint with the anchor layer on in the well
+frame, brings the page forward, and leaves `anchor_pending` on the state;
+`_apply_pending_anchor` turns *Set anchor* on once the well's tables are loaded
+(the grid status decides whether it can be), or says on the figure why it
+cannot.
 
 **The exclusion is an inclusion layer, not a triage feature.**
 `review/data/field_exclusions.py` projects `Excluded_Field_Pass` from

@@ -135,6 +135,9 @@ class NanowellState:
     montages: dict = field(default_factory=dict)         # (well, timepoint) -> (image_compute.Montage | None, why)
     fetching: set = field(default_factory=set)           # ("crops" | "montages", key) being read on a worker
     fetch_bridges: list = field(default_factory=list)    # each worker bridge, kept alive until it delivers
+    #: The page's figure shows the first selected nanowell's crops at every timepoint, large, in place of the view
+    #: (``renderer.render_crop_grid``); off again when the selection is cleared. Never persisted.
+    crop_view: bool = False
     # The Array view's interaction, never persisted: where it is zoomed to (``(left, top, right, bottom)`` in the
     # frame it draws, for the ``(well, positions)`` in ``region_for``), the press a drag or click started with,
     # whether a click sets the anchor, and what the last draw put on screen (``renderer.ArrayDrawn``).

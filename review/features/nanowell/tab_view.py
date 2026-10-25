@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QLabel, QLineEdit, QMenu, QPushButton, QSlider, QSplitter, QToolButton, QVBoxLayout,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSlider, QSplitter, QToolButton, QVBoxLayout,
     QWidget,
 )
 
@@ -245,7 +245,12 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_detail_card", detail_card)
     reg.register("_nw_detail_fig", detail_card.figure)
     reg.register("_nw_detail_canvas", detail_card.canvas)
-    detail_layout.addWidget(clear_btn, 0, Qt.AlignRight)
+    crops_btn = _crops_button(ctx, detail)
+    buttons = QHBoxLayout()
+    buttons.addStretch(1)
+    buttons.addWidget(crops_btn)
+    buttons.addWidget(clear_btn)
+    detail_layout.addLayout(buttons)
     detail_layout.addWidget(detail_card, 1)
     detail.hide()
     reg.register("_nw_detail_pane", detail)
@@ -345,6 +350,31 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_page_visible", page_visible)
     reg.register("_nw_refresh_controls", refresh_controls)
     refresh_controls()
+
+
+def _crops_button(ctx, parent) -> QPushButton:
+    """**Enlarge crops**: the first selected nanowell at every timepoint, large, in place of the page's view
+    (``controller.set_crop_view``); it reads **Back to the plot** while that is shown."""
+    reg = ctx.widgets
+    button = QPushButton("Enlarge crops", parent)
+    button.setProperty("variant", "secondary")
+    button.setCheckable(True)
+    button.setToolTip("Show the first selected nanowell at every timepoint, large, in place of the plot — on one "
+                      "brightness scale, so changes between timepoints read as changes. Press again to go back.")
+    button.toggled.connect(lambda on: nwc.set_crop_view(ctx, on))
+    reg.register("_nw_crops_btn", button)
+
+    def refresh() -> None:
+        st = ctx.state.feature_slice("nanowell")
+        on = bool(st is not None and st.crop_view)
+        if button.isChecked() != on:
+            button.blockSignals(True)
+            button.setChecked(on)
+            button.blockSignals(False)
+        button.setText("Back to the plot" if on else "Enlarge crops")
+
+    reg.register("_nw_refresh_crop_view", refresh)
+    return button
 
 
 def _button(text: str, tip: str, on_click) -> QPushButton:

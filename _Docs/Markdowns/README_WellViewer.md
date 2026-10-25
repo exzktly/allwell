@@ -5082,7 +5082,10 @@ Under the plots, a strip of crops shows the first selected nanowell at each time
 from the image the run segmented (the well's archive in `in/`). When that archive is not beside the dataset
 (an output folder copied on its own), cannot be read, or the nanowell has no single owner tile (a fused one),
 the crop is cut from the lower-resolution montage instead, and the caption under the strip says so and why; a
-timepoint with no crop says why. Selecting nanowells does not change the plate selection.
+timepoint with no crop says why. **Enlarge crops**, above the site detail, shows those crops large in place of the
+plot — one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a
+change between panels; **Back to the plot** (the same button) returns, and so does clearing the selection.
+Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it

@@ -10582,7 +10582,7 @@ Every text and line is in the plot's ink and tagged `follows_theme`; the dots ta
 `widgets.plot_card.theme_paired_colours`, the hook `PlotCard.setPlotTheme` uses to repaint a paired data
 palette — so a capture, which flips the theme without a redraw, puts the publication shades on white. `render_site_detail` draws the selected nanowells' series
 against recorded time, a timepoint without a number as a gap and a hatched band, with each timepoint's state
-written above, and a strip of crops of the first selected nanowell, one per timepoint.
+written above, and a strip of crops of the first selected nanowell, one per timepoint. **Enlarge crops** (`_nw_crops_btn`, `controller.set_crop_view`, `NanowellState.crop_view`, never persisted) draws the same crops large in place of the page's view (`renderer.render_crop_grid`): one panel per timepoint, all on one brightness scale (the 1st–99th percentile of every crop together) so a change between timepoints reads as a change, with the source and scale in the caption. `redraw` hands the figure to it before any view is drawn (`_draw_crop_view`), the figure answers no click or zoom meanwhile (`st.hits`/`st.drawn` cleared, `on_click` returns), the crops arrive by the site detail's own worker fetch, and clearing the selection leaves the view.
 
 **The other views.** `views_compute` holds what they draw as data. `lattice_xy` places an address on an ideal
 lattice of the well's measured pitch (`well_pitch`, the median of its timepoints' grid records) and kind

@@ -234,6 +234,25 @@ def test_a_run_s_count_is_scaled_by_its_nanowells_interiors_and_an_earlier_run_s
         nr.NanowellSettings("100um", segment_scale="percentile")
 
 
+def test_a_nanowell_crowded_with_cells_keeps_its_floor_under_levelling():
+    """A plate seeded at about twenty cells per nanowell has nanowells more than half covered by cells, whose interior
+    median is the cells' level, not the floor's. Levelled by that median, such a nanowell's bare floor was moved by
+    the cell-to-floor contrast; levelled by its modal floor it stays where the others' is."""
+    from pipeline.nanowell_measure import INTERIOR_FRACTION
+
+    tile, px, geoms = _rimmed_tile()
+    yy, xx = np.mgrid[:200, :200]
+    inside = np.hypot(xx - 50.0, yy - 50.0) <= 22.0 * INTERIOR_FRACTION
+    rng = np.random.default_rng(0)
+    crowded = inside & (xx < 50.0 + 0.35 * 22.0)                                # ~60 % of the first nanowell
+    assert crowded.sum() > 0.5 * inside.sum()
+    tile = tile.copy()
+    tile[crowded] = rng.uniform(60.0, 90.0, crowded.sum())                       # dark, textured cells
+    seen, _range = nm.segmenter_scale(tile, px, geoms, "levelled")
+    bare = inside & ~crowded & (np.hypot(xx - 55.0, yy - 50.0) > 4.5)           # the crowded nanowell's bare floor
+    assert np.median(seen[bare]) == pytest.approx(seen[150, 140], abs=1.0)      # level with another's floor (100)
+
+
 def test_a_bright_nanowell_is_levelled_to_the_others_before_the_pooled_range():
     """Reported: on brightfield, the nanowells counted empty were often the brightest. Under the pooled interior
     range (``nanowells``) a bright nanowell either lies above the range (a rare one: the segmenter is given values it

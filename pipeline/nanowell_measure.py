@@ -90,7 +90,10 @@ MIN_LEVEL_CONTRAST = 0.05
 #: floor's texture over every site with the cells clipped away, and the fluorescence background is each tile's
 #: floor level. 5: a site's offset is the median of its same-tile neighbours' offsets, read from nanowells only, as
 #: its gain already was (``nanowell_run._smoothed_offsets``): one misread surround moved one nanowell's floor alone.
-MEASURE_VERSION = 5
+#: 6: the ``levelled`` segmenter scale levels each nanowell by its modal floor (:func:`modal_level`), not its
+#: interior's median, which in a nanowell more than half covered by cells is the cells' level; and the count's
+#: input no longer carries the Cellpose normalisation earlier crop builds gave it, so their counts are not reused.
+MEASURE_VERSION = 6
 #: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
 MIN_TEXTURE_THRESHOLD = 0.02
 #: A timepoint's template whose floor-to-surround ratio (:func:`floor_ratio`) has moved by more than a factor of two
@@ -721,10 +724,15 @@ def segmenter_scale(image, pixel_size_um: float, geometries, scale: str = "level
 
 def _level_interiors(image: np.ndarray, pixel_size_um: float, geometries) -> np.ndarray:
     """A copy of *image* with each nanowell's interior (``INTERIOR_FRACTION`` of its radius, the pixels the
-    segmenter keeps) shifted by a constant so that its median is the median of all the interiors' medians."""
+    segmenter keeps) shifted by a constant so that its floor is the median of all the interiors' floors.
+
+    The floor is the interior's modal level (:func:`modal_level`), not its median: a plate seeded at about twenty
+    cells per nanowell has nanowells more than half covered by cells, whose median is the cells' level, and
+    shifting by that moved those nanowells' floors by the cell-to-floor contrast, widening the pooled range the
+    levelling exists to narrow."""
     out = image.copy()
     regions = [_interior_pixels(image.shape, pixel_size_um, g, INTERIOR_FRACTION) for g in geometries]
-    medians = [float(np.median(v)) if (v := image[r][np.isfinite(image[r])]).size else None for r in regions]
+    medians = [modal_level(v) if (v := image[r][np.isfinite(image[r])]).size else None for r in regions]
     known = [m for m in medians if m is not None]
     if not known:
         return out

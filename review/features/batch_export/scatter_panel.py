@@ -741,7 +741,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         color_by_tp = self._sc_color_tp_cb.isChecked()
         show_gates = self._sc_gates_cb.isChecked()
         separate = self._sc_layout_cb.currentText().startswith("Separate")
-        prefs = self._ctx.state.export_prefs.style_prefs or {}
+        prefs = self._batch_style()
         marker_size = float(prefs.get("marker_size", 5.0) or 5.0)
         ink = theme.Colors.text_muted
 

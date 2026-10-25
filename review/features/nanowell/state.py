@@ -127,6 +127,9 @@ class NanowellState:
     #: The counted cells drawn as dots on every crop the page shows — the site detail's strip, the pop-out and the
     #: Extremes montage — as the Array view's Cells layer draws them on the array.
     crop_cells: bool = False
+    #: The numbers written on each crop of the Extremes montage (its fold change and its metrics line); off leaves the
+    #: crops bare, the row labels and the caption still giving the ranking.
+    crop_metrics: bool = True
     #: The *Subset*: the conditions a nanowell must meet to be used — its starting cells, a metric at a timepoint,
     #: its ring or distance from the centre, its address, its imaging field. No conditions: every nanowell. See
     #: ``subset_compute``.
@@ -195,6 +198,7 @@ class NanowellState:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
                 "extremes_n": self.extremes_n, "extremes_tps": list(self.extremes_tps), "crop_cells": self.crop_cells,
+                "crop_metrics": self.crop_metrics,
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
@@ -215,6 +219,7 @@ class NanowellState:
         self.extremes_n = (count if isinstance(count, int) and not isinstance(count, bool)
                            and 1 <= count <= EXTREMES_MAX_N else fresh.extremes_n)
         self.crop_cells = config.get("crop_cells") is True
+        self.crop_metrics = config.get("crop_metrics") is not False
         tps = config.get("extremes_tps")
         self.extremes_tps = [str(tp) for tp in tps if isinstance(tp, str)] if isinstance(tps, list) else []
         self.layers = _layers_from(config)

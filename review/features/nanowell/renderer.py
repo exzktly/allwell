@@ -440,6 +440,8 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
     notes: set = set()
     for k, (tp, crop) in enumerate(items):
         ax = fig.add_subplot(grid[k // cols, k % cols])
+        # An image, pixel for pixel: the style pass must not put the card's typed axis range on it.
+        ax._aw_image_panel = True
         ax.set_xticks([])
         ax.set_yticks([])
         if crop.image is not None:

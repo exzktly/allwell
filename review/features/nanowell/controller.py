@@ -27,6 +27,7 @@ from review.features.nanowell.distribution_compute import (
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, one_to_one
 from review.features.nanowell import extremes_compute as ec
+from review.features.nanowell import starting_cells_compute as sc
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_distribution, render_extremes, render_message,
@@ -105,6 +106,12 @@ def export_long_csv(state, path, wells=None) -> int:
     table = long_format(metrics, state.data.channels)
     table.insert(table.columns.get_loc("time_h") + 1, "time_source", state.data.time_source or "")
     table.insert(table.columns.get_loc("baseline_timepoint"), "baseline", state.baseline)
+    # Every row is kept, and flagged: a file filtered to the page's Starting cells would lose rows a reader may
+    # want back, and could not say which filter made it.
+    table["in_starting_cells_filter"] = sc.inside(metrics, state.start_min, state.start_max).to_numpy()
+    table["starting_cells_min"] = state.start_min
+    table["starting_cells_max"] = state.start_max
+    table["starting_cells_baseline"] = state.baseline
     path = Path(path)
     tmp = path.with_name(path.name + ".part")
     table.to_csv(tmp, index=False)
@@ -327,7 +334,8 @@ def redraw(ctx) -> None:
         control=st.control, baseline=st.baseline, cohort=st.cohort, well=well,
         well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
         selected=[tuple(s) for s in st.selected_sites],
-        responding_above=st.thresholds.get(metric_column(metric, channel)), **array)
+        responding_above=st.thresholds.get(metric_column(metric, channel)),
+        start_cells=(st.start_min, st.start_max), **array)
     if isinstance(model, ArrayDrawn) or st.view == "array":
         st.drawn = model
         if model is not None and model.rendered is not None:
@@ -369,7 +377,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
               note: str = "", tableless=(), selected=(), responding_above: float | None = None,
               layers: ArrayLayers | None = None, image=None, image_note: str = "",
-              region=None) -> tuple[object, object]:
+              region=None, start_cells: tuple = (None, None)) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories or Position) into *fig*: ``(hit map, model)``.
 
     **The one composition of each view**, called by the page and by Batch Export's Nanowells mode (tracker I4),
@@ -379,9 +387,17 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     with *layers* (the lattice map when none are given — a batch figure), *image* under it and *region* where it
     looks (:func:`draw_array`); its model is the ``renderer.ArrayDrawn``.
     The hit map is ``None`` for views with nothing to click. *responding_above* is the user's cut for *metric*
-    (tracker I9), which the Distribution view states the fraction responding at.
+    (tracker I9), which the Distribution view states the fraction responding at. *start_cells* is the *Starting
+    cells* filter's ``(min, max)``: every view but the Array draws only the nanowells inside it, saying how many it
+    left out; the Array view draws them all and dims the rest.
     """
     wells = [w for members in groups.values() for w in members]
+    lo, hi = start_cells
+    all_metrics = metrics
+    metrics, filtered = sc.apply(metrics, lo, hi, baseline, [well] if view == "array" else wells)
+    if view != "array" and filtered is not None and filtered.kept == 0:
+        render_message(fig, sc.empty_text(filtered), gid="nw-start-empty")
+        return None, None
     # Wells whose rosters two versions decided differently count their rim differently; the figure says so (X35a-R4).
     mixed = mixed_rules_note({w: data.roster_rules.get(w) for w in wells if w in getattr(data, "roster_rules", {})})
     note = " ".join(filter(None, [note, f"{mixed}." if mixed else ""]))
@@ -391,10 +407,16 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         note = " ".join(filter(None, [note, f"{', '.join(again)}: analysed again over every timepoint when a timepoint "
                                             "was added, so their earlier timepoints' numbers were rewritten."]))
     if view == "array":
-        drawn = draw_array(fig, metrics, data, well=well, timepoint=well_timepoint, metric=metric, channel=channel,
-                           layers=layers, image=image, image_note=image_note, region=region, selected=selected,
-                           note=note)
+        dimmed = frozenset() if filtered is None else filtered.outside_sites
+        if filtered is not None:
+            note = " ".join(filter(None, [f"{filtered.total - filtered.kept:,} outside {filtered.label()}, drawn "
+                                          "dimmed.", note]))
+        drawn = draw_array(fig, all_metrics, data, well=well, timepoint=well_timepoint, metric=metric,
+                           channel=channel, layers=layers, image=image, image_note=image_note, region=region,
+                           selected=selected, note=note, dimmed=dimmed)
         return (drawn.hits if drawn is not None else None), drawn
+    if filtered is not None:
+        note = " ".join(filter(None, [sc.note(filtered), note]))
     if view == "trajectories":
         render_trajectories(fig, vc.trajectory_panels(metrics, wells, metric_column(metric, channel), cohort=cohort),
                             cohort=cohort, label=_label(metric, channel), time_source=data.time_source, note=note)
@@ -402,6 +424,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if view == "position":
         series, missing = vc.position_series(metrics, wells, timepoint, metric_column(metric, channel),
                                              kinds={w: vc.lattice_kind(data, w, timepoint) for w in wells})
+        # A well the Starting cells filter emptied is named in the filter's note, not as one without addresses.
+        missing = [w for w in missing if filtered is None or filtered.per_well.get(w, 1) > 0]
         if missing:
             note = " ".join(filter(None, [note, f"No addressed nanowells at {timepoint}, so not drawn: "
                                                 f"{', '.join(missing)}."]))
@@ -410,6 +434,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above)
+    model.starting = (lo, hi)
     if tableless:
         model.notes.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
                               f"{', '.join(tableless)}.")
@@ -477,7 +502,7 @@ def batch_array_layers() -> ArrayLayers:
 
 def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, channel: str | None,
                layers: ArrayLayers | None = None, image=None, image_note: str = "", region=None, selected=(),
-               note: str = "") -> ArrayDrawn | None:
+               note: str = "", dimmed=frozenset()) -> ArrayDrawn | None:
     """**The one composition of the Array view**, for the page and for Batch Export (through :func:`draw_view`).
 
     *layers* says what is drawn (the lattice map when none are given); *image* is the run montage or the tile
@@ -506,7 +531,7 @@ def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, ch
         render_message(fig, says, gid="nw-array-missing")
         return None
     return render_array(fig, scene, layers, label=_label(metric, channel), image=image, image_note=image_note,
-                        selected=selected, region=region, note=note)
+                        selected=selected, region=region, note=note, dimmed=dimmed)
 
 
 def _array_image(ctx, st, well: str, timepoint: str) -> tuple[object, str]:
@@ -909,7 +934,16 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
     st.hits, st.drawn = None, None                       # no dots to hit and nothing to zoom: rows are clicked
     timepoint = shown_timepoint(ctx)[1]
     column = metric_column(metric, channel)
-    model = ec.extremes(st.metrics, well, timepoint, column, st.extremes_n, st.data.channels)
+    metrics, filtered = sc.apply(st.metrics, st.start_min, st.start_max, st.baseline, [well])
+    if filtered is not None and filtered.kept == 0:
+        render_message(fig, sc.empty_text(filtered), gid="nw-start-empty")
+        apply_export_style_to_current(ctx, fig, canvas)
+        canvas.draw_idle()
+        redraw_detail(ctx)
+        return
+    if filtered is not None:
+        note = " ".join(filter(None, [sc.note(filtered), note]))
+    model = ec.extremes(metrics, well, timepoint, column, st.extremes_n, st.data.channels)
     missing = tuple(sorted(site for site in model.sites() if site not in st.crops))
     if missing:
         data, metrics = st.data, st.metrics
@@ -1000,8 +1034,25 @@ def redraw_detail(ctx) -> None:
         data, metrics = st.data, st.metrics
         _fetch(ctx, "crops", first, lambda: site_crops(data, metrics, first),
                failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
-    render_site_detail(fig, series, channel=channel, time_source=st.data.time_source, crops=crops)
+    render_site_detail(fig, series, channel=channel, time_source=st.data.time_source, crops=crops,
+                       outside=_outside_badges(st, [site for site, _frame in series]))
     canvas.draw_idle()
+
+
+def _outside_badges(st, sites) -> dict:
+    """``site -> sentence`` for each of *sites* the *Starting cells* filter leaves out of the page's figures."""
+    if not sc.is_active(st.start_min, st.start_max):
+        return {}
+    out = {}
+    label = f"Starting cells {sc.bounds_text(st.start_min, st.start_max)}"
+    for site in sites:
+        rows = site_series(st.metrics, *site)
+        if not len(rows) or bool(sc.inside(rows.iloc[:1], st.start_min, st.start_max).iloc[0]):
+            continue
+        n0 = pd.to_numeric(rows["n0"], errors="coerce").iloc[0] if "n0" in rows else float("nan")
+        count = "no count at baseline" if not math.isfinite(n0) else f"{int(n0)} cells at baseline"
+        out[tuple(site)] = f"outside {label} ({count})"
+    return out
 
 
 #: Montages kept read: a montage is up to 4096 px square, so the slider's recent steps only.
@@ -1167,6 +1218,27 @@ def nw_on_channel_changed(ctx) -> None:
 
 def set_view(ctx, view: str) -> None:
     _set(ctx, "view", view)
+
+
+def set_starting_cells(ctx, lo, hi) -> None:
+    """Set the *Starting cells* filter's bounds (``None`` for no bound on that side). Bounds that are not whole
+    numbers ≥ 0, or a minimum above the maximum, change nothing: the controls are put back to the filter that
+    is set."""
+    st = _state(ctx)
+    if st is None:
+        return
+    try:
+        lo, hi = sc.normalise(lo, hi)
+    except ValueError:
+        _call(ctx, "_nw_refresh_controls")
+        return
+    if (st.start_min, st.start_max) == (lo, hi):
+        _call(ctx, "_nw_refresh_controls")
+        return
+    st.start_min, st.start_max = lo, hi
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
 
 
 def set_extremes_n(ctx, count: int) -> None:

@@ -30,6 +30,7 @@ from review.features.nanowell.array_compute import padded
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
 from review.features.nanowell.extremes_compute import caption, format_value
+from review.features.nanowell.starting_cells_compute import occupancy_in_filter
 from review.features.nanowell.full_montage_compute import fit_region
 
 #: A dot's diameter, in points.
@@ -324,16 +325,22 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     key.set_xlim(0, 10)
     key.set_ylim(0, 1)
     classes = ["0", "1", "2", "3+", None]
+    # The classes the Starting cells filter removes whole are drawn faint and named so, or a key would decode
+    # colours the figure cannot contain.
+    lo, hi = model.starting
+    kept = [occupancy_in_filter(cls, lo, hi) for cls in classes]
     screen, publication = _occupancy_colours(classes)
     faces, edges = publication if _is_publication(key) else screen
     coll = key.scatter([4.2, 5.4, 6.6, 7.8, 9.0], [0.5] * 5, s=(DOT_PT * 1.1) ** 2, facecolors=faces,
                        edgecolors=edges, linewidths=0.8)
+    coll.set_alpha([1.0 if k else 0.2 for k in kept])
     theme_paired_colours(coll, screen=screen, publication=publication)
     title = ("Cells at baseline (" + ("first measurable" if model.baseline == "first_measurable" else "earliest")
-             + "):")
+             + ("; faint: filtered out" if not all(kept) else "") + "):")
     _ink(key.text(4.0, 0.5, title, ha="right", va="center", fontsize=7, color=muted, gid="nw-legend"), muted=True)
-    for xk, label in zip([4.2, 5.4, 6.6, 7.8, 9.0], ["0", "1", "2", "3+", "?"]):
-        _ink(key.text(xk + 0.2, 0.5, label, ha="left", va="center", fontsize=7, color=muted, gid="nw-legend"),
+    for xk, label, k in zip([4.2, 5.4, 6.6, 7.8, 9.0], ["0", "1", "2", "3+", "?"], kept):
+        _ink(key.text(xk + 0.2, 0.5, label, ha="left", va="center", fontsize=7, color=muted, gid="nw-legend",
+                      alpha=1.0 if k else 0.35),
              muted=True)
 
 
@@ -343,16 +350,18 @@ DETAIL_ROWS = (("n", "Cell count"), ("c", "Confluence"))
 
 
 def render_site_detail(fig, series: list, *, channel: str | None = None, time_source: str | None = None,
-                       crops: dict | None = None) -> None:
+                       crops: dict | None = None, outside: dict | None = None) -> None:
     """One row per measurement, one line per selected nanowell, against recorded time (tracker V3).
 
     *series* is ``[(site, frame)]`` with ``frame`` from :func:`series_compute.site_series`. A timepoint
     without a value is a gap in the line, never a zero; a timepoint whose state carries no number is a
     hatched band naming the state. *crops* (``timepoint -> image_compute.Crop`` for the first nanowell) adds a
     row of its crops at every timepoint, each titled with its timepoint and where it was cut from (V3c); a
-    timepoint without one says why in its place.
+    timepoint without one says why in its place. *outside* (``site -> sentence``) marks a selected nanowell that the
+    *Starting cells* filter leaves out of the page's figures: the detail still draws it, and says so.
     """
     fig.clear()
+    outside = outside or {}
     rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", f"Brightness · {channel}"),
                                  (f"signal_{channel}", f"Site signal · {channel}")] if channel else [])
     if not series:
@@ -377,7 +386,8 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
                     ax.axvspan(xi - _band(x), xi + _band(x), facecolor="none", edgecolor=colour, hatch="///",
                                alpha=0.35, linewidth=0, zorder=1)
         states = ", ".join(f"{tp}: {_state_text(row)}" for tp, row in zip(frame["timepoint"], frame.to_dict("records")))
-        fig.text(0.16, 0.975 - 0.03 * k, f"{site[0]} · q {site[1]}, r {site[2]} — {states}", fontsize=7,
+        badge = f" · {outside[tuple(site)]}" if tuple(site) in outside else ""
+        fig.text(0.16, 0.975 - 0.03 * k, f"{site[0]} · q {site[1]}, r {site[2]} — {states}{badge}", fontsize=7,
                  color=colour, gid="nw-detail-states")          # a selection colour: data ink, not tagged
     for ax, (_column, label) in zip(axes, rows):
         _ink(ax.set_ylabel(label, fontsize=7.5, color=faint), muted=True)
@@ -668,14 +678,16 @@ def array_footer(scene, layers, *, label: str, image_note: str = "", note: str =
 
 
 def render_array(fig, scene, layers, *, label: str, image=None, image_note: str = "", selected=(),
-                 region=None, note: str = "") -> ArrayDrawn:
+                 region=None, note: str = "", dimmed=frozenset()) -> ArrayDrawn:
     """The Array view: one well at one timepoint, drawn with the *layers* that are on (``state.ArrayLayers``).
 
     *image* is what is drawn under the nanowells in the well frame: a run montage (``image_compute.Montage``) or a
     tile store (``full_montage_compute.TileStore``), rendered for exactly the region and pixels the axes show.
     *region* ``(left, top, right, bottom)`` is where the view looks, widened to the axes' shape; without one the
     view fits everything drawn. The nanowells are coloured as ``ui/nanowell_sites.py`` colours them wherever one is
-    drawn, so a state reads the same here as in Analyze's Test detection.
+    drawn, so a state reads the same here as in Analyze's Test detection. The nanowells in *dimmed* (``(well, q,
+    r)``: outside the *Starting cells* filter) are drawn under a veil of the ground, still where they are and still
+    clickable, so where the kept ones sit on the array stays visible.
     """
     fig.clear()
     in_well = scene.frame == "well"
@@ -694,6 +706,7 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
         _draw_tiles(ax, scene.tiles, muted)
     if layers.nanowells and len(scene.sites):
         _draw_nanowells(fig, ax, drawn, scene, layers, label=label, selected=selected)
+        _dim_nanowells(ax, scene.sites, dimmed)
     if layers.cells and scene.cells is not None and len(scene.cells[0]):
         _draw_cells(ax, *scene.cells)
     if (layers.addresses or layers.values) and len(scene.sites):
@@ -814,6 +827,31 @@ def _draw_nanowells(fig, ax, drawn, scene, layers, *, label: str, selected) -> N
         if site in sites.sites:
             k = sites.sites.index(site)
             ax.add_patch(_ring(sites.x[k], sites.y[k], sites.radius[k] * 1.35, colour))
+
+
+#: How opaque the veil over a nanowell outside the *Starting cells* filter is: enough to read as set aside, little
+#: enough that its state and fill still show through.
+DIM_ALPHA = 0.65
+
+
+def _dim_nanowells(ax, sites, dimmed) -> None:
+    """A veil of the figure's ground over each nanowell in *dimmed*, in the ground of either theme (a capture flips
+    the theme without a redraw, so the veil is a paired colour like the occupancy dots)."""
+    from matplotlib.colors import to_rgba
+
+    from widgets.plot_card import plot_tokens, theme_paired_colours
+
+    if not dimmed or not len(sites.x):
+        return
+    mask = np.array([tuple(site) in dimmed for site in sites.sites], dtype=bool)
+    if not mask.any():
+        return
+    screen = to_rgba(plot_tokens("screen")[0], DIM_ALPHA)
+    publication = to_rgba(plot_tokens("publication")[0], DIM_ALPHA)
+    coll = _ellipses(ax, sites, mask, facecolors=publication if _is_publication(ax) else screen,
+                     edgecolors="none", zorder=4.5)
+    coll.set_gid("nw-array-dimmed")
+    theme_paired_colours(coll, screen=(screen, "none"), publication=(publication, "none"))
 
 
 def _fill_by_metric(fig, ax, sites, fused, outline: float, label: str) -> None:

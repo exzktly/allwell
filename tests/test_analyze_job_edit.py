@@ -14,6 +14,8 @@ over defaults passes without restoring anything at all.
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 
@@ -40,8 +42,12 @@ _OPTS = {
     "compress_output_well_folders": True,
     "move_source_tifs": True,
     "remote_batch_size": "12",
+    # One choice of three on the form ("If a well already has output"): Redo
+    # it is force with incremental off. The pipeline always ignored
+    # --incremental under --force, so force+incremental was never a state of
+    # its own; the Fill-in-what's-missing round trip is its own test below.
     "force": True,
-    "incremental": True,
+    "incremental": False,
     "force_wells": ["A1", "B2"],
     "only_wells": ["A1", "B2", "C3"],
     "cpu_only": True,
@@ -189,7 +195,10 @@ def test_the_fixture_is_all_non_default(tab):
                  "move_source_tifs",
                  # nanowell mode pins label-free segmentation, which has no cytoplasm channel, so a saved
                  # nanowell spec always carries it blank.
-                 "cytoplasm_token"}
+                 "cytoplasm_token",
+                 # Off whenever force is on: one choice of three (see _OPTS), so it cannot differ from the
+                 # default in the same fixture as force; test_fill_in_what_is_missing_round_trips covers it.
+                 "incremental"}
     default = tab.collect_spec()["opts"]
     same = [k for k, v in _OPTS.items() if k not in constants and default.get(k) == v]
     assert not same, f"these fixture values match the form default, so they test nothing: {same}"
@@ -199,6 +208,17 @@ def test_hydrate_then_collect_reproduces_the_spec(tab):
     """The round trip. A key that survives here is a key the edit flow keeps."""
     tab.hydrate_job(_SPEC)
     assert tab.collect_spec() == _SPEC
+
+
+def test_fill_in_what_is_missing_round_trips(tab):
+    """The third value of the existing-output choice, which _SPEC (Redo it)
+    cannot carry: incremental on, force off."""
+    spec = copy.deepcopy(_SPEC)
+    spec["opts"]["force"] = False
+    spec["opts"]["incremental"] = True
+    tab.hydrate_job(spec)
+    assert tab._existing_output_cb.value() == "incremental"
+    assert tab.collect_spec() == spec
 
 
 @pytest.mark.parametrize("spec", [_REMOTE_SPEC, _REMOTE_NO_CLEANUP_SPEC],

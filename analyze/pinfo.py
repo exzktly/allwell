@@ -354,8 +354,8 @@ class AnalyzePipelineInfoMixin:
         # re-arming it from a folder someone happened to open would be a safety
         # override the user never chose on a disk they may not have measured.
         # It is a per-run decision, so it starts unticked every time.
-        chk("_force_cb", d.get("force"))
-        chk("_incremental_cb", d.get("incremental"))
+        if hasattr(self, "_existing_output_cb"):
+            self._set_existing_output(force=d.get("force"), incremental=d.get("incremental"))
         forced = d.get("force_wells")
         if forced is not None and hasattr(self, "_force_wells_edit"):
             self._force_wells_edit.setText(", ".join(str(w) for w in forced))

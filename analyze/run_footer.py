@@ -91,6 +91,7 @@ class AnalyzeRunFooterMixin:
         # The schema check also decides whether Run is enabled, and the first
         # one ran inside _build_form, before the footer's Run button existed.
         self._refresh_schema_preview()
+        self._start_live_run_checks()
 
     def _build_run_footer(self, footer: QWidget) -> None:
         """Fill *footer*: the Run on row, then the run buttons.
@@ -145,3 +146,13 @@ class AnalyzeRunFooterMixin:
         self._refresh_remote_controls()
 
         layout.addWidget(self._build_run_row(footer))
+
+        # What stops the form from running, under Run: every problem, the
+        # first in full; a click goes to its section (``analyze.run_problems``).
+        self._run_problems_lbl = QLabel("", footer)
+        self._run_problems_lbl.setWordWrap(True)
+        self._run_problems_lbl.setContentsMargins(12, 0, 12, 8)
+        self._run_problems_lbl.setCursor(Qt.PointingHandCursor)
+        self._run_problems_lbl.mousePressEvent = lambda _ev: self._go_to_run_problem()
+        layout.addWidget(self._run_problems_lbl)
+        self._set_status(self._run_problems_lbl, "")

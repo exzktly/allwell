@@ -75,13 +75,17 @@ def test_run_comes_back_when_the_run_ends(qtbot):
         "Run stayed disabled after the run ended")
 
 
-def test_an_invalid_schema_still_disables_run(qtbot):
-    """The original rule survives: a broken schema blocks Run on its own."""
+def test_an_invalid_schema_still_blocks_run(qtbot, run_refusals):
+    """A broken schema blocks a run on its own. Run is no longer greyed out
+    for it — pressing Run lists the problem and opens the section holding it
+    (``analyze.run_problems``) — but the run does not start."""
     tab = _tab(qtbot)
     tab._schema_picker.schema_edit.setText("not:a:real:schema:at:all:here")
     tab._refresh_schema_preview()
-    assert not tab._run_btn.isEnabled(), (
-        "an invalid schema left Run enabled")
+    assert tab._validate_run_request() is None, "an invalid schema let the run start"
+    assert run_refusals[-1][0] in ("Input Error", "Schema Error")
+    assert any(t == "Schema Error" for t, _m in tab._last_run_problems)
+    assert tab._collapsible_sections["Filename schema"][0].isVisibleTo(tab)
 
 
 def test_the_runner_refuses_a_second_start_while_its_thread_lives():

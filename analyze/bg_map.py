@@ -97,11 +97,11 @@ _BG_MAP_BLANK_DARKEN = 145
 #: carries the block and the ring already carries "this is the one being edited".
 _BG_MAP_BLANK_GLYPH = "◎"
 
-#: How far the summary line under the "Pair blanks…" button steps in. Enough to
-#: read as a note about the row above, and nowhere near the button's own left
-#: edge: the form's scroll column is about 310px, so that alignment would spend
-#: a third of the width on white space.
-_BG_MAP_NOTE_INDENT_PX = 12
+#: How far the summary line under the "Pair blanks…" button steps in: not at
+#: all. The form is one column, so the button already starts at the form's left
+#: edge, and a note indented from it sat at a third indent that lined up with
+#: nothing (it was 12px when the button stood in a field column beside a label).
+_BG_MAP_NOTE_INDENT_PX = 0
 
 #: One row of the blank list, for sizing the scroll area that holds them. A
 #: radio button plus a swatch, with the layout's own 1px margins either side.
@@ -174,11 +174,7 @@ class AnalyzeBackgroundMapMixin:
         # is a sentence about the state rather than a second control, so a
         # control row is the wrong place for it.
         #
-        # Indented a little, and not to the button's own left edge: the Analyze
-        # form sits in a scroll column about 310 pixels wide, so aligning with
-        # the button costs `_ROW_LABEL_W` — a third of the width — and pushed
-        # the longest sentence onto three lines. A small step in reads as "a
-        # note about the row above" and leaves the text room to say it.
+        # Aligned with the button, at the form's left edge (``_BG_MAP_NOTE_INDENT_PX``).
         under = QWidget(sec)
         under_layout = QHBoxLayout(under)
         under_layout.setContentsMargins(_BG_MAP_NOTE_INDENT_PX, 0, 0, 2)

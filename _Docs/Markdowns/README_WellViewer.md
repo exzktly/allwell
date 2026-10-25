@@ -198,14 +198,14 @@ batch processing on headless workers:
 python process_microscopy.py --help
 ```
 
-#### Nanowell arrays (Analyze ▸ Nanowells, or the command line)
+#### Nanowell arrays (Analyze ▸ Plate type, or the command line)
 
 The section and the Review page belong to the Nanowells feature: a build made from a profile without it
 (`ALLWELL_PROFILE`, as for a feature-subset executable) shows neither. The command-line `--nanowell_format` works in every
 build.
 
-In the Analyze pane, open the **Nanowells** section (below Image correction & QC, folded by default), tick **Nanowell arrays**, and mark the
-channel the tiles are imaged in as **Phase** (Channels & segmentation). The section asks for the plate format (100 µm or
+In the Analyze pane, set **Channels ▸ Plate type** to **Nanowell array** — the **Nanowell array** section appears below
+Segmentation — and set the Role of the channel the tiles are imaged in to **Phase**. The section asks for the plate format (100 µm or
 50 µm nanowells, or **Custom size**, which shows two more fields: the nanowell diameter and the lattice pitch,
 centre to centre — the run measures the pitch on the tiles, so it is a starting value), the **Array geometry**
 and, optionally, the margin around a nanowell that must lie inside one tile
@@ -470,7 +470,7 @@ at least four of the plate's wells are in the run; otherwise click each timepoin
 Concatenate carry the anchors of the wells and timepoints they keep, renamed as they rename them.
 
 `--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile
-record recomputes the timepoint. Ticking **Incremental** for a nanowell run on a remote host is refused for now —
+record recomputes the timepoint. Choosing **Fill in what's missing** (Run scope) for a nanowell run on a remote host is refused for now —
 the remote would analyse the new timepoints without the earlier ones — so run it on this computer, or run the
 remote plate in full. Resuming one is not refused: when a remote nanowell run stopped part way (or the app finds an
 unfinished earlier run of the plate), pressing Run or Resume goes well by well. Every well whose results here
@@ -486,7 +486,7 @@ together. *Merge Plates* carries both plates' tables, with dataset 2's wells ren
 plates analysed under different nanowell settings, and says when only one plate has nanowell results (the
 other's wells then show on the Nanowells page as wells without a table). *Concatenate* supports the
 successive-imaging workflow: concatenate the analysed dataset with the new timepoint's raw images, then run
-Analyze with *Incremental* — the earlier timepoints are kept, and the new one is added onto the same nanowells.
+Analyze with Run scope set to *Fill in what's missing* — the earlier timepoints are kept, and the new one is added onto the same nanowells.
 The new images need an acquisition record of their own when the analysed dataset has one (convert them with
 the CZI, ND2 or OME import); without it the merge is refused, because the merged dataset would have no record
 to add the new timepoint from. Two datasets that both hold nanowell results are refused. Each tool checks the tables before it writes anything,
@@ -703,17 +703,37 @@ with `Ctrl+O`.
 
 ## Analyze mode — running the pipeline
 
-The Analyze tab is one tall scrollable form with a footer pinned under it. The
-footer holds **Run on** (where the run goes; see
-[Running on a remote host](#11-running-on-a-remote-host)) and the run buttons,
-so **Run** is on screen however far down the form you are. Every section after
-the first three is folded until you open it; a folded section's ▸ caret opens
-it. Problems the form can see — an input folder it cannot use, a segmentation
-method missing the channel it needs, a correction missing its blank well — are
-written in red where they occur, and anything that is only help is grey. Top to
-bottom:
+The Analyze tab is one tall scrollable form with a footer pinned under it. Each
+section asks one question, in the order a run needs the answers: **Data**,
+**Filename schema**, **Channels**, **Segmentation**, **Image correction**,
+**Measurements & filters**, **Auto-threshold**, **Run scope** and **Advanced**,
+with **Nanowell array** after Segmentation for a nanowell plate and **Remote
+options** at the foot while a remote host is chosen. Every label sits above its
+field, so fields use the panel's full width.
 
-### 1. Folders
+Data, Channels, Segmentation and Image correction are open when the form opens;
+the rest are folded, and a folded section's header says what it holds —
+"None · Rolling disk", "Fill in what's missing · only B02", or "2 changed" when
+some of its settings differ from a new form's. Click a header to open or fold it.
+
+The footer holds **Run on** (where the run goes; see
+[Running on a remote host](#10-running-on-a-remote-host)), the run buttons, and
+under them **what stops the run**: every problem the form can see — no input
+folder, a schema that does not parse, a method missing the channel it needs, a
+correction missing its blank well, a number that is not one — the first in full
+and a count of the rest, with all of them in its tooltip. While you fill the
+form in the list is grey; once you press **Run** (or **+ Queue**) with problems
+outstanding it turns red, the section holding the first problem opens and
+scrolls into view, and clicking the line does the same. Nothing opens a dialog.
+The checks that read the input folder from disk — a packed file, a blank or
+control well missing from the input — are made when Run is pressed.
+
+### 1. Data
+
+The input folder, where the run will write (**Output to**, shown once the
+input resolves), a line in red if the folder cannot be used, and
+**Use settings from a previous run…**.
+
 
 The input folder is resolved by
 [`services/input_resolution_service.py`](../../services/input_resolution_service.py).
@@ -764,9 +784,11 @@ message names the page that converts *that* file, because the others would
 refuse it. Pointing Analyze at a raw `.ome.tif` just shows a reminder to
 convert it.
 
-You can also explicitly override the output folder.
+The output folder is always the one the input resolves to, shown as **Output to**
+under the input field; the form has no separate output setting. From the
+command line, `--output_dir` names any folder.
 
-**If that output folder already holds a run, a card at the top of the form, above the Folders section,
+**If that output folder already holds a run, a card at the top of the form, above the Data section,
 says so before you press anything.** It names when the last run against this folder
 started and how it ended — completed, failed, stopped, suspended, or *never
 finished*, which means All-Well was closed while it was going — followed by how
@@ -777,10 +799,11 @@ already accounts for, so you can see how much a re-run has left to do. If new
 images have been dropped in since, it also says what the run will do about them,
 in the same words the run log will use.
 
-**Load settings from a run…**, just above the Folders section, does the same from a
+**Use settings from a previous run…**, at the foot of the Data section, does the same from a
 `pipeline_info.json` you pick, and points the input at the plate
 that file belongs to. It loads settings only — it does not resume the run; use
-the resume card (or tick **Incremental** and Run) for that. A file from a
+the resume card (or set **Run scope → If a well already has output** to
+**Fill in what's missing** and Run) for that. A file from a
 remote run is read against this computer: the input comes from where the file
 is, and the scratch disk and the completeness check are left as they are,
 because the recorded values describe the remote host.
@@ -798,6 +821,12 @@ their own row beneath the report, so the text has the full width of the sidebar.
 else, or once a run has written there again.
 
 ### 2. Filename schema
+
+Folded until you open it: choosing an input folder detects the schema, so most
+runs never need it. Its folded header shows the schema as filenames spell it
+(`experiment_channel_well_fov_timepoint`), and a schema that does not parse
+unfolds the section and is listed under **Run**. The input folder is never locked
+while the schema is being fixed.
 
 A colon-separated list of field names, applied left-to-right against the
 underscore-separated tokens in each filename. The `Schema string` field is
@@ -843,38 +872,34 @@ Prefixed    T01, day2, tp_3  (numeric suffix → ordinal)
 Any string  preserved as-is and sorted lexicographically
 ```
 
-### 3. Channels & segmentation
+### 3. Channels
 
-- **Segmentation.** The method, chosen first, with a one-line note under it
-  saying when to use it; the settings that method needs appear below the
-  channel list (see [section 4](#4-segmentation-settings)).
-- **Segmentation channel.** The channel name (the token in your filenames)
-  the method segments (also quantified — its intensities appear in the CSV like
-  any other channel). Hidden for **Label-free**, which segments the channel
-  marked Phase instead.
-- **Fluorescent channels.** One or more tokens whose intensities you want
-  quantified. Each token gets its own CSV column set (`<token>_mean_intensity`,
+- **Plate type.** **Standard plate** or **Nanowell array**. Choosing Nanowell
+  array shows the [Nanowell array](#nanowell-arrays-analyze--plate-type-or-the-command-line)
+  section and sets the Segmentation section to the nanowell cell count.
+- **One row per channel**, named as in the filenames, with a **Role** dropdown
+  and a ✕ to remove it. **+ Add channel** adds a row. The roles:
+  - **Quantify.** Every channel is quantified. Each token gets its own CSV column set (`<token>_mean_intensity`,
   `<token>_total_intensity`, etc.).
-- **smFISH channels** (optional). Channels processed for spot detection.
+  - **smFISH.** Also processed for spot detection.
   Each smFISH channel appears with both a regular intensity column set and
   a `_smfish_count` column.
-- **Phase channel** (optional). Tick **Phase** on the fluorescent-channel row
-  holding your brightfield / DIC image. That channel skips flat-field and
+  - **Phase** (optional). The row holding your brightfield / DIC image. That channel skips flat-field and
   background correction entirely — those corrections have nothing to remove from
   a brightfield frame and only add artefacts. Its corrected image is therefore
   the input image unchanged, so by default the run does not save it a second
   time: Review shows the phase frame from the input archive `in/<WELL>.zip` (see
-  **Reference the phase input image** under [Output options](#8-output-options)).
+  **Reference the phase input image** under [Advanced](#9-advanced--output-performance-scratch-folder)).
   It is still quantified like any other channel. At most one channel can be
   Phase, and it cannot also be smFISH.
 
-  **All-Well pre-ticks it when a channel's name reads as brightfield** — `DIC`,
+  **All-Well sets Phase itself when a channel's name reads as brightfield** — `DIC`,
   `BF`, `Phase`, `Brightfield`, `Trans` and the usual spellings around them,
   including prefixed and numbered forms like `w1BF`, `BF2` and `DIC1`. A short
   hint has to stand on its own between the letters around it, so a fluorescence
   channel that merely contains those letters — `Ca-Indicator`, `Transferrin647`,
   `BFP` — is left as an ordinary channel. The guess is only a
-  starting point: check the tick before you run, because a fluorescence channel
+  starting point: check the role before you run, because a fluorescence channel
   marked Phase is quantified from uncorrected images and nothing downstream says
   so.
 
@@ -886,10 +911,13 @@ Any string  preserved as-is and sorted lexicographically
   same channel is refused before the run starts, with a message naming the
   channel.
 
-### 4. Segmentation settings
+### 4. Segmentation
 
-These sit in **Channels & segmentation**, under the channel list, and only the
-chosen method's settings are shown.
+The **Method**, with a one-line note under it saying when to use it (it turns
+red, and says what is missing, while the method cannot run); the
+**Segmentation channel** — the channel name the method segments, also
+quantified like any other — which is hidden for **Label-free**, since that
+segments the channel marked Phase; then only the chosen method's own settings.
 
 - **Segmentation** — five methods (the pipeline's name in brackets):
   **StarDist — nuclei** (`stardist_nuclei`, the default), **StarDist +
@@ -906,7 +934,7 @@ chosen method's settings are shown.
   them by name. **Nucleus channel (optional)** is the second channel the cyto
   models can read.
 - The background radii are set under
-  [Image correction & QC](#5-image-correction--qc--field-flatness--background-correction).
+  [Image correction](#5-image-correction--field-flatness--background).
 - **Cell diameter** (px; `0` = 30) — shown for both Cellpose methods, general
   and label-free. Cellpose's models were trained on cells about 30 px across, and
   Cellpose resizes each image so that cells of the diameter you enter become
@@ -984,28 +1012,16 @@ chosen method's settings are shown.
     rather than reporting that no nuclei were found: nothing was measured, and
     that is a different statement from measuring zero.
 
-### 5. Image correction & QC — field flatness & background correction
+### 5. Image correction — field flatness & background
 
-The **Image correction & QC** section (folded until you open it) bundles
-optional, pre-measurement clean-up that runs **per channel at quantification
-time** (so it changes the pixel values that get measured and can only be changed
-by re-running the pipeline). There are two independent correction stages, a
-debris filter, and one measurement. **Both corrections start at None**: a fresh
-form corrects nothing, and each correction is something you turn on knowing what
-it reads. The dropdowns show a plain name for each mode; the pipeline's own name
+Two independent corrections that run **per channel at quantification time**,
+so they change the pixel values that get measured and can only be changed by
+re-running the pipeline. **They start at the command line's own defaults** — no
+flat-field, and a **Rolling disk** background — so a run from this form and one
+from `process_microscopy.py` with no flags correct the same way, and neither
+needs a blank well. Folded, the section's header names both choices. The dropdowns show a plain name for each mode; the pipeline's own name
 is in the first column of the tables below, and it is what `pipeline_info.json`
 records:
-
-**Measure per-cell focus** is on by default and adds one column to every well's
-CSV: how sharp each nucleus's own boundary is. It costs a few percent of the
-run, and it is the only evidence a later reader has that part of a field was
-soft — a dataset without it cannot be asked the question afterwards without
-being re-run over the images. **Out of focus below** beside it is the cut for
-that number, and it is **recorded with the dataset rather than applied by the
-run**: nothing is dropped here, and Review's Cell Gating tab is where the
-exclusion actually happens, so a threshold chosen wrongly costs a tick rather
-than a re-run. Leave the box blank unless you have measured a value; see
-[Cell Gating](#cell-gating) for where that number comes from.
 
 1. **Flat-field (illumination) correction** — *multiplicative*. Models the slow
    illumination profile (vignetting / uneven excitation) as a smooth field `F`,
@@ -1026,7 +1042,7 @@ special combined case described below.
 
 | Mode (shown as) | What it does |
 |------|--------------|
-| **`none`** (None) | No illumination correction. The default. |
+| **`none`** (None) | No illumination correction. The default (the command line's too). |
 | **`gaussian`** (Self (Gaussian blur)) | Self-referential, per-image: heavily Gaussian-blurs each image (σ ≈ 50 px) to estimate its own illumination field, then divides. No reference well needed; flattens slow gradients while preserving cell-scale structure. |
 | **`basic`** (Whole plate (BaSiC)) | Pure-numpy BaSiC-style. Samples up to ~30 images **per channel across the whole plate**, takes the **per-pixel median** (robust to cells/debris that move between fields), Gaussian-smooths it, normalizes to mean 1, and divides. One field per channel. Approximates BaSiC without its L1/low-rank optimisation (no `jax`/`basicpy`). |
 | **`empty_well`** (From blank well(s)) | Same median-based estimator, but sampled **only from a designated empty/background well** (the *Background well* field) — that well's measured intensity *is* the illumination profile. Requires a Background well. |
@@ -1035,10 +1051,10 @@ special combined case described below.
 
 | Method (shown as) | Operation | Notes |
 |--------|-----------|-------|
-| **`none`** (None) | Image unchanged. | The default. |
+| **`none`** (None) | Image unchanged. | — |
 | **`robust_mesh`** (Robust local mesh) | `img − B`, `B` a sigma-clipped background on a coarse grid of tiles, bicubically interpolated. | **Recommended when background needs removing.** SExtractor/Background2D style: each tile's background is estimated with bright object pixels clipped away, so it is robust to bright or confluent objects on an uneven background, where the morphological methods struggle. The radius sets the scale; **Mesh tile ratio** (tile = radius ÷ ratio) and **Mesh sigma-clip** tune it. |
 | **`top_hat`** (Top-hat) | `img − grey_opening(img, square)`, square footprint of side `2·radius+1`. | Fast (separable 1-D passes) but the square footprint leaves anisotropic, *terraced* residuals — square halos/hotspots next to bright objects. Legacy method. |
-| **`sliding_disk`** (Rolling disk) | Isotropic-disk white top-hat at full resolution: `img − opening(img, disk)`. | A disk of the given radius flattens regions wider than ~2·radius (treated as background) and preserves narrower ones (kept as signal), isotropically — no square terracing. Built from a decomposed disk so it stays fast (~2 s on a 1024² frame). |
+| **`sliding_disk`** (Rolling disk) | Isotropic-disk white top-hat at full resolution: `img − opening(img, disk)`. | **The default** (the command line's too). A disk of the given radius flattens regions wider than ~2·radius (treated as background) and preserves narrower ones (kept as signal), isotropically — no square terracing. Built from a decomposed disk so it stays fast (~2 s on a 1024² frame). |
 | **`fov_median`** (Field median) | `img − median(img)`. | Subtracts a **single scalar**, the median intensity of the whole field of view. Most pixels in a field are background, so the median is a robust flat-background estimate (insensitive to bright cells/debris). Removes a **uniform offset only** — it does *not* flatten spatial gradients (use a morphological method or `empty_well` for that). No radius and no reference well needed; the cheapest correction. |
 | **`empty_well`** (From blank well(s)) | `img − B`. | Subtracts a *measured* per-channel additive background `B` — the **per-pixel median** of the empty/background well's images, Gaussian-smoothed and kept at its measured level (not normalized). No-op if no field is available for the channel. Requires a Background well. |
 | **`fft_bandpass`** (FFT band-pass) | 2-D FFT Butterworth high-pass. | Removes low-frequency background (illumination, gradients, large blobs) whatever the object size. The radius is the large-structure cutoff; **Segmentation small px** / **Other small px** are an optional high-frequency cutoff for a true band-pass (`0` = high-pass only). |
@@ -1183,6 +1199,36 @@ wells' frames across every timepoint), which is the historical whole-timecourse
 behavior. Single-well, single-timepoint datasets therefore behave exactly as
 before.
 
+### 6. Measurements & filters
+
+Folded by default; folded, its header says how many settings differ from a new
+form's. What is measured beyond intensity, and what is filtered out.
+
+#### Shape metrics
+
+Per-cell morphology, measured from each nucleus mask at
+quantification time and written as `shape_…` columns in the measurements CSV.
+One dropdown; tick the features you want.
+
+- **Selectable features** — Area, Perimeter, Eccentricity, Solidity, Extent,
+  Major Axis Length, Minor Axis Length, Orientation. **Area, Eccentricity,
+  Solidity and Perimeter** are ticked when the form opens.
+- **Always measured, whatever the dropdown says** — the two centroid columns
+  (`shape_centroid_row` / `shape_centroid_col`), `shape_circularity`, and
+  `shape_solidity`. Features elsewhere in the app depend on them, so they are
+  not left to a per-run choice: centroids are what cross-timepoint cell tracking
+  links on and what the [Cell Browser](#cell-browser)'s region delete and the
+  crop rectangle test cells against on frames whose masks are not loaded, and
+  the debris gate filters on size, **solidity** and
+  **circularity** — a gate you can edit after the run precisely because those
+  columns are always there. Solidity appears in the dropdown as well (it is
+  ticked by default); unticking it slims nothing, since the run adds it back.
+- **Choosing** — these are measured once, at run time, and cannot be added to a
+  dataset afterwards without re-running the pipeline, so tick anything you might
+  plot. The cost is a few extra CSV columns, not extra segmentation work. What
+  you tick here is what the Review pane's [Multivariate](#multivariate-analysis)
+  and [Spatial](#spatial-analysis) tabs can offer as an axis.
+
 #### Debris removal
 
 The **Remove debris** toggle drops segmented regions whose size / shape fall
@@ -1193,9 +1239,23 @@ recomputes the verdict live as you tune the thresholds, with no re-segmentation
 (the debris gate is edited from the [Cell Gating](#cell-gating) tab in Review).
 A cell counts only when it is manually kept **and** it passes QC.
 
-### 6. Auto-threshold — picking each channel's "on" cut
+#### Per-cell focus
 
-Collapsed by default. When a run finishes, All-Well can choose a default **on**
+**Measure per-cell focus** is on by default and adds one column to every well's
+CSV: how sharp each nucleus's own boundary is. It costs a few percent of the
+run, and it is the only evidence a later reader has that part of a field was
+soft — a dataset without it cannot be asked the question afterwards without
+being re-run over the images. **Out of focus below** beside it is the cut for
+that number, and it is **recorded with the dataset rather than applied by the
+run**: nothing is dropped here, and Review's Cell Gating tab is where the
+exclusion actually happens, so a threshold chosen wrongly costs a tick rather
+than a re-run. Leave the box blank unless you have measured a value; see
+[Cell Gating](#cell-gating) for where that number comes from.
+
+### 7. Auto-threshold — picking each channel's "on" cut
+
+Collapsed by default, with its on/off switch in the section header so it can be
+read and changed folded; the folded header also names the method. When a run finishes, All-Well can choose a default **on**
 threshold for each channel and store it with the dataset, so the Cell Gating tab
 opens with sensible values instead of a flat 50 everywhere.
 
@@ -1287,34 +1347,72 @@ are never overwritten, so re-running a plate into an output folder that already
 has them changes nothing. Clear the values on the Cell Gating tab first if you
 want a re-run to recompute them.
 
-### 7. Shape metrics
+### 8. Run scope
 
-Collapsed by default. Per-cell morphology, measured from each nucleus mask at
-quantification time and written as `shape_…` columns in the measurements CSV.
-The section holds a single dropdown; tick the features you want.
+Folded by default; folded, its header names anything that is not "every well,
+skip what is done".
 
-- **Selectable features** — Area, Perimeter, Eccentricity, Solidity, Extent,
-  Major Axis Length, Minor Axis Length, Orientation. **Area, Eccentricity,
-  Solidity and Perimeter** are ticked when the form opens.
-- **Always measured, whatever the dropdown says** — the two centroid columns
-  (`shape_centroid_row` / `shape_centroid_col`), `shape_circularity`, and
-  `shape_solidity`. Features elsewhere in the app depend on them, so they are
-  not left to a per-run choice: centroids are what cross-timepoint cell tracking
-  links on and what the [Cell Browser](#cell-browser)'s region delete and the
-  crop rectangle test cells against on frames whose masks are not loaded, and
-  the Image correction & QC debris gate filters on size, **solidity** and
-  **circularity** — a gate you can edit after the run precisely because those
-  columns are always there. Solidity appears in the dropdown as well (it is
-  ticked by default); unticking it slims nothing, since the run adds it back.
-- **Choosing** — these are measured once, at run time, and cannot be added to a
-  dataset afterwards without re-running the pipeline, so tick anything you might
-  plot. The cost is a few extra CSV columns, not extra segmentation work. What
-  you tick here is what the Review pane's [Multivariate](#multivariate-analysis)
-  and [Spatial](#spatial-analysis) tabs can offer as an axis.
+- **If a well already has output.** One choice of three:
+  - **Skip it** (default). A well whose `<WELL>_out.zip` and CSV both exist is
+    left as it is.
+  - **Fill in what's missing.** Finishes a partial or crashed run instead of
+      skipping past it (`--incremental`). Normally a well whose `<WELL>_out.zip` and
+    CSV both exist is skipped whole, however few of its `(FOV, timepoint)` pairs
+    actually made it in — so pressing Run again after a crash does nothing for
+    the wells that need it. With this chosen, each well's already-recorded pairs
+    are read from the output folder and only the missing ones are processed,
+    then merged into the existing CSV and archive. Wells with no output at all
+    process in full; complete wells are left untouched. Datasets → *Validate &
+    Repair* → **Complete this run in Analyze** chooses this for you.
+  - **Redo it.** Re-processes wells whose output ZIPs already exist (`--force`). It also
+    discards the per-FOV checkpoints a stopped run left behind, so forcing really
+    does recompute: it used to re-run the well and then resume those checkpoints,
+    which meant changing a threshold and choosing Redo it gave you back numbers
+    identical to the ones you were trying to replace. On a remote run it carries
+    all the way to the end: the run will not decide the remote's existing outputs
+    make the work unnecessary, the fetch will not skip a well because its local
+    copy looks complete, and — if a well's output file comes back with the same
+    size and timestamp it had before the run — the run says so by name and fails
+    rather than reporting success over an artefact it never replaced.
 
-### 8. Output options
+    **You usually will not need it for a settings change.** A well records which
+    configuration produced it, and a re-run whose segmentation method, thresholds,
+    channel set, corrections or filename schema differ recomputes that well on its
+    own rather than reporting it up to date. Wells written by a version of All-Well
+    that predates that record carry no such marker and are still treated as up to
+    date, so for those — a plate you last analysed some time ago — **Redo it** is still
+    how you make a settings change take effect.
+- **Only these wells.** Comma-separated wells to process — and no others. Every
+  other well's output, and its records in `pipeline_info.json`, are left
+  exactly as they are, so you can re-run part of a plate without touching the
+  rest. Empty means the whole plate. The run refuses to start if you name a
+  well the input does not hold, and when it starts it says on the run panel
+  which wells it is limited to. Combine it with **Fill in what's missing** to finish
+  partial wells and with **Force these wells** to regenerate named ones. It
+  also works for remote runs: only the named wells are uploaded (plus an
+  empty-well blank the correction needs), including runs the remote splits
+  into batches, where each batch runs the named wells it was sent. It is never filled in from a previous
+  run's settings — a subset is a decision for one run. The pipeline flag is
+  `--only_wells`. When an earlier run of the plate did not finish, a run limited
+  to named wells picks up only what that run left half-done in *those* wells
+  (output written but never marked complete); wells it never reached, or
+  finished, are run as asked, and the log says so. A remote nanowell run that
+  would have to pick up a named well is refused, naming the well; choose **Redo it**
+  to redo just the named wells in full, or run on this computer.
+- **Force these wells.** Comma-separated wells to reprocess in full, whatever
+  else the run decides. This is the only thing that recovers a well whose
+  `<WELL>_out.zip` exists but whose measurements CSV is missing: its own
+  processed images count as already-done work, so an incremental run reports
+  that well "up to date" and skips it forever. Forcing it re-segments the well
+  and overwrites its outputs; every other well is unaffected. Validate &
+  Repair's completion handoff fills this in for you with exactly those wells.
 
-Collapsed by default.
+### 9. Advanced — output, performance, scratch folder
+
+Folded by default; folded, its header says how many settings differ from a new
+form's.
+
+#### Output
 
 - **CSV prefix.** The stem of the per-well measurements files the run writes;
   `measurements` by default, giving `measurements_<WELL>.csv`. Change it to keep
@@ -1345,7 +1443,7 @@ Collapsed by default.
   Untick it to resave the phase image into the output archive, as earlier
   versions did — for instance before handing someone only the `out/` folder;
   wells that are already finished keep their archive unless you also tick
-  **Force reprocess**. Measurements are identical either way.
+  **Redo it** (Run scope). Measurements are identical either way.
 
 - **Store corrected images at the input's bit depth.** On by default. The
   background-corrected images (`_tophat`) are computed as 32-bit decimals; with
@@ -1369,14 +1467,14 @@ Collapsed by default.
   `tophat_dtype`) and restored when you load a dataset's settings. Neither marks
   an existing well out of date, and an incremental run keeps the images earlier
   runs archived, so a plate's existing wells shrink only when you re-run them
-  with **Force reprocess**. From the command line they are
+  with **Redo it** (Run scope). From the command line they are
   `--phase_output reference|copy` and `--tophat_dtype source|float32`.
 
 Packaging is not configurable: inputs are always read from per-well `.zip`
 archives and outputs are always written as per-well `.zip` archives. See
 [What the pipeline writes](#what-the-pipeline-writes) for the full layout.
 
-### 9. Compute options
+#### Performance
 
 - **Threads per worker** (`0` = auto). TensorFlow intra-op parallelism (CPU
   only; ignored on Metal). Auto is 4 (2 on Apple Silicon), never more than the
@@ -1410,69 +1508,15 @@ archives and outputs are always written as per-well `.zip` archives. See
   which on macOS reads lower than Finder's (Finder counts purgeable caches and
   snapshots that are not claimable until something asks for the space). So the
   two numbers can meet and refuse a run that would have finished. When the
-  volume really is tight, pointing **Scratch disk** at a roomier one or lowering
-  **Workers** is the better fix: workers multiply the staging need directly.
-  This box is the one Compute option that is *not* restored by **Open
+  volume really is tight, pointing **Scratch folder** at a roomier one or lowering
+  **Wells in parallel** is the better fix: workers multiply the staging need directly.
+  This box is the one performance setting that is *not* restored by **Open
   pipeline_info…** — it disarms a check that exists because a volume filling
   part-way costs hours of work, so it is a decision you make per run rather than
   one a folder you happened to open makes for you.
-- **Force re-run.** Re-processes wells whose output ZIPs already exist. It also
-  discards the per-FOV checkpoints a stopped run left behind, so forcing really
-  does recompute: it used to re-run the well and then resume those checkpoints,
-  which meant changing a threshold and ticking Force gave you back numbers
-  identical to the ones you were trying to replace. On a remote run it carries
-  all the way to the end: the run will not decide the remote's existing outputs
-  make the work unnecessary, the fetch will not skip a well because its local
-  copy looks complete, and — if a well's output file comes back with the same
-  size and timestamp it had before the run — the run says so by name and fails
-  rather than reporting success over an artefact it never replaced.
+#### Scratch folder
 
-  **You usually will not need it for a settings change.** A well records which
-  configuration produced it, and a re-run whose segmentation method, thresholds,
-  channel set, corrections or filename schema differ recomputes that well on its
-  own rather than reporting it up to date. Wells written by a version of All-Well
-  that predates that record carry no such marker and are still treated as up to
-  date, so for those — a plate you last analysed some time ago — Force is still
-  how you make a settings change take effect.
-- **Only these wells.** Comma-separated wells to process — and no others. Every
-  other well's output, and its records in `pipeline_info.json`, are left
-  exactly as they are, so you can re-run part of a plate without touching the
-  rest. Empty means the whole plate. The run refuses to start if you name a
-  well the input does not hold, and when it starts it says on the run panel
-  which wells it is limited to. Combine it with **Incremental** to finish
-  partial wells and with **Force these wells** to regenerate named ones. It
-  also works for remote runs: only the named wells are uploaded (plus an
-  empty-well blank the correction needs), including runs the remote splits
-  into batches, where each batch runs the named wells it was sent. It is never filled in from a previous
-  run's settings — a subset is a decision for one run. The pipeline flag is
-  `--only_wells`. When an earlier run of the plate did not finish, a run limited
-  to named wells picks up only what that run left half-done in *those* wells
-  (output written but never marked complete); wells it never reached, or
-  finished, are run as asked, and the log says so. A remote nanowell run that
-  would have to pick up a named well is refused, naming the well; tick **Force**
-  to redo just the named wells in full, or run on this computer.
-- **Force these wells.** Comma-separated wells to reprocess in full, whatever
-  else the run decides. This is the only thing that recovers a well whose
-  `<WELL>_out.zip` exists but whose measurements CSV is missing: its own
-  processed images count as already-done work, so an incremental run reports
-  that well "up to date" and skips it forever. Forcing it re-segments the well
-  and overwrites its outputs; every other well is unaffected. Validate &
-  Repair's completion handoff fills this in for you with exactly those wells.
-- **Incremental — process only missing FOVs.** Finishes a partial or crashed
-  run instead of skipping past it. Normally a well whose `<WELL>_out.zip` and
-  CSV both exist is skipped whole, however few of its `(FOV, timepoint)` pairs
-  actually made it in — so pressing Run again after a crash does nothing for
-  the wells that need it. With this ticked, each well's already-recorded pairs
-  are read from the output folder and only the missing ones are processed,
-  then merged into the existing CSV and archive. Wells with no output at all
-  process in full; complete wells are left untouched. Datasets → *Validate &
-  Repair* → **Complete this run in Analyze** ticks this for you. Force re-run
-  overrides it.
-
-### 10. Scratch disk
-
-Collapsed by default. One field plus **Browse…**, and the last option above the
-Run controls.
+One field plus **Browse…**.
 
 A run does most of its file churn somewhere other than your input and output
 folders: each well's archive is extracted, intermediate images are written, and
@@ -1490,17 +1534,17 @@ that lands on the scratch disk.
   the input folder for this reason.
 - **It is also the fix for a run that will not start on space.** When the
   pre-run space check refuses a run, moving scratch to a roomier volume (or
-  lowering **Workers**, which multiply the staging need directly) is the real
+  lowering **Wells in parallel**, which multiply the staging need directly) is the real
   fix; *Start even if the disk looks too small* under
-  [Compute options](#9-compute-options) only disarms the check.
+  [Advanced ▸ Performance](#performance) only disarms the check.
 - **It fills up.** A run that dies mid-way with a disk-full message, or that
   finishes with wells reported incomplete, usually ran out of room here rather
   than on the output volume — scratch defaults to your home drive, so a dataset
   on a roomy external disk can still exhaust a full internal one. The per-FOV
   tracebacks in `<output folder>/errors/` say so. Free space or move scratch,
-  then re-run with **Incremental**.
+  then re-run with **Fill in what's missing** (Run scope).
 
-### 11. Running on a remote host
+### 10. Running on a remote host
 
 **Run on** is the dropdown in the footer pinned under the form, beside the run
 buttons, so where the run will go is in sight when you press Run.
@@ -1602,7 +1646,7 @@ message about space. Set it to your site's real scratch: `$TMPDIR`,
 on the remote, not here. A per-job folder (`$TMPDIR` or `$SLURM_TMPDIR` on most
 clusters) is emptied when the job ends, which costs the resume of a well a
 stopped run left part-way — it starts that well again; `/scratch/$USER` and the
-default keep it. This is separate from **Scratch disk** in the form
+default keep it. This is separate from **Scratch folder** (Advanced) in the form
 above, which governs local runs and is not used when the pipeline runs remotely.
 
 **Empty-well correction works with batching.** If you set background or flat-field correction to **empty_well** and name a blank well, that well is uploaded once, on its own, after the cluster job has been requested and before the batches start — every batch then corrects against the same reference. A blank that still needs processing is run once, with the last batch; one that a re-run has already completed is uploaded as a reference only and not processed again. The blank is never diffed or skipped by the incremental filters either, since it is the input the correction is built from rather than a well whose output you are waiting for. If it cannot be found at all, the run stops and says which well it looked for and where, instead of quietly producing uncorrected numbers.
@@ -1656,7 +1700,7 @@ What a remote run does before it uploads (which archives it rebuilds, which it
 sends untouched) and what it reports on the way back are covered by the run log
 and by `remote_fetch_report.txt` in the output folder.
 
-### 12. Run / Suspend / Stop / Log
+### 11. Run / Suspend / Stop / Log
 
 - Click **Run** (in the footer under the form). While the run is going,
   **Suspend** and **Stop** take its place; they are not shown while nothing is
@@ -1788,7 +1832,7 @@ and by `remote_fetch_report.txt` in the output folder.
   exactly as they are, and you can still finish the plate later by re-running
   that input with **incremental** ticked.
   Pressing Run on an input with an unfinished run behind it processes
-  incrementally on its own, and the log says so. **Force reprocess all wells**
+  incrementally on its own, and the log says so. **Redo it** (Run scope)
   overrides that: every well is recomputed from scratch, and on a remote run
   every well is uploaded whole, even one that is already complete locally.
   Without Force, a remote run — like a run on this computer — skips every well
@@ -1874,8 +1918,8 @@ and by `remote_fetch_report.txt` in the output folder.
   correctly not reused. One case it cannot find without a record: a run whose
   upload was rewritten to drop unused channels, if a later run made before this
   version overwrote where it went. If the download fails, the run stops with an error
-  rather than re-uploading the wells: run it again to retry, or tick **Force
-  reprocess all wells** to recompute the plate from scratch.
+  rather than re-uploading the wells: run it again to retry, or set Run scope to
+  **Redo it** to recompute the plate from scratch.
 - The offer is about **the folder in the input field**. If you have not chosen
   one yet — the state the pane opens in — it offers the most recent unfinished
   run on any plate, which is how you carry on with something from yesterday.
@@ -1973,8 +2017,8 @@ disk while a plate is being processed: under the load of a run its session can
 drop and reconnect, and on macOS every file the app had open at that moment
 becomes invalid — the error reads `[Errno 9] Bad file descriptor`. All-Well
 keeps the bulk of a run's file churn off your chosen folders (its scratch
-defaults to the `scratch` folder inside the app's own folder; the *Scratch disk*
-field overrides it), and
+defaults to the `scratch` folder inside the app's own folder; the *Scratch folder*
+field (Advanced) overrides it), and
 every remaining write on your input or output folder is retried a few times
 before it is allowed to fail. You will see a `[retry] …` line in the log when
 that happens — one or two is the app absorbing a blip, a steady stream means the
@@ -2259,7 +2303,7 @@ that tab itself shows you.
 partial wells, wells with images but no measurements, wells that were staged and
 never processed — all of them open **Analyze** already set up to complete this
 dataset: pointed at the project folder, configured from the run's own recorded
-settings, with *Incremental* on so only the missing fields are processed, and
+settings, with Run scope on *Fill in what's missing* so only the missing fields are processed, and
 with the wells an incremental run would otherwise skip forever listed for a full
 reprocess — and limited, through **Only these wells**, to the wells that need
 work, so nothing already complete is touched. You do not have to remember what the original run was told to do; the
@@ -2406,7 +2450,7 @@ choice applies once, when the menu closes.
   - a plate only **partly** measured — a resumed or incremental run measures
     only the fields it re-processed, so a comparison against the plate would be
     drawn from a biased sample. Nothing is excluded, and the line says which
-    wells are short. Re-run those wells with **Force** to complete it;
+    wells are short. Re-run those wells with **Redo it** (Run scope) to complete it;
   - a well whose FOV labels do not identify its fields. The app can tell when a
     well's filenames did not decompose and every row arrived labelled field 1;
     a per-field verdict cannot be attached to such a well at all, so every row
@@ -2462,7 +2506,7 @@ choice applies once, when the menu closes.
   differently. Find a value once for your microscope and
   magnification and it will carry between plates taken the same way, exposure
   permitting.
-  Type it into **Analyze ▸ Image correction & QC ▸ Out of focus below** so future
+  Type it into **Analyze ▸ Measurements & filters ▸ Out of focus below** so future
   runs record it and this box opens ready. That field remembers what you last
   typed between sessions — it is the one setting on the Analyze form that does,
   because it describes your microscope rather than the plate in front of you.
@@ -2511,10 +2555,10 @@ choice applies once, when the menu closes.
   analysed before that column existed has nothing to filter on; the line says
   so — in amber if the box is ticked, because then nothing you asked for is
   happening. A plate only partly analysed since then (a run continued with
-  **Incremental**, or some wells re-run) is checked only for the cells analysed
+  **Fill in what's missing**, or some wells re-run) is checked only for the cells analysed
   after it: the line then says how many cells were checked out of how many,
   and that the rest are kept unjudged, again in amber when the box is ticked.
-  Only a **Force** re-run records the column for the older cells — an ordinary
+  Only a **Redo it** re-run (Run scope) records the column for the older cells — an ordinary
   re-run skips every well whose results already exist, and an incremental one
   with the same settings finds them up to date. In the Segmentation
   view's **Why removed** overlay these cells are outlined in magenta and
@@ -2561,7 +2605,7 @@ choice applies once, when the menu closes.
   the app never treats them alike.
 
   If a dataset was analysed before this existed it carries no focus column and
-  says so. Re-run it with **Analyze ▸ Image correction & QC ▸ Measure per-cell focus**
+  says so. Re-run it with **Analyze ▸ Measurements & filters ▸ Measure per-cell focus**
   ticked — it is on by default — to get one.
 
   On the **Home** tab's plate map, a well that needs a look carries a `!` and a
@@ -4097,7 +4141,7 @@ still exported (see below).
   folder untouched — nothing is copied to your local disk for it, and the log
   says how many archives took that route. Only wells that genuinely lose
   something (a channel you did not select, or fields **incremental** has already
-  done) are rebuilt, into the app's scratch folder unless the *Scratch disk* field
+  done) are rebuilt, into the app's scratch folder unless the *Scratch folder* field
   says otherwise. If your data is on a network or external drive, this pass reads
   only the images it will upload, so it is roughly as fast as the upload itself.
   Whether an archive counts as unchanged is judged on its images only, so the
@@ -4184,14 +4228,14 @@ still exported (see below).
   than leaving you to find out: before it reads an image the run sizes
   itself against the volumes it will write to and warns (or, if there is not
   room for even one well, stops — see **Start even if the disk looks too
-  small** under Compute options for when that refusal is wrong and how to
+  small** under Advanced ▸ Performance for when that refusal is wrong and how to
   overrule it); as wells complete it measures what they
   actually wrote — only what this run added, so results already in the output
   folder from earlier batches or an earlier run do not count against each new
   well — and warns once if the rest of the plate will not fit; and if a
   volume does fill, the error names *which* volume and how much is left on it
-  instead of the bare system message. Free space, or point **Scratch disk** at a
-  roomier volume, and re-run with **incremental** — the wells already written are
+  instead of the bare system message. Free space, or point **Scratch folder** at a
+  roomier volume, and re-run with **Fill in what's missing** — the wells already written are
   complete and are not redone.
 - **"Unusable FOV labels" at load** — a warning naming specific wells means those
   wells' rows carry no usable field-of-view label, so all their fields pooled
@@ -4576,8 +4620,8 @@ place cells in a grid that mirrors your plate or your experimental design.
   - **Timepoint** dropdown (reads e.g. `Timepoint: 4.0h`). The timepoint you
     were on is remembered with the dataset and comes back as *the same hour*, not
     the same position in the list — so extending a plate with more timepoints
-    and reloading it (an **Incremental** re-run, see
-    [Compute options](#9-compute-options)) still brings
+    and reloading it (a **Fill in what's missing** re-run, see
+    [Run scope](#8-run-scope)) still brings
     the map back on the timepoint you saved it on. If the plate no longer has
     that hour at all, the map opens on its default timepoint and the log says
     which hour was missing, rather than putting up a neighbouring one that would
@@ -6281,7 +6325,7 @@ The dialog lists what can go, each with its size, and clears what you tick:
   the checkout's `.mplcache`, and temporary folders went to the system temp
   folder. On Windows, an older version also kept Analyze's scratch in
   `C:\Users\<you>\.allwell\scratch`; it is listed here too, unless the
-  *Scratch disk* field points at it. Nothing reads them any more.
+  *Scratch folder* field points at it. Nothing reads them any more.
 - **Analyze run scratch** — unticked to begin with, and marked with a warning.
   The extracted images and per-field checkpoints Analyze runs keep in the
   `scratch` folder inside the folder above. It can grow to many gigabytes. A
@@ -6289,7 +6333,7 @@ The dialog lists what can go, each with its size, and clears what you tick:
   that run reprocess those wells from the beginning; results already in your
   output folders are not affected. Clear asks you to confirm first (Cancel is
   the default), and refuses while an Analyze run is going. Anything written to
-  in the last hour is skipped, and a *Scratch disk* folder you chose yourself in
+  in the last hour is skipped, and a *Scratch folder* you chose yourself in
   the Analyze form is never touched.
 - **Row cache of the open dataset** — unticked to begin with. Fast copies of the
   dataset's CSVs, kept in `.aw_parquet` folders beside them. Clearing it frees
@@ -6311,7 +6355,7 @@ folder made by the app on another machine is never cleared from this one.
 The dialog never touches your images, CSVs or analysis, your settings, remote
 hosts, queued jobs or suspended runs, or an Analyze run's own files. A run's
 scratch folder is the `scratch` folder inside the app's folder above (or the
-*Scratch disk* you set), and the CZI scan cache is its `czi-scans` folder; both
+*Scratch folder* you set), and the CZI scan cache is its `czi-scans` folder; both
 belong to runs — a suspended run resumes from what is in its scratch — and are
 not offered. To reclaim scratch space, delete the `scratch` folder by hand while
 no run is going or suspended.
@@ -7445,7 +7489,7 @@ rewritten.
   dataset 2's images, a well only dataset 2 has gets a new archive, and the
   acquisition record gains dataset 2's timepoints. An analysed dataset 1's
   results (`out/`) are left exactly as they are. Then run **Analyze** on dataset
-  1 with **Incremental** ticked: only the new timepoint is processed, and its
+  1 with Run scope set to **Fill in what's missing**: only the new timepoint is processed, and its
   rows are added to each well's measurements and nanowell tables.
 - **Dataset 2 is left where it is.** Nothing in it is changed or deleted. The
   end of the run log lists every one of dataset 2's files that was added and
@@ -7581,8 +7625,8 @@ say — the raw log says so and the findings are unaffected.
    Analyze** opens the dataset there set up to finish it: the Analyze form is
    filled in from the dataset's own recorded settings (schema, separator,
    channel roles, QC options, CSV prefix — everything the original run used),
-   and **Incremental — process only missing FOVs** is ticked for you. You land
-   with Compute options already unfolded so you can see that tick, and a line
+   and **Run scope** is set to **Fill in what's missing** for you. You land
+   with Run scope already unfolded so you can see that choice, and a line
    across the top of the run panel naming the dataset and confirming what was
    set up, including any wells listed under **Force these wells** — those are
    wells whose images exist but whose measurements CSV is gone, which an
@@ -8064,7 +8108,7 @@ worker loads StarDist once and reuses it across every FOV in that well.
   throughput, they only add RAM pressure. Two workers overlap I/O and
   CPU preprocessing with GPU inference.
 - **CPU-only.** Workers default to `floor((cpu_count − 1) / tf_threads)`,
-  with `tf_threads` defaulting to 4. Adjust under Compute options if your
+  with `tf_threads` defaulting to 4. Adjust under Advanced ▸ Performance if your
   machine has very many cores.
 
 Temporary directories (`_tmp_extract_*`, `_tmp_images_*`) are removed when

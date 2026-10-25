@@ -213,6 +213,6 @@ def test_test_detection_opens_with_a_remote_and_incremental_chosen(tab, tmp_path
     root, _ = _plate(tmp_path)
     tab._remote_cb.addItem("bench-box", userData="bench-box")
     tab._remote_cb.setCurrentIndex(tab._remote_cb.findData("bench-box"))
-    tab._incremental_cb.setChecked(True)
+    tab._existing_output_cb.setValue("incremental")
     window = _open(tab, root)
     assert window is not None and window.isVisible()

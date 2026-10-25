@@ -43,7 +43,11 @@ class AnalyzeSchemaSectionMixin:
     """Builds the Filename schema section and keeps its preview current."""
 
     def _build_schema_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Filename schema")
+        # Folded: a folder's schema is detected when it is chosen, so most runs
+        # never need to look at it. The folded header says what it is, and a
+        # schema that does not parse unfolds it (_refresh_schema_preview).
+        sec = self._section(parent, "Filename schema", collapsible=True, collapsed=True,
+                            summary=self._schema_summary)
 
         # The separator, the five position dropdowns and the schema string they
         # write are one reusable control (`widgets.schema_picker`), because the
@@ -66,8 +70,7 @@ class AnalyzeSchemaSectionMixin:
         # first ten seconds that the feature does not work. The Zip Loose
         # Folder page has always carried the equivalent line.
         self._schema_picker.setDetection(
-            "Pick an input folder above, then detect its layout from the "
-            "filenames.")
+            "Detect reads the layout from the input folder's filenames.")
 
         # Run-time detection: the same scan the button above makes, made again
         # when the run starts — for a queued job whose input an earlier job
@@ -102,8 +105,18 @@ class AnalyzeSchemaSectionMixin:
 
         self._schema_preview_lbl = QLabel("", sec)
         self._schema_preview_lbl.setObjectName("Muted")
+        # Monospaced, so the example filenames' indented second line lines up
+        # under the first (QSS ``QLabel[mono="true"]``).
+        self._schema_preview_lbl.setProperty("mono", True)
         self._schema_preview_lbl.setWordWrap(True)
         sec.layout().addWidget(self._schema_preview_lbl)
+
+    def _schema_summary(self) -> str:
+        """The folded header's line: the schema as filenames spell it."""
+        if self._auto_detect_on():
+            return "detected at run time"
+        fields = self._schema_field_list()
+        return self._filename_sep().join(fields) if fields else ""
 
     def _on_auto_detect_toggled(self, on: bool) -> None:
         """Grey out what run-time detection replaces, and re-check the form.
@@ -157,21 +170,14 @@ class AnalyzeSchemaSectionMixin:
         errors = [] if detect else self._schema_errors()
         fields = self._schema_field_list()
         sep = self._filename_sep()
-        schema_valid = not errors
 
-        if hasattr(self, "_input_edit"):
-            self._input_edit.setEnabled(schema_valid)
-            self._browse_btn.setEnabled(schema_valid)
-        if hasattr(self, "_folder_lock_lbl"):
-            self._set_status(self._folder_lock_lbl,
-                             "" if schema_valid else "Define the filename schema below first.",
-                             error=not schema_valid)
-
+        # The input picker is never locked on the schema — choosing a folder is
+        # what lets Detect read the schema — and neither is Run: a schema that
+        # does not parse is one of the problems Run reports, in the footer.
         if errors:
             self._set_status(self._schema_err_lbl, "  ".join(errors), error=True)
             self._schema_preview_lbl.setText("")
-            if hasattr(self, "_run_btn"):
-                self._run_btn.setEnabled(False)
+            self.reveal_section("Filename schema")
             return
 
         self._set_status(self._schema_err_lbl, "", error=True)

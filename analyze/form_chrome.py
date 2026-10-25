@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
+    QBoxLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from widgets.separator import build_hline_separator
@@ -26,8 +26,14 @@ from widgets.separator import build_hline_separator
 class AnalyzeFormChromeMixin:
     """Section / row / entry / info-marker builders for the Analyze form."""
 
+    #: Width of the column the ▸/▾ caret sits in. Every section header reserves
+    #: it, folding or not, so all section titles start at the same x.
+    _CARET_GUTTER_W = 26
+
     def _section(self, parent: QWidget, title: str, info: str = "",
-                 *, collapsible: bool = False, collapsed: bool = False) -> QWidget:
+                 *, collapsible: bool = False, collapsed: bool = False,
+                 switch: QWidget | None = None,
+                 summary=None) -> QWidget:
         """Add a labelled section to *parent* and return its body widget.
 
         When *info* is given, a small ``ⓘ`` marker is placed next to the title
@@ -35,9 +41,15 @@ class AnalyzeFormChromeMixin:
         notes available on demand instead of cluttering the form inline.
 
         When *collapsible*, the header carries a ▾/▸ caret and clicking it
-        shows/hides the body; *collapsed* sets the initial state. Used (C3) to
-        fold the optional/advanced sections (QC, Shape, Output, Compute,
-        Scratch) by default so the required fields lead the form.
+        shows/hides the body; *collapsed* sets the initial state. The optional
+        sections fold by default so the required ones lead the form.
+
+        *switch* is a section's own on/off control, put in the header beside
+        the title so it can be read and changed with the section folded; its
+        clicks are its own and do not fold the section. *summary* is a
+        callable returning a short muted line shown after the title while the
+        section is folded — what the fold is hiding (see
+        ``analyze.section_summaries``).
         """
         container = QWidget(parent)
         cl = QVBoxLayout(container)
@@ -46,24 +58,41 @@ class AnalyzeFormChromeMixin:
 
         header = QWidget(container)
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setContentsMargins(0, 0, 12, 0)
         hl.setSpacing(4)
-        caret = None
-        if collapsible:
-            caret = QLabel("▸" if collapsed else "▾", header)
-            caret.setObjectName("SectionTitle")
-            caret.setContentsMargins(12, 6, 0, 2)
-            hl.addWidget(caret)
+        caret = QLabel("▸" if collapsed else "▾" if collapsible else "", header)
+        caret.setObjectName("SectionTitle")
+        caret.setFixedWidth(self._CARET_GUTTER_W)
+        caret.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        caret.setContentsMargins(0, 6, 4, 2)
+        hl.addWidget(caret)
         title_lbl = QLabel(title, header)
         title_lbl.setObjectName("SectionTitle")
-        title_lbl.setContentsMargins(2 if collapsible else 12, 6, 0, 2)
+        title_lbl.setContentsMargins(0, 6, 0, 2)
         hl.addWidget(title_lbl)
         if info:
             hl.addWidget(self._info_icon(header, info))
+        if switch is not None:
+            switch.setParent(header)
+            hl.addWidget(switch)
+        summary_lbl = QLabel("", header)
+        summary_lbl.setObjectName("Muted")
+        summary_lbl.setContentsMargins(6, 6, 0, 2)
+        summary_lbl.setMinimumWidth(0)
+        summary_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        summary_lbl.hide()
+        # The summary takes the header's spare width when it shows; the
+        # stretch after it holds the title, ⓘ and switch to the left when it
+        # does not (a hidden widget takes no part in the layout).
+        hl.addWidget(summary_lbl, 20)
         hl.addStretch(1)
         cl.addWidget(header)
 
-        cl.addWidget(build_hline_separator(container))
+        rule = build_hline_separator(container)
+        # The section rule: one step stronger than an in-panel hairline, which
+        # is near-invisible on the grey theme (QSS ``QFrame#Separator[section]``).
+        rule.setProperty("section", True)
+        cl.addWidget(rule)
 
         body = QWidget(container)
         bl = QVBoxLayout(body)
@@ -74,10 +103,11 @@ class AnalyzeFormChromeMixin:
         if collapsible:
             body.setVisible(not collapsed)
 
-            def _toggle(_ev=None, _body=body, _caret=caret) -> None:
+            def _toggle(_ev=None, _body=body, _caret=caret, _title=title) -> None:
                 vis = not _body.isVisible()
                 _body.setVisible(vis)
                 _caret.setText("▾" if vis else "▸")
+                self._refresh_section_summary(_title)
 
             header.setCursor(Qt.PointingHandCursor)
             header.mousePressEvent = _toggle  # type: ignore[assignment]
@@ -87,6 +117,11 @@ class AnalyzeFormChromeMixin:
                 self._collapsible_sections = {}
             self._collapsible_sections[title] = (body, caret)
 
+        if summary is not None:
+            if not hasattr(self, "_section_summaries"):
+                self._section_summaries = {}
+            self._section_summaries[title] = (summary, summary_lbl, body)
+
         # Every section, collapsible or not, is recorded in build order so
         # current_help_section can say which one the user has scrolled to.
         if not hasattr(self, "_section_widgets"):
@@ -95,6 +130,31 @@ class AnalyzeFormChromeMixin:
 
         parent.layout().addWidget(container)
         return body
+
+    def _refresh_section_summary(self, title: str) -> None:
+        """Redraw *title*'s folded summary: shown while folded, hidden open."""
+        entry = getattr(self, "_section_summaries", {}).get(title)
+        if entry is None:
+            return
+        summary, label, body = entry
+        text = ""
+        if not body.isVisibleTo(body.parentWidget()):
+            from core.safe import swallow
+            with swallow(f"summarising the {title} section"):
+                text = summary() or ""
+        # Elided to the width the header leaves it: a schema or a well list
+        # can be longer than the panel, and a clipped word reads as a typo.
+        width = label.width()
+        shown = (label.fontMetrics().elidedText(text, Qt.ElideRight, width)
+                 if text and width > 40 else text)
+        label.setText(shown)
+        label.setToolTip(text)
+        label.setVisible(bool(text))
+
+    def refresh_section_summaries(self) -> None:
+        """Redraw every folded section's summary."""
+        for title in list(getattr(self, "_section_summaries", {})):
+            self._refresh_section_summary(title)
 
     def current_help_section(self) -> str:
         """Title of the form section the user is working in, or ``""``.
@@ -185,6 +245,7 @@ class AnalyzeFormChromeMixin:
         body, caret = entry
         body.setVisible(True)
         caret.setText("▾")
+        self._refresh_section_summary(title)
 
     def _info_icon(self, parent: QWidget, info: str) -> QLabel:
         """A small ``ⓘ`` marker whose hover tooltip carries *info*.
@@ -196,17 +257,15 @@ class AnalyzeFormChromeMixin:
         from widgets.info_icon import info_icon
         return info_icon(parent, info)
 
-    #: Row label column width, narrow enough to leave room for a field at
-    #: rail_w; word-wrap below lets an overflowing label wrap instead of clip.
-    _ROW_LABEL_W = 108
-    # Control widths for the Analyze form, alongside the label column above.
-    # The whole set is one decision: ARCHITECTURE's rail-head section explains
-    # that the form was narrowed to fit ``theme.Metrics.rail_w`` by shrinking this label
-    # column and capping the two widest combos, so a later change to that fit
-    # has to be able to see all of them at once.
+    # Control widths for the Analyze form. The form is one column — every
+    # label sits above its field — so a field takes the panel's whole width
+    # and nothing here has to be squeezed beside a label column. Two widths
+    # remain (``_normalise_field_widths``): the full width for text, paths and
+    # dropdowns, and ``_NUM_FIELD_W`` for a number.
     _ADD_BTN_W = 130
     _AUTO_THRESHOLD_METHOD_CB_W = 165
     _CB_W = 160
+    _NUM_FIELD_W = 80
     _REMOVE_BTN_W = 36
     _RIGHT_MIN_W = 300
     _SCHEMA_STR_EDIT_MIN_W = 165
@@ -214,43 +273,95 @@ class AnalyzeFormChromeMixin:
     _SHAPE_CHIPS_MAX_W = 230
 
     def _row(self, parent: QWidget, label: str, *, tooltip: str = "") -> QWidget:
-        """Append a two-column label+widget row to *parent*; return the right cell.
+        """Append a label-above-field row to *parent*; return the field cell.
+
+        One column, because the panel is ``theme.Metrics.rail_w`` (329 px)
+        wide: a label column beside the field left the field about 180 px,
+        which clipped paths, the schema string and the longer dropdown entries,
+        and wrapped labels such as "Background subtraction" onto two lines.
 
         *tooltip* is set on the row **and its label**, not only on whatever the
-        caller puts in the right-hand cell. The label is the word the user reads
-        and the larger target; a tooltip that answers only over a narrow entry
-        box is one most people never see.
+        caller puts in the field cell. The label is the word the user reads and
+        the larger target; a tooltip that answers only over a narrow entry box
+        is one most people never see.
         """
         row = QWidget(parent)
-        # Named so phone layout can find the form's label+field rows and stack
-        # each label above its field (``ui/phone_shell.py``).
+        # Named so phone layout can find the form's rows; ``stackedAtDesk``
+        # tells it these are already label-above-field and must stay so when
+        # it hands the pane back to the desk (``ui/phone_shell.py``).
         row.setObjectName("AnalyzeFormRow")
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(0, 1, 0, 1)
-        rl.setSpacing(4)
+        row.setProperty("stackedAtDesk", True)
+        rl = QBoxLayout(QBoxLayout.TopToBottom, row)
+        rl.setContentsMargins(0, 2, 0, 2)
+        rl.setSpacing(2)
 
         lbl = QLabel(label, row)
         lbl.setObjectName("Muted")
-        lbl.setFixedWidth(self._ROW_LABEL_W)
         lbl.setWordWrap(True)
         if tooltip:
             row.setToolTip(tooltip)
             lbl.setToolTip(tooltip)
-        # Centred on the field rather than top-aligned: a field is about 28 px
-        # tall and a label line about 16, so a top-aligned label sat ~6 px above
-        # the text of the value it names, on every row. A label that wraps to
-        # two lines is about as tall as the field and lands in the same place.
-        rl.addWidget(lbl, 0, Qt.AlignVCenter)
+        rl.addWidget(lbl)
 
         right = QWidget(row)
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         rr = QHBoxLayout(right)
         rr.setContentsMargins(0, 0, 0, 0)
         rr.setSpacing(4)
-        rl.addWidget(right, 0, Qt.AlignVCenter)
+        rl.addWidget(right)
 
         parent.layout().addWidget(row)
         return right
+
+    def _normalise_field_widths(self, host: QWidget) -> None:
+        """Give every row's fields one of two widths, after the form is built.
+
+        Dropdowns and text or path fields take the row's whole width; a number
+        field takes ``_NUM_FIELD_W``. Builders were written for a label column
+        and pinned widths one by one (160, 165, 106, 118, 183…), so the right
+        edges never lined up; doing it here, once, keeps the rule in one place
+        rather than in forty call sites. A field narrower than 40 px (the
+        one-character separator box) keeps its width, and a combo inside a
+        composite widget (the schema picker's position combos) is reached the
+        same way, since each sits in a row of its own.
+        """
+        from PySide6.QtWidgets import QComboBox, QLineEdit, QSpacerItem
+
+        for row in host.findChildren(QWidget, "AnalyzeFormRow"):
+            lay = row.layout()
+            if lay is None or lay.count() < 2:
+                continue
+            cell = lay.itemAt(1).widget()
+            cell_lay = cell.layout() if cell is not None else None
+            if cell_lay is None:
+                continue
+            widened = False
+            for i in range(cell_lay.count()):
+                w = cell_lay.itemAt(i).widget()
+                if isinstance(w, QComboBox):
+                    w.setMinimumWidth(0)
+                    w.setMaximumWidth(16_777_215)
+                    w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                    w.setMinimumContentsLength(4)
+                    cell_lay.setStretch(i, 1)
+                    widened = True
+                elif isinstance(w, QLineEdit) and w.minimumWidth() == w.maximumWidth():
+                    fixed = w.maximumWidth()
+                    if fixed < 40:
+                        continue
+                    if fixed <= 90:
+                        w.setFixedWidth(self._NUM_FIELD_W)
+                    else:
+                        w.setMinimumWidth(0)
+                        w.setMaximumWidth(16_777_215)
+                        w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                        cell_lay.setStretch(i, 1)
+                        widened = True
+            if widened:
+                for i in reversed(range(cell_lay.count())):
+                    item = cell_lay.itemAt(i)
+                    if isinstance(item, QSpacerItem):
+                        cell_lay.takeAt(i)
 
     @staticmethod
     def _set_status(label: QLabel, text: str, *, error: bool = False,
@@ -270,6 +381,23 @@ class AnalyzeFormChromeMixin:
             label.setObjectName(name)
             label.style().unpolish(label)
             label.style().polish(label)
+
+    def _subheading(self, sec: QWidget, text: str, *, info: str = "") -> QWidget:
+        """A heading inside a section, above the rows it groups ("Output",
+        "Performance", "Channels in the filenames"). One style for every such
+        heading, so a group inside a section never reads as a section."""
+        head = QWidget(sec)
+        hl = QHBoxLayout(head)
+        hl.setContentsMargins(0, 8, 0, 2)
+        hl.setSpacing(4)
+        lbl = QLabel(text, head)
+        lbl.setObjectName("FormSubheading")
+        hl.addWidget(lbl)
+        if info:
+            hl.addWidget(self._info_icon(head, info))
+        hl.addStretch(1)
+        sec.layout().addWidget(head)
+        return head
 
     @staticmethod
     def _field_note(cell: QWidget, text: str) -> QLabel:

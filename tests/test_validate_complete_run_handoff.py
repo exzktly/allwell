@@ -153,7 +153,7 @@ def test_open_dataset_in_analyze_prefills_the_form_and_keeps_the_callers_path(
     assert shell._nb.index == 1
     assert analyze._input_edit.text() == str(tmp_path)
     assert analyze._csv_prefix_edit.text() == "run7"
-    assert analyze._incremental_cb.isChecked()
+    assert (analyze._existing_output_cb.value() == "incremental")
     # Output resolves off the dataset root, which is also the prior dir the
     # incremental done-set is read from.
     assert analyze._output_lbl.text() == str(tmp_path / "out")
@@ -170,13 +170,13 @@ def test_incremental_checkbox_reaches_the_pipeline_command_line(qtbot, tmp_path)
     qtbot.addWidget(analyze)
     analyze._input_edit.setText(str(tmp_path))
 
-    assert not analyze._incremental_cb.isChecked()   # off by default
+    assert not (analyze._existing_output_cb.value() == "incremental")   # off by default
     plain = build_pipeline_args(
         Path("process_microscopy.py"), tmp_path / "in", tmp_path / "out",
         analyze._collect_run_options())
     assert "--incremental" not in plain
 
-    analyze._incremental_cb.setChecked(True)
+    analyze._existing_output_cb.setValue("incremental")
     opts = analyze._collect_run_options()
     assert opts["incremental"] is True
     args = build_pipeline_args(
@@ -202,7 +202,7 @@ def test_handoff_unfolds_the_section_holding_the_control_it_changed(qtbot, tmp_p
     """Regression guard: everything the handoff sets is either a field whose
     new value looks like the old one at a glance, or -- for Incremental, the
     setting that decides whether the run completes anything -- a checkbox
-    inside "Compute options", which is collapsed by default. A correctly
+    inside "Run scope", which is collapsed by default. A correctly
     configured completion run was therefore indistinguishable from landing on
     an untouched Analyze tab."""
     from allwell import AllWellApp
@@ -212,13 +212,13 @@ def test_handoff_unfolds_the_section_holding_the_control_it_changed(qtbot, tmp_p
     info = json.loads((tmp_path / "out" / "pipeline_info.json").read_text())
     analyze = AnalyzeTab()
     qtbot.addWidget(analyze)
-    body, caret = analyze._collapsible_sections["Compute options"]
+    body, caret = analyze._collapsible_sections["Run scope"]
     assert not body.isVisibleTo(analyze), "section starts folded (the premise)"
 
     AllWellApp._open_dataset_in_analyze(
         _shell_with(analyze), tmp_path, info, incremental=True)
 
-    assert analyze._incremental_cb.isChecked()
+    assert (analyze._existing_output_cb.value() == "incremental")
     assert body.isVisibleTo(analyze)
     assert caret.text() == "▾"
 

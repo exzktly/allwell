@@ -109,11 +109,12 @@ def test_every_section_is_recorded(analyze_tab):
 
 def test_sections_are_recorded_in_build_order(analyze_tab):
     titles = list(analyze_tab._section_widgets)
-    # The input folder heads the form, then Schema, then Channels; the manual
-    # numbers its Analyze headings to match. Remote options closes the form,
-    # beside the Run on selector pinned under it.
-    assert titles[:3] == ["Folders", "Filename schema", "Channels & segmentation"]
-    assert titles[-2:] == ["Scratch disk", "Remote options"]
+    # The form asks its questions in the order a run needs the answers, and
+    # the manual numbers its Analyze headings to match. Remote options closes
+    # the form, beside the Run on selector pinned under it.
+    assert titles == ["Data", "Filename schema", "Channels", "Segmentation",
+                      "Nanowell array", "Image correction", "Measurements & filters",
+                      "Auto-threshold", "Run scope", "Advanced", "Remote options"]
 
 
 # ── focus wins, and reaches every section ────────────────────────────────────
@@ -124,7 +125,9 @@ def test_focus_reaches_every_single_section(qapp, analyze_tab):
     screen at once there — so if focus did not reach them, the four manual
     subsections this feature exists to open would be unreachable and a
     subset-style assertion would have called that a pass."""
-    # Remote options is on screen only while a remote is chosen.
+    # Remote options is on screen only while a remote is chosen, and Nanowell
+    # array only for a nanowell plate.
+    analyze_tab._nanowell_cb.setChecked(True)
     analyze_tab._remote_cb.addItem("gpu-box", userData="gpu-box")
     analyze_tab._remote_cb.setCurrentIndex(analyze_tab._remote_cb.count() - 1)
     _expand_every_section(qapp, analyze_tab)
@@ -141,10 +144,10 @@ def test_focus_reaches_every_single_section(qapp, analyze_tab):
 def test_focus_outranks_scroll_position(qapp, analyze_tab):
     _expand_every_section(qapp, analyze_tab)
     _scroll(qapp, analyze_tab, 0)
-    target = _focusable_in(analyze_tab._section_widgets["Scratch disk"])
+    target = _focusable_in(analyze_tab._section_widgets["Advanced"])
     target.setFocus()
     _settle(qapp, 2)
-    assert analyze_tab.current_help_section() == "Scratch disk"
+    assert analyze_tab.current_help_section() == "Advanced"
 
 
 # ── scroll position, when nothing has focus ──────────────────────────────────
@@ -152,7 +155,7 @@ def test_focus_outranks_scroll_position(qapp, analyze_tab):
 def test_top_of_the_form_reports_the_first_section(qapp, analyze_tab):
     _scroll(qapp, analyze_tab, 0)
     _clear_focus(qapp, analyze_tab)
-    assert analyze_tab.current_help_section() == "Folders"
+    assert analyze_tab.current_help_section() == "Data"
 
 
 def test_a_section_scrolled_past_is_not_reported(qapp, analyze_tab):
@@ -160,13 +163,13 @@ def test_a_section_scrolled_past_is_not_reported(qapp, analyze_tab):
     top of the viewport by a few dozen pixels, and "the first section with any
     part on screen" named it while Channel Tokens filled the screen."""
     _clear_focus(qapp, analyze_tab)
-    top = analyze_tab._section_widgets["Channels & segmentation"]
+    top = analyze_tab._section_widgets["Segmentation"]
     form = analyze_tab._left_sidebar.widget()
     wanted = top.mapTo(form, top.rect().topLeft()).y()
     # Land part-way into Channel Tokens: its header is above the viewport top,
     # the previous section's tail is still on screen.
     _scroll(qapp, analyze_tab, wanted + 60)
-    assert analyze_tab.current_help_section() == "Channels & segmentation"
+    assert analyze_tab.current_help_section() == "Segmentation"
 
 
 def test_bottom_of_the_form_reports_the_section_at_the_top_of_the_screen(qapp, analyze_tab):
@@ -232,7 +235,7 @@ def test_a_collapsed_sidebar_reports_nothing(qapp, analyze_tab):
         _settle(qapp, 2)
 
 
-def test_the_resume_and_preflight_banners_head_the_form_above_folders(analyze_tab):
+def test_the_resume_and_preflight_banners_head_the_form_above_data(analyze_tab):
     """Reported: the Folders section appeared above the sidebar's banners, which it should not. The banners (resume
     and preflight, one holder) are the form's first item, and Folders — still the first section — comes after them."""
     holder = analyze_tab._preflight_banner.parentWidget()
@@ -245,11 +248,11 @@ def test_the_resume_and_preflight_banners_head_the_form_above_folders(analyze_ta
         return form.indexOf(widget)
 
     assert row(holder) == 0
-    assert row(analyze_tab._section_widgets["Folders"]) > row(holder)
-    assert row(analyze_tab._section_widgets["Folders"]) < row(analyze_tab._section_widgets["Filename schema"])
+    assert row(analyze_tab._section_widgets["Data"]) > row(holder)
+    assert row(analyze_tab._section_widgets["Data"]) < row(analyze_tab._section_widgets["Filename schema"])
 
 
-def test_load_settings_from_a_run_sits_above_folders_under_the_banners(analyze_tab):
+def test_load_settings_from_a_run_sits_above_the_folder_under_the_banners(analyze_tab):
     """Asked for: "Load settings from a run…" above the folder selection (it sets the input folder), and still below
     the banners that head the form."""
     holder = analyze_tab._preflight_banner.parentWidget()
@@ -260,5 +263,10 @@ def test_load_settings_from_a_run_sits_above_folders_under_the_banners(analyze_t
             widget = widget.parentWidget()
         return form.indexOf(widget)
 
+    # It is the Data section's first row now, so it sits above the input
+    # folder inside the section that holds it.
     load = row(analyze_tab._open_pinfo_btn)
-    assert row(holder) < load == row(analyze_tab._section_widgets["Folders"]) - 1
+    assert row(holder) < load == row(analyze_tab._section_widgets["Data"])
+    data = analyze_tab._section_widgets["Data"]
+    assert (analyze_tab._open_pinfo_btn.mapTo(data, analyze_tab._open_pinfo_btn.rect().topLeft()).y()
+            < analyze_tab._input_edit.mapTo(data, analyze_tab._input_edit.rect().topLeft()).y())

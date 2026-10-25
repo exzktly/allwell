@@ -1959,9 +1959,9 @@ class AllWellApp(QMainWindow):
 
         **The handoff has to be legible on arrival.** Everything it changes is
         either a field whose new value is indistinguishable from the old one at
-        a glance, or — for *Incremental*, the setting that decides whether the
-        run completes anything at all — a checkbox inside a section that is
-        folded by default. A correct handoff therefore looked exactly like
+        a glance, or — for *Fill in what's missing*, the setting that decides
+        whether the run completes anything at all — a choice inside Run scope,
+        a section that is folded by default. A correct handoff therefore looked exactly like
         landing on an untouched Analyze tab. So the section is unfolded and the
         run dashboard states what was set up, naming the dataset.
         """
@@ -1974,9 +1974,9 @@ class AllWellApp(QMainWindow):
         if edit is not None:
             edit.setEnabled(True)
             edit.setText(str(dataset_path))
-        incremental_cb = getattr(self._analyze, "_incremental_cb", None)
-        if incremental_cb is not None and incremental:
-            incremental_cb.setChecked(True)
+        existing = getattr(self._analyze, "_existing_output_cb", None)
+        if existing is not None and incremental:
+            existing.setValue("incremental")
         forced = [str(w).strip() for w in (force_wells or []) if str(w).strip()]
         force_edit = getattr(self._analyze, "_force_wells_edit", None)
         if force_edit is not None and forced:
@@ -1991,7 +1991,7 @@ class AllWellApp(QMainWindow):
         if incremental or forced or only:
             reveal = getattr(self._analyze, "reveal_section", None)
             if callable(reveal):
-                reveal("Compute options")
+                reveal("Run scope")
         refresh = getattr(self._analyze, "_refresh_output", None)
         if callable(refresh):
             refresh()

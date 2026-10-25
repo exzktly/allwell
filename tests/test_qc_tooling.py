@@ -506,7 +506,7 @@ def test_analyze_qc_section_present_and_gated():
                  "_qc_min_area_edit", "_qc_max_area_edit", "_qc_min_solidity_edit"):
         assert getattr(tab, attr, None) is not None
     titles = {l.text() for l in tab.findChildren(QLabel)}
-    assert "Image correction & QC" in titles
+    assert "Image correction" in titles
 
     # Debris bounds hidden until the checkbox is on, then re-hidden when off.
     # (``isHidden`` is the offscreen-robust check — ``isVisible`` is False for
@@ -549,24 +549,24 @@ def test_analyze_qc_section_present_and_gated():
     assert all(not r.isHidden() for r in tab._bg_radius_rows)
 
 
-def test_analyze_default_corrections_are_none_end_to_end(qapp):
-    """A fresh form corrects nothing, and says so all the way to the CLI args.
+def test_analyze_default_corrections_match_the_cli_end_to_end(qapp):
+    """A fresh form corrects as the command line does, all the way to the args.
 
-    Background is passed explicitly as ``none`` — the CLI's own default is
-    ``sliding_disk``, so an omitted flag would correct the run behind the
-    form's back. Flat-field ``none`` is the CLI default and is not passed. The
-    old default (flat-field from a blank well) could not run until a blank
-    well was named, so a fresh form refused to start."""
+    No flat-field and a rolling-disk background — ``pipeline/cli_args.py``'s
+    defaults — so a run from the form and one from ``process_microscopy.py``
+    with no flags agree. The background is passed explicitly, as every method
+    is. The old default (flat-field from a blank well) could not run until a
+    blank well was named, so a fresh form refused to start."""
     from analyze.tab import AnalyzeTab
     from services.pipeline_service import build_pipeline_args
     tab = AnalyzeTab()
     assert tab._flatfield_cb.value() == "none"
-    assert tab._background_cb.value() == "none"
+    assert tab._background_cb.value() == "sliding_disk"
     opts = tab._collect_run_options()
-    assert (opts.get("flatfield"), opts.get("background")) == ("none", "none")
+    assert (opts.get("flatfield"), opts.get("background")) == ("none", "sliding_disk")
     a = build_pipeline_args(Path("/x/process_microscopy.py"),
                             Path("/in"), Path("/out"), opts)
-    assert a[a.index("--background") + 1] == "none"
+    assert a[a.index("--background") + 1] == "sliding_disk"
     assert "--flatfield" not in a
     assert tab._background_well_validation_error(check_input=False) is None
 

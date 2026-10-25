@@ -217,7 +217,8 @@ def test_along_wells_draws_one_timepoint_with_the_statistic_over_wells(page, qtb
     st = page.state.feature_slice("nanowell")
     assert st.axis == "wells" and st.model.timepoint == "t_a"
     assert page.widgets.get("_nw_tp_cb").isVisible() and page.widgets.get("_nw_control_cb").isVisible()
-    assert any("nanowells are not replicates" in t for t in _texts(page, "nw-footer"))
+    # No control chosen: nothing per-well is drawn beside the swarms, so the footer claims no interval.
+    assert not any("t interval" in t for t in _texts(page, "nw-footer"))
 
 
 # ── V3 / V3a: clicking a dot opens its history ───────────────────────────────

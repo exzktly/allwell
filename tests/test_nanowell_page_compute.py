@@ -125,7 +125,8 @@ def test_along_wells_takes_the_latest_timepoint_and_states_its_statistic_over_we
     stats = {s.group: s for s in model.panels[0].stats}
     assert stats["treated"].centre == 3.0 and stats["treated"].n_wells == 2 and stats["treated"].df == 1
     assert stats["treated"].vs_control == pytest.approx(1.5)
-    assert any("df 1" in note and "nanowells are not replicates" in note for note in model.notes)
+    assert any(n.startswith("The comparison with the control is per well") for n in model.notes)
+    assert not any("t interval" in n for n in model.notes)       # no interval is drawn, so none is described
     assert [t[1] for t in model.panels[0].ticks] == ["treated", "control"]
 
 
@@ -282,6 +283,29 @@ def test_the_comparison_to_control_keeps_three_significant_figures():
     fig = Figure(figsize=(8, 6.4))
     render_distribution(fig, model)
     assert [t.get_text() for t in fig.axes[0].texts if t.get_gid() == "nw-vs-control"] == [" ×1.04"]
+
+
+def test_no_summary_marker_or_interval_is_drawn_beside_a_swarm():
+    """The group's centre was a diamond with a 95% interval bar to the right of the swarm; with one well it stood
+    alone, an unlabelled dot. Neither is drawn now: the only mark at the centre is the comparison text, and only
+    when a control is chosen."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.renderer import render_distribution
+
+    swarm = dc.Swarm("A01", "A01", 0.0, np.array([1.0, 1.1]), [("A01", 0, 0), ("A01", 1, 0)], ["1", "1"], 2)
+    for vs, texts in ((float("nan"), []), (1.04, [" ×1.04"])):
+        stat = dc.GroupStat("g", 0.0, 0.7, 0.5, 0.9, 2, 1, vs, [])
+        model = dc.DistributionModel("count_fc", "count_fc", "Count fold change", dc.WELLS, False,
+                                     [dc.Panel("t", [swarm], [(0.0, "g")], stats=[stat])])
+        fig = Figure(figsize=(8, 6.4))
+        render_distribution(fig, model)
+        ax = fig.axes[0]
+        beside = [ln for ln in ax.lines if any(abs(float(x) - 0.44) < 1e-9 for x in np.atleast_1d(ln.get_xdata()))]
+        assert beside == []
+        assert [t.get_text() for t in ax.texts if t.get_gid() == "nw-vs-control"] == texts
 
 
 def test_a_swarm_too_full_for_its_slot_says_how_many_dots_are_hidden_under_it():

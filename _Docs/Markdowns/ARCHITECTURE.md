@@ -6955,6 +6955,20 @@ listing can hold a single channel token. A slot with one distinct value is not
 recognised as the channel slot at all, so a prefix sample reports *no* channels
 on exactly the largest plates.
 
+**The channel slot is the one that changes within a tile.** A tile — one well,
+field and timepoint — is imaged once per channel, so `_pick_channel_slot` prefers a
+categorical slot that takes more than one value among the names of one tile
+(`_varies_within_a_tile`, keyed on the well, field and timepoint slots found
+before it); an experiment prefix is the same for every image of a tile. Only when
+no slot varies within a tile (a single-channel plate) does the fewest-distinct
+rule decide alone. Without it a plate holding two prefixes — a Concatenate of two
+acquisitions, each named by its own run — read `expA`/`expB` against
+`PHASE`/`GFP`, two values each, and the leftmost, the prefix, was confidently
+taken for the channel, so no image matched the phase token and the run stopped
+with "No image groups found". That error now says why
+(`pipeline.nanowell_task.no_groups_reason`): what the channel position holds, or
+the partner image it looked for and did not find.
+
 The optional sections fold by default; **Auto-threshold** is one of them, and it
 owns every threshold-related control: a checkbox driving the pipeline's
 `--no_auto_threshold` (which previously had no UI), a **Method** combo choosing

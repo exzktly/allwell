@@ -386,3 +386,24 @@ def test_the_count_survives_the_round_trip_from_a_real_folder(tmp_path):
     assert guess is not None
     assert guess.sampled == len(_default_stems()) + 1
     assert guess.matched == len(_default_stems())
+
+
+def test_two_experiment_prefixes_are_not_taken_for_the_channel():
+    """Reported: a concatenated nanowell plate — two acquisitions, each named by its own run — failed with "no image
+    groups found" though every image was correctly named. Its prefix took two values (``expA``/``expB``) against the
+    channel's two (``PHASE``/``GFP``), and the leftmost was taken for the channel, confidently. The channel is the
+    slot that changes within one tile (well, field, timepoint); a prefix does not."""
+    stems = (_default_stems(channels=("PHASE", "GFP"), tps=("0h",), experiment="expA")
+             + _default_stems(channels=("PHASE", "GFP"), tps=("24h",), experiment="expB"))
+    guess = infer_schema(stems)
+    assert guess.fields[1:] == ["channel", "well", "fov", "timepoint"]
+    assert guess.channels == ["PHASE", "GFP"] and guess.confident
+
+
+def test_prefixes_that_outnumber_the_channels_still_lose_to_the_channel():
+    """Fewer prefixes than channels was never the danger; more or as many was. Three prefixes against two channels."""
+    stems = [s for exp, tp in (("runA", "0h"), ("runB", "24h"), ("runC", "48h"))
+             for s in _default_stems(channels=("PHASE", "GFP"), tps=(tp,), experiment=exp)]
+    guess = infer_schema(stems)
+    assert guess.channels == ["PHASE", "GFP"]
+

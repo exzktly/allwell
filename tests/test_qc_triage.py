@@ -250,7 +250,8 @@ def test_rerun_hands_off_exactly_the_selected_wells(tmp_path, monkeypatch):
     ctx = _ctx(tmp_path, {"run_check": _run_check(wells)})
     rows = tc.triage_rows(ctx)
     assert tcc.rerun_wells(ctx, rows[1:]) == ["B03"]
-    assert seen == {"force_wells": ["B03"], "only_wells": ["B03"]}
+    # Not incremental: every well is forced, and a remote nanowell run refuses an Incremental tick.
+    assert seen == {"force_wells": ["B03"], "only_wells": ["B03"], "incremental": False}
 
 
 def test_a_rerun_that_could_not_open_analyze_reports_nothing_queued(tmp_path, monkeypatch):

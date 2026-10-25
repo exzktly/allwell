@@ -7870,7 +7870,8 @@ the screen's height.
 
 Long panels — the sidebar, the controls, the logs, plot pages and the Datasets
 and Analyze forms — scroll by dragging. A drag that starts on a well plate
-still selects wells, and one on a slider still moves it. The
+still selects wells, and one on a slider still moves it. A drag on a log scrolls
+the log, not the page it sits on — drag beside the log to scroll the page. The
 plot toolbar's pan and zoom are hidden in phone layout; switch back to the
 desktop layout for them. An **ⓘ** shows its explanation when tapped.
 

@@ -542,7 +542,13 @@ class _DragOwnerGuard(QObject):
     a slider is left to it. Qt asks the viewport before it starts scrolling
     (``QScrollPrepareEvent``); refused, the press reaches the widget under it
     as if no gesture were there. Grabbed without this, a swipe starting on a
-    plate neither selected wells nor scrolled."""
+    plate neither selected wells nor scrolled.
+
+    A drag that starts inside a smaller scroll area of its own — Analyze's log
+    on the Progress page, which itself scrolls — is left to that area too, when
+    it scrolls by a drag and has somewhere to go (:func:`_inner_area_owns_drag`).
+    Both viewports accept the gesture otherwise, and the outer one wins it: a
+    swipe on the log scrolled the page and the log stayed where it was."""
 
     def eventFilter(self, obj, ev) -> bool:  # Qt naming
         if not isinstance(ev, QEvent) or ev.type() != QEvent.ScrollPrepare:
@@ -550,11 +556,26 @@ class _DragOwnerGuard(QObject):
         from PySide6.QtWidgets import QAbstractSlider
         w = obj.childAt(ev.startPos().toPoint()) if isinstance(obj, QWidget) else None
         while w is not None and w is not obj:
-            if isinstance(w, QAbstractSlider) or _plate_owns_drag(w):
+            if (isinstance(w, QAbstractSlider) or _plate_owns_drag(w)
+                    or _inner_area_owns_drag(w)):
                 ev.ignore()
                 return True
             w = w.parentWidget()
         return False
+
+
+def _inner_area_owns_drag(w: QWidget) -> bool:
+    """*w* is a scroll area that scrolls by a drag of its own and has range to
+    scroll — so a drag starting in it is its, not the page's around it. One
+    with nothing to scroll leaves the drag to the page, so a short log does not
+    become a dead spot to swipe the page from."""
+    from PySide6.QtWidgets import QAbstractScrollArea
+    # Read from :func:`set_drag_scroll`'s own mark: Qt's ``hasScroller`` and
+    # ``grabbedGesture`` both still answer yes after ``ungrabGesture``.
+    if not isinstance(w, QAbstractScrollArea) or not w.viewport().property(_P_DRAG_SCROLL):
+        return False
+    return any(bar.maximum() > bar.minimum()
+               for bar in (w.verticalScrollBar(), w.horizontalScrollBar()))
 
 
 def _plate_owns_drag(w: QWidget) -> bool:
@@ -568,9 +589,14 @@ def _plate_owns_drag(w: QWidget) -> bool:
     return not (callable(is_report_only) and is_report_only())
 
 
+#: Set on a viewport while :func:`set_drag_scroll` has it scrolling by a drag.
+_P_DRAG_SCROLL = "_awDragScroll"
+
+
 def set_drag_scroll(viewport: QWidget, on: bool) -> None:
     """Scroll *viewport*'s area by a left-button drag, or stop. Idempotent."""
     from PySide6.QtWidgets import QScroller
+    viewport.setProperty(_P_DRAG_SCROLL, bool(on))
     guard = viewport.findChild(_DragOwnerGuard, options=Qt.FindDirectChildrenOnly)
     if on:
         QScroller.grabGesture(viewport, QScroller.LeftMouseButtonGesture)

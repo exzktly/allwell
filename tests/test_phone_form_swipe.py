@@ -116,3 +116,58 @@ def test_every_form_page_under_the_swipe_roots_is_grabbed(qtbot, scroller_calls)
     PhoneShell._grab_page_scrolling(shell, False)
     ungrabbed = {id(t) for kind, t in scroller_calls if kind == "ungrab"}
     assert ungrabbed == grabbed
+
+
+def _page_with_log(qtbot, lines: int):
+    """A drag-scrolled page holding a log that scrolls by a drag of its own —
+    Analyze's Progress page and every Datasets tool page are this shape."""
+    from PySide6.QtWidgets import QTextEdit
+    area = QScrollArea()
+    qtbot.addWidget(area)
+    area.resize(360, 400)
+    area.setWidgetResizable(True)
+    inner = QWidget()
+    lay = QVBoxLayout(inner)
+    head = QLabel("Run")
+    log = QTextEdit()
+    log.setReadOnly(True)
+    log.setFixedHeight(150)
+    log.setPlainText("\n".join(f"line {i}" for i in range(lines)))
+    tail = QLabel("…")
+    tail.setFixedHeight(1200)
+    for w in (head, log, tail):
+        lay.addWidget(w)
+    area.setWidget(inner)
+    area.show()
+    qtbot.waitExposed(area)
+    set_drag_scroll(area.viewport(), True)
+    set_drag_scroll(log.viewport(), True)
+    QApplication.processEvents()
+    return area, head, log
+
+
+def test_a_drag_on_a_log_that_scrolls_is_the_log_s_not_the_page_s(qtbot):
+    """Reported: in phone layout Analyze's log could not be scrolled. Measured
+    in the real window, a swipe on it moved the Progress page (688 -> 568) and
+    the log 6 px: both viewports took the gesture and the page's won."""
+    area, head, log = _page_with_log(qtbot, lines=400)
+    assert log.verticalScrollBar().maximum() > 0
+    centre = log.viewport().rect().center()
+    assert not _starts_a_scroll(area, log.viewport(), centre), \
+        "a drag on the log would scroll the page around it"
+    assert _starts_a_scroll(area, head, QPoint(5, 5)), \
+        "a drag beside the log must still scroll the page"
+
+
+def test_a_log_with_nothing_to_scroll_leaves_the_drag_to_the_page(qtbot):
+    area, _head, log = _page_with_log(qtbot, lines=2)
+    assert log.verticalScrollBar().maximum() == 0
+    assert _starts_a_scroll(area, log.viewport(), log.viewport().rect().center()), \
+        "an empty log would be a dead spot on the page"
+
+
+def test_a_log_that_does_not_scroll_by_a_drag_leaves_it_to_the_page(qtbot):
+    area, _head, log = _page_with_log(qtbot, lines=400)
+    set_drag_scroll(log.viewport(), False)
+    QApplication.processEvents()
+    assert _starts_a_scroll(area, log.viewport(), log.viewport().rect().center())

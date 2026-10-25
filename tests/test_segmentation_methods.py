@@ -58,12 +58,14 @@ def test_param_panel_swaps_per_method(qapp):
     assert tab._cellpose_nuclei_channel_edit is not None
 
     # Label-free hides the Segmentation-channel field (phase takes that slot);
-    # general Cellpose shows it. (isHidden reflects setVisible intent even when
-    # the top-level window isn't shown, unlike isVisible.)
+    # general Cellpose shows it. ``isVisibleTo(tab)`` rather than the cell's own
+    # ``isHidden``: the whole row is hidden, label and all, so the cell's own
+    # flag never changes — and, unlike ``isVisible``, it reads the intent even
+    # when the top-level window isn't shown.
     _set_method(tab, "cellpose_labelfree")
-    assert tab._nuclear_row_widget.isHidden() is True
+    assert not tab._nuclear_row_widget.isVisibleTo(tab)
     _set_method(tab, "cellpose")
-    assert tab._nuclear_row_widget.isHidden() is False
+    assert tab._nuclear_row_widget.isVisibleTo(tab)
 
 
 def test_param_stack_collapses_to_current_page(qapp):

@@ -907,6 +907,10 @@ chosen method's settings are shown.
   models can read.
 - The background radii are set under
   [Image correction & QC](#5-image-correction--qc--field-flatness--background-correction).
+- **Label-free** segments the channel marked **Phase**, so the *Segmentation
+  channel* field is hidden while it is chosen. The channel that field named is
+  not dropped: it moves into **Fluorescent channels**, so it is still measured,
+  and it moves back if you switch to another method.
 - **Cell diameter** (px; `0` = 30) — shown for both Cellpose methods, general
   and label-free. Cellpose's models were trained on cells about 30 px across, and
   Cellpose resizes each image so that cells of the diameter you enter become

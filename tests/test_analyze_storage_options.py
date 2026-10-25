@@ -15,9 +15,9 @@ pytest.importorskip("PySide6")
 
 @pytest.fixture
 def tab(qtbot, monkeypatch):
-    import analyze.form
+    import analyze.run_footer
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     from analyze.tab import AnalyzeTab
 
     t = AnalyzeTab()

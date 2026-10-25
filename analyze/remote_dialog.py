@@ -1493,7 +1493,7 @@ class ManageRemotesDialog(QDialog):
     Bootstrap buttons.
 
     Emits :attr:`remotes_changed` whenever the underlying file changes
-    so the parent AnalyzeTab can refresh its "Run on:" combobox.
+    so the parent AnalyzeTab can refresh its "Run on" combobox.
     """
 
     remotes_changed = Signal()

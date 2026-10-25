@@ -25,9 +25,9 @@ pytest.importorskip("PySide6")
 
 @pytest.fixture
 def tab(qtbot, monkeypatch, tmp_path):
-    import analyze.form
+    import analyze.run_footer
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     from analyze.tab import AnalyzeTab
 
     t = AnalyzeTab()
@@ -126,13 +126,13 @@ def live_tab(qtbot, monkeypatch, tmp_path):
     import sys
     from pathlib import Path
 
-    import analyze.form
+    import analyze.run_footer
     import services.pipeline_runner as pr
 
     repo = str(Path(__file__).resolve().parent.parent)
     script = tmp_path / "fake.py"
     script.write_text(_REAL_HANDLER_PIPELINE.format(repo=repo))
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     monkeypatch.setattr(pr, "build_pipeline_args",
                         lambda p, i, o, opts: [sys.executable, str(script)])
     monkeypatch.setattr("services.suspend_record.record_path",

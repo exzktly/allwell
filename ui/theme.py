@@ -1721,6 +1721,14 @@ QWidget#PhoneRunBar {{
     background-color: {c.rail};
     border-top: 1px solid {c.border_subtle};
 }}
+/* Analyze's run footer at the desk, pinned under the scrolling form
+   (analyze/run_footer.py). A step lighter than the form, with the default
+   control border as its top edge: the subtle hairline is near-invisible on the
+   grey theme, and the footer has to read as "not part of what scrolls". */
+QWidget#AnalyzeRunFooter {{
+    background-color: {c.panel};
+    border-top: 1px solid {c.border};
+}}
 QToolButton#PhoneMenuButton, QToolButton#PhonePageButton,
 QToolButton#PhoneOptionsButton, QToolButton#PhoneControlsButton {{
     background-color: transparent;

@@ -204,8 +204,8 @@ The section and the Review page belong to the Nanowells feature: a build made fr
 (`ALLWELL_PROFILE`, as for a feature-subset executable) shows neither. The command-line `--nanowell_format` works in every
 build.
 
-In the Analyze pane, open the **Nanowells** section (below Quality Control, folded by default), tick **Nanowell arrays**, and mark the
-channel the tiles are imaged in as **Phase** (Channel Tokens). The section asks for the plate format (100 µm or
+In the Analyze pane, open the **Nanowells** section (below Image correction & QC, folded by default), tick **Nanowell arrays**, and mark the
+channel the tiles are imaged in as **Phase** (Channels & segmentation). The section asks for the plate format (100 µm or
 50 µm nanowells, or **Custom size**, which shows two more fields: the nanowell diameter and the lattice pitch,
 centre to centre — the run measures the pitch on the tiles, so it is a starting value), the **Array geometry**
 and, optionally, the margin around a nanowell that must lie inside one tile
@@ -676,7 +676,7 @@ A common end-to-end run, from raw images to plots, takes five clicks:
    hundred names, not the whole plate. Channels are listed in filename order,
    which is usually alphabetical rather than the order they were acquired in.
 
-   **Detect from filenames**, the first row of the Filename Schema section,
+   **Detect from filenames**, the first row of the Filename schema section,
    re-runs that scan on demand and fills the separator, position and schema
    rows beneath it. Use it after typing
    over the guess, after fixing the separator by hand, or after pointing the
@@ -701,7 +701,15 @@ with `Ctrl+O`.
 
 ## Analyze mode — running the pipeline
 
-The Analyze tab is one tall scrollable form. Top to bottom:
+The Analyze tab is one tall scrollable form with a footer pinned under it. The
+footer holds **Run on** (where the run goes; see
+[Running on a remote host](#11-running-on-a-remote-host)) and the run buttons,
+so **Run** is on screen however far down the form you are. Every section after
+the first three is folded until you open it; a folded section's ▸ caret opens
+it. Problems the form can see — an input folder it cannot use, a segmentation
+method missing the channel it needs, a correction missing its blank well — are
+written in red where they occur, and anything that is only help is grey. Top to
+bottom:
 
 ### 1. Folders
 
@@ -833,11 +841,15 @@ Prefixed    T01, day2, tp_3  (numeric suffix → ordinal)
 Any string  preserved as-is and sorted lexicographically
 ```
 
-### 3. Channel tokens
+### 3. Channels & segmentation
 
-- **Nuclear (segmentation) channel.** The token used to find the image
-  StarDist runs against (also gets quantified — its intensities appear in
-  the CSV like any other channel).
+- **Segmentation.** The method, chosen first, with a one-line note under it
+  saying when to use it; the settings that method needs appear below the
+  channel list (see [section 4](#4-segmentation-settings)).
+- **Segmentation channel.** The channel name (the token in your filenames)
+  the method segments (also quantified — its intensities appear in the CSV like
+  any other channel). Hidden for **Label-free**, which segments the channel
+  marked Phase instead.
 - **Fluorescent channels.** One or more tokens whose intensities you want
   quantified. Each token gets its own CSV column set (`<token>_mean_intensity`,
   `<token>_total_intensity`, etc.).
@@ -872,16 +884,28 @@ Any string  preserved as-is and sorted lexicographically
   same channel is refused before the run starts, with a message naming the
   channel.
 
-### 4. Pipeline options
+### 4. Segmentation settings
 
-- **Segmentation method.** `stardist_nuclei` (default — segment nuclei
-  only), `stardist_seeded_watershed_cell` (StarDist nuclei + watershed
-  cytoplasm segmentation).
-- **Cytoplasm token** (only used by the seeded-watershed method).
-- **Top-hat radii.** Nuclear and per-fluor radii in pixels. `0` or
-  `--no_tophat_*` flags disable per-channel.
-- **Min nucleus area** in pixels (rejects garbage detections).
-- **Cell diameter (px, 0=model's 30)** — shown for both Cellpose methods, general
+These sit in **Channels & segmentation**, under the channel list, and only the
+chosen method's settings are shown.
+
+- **Segmentation** — five methods (the pipeline's name in brackets):
+  **StarDist — nuclei** (`stardist_nuclei`, the default), **StarDist +
+  watershed** (`stardist_seeded_watershed_cell`, nuclei plus a cytoplasm
+  mask), **Cellpose** (`cellpose`), **Label-free** (`cellpose_labelfree`,
+  Cellpose-SAM on the Phase channel) and **Classical threshold**
+  (`classical_threshold`, Otsu plus watershed, no model).
+- **Cytoplasm channel** (StarDist + watershed only).
+- **Min nucleus area** in pixels (StarDist + watershed only; rejects garbage
+  detections).
+- **Model** (Cellpose only). Each entry says which Cellpose it needs:
+  `cpsam` (Cellpose-SAM) runs on the Cellpose 4 the app installs; `cyto3`,
+  `cyto2`, `cyto` and `nuclei` need Cellpose 3, and a run on Cellpose 4 refuses
+  them by name. **Nucleus channel (optional)** is the second channel the cyto
+  models can read.
+- The background radii are set under
+  [Image correction & QC](#5-image-correction--qc--field-flatness--background-correction).
+- **Cell diameter** (px; `0` = 30) — shown for both Cellpose methods, general
   and label-free. Cellpose's models were trained on cells about 30 px across, and
   Cellpose resizes each image so that cells of the diameter you enter become
   30 px before segmenting. That makes the time per field scale with
@@ -958,12 +982,17 @@ Any string  preserved as-is and sorted lexicographically
     rather than reporting that no nuclei were found: nothing was measured, and
     that is a different statement from measuring zero.
 
-### 5. Quality control — field flatness & background correction
+### 5. Image correction & QC — field flatness & background correction
 
-The **Quality Control** section bundles optional, pre-measurement clean-up that
-runs **per channel at quantification time** (so it changes the pixel values that
-get measured and can only be changed by re-running the pipeline). There are two
-independent correction stages, a debris filter, and one measurement:
+The **Image correction & QC** section (folded until you open it) bundles
+optional, pre-measurement clean-up that runs **per channel at quantification
+time** (so it changes the pixel values that get measured and can only be changed
+by re-running the pipeline). There are two independent correction stages, a
+debris filter, and one measurement. **Both corrections start at None**: a fresh
+form corrects nothing, and each correction is something you turn on knowing what
+it reads. The dropdowns show a plain name for each mode; the pipeline's own name
+is in the first column of the tables below, and it is what `pipeline_info.json`
+records:
 
 **Measure per-cell focus** is on by default and adds one column to every well's
 CSV: how sharp each nucleus's own boundary is. It costs a few percent of the
@@ -993,26 +1022,29 @@ special combined case described below.
 
 #### Flat-field correction modes
 
-| Mode | What it does |
+| Mode (shown as) | What it does |
 |------|--------------|
-| **`none`** | No illumination correction. |
-| **`gaussian`** | Self-referential, per-image: heavily Gaussian-blurs each image (σ ≈ 50 px) to estimate its own illumination field, then divides. No reference well needed; flattens slow gradients while preserving cell-scale structure. |
-| **`basic`** | Pure-numpy BaSiC-style. Samples up to ~30 images **per channel across the whole plate**, takes the **per-pixel median** (robust to cells/debris that move between fields), Gaussian-smooths it, normalizes to mean 1, and divides. One field per channel. Approximates BaSiC without its L1/low-rank optimisation (no `jax`/`basicpy`). |
-| **`empty_well`** | Same median-based estimator, but sampled **only from a designated empty/background well** (the *Background well* field) — that well's measured intensity *is* the illumination profile. Requires a Background well. |
+| **`none`** (None) | No illumination correction. The default. |
+| **`gaussian`** (Self (Gaussian blur)) | Self-referential, per-image: heavily Gaussian-blurs each image (σ ≈ 50 px) to estimate its own illumination field, then divides. No reference well needed; flattens slow gradients while preserving cell-scale structure. |
+| **`basic`** (Whole plate (BaSiC)) | Pure-numpy BaSiC-style. Samples up to ~30 images **per channel across the whole plate**, takes the **per-pixel median** (robust to cells/debris that move between fields), Gaussian-smooths it, normalizes to mean 1, and divides. One field per channel. Approximates BaSiC without its L1/low-rank optimisation (no `jax`/`basicpy`). |
+| **`empty_well`** (From blank well(s)) | Same median-based estimator, but sampled **only from a designated empty/background well** (the *Background well* field) — that well's measured intensity *is* the illumination profile. Requires a Background well. |
 
 #### Background-subtraction methods
 
-| Method | Operation | Notes |
+| Method (shown as) | Operation | Notes |
 |--------|-----------|-------|
-| **`none`** | Image unchanged. | — |
-| **`top_hat`** | `img − grey_opening(img, square)`, square footprint of side `2·radius+1`. | Fast (separable 1-D passes) but the square footprint leaves anisotropic, *terraced* residuals — square halos/hotspots next to bright objects. Legacy method. |
-| **`sliding_disk`** | Isotropic-disk white top-hat at full resolution: `img − opening(img, disk)`. | **Default & recommended.** A disk of the given radius flattens regions wider than ~2·radius (treated as background) and preserves narrower ones (kept as signal), isotropically — no square terracing. Built from a decomposed disk so it stays fast (~2 s on a 1024² frame). |
-| **`fov_median`** | `img − median(img)`. | Subtracts a **single scalar**, the median intensity of the whole field of view. Most pixels in a field are background, so the median is a robust flat-background estimate (insensitive to bright cells/debris). Removes a **uniform offset only** — it does *not* flatten spatial gradients (use a morphological method or `empty_well` for that). No radius and no reference well needed; the cheapest correction. |
-| **`empty_well`** | `img − B`. | Subtracts a *measured* per-channel additive background `B` — the **per-pixel median** of the empty/background well's images, Gaussian-smoothed and kept at its measured level (not normalized). No-op if no field is available for the channel. Requires a Background well. |
+| **`none`** (None) | Image unchanged. | The default. |
+| **`robust_mesh`** (Robust local mesh) | `img − B`, `B` a sigma-clipped background on a coarse grid of tiles, bicubically interpolated. | **Recommended when background needs removing.** SExtractor/Background2D style: each tile's background is estimated with bright object pixels clipped away, so it is robust to bright or confluent objects on an uneven background, where the morphological methods struggle. The radius sets the scale; **Mesh tile ratio** (tile = radius ÷ ratio) and **Mesh sigma-clip** tune it. |
+| **`top_hat`** (Top-hat) | `img − grey_opening(img, square)`, square footprint of side `2·radius+1`. | Fast (separable 1-D passes) but the square footprint leaves anisotropic, *terraced* residuals — square halos/hotspots next to bright objects. Legacy method. |
+| **`sliding_disk`** (Rolling disk) | Isotropic-disk white top-hat at full resolution: `img − opening(img, disk)`. | A disk of the given radius flattens regions wider than ~2·radius (treated as background) and preserves narrower ones (kept as signal), isotropically — no square terracing. Built from a decomposed disk so it stays fast (~2 s on a 1024² frame). |
+| **`fov_median`** (Field median) | `img − median(img)`. | Subtracts a **single scalar**, the median intensity of the whole field of view. Most pixels in a field are background, so the median is a robust flat-background estimate (insensitive to bright cells/debris). Removes a **uniform offset only** — it does *not* flatten spatial gradients (use a morphological method or `empty_well` for that). No radius and no reference well needed; the cheapest correction. |
+| **`empty_well`** (From blank well(s)) | `img − B`. | Subtracts a *measured* per-channel additive background `B` — the **per-pixel median** of the empty/background well's images, Gaussian-smoothed and kept at its measured level (not normalized). No-op if no field is available for the channel. Requires a Background well. |
+| **`fft_bandpass`** (FFT band-pass) | 2-D FFT Butterworth high-pass. | Removes low-frequency background (illumination, gradients, large blobs) whatever the object size. The radius is the large-structure cutoff; **Segmentation small px** / **Other small px** are an optional high-frequency cutoff for a true band-pass (`0` = high-pass only). |
 
-The **Nuclear radius** / **Fluor radius** entries set the background length scale
-(in px) for the morphological methods only (`top_hat` / `sliding_disk`); these
-controls are hidden for `none` / `fov_median` / `empty_well`, which take no radius.
+The **Segmentation-channel radius** / **Other channels' radius** entries set the
+background length scale (in px) for the methods that take one (`robust_mesh`,
+`sliding_disk`, `top_hat`, `fft_bandpass`); these controls are hidden for `none` /
+`fov_median` / `empty_well`, which take no radius.
 Each channel has a **Disable** checkbox to skip background subtraction for that
 channel.
 
@@ -1036,7 +1068,9 @@ empty well itself to ~0.
 #### Background well
 
 Any `empty_well` choice (flat-field and/or background) reads its reference images
-from the well(s) named here. Enter **one** well (e.g. `H12`), **several
+from the well(s) named here. The field, and **Pair blanks…** under it, are shown
+only while one of the two corrections is **From blank well(s)**; while one is and
+the field is empty, a red line under it says it is required. Enter **one** well (e.g. `H12`), **several
 comma-separated** (e.g. `H12, G12`), or a **rectangular block** written with a
 colon — `H01:H12` is the whole of row H, `A01:D12` the top half of the plate,
 `A01:H01` the first column. Blocks and single wells mix freely (`H01:H12, A01`),
@@ -1266,7 +1300,7 @@ The section holds a single dropdown; tick the features you want.
   not left to a per-run choice: centroids are what cross-timepoint cell tracking
   links on and what the [Cell Browser](#cell-browser)'s region delete and the
   crop rectangle test cells against on frames whose masks are not loaded, and
-  the Quality Control debris gate filters on size, **solidity** and
+  the Image correction & QC debris gate filters on size, **solidity** and
   **circularity** — a gate you can edit after the run precisely because those
   columns are always there. Solidity appears in the dropdown as well (it is
   ticked by default); unticking it slims nothing, since the run adds it back.
@@ -1342,9 +1376,11 @@ archives and outputs are always written as per-well `.zip` archives. See
 
 ### 9. Compute options
 
-- **TF threads.** TensorFlow intra-op parallelism (CPU only; ignored on
-  Metal). Defaults to 4.
-- **Workers.** Number of wells processed in parallel.
+- **Threads per worker** (`0` = auto). TensorFlow intra-op parallelism (CPU
+  only; ignored on Metal). Auto is 4 (2 on Apple Silicon), never more than the
+  cores available.
+- **Wells in parallel** (`0` = auto). The number of worker processes, each
+  processing one well.
   - On Apple Silicon Metal the default is 2 — Metal serialises GPU calls
     across processes, so more workers don't help GPU throughput.
   - CPU-only: defaults to `floor((cpu_count − 1) / tf_threads)`.
@@ -1464,7 +1500,8 @@ that lands on the scratch disk.
 
 ### 11. Running on a remote host
 
-The last thing the form asks before the run buttons is a **Run on:** dropdown.
+**Run on** is the dropdown in the footer pinned under the form, beside the run
+buttons, so where the run will go is in sight when you press Run.
 It lists `Local` plus every SSH host configured in `remotes.toml`, in the
 app's own folder (`~/.allwell/remotes.toml` on macOS and Linux,
 `%LOCALAPPDATA%\allwell\remotes.toml` on Windows; the `ALLWELL_REMOTES`
@@ -1607,8 +1644,9 @@ because none of it applies:
   at end of run, and removes nothing — worth one run on a shared host before
   trusting auto-delete on it.
 
-Both toggles keep what you set them to. Switching **Run on:** to `Local` hides
-the group, because none of it applies to a local run, and switching back shows
+Both toggles keep what you set them to. These remote-only settings are the
+**Remote options** section at the foot of the form, shown only while a remote
+is chosen. Switching **Run on** to `Local` hides the section, because none of it applies to a local run, and switching back shows
 it exactly as you left it — a dry-run tick is not dropped, and an auto-delete
 you turned off is not turned back on, by a glance at `Local`.
 
@@ -1618,7 +1656,9 @@ and by `remote_fetch_report.txt` in the output folder.
 
 ### 12. Run / Suspend / Stop / Log
 
-- Click **Run**. The log streams the pipeline's stdout/stderr live.
+- Click **Run** (in the footer under the form). While the run is going,
+  **Suspend** and **Stop** take its place; they are not shown while nothing is
+  running. The log streams the pipeline's stdout/stderr live.
 - The **plate map** above the log colours each well by the stage it has reached.
   A well that has started is drawn as a dial rather than a flat circle: the
   darker part of it is the work already done, the lighter part what is left,
@@ -2420,7 +2460,7 @@ choice applies once, when the menu closes.
   differently. Find a value once for your microscope and
   magnification and it will carry between plates taken the same way, exposure
   permitting.
-  Type it into **Analyze ▸ Quality Control ▸ Out of focus below** so future
+  Type it into **Analyze ▸ Image correction & QC ▸ Out of focus below** so future
   runs record it and this box opens ready. That field remembers what you last
   typed between sessions — it is the one setting on the Analyze form that does,
   because it describes your microscope rather than the plate in front of you.
@@ -2519,7 +2559,7 @@ choice applies once, when the menu closes.
   the app never treats them alike.
 
   If a dataset was analysed before this existed it carries no focus column and
-  says so. Re-run it with **Analyze ▸ Quality Control ▸ Measure per-cell focus**
+  says so. Re-run it with **Analyze ▸ Image correction & QC ▸ Measure per-cell focus**
   ticked — it is on by default — to get one.
 
   On the **Home** tab's plate map, a well that needs a look carries a `!` and a
@@ -7511,7 +7551,7 @@ say — the raw log says so and the findings are unaffected.
    filled in from the dataset's own recorded settings (schema, separator,
    channel roles, QC options, CSV prefix — everything the original run used),
    and **Incremental — process only missing FOVs** is ticked for you. You land
-   with Compute Options already unfolded so you can see that tick, and a line
+   with Compute options already unfolded so you can see that tick, and a line
    across the top of the run panel naming the dataset and confirming what was
    set up, including any wells listed under **Force these wells** — those are
    wells whose images exist but whose measurements CSV is gone, which an
@@ -7723,7 +7763,7 @@ instead of babysitting each one.
 **Queuing an Analyze run whose input does not exist yet** — for example, one
 that analyses what a converter earlier in the queue will produce:
 
-- Tick **Detect schema & channels at run time** under *Filename Schema*. The
+- Tick **Detect schema & channels at run time** under *Filename schema*. The
   schema picker greys out: when the run starts, All-Well reads the filename
   schema and the channels from the input's filenames, as **Detect from
   filenames** does. When the job runs after a converter, the converter's own
@@ -7993,7 +8033,7 @@ worker loads StarDist once and reuses it across every FOV in that well.
   throughput, they only add RAM pressure. Two workers overlap I/O and
   CPU preprocessing with GPU inference.
 - **CPU-only.** Workers default to `floor((cpu_count − 1) / tf_threads)`,
-  with `tf_threads` defaulting to 4. Adjust under Compute Options if your
+  with `tf_threads` defaulting to 4. Adjust under Compute options if your
   machine has very many cores.
 
 Temporary directories (`_tmp_extract_*`, `_tmp_images_*`) are removed when

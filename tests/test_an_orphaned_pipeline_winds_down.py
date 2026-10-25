@@ -117,11 +117,11 @@ def test_the_restarted_app_will_not_start_over_a_live_run(tmp_path, qtbot,
     """Through the real ``start_run``, which Run, Resume and the queue all use."""
     import zipfile
 
-    import analyze.form
+    import analyze.run_footer
     from pipeline.suspend import ALIVE_FILENAME
     from services.run_spec import RunSpec
 
-    monkeypatch.setattr(analyze.form, "load_remotes", lambda: {})
+    monkeypatch.setattr(analyze.run_footer, "load_remotes", lambda: {})
     plate = tmp_path / "plate"
     (plate / "in").mkdir(parents=True)
     with zipfile.ZipFile(plate / "in" / "A01.zip", "w") as zf:

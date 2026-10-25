@@ -48,7 +48,11 @@ def qapp():
 @pytest.fixture()
 def tab(qapp):
     from analyze.tab import AnalyzeTab
-    return AnalyzeTab()
+    t = AnalyzeTab()
+    # Pairing is offered only while a correction reads a blank well, and a
+    # fresh form corrects nothing; every test here is about the pairing.
+    t._flatfield_cb.setValue("empty_well")
+    return t
 
 
 def rows(tab):
@@ -706,6 +710,7 @@ def test_the_summary_reads_under_the_button_not_beside_it(tab):
     """
     from PySide6.QtWidgets import QApplication
 
+    tab.reveal_section("Image correction & QC")      # folded by default
     tab.show()
     tab.resize(1100, 900)
     QApplication.processEvents()

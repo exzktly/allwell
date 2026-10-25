@@ -109,10 +109,11 @@ def test_every_section_is_recorded(analyze_tab):
 
 def test_sections_are_recorded_in_build_order(analyze_tab):
     titles = list(analyze_tab._section_widgets)
-    # The input folder heads the form, then Schema, then Channel tokens; the
-    # manual numbers its Analyze headings to match.
-    assert titles[:3] == ["Folders", "Filename Schema", "Channel Tokens"]
-    assert titles[-1] == "Scratch Disk"
+    # The input folder heads the form, then Schema, then Channels; the manual
+    # numbers its Analyze headings to match. Remote options closes the form,
+    # beside the Run on selector pinned under it.
+    assert titles[:3] == ["Folders", "Filename schema", "Channels & segmentation"]
+    assert titles[-2:] == ["Scratch disk", "Remote options"]
 
 
 # ── focus wins, and reaches every section ────────────────────────────────────
@@ -123,6 +124,9 @@ def test_focus_reaches_every_single_section(qapp, analyze_tab):
     screen at once there — so if focus did not reach them, the four manual
     subsections this feature exists to open would be unreachable and a
     subset-style assertion would have called that a pass."""
+    # Remote options is on screen only while a remote is chosen.
+    analyze_tab._remote_cb.addItem("gpu-box", userData="gpu-box")
+    analyze_tab._remote_cb.setCurrentIndex(analyze_tab._remote_cb.count() - 1)
     _expand_every_section(qapp, analyze_tab)
     reached = {}
     for title, section in analyze_tab._section_widgets.items():
@@ -137,10 +141,10 @@ def test_focus_reaches_every_single_section(qapp, analyze_tab):
 def test_focus_outranks_scroll_position(qapp, analyze_tab):
     _expand_every_section(qapp, analyze_tab)
     _scroll(qapp, analyze_tab, 0)
-    target = _focusable_in(analyze_tab._section_widgets["Scratch Disk"])
+    target = _focusable_in(analyze_tab._section_widgets["Scratch disk"])
     target.setFocus()
     _settle(qapp, 2)
-    assert analyze_tab.current_help_section() == "Scratch Disk"
+    assert analyze_tab.current_help_section() == "Scratch disk"
 
 
 # ── scroll position, when nothing has focus ──────────────────────────────────
@@ -156,13 +160,13 @@ def test_a_section_scrolled_past_is_not_reported(qapp, analyze_tab):
     top of the viewport by a few dozen pixels, and "the first section with any
     part on screen" named it while Channel Tokens filled the screen."""
     _clear_focus(qapp, analyze_tab)
-    top = analyze_tab._section_widgets["Channel Tokens"]
+    top = analyze_tab._section_widgets["Channels & segmentation"]
     form = analyze_tab._left_sidebar.widget()
     wanted = top.mapTo(form, top.rect().topLeft()).y()
     # Land part-way into Channel Tokens: its header is above the viewport top,
     # the previous section's tail is still on screen.
     _scroll(qapp, analyze_tab, wanted + 60)
-    assert analyze_tab.current_help_section() == "Channel Tokens"
+    assert analyze_tab.current_help_section() == "Channels & segmentation"
 
 
 def test_bottom_of_the_form_reports_the_section_at_the_top_of_the_screen(qapp, analyze_tab):
@@ -242,7 +246,7 @@ def test_the_resume_and_preflight_banners_head_the_form_above_folders(analyze_ta
 
     assert row(holder) == 0
     assert row(analyze_tab._section_widgets["Folders"]) > row(holder)
-    assert row(analyze_tab._section_widgets["Folders"]) < row(analyze_tab._section_widgets["Filename Schema"])
+    assert row(analyze_tab._section_widgets["Folders"]) < row(analyze_tab._section_widgets["Filename schema"])
 
 
 def test_load_settings_from_a_run_sits_above_folders_under_the_banners(analyze_tab):

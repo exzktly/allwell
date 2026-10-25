@@ -148,8 +148,8 @@ def _configure_form(
     # Isolate segmentation: no flat-field, no background subtraction, no debris
     # filter. Each of those has its own tests; here they would only add ways for
     # an unrelated stage to change the object count.
-    tab._flatfield_cb.setCurrentText("none")
-    tab._background_cb.setCurrentText("none")
+    tab._flatfield_cb.setValue("none")
+    tab._background_cb.setValue("none")
     tab._qc_remove_debris_cb.setChecked(False)
 
     # One worker, CPU only — deterministic, and small enough for a CI box.
@@ -159,7 +159,7 @@ def _configure_form(
 
 def _configure_cellpose(tab, *, model: str, diameter: str) -> None:
     """Set the general-Cellpose parameter page (model + expected object size)."""
-    tab._cellpose_model_cb.setCurrentText(model)
+    tab._cellpose_model_cb.setValue(model)
     tab._cellpose_diameter_edit.setText(diameter)
 
 

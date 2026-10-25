@@ -103,8 +103,8 @@ _STRIPPED_FORM = textwrap.dedent("""
     sys.meta_path.insert(0, Blocker())
     from PySide6.QtWidgets import QApplication
     app = QApplication([])
-    import analyze.form
-    analyze.form.load_remotes = lambda: {}
+    import analyze.run_footer
+    analyze.run_footer.load_remotes = lambda: {}
     from analyze.tab import AnalyzeTab
     from services.pipeline_service import build_pipeline_args
 

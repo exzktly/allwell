@@ -1,6 +1,6 @@
 """The Nanowells page's state: what the user chose (persisted) and the data computed from the dataset (not).
 
-Qt-free and stdlib-only. The persisted subset is :meth:`NanowellState.to_config`; :meth:`apply_config` accepts
+Qt-free. The persisted subset is :meth:`NanowellState.to_config`; :meth:`apply_config` accepts
 only values it recognises, so a block written by another version, or edited by hand, cannot put the page in
 a state its controls cannot show.
 """
@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
+
+from review.features.nanowell.subset_compute import Subset
+from review.features.nanowell.subset_compute import restore as restore_subset
 
 BASELINES = ("earliest", "first_measurable")
 AXES = ("time", "wells")            # what the Distribution view's x-axis carries
@@ -124,10 +127,10 @@ class NanowellState:
     #: The counted cells drawn as dots on every crop the page shows — the site detail's strip, the pop-out and the
     #: Extremes montage — as the Array view's Cells layer draws them on the array.
     crop_cells: bool = False
-    #: The *Starting cells* filter: the fewest and the most cells a nanowell may have held at the baseline to be
-    #: used (``None``: no bound on that side; both ``None``: no filter). See ``starting_cells_compute``.
-    start_min: int | None = None
-    start_max: int | None = None
+    #: The *Subset*: the conditions a nanowell must meet to be used — its starting cells, a metric at a timepoint,
+    #: its ring or distance from the centre, its address, its imaging field. No conditions: every nanowell. See
+    #: ``subset_compute``.
+    subset: Subset = field(default_factory=Subset)
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
@@ -192,7 +195,7 @@ class NanowellState:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
                 "extremes_n": self.extremes_n, "extremes_tps": list(self.extremes_tps), "crop_cells": self.crop_cells,
-                "start_min": self.start_min, "start_max": self.start_max, "layers": self.layers.to_config(),
+                "subset": self.subset.to_config(), "layers": self.layers.to_config(),
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -207,7 +210,7 @@ class NanowellState:
             value = config.get(name)
             setattr(self, name, value if isinstance(value, str) else getattr(fresh, name))
         self.cohort = config.get("cohort") is True
-        self.start_min, self.start_max = _start_bounds(config.get("start_min"), config.get("start_max"))
+        self.subset = _subset_from(config)
         count = config.get("extremes_n")
         self.extremes_n = (count if isinstance(count, int) and not isinstance(count, bool)
                            and 1 <= count <= EXTREMES_MAX_N else fresh.extremes_n)
@@ -227,15 +230,18 @@ class NanowellState:
                            and math.isfinite(v)}
 
 
-def _start_bounds(lo, hi) -> tuple:
-    """The saved *Starting cells* bounds, or no filter at all when either is not a whole number ≥ 0 or the minimum
-    is above the maximum: half a filter restored would be a different filter than the one saved."""
-    def ok(v):
-        return v is None or (isinstance(v, int) and not isinstance(v, bool) and v >= 0)
-
-    if not (ok(lo) and ok(hi)) or (lo is not None and hi is not None and lo > hi):
-        return None, None
-    return (None if lo == 0 else lo), hi
+def _subset_from(config: dict) -> Subset:
+    """The saved *Subset* — or, from a block saved when the page had only *Starting cells*, that filter's bounds as a
+    one-condition subset. A block that is not a subset, or a pair of bounds that is not a filter (a minimum above the
+    maximum, a value that is not a whole number ≥ 0), restores as no subset: half a filter restored would be a
+    different filter than the one saved."""
+    if "subset" in config:
+        return restore_subset(config.get("subset"))
+    lo, hi = config.get("start_min"), config.get("start_max")
+    try:
+        return Subset.starting(lo, hi)
+    except ValueError:
+        return Subset()
 
 
 def _layers_from(config: dict) -> ArrayLayers:

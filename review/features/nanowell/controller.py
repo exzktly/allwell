@@ -27,7 +27,7 @@ from review.features.nanowell.distribution_compute import (
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, one_to_one
 from review.features.nanowell import extremes_compute as ec
-from review.features.nanowell import starting_cells_compute as sc
+from review.features.nanowell import subset_compute as ss
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
@@ -106,12 +106,11 @@ def export_long_csv(state, path, wells=None) -> int:
     table = long_format(metrics, state.data.channels)
     table.insert(table.columns.get_loc("time_h") + 1, "time_source", state.data.time_source or "")
     table.insert(table.columns.get_loc("baseline_timepoint"), "baseline", state.baseline)
-    # Every row is kept, and flagged: a file filtered to the page's Starting cells would lose rows a reader may
-    # want back, and could not say which filter made it.
-    table["in_starting_cells_filter"] = sc.inside(metrics, state.start_min, state.start_max).to_numpy()
-    table["starting_cells_min"] = state.start_min
-    table["starting_cells_max"] = state.start_max
-    table["starting_cells_baseline"] = state.baseline
+    # Every row is kept, and flagged: a file filtered to the page's Subset would lose rows a reader may want back,
+    # and could not say which subset made it.
+    table["in_subset"] = ss.inside(metrics, state.subset, state.data).to_numpy()
+    table["subset"] = state.subset.label()
+    table["subset_baseline"] = state.baseline
     path = Path(path)
     tmp = path.with_name(path.name + ".part")
     table.to_csv(tmp, index=False)
@@ -333,7 +332,7 @@ def redraw(ctx) -> None:
         well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
-        start_cells=(st.start_min, st.start_max), **array)
+        subset=st.subset, **array)
     if isinstance(model, ArrayDrawn) or st.view == "array":
         st.drawn = model
         if model is not None and model.rendered is not None:
@@ -375,7 +374,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
               note: str = "", tableless=(), selected=(), responding_above: float | None = None,
               layers: ArrayLayers | None = None, image=None, image_note: str = "",
-              region=None, start_cells: tuple = (None, None)) -> tuple[object, object]:
+              region=None, subset: ss.Subset = ss.Subset()) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories or Position) into *fig*: ``(hit map, model)``.
 
     **The one composition of each view**, called by the page and by Batch Export's Nanowells mode (tracker I4),
@@ -385,16 +384,15 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     with *layers* (the lattice map when none are given — a batch figure), *image* under it and *region* where it
     looks (:func:`draw_array`); its model is the ``renderer.ArrayDrawn``.
     The hit map is ``None`` for views with nothing to click. *responding_above* is the user's cut for *metric*
-    (tracker I9), which the Distribution view states the fraction responding at. *start_cells* is the *Starting
-    cells* filter's ``(min, max)``: every view but the Array draws only the nanowells inside it, saying how many it
+    (tracker I9), which the Distribution view states the fraction responding at. *subset* is the page's
+    *Subset* (``subset_compute``): every view but the Array draws only the nanowells inside it, saying how many it
     left out; the Array view draws them all and dims the rest.
     """
     wells = [w for members in groups.values() for w in members]
-    lo, hi = start_cells
     all_metrics = metrics
-    metrics, filtered = sc.apply(metrics, lo, hi, baseline, [well] if view == "array" else wells)
+    metrics, filtered = ss.apply(metrics, subset, baseline, [well] if view == "array" else wells, data)
     if view != "array" and filtered is not None and filtered.kept == 0:
-        render_message(fig, sc.empty_text(filtered), gid="nw-start-empty")
+        render_message(fig, ss.empty_text(filtered), gid="nw-start-empty")
         return None, None
     # Wells whose rosters two versions decided differently count their rim differently; the figure says so (X35a-R4).
     mixed = mixed_rules_note({w: data.roster_rules.get(w) for w in wells if w in getattr(data, "roster_rules", {})})
@@ -414,7 +412,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                            selected=selected, note=note, dimmed=dimmed)
         return (drawn.hits if drawn is not None else None), drawn
     if filtered is not None:
-        note = " ".join(filter(None, [sc.note(filtered), note]))
+        note = " ".join(filter(None, [ss.note(filtered), note]))
     if view == "trajectories":
         render_trajectories(fig, vc.trajectory_panels(metrics, wells, metric_column(metric, channel), cohort=cohort),
                             cohort=cohort, label=_label(metric, channel), time_source=data.time_source, note=note)
@@ -422,7 +420,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if view == "position":
         series, missing = vc.position_series(metrics, wells, timepoint, metric_column(metric, channel),
                                              kinds={w: vc.lattice_kind(data, w, timepoint) for w in wells})
-        # A well the Starting cells filter emptied is named in the filter's note, not as one without addresses.
+        # A well the Subset emptied is named in the filter's note, not as one without addresses.
         missing = [w for w in missing if filtered is None or filtered.per_well.get(w, 1) > 0]
         if missing:
             note = " ".join(filter(None, [note, f"No addressed nanowells at {timepoint}, so not drawn: "
@@ -432,7 +430,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above)
-    model.starting = (lo, hi)
+    model.starting = subset.start_bounds()
     if tableless:
         model.notes.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
                               f"{', '.join(tableless)}.")
@@ -932,15 +930,15 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
     st.hits, st.drawn = None, None                       # no dots to hit and nothing to zoom: rows are clicked
     timepoint = shown_timepoint(ctx)[1]
     column = metric_column(metric, channel)
-    metrics, filtered = sc.apply(st.metrics, st.start_min, st.start_max, st.baseline, [well])
+    metrics, filtered = ss.apply(st.metrics, st.subset, st.baseline, [well], st.data)
     if filtered is not None and filtered.kept == 0:
-        render_message(fig, sc.empty_text(filtered), gid="nw-start-empty")
+        render_message(fig, ss.empty_text(filtered), gid="nw-start-empty")
         apply_export_style_to_current(ctx, fig, canvas)
         canvas.draw_idle()
         redraw_detail(ctx)
         return
     if filtered is not None:
-        note = " ".join(filter(None, [sc.note(filtered), note]))
+        note = " ".join(filter(None, [ss.note(filtered), note]))
     model = ec.extremes(metrics, well, timepoint, column, st.extremes_n, st.data.channels)
     missing = tuple(sorted(site for site in model.sites() if site not in st.crops))
     if missing:
@@ -1070,18 +1068,14 @@ def redraw_detail(ctx) -> None:
 
 
 def _outside_badges(st, sites) -> dict:
-    """``site -> sentence`` for each of *sites* the *Starting cells* filter leaves out of the page's figures."""
-    if not sc.is_active(st.start_min, st.start_max):
+    """``site -> sentence`` for each of *sites* the *Subset* leaves out of the page's figures."""
+    if not st.subset.is_active():
         return {}
     out = {}
-    label = f"Starting cells {sc.bounds_text(st.start_min, st.start_max)}"
     for site in sites:
-        rows = site_series(st.metrics, *site)
-        if not len(rows) or bool(sc.inside(rows.iloc[:1], st.start_min, st.start_max).iloc[0]):
-            continue
-        n0 = pd.to_numeric(rows["n0"], errors="coerce").iloc[0] if "n0" in rows else float("nan")
-        count = "no count at baseline" if not math.isfinite(n0) else f"{int(n0)} cells at baseline"
-        out[tuple(site)] = f"outside {label} ({count})"
+        said = ss.site_badge(site_series(st.metrics, *site), st.subset, st.data)
+        if said:
+            out[tuple(site)] = said
     return out
 
 
@@ -1249,24 +1243,45 @@ def set_view(ctx, view: str) -> None:
 
 
 def set_starting_cells(ctx, lo, hi) -> None:
-    """Set the *Starting cells* filter's bounds (``None`` for no bound on that side). Bounds that are not whole
-    numbers ≥ 0, or a minimum above the maximum, change nothing: the controls are put back to the filter that
-    is set."""
-    st = _state(ctx)
-    if st is None:
-        return
+    """Make the *Subset* the Starting cells filter of *lo* to *hi* cells at the baseline (``None`` for no bound on
+    that side) — the Subset control's presets. Bounds that are not whole numbers ≥ 0, or a minimum above the
+    maximum, change nothing: the controls are put back to the subset that is set."""
     try:
-        lo, hi = sc.normalise(lo, hi)
+        subset = ss.Subset.starting(lo, hi)
     except ValueError:
         _call(ctx, "_nw_refresh_controls")
         return
-    if (st.start_min, st.start_max) == (lo, hi):
+    set_subset(ctx, subset)
+
+
+def set_subset(ctx, subset) -> bool:
+    """Make *subset* the page's *Subset* and redraw; ``False`` (and nothing changed) when it is not one — a range
+    whose lower bound is above its upper, a tile condition with no tile chosen."""
+    st = _state(ctx)
+    if st is None:
+        return False
+    try:
+        subset = subset.validated()
+    except ValueError:
         _call(ctx, "_nw_refresh_controls")
-        return
-    st.start_min, st.start_max = lo, hi
+        return False
+    if st.subset == subset:
+        _call(ctx, "_nw_refresh_controls")
+        return True
+    st.subset = subset
     _save_soon(ctx)
     _call(ctx, "_nw_refresh_controls")
     redraw(ctx)
+    return True
+
+
+def subset_tiles(ctx) -> list[str]:
+    """The imaging fields (tiles) the page's wells' nanowells were cut from, for the Subset editor's tile choice."""
+    st = _state(ctx)
+    if st is None or st.metrics is None or "owner" not in st.metrics:
+        return []
+    rows = st.metrics[st.metrics["well"].isin(page_wells(ctx))]
+    return sorted({str(v) for v in rows["owner"].dropna() if str(v)})
 
 
 def set_crop_cells(ctx, on: bool) -> None:

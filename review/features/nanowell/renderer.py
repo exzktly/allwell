@@ -450,8 +450,8 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
 def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None)) -> None:
     """The occupancy colours' key at the figure's top right: every figure coloured by occupancy class carries one,
     or its colours decode to nothing. Its title reads ``title (baseline; faint: filtered out):``, each part in the
-    brackets only when it applies; *starting* is the *Starting cells* filter's ``(minimum, maximum)``, whose
-    excluded classes are drawn faint."""
+    brackets only when it applies; *starting* is the ``(minimum, maximum)`` count at the baseline the *Subset*
+    holds every kept nanowell to (``Subset.start_bounds``), whose excluded classes are drawn faint."""
     from widgets.plot_card import theme_paired_colours
 
     key = fig.add_axes([0.6, 0.955, 0.38, _LINE * 0.9])        # top right, above the panels' titles
@@ -459,7 +459,7 @@ def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None)
     key.set_xlim(0, 10)
     key.set_ylim(0, 1)
     classes = ["0", "1", "2", "3+", None]
-    # The classes the Starting cells filter removes whole are drawn faint and named so, or a key would decode
+    # The classes the Subset removes whole are drawn faint and named so, or a key would decode
     # colours the figure cannot contain.
     lo, hi = starting
     kept = [occupancy_in_filter(cls, lo, hi) for cls in classes]
@@ -491,7 +491,7 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     without a value is a gap in the line, never a zero; a timepoint whose state carries no number is a
     hatched band naming the state. The rows share one time axis, labelled once under the bottom row. The crops
     are drawn on a figure of their own under the **Pop out** button (:func:`render_crop_strip`). *outside*
-    (``site -> sentence``) marks a selected nanowell that the *Starting cells* filter leaves out of the page's
+    (``site -> sentence``) marks a selected nanowell that the *Subset* leaves out of the page's
     figures: the detail still draws it, and says so.
     """
     fig.clear()
@@ -1064,7 +1064,7 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     *region* ``(left, top, right, bottom)`` is where the view looks, widened to the axes' shape; without one the
     view fits everything drawn. The nanowells are coloured as ``ui/nanowell_sites.py`` colours them wherever one is
     drawn, so a state reads the same here as in Analyze's Test detection. The nanowells in *dimmed* (``(well, q,
-    r)``: outside the *Starting cells* filter) are drawn under a veil of the ground, still where they are and still
+    r)``: outside the *Subset*) are drawn under a veil of the ground, still where they are and still
     clickable, so where the kept ones sit on the array stays visible.
     """
     fig.clear()
@@ -1207,7 +1207,7 @@ def _draw_nanowells(fig, ax, drawn, scene, layers, *, label: str, selected) -> N
             ax.add_patch(_ring(sites.x[k], sites.y[k], sites.radius[k] * 1.35, colour))
 
 
-#: How opaque the veil over a nanowell outside the *Starting cells* filter is: enough to read as set aside, little
+#: How opaque the veil over a nanowell outside the *Subset* is: enough to read as set aside, little
 #: enough that its state and fill still show through.
 DIM_ALPHA = 0.65
 

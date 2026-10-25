@@ -295,6 +295,13 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                 "This dataset has no nanowell tables (out/nanowells/), so there is nothing to "
                                 "export in this mode.")
             return None
+        if not len(data.sites):
+            # Only the batch's wells are read, so none of them having a table leaves no site at all, and the
+            # metrics cannot be computed over nothing (they raised KeyError: 'state').
+            QMessageBox.warning(self, "No nanowell tables",
+                                "None of the groups' wells has a nanowell table (out/nanowells/), so there is "
+                                "nothing to export in this mode.")
+            return None
         return data, _site_metrics(data, baseline)
 
     def _run_batch(self) -> None:

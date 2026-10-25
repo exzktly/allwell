@@ -374,9 +374,12 @@ def test_a_well_its_record_says_was_left_part_way_is_sent_again(tmp_path):
     assert sent == ["B02"] and _forced(argv[-1]) == []
 
 
-def test_a_nanowell_timepoint_that_did_not_finish_ok_is_not_covered(tmp_path):
-    """Reported by review: every timepoint the grid record named counted, whatever its status; the rule
-    (``completeness.nanowell_coverage``) counts only those that finished ``ok``."""
+def test_a_nanowell_timepoint_the_run_reached_without_an_address_is_not_sent_alone_again(tmp_path):
+    """Rewritten around a later review, which found the rule this test first pinned (only ``ok`` counts) to be the
+    defect: a well with an ``unaddressed`` timepoint was re-sent alone and forced, its plate-rigid timepoints came
+    back unaddressed because the host had no other wells to fit the plate's motion from, the worse tables replaced
+    the better, and the well stayed unfinished for every later re-run. A timepoint the run recorded a verdict for
+    is finished for this question; one it never reached is not."""
     inp, out = _plate(tmp_path)
     opts = _opts(**NANOWELL)
     for well in ("A01", "B02"):
@@ -384,7 +387,10 @@ def test_a_nanowell_timepoint_that_did_not_finish_ok_is_not_covered(tmp_path):
         _grid(out, well, "T01")
     (out / "nanowells" / "B02_grid.json").write_text(json.dumps({"timepoints": {"T01": {"status": "unaddressed"}}}))
     sent, _lines = _run(inp, out, opts)
-    assert sent == ["B02"]
+    assert sent is None                                                   # nothing a resend alone could improve
+    (out / "nanowells" / "B02_grid.json").write_text(json.dumps({"timepoints": {}}))
+    sent, _lines = _run(inp, out, opts)
+    assert sent == ["B02"]                                                # never reached: sent
 
 
 def test_a_finished_blank_alone_ends_the_run_without_its_out_zip_and_a_forced_one_is_sent(tmp_path):
@@ -441,3 +447,32 @@ def test_a_batched_run_s_blank_measured_against_its_run_directory_copy_is_finish
     proc._run_batches()
     skip_lines = [ln for ln in logged if "skipping upload + compute" in ln]
     assert len(skip_lines) == 1 and "A01, H12" in skip_lines[0], logged[:6]
+
+
+def test_a_field_mode_well_whose_archive_gained_a_field_or_timepoint_is_sent(tmp_path):
+    """Reported by review: the field-mode check read the settings and the CSV, never the input, so a well whose
+    archive gained a field or a timepoint since (a re-export, a Concatenate in place) was reported up to date and
+    the new images were never analysed."""
+    inp, out = _plate(tmp_path)
+    for well in ("A01", "B02"):
+        _record(out, well, _opts())
+    with zipfile.ZipFile(inp / "A01.zip", "a") as zf:
+        for ch in ("DAPI", "GFP"):
+            zf.writestr(f"e_{ch}_A01_1_T02.tif", b"x")
+    sent, _lines = _run(inp, out, _opts())
+    assert sent == ["A01"]
+
+
+def test_an_only_wells_subset_leaves_the_plate_s_gating_to_this_computer(tmp_path, monkeypatch):
+    """Reported by review: staging narrows the finished wells to the named ones, so a subset none of whose wells
+    was finished sent no --no_auto_threshold, and the host gated the plate from the subset."""
+    import services.pipeline_runner as pr
+
+    regated: list = []
+    monkeypatch.setattr(pr, "run_local_auto_threshold", lambda out, argv, log: regated.append(list(argv)))
+    inp, out = _plate(tmp_path)
+    for well in ("A01", "B02"):
+        (out / f"measurements_{well}.csv").unlink()
+    argv: list = []
+    sent, _lines = _run(inp, out, _opts(only_wells=["A01"]), argv_sent=argv)
+    assert sent == ["A01"] and "--no_auto_threshold" in argv[-1] and len(regated) == 1

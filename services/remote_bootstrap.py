@@ -582,6 +582,8 @@ CELLPOSE_REQUIRED_IMPORTS: dict[str, str] = {
     "torchvision": "torchvision",
     "cellpose": "cellpose",
     "exceptiongroup": "exceptiongroup",
+    "numpy": "numpy",
+    "opencv-python-headless": "cv2",
 }
 CELLPOSE_NOT_PROBED: dict[str, str] = {
     "tomli": "installed only on Python < 3.11, where tomllib is missing",

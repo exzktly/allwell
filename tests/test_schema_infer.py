@@ -407,3 +407,22 @@ def test_prefixes_that_outnumber_the_channels_still_lose_to_the_channel():
     guess = infer_schema(stems)
     assert guess.channels == ["PHASE", "GFP"]
 
+
+
+def test_imagexpress_sites_in_per_well_zips_are_not_taken_for_the_channel(tmp_path):
+    """Through the sampling the app uses (``infer_from_dir`` on per-well zips): 4 sites against 3 channels. The
+    strided sample of each archive held one channel per well, so the ``s<n>`` site slot — which no predicate claims
+    and which changes within a tile — was taken for the channel when changing within a tile ranked first."""
+    import zipfile
+
+    from util.schema_infer import infer_from_dir
+
+    (tmp_path / "in").mkdir()
+    for well in [f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)]:
+        with zipfile.ZipFile(tmp_path / "in" / f"{well}.zip", "w") as zf:
+            for site in range(1, 5):
+                for chan in range(1, 4):
+                    zf.writestr(f"Plate_{well}_s{site}_w{chan}.tif", b"")
+    guess = infer_from_dir(tmp_path)
+    assert guess.schema_str == "experiment:well:ignore:channel"
+    assert sorted(guess.channels) == ["w1", "w2", "w3"]

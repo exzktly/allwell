@@ -274,9 +274,10 @@ def _cell_brightness(paths, well: str | None = None, tables: dict | None = None)
         if tables is not None:
             for named in frame["well"].dropna().unique():
                 tables.setdefault(str(named), path)
-        if tables is not None:
-            for well in frame["well"].dropna().unique():
-                tables.setdefault(str(well), path)
+            if well is not None and Path(path).name.split(".csv")[0].endswith(f"_{well}"):
+                # The well's own table with no rows is a run that measured it and counted no cell
+                # (pipeline/nanowell_task.write_empty_cells_csv), not a well without a cell table.
+                tables.setdefault(well, path)
     if not frames:
         return None
     cells = pd.concat(frames, ignore_index=True)

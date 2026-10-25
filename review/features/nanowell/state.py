@@ -170,6 +170,7 @@ class NanowellState:
         self.crops, self.montages, self.fetching, self.fetch_bridges = {}, {}, set(), []
         self.region = self.region_for = self.press = self.drawn = None
         self.anchor_mode, self.array_message = False, ""
+        self.crop_view = False                           # a new dataset opens on its view, not a crop view
         self.release_tiles()
 
     def to_config(self) -> dict:

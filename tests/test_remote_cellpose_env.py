@@ -12,6 +12,8 @@ stub conda (``tests/test_remote_conda_env.py``'s, which owns the conda side of t
 
 from __future__ import annotations
 
+import os
+
 import shutil
 import subprocess
 
@@ -79,11 +81,20 @@ def _stub_conda_run(binder):
     (binder / "conda").write_text(script)
 
 
+def _ready_python(env, *, finds: bool = True):
+    """A stub python in *env* whose module probe answers *finds*: the guard asks it whether Cellpose, Torch and the
+    rest are importable there before it chooses the env."""
+    (env / "bin").mkdir(parents=True, exist_ok=True)
+    (env / "bin" / "python").write_text(f"#!/bin/sh\nexit {0 if finds else 1}\n")
+    (env / "bin" / "python").chmod(0o755)
+    return env
+
+
 @_NEEDS_BASH
 def test_the_guard_runs_a_cellpose_run_in_the_cellpose_env_where_the_host_has_it(remote_home, tmp_path):  # noqa: F811
     _, binder = remote_home
     allwell = _make_env(tmp_path / "envs" / "allwell", valid=True)
-    cellpose = _make_env(tmp_path / "envs" / CELLPOSE_CONDA_ENV, valid=True)
+    cellpose = _ready_python(_make_env(tmp_path / "envs" / CELLPOSE_CONDA_ENV, valid=True))
     _stub_conda(binder, envs={"base": "/opt/conda", "allwell": str(allwell), CELLPOSE_CONDA_ENV: str(cellpose)})
     _stub_conda_run(binder)
     # The guard, then the argv as the runner quotes it for the remote shell: the prefix reaches conda resolved.
@@ -105,6 +116,31 @@ def test_a_host_without_it_runs_in_allwell_and_says_why(remote_home, tmp_path): 
     assert f"CONDA-RUN {allwell}" in r.stdout
     assert f"env {CELLPOSE_CONDA_ENV} is not installed" in r.stdout and "float32" in r.stdout
     assert "Bootstrap" in r.stdout
+
+
+@_NEEDS_BASH
+@pytest.mark.parametrize("state", ["created, pip not run", "pip failed", "pip still running"])
+def test_a_cellpose_env_conda_created_but_not_installed_is_not_chosen(remote_home, tmp_path, state):  # noqa: F811
+    """The bootstrap creates the env first and pip-installs into it after, detached and non-fatally: an env that
+    exists is not yet one Cellpose can run in, and a run sent there died on import."""
+    home, binder = remote_home
+    allwell = _make_env(tmp_path / "envs" / "allwell", valid=True)
+    cellpose = _make_env(tmp_path / "envs" / CELLPOSE_CONDA_ENV, valid=True)
+    staging = home / ".allwell-staging"
+    staging.mkdir()
+    if state == "created, pip not run":
+        _ready_python(cellpose, finds=False)
+    elif state == "pip failed":
+        _ready_python(cellpose)
+        (staging / ".pip_cellpose_failed").touch()
+    else:
+        _ready_python(cellpose)
+        (staging / ".pip_cellpose_running").write_text(str(os.getpid()))   # a live pid
+    _stub_conda(binder, envs={"base": "/opt/conda", "allwell": str(allwell), CELLPOSE_CONDA_ENV: str(cellpose)})
+    _stub_conda_run(binder)
+    r = _run(_conda_env_guard(_PREFER) + '; conda run --no-capture-output -p "$AW_PREFIX" python pm.py')
+    assert r.returncode == 0, r.stderr
+    assert f"CONDA-RUN {allwell}" in r.stdout and "not ready" in r.stdout
 
 
 @_NEEDS_BASH

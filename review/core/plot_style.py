@@ -1140,6 +1140,14 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         # applied above, so the colour bar still tracks the plot theme.
         if bool(getattr(ax, "_aw_colorbar", False)):
             continue
+        # An image panel (``_aw_image_panel``) is the same case for a different
+        # reason: its limits are the image's own extent, and a range, log scale,
+        # grid or tick choice typed for the figure's plot means nothing on it. The
+        # Nanowells page draws its enlarged crops on the page's own figure, so
+        # the card's typed y range (0 to 10 on a count plot) cut every crop to a
+        # ten-row strip until these were left alone.
+        if bool(getattr(ax, "_aw_image_panel", False)):
+            continue
 
         _style_x_tick_angle(ax, int(axis_prefs.style(idx, "x_tick_angle", 0)))
         _style_lines(ax, marks)

@@ -590,7 +590,7 @@ def _load_tiles(ctx, names, *, level) -> None:
 # ── the Array view's layers ──────────────────────────────────────────────────
 #: Said on the figure while the *Overlays* button hides the coloured layers, so a view with no nanowells drawn
 #: cannot be mistaken for a timepoint that has none (CLAUDE.md §7: degraded output must say so).
-OVERLAYS_HIDDEN_NOTE = "Overlays hidden — press Overlays to show the nanowells, tiles and anchor again."
+OVERLAYS_HIDDEN_NOTE = "Overlays hidden — press Overlays to show the nanowells, tiles, anchor and cells again."
 
 
 def drawn_layers(st) -> ArrayLayers:
@@ -691,6 +691,10 @@ def _zoom_to(ctx, st, factor: float, at_um) -> None:
     drawn = st.drawn
     now = array_zoom_factor(drawn)
     if now is not None:
+        # A view already past a limit (a refit to a new axes shape can put it there) is not stepped further
+        # past it, and is never stepped the opposite way to the one asked for.
+        if (factor > 1 and now <= ZOOM_OUT_LIMIT) or (factor < 1 and now >= ZOOM_IN_LIMIT):
+            return
         # The zoom after this step, held inside the limits: the step is shortened to land on the limit.
         target = min(max(now / factor, ZOOM_OUT_LIMIT), ZOOM_IN_LIMIT)
         factor = now / target
@@ -882,10 +886,14 @@ def rerun_anchored(ctx) -> bool:
 def _draw_crop_view(ctx, st, fig, canvas) -> bool:
     """Draw the first selected nanowell's crops at every timepoint, large, on the page's figure, when the crop view
     is on; ``True`` when it drew. The crops are the site detail's (``st.crops``), read on a worker the first time."""
-    if not (st.crop_view and st.selected_sites):
-        st.crop_view = False
+    site = _crop_view_site(st) if st.crop_view else None
+    if site is None:
+        if st.crop_view:
+            # Leaving it because nothing is left to enlarge: the button must say so too, or it stays on "Back
+            # to the plot" and the next press only un-checks it.
+            st.crop_view = False
+            _call(ctx, "_nw_refresh_crop_view")
         return False
-    site = tuple(st.selected_sites[0])
     st.hits, st.drawn = None, None                       # nothing on the figure answers a click or a zoom
     if site not in st.crops:
         data, metrics = st.data, st.metrics
@@ -899,6 +907,17 @@ def _draw_crop_view(ctx, st, fig, canvas) -> bool:
     _call(ctx, "_nw_refresh_crop_view")
     redraw_detail(ctx)
     return True
+
+
+def _crop_view_site(st) -> tuple | None:
+    """The nanowell the crop view enlarges: the first selected one with a series, the one the site detail beside
+    it leads with (:func:`redraw_detail`); ``None`` when no selected nanowell has one."""
+    if st.metrics is None:
+        return None
+    for well, q, r in st.selected_sites:
+        if len(site_series(st.metrics, well, q, r)):
+            return (well, q, r)
+    return None
 
 
 def set_crop_view(ctx, on: bool) -> None:

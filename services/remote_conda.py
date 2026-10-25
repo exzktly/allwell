@@ -175,6 +175,19 @@ aw_env_prefix() {
 aw_env_is_valid() {
     [ -n "$1" ] && [ -f "$1/conda-meta/history" ]
 }
+aw_cellpose_env_ready() {
+    # An env conda created is not yet one Cellpose can run in: the bootstrap creates it, then pip-installs into it
+    # detached, and that install can fail, still be running, or be cut off. Ready means valid, no live or failed
+    # install of it (the pip_cellpose markers, services/remote_bootstrap.pip_install_script), and its python finding
+    # what the pipeline imports there. No single quotes: this is embedded in one.
+    aw_env_is_valid "$1" || return 1
+    _st="$HOME/.allwell-staging"
+    [ -f "$_st/.pip_cellpose_failed" ] && return 1
+    if [ -f "$_st/.pip_cellpose_running" ] && kill -0 "$(cat "$_st/.pip_cellpose_running")" 2>/dev/null; then
+        return 1
+    fi
+    "$1/bin/python" -c "import importlib.util as u, sys; sys.exit(0 if all(u.find_spec(m) for m in sys.argv[1:]) else 1)" cellpose torch pandas tifffile imagecodecs 2>/dev/null
+}
 aw_env_stale_dir() {
     for _c in "$HOME/.conda/envs/$1" "$(conda info --base 2>/dev/null)/envs/$1"; do
         if [ -d "$_c" ] && [ ! -f "$_c/conda-meta/history" ]; then
@@ -223,10 +236,10 @@ def _conda_env_guard(selector: EnvSelector) -> str:
         first_q, second_q = _remote_quote(first), _remote_quote(second)
         resolve = (
             f'AW_PREFIX="$(aw_env_prefix {first_q})"; '
-            f'if aw_env_is_valid "$AW_PREFIX"; then '
+            f'if aw_cellpose_env_ready "$AW_PREFIX"; then '
             f'echo "[remote] conda env: {first} (Cellpose, Torch with bfloat16)"; '
             f'else AW_PREFIX="$(aw_env_prefix {second_q})"; '
-            f'echo "[remote] note: env {first} is not installed on $(hostname), so Cellpose runs in {second} '
+            f'echo "[remote] note: env {first} is not installed, or not ready, on $(hostname), so Cellpose runs in {second} '
             f'(float32). Run Analyze -> Remotes -> Bootstrap to install it."; fi; '
             f'AW_STALE="$(aw_env_stale_dir {second_q} || true)"'
         )

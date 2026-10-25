@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from pipeline import nanowell_measure as nm
 from pipeline import nanowell_run as nr
 from tests._nanowell_run_fixture import build_well, paint_cell, threshold_segmenter
 
@@ -57,7 +58,7 @@ def test_every_seen_nanowell_has_a_confluence_and_it_does_not_depend_on_the_tile
     assert {k: (sites[k]["state"], sites[k]["n_cells"]) for k in seen} == \
         {k: (reference[k]["state"], reference[k]["n_cells"]) for k in seen}
     block = measured.template["normalisation"]
-    assert block["measure_version"] == 5 and block["offset"] == "per nanowell" and block["tiles_without_gain"] == []
+    assert block["measure_version"] == nm.MEASURE_VERSION and block["offset"] == "per nanowell" and block["tiles_without_gain"] == []
 
 
 def test_empty_nanowells_read_empty_and_loaded_ones_textured_on_every_tile(well):

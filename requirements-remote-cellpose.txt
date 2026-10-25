@@ -16,6 +16,14 @@
 # create puts in both envs. The pins below match ``requirements-remote.txt`` where a package is in both, so a count
 # differs between the envs only by the model's arithmetic precision.
 
+# ── The stack beneath, held where conda put it ───────────────────────────────
+# Nothing above TF caps numpy in this env, and every recent opencv-python-headless (a Cellpose requirement with no
+# version bound) needs numpy 2; pip would then upgrade numpy under conda's scipy and scikit-image and the pinned
+# imagecodecs, which are built against 1.24 and fail to import ("numpy.dtype size changed"). 4.10 is the last
+# opencv that installs on numpy 1.x.
+numpy>=1.24,<1.25
+opencv-python-headless<4.11
+
 # ── Image I/O ────────────────────────────────────────────────────────────────
 tifffile==2023.9.26
 imagecodecs==2023.9.18

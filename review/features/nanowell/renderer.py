@@ -440,6 +440,8 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
     notes: set = set()
     for k, (tp, crop) in enumerate(items):
         ax = fig.add_subplot(grid[k // cols, k % cols])
+        # An image, pixel for pixel: the style pass must not put the card's typed axis range on it.
+        ax._aw_image_panel = True
         ax.set_xticks([])
         ax.set_yticks([])
         if crop.image is not None:
@@ -782,6 +784,9 @@ def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool) -> lis
     what = "addresses and values" if addresses and values else "addresses" if addresses else "values"
     if show.sum() > MAX_ADDRESSES:
         return [f"{int(show.sum()):,} nanowell {what} in view: zoom in to read them."]
+    if not (labels != "").any():
+        # Nothing to write at any size: zooming in cannot help, so the footer must not say it would.
+        return [f"No nanowell here has {what} to write."]
     if not show.any():
         return [f"Nanowell {what} are written in a nanowell drawn at least {MIN_LABEL_DIAMETER_PX} px across: zoom "
                 "in to read them."]

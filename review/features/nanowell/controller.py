@@ -590,7 +590,7 @@ def _load_tiles(ctx, names, *, level) -> None:
 # ── the Array view's layers ──────────────────────────────────────────────────
 #: Said on the figure while the *Overlays* button hides the coloured layers, so a view with no nanowells drawn
 #: cannot be mistaken for a timepoint that has none (CLAUDE.md §7: degraded output must say so).
-OVERLAYS_HIDDEN_NOTE = "Overlays hidden — press Overlays to show the nanowells, tiles and anchor again."
+OVERLAYS_HIDDEN_NOTE = "Overlays hidden — press Overlays to show the nanowells, tiles, anchor and cells again."
 
 
 def drawn_layers(st) -> ArrayLayers:
@@ -691,6 +691,10 @@ def _zoom_to(ctx, st, factor: float, at_um) -> None:
     drawn = st.drawn
     now = array_zoom_factor(drawn)
     if now is not None:
+        # A view already past a limit (a refit to a new axes shape can put it there) is not stepped further
+        # past it, and is never stepped the opposite way to the one asked for.
+        if (factor > 1 and now <= ZOOM_OUT_LIMIT) or (factor < 1 and now >= ZOOM_IN_LIMIT):
+            return
         # The zoom after this step, held inside the limits: the step is shortened to land on the limit.
         target = min(max(now / factor, ZOOM_OUT_LIMIT), ZOOM_IN_LIMIT)
         factor = now / target

@@ -286,3 +286,42 @@ def test_with_the_overlays_hidden_a_double_click_still_finds_the_nanowell(qc_pag
     QTest.mouseDClick(canvas, Qt.LeftButton, Qt.NoModifier, point)
     x0, y0, x1, y1 = st.drawn.region
     assert ((x0 + x1) / 2, (y0 + y1) / 2) == pytest.approx((40.0, 200.0), abs=0.01)
+
+
+def test_with_no_value_to_write_the_footer_does_not_say_zoom_in():
+    # Every label empty (the metric undefined, addresses off): no zoom can show one, so the footer must not
+    # claim it would.
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.array_compute import ArraySites
+    from review.features.nanowell.renderer import ArrayDrawn, HitMap, _draw_labels
+
+    fig = Figure(dpi=100)
+    ax = fig.add_subplot()
+    sites = ArraySites(np.array([0.0, 100, 200]), np.zeros(3), np.full(3, 40.0), np.full(3, np.nan),
+                       ["measured"] * 3, np.zeros(3, bool), [("A01", 0, 0), ("A01", 1, 0), ("A01", 2, 0)],
+                       ["0,0", "1,0", "2,0"])
+    drawn = ArrayDrawn(HitMap(), ax, (-50, -50, 250, 250), (600, 600), "well")     # 160 px nanowells
+    assert _draw_labels(fig, ax, drawn, sites, addresses=False, values=True) == [
+        "No nanowell here has values to write."]
+
+
+def test_a_view_refitted_past_the_zoom_out_limit_is_not_zoomed_in_by_a_wheel_out(monkeypatch):
+    # A narrower axes refits the region and the fit, so a view at the 0.25x limit can read below it; a
+    # wheel-out notch then must leave it alone rather than "clamp" it inward.
+    from types import SimpleNamespace as NS
+
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell.full_montage_compute import fit_region
+
+    monkeypatch.setattr(nwc, "redraw", lambda ctx: None)
+    region = (-3500, -1500, 4500, 2500)
+    drawn = NS(fit=fit_region((0, 0, 1000, 1000), 500, 400, margin=0),
+               region=fit_region(region, 500, 400, margin=0))
+    assert nwc.array_zoom_factor(drawn) < nwc.ZOOM_OUT_LIMIT
+    st = NS(drawn=drawn, region=None)
+    nwc._zoom_to(None, st, 1 / nwc.WHEEL_STEP, (500, 500))
+    assert st.region is None
+    nwc._zoom_to(None, st, nwc.WHEEL_STEP, (500, 500))          # zooming in from there still works
+    assert st.region is not None and st.region[2] - st.region[0] < drawn.region[2] - drawn.region[0]

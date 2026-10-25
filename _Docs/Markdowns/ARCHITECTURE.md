@@ -10638,8 +10638,9 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
 - **Cells** (off by default, in no preset) is a dot at the centre of each cell the run counted — the run keeps
   no cell outlines, so a centre is all there is. The positions are the cell table's `well_x_um` / `well_y_um`
   (the table every nanowell run writes beside its nanowell tables, one row per counted cell);
-  `collect.load_nanowell_data` notes which CSV holds each well while it reads their brightness
-  (`NanowellData.cell_tables`), and `collect.cell_positions` reads one well's table only when the layer is on,
+  `collect.read_well_part` notes which CSV holds each well while it reads that well's brightness
+  (`NanowellData.cell_tables`) — the well's own table even when it has no rows, since that is a run that
+  measured the well and counted no cell, not a well without a cell table, and `collect.cell_positions` reads one well's table only when the layer is on,
   kept (`_read_cell_positions`, the last two files) until the file's modification time or size changes, so a
   plate's every cell is never held at once. `array_compute.cells_into` puts them in the scene: where measured in
   the well frame; on the lattice at the nanowell's lattice place plus the cell's offset from that nanowell's
@@ -10647,7 +10648,8 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   or measured centre is counted in the footer, not drawn. The renderer draws them as one `scatter` of fixed
   screen size (`CELL_DOT_PT2`), light with a dark rim (`ui/nanowell_sites.CELL_COLOUR`, `CELL_EDGE_COLOUR`) so
   they read over the image and over any fill, above the nanowells and under the addresses. The footer says how
-  many were drawn, or that the well has no cell table, or that its table holds no positions.
+  many were drawn, that the run counted no cell in the well at that timepoint, that the well has no cell table,
+  or that its table holds no positions.
 - **One scene, one renderer.** `array_compute.array_scene` builds the `ArrayScene` — the nanowells drawn
   (`ArraySites`: position, radius, value, state, fused flag, `(well, q, r)`, the `q,r` text from
   `util.nanowell_address.coordinate_text`; an unaddressed nanowell carries `None` and is drawn but never

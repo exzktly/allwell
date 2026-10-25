@@ -176,6 +176,10 @@ def cells_into(scene: ArrayScene, rows, data) -> None:
                             f"Cells: {scene.well} has no cell table, so no cell is drawn (a run that counted no "
                             "cell, or one that could not count).")
         return
+    if found.empty:
+        scene.cells = (np.zeros(0), np.zeros(0))
+        scene.cells_note = f"Cells: the run counted no cell in {scene.well} at {scene.timepoint}."
+        return
     x, y = found["well_x_um"].to_numpy(dtype=float), found["well_y_um"].to_numpy(dtype=float)
     unplaced = 0
     if scene.frame == "lattice":

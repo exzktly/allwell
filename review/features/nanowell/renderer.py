@@ -782,6 +782,9 @@ def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool) -> lis
     what = "addresses and values" if addresses and values else "addresses" if addresses else "values"
     if show.sum() > MAX_ADDRESSES:
         return [f"{int(show.sum()):,} nanowell {what} in view: zoom in to read them."]
+    if not (labels != "").any():
+        # Nothing to write at any size: zooming in cannot help, so the footer must not say it would.
+        return [f"No nanowell here has {what} to write."]
     if not show.any():
         return [f"Nanowell {what} are written in a nanowell drawn at least {MIN_LABEL_DIAMETER_PX} px across: zoom "
                 "in to read them."]

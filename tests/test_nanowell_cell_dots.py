@@ -77,6 +77,18 @@ def test_a_well_without_a_cell_table_or_positions_says_so_and_draws_nothing(tmp_
     assert len(scene.cells[0]) == 0 and "has no cell table" in scene.cells_note
 
 
+def test_a_well_measured_with_no_cell_says_the_run_counted_none_not_that_it_has_no_table(tmp_path):
+    # The pipeline writes a header-only table for a well it measured and found no cell in
+    # (pipeline/nanowell_task.write_empty_cells_csv); that is "counted zero", not "could not count".
+    from pipeline.nanowell_task import cell_columns
+
+    out = _write(tmp_path)
+    pd.DataFrame(columns=cell_columns(["GFP"])).to_csv(out / "measurements_A01.csv", index=False)
+    scene = _scene(out)
+    assert len(scene.cells[0]) == 0
+    assert scene.cells_note == f"Cells: the run counted no cell in A01 at {scene.timepoint}."
+
+
 def test_the_cell_table_is_read_again_when_it_changes(tmp_path):
     out = _write(tmp_path)
     assert len(_scene(out).cells[0]) == 3

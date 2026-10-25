@@ -5052,7 +5052,7 @@ use them.
   - **Layers → Show as** sets every layer at once: *Array map* (lattice places filled by the metric), *Array
     QC* (the run montage, the tiles and the nanowells by state, with the run record) or *Full montage* (full
     resolution, nanowells by state with their addresses and values, and the anchor).
-  - **Overlays** — one button that takes every coloured layer (the nanowells, the tiles and the anchor) off
+  - **Overlays** — one button that takes every coloured layer (the nanowells, the tiles, the anchor and the cells) off
     the image and puts them back, for a quick look at what is underneath. The Layers menu's choices are kept,
     so pressing it again restores exactly what was on; while they are hidden the footer says so, and Set
     anchor is greyed.

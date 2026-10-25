@@ -1,9 +1,11 @@
-"""The selected nanowell over time, large, in place of the Nanowells page's view.
+"""The selected nanowell's crops: the strip under the site detail, and **Pop out**, which shows them large in a
+window of their own.
 
-Asked for: a larger view of a selected nanowell over time than the site detail's strip of small crops, shown
-inside the page. Driven through the real builder, the real **Enlarge crops** button and real clicks on the
-canvas, in the minimal shell the other page tests use (``tests/test_nanowell_page.py``); what is checked is read
-back from the figure's artists.
+Reported: the in-page crop view (**Enlarge crops** / **Back to the plot**) and **Clear selection** misbehaved —
+the crop view replaced the page's figure, and the view switch beside it went on drawing crops, so the page read as
+stuck. Asked for instead: a **Pop out** button above the crops. Driven through the real builder, the real button
+and real clicks on the canvas, in the minimal shell the other page tests use (``tests/test_nanowell_page.py``);
+what is checked is read back from the figures' artists.
 """
 
 from __future__ import annotations
@@ -30,93 +32,81 @@ def known_crops(monkeypatch):
     return crops
 
 
-def _press_enlarge(qtbot, ctx):
-    """Press **Enlarge crops** with the mouse, once the site detail beside the figure has been laid out (it opens
-    at zero width and takes its share of the splitter on the next layout pass)."""
-    button = ctx.widgets.get("_nw_crops_btn")
-    qtbot.waitUntil(lambda: button.width() > 0, timeout=5000)
+def _press_pop_out(qtbot, ctx):
+    """Press **Pop out** with the mouse, once the site detail beside the figure has been laid out (it opens at zero
+    width and takes its share of the splitter on the next layout pass)."""
+    button = ctx.widgets.get("_nw_popout_btn")
+    qtbot.waitUntil(lambda: button.isVisible() and button.width() > 0, timeout=5000)
     qtbot.mouseClick(button, Qt.LeftButton)
-    return button
+    window = ctx.widgets.get("_nw_popout")
+    qtbot.addWidget(window)
+    return window
 
 
-def _grid_images(ctx):
-    fig = ctx.widgets.get("_nw_fig")
-    return [im for ax in fig.axes for im in ax.get_images() if im.get_gid() == "nw-crop-grid-image"]
+def _images(ctx, key):
+    fig = ctx.widgets.get(key)
+    return [im for ax in fig.axes for im in ax.get_images()]
 
 
-def _titles(ctx):
-    fig = ctx.widgets.get("_nw_fig")
-    return [ax.title.get_text() for ax in fig.axes if ax.title.get_gid() == "nw-crop-title"]
+def _popout_title(ctx):
+    return [t.get_text() for t in ctx.widgets.get("_nw_popout_fig").texts if t.get_gid() == "nw-crop-grid-title"]
 
 
-def test_enlarge_crops_draws_every_timepoint_large_on_one_scale_and_back_returns(page, qtbot, known_crops):  # noqa: F811
+def _panel_titles(ctx):
+    return [ax.get_title(loc="left") for ax in ctx.widgets.get("_nw_fig").axes if ax.get_title(loc="left")]
+
+
+def test_the_strip_under_pop_out_shows_the_first_selected_nanowell_s_crops(page, qtbot, known_crops):  # noqa: F811
     _loaded(qtbot, page)
     _click_dot(qtbot, page, ("A01", 1, 0))
-    assert page.widgets.get("_nw_crops_btn").text() == "Enlarge crops"
-    button = _press_enlarge(qtbot, page)
-    qtbot.waitUntil(lambda: len(_grid_images(page)) == 2, timeout=10000)
-    assert _titles(page) == ["t_c", "t_a"]
+    qtbot.waitUntil(lambda: len(_images(page, "_nw_strip_fig")) == 2, timeout=10000)
+    titles = [ax.get_title() for ax in page.widgets.get("_nw_strip_fig").axes]
+    assert titles == ["t_c", "t_a"]
+    assert page.widgets.get("_nw_popout_btn").isVisible()
+
+
+def test_pop_out_draws_every_timepoint_large_on_one_scale_and_leaves_the_page_s_view(page, qtbot, known_crops):  # noqa: F811
+    _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    before = _panel_titles(page)
+    window = _press_pop_out(qtbot, page)
+    assert window.isVisible() and window.isWindow()
+    qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
+    assert _popout_title(page) == ["A01 · q 1, r 0 over time"]
     combined = np.concatenate([c.image.ravel() for c in known_crops.values()])
     lo, hi = np.percentile(combined, [1, 99])
-    for image in _grid_images(page):
+    for image in _images(page, "_nw_popout_fig"):
         assert image.get_clim() == pytest.approx((lo, hi))           # one scale, not each crop's own range
-    assert button.text() == "Back to the plot"
-    qtbot.mouseClick(button, Qt.LeftButton)
-    assert _grid_images(page) == [] and page.state.feature_slice("nanowell").crop_view is False
-    assert button.text() == "Enlarge crops"
+    assert _panel_titles(page) == before and before                  # the page still shows its own view
 
 
-def test_clearing_the_selection_leaves_the_crop_view(page, qtbot, known_crops):  # noqa: F811
+def test_the_pop_out_follows_the_selection_and_says_when_there_is_none(page, qtbot, known_crops):  # noqa: F811
     _loaded(qtbot, page)
     _click_dot(qtbot, page, ("A01", 1, 0))
-    _press_enlarge(qtbot, page)
-    qtbot.waitUntil(lambda: len(_grid_images(page)) == 2, timeout=10000)
-    qtbot.mouseClick(page.widgets.get("_nw_clear_btn"), Qt.LeftButton)
-    st = page.state.feature_slice("nanowell")
-    assert st.selected_sites == [] and st.crop_view is False and _grid_images(page) == []
-    button = page.widgets.get("_nw_crops_btn")
-    assert button.text() == "Enlarge crops" and not button.isChecked()   # one press enlarges again
+    _press_pop_out(qtbot, page)
+    qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
+    _click_dot(qtbot, page, ("A01", 0, 0))
+    qtbot.waitUntil(lambda: _popout_title(page) == ["A01 · q 0, r 0 over time"], timeout=10000)
+    nwc._select(page, None, False)                                   # what a click on empty space does
+    said = [t.get_text() for ax in page.widgets.get("_nw_popout_fig").axes for t in ax.texts
+            if t.get_gid() == "nw-popout-empty"]
+    assert said == ["Select a nanowell on the plot to see its crops here."]
+    assert not page.widgets.get("_nw_detail_pane").isVisible()
 
 
-def test_a_new_dataset_opens_on_the_view_not_the_crop_view():
+def test_switching_the_view_with_the_crops_popped_out_draws_the_new_view(page, qtbot, known_crops):  # noqa: F811
+    """The reported stuck state: with the old in-page crop view on, the view switch redrew the crops, not the view."""
+    _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    _press_pop_out(qtbot, page)
+    nwc.set_view(page, "trajectories")
+    texts = [t.get_gid() for t in page.widgets.get("_nw_fig").texts]
+    assert "nw-traj-footer" in texts
+
+
+def test_the_old_crop_view_and_clear_selection_buttons_are_gone(page):  # noqa: F811
+    for name in ("_nw_crops_btn", "_nw_clear_btn"):
+        assert page.widgets.get_or_none(name) is None
     from review.features.nanowell.state import NanowellState
 
-    st = NanowellState()
-    st.crop_view = True
-    st.reset_data()
-    assert st.crop_view is False
-
-
-def test_a_click_on_the_crop_view_selects_nothing(page, qtbot, known_crops):  # noqa: F811
-    _loaded(qtbot, page)
-    _click_dot(qtbot, page, ("A01", 1, 0))
-    _press_enlarge(qtbot, page)
-    qtbot.waitUntil(lambda: len(_grid_images(page)) == 2, timeout=10000)
-    canvas = page.widgets.get("_nw_canvas")
-    qtbot.mouseClick(canvas, Qt.LeftButton, pos=canvas.rect().center())
-    st = page.state.feature_slice("nanowell")
-    assert st.selected_sites == [["A01", 1, 0]] and st.crop_view is True
-
-
-def test_every_crop_is_drawn_whole_whatever_range_the_card_was_given(page, qtbot, known_crops):  # noqa: F811
-    """Reported: the enlarged crops showed a strip about ten pixels tall rather than the whole crop. The card's
-    typed y range (0 to 10, a sensible range for a count) was being applied by the style pass to every crop panel,
-    which drew ten rows of each. Both routes into the style pass are driven: the page's own redraw, and the
-    Properties sidebar restyling the figure directly."""
-    from review.core import plot_style
-
-    _loaded(qtbot, page)
-    _click_dot(qtbot, page, ("A01", 1, 0))
-    fig = page.widgets.get("_nw_fig")
-    plot_style._ensure_axis_prefs_store(page)[plot_style.figure_pref_key(page, fig)].update(
-        {"y_lim_min": "0", "y_lim_max": "10", "x_lim_min": "2", "x_lim_max": "5", "y_log": True})
-    _press_enlarge(qtbot, page)
-    qtbot.waitUntil(lambda: len(_grid_images(page)) == 2, timeout=10000)
-
-    def extents():
-        return [(im.axes.get_xlim(), im.axes.get_ylim(), im.axes.get_yscale()) for im in _grid_images(page)]
-
-    whole = [((-0.5, 19.5), (19.5, -0.5), "linear")] * 2
-    assert extents() == whole
-    plot_style.apply_export_style_to_current(page, fig, page.widgets.get("_nw_canvas"))    # the sidebar's route
-    assert extents() == whole
+    assert not hasattr(NanowellState(), "crop_view")

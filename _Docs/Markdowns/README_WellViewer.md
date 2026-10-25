@@ -5096,15 +5096,16 @@ use them.
 
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
 brightness and site signal against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
-six nanowells to compare; clicking empty space clears them, as does *Clear selection*. A timepoint where the
+six nanowells to compare; clicking empty space on the plot clears them. A timepoint where the
 nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
 Under the plots, a strip of crops shows the first selected nanowell at each timepoint, cut at full resolution
 from the image the run segmented (the well's archive in `in/`). When that archive is not beside the dataset
 (an output folder copied on its own), cannot be read, or the nanowell has no single owner tile (a fused one),
 the crop is cut from the lower-resolution montage instead, and the caption under the strip says so and why; a
-timepoint with no crop says why. **Enlarge crops**, above the site detail, shows those crops large in place of the
-plot — one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a
-change between panels; **Back to the plot** (the same button) returns, and so does clearing the selection.
+timepoint with no crop says why. **Pop out**, above the strip, opens the crops large in a window of their own —
+one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a change
+between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
+it like any window.
 Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it

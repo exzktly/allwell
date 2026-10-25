@@ -179,13 +179,13 @@ def test_clicking_a_nanowell_on_the_map_selects_it_and_cuts_its_crop_from_the_mo
         "t_c": ("montage", "from the montage: the input archive is not beside this dataset"),
         "t_a": ("montage", "from the montage: the input archive is not beside this dataset")}
     assert crops["t_c"].image.max() == 255                    # centred on the bright square at (100, 100) µm
-    detail = page.widgets.get("_nw_detail_fig")
+    detail = page.widgets.get("_nw_strip_fig")                    # the strip under the Pop out button
     images = [im for ax in detail.axes for im in ax.images]
     assert len(images) == 2
     # What the crops are is stated on the figure, not only on the state.
     caption = [t.get_text() for t in detail.texts if t.get_gid() == "nw-crop-caption"]
-    assert caption == ["Crops: A01 · q 1, r 0, from the montage, at its lower resolution; from the montage: the "
-                       "input archive is not beside this dataset"]
+    assert caption == ["Crops: A01 · q 1, r 0, from the montage, at its lower resolution; one brightness scale; "
+                       "from the montage: the input archive is not beside this dataset"]
     assert st.fetch_bridges == [] and st.fetching == set()           # nothing kept once delivered
 
 
@@ -202,7 +202,7 @@ def test_a_crop_job_that_fails_says_so_on_the_figure_and_is_not_relaunched(page,
     _click_site(qtbot, page, ("A01", 1, 0))
     st = page.state.feature_slice("nanowell")
     qtbot.waitUntil(lambda: ("A01", 1, 0) in st.crops, timeout=20000)
-    detail = page.widgets.get("_nw_detail_fig")
+    detail = page.widgets.get("_nw_strip_fig")
     missing = [t.get_text() for ax in detail.axes for t in ax.texts if t.get_gid() == "nw-crop-missing"]
     assert len(missing) == 1 and missing[0].startswith("The crops could not be cut: ")
     assert "disk went away" in missing[0]

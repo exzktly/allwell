@@ -59,7 +59,9 @@ _PRESETS = (("map", "Array map — lattice places, filled by the metric"),
 _AXES = (("time", "Time"), ("wells", "Wells"))
 _BASELINES = (("earliest", "Earliest"), ("first_measurable", "First measurable"))
 _FIG_W, _FIG_H = 8.0, 6.4
-_DETAIL_W, _DETAIL_H = 4.2, 6.4
+_DETAIL_W, _DETAIL_H = 4.2, 5.0
+#: The crop strip under the site detail, below its **Pop out** button.
+_STRIP_H = 1.4
 _METRIC_CB_MIN_W = 220
 
 _VIEW_TIP = ("Distribution: one dot per nanowell, per well and timepoint.\n"
@@ -253,23 +255,21 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     detail = QWidget(splitter)
     detail_layout = QVBoxLayout(detail)
     detail_layout.setContentsMargins(0, 0, 0, 0)
-    clear_btn = QPushButton("Clear selection", detail)
-    clear_btn.setProperty("variant", "secondary")
-    clear_btn.setToolTip("Clear the nanowells selected for the site detail (the plate selection is not touched).")
-    clear_btn.clicked.connect(lambda _=False: _clear_sites(ctx))
-    reg.register("_nw_clear_btn", clear_btn)
     detail_card = PlotCard(detail, figsize=(_DETAIL_W, _DETAIL_H), constrained=False, header=False)
     detail_card.setFigureTitle("")
+    detail_card.setToolTip("The selected nanowells over time. Click a dot to select one, Shift-click to add one, "
+                           "and click empty space on the plot to clear the selection.")
     reg.register("_nw_detail_card", detail_card)
     reg.register("_nw_detail_fig", detail_card.figure)
     reg.register("_nw_detail_canvas", detail_card.canvas)
-    crops_btn = _crops_button(ctx, detail)
-    buttons = QHBoxLayout()
-    buttons.addStretch(1)
-    buttons.addWidget(crops_btn)
-    buttons.addWidget(clear_btn)
-    detail_layout.addLayout(buttons)
-    detail_layout.addWidget(detail_card, 1)
+    detail_layout.addWidget(detail_card, 3)
+    detail_layout.addLayout(_crops_header(ctx, detail))
+    strip_card = PlotCard(detail, figsize=(_DETAIL_W, _STRIP_H), constrained=False, header=False)
+    strip_card.setFigureTitle("")
+    reg.register("_nw_strip_card", strip_card)
+    reg.register("_nw_strip_fig", strip_card.figure)
+    reg.register("_nw_strip_canvas", strip_card.canvas)
+    detail_layout.addWidget(strip_card, 1)
     detail.hide()
     reg.register("_nw_detail_pane", detail)
     splitter.addWidget(card)
@@ -380,29 +380,58 @@ def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:
                         f"channel.")
 
 
-def _crops_button(ctx, parent) -> QPushButton:
-    """**Enlarge crops**: the first selected nanowell at every timepoint, large, in place of the page's view
-    (``controller.set_crop_view``); it reads **Back to the plot** while that is shown."""
-    reg = ctx.widgets
-    button = QPushButton("Enlarge crops", parent)
+def _crops_header(ctx, parent) -> QHBoxLayout:
+    """The row above the site detail's crop strip: what the strip is, and **Pop out**, which opens the crops large in
+    a window of their own (:func:`_popout_window`, ``controller.pop_out_crops``)."""
+    row = QHBoxLayout()
+    row.setContentsMargins(0, 0, 0, 0)
+    title = QLabel("Crops over time", parent)
+    title.setObjectName("Caption")
+    button = QPushButton("Pop out", parent)
     button.setProperty("variant", "secondary")
-    button.setCheckable(True)
-    button.setToolTip("Show the first selected nanowell at every timepoint, large, in place of the plot — on one "
-                      "brightness scale, so changes between timepoints read as changes. Press again to go back.")
-    button.toggled.connect(lambda on: nwc.set_crop_view(ctx, on))
-    reg.register("_nw_crops_btn", button)
+    button.setToolTip("Open the first selected nanowell's crops at every timepoint, large, in a window of their own "
+                      "— on one brightness scale, so changes between timepoints read as changes. The window "
+                      "follows the selection.")
+    button.clicked.connect(lambda _=False: nwc.pop_out_crops(ctx))
+    ctx.widgets.register("_nw_popout_btn", button)
+    ctx.widgets.register("_nw_open_popout", lambda: _popout_window(ctx).show_raised())
+    row.addWidget(title)
+    row.addStretch(1)
+    row.addWidget(button)
+    return row
 
-    def refresh() -> None:
-        st = ctx.state.feature_slice("nanowell")
-        on = bool(st is not None and st.crop_view)
-        if button.isChecked() != on:
-            button.blockSignals(True)
-            button.setChecked(on)
-            button.blockSignals(False)
-        button.setText("Back to the plot" if on else "Enlarge crops")
 
-    reg.register("_nw_refresh_crop_view", refresh)
-    return button
+def _popout_window(ctx):
+    """The pop-out crops window, built on first use and kept: a top-level window owned by the app's window, so it
+    closes with it, holding one :class:`PlotCard` the controller draws the crops on."""
+    window = ctx.widgets.get_or_none("_nw_popout")
+    if window is not None:
+        return window
+    from widgets.plot_card import PlotCard
+
+    window = _PopoutWindow(ctx.window)
+    window.setWindowTitle("Nanowell crops")
+    layout = QVBoxLayout(window)
+    layout.setContentsMargins(0, 0, 0, 0)
+    card = PlotCard(window, figsize=(_FIG_W, _FIG_H * 0.8), constrained=False, header=False)
+    card.setFigureTitle("")
+    layout.addWidget(card)
+    window.resize(900, 640)
+    ctx.widgets.register("_nw_popout", window)
+    ctx.widgets.register("_nw_popout_fig", card.figure)
+    ctx.widgets.register("_nw_popout_canvas", card.canvas)
+    card.plotThemeChanged.connect(lambda _m: nwc.draw_popout(ctx))
+    return window
+
+
+class _PopoutWindow(QWidget):
+    def __init__(self, parent) -> None:
+        super().__init__(parent, Qt.Window)
+
+    def show_raised(self) -> None:
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
 
 def _button(text: str, tip: str, on_click) -> QPushButton:
@@ -566,10 +595,3 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
         anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn, overlays_btn=overlays_btn,
         signalling=(image_cb, positions_seg, anchor_btn, overlays_btn, *layer_actions.values(),
                     *colour_actions.values()))
-
-
-def _clear_sites(ctx) -> None:
-    st = ctx.state.feature_slice("nanowell")
-    if st is not None and st.selected_sites:
-        st.selected_sites = []
-        nwc.selection_changed(ctx)

@@ -76,6 +76,23 @@ def _inks(ax) -> tuple[str, str, str]:
     return bg, fg, muted
 
 
+def _theme_axes(ax) -> None:
+    """Give *ax* the card's own ground, spines and tick ink, as ``PlotCard.setPlotTheme`` gives the axes it finds.
+
+    An axes added after the card was themed is matplotlib's white otherwise, and on the dark screen card the light
+    occupancy shades and the light legend text drawn for that ground vanished into it."""
+    from widgets.plot_card import apply_axes_style
+
+    apply_axes_style(ax, "publication" if _is_publication(ax) else "screen")
+
+
+def _y_locator(integer: bool):
+    """Ticks for a y axis: whole numbers only for a count, where 2.5 cells is no value a reader can have."""
+    from matplotlib.ticker import MaxNLocator
+
+    return MaxNLocator(nbins=5, integer=integer, min_n_ticks=2)
+
+
 def _ink(artist, *, muted: bool = False):
     from widgets.plot_card import follows_theme
 
@@ -342,28 +359,26 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
 DETAIL_ROWS = (("n", "Cell count"), ("c", "Confluence"))
 
 
-def render_site_detail(fig, series: list, *, channel: str | None = None, time_source: str | None = None,
-                       crops: dict | None = None) -> None:
+def render_site_detail(fig, series: list, *, channel: str | None = None, time_source: str | None = None) -> None:
     """One row per measurement, one line per selected nanowell, against recorded time (tracker V3).
 
     *series* is ``[(site, frame)]`` with ``frame`` from :func:`series_compute.site_series`. A timepoint
     without a value is a gap in the line, never a zero; a timepoint whose state carries no number is a
-    hatched band naming the state. *crops* (``timepoint -> image_compute.Crop`` for the first nanowell) adds a
-    row of its crops at every timepoint, each titled with its timepoint and where it was cut from (V3c); a
-    timepoint without one says why in its place.
+    hatched band naming the state. The rows share one time axis, labelled once under the bottom row. The crops
+    are drawn on a figure of their own under the **Pop out** button (:func:`render_crop_strip`).
     """
     fig.clear()
-    rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", f"Brightness · {channel}"),
-                                 (f"signal_{channel}", f"Site signal · {channel}")] if channel else [])
+    rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", "Brightness"), (f"signal_{channel}", "Site signal")]
+                                if channel else [])
     if not series:
         return
-    crop_row = bool(crops)
-    grid = fig.add_gridspec(len(rows) + (2 if crop_row else 0), 1, hspace=0.25)
+    header = 0.035 * len(series)
+    grid = fig.add_gridspec(len(rows), 1, left=0.2, right=0.96, top=0.95 - header, bottom=0.1, hspace=0.18)
     axes = [fig.add_subplot(grid[0, 0])]
     axes += [fig.add_subplot(grid[i, 0], sharex=axes[0]) for i in range(1, len(rows))]
-    axes = np.array(axes)
-    fig.subplots_adjust(left=0.16, right=0.97, top=0.94 - 0.03 * len(series), bottom=0.06, hspace=0.25)
     _bg, ink, faint = _inks(axes[0])
+    for ax in axes:
+        _theme_axes(ax)
     colours = selection_colours()
     use_time = all(frame["time_h"].notna().all() for _site, frame in series)
     for k, (site, frame) in enumerate(series):
@@ -377,42 +392,64 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
                     ax.axvspan(xi - _band(x), xi + _band(x), facecolor="none", edgecolor=colour, hatch="///",
                                alpha=0.35, linewidth=0, zorder=1)
         states = ", ".join(f"{tp}: {_state_text(row)}" for tp, row in zip(frame["timepoint"], frame.to_dict("records")))
-        fig.text(0.16, 0.975 - 0.03 * k, f"{site[0]} · q {site[1]}, r {site[2]} — {states}", fontsize=7,
-                 color=colour, gid="nw-detail-states")          # a selection colour: data ink, not tagged
-    for ax, (_column, label) in zip(axes, rows):
-        _ink(ax.set_ylabel(label, fontsize=7.5, color=faint), muted=True)
+        fig.text(0.03, 0.985 - 0.035 * k, f"{site[0]} · q {site[1]}, r {site[2]} — {states}", fontsize=7,
+                 color=colour, va="top", wrap=True, gid="nw-detail-states")     # a selection colour: data ink
+    for ax, (column, label) in zip(axes, rows):
+        _ink(ax.set_ylabel(label + (f"\n{channel}" if channel and column.endswith(f"_{channel}") else ""),
+                           fontsize=7.5, color=faint), muted=True)
+        ax.tick_params(labelsize=7)
+        ax.yaxis.set_major_locator(_y_locator(column == "n"))
+        if column == "n":
+            lo, hi = ax.get_ylim()
+            if hi - lo < 2:                       # a flat count still gets whole-number ticks around it
+                mid = round((lo + hi) / 2)
+                ax.set_ylim(mid - 1.5, mid + 1.5)
         ax.grid(alpha=0.3)
+    for ax in axes[:-1]:
+        ax.tick_params(labelbottom=False)
     axes[-1].set_xlabel("Hours since the first timepoint" + (" (from labels)" if time_source == "label" else "")
                         if use_time else "Timepoint (order; times unknown)", fontsize=8, color=ink)
     _ink(axes[-1].xaxis.label)
-    if crop_row:
-        _crop_strip(fig, grid[len(rows):, 0], crops, series[0][0], ink, faint)
+    fig.align_ylabels(axes)
 
 
-def _crop_strip(fig, cell, crops: dict, site, ink, faint) -> None:
+def render_crop_strip(fig, crops: dict | None, site) -> None:
+    """The first selected nanowell's crops, one per timepoint, on the strip under the site detail's **Pop out**
+    button: each titled with its timepoint, a timepoint without a crop saying why in its place, and where the crops
+    were cut from said once in the caption. *crops* is ``None`` while they are being cut."""
+    fig.clear()
+    _bg, ink, faint = _inks(fig.add_subplot(111))
+    fig.clear()
+    if not crops:
+        _ink(fig.text(0.5, 0.5, "Cutting the crops…" if crops is None else "No crop could be cut.", ha="center",
+                      va="center", fontsize=7.5, color=faint, gid="nw-crop-pending"), muted=True)
+        return
     items = list(crops.items())
+    lo, hi = _one_scale(c.image for _tp, c in items)
     notes: set = set()
-    sub = cell.subgridspec(1, len(items), wspace=0.08)
+    mixed = len({c.source for _tp, c in items if c.image is not None}) > 1
+    sub = fig.add_gridspec(1, len(items), left=0.03, right=0.97, top=0.8, bottom=0.2, wspace=0.08)
     for k, (tp, crop) in enumerate(items):
         ax = fig.add_subplot(sub[0, k])
+        ax._aw_image_panel = True
         ax.set_xticks([])
         ax.set_yticks([])
         if crop.image is not None:
-            ax.imshow(crop.image, cmap="gray", interpolation="nearest")
+            ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi)
             if crop.source == "montage":
                 notes.add(crop.note)
         else:
             _ink(ax.text(0.5, 0.5, crop.note, ha="center", va="center", wrap=True, fontsize=5.5,
                          transform=ax.transAxes, color=faint, gid="nw-crop-missing"), muted=True)
-        _ink(ax.set_title(tp + ("" if crop.source != "montage" else " (montage)"), fontsize=6.5, color=ink,
-                          gid="nw-crop-title"))
+        _ink(ax.set_title(tp + (" (montage)" if mixed and crop.source == "montage" else ""), fontsize=7, color=ink,
+                          pad=2, gid="nw-crop-title"))
     sources = {crop.source for _tp, crop in items if crop.image is not None}
     origin = ("from its owner tile at full resolution" if sources == {"tile"} else
               "from the montage, at its lower resolution" if sources == {"montage"} else
               "from its owner tile, or the montage where marked" if sources else "none could be cut")
-    caption = f"Crops: {site[0]} · q {site[1]}, r {site[2]}, {origin}" + "".join(
+    caption = f"Crops: {site[0]} · q {site[1]}, r {site[2]}, {origin}; one brightness scale" + "".join(
         f"; {note}" for note in sorted(notes))
-    _ink(fig.text(0.16, 0.012, caption, fontsize=6.5, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
+    _ink(fig.text(0.03, 0.03, caption, fontsize=6.5, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
 
 
 def render_crop_grid(fig, crops: dict | None, site) -> None:
@@ -434,8 +471,9 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
     lo, hi = _one_scale(c.image for _tp, c in items)
     cols = int(min(len(items), max(1, np.ceil(np.sqrt(len(items) * 1.6)))))
     rows = int(np.ceil(len(items) / cols))
-    grid = fig.add_gridspec(rows, cols, left=0.02, right=0.98, top=0.93, bottom=0.07, wspace=0.05, hspace=0.18)
+    grid = fig.add_gridspec(rows, cols, left=0.02, right=0.98, top=0.87, bottom=0.08, wspace=0.05, hspace=0.18)
     notes: set = set()
+    mixed = len({c.source for _tp, c in items if c.image is not None}) > 1
     for k, (tp, crop) in enumerate(items):
         ax = fig.add_subplot(grid[k // cols, k % cols])
         # An image, pixel for pixel: the style pass must not put the card's typed axis range on it.
@@ -449,9 +487,9 @@ def render_crop_grid(fig, crops: dict | None, site) -> None:
         else:
             _ink(ax.text(0.5, 0.5, crop.note, ha="center", va="center", wrap=True, fontsize=8,
                          transform=ax.transAxes, color=faint, gid="nw-crop-missing"), muted=True)
-        _ink(ax.set_title(tp + ("" if crop.source != "montage" else " (montage)"), fontsize=9, color=ink,
+        _ink(ax.set_title(tp + (" (montage)" if mixed and crop.source == "montage" else ""), fontsize=9, color=ink,
                           gid="nw-crop-title"))
-    _ink(fig.text(0.02, 0.965, f"{site[0]} · q {site[1]}, r {site[2]} over time", fontsize=10, color=ink,
+    _ink(fig.text(0.02, 0.955, f"{site[0]} · q {site[1]}, r {site[2]} over time", fontsize=11, color=ink,
                   gid="nw-crop-grid-title"))
     sources = {crop.source for _tp, crop in items if crop.image is not None}
     origin = ("cut from its owner tile at full resolution" if sources == {"tile"} else

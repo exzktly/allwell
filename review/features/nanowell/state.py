@@ -141,9 +141,6 @@ class NanowellState:
     montages: dict = field(default_factory=dict)         # (well, timepoint) -> (image_compute.Montage | None, why)
     fetching: set = field(default_factory=set)           # ("crops" | "montages", key) being read on a worker
     fetch_bridges: list = field(default_factory=list)    # each worker bridge, kept alive until it delivers
-    #: The page's figure shows the first selected nanowell's crops at every timepoint, large, in place of the view
-    #: (``renderer.render_crop_grid``); off again when the selection is cleared. Never persisted.
-    crop_view: bool = False
     #: The Extremes view's crop panels on screen, ``{axes: (well, q, r)}``: a click on a row selects its nanowell.
     extreme_axes: dict = field(default_factory=dict)
     # The Array view's interaction, never persisted: where it is zoomed to (``(left, top, right, bottom)`` in the
@@ -178,7 +175,6 @@ class NanowellState:
         self.crops, self.montages, self.fetching, self.fetch_bridges = {}, {}, set(), []
         self.region = self.region_for = self.press = self.drawn = None
         self.anchor_mode, self.array_message = False, ""
-        self.crop_view = False                           # a new dataset opens on its view, not a crop view
         self.extreme_axes = {}
         self.release_tiles()
 

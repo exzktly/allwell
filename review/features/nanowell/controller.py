@@ -29,7 +29,7 @@ from review.features.nanowell.array_compute import array_scene, one_to_one
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
-    ArrayDrawn, render_array, render_crop_grid, render_distribution, render_extremes, render_message,
+    ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
     render_position, render_site_detail, render_trajectories,
 )
 from review.features.nanowell.state import IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS
@@ -303,8 +303,6 @@ def redraw(ctx) -> None:
         return
     if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
         return                                           # the right metrics are on their way
-    if _draw_crop_view(ctx, st, fig, canvas):
-        return
     metric, channel, note = resolve_metric(st.view, st.metric, ctx.state.channel.active_channel, st.data.channels)
     well = page_well(ctx)
     st.extreme_axes = {}
@@ -929,36 +927,10 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
     redraw_detail(ctx)
 
 
-def _draw_crop_view(ctx, st, fig, canvas) -> bool:
-    """Draw the first selected nanowell's crops at every timepoint, large, on the page's figure, when the crop view
-    is on; ``True`` when it drew. The crops are the site detail's (``st.crops``), read on a worker the first time."""
-    site = _crop_view_site(st) if st.crop_view else None
-    if site is None:
-        if st.crop_view:
-            # Leaving it because nothing is left to enlarge: the button must say so too, or it stays on "Back
-            # to the plot" and the next press only un-checks it.
-            st.crop_view = False
-            _call(ctx, "_nw_refresh_crop_view")
-        return False
-    st.hits, st.drawn = None, None                       # nothing on the figure answers a click or a zoom
-    if site not in st.crops:
-        data, metrics = st.data, st.metrics
-        _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site),
-               failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
-    render_crop_grid(fig, st.crops.get(site), site)
-    from review.core.plot_style import apply_export_style_to_current
-
-    apply_export_style_to_current(ctx, fig, canvas)
-    canvas.draw_idle()
-    _call(ctx, "_nw_refresh_crop_view")
-    redraw_detail(ctx)
-    return True
-
-
-def _crop_view_site(st) -> tuple | None:
-    """The nanowell the crop view enlarges: the first selected one with a series, the one the site detail beside
-    it leads with (:func:`redraw_detail`); ``None`` when no selected nanowell has one."""
-    if st.metrics is None:
+def crops_site(st) -> tuple | None:
+    """The nanowell whose crops the detail's strip and the pop-out show: the first selected one with a series, the
+    one the site detail leads with (:func:`redraw_detail`); ``None`` when no selected nanowell has one."""
+    if st is None or st.metrics is None:
         return None
     for well, q, r in st.selected_sites:
         if len(site_series(st.metrics, well, q, r)):
@@ -966,18 +938,36 @@ def _crop_view_site(st) -> tuple | None:
     return None
 
 
-def set_crop_view(ctx, on: bool) -> None:
-    """Show the selected nanowell's crops over time large, in place of the page's view, or go back to the view."""
+def pop_out_crops(ctx) -> None:
+    """**Pop out**: open (or bring forward) the window that shows the selected nanowell's crops at every timepoint,
+    large, and draw it. The window follows the selection until it is closed; the page's own view is untouched."""
+    _call(ctx, "_nw_open_popout")
+    draw_popout(ctx)
+
+
+def draw_popout(ctx) -> None:
+    """Draw the pop-out window's crops, when it is open: the first selected nanowell's crops at every timepoint on
+    one brightness scale (``renderer.render_crop_grid``), or a sentence saying a nanowell has to be selected."""
     st = _state(ctx)
-    if st is None:
+    window = ctx.widgets.get_or_none("_nw_popout")
+    fig, canvas = ctx.widgets.get_or_none("_nw_popout_fig"), ctx.widgets.get_or_none("_nw_popout_canvas")
+    if st is None or window is None or fig is None or canvas is None or not window.isVisible():
         return
-    st.crop_view = bool(on and st.selected_sites)
-    redraw(ctx)
-    _call(ctx, "_nw_refresh_crop_view")
+    site = crops_site(st)
+    if site is None:
+        render_message(fig, "Select a nanowell on the plot to see its crops here.", gid="nw-popout-empty")
+    else:
+        if site not in st.crops:
+            data, metrics = st.data, st.metrics
+            _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site),
+                   failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
+        render_crop_grid(fig, st.crops.get(site), site)
+    canvas.draw_idle()
 
 
 def redraw_detail(ctx) -> None:
-    """Draw the site detail for the selected nanowells, or hide it when none is selected."""
+    """Draw the site detail for the selected nanowells — their series, and the first one's crops in the strip under
+    the **Pop out** button — or hide it when none is selected; and the pop-out window, which follows the selection."""
     st = _state(ctx)
     fig, canvas = ctx.widgets.get_or_none("_nw_detail_fig"), ctx.widgets.get_or_none("_nw_detail_canvas")
     show = ctx.widgets.get_or_none("_nw_show_detail")
@@ -991,6 +981,7 @@ def redraw_detail(ctx) -> None:
                 series.append(((well, q, r), frame))
     if callable(show):
         show(bool(series))
+    draw_popout(ctx)
     if not series:
         return
     channel = match_channel(ctx.state.channel.active_channel, st.data.channels)
@@ -1000,8 +991,12 @@ def redraw_detail(ctx) -> None:
         data, metrics = st.data, st.metrics
         _fetch(ctx, "crops", first, lambda: site_crops(data, metrics, first),
                failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
-    render_site_detail(fig, series, channel=channel, time_source=st.data.time_source, crops=crops)
+    render_site_detail(fig, series, channel=channel, time_source=st.data.time_source)
     canvas.draw_idle()
+    strip_fig, strip_canvas = ctx.widgets.get_or_none("_nw_strip_fig"), ctx.widgets.get_or_none("_nw_strip_canvas")
+    if strip_fig is not None and strip_canvas is not None:
+        render_crop_strip(strip_fig, crops, first)
+        strip_canvas.draw_idle()
 
 
 #: Montages kept read: a montage is up to 4096 px square, so the slider's recent steps only.
@@ -1038,7 +1033,7 @@ def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
             store[key] = value
             while kind == "montages" and len(store) > MONTAGES_KEPT:
                 store.pop(next(iter(store)))
-        (redraw_detail if kind == "crops" and not st.crop_view else redraw)(ctx)
+        (redraw_detail if kind == "crops" else redraw)(ctx)
 
     def on_failed(message) -> None:
         log.warning("Nanowells: %s for %s could not be read: %s", kind, key, message)
@@ -1052,10 +1047,8 @@ def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
 def on_click(ctx, event) -> None:
     """A press on the figure. On the Distribution figure: select the nanowell under it, add it with Shift (or
     ⌘/Ctrl), or clear the selection on empty space. On the Array view a press starts a drag or a click, which
-    :func:`on_release` tells apart. The plate selection is never touched. The crop view answers no click."""
+    :func:`on_release` tells apart. The plate selection is never touched."""
     st = _state(ctx)
-    if st is not None and st.crop_view:
-        return
     if st is not None and st.view == "extremes":
         if event.button == 1:
             _select(ctx, st.extreme_axes.get(event.inaxes), _adding(event))

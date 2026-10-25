@@ -26,6 +26,8 @@ from __future__ import annotations
 import math
 import types
 
+from review.core.export_prefs_state import ExportPrefsState
+
 import pytest
 
 pytest.importorskip("matplotlib")
@@ -188,7 +190,7 @@ def _stub_ctx(widgets, *, labels_on: bool, fmt: str = ""):
         state=types.SimpleNamespace(
             plot=plot,
             scatter=ScatterState(),
-            export_prefs=types.SimpleNamespace(style_prefs={}),
+            export_prefs=ExportPrefsState(),
         ),
         runtime=types.SimpleNamespace(
             scatter=types.SimpleNamespace(interaction_cache={}, metadata=None),

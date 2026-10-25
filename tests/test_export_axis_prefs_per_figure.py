@@ -53,13 +53,15 @@ def test_axis_prefs_do_not_leak_between_figures():
     assert line["y_lim_min"] == "0.5"
 
 
-def test_global_style_keys_stay_shared():
+def test_publication_style_keys_stay_on_their_figure_too():
+    """Once deliberately shared; now, as requested, an edit restyles only the plot it was made on."""
     app = _app()
     line = PS.figure_prefs(app._ctx, app._line_fig)
     bar = PS.figure_prefs(app._ctx, app._bar_fig)
-    # A non-axis (publication style) key is shared across figures.
     line["axis_label_size"] = 22
-    assert bar["axis_label_size"] == 22
+    assert line["axis_label_size"] == 22
+    assert bar["axis_label_size"] == PS.DEFAULT_EXPORT_STYLE_PREFS["axis_label_size"]
+    assert app._app_state.export_prefs.axis_prefs["line"]["axis_label_size"] == 22
 
 
 def test_axis_writes_route_to_per_figure_store_not_global():

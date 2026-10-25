@@ -308,6 +308,11 @@ def redraw(ctx) -> None:
     _refresh_empty(ctx)
     if st.metrics is None or nanowell_empty_reason(ctx) is not None:
         return
+    # The page's views share one figure; each keeps its own Properties settings, so a range typed for Distribution
+    # never reaches the Array map or the Trajectories' hours (``plot_style.set_pref_scope``).
+    from review.core.plot_style import set_pref_scope
+
+    set_pref_scope(ctx, fig, "" if st.view == "distribution" else st.view)
     if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
         return                                           # the right metrics are on their way
     metric, channel, note = resolve_metric(st.view, st.metric, ctx.state.channel.active_channel, st.data.channels)

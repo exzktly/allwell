@@ -21,7 +21,7 @@ from review.core.channel_state_controller import (
 from review.domain.ratio_models import is_ratio_key
 from pipeline.shape_features import is_shape_column
 from core.safe import swallowed
-from review.core.plot_style import apply_export_style_to_current, style_legend
+from review.core.plot_style import apply_export_style_to_current, figure_prefs, style_legend
 from review.features.scatter.collect import (  # re-export
     collect_scatter_agg_data,
     collect_scatter_data,
@@ -154,9 +154,10 @@ def redraw_scatter(
         return
 
     # ``render_scatter_points`` owns the solid / density / color-by-time branch,
-    # returning the click-interaction points and the legend handles. Density mode
-    # + log state come from the shared export-style prefs, re-read each redraw.
-    prefs = ctx.state.export_prefs.style_prefs or {}
+    # returning the click-interaction points and the legend handles. Density mode,
+    # log state and marker size are this figure's own Properties settings, re-read
+    # each redraw: an edit there restyles only the plot it was made on.
+    prefs = figure_prefs(ctx, scatter_fig)
     density_on = bool(prefs.get("scatter_density", False))
     interaction_points, legend_handles = render_scatter_points(
         ctx, ax_scatter, scatter_data,

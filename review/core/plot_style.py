@@ -703,20 +703,25 @@ def drop_axis_limits(fig_prefs) -> None:
 # publication. Five aggregate points want an 8pt marker; a per-cell cloud of
 # 50,000 cells wants 2pt. Sharing one value meant styling the Scatter tab's
 # aggregate sub-tab restyled its per-cell sub-tab (and the line and bar plots)
-# into illegibility. Typography, grid, legend and ticks stay shared, so one
-# setting still gives a whole figure set a consistent look for a paper.
+# into illegibility. Every other preference is per figure now as well
+# (:data:`FIGURE_SCOPED_PREF_KEYS`); the mark keys keep their own name because
+# callers still ask which keys are marks.
 #
-# Unlike the axis keys, an unset mark key falls back to the *global* value
-# before the neutral default (see :class:`_FigurePrefs`). That keeps a mark
-# style saved before this split applying everywhere it used to, until the user
-# edits a figure and gives that figure its own value.
+# Unlike the axis keys, an unset mark key — like every non-axis key — falls back
+# to the *app-wide* value before the neutral default (see :class:`_FigurePrefs`).
+# That keeps a style saved before the split applying everywhere it used to, until
+# the user edits a figure and gives that figure its own value.
 MARK_SCOPED_PREF_KEYS = frozenset({
     "line_width", "line_style",
     "marker_size", "marker_style", "marker_edge_width",
 })
 
-#: Every key stored per figure rather than app-wide.
-FIGURE_SCOPED_PREF_KEYS = AXIS_SCOPED_PREF_KEYS | MARK_SCOPED_PREF_KEYS
+#: Every preference the Properties bar sets is stored per figure: an edit restyles the plot it was made on and no
+#: other. Typography, grid, legend, ticks, layout, the export profile and format were once one app-wide dict "so one
+#: setting gives a whole figure set a consistent look", and that is exactly what made raising a font on one plot raise
+#: it on every plot. The app-wide dict survives only as what an untouched figure reads for a key it has never been
+#: given (the value saved before this change), and nothing writes it any more but a restored settings file.
+FIGURE_SCOPED_PREF_KEYS = frozenset(DEFAULT_EXPORT_STYLE_PREFS) | AXIS_SCOPED_PREF_KEYS | MARK_SCOPED_PREF_KEYS
 
 # Stable per-figure keys (survive figure recreation across sessions, unlike
 # ``id(fig)``) so the per-figure axis prefs can persist. Every figure the
@@ -741,7 +746,13 @@ _FIG_PREF_KEY_MAP = (
 
 
 def figure_pref_key(ctx, fig) -> str:
-    """A stable identifier for *fig* used to scope its axis prefs.
+    """The store key *fig*'s prefs are kept under now: its stable key (:func:`_base_pref_key`), and the view it shows
+    when it shows several (``_aw_pref_scope``, see :class:`_FigurePrefs`)."""
+    return _with_scope(_base_pref_key(ctx, fig), fig)
+
+
+def _base_pref_key(ctx, fig) -> str:
+    """A stable identifier for *fig* used to scope its prefs.
 
     A8 teardown: resolves the fig through the WidgetRegistry (``ctx.widgets``),
     so it takes ``ctx``.
@@ -784,45 +795,45 @@ def _ensure_axis_prefs_store(ctx) -> dict:
 class _FigurePrefs(MutableMapping):
     """Read/write view over one figure's prefs.
 
-    Figure-scoped keys (:data:`FIGURE_SCOPED_PREF_KEYS`) route to the figure's
-    own dict; everything else routes to the shared global style. Writes to a
-    scoped key never touch the global dict, so styling one figure cannot restyle
-    another. The two scoped families differ in what an *unset* key reads as:
+    **Every key is the figure's own** (:data:`FIGURE_SCOPED_PREF_KEYS`): a write goes to the figure's entry in the
+    per-figure store and never to the app-wide dict, so styling one plot cannot restyle another. What an *unset* key
+    reads as differs by family:
 
-    * axis keys (limits / log / bucket bookkeeping) fall back to the neutral
-      default and never consult the global dict — a limit typed on one figure is
-      meaningless on another, so it must not be visible there;
-    * mark keys fall back to the global value first. Nothing writes those
-      globals any more, so in practice that is the value saved before marks
-      became per-figure: it keeps applying to every figure the user has not yet
-      restyled, instead of silently reverting to the stock 5pt circle.
+    * axis keys (limits / log / bucket bookkeeping) fall back to the neutral default and never consult the app-wide
+      dict — a limit typed on one figure is meaningless on another, so it must not be visible there;
+    * every other key falls back to the app-wide value first. Nothing writes that dict any more but a restored
+      settings file, so it is the style saved before preferences became per plot: it keeps applying to every figure
+      the user has not restyled since, instead of silently reverting to the stock defaults.
 
-    Behaves like a plain ``dict`` for every existing call site
-    (``[]``/``get``/``in``/``dict(...)``).
+    **A figure that shows several views keys its prefs per view.** The Nanowells page draws five views on one
+    figure; a range typed on its Distribution applied to its Array map. A figure carrying ``_aw_pref_scope`` is
+    stored under ``<key>:<scope>`` for each scope, resolved on every access from the figure itself, so the Properties
+    panel — built once per figure and cached — follows the view on screen.
 
-    **The two dicts are looked up per access, never captured.** A view can
-    outlive the dicts it reads: the Properties sidebar is built once per figure
-    and cached for the life of the process, while loading a dataset replaces
-    both stores wholesale — ``view_state.restore`` rebuilds ``axis_prefs`` as
-    ``{str(k): dict(v)}``, and ``ExportPrefsState.reset_for_new_dataset``
-    rebuilds it without the entries that emptied. A view holding the *old*
-    entry then writes every axis limit, log toggle, log base and per-axis tick
-    size into a dict nothing reads, and reports success: the panel's fields
-    keep the values, and the figure never moves. Only the controls that write
-    ``PlotState`` — the colour mode, the Show/Error-bars segments — go on
-    working, which is what a whole Properties panel looks like when it has
-    quietly come loose from its figure.
+    Behaves like a plain ``dict`` for every existing call site (``[]``/``get``/``in``/``dict(...)``).
 
-    The *key* is resolved once, since it is a property of the figure's place in
-    the widget registry rather than of the store, and re-deriving it per access
-    would re-scan the registry (and re-log its diagnostic) on every read.
+    **The dicts are looked up per access, never captured.** A view can outlive the dicts it reads: the Properties
+    sidebar is built once per figure and cached for the life of the process, while loading a dataset replaces both
+    stores wholesale — ``view_state.restore`` rebuilds ``axis_prefs`` as ``{str(k): dict(v)}``, and
+    ``ExportPrefsState.reset_for_new_dataset`` rebuilds it without the entries that emptied. A view holding the *old*
+    entry would write every edit into a dict nothing reads, and report success.
+
+    The figure's base key is resolved once, since it is a property of the figure's place in the widget registry rather
+    than of the store, and re-deriving it per access would re-scan the registry (and re-log its diagnostic) on every
+    read.
     """
 
-    __slots__ = ("_ctx", "_key")
+    __slots__ = ("_ctx", "_key", "_fig")
 
-    def __init__(self, ctx, key: str) -> None:
+    def __init__(self, ctx, key: str, fig=None) -> None:
         self._ctx = ctx
         self._key = key
+        self._fig = fig
+
+    @property
+    def key(self) -> str:
+        """The store key this view reads and writes now: the figure's, and its view's when it shows several."""
+        return _with_scope(self._key, self._fig)
 
     @property
     def _global(self) -> dict:
@@ -830,55 +841,88 @@ class _FigurePrefs(MutableMapping):
 
     @property
     def _axis(self) -> dict:
-        return _ensure_axis_prefs_store(self._ctx).setdefault(self._key, {})
+        return _ensure_axis_prefs_store(self._ctx).setdefault(self.key, {})
 
     def __getitem__(self, key):
-        if key in FIGURE_SCOPED_PREF_KEYS:
-            if key in self._axis:
-                return self._axis[key]
-            if key in MARK_SCOPED_PREF_KEYS and key in self._global:
-                return self._global[key]
+        own = self._axis
+        if key in own:
+            return own[key]
+        if key in AXIS_SCOPED_PREF_KEYS:
             return DEFAULT_EXPORT_STYLE_PREFS.get(key)
-        return self._global[key]
+        legacy = self._global
+        if key in legacy:
+            return legacy[key]
+        if key in DEFAULT_EXPORT_STYLE_PREFS:
+            return DEFAULT_EXPORT_STYLE_PREFS[key]
+        raise KeyError(key)
 
     def __setitem__(self, key, value) -> None:
-        if key in FIGURE_SCOPED_PREF_KEYS:
-            self._axis[key] = value
-        else:
-            self._global[key] = value
+        self._axis[key] = value
 
     def __delitem__(self, key) -> None:
-        if key in FIGURE_SCOPED_PREF_KEYS:
-            self._axis.pop(key, None)
-        else:
-            self._global.pop(key, None)
+        self._axis.pop(key, None)
 
     def __iter__(self):
-        seen = set()
-        for k in self._global:
-            if k not in FIGURE_SCOPED_PREF_KEYS:
-                seen.add(k)
-                yield k
-        for k in FIGURE_SCOPED_PREF_KEYS:
-            if k not in seen:
-                yield k
+        seen: set = set()
+        for source in (DEFAULT_EXPORT_STYLE_PREFS, self._global, self._axis, AXIS_SCOPED_PREF_KEYS):
+            for k in source:
+                if k not in seen:
+                    seen.add(k)
+                    yield k
 
     def __len__(self) -> int:
         return sum(1 for _ in self)
 
 
+def plot_style_of(ctx, key: str) -> dict:
+    """The Properties style of the plot stored under *key* (``"bar"``, ``"scatter_agg"``, …), for a figure of that
+    plot drawn somewhere else — a Batch Export run — as a plain dict: every preference as that plot reads it, less its
+    axis ranges, log scales and per-axis buckets, which describe the plot on screen and which a batch run sets for
+    itself. Styling a plot in Properties styles its batch figures; it styles no other plot's."""
+    _ensure_export_style_prefs(ctx)
+    view = _FigurePrefs(ctx, key)
+    return {k: view[k] for k in view if k not in AXIS_SCOPED_PREF_KEYS}
+
+
+def set_pref_scope(ctx, fig, scope: str) -> None:
+    """Key *fig*'s Properties preferences to the view it shows now, *scope* (``""`` for its first view, which keeps
+    the figure's own key and so the settings saved under it).
+
+    For a figure that draws several views (the Nanowells page's five): each view keeps its own ranges, fonts and
+    marks. When the scope changes, an open Properties panel on the figure re-reads its fields, so what it shows — and
+    what its next edit writes — is the view on screen, not the one before."""
+    if fig is None:
+        return
+    scope = scope or ""
+    if getattr(fig, "_aw_pref_scope", "") == scope:
+        return
+    fig._aw_pref_scope = scope
+    from core.safe import swallow
+
+    for panel in list((ctx.widgets.get_or_none("_export_style_sidebars") or {}).values()):
+        if getattr(panel, "_fig", None) is fig and hasattr(panel, "_resync_pref_fields"):
+            with swallow("re-read the Properties panel for the view now shown"):
+                panel._resync_pref_fields()
+
+
+def _with_scope(key: str, fig) -> str:
+    """*key* for the view *fig* shows now: ``<key>:<scope>`` when the figure carries a non-empty ``_aw_pref_scope``."""
+    scope = getattr(fig, "_aw_pref_scope", "") if fig is not None else ""
+    return f"{key}:{scope}" if isinstance(scope, str) and scope else key
+
+
 def figure_prefs(ctx, fig):
-    """A :class:`_FigurePrefs` view for *fig* — the shared publication style
-    (typography, grid, legend, ticks) plus that figure's own axis limits, log
-    scaling, and mark styling. A8 teardown: takes ``ctx``."""
+    """A :class:`_FigurePrefs` view for *fig*: every Properties preference of that figure (and of the view it shows,
+    for a figure that shows several), an unset one reading the app-wide value saved before preferences became per
+    plot. A8 teardown: takes ``ctx``."""
     # Seed both stores now — a caller that only ever reads must still find the
     # global defaults filled in — but hand the view the *key*, not the dicts it
     # currently resolves to. See :class:`_FigurePrefs` for what capturing them
     # costs a panel that outlives a dataset load.
     _ensure_export_style_prefs(ctx)
-    key = figure_pref_key(ctx, fig)
-    _ensure_axis_prefs_store(ctx).setdefault(key, {})
-    return _FigurePrefs(ctx, key)
+    key = _base_pref_key(ctx, fig)
+    _ensure_axis_prefs_store(ctx).setdefault(_with_scope(key, fig), {})
+    return _FigurePrefs(ctx, key, fig)
 
 
 def figure_pref_is_set(ctx, fig, key: str) -> bool:

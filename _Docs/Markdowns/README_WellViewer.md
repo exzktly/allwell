@@ -5098,7 +5098,8 @@ use them.
 - **Well**, **Timepoint** and **Largest & smallest** (on *Extremes*) — the well whose nanowells are ranked, the
   timepoint they are ranked at (the well's latest by default), and how many each block shows (1 to 12, 5 by
   default). **Timepoints** chooses which of the well's timepoints the montage shows (all by default), and
-  **Cells** draws the cells the run counted on every crop (see *Site detail*).
+  **Cells** draws the cells the run counted on every crop (see *Site detail*); **Metrics** shows or hides the
+  numbers written on each crop (its fold change and its line of measurements).
 
 **Reading the figure**
 
@@ -5147,13 +5148,14 @@ use them.
   biggest responders and the non-responders looked like over time. Every metric is ranked by its fold change
   against the Baseline — Cell count by the count fold change, Confluence by the confluence fold change, and so
   on; growth rate and occupancy have no fold change over time and are greyed. Each row is labelled with its
-  rank, address and the fold change it was ranked by, each crop with the fold change at its own timepoint and the
-  nanowell's measurements there (cell count, confluence, and the channel's brightness and site signal), and the
-  ranking timepoint's column is outlined. The montage fills the figure: the Largest and Smallest blocks sit side
-  by side whenever that gives bigger crops, and **Timepoints** (beside *Largest & smallest*) chooses which
-  timepoints are shown — fewer give bigger crops; the ranking timepoint is always shown. When the crops would be
-  too small to read with their measurements beside them, the measurements are left out and the caption says so;
-  the pop-out writes them under each of its panels. All crops share one brightness scale, so a nanowell that filled
+  rank, address and the fold change it was ranked by, and the ranking timepoint's column is outlined. Each crop
+  carries its own numbers inside it, so they take no room from the crops: the fold change at that timepoint in its
+  top-left corner, and along its foot as many of the nanowell's measurements there as fit one line — cell count,
+  confluence, then the channel's site signal and brightness. The pop-out writes all of them under each panel. The
+  montage fills the figure: the Largest and Smallest blocks sit side by side whenever that gives bigger crops, and
+  **Timepoints** (beside *Largest & smallest*) chooses which timepoints are shown — fewer give bigger crops; the
+  ranking timepoint is always shown. Crops too small to hold a line of measurements show the fold change only, and
+  the caption says so. All crops share one brightness scale, so a nanowell that filled
   with cells reads brighter than one that emptied. Nanowells without a fold change at the ranking timepoint
   (occluded, seeded later, and so on) are not ranked and are counted by reason in the caption; a well with
   fewer nanowells than both blocks need splits them between the two and never shows one twice. Click any crop

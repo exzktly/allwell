@@ -303,6 +303,7 @@ class AnalyzeNanowellSectionMixin:
         size_edit.textEdited.connect(lambda _t: setattr(self, "_nanowell_size_typed", True))
         # A note about where the size came from stops being true once anything else sets it.
         size_edit.textChanged.connect(lambda _t: self._nanowell_size_note.setVisible(False))
+        self._nanowell_resize_cb.currentIndexChanged.connect(lambda _i: self._sync_cell_diameter_to_resize())
 
     def _nanowell_edit_row(self, sec, key, label, attr, tip):
         r = self._row(sec, label, tooltip=tip)
@@ -344,6 +345,19 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_pin_segmentation(on)
         self._refresh_nanowell_custom()
         self._carry_cellpose_diameter()
+        self._sync_cell_diameter_to_resize()
+
+    def _sync_cell_diameter_to_resize(self) -> None:
+        """With Resize: None the count tells Cellpose no diameter (``NanowellSettings.segmenter_diameter_px`` is 0),
+        so the cell diameter changes nothing: the field is disabled then, and its tooltip says why, rather than
+        asking for a value it does not use."""
+        edit = getattr(self, "_nanowell_cell_diameter_edit", None)
+        if edit is None:
+            return
+        unused = self._nanowell_resize_cb.currentData() == "none"
+        edit.setEnabled(self._nanowell_cb.isChecked() and not unused)
+        edit.setToolTip("Not used with Resize: None — Cellpose segments each image as imaged, at any pixel size."
+                        if unused else "")
 
     def _carry_cellpose_diameter(self) -> None:
         """Turning nanowell mode on with a cell diameter in pixels set above and none set in µm here: convert it.

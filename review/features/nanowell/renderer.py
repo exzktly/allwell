@@ -414,6 +414,54 @@ def _crop_strip(fig, cell, crops: dict, site, ink, faint) -> None:
     _ink(fig.text(0.16, 0.012, caption, fontsize=6.5, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
 
 
+def render_crop_grid(fig, crops: dict | None, site) -> None:
+    """The selected nanowell at every timepoint, large: one panel per timepoint, filling the page's figure.
+
+    Asked for: a larger view of a selected nanowell over time than the site detail's strip of small crops. Every
+    panel is drawn on **one** brightness scale — the 1st to 99th percentile of all the crops together — so a cell
+    that appears, divides or fades reads as a change between panels, not as each crop stretched to its own range.
+    *crops* is ``timepoint -> image_compute.Crop`` as the strip takes it, or ``None`` while they are cut; a
+    timepoint without a crop says why in its panel, and the caption says where the crops were cut from."""
+    fig.clear()
+    _bg, ink, faint = _inks(fig.add_subplot(111))
+    fig.clear()
+    if not crops:
+        _ink(fig.text(0.5, 0.5, "Cutting the crops…" if crops is None else "No crop could be cut.", ha="center",
+                      va="center", color=faint, gid="nw-crop-grid-pending"), muted=True)
+        return
+    items = list(crops.items())
+    images = [np.asarray(c.image, dtype=float) for _tp, c in items if c.image is not None]
+    finite = np.concatenate([im[np.isfinite(im)].ravel() for im in images]) if images else np.empty(0)
+    lo, hi = (np.percentile(finite, [1, 99]) if finite.size else (0.0, 1.0))
+    hi = hi if hi > lo else lo + 1.0
+    cols = int(min(len(items), max(1, np.ceil(np.sqrt(len(items) * 1.6)))))
+    rows = int(np.ceil(len(items) / cols))
+    grid = fig.add_gridspec(rows, cols, left=0.02, right=0.98, top=0.93, bottom=0.07, wspace=0.05, hspace=0.18)
+    notes: set = set()
+    for k, (tp, crop) in enumerate(items):
+        ax = fig.add_subplot(grid[k // cols, k % cols])
+        ax.set_xticks([])
+        ax.set_yticks([])
+        if crop.image is not None:
+            ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi, gid="nw-crop-grid-image")
+            if crop.source == "montage":
+                notes.add(crop.note)
+        else:
+            _ink(ax.text(0.5, 0.5, crop.note, ha="center", va="center", wrap=True, fontsize=8,
+                         transform=ax.transAxes, color=faint, gid="nw-crop-missing"), muted=True)
+        _ink(ax.set_title(tp + ("" if crop.source != "montage" else " (montage)"), fontsize=9, color=ink,
+                          gid="nw-crop-title"))
+    _ink(fig.text(0.02, 0.965, f"{site[0]} · q {site[1]}, r {site[2]} over time", fontsize=10, color=ink,
+                  gid="nw-crop-grid-title"))
+    sources = {crop.source for _tp, crop in items if crop.image is not None}
+    origin = ("cut from its owner tile at full resolution" if sources == {"tile"} else
+              "cut from the montage, at its lower resolution" if sources == {"montage"} else
+              "cut from its owner tile, or the montage where marked" if sources else "none could be cut")
+    caption = (f"{origin}; every panel on one brightness scale ({lo:.4g} to {hi:.4g})"
+               + "".join(f"; {note}" for note in sorted(notes)))
+    _ink(fig.text(0.02, 0.015, caption, fontsize=8, color=faint, gid="nw-crop-grid-caption", wrap=True), muted=True)
+
+
 def _band(x) -> float:
     finite = np.sort(np.asarray(x, dtype=float)[np.isfinite(x)])
     gaps = np.diff(finite)

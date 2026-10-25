@@ -600,3 +600,49 @@ def test_a_real_nanowell_well_reads_as_finished_and_a_new_timepoint_unfinishes_i
     with zipfile.ZipFile(plate / "in" / f"{WELL}.zip", "a") as zf:
         zf.writestr(f"exp_PHASE_{WELL}_F0_24h.tif", b"x")
     assert finished_here(out, argv, ["A01"]) == []
+
+
+def test_a_concatenation_of_two_prefixed_plates_is_detected_and_counted(tmp_path, monkeypatch):
+    """Reported: a concatenated nanowell plate, every image correctly named but for each acquisition's own prefix,
+    failed with "No image groups found". The schema the app detects from the archive took the prefix for the
+    channel. Both timepoints are now detected, grouped and measured, through the real Concatenate and the real run."""
+    from datasets.concatenate import apply
+    from datasets.concatenate import concatenate_compute as cc
+    from util.schema_infer import infer_from_dir
+
+    def plate(root, prefix):
+        rendered, record = build_well(timepoint="0h")
+        (root / "in").mkdir(parents=True)
+        tif = tmp_path / "frame.tif"
+        with zipfile.ZipFile(root / "in" / f"{WELL}.zip", "w") as zf:
+            for fov, image in rendered.images.items():
+                for channel, frame in (("PHASE", image), ("GFP", image * 0 + 10.0)):
+                    imwrite(str(tif), frame.astype("float32"))
+                    zf.write(tif, f"{prefix}_{channel}_{WELL}_{fov}_0h.tif")
+        write_record_file(root / "in" / "acquisition.json", record)
+
+    plate(tmp_path / "d1", "expA")
+    plate(tmp_path / "d2", "expB")
+    apply.execute_plan(cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=24.0))
+    guess = infer_from_dir(tmp_path / "dest" / "in")
+    assert guess.confident and guess.fields[1] == "channel" and set(guess.channels) == {"PHASE", "GFP"}
+    out = _run_main(monkeypatch, tmp_path / "dest", "--nanowell_format", "100um",
+                    "--filename_schema", ":".join(guess.fields))
+    grid = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())
+    assert {tp: block["status"] for tp, block in grid["timepoints"].items()} == {"0h": "ok", "24h": "ok"}
+
+
+def test_no_image_groups_says_why(tmp_path):
+    """"No image groups found" named no cause. It now says what the channel position holds, or which partner image
+    is missing — the two causes a user cannot see from the archive's names alone."""
+    from pipeline.nanowell_task import no_groups_reason
+
+    archive = tmp_path / "A01.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        for prefix in ("expA", "expB"):
+            for channel in ("PHASE", "GFP"):
+                zf.writestr(f"{prefix}_{channel}_A01_F0_0h.tif", b"x")
+    wrong = no_groups_reason(archive, "PHASE", ["GFP"], ["channel", "ignore", "well", "fov", "timepoint"], "_")
+    assert "no image has the phase channel 'PHASE'" in wrong and "'expA' (2), 'expB' (2)" in wrong
+    right = no_groups_reason(archive, "PHASE", ["RFP"], ["experiment", "channel", "well", "fov", "timepoint"], "_")
+    assert "no RFP image" in right and "'expA_RFP_A01_F0_0h'" in right

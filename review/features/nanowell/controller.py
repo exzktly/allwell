@@ -28,8 +28,8 @@ from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, one_to_one
 from review.features.nanowell.image_compute import Crop, read_montage, site_crops
 from review.features.nanowell.renderer import (
-    ArrayDrawn, render_array, render_distribution, render_message, render_position, render_site_detail,
-    render_trajectories,
+    ArrayDrawn, render_array, render_crop_grid, render_distribution, render_message, render_position,
+    render_site_detail, render_trajectories,
 )
 from review.features.nanowell.state import IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS
 from review.features.nanowell.series_compute import long_format, site_metrics, site_series
@@ -302,6 +302,8 @@ def redraw(ctx) -> None:
         return
     if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
         return                                           # the right metrics are on their way
+    if _draw_crop_view(ctx, st, fig, canvas):
+        return
     metric, channel, note = resolve_metric(st.view, st.metric, ctx.state.channel.active_channel, st.data.channels)
     well = page_well(ctx)
     tableless = tableless_wells(ctx)
@@ -877,6 +879,38 @@ def rerun_anchored(ctx) -> bool:
     return False
 
 
+def _draw_crop_view(ctx, st, fig, canvas) -> bool:
+    """Draw the first selected nanowell's crops at every timepoint, large, on the page's figure, when the crop view
+    is on; ``True`` when it drew. The crops are the site detail's (``st.crops``), read on a worker the first time."""
+    if not (st.crop_view and st.selected_sites):
+        st.crop_view = False
+        return False
+    site = tuple(st.selected_sites[0])
+    st.hits, st.drawn = None, None                       # nothing on the figure answers a click or a zoom
+    if site not in st.crops:
+        data, metrics = st.data, st.metrics
+        _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site),
+               failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
+    render_crop_grid(fig, st.crops.get(site), site)
+    from review.core.plot_style import apply_export_style_to_current
+
+    apply_export_style_to_current(ctx, fig, canvas)
+    canvas.draw_idle()
+    _call(ctx, "_nw_refresh_crop_view")
+    redraw_detail(ctx)
+    return True
+
+
+def set_crop_view(ctx, on: bool) -> None:
+    """Show the selected nanowell's crops over time large, in place of the page's view, or go back to the view."""
+    st = _state(ctx)
+    if st is None:
+        return
+    st.crop_view = bool(on and st.selected_sites)
+    redraw(ctx)
+    _call(ctx, "_nw_refresh_crop_view")
+
+
 def redraw_detail(ctx) -> None:
     """Draw the site detail for the selected nanowells, or hide it when none is selected."""
     st = _state(ctx)
@@ -935,7 +969,7 @@ def _fetch(ctx, kind: str, key, job, *, failed) -> None:
         store[key] = value
         while kind == "montages" and len(store) > MONTAGES_KEPT:
             store.pop(next(iter(store)))
-        (redraw_detail if kind == "crops" else redraw)(ctx)
+        (redraw_detail if kind == "crops" and not st.crop_view else redraw)(ctx)
 
     def on_failed(message) -> None:
         log.warning("Nanowells: %s for %s could not be read: %s", kind, key, message)
@@ -949,8 +983,10 @@ def _fetch(ctx, kind: str, key, job, *, failed) -> None:
 def on_click(ctx, event) -> None:
     """A press on the figure. On the Distribution figure: select the nanowell under it, add it with Shift (or
     ⌘/Ctrl), or clear the selection on empty space. On the Array view a press starts a drag or a click, which
-    :func:`on_release` tells apart. The plate selection is never touched."""
+    :func:`on_release` tells apart. The plate selection is never touched. The crop view answers no click."""
     st = _state(ctx)
+    if st is not None and st.crop_view:
+        return
     if st is not None and st.view == "array":
         if event.dblclick and event.button == 1 and not st.anchor_mode:
             focus_nanowell_at(ctx, event)

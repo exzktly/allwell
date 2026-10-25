@@ -259,7 +259,8 @@ what every earlier run did) resizes by 30 ÷ the cell diameter in pixels, so a c
 models work at. Where cells are smaller than that in pixels it is an enlargement, and the network's work grows with
 its square: at 0.65 µm per pixel a 10 µm cell is 15.4 px, enlarged ×1.95, nearly four times the pixels. *None (as
 imaged)* segments each image as it is, which is that much faster, at whatever the model makes of cells at that size
-— compare the counts on one well before a plate-wide run. With *None*, the cell diameter no longer sets the scale.
+— compare the counts on one well before a plate-wide run. With *None*, the cell diameter no longer sets the scale,
+so the field is greyed out.
 (On the command line: `--nanowell_resize none`.)
 
 Whichever you choose, the model is given the nanowells only: everything outside each nanowell's interior — its rim
@@ -1627,8 +1628,11 @@ and by `remote_fetch_report.txt` in the output folder.
   every plate map in the app, including the ones on the Datasets tools.
 - The dial follows whichever step the well is actually in. While the well is
   being computed it fills with the fields measured — in a nanowell run, with
-  its timepoints, each located and then measured, and while a timepoint is
-  measured, with how many of its nanowells are segmented so far. Hovering the
+  its timepoints, each located and then measured — two steps a timepoint, so
+  a well of 2 timepoints is 4 steps, and the log says both
+  (`Well A01 — 4 step(s): its 2 timepoint(s), each located, then measured`) —
+  and while a timepoint is measured, with how many of its nanowells are
+  segmented so far. Hovering the
   well says where it is (`step 5/8, 24h: 120/400 nanowells segmented`), and the
   run log prints the same count about every tenth of a timepoint's nanowells
   (`Well A01 — 24h: 120/400 nanowells segmented`, with the time per nanowell,
@@ -5078,7 +5082,10 @@ Under the plots, a strip of crops shows the first selected nanowell at each time
 from the image the run segmented (the well's archive in `in/`). When that archive is not beside the dataset
 (an output folder copied on its own), cannot be read, or the nanowell has no single owner tile (a fused one),
 the crop is cut from the lower-resolution montage instead, and the caption under the strip says so and why; a
-timepoint with no crop says why. Selecting nanowells does not change the plate selection.
+timepoint with no crop says why. **Enlarge crops**, above the site detail, shows those crops large in place of the
+plot — one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a
+change between panels; **Back to the plot** (the same button) returns, and so does clearing the selection.
+Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it

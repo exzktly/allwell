@@ -241,3 +241,19 @@ def test_the_prefilled_cell_size_gives_way_to_a_pixel_diameter_but_a_typed_one_d
     assert edit.text() == "19.5"
     tab._apply_nanowell_settings({"nanowell_format": "100um"})
     assert edit.text() == ""                                           # a nanowell run that stated none: 15 µm
+
+
+def test_the_cell_diameter_is_disabled_while_resize_is_none(tab):  # noqa: F811
+    """Asked: why does the form ask for a cell diameter with Resize: None, which does not use it."""
+    edit, combo = tab._nanowell_cell_diameter_edit, tab._nanowell_resize_cb
+    tab._nanowell_cb.setChecked(True)
+    assert edit.isEnabled()
+    combo.setCurrentIndex(combo.findData("none"))
+    assert not edit.isEnabled() and "Not used with Resize: None" in edit.toolTip()
+    combo.setCurrentIndex(combo.findData("cell"))
+    assert edit.isEnabled() and edit.toolTip() == ""
+    tab._apply_nanowell_settings({"nanowell_format": "100um", "nanowell_resize": "none"})   # a restored run
+    assert not edit.isEnabled()
+    tab._nanowell_cb.setChecked(False)
+    tab._nanowell_cb.setChecked(True)
+    assert not edit.isEnabled()                                          # still None: still unused

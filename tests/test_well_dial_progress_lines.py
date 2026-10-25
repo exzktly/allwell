@@ -213,3 +213,18 @@ def test_before_a_timepoint_is_measured_the_run_says_the_scale_cellpose_sees_it_
         f"{1.2 * crops.diameter_um / 0.65 * 30 / (10 / 0.65):.0f} px as the network sees it")
     tile = nr.NanowellSettings("100um", cell_diameter_um=10.0, cellpose_model="cpsam", segment_scope="tile")
     assert nr.cellpose_scale_text(located, tile).endswith("resizes each image x1.95")
+
+
+def test_the_step_total_names_its_timepoints_and_still_drives_the_dial(caplog):
+    """Asked: "the app claims there are 4 steps though there are only two timepoints". Each timepoint is two steps,
+    located then measured; the line now says how many timepoints that is, and the dial still reads the count."""
+    import logging
+
+    from pipeline.nanowell_task import _log_steps
+    from services.pipeline_runner import _RE_WELL_FOV_TOTAL
+
+    with caplog.at_level(logging.INFO, logger="allwell.nanowell"):
+        _log_steps("A01", 0, 4)
+    line = caplog.records[-1].getMessage()
+    assert line == "Well A01 — 4 step(s): its 2 timepoint(s), each located, then measured"
+    assert _RE_WELL_FOV_TOTAL.search(line).groups() == ("A01", "4", "step")

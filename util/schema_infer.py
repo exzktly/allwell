@@ -335,9 +335,17 @@ def _best_slot(cols, pred, used: set[int]) -> int | None:
     return best_i
 
 
-def _pick_channel_slot(cols, used: set[int]) -> int | None:
-    """The unused slot with the fewest distinct values that reads as a small
-    alphabetic categorical set; leftmost on a tie.
+def _pick_channel_slot(cols, used: set[int], tile_slots: tuple[int, ...] = ()) -> int | None:
+    """The unused slot that reads as a small alphabetic categorical set and is the channel: one that takes more than
+    one value within a single tile, if any does; then the fewest distinct values, leftmost on a tie.
+
+    **Within a tile first.** A tile — one well, field and timepoint (*tile_slots*) — is imaged once per channel, so
+    the channel slot changes inside it, while an experiment prefix is the same for every image of a tile. Fewest-
+    distinct alone could not tell them apart once a plate held two prefixes: a concatenation of two acquisitions,
+    each named by its own run, reads ``expA``/``expB`` against ``PHASE``/``GFP``, two values each, and the leftmost —
+    the prefix — was taken for the channel, confidently, so no image matched its channel token and the run found
+    "no image groups". When no slot varies within a tile (a single-channel plate, or no tile slots found), the rule
+    below decides alone.
 
     Fewest-distinct rather than leftmost outright: a plate has more wells than
     channels, so on any layout where both slots survive the earlier passes the
@@ -345,7 +353,7 @@ def _pick_channel_slot(cols, used: set[int]) -> int | None:
     — the well slot is claimed by :func:`_classify_slots` before this runs, and
     when it is not (a folder with fewer wells than channels), the narrower slot
     genuinely is the better guess."""
-    best_i, best_distinct = None, None
+    candidates = []
     for i, col in enumerate(cols):
         if i in used:
             continue
@@ -354,9 +362,20 @@ def _pick_channel_slot(cols, used: set[int]) -> int | None:
             continue
         if not all(_HAS_ALPHA_RE.search(v) for v in distinct):
             continue
-        if best_distinct is None or len(distinct) < best_distinct:
-            best_i, best_distinct = i, len(distinct)
-    return best_i
+        candidates.append((not _varies_within_a_tile(cols, i, tile_slots), len(distinct), i))
+    return min(candidates)[2] if candidates else None
+
+
+def _varies_within_a_tile(cols, i: int, tile_slots: tuple[int, ...]) -> bool:
+    """Whether slot *i* takes more than one value among the names of one tile (equal in every *tile_slots* slot)."""
+    if not tile_slots:
+        return False
+    seen: dict[tuple, str] = {}
+    for row, value in enumerate(cols[i]):
+        key = tuple(cols[s][row] for s in tile_slots)
+        if seen.setdefault(key, value) != value:
+            return True
+    return False
 
 
 def _classify_slots(rows: list[list[str]], k: int):
@@ -395,7 +414,7 @@ def _classify_slots(rows: list[list[str]], k: int):
         if i not in used and len(set(cols[i])) == 1:
             fields[i] = "experiment"; used.add(i)
             break
-    chan_i = _pick_channel_slot(cols, used)
+    chan_i = _pick_channel_slot(cols, used, tuple(s for s in (well_i, fov_i, tp_i) if s is not None))
     if chan_i is not None:
         fields[chan_i] = "channel"; used.add(chan_i)
 

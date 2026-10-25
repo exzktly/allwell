@@ -100,7 +100,10 @@ def _log_steps(well_label: str, done: int, total: int) -> None:
     (``services.pipeline_runner``: ``_RE_WELL_FOV_TOTAL`` / ``_RE_WELL_FOV_DONE``). A nanowell well is processed a
     timepoint at a time, never a field at a time, so without them it printed nothing the dial could follow."""
     if done == 0:
-        log.info("Well %s — %d step(s): each timepoint located, then measured", well_label, total)
+        # Two steps a timepoint, so say how many timepoints that is: "4 steps" read as four timepoints on a plate
+        # with two. The count stays first, where the run reader's _RE_WELL_FOV_TOTAL looks for it.
+        log.info("Well %s — %d step(s): its %d timepoint(s), each located, then measured", well_label, total,
+                 total // 2)
     else:
         log.info("Well %s — step %d/%d done", well_label, done, total)
 
@@ -605,7 +608,8 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
             "--nanowell_overlap_percent and --nanowell_pixel_size_um")
     groups, needed = grouper(zip_path, nuclear_token, fluor_tokens, scratch_dir, schema=schema, sep=sep)
     if not groups:
-        raise NanowellInputError(f"No image groups found in {Path(zip_path).name}")
+        raise NanowellInputError(f"No image groups found in {Path(zip_path).name}: "
+                                 f"{no_groups_reason(zip_path, nuclear_token, fluor_tokens, schema, sep)}")
     index = _tile_index(groups, parse, schema, sep)
     described = record is None
     if described:
@@ -706,6 +710,47 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         if block.get("status") != nr.OK:
             log.warning("Well %s timepoint %s: %s (%s)", well_label, tp, block.get("status"), block.get("reason", ""))
     return records, failed
+
+
+def no_groups_reason(zip_path, nuclear_token: str, fluor_tokens, schema, sep: str) -> str:
+    """Why *zip_path* yields no image group, said from its member names the way the grouper reads them
+    (``process_microscopy._collect_image_groups``): a group is an image whose channel field is *nuclear_token* (here
+    the phase channel) with an image of every *fluor_tokens* channel named the same but for that field.
+
+    "No image groups found" alone named no cause, and the usual causes are a schema that reads the channel from
+    the wrong position (a concatenated plate's two prefixes were once taken for the channel) or a channel named
+    differently from the form; each is told apart here by what the channel position actually holds."""
+    from collections import Counter
+
+    from util.image_exts import GROUP_IMAGE_EXTS
+
+    fields = list(schema) if not isinstance(schema, str) else [f for f in schema.split(":") if f]
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            names = sorted({Path(n).name for n in zf.namelist()})
+    except (OSError, zipfile.BadZipFile) as exc:
+        return f"the archive cannot be read ({exc})"
+    stems = [Path(n).stem for n in names if not n.startswith(".") and Path(n).suffix.lower() in GROUP_IMAGE_EXTS]
+    if not stems:
+        return "it holds no images"
+    if "channel" not in fields:
+        return f"the filename schema ({':'.join(fields)}) has no channel field"
+    at = fields.index("channel")
+    held = Counter(parts[at] for parts in (s.split(sep) for s in stems) if len(parts) > at)
+    shown = ", ".join(f"{value!r} ({n})" for value, n in held.most_common(6))
+    where = f"position {at + 1} of the schema {':'.join(fields)} (separator {sep!r})"
+    if nuclear_token not in held:
+        return (f"no image has the phase channel {nuclear_token!r} at the channel's {where}; that position holds "
+                f"{shown or 'nothing'}. Check the filename schema and the channel names on the form")
+    for stem in stems:
+        parts = stem.split(sep)
+        if len(parts) > at and parts[at] == nuclear_token:
+            for token in fluor_tokens:
+                partner = sep.join([*parts[:at], token, *parts[at + 1:]])
+                if partner not in stems:
+                    return (f"the {nuclear_token} images have no {token} image named the same but for the channel "
+                            f"(looked for {partner!r}, beside {stem!r}); the channel position holds {shown}")
+    return f"the channel position ({where}) holds {shown}"
 
 
 def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,

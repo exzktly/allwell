@@ -189,9 +189,19 @@ def test_a_filter_that_keeps_nothing_says_so(page):
                             "timepoint). Widen Starting cells or choose Any."]
 
 
-def test_the_array_view_dims_the_nanowells_outside_and_counts_them(page):
+def _settled(qtbot, ctx) -> None:
+    """Wait out the Array view's re-fit: switching to it re-flows the band, so the canvas resizes and the page's
+    re-fit timer (``_nw_refit_timer``) queues a redraw. A test that ends inside that window leaves matplotlib a draw
+    queued on a canvas the widget reaper then deletes, and the teardown errors with "Internal C++ object
+    (FigureCanvasQTAgg) already deleted" — intermittently, by how the teardown is scheduled."""
+    timer, canvas = ctx.widgets.get("_nw_refit_timer"), ctx.widgets.get("_nw_canvas")
+    qtbot.waitUntil(lambda: not timer.isActive() and not getattr(canvas, "_draw_pending", False), timeout=5000)
+
+
+def test_the_array_view_dims_the_nanowells_outside_and_counts_them(page, qtbot):
     _view(page, "array")
     _choose(page, "single")
+    _settled(qtbot, page)
     fig = page.widgets.get("_nw_fig")
     veils = [c for ax in fig.axes for c in ax.collections if c.get_gid() == "nw-array-dimmed"]
     st = page.state.feature_slice("nanowell")

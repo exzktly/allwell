@@ -143,3 +143,15 @@ def test_a_bootstrap_installs_the_cellpose_env_after_allwell_s_and_says_when_its
     assert steps == ["probe", "install_miniforge_if_missing", "ensure_env_and_staging", "sync_required_files",
                      "install_pip_deps", "install_cellpose_deps", "probe", "measure_bandwidth", "write"]
     assert "cannot see the GPU" in capsys.readouterr().out
+
+
+def test_the_cellpose_env_holds_numpy_below_2():
+    """Nothing in the Cellpose env caps numpy as TensorFlow does in ``allwell``, and every recent
+    opencv-python-headless (a Cellpose requirement with no bound) needs numpy 2: unpinned, pip upgraded numpy under
+    conda's 1.24 builds and the pinned imagecodecs failed to import ("numpy.dtype size changed")."""
+    from pathlib import Path
+
+    lines = [ln.split("#")[0].strip() for ln in
+             (Path(__file__).resolve().parents[1] / "requirements-remote-cellpose.txt").read_text().splitlines()]
+    assert "numpy>=1.24,<1.25" in lines
+    assert "opencv-python-headless<4.11" in lines

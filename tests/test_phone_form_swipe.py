@@ -171,3 +171,15 @@ def test_a_log_that_does_not_scroll_by_a_drag_leaves_it_to_the_page(qtbot):
     set_drag_scroll(log.viewport(), False)
     QApplication.processEvents()
     assert _starts_a_scroll(area, log.viewport(), log.viewport().rect().center())
+
+
+def test_an_unwrapped_log_with_only_sideways_range_leaves_the_drag_to_the_page(qtbot):
+    """A page drag is vertical: a few long unwrapped lines give the log horizontal range only, and that must not
+    make it a dead spot to swipe the page from."""
+    from PySide6.QtWidgets import QTextEdit
+    area, _head, log = _page_with_log(qtbot, lines=2)
+    log.setLineWrapMode(QTextEdit.NoWrap)
+    log.setPlainText("x" * 2000 + "\nshort")
+    QApplication.processEvents()
+    assert log.verticalScrollBar().maximum() == 0 and log.horizontalScrollBar().maximum() > 0
+    assert _starts_a_scroll(area, log.viewport(), log.viewport().rect().center())

@@ -6962,13 +6962,16 @@ listing can hold a single channel token. A slot with one distinct value is not
 recognised as the channel slot at all, so a prefix sample reports *no* channels
 on exactly the largest plates.
 
-**The channel slot is the one that changes within a tile.** A tile — one well,
-field and timepoint — is imaged once per channel, so `_pick_channel_slot` prefers a
-categorical slot that takes more than one value among the names of one tile
-(`_varies_within_a_tile`, keyed on the well, field and timepoint slots found
-before it); an experiment prefix is the same for every image of a tile. Only when
-no slot varies within a tile (a single-channel plate) does the fewest-distinct
-rule decide alone. Without it a plate holding two prefixes — a Concatenate of two
+**On a tie, the channel slot is the one that changes within a tile.**
+`_pick_channel_slot` takes the categorical slot with the fewest distinct values;
+between slots with as many, it prefers one that takes more than one value among
+the names of one tile — one well, field and timepoint (`_varies_within_a_tile`,
+keyed on the slots found before it) — since a tile is imaged once per channel and
+an experiment prefix is the same for every image of a tile. It is only a
+tie-break because the names are a strided sample of each archive and an
+unclaimed slot such as ImageXpress's `s<n>` site also varies within a tile: ranked
+first, it took a 4-site, 3-channel per-well zip plate's sites for its channels.
+Without the tie-break a plate holding two prefixes — a Concatenate of two
 acquisitions, each named by its own run — read `expA`/`expB` against
 `PHASE`/`GFP`, two values each, and the leftmost, the prefix, was confidently
 taken for the channel, so no image matched the phase token and the run stopped
@@ -10031,12 +10034,20 @@ new run, gives it each owned nanowell's crop, `CROP_REACH` (1.2) radii around th
 (`nanowell_measure.segment_sites`) — `CROP_BATCH` (32) crops a call to a segmenter that offers `segment_many`
 (Cellpose's: `pipeline.cellpose._segment_cellpose_many` centres them in a common shape padded with 0 and makes one
 Cellpose 4 `eval` of the `(N, H, W, 1)` stack, which runs 8 crops' network tiles per pass and computes each crop's
-masks on its own; on Cellpose 3 it is one call per crop), one call per crop otherwise — renumbers each crop's labels and pastes them into a whole-tile label image, so
-`count_cells` and the rest read it unchanged; a segmenter that declares `accepts_range` (Cellpose's) is given one
+masks on its own; on Cellpose 3 it is one call per crop), one call per crop otherwise — drops from each crop the
+objects whose centroid lies in another nanowell's counting circle (`_own_labels`: at a pitch under about 2.4 radii a
+crop reaches into its neighbour's circle, and the part of a neighbour's cell it saw, pasted first, kept those pixels
+from that cell's own crop, which then counted it a second time), renumbers each crop's labels and pastes them into a
+whole-tile label image, so `count_cells` and the rest read it unchanged; a segmenter that declares
+`accepts_size_cap` (Cellpose's) is told `max_size_fraction=1.0` for a crop, since Cellpose 4 drops a mask over 40 %
+of its image by default and a nanowell's counting circle is 44 % of its crop, so an object filling the nanowell was
+deleted and the nanowell counted empty; a segmenter that declares `accepts_range` (Cellpose's) is given one
 range for every crop of a tile, because a crop scaled to its own range would stretch an empty nanowell's noise. Which
 range is `segment_scale` (`nanowell_measure.SEGMENT_SCALES`, applied by `segmenter_scale` in `_tile_contents` and in
 Test detection's `_tile_segmented`, for either scope): `levelled`, the default for a new run, first shifts each
-nanowell's interior by a constant so its median is the median of the tile's nanowells' medians (`_level_interiors`),
+nanowell's interior by a constant so its floor — its modal level (`modal_level`), not its median, which in a
+nanowell more than half covered by cells is the cells' level — is the median of the tile's nanowells' floors
+(`_level_interiors`),
 then does what `nanowells` does — on brightfield a few nanowells are far brighter than the rest, and under one pooled
 range such a nanowell either lay above it (a rare one) or widened it and squashed every other nanowell's cells (a
 common one), and was counted empty; the shift moves brightness, not contrast. `nanowells` takes the pooled
@@ -10427,8 +10438,9 @@ when the user ticked Incremental, in Analyze and as a backstop in the runner and
 ones' roster and template, and its tables would replace the local ones. A run the *app* makes incremental — a
 resume, or a plate with an unfinished run behind it — goes well by well instead
 (`analyze.run_spec._nanowell_remote_resume_by_well` drops the incremental and logs why): the finished-wells step
-skips every well whose tables here cover all its archive's timepoints (each finished `ok` in its grid record, and
-its completeness record, when the sidecar has one, whole), and every other well is sent whole, analysed in
+skips every well whose tables here cover all its archive's timepoints (each with a verdict in its grid record —
+reached is enough: an `unaddressed` timepoint sent alone would lose the plate the end-of-run re-anchoring fits
+from — and its completeness record, when the sidecar has one, whole), and every other well is sent whole, analysed in
 full, and forced (`remote_finished_wells.nanowell_forced`, merged into the argv by `argv_forcing`) when it has
 output here, so an earlier attempt's partial tables on the host cannot be kept in its place. In
 `datasets/core/nanowell_tables`, `carry_nanowell_tables` copies a dataset's tables through a well map (canonical
@@ -10638,8 +10650,9 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
 - **Cells** (off by default, in no preset) is a dot at the centre of each cell the run counted — the run keeps
   no cell outlines, so a centre is all there is. The positions are the cell table's `well_x_um` / `well_y_um`
   (the table every nanowell run writes beside its nanowell tables, one row per counted cell);
-  `collect.load_nanowell_data` notes which CSV holds each well while it reads their brightness
-  (`NanowellData.cell_tables`), and `collect.cell_positions` reads one well's table only when the layer is on,
+  `collect.read_well_part` notes which CSV holds each well while it reads that well's brightness
+  (`NanowellData.cell_tables`) — the well's own table even when it has no rows, since that is a run that
+  measured the well and counted no cell, not a well without a cell table, and `collect.cell_positions` reads one well's table only when the layer is on,
   kept (`_read_cell_positions`, the last two files) until the file's modification time or size changes, so a
   plate's every cell is never held at once. `array_compute.cells_into` puts them in the scene: where measured in
   the well frame; on the lattice at the nanowell's lattice place plus the cell's offset from that nanowell's
@@ -10647,7 +10660,8 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   or measured centre is counted in the footer, not drawn. The renderer draws them as one `scatter` of fixed
   screen size (`CELL_DOT_PT2`), light with a dark rim (`ui/nanowell_sites.CELL_COLOUR`, `CELL_EDGE_COLOUR`) so
   they read over the image and over any fill, above the nanowells and under the addresses. The footer says how
-  many were drawn, or that the well has no cell table, or that its table holds no positions.
+  many were drawn, that the run counted no cell in the well at that timepoint, that the well has no cell table,
+  or that its table holds no positions.
 - **One scene, one renderer.** `array_compute.array_scene` builds the `ArrayScene` — the nanowells drawn
   (`ArraySites`: position, radius, value, state, fused flag, `(well, q, r)`, the `q,r` text from
   `util.nanowell_address.coordinate_text`; an unaddressed nanowell carries `None` and is drawn but never
@@ -11696,7 +11710,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_jobs.py` | The scheduler jobs a remote run holds, and making sure none outlives it. `close_remote_job` is the teardown backstop every exit the app survives goes through (it reads the job id from `<pidfile>.slurm` and `scancel`s it); `sweep_orphaned_allocation` is what the next run of the same plate does about an exit the app did not survive, and returns its verdict (`swept`, `owned`, `notmine`, `unknown`, `none`) because the batched path acts on it. Both refuse to cancel a job that is not the caller's (`_only_my_job`), and both are no-ops on a host with no `compute_launcher`. `RemoteRunner.close_remote_job` and `_sweep_orphaned_allocation` delegate here. Line-budgeted (`REMOTE_JOBS_BUDGET`). |
 | `remote_process.py` | The run as the GUI sees it: `_RemoteProcess` wraps the single ssh that runs the pipeline and `_BatchedRemoteProcess` the driver that holds one allocation and runs the plate batch by batch. Both present the `subprocess.Popen` surface `PipelineRunner` reads and tee every line to the `Fetcher`, so per-well downloads start the moment a well is announced done; `wait` flushes the `Fetcher` and `terminate`/`kill` cancel it, and every exit path ends the run heartbeat (`_UploadHeartbeat`) exactly once. A batch whose driver vanished marks the run failed (1); a stopped one reports 130. `tests/test_remote_process.py` drives the single-launch wrapper against a real child process. Line-budgeted (`REMOTE_PROCESS_BUDGET`). |
 | `remote_staging.py` | Turning the user's input into the per-well archives a remote run uploads: `stage_local_zips` detects the layout (one zip per well, well folders, loose TIFs, or a mix left by an interrupted zip-up), zips folders and loose TIFs **into the input directory itself** so the next run finds zips and skips the zip-up (a folder's archived TIFs are removed the moment its own zip is published), and returns a `ZippedInput`. The channel filter and an incremental run's split are both planned from each archive's member list before any image data is read, and only archives that change are written — to a staging directory beside the input, never over the user's archives. `ZippedInput.cleanup` removes every staging directory a run made (the filter's and the split's, joined), a failure part way through removes its own before the error propagates, and a filter that matches no image in any well is refused before anything moves, on both the ZIP and the MIXED path. Line-budgeted (`REMOTE_STAGING_BUDGET`); `tests/test_remote_staging.py` pins the cleanup contract. |
-| `remote_finished_wells.py` | Which wells a remote run need not send: `finished_here` answers, before staging, with the pipeline's own rule — the per-well CSV present, recorded under the key `pipeline.cli_args.settings_key_from_argv` gives this run's argv plus the host's flags, not forced, its completeness record whole, never an empty-well blank, and for a nanowell well every timepoint of its archive finished `ok` — and `drop_finished` removes them from a staged `ZippedInput` into its `up_to_date_wells`; `nanowell_forced` and `argv_forcing` force a nanowell well sent again over partial output here, and `pull_settings_marker` writes `UNKNOWN_SETTINGS` when a well's marker cannot be fetched. Called by `PipelineRunner._finished_here` and by batched mode's local-completion filter (see *What is finished here is not sent again*). |
+| `remote_finished_wells.py` | Which wells a remote run need not send: `finished_here` answers, before staging, with the pipeline's own rule — the per-well CSV present, recorded under the key `pipeline.cli_args.settings_key_from_argv` gives this run's argv plus the host's flags, not forced, its completeness record whole, never an empty-well blank, and for a nanowell well every timepoint of its archive reached, with a verdict in its grid record — and `drop_finished` removes them from a staged `ZippedInput` into its `up_to_date_wells`; `nanowell_forced` and `argv_forcing` force a nanowell well sent again over partial output here, and `pull_settings_marker` writes `UNKNOWN_SETTINGS` when a well's marker cannot be fetched. Called by `PipelineRunner._finished_here` and by batched mode's local-completion filter (see *What is finished here is not sent again*). |
 | `remote_fetch.py` | Bringing a remote run's output home, and proving it arrived. `Fetcher` pulls each well's output the moment the pipeline announces it done (overlapping download with later wells' compute), merges an incremental run's partial zip and CSV into the local ones rather than overwriting them, keeps the mid-run `pipeline_info.json` current, and removes a well's remote files only once its local artefact is in place. `FetchedOutputVerifier` runs after the pipeline exits: it pulls the top-level artefacts, merges the fetched sidecar's run-report, field-quality and user blocks with the local ones, writes the client-side completeness record, checks every expected well's CSV and non-empty `<well>_out.zip` are present (and replaced, for a forced well), re-pulls what is missing, and returns a `FetchVerification`. It never deletes the run's remote directory — `RemoteRunner.verify_and_cleanup` does that, on a passing verdict only. Its collaborators (host, run record, the dataset cache whose ssh it borrows, the stop flag) are passed in, never read off the runner. Line-budgeted (`REMOTE_FETCH_BUDGET`). |
 | `remote_fetch_place.py` | The Fetcher's second thread. For an incremental run, a downloaded well's merge into the local output — partial CSV into the `.csv.gz`, partial `<well>_out.zip` into the local one — and everything after it (marking the well fetched, deleting its remote copy) run on `Placer`, not on the transfer thread, so one large well's merge does not hold every later download and remote copy behind it. The queue is bounded (`MAX_PENDING`), since each waiting well holds its download in the local transit directory; a remote copy is still deleted only after its well is in place. `Fetcher.flush_and_join` drains it before the run is reported done. A well with no local CSV or `<well>_out.zip` — one new to this run — has nothing to merge with, so its download is moved into place unchanged (`place_whole`, and `pipeline.io._place_fetched_csv` for the CSV) rather than parsed and rewritten. **A Stop part-way through a download leaves nothing that reads as finished.** The end-of-run retry pulls into the output folder with `--partial-dir=.allwell-partial`, so a cut-off transfer is never under the real name; and a truncated file an earlier build left there (it used `--partial`) is treated as absent wherever it is read: the retry re-pulls a zip that fails `_zip_is_complete` and a CSV that fails `util.csv_gz.csv_is_whole`, `_materialize_incremental` places a download whole over an unreadable local zip, `merge_images_into_zip` writes a whole archive rather than re-reading a corrupt one, and `merge_fetched_csvs` sets an unreadable local `.csv.gz` aside as `.<name>.truncated` (kept, never deleted) and rebuilds the well's CSV from its readable rows plus the download (`_merge_onto_cut_csv`) — a gzip error being the one failure that means a cut-off copy, where an `OSError` still leaves the local file untouched. The readable rows matter because an incremental download holds only the new field groups: placing it alone dropped every earlier group's rows, and the well's done-set, which also reads its `<well>_out.zip`, never computed them again. Only whole groups are kept (`_salvage_cut_csv`): the group the cut fell in is dropped rather than kept short, and unless the download carries that group the loss is written to `errors/<WELL>_local_csv_cut_short.txt` beside the run's own failure records, with an `Exception type:` header and the `--force` remedy, as well as logged. `tests/test_a_slow_merge_does_not_hold_the_next_download.py` drives the real worker loop with a merge that blocks. |
 | `remote_run_state.py` | `_RemoteRun`, the record one remote run carries from staging through fetch, and the two enums in it the user chooses — `LocalInputMode` and `OutputFilter`. Shared by the runner, the process wrappers and the `Fetcher`, so it lives in none of them and none has to import another to reach it. |
@@ -11833,8 +11847,17 @@ finished when:
 - its completeness record in the sidecar's `run_report`, if it has one, says it is
   whole (`run_report.well_is_whole`): a well wound down part way, or with failed
   groups, writes a CSV and a settings record too;
-- for a nanowell well, every timepoint its archive holds finished `ok` in its grid
-  record (`completeness.nanowell_coverage`, the rule Validate uses);
+- for a nanowell well, every timepoint its archive holds has a verdict in its grid
+  record (`completeness.nanowell_coverage`). Not only `ok`, which is Validate's
+  question: an `unaddressed` or `no_lattice` timepoint is the run's verdict on those
+  images, and sending the well alone cannot improve it — it loses the rest of the
+  plate the end-of-run re-anchoring fits from, so a timepoint that pass had anchored
+  came back unaddressed and replaced the better result, on every re-run. Force,
+  which re-runs the plate, is what re-anchors;
+- for a field-mode well whose input lists per well (an archive or a `<WELL>/`
+  folder), its CSV holds every field and timepoint the input holds now
+  (`_field_coverage`, `completeness.coverage_for_well`): a well whose archive gained
+  images since is sent;
 - neither `--force` nor `--force_wells` names it, and it is not an empty-well
   blank.
 
@@ -12878,7 +12901,10 @@ therefore also creates `allwell-cellpose` (`CELLPOSE_ENV_NAME`) with the same
 `env_setup_script` — the same python and scientific stack — and pip-installs
 `requirements-remote-cellpose.txt` into it: Torch 2.4.1, the same Cellpose 4.1.1,
 no TensorFlow or StarDist, which the pipeline imports only inside StarDist's own
-functions. The probe reads it as it reads `allwell` (`CELLPOSE_REQUIRED_IMPORTS`,
+functions. The file holds numpy at conda's 1.24 and opencv below 4.11: with no
+TensorFlow capping it, Cellpose's unbounded opencv requirement otherwise pulled
+numpy 2 under conda's scipy, scikit-image and the pinned imagecodecs, which then
+failed to import. The probe reads it as it reads `allwell` (`CELLPOSE_REQUIRED_IMPORTS`,
 `CELLPOSE_VERSION_PINS`, plus whether its Torch sees a GPU), `install_cellpose_deps`
 installs it with its own markers (`pip_install_script(..., tag="pip_cellpose")`),
 a failure there is a warning rather than the bootstrap's failure, and a re-probe
@@ -12889,11 +12915,19 @@ Which env a run uses is decided per run: `remote_conda.cellpose_env_selector` gi
 a run that segments with Cellpose (`runs_cellpose`: a nanowell run, or a Cellpose
 method) on a host left at the default env the `prefer` selector, and leaves a host
 whose Remote python names an env alone. `prefer` is resolved **on the remote**, by
-the env guard: the Cellpose env when it is a usable environment, `allwell` otherwise
-with a line saying so, and the guard's usual failure when neither is. `conda run -p`
+the env guard: the Cellpose env when it is ready (`aw_cellpose_env_ready`: a valid
+environment, no failed or still-running `pip_cellpose` install, and its python
+finds Cellpose, Torch, pandas, tifffile and imagecodecs — the bootstrap creates the
+env before it installs into it, non-fatally, so an env that merely exists is not
+one a run can import in), `allwell` otherwise with a line saying so, and the guard's usual failure when neither is. `conda run -p`
 then reads the prefix the guard resolved (`remote_transport.AW_PREFIX_ARG`,
 `"$AW_PREFIX"`, the one argument `_remote_quote` passes through unquoted), so a host
-not yet bootstrapped for the Cellpose env still runs, in float32.
+not yet bootstrapped for the Cellpose env still runs, in float32. The precision a
+count ran at (bfloat16 in the Cellpose env on a GPU that computes in it, TF32 or
+float32 otherwise) is in no reuse key — neither `NanowellSettings.key()` nor the
+settings digest — since it depends on the host rather than on the options: a
+half-finished well resumed after a bootstrap installed the Cellpose env holds
+timepoints counted at two precisions, and nothing in its tables says so.
 `tests/test_bootstrap_cellpose_env.py` and `tests/test_remote_cellpose_env.py` hold
 both halves, the second running the guard under bash against a stub conda. Version drift — a package present
 at the wrong pin — is not detected; pip resolves that only when the install

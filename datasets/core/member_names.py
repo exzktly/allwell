@@ -38,6 +38,9 @@ _JUNK_BASENAMES = frozenset({
     ".ds_store", "thumbs.db", "desktop.ini", ".localized",
     ".spotlight-v100", ".trashes", ".fseventsd", ".temporaryitems",
     ".documentrevisions-v100", ".apple_double",
+    # The directories below, met as an entry of their own (``out/.AppleDouble/`` listed beside the wells), and
+    # Finder's custom-icon file, whose name ends in a carriage return.
+    ".appledouble", "__macosx", "icon\r",
 })
 _JUNK_DIRECTORIES = frozenset({"__macosx", ".appledouble", ".spotlight-v100"})
 

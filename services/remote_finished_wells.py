@@ -20,8 +20,12 @@ This is that step for a remote run, asked once, before staging, with the pipelin
   down part way, or with failed groups, writes a CSV and a settings record too;
 * **a forced well is never finished**, nor is any well under ``--force``, and an incremental run decides per field
   in staging instead, so it gets nothing from here;
-* **a nanowell well is finished only when its tables cover every timepoint its archive holds** — each finished
-  ``ok`` in its grid record (``pipeline.completeness.nanowell_coverage``). A remote nanowell run cannot add a well's
+* **a field-mode well is finished only when its CSV holds every field and timepoint its input holds now**
+  (``_field_coverage``), so a well whose archive gained fields or timepoints since is sent;
+* **a nanowell well is finished only when its tables cover every timepoint its archive holds** — each with a
+  verdict in its grid record (``pipeline.completeness.nanowell_coverage``). Reached is enough: an ``unaddressed``
+  or ``no_lattice`` timepoint is the run's verdict on those images, which sending the well alone cannot change,
+  and alone it loses the plate the end-of-run re-anchoring fits from; only Force, re-running the plate, can. A remote nanowell run cannot add a well's
   missing timepoints to its earlier tables (the host never has them), so a well short of any — left part way by a
   run that stopped, or given new timepoints since — is not finished: it is sent whole and analysed again in full,
   and the runner forces it (``nanowell_forced``) so an earlier attempt's output on the host cannot stand in for it;
@@ -65,7 +69,7 @@ def finished_here(output_dir: Path, pipeline_argv: Sequence[str], wells: Iterabl
     never = _canonical_force_wells(args.force_wells) | {canonical_well_label(w) or w for w in keep}
     prefix = args.csv_prefix or "measurements"
     records = _completeness_records(output_dir)
-    covered = _nanowell_coverage(output_dir, args) if args.nanowell_format else None
+    covered = _nanowell_coverage(output_dir, args) if args.nanowell_format else _field_coverage(output_dir, args)
     out = []
     for well in wells:
         label = canonical_well_label(well) or well
@@ -73,7 +77,7 @@ def finished_here(output_dir: Path, pipeline_argv: Sequence[str], wells: Iterabl
             continue
         csv = existing_csv(Path(output_dir) / f"{prefix}_{label}.csv")
         if (csv is not None and csv.stat().st_size > 0 and well_settings_allow_reuse(output_dir, label, key)
-                and _whole(records.get(label)) and (covered is None or covered(label))):
+                and _whole(records.get(label)) and covered(label)):
             out.append(label)
     return out
 
@@ -162,9 +166,9 @@ def argv_forcing(pipeline_argv: Sequence[str], wells: Iterable[str]) -> list[str
 
 
 def _nanowell_coverage(output_dir: Path, args):
-    """``covered(well)`` for a nanowell run: whether every timepoint of the well's archive in ``--input_dir`` is
-    finished ``ok`` in its grid record — the rule the Validate tool and the end-of-run scan use
-    (``pipeline.completeness.nanowell_coverage``). Anything unreadable is not covered."""
+    """``covered(well)`` for a nanowell run: whether the run reached every timepoint of the well's archive in
+    ``--input_dir`` — its grid record holds a verdict for each (``pipeline.completeness.nanowell_coverage``, whose
+    ``ok``-only count is Validate's question, not this one). Anything unreadable is not covered."""
     from pipeline.completeness import nanowell_coverage
     from util.well_token import well_archives
 
@@ -183,13 +187,67 @@ def _nanowell_coverage(output_dir: Path, args):
         cov = nanowell_coverage(well, in_members=members, grid_path=out / "nanowells" / f"{well}_grid.json",
                                 sites_path=out / "nanowells" / f"{well}.csv", has_out_zip=True,
                                 schema=args.filename_schema, sep=args.filename_sep, skip_hidden=True)
+        # Reached, not only ok: a timepoint the run recorded a verdict for (unaddressed, no lattice, a bad grid…) is
+        # a verdict on its images under these settings, which sending the well alone cannot change — and a well
+        # sent alone loses the rest of the plate the end-of-run re-anchoring fits from, so a timepoint that pass
+        # had anchored came back unaddressed and replaced the better result, on every re-run. Only a timepoint
+        # with no verdict at all (the run never reached it) makes the well unfinished.
+        reached = {tp for tp, _status in cov.not_addressed}
+        return cov.intent > 0 and all(tp in reached for _fov, tp in cov.missing)
+
+    return covered
+
+
+def _field_coverage(output_dir: Path, args):
+    """``covered(well)`` for a field-mode run: whether the well's CSV holds every ``(fov, timepoint)`` its input
+    holds now (``pipeline.completeness.coverage_for_well``, from the CSV alone, as the CSV is what this check reads).
+    A well whose archive gained a field or a timepoint since — a re-export, a Concatenate in place — is not
+    finished, and is sent. A well whose input cannot be listed per well (loose images at the input's top level) is
+    decided by the other checks alone, as before; images replaced under the same names are not seen here, as a
+    local run does not see them either."""
+    from pipeline.completeness import coverage_for_well
+    from pipeline.incremental_keys import read_done_fov_keys
+    from util.csv_gz import existing_csv
+    from util.well_token import well_archives
+
+    out = Path(output_dir)
+    where = _wells_directory(Path(args.input_dir))
+    archives = {canonical_well_label(p.stem): p for p in well_archives(where)}
+    prefix = args.csv_prefix or "measurements"
+    schema, sep = args.filename_schema, args.filename_sep
+    fields = schema.split(":") if isinstance(schema, str) else list(schema)
+
+    def members_of(well: str):
+        archive = archives.get(well)
+        if archive is not None:
+            try:
+                with zipfile.ZipFile(archive) as zf:
+                    return [Path(n).name for n in zf.namelist()], True
+            except (OSError, zipfile.BadZipFile):
+                return None, True
+        folder = where / well
+        if folder.is_dir():
+            return [p.name for p in folder.iterdir() if p.is_file()], True
+        return None, False
+
+    def covered(well: str) -> bool:
+        members, listable = members_of(well)
+        if not listable:
+            return True
+        if members is None:
+            return False
+        csv = existing_csv(out / f"{prefix}_{well}.csv")
+        keys = read_done_fov_keys(csv) if csv is not None else set()
+        cov = coverage_for_well(well, in_members=members, csv_keys=keys, csv_state="ok", out_zip=None,
+                                out_folder=None, schema=schema, sep=sep, fov_field_present="fov" in fields,
+                                skip_hidden=True)
         return cov.intent > 0 and not cov.missing
 
     return covered
 
 
 def _wells_directory(input_dir: Path) -> Path:
-    """Where a nanowell plate's archives are: ``<input>/in`` when that exists, else the input itself."""
+    """Where a plate's well archives (or per-well folders) are: ``<input>/in`` when that exists, else the input."""
     return input_dir / "in" if (input_dir / "in").is_dir() else input_dir
 
 

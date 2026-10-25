@@ -480,14 +480,21 @@ class AnalyzeNanowellSectionMixin:
         named = d.get("nanowell_segment_on") if "nanowell_segment_on" in d else SEGMENT_ON_CHOICES[0][0]
         self._nanowell_segment_on_cb.setCurrentIndex(
             max(self._nanowell_segment_on_cb.findData(str(named or LEGACY_SEGMENT_ON)), 0))
-        # And for how much of a tile it is given: a run that named none segmented whole tiles.
-        named = d.get("nanowell_segment_scope") if "nanowell_segment_scope" in d else SEGMENT_SCOPE_CHOICES[0][0]
+        # And for how much of a tile it is given: a nanowell run that named none segmented whole tiles. The flag
+        # was born defaulting to "nanowells", so every run since records it and an absent key is an older run;
+        # only a dataset that was not analysed as arrays starts on the default.
+        named = (d.get("nanowell_segment_scope") or LEGACY_SEGMENT_SCOPE if plate_format
+                 else SEGMENT_SCOPE_CHOICES[0][0])
         self._nanowell_segment_scope_cb.setCurrentIndex(
             max(self._nanowell_segment_scope_cb.findData(str(named or LEGACY_SEGMENT_SCOPE)), 0))
         # And for the resize: absent or None is a run that resized to the cell diameter, every run's default.
         self._nanowell_resize_cb.setCurrentIndex(
             max(self._nanowell_resize_cb.findData(str(d.get("nanowell_resize") or RESIZE_CHOICES[0][0])), 0))
         self._nanowell_registration_edit.setText(str(d.get(REGISTRATION_FROM_KEY) or ""))
+        if d.get("nanowell_cell_diameter_um") not in (None, ""):
+            # A size the dataset states is a size already set: the carry-over from the pixel diameter must not
+            # replace it, even when it reads as the prefilled value.
+            self._nanowell_size_typed = True
         self._refresh_nanowell_custom()
 
     def _nanowell_validation_error(self, *, check_input: bool, for_run: bool = True) -> str | None:

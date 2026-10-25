@@ -1734,11 +1734,13 @@ class PipelineRunner:
         part way, or the one well in Force wells. A batched run already
         suppresses it per batch and re-runs it here
         (``remote_process.run_local_auto_threshold``); this does the same for a
-        single-shot run with wells left out (``up_to_date_wells``) or an
-        incremental split. ``None`` too when the user turned the pass off."""
+        single-shot run with wells left out (``up_to_date_wells``), an
+        incremental split, or a ``--only_wells`` subset. ``None`` too when the user turned the pass off."""
         if int(opts.get("remote_batch_size", 0) or 0) > 0 or "--no_auto_threshold" in args:
             return None
-        if not (zipped.incremental or zipped.up_to_date_wells):
+        # A --only_wells subset is part of a plate too, whether or not any well of it is finished here (staging
+        # narrows up_to_date_wells to the named wells, so that test alone missed it).
+        if not (zipped.incremental or zipped.up_to_date_wells or opts.get("only_wells")):
             return None
         return list(args)
 

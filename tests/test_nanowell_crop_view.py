@@ -74,6 +74,17 @@ def test_clearing_the_selection_leaves_the_crop_view(page, qtbot, known_crops): 
     qtbot.mouseClick(page.widgets.get("_nw_clear_btn"), Qt.LeftButton)
     st = page.state.feature_slice("nanowell")
     assert st.selected_sites == [] and st.crop_view is False and _grid_images(page) == []
+    button = page.widgets.get("_nw_crops_btn")
+    assert button.text() == "Enlarge crops" and not button.isChecked()   # one press enlarges again
+
+
+def test_a_new_dataset_opens_on_the_view_not_the_crop_view():
+    from review.features.nanowell.state import NanowellState
+
+    st = NanowellState()
+    st.crop_view = True
+    st.reset_data()
+    assert st.crop_view is False
 
 
 def test_a_click_on_the_crop_view_selects_nothing(page, qtbot, known_crops):  # noqa: F811

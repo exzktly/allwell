@@ -336,16 +336,20 @@ def _best_slot(cols, pred, used: set[int]) -> int | None:
 
 
 def _pick_channel_slot(cols, used: set[int], tile_slots: tuple[int, ...] = ()) -> int | None:
-    """The unused slot that reads as a small alphabetic categorical set and is the channel: one that takes more than
-    one value within a single tile, if any does; then the fewest distinct values, leftmost on a tie.
+    """The unused slot that reads as a small alphabetic categorical set and is the channel: the one with the fewest
+    distinct values; on a tie, one that takes more than one value within a single tile; then the leftmost.
 
-    **Within a tile first.** A tile — one well, field and timepoint (*tile_slots*) — is imaged once per channel, so
+    **Within a tile breaks a tie, and only a tie.** A tile — one well, field and timepoint (*tile_slots*) — is imaged once per channel, so
     the channel slot changes inside it, while an experiment prefix is the same for every image of a tile. Fewest-
     distinct alone could not tell them apart once a plate held two prefixes: a concatenation of two acquisitions,
     each named by its own run, reads ``expA``/``expB`` against ``PHASE``/``GFP``, two values each, and the leftmost —
     the prefix — was taken for the channel, confidently, so no image matched its channel token and the run found
-    "no image groups". When no slot varies within a tile (a single-channel plate, or no tile slots found), the rule
-    below decides alone.
+    "no image groups". It cannot rank ahead of fewest-distinct: the names are a sample (:func:`_zip_stems_in` takes
+    a strided few from each archive), and a slot no predicate claims — ImageXpress's ``s<n>`` site — also changes
+    within a tile. On a per-well zip of 4 sites by 3 channels the stride equalled the channel count, every sampled
+    name of a well had one channel, and the site slot, varying within the tile, was taken for the channel,
+    confidently. Two prefixes that outnumber the channels therefore still win; only the tie, the reported
+    two-against-two concatenation, is decided by the tile.
 
     Fewest-distinct rather than leftmost outright: a plate has more wells than
     channels, so on any layout where both slots survive the earlier passes the
@@ -362,7 +366,7 @@ def _pick_channel_slot(cols, used: set[int], tile_slots: tuple[int, ...] = ()) -
             continue
         if not all(_HAS_ALPHA_RE.search(v) for v in distinct):
             continue
-        candidates.append((not _varies_within_a_tile(cols, i, tile_slots), len(distinct), i))
+        candidates.append((len(distinct), not _varies_within_a_tile(cols, i, tile_slots), i))
     return min(candidates)[2] if candidates else None
 
 

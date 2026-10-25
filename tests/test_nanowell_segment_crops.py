@@ -234,6 +234,25 @@ def test_a_run_s_count_is_scaled_by_its_nanowells_interiors_and_an_earlier_run_s
         nr.NanowellSettings("100um", segment_scale="percentile")
 
 
+def test_a_nanowell_crowded_with_cells_keeps_its_floor_under_levelling():
+    """A plate seeded at about twenty cells per nanowell has nanowells more than half covered by cells, whose interior
+    median is the cells' level, not the floor's. Levelled by that median, such a nanowell's bare floor was moved by
+    the cell-to-floor contrast; levelled by its modal floor it stays where the others' is."""
+    from pipeline.nanowell_measure import INTERIOR_FRACTION
+
+    tile, px, geoms = _rimmed_tile()
+    yy, xx = np.mgrid[:200, :200]
+    inside = np.hypot(xx - 50.0, yy - 50.0) <= 22.0 * INTERIOR_FRACTION
+    rng = np.random.default_rng(0)
+    crowded = inside & (xx < 50.0 + 0.35 * 22.0)                                # ~60 % of the first nanowell
+    assert crowded.sum() > 0.5 * inside.sum()
+    tile = tile.copy()
+    tile[crowded] = rng.uniform(60.0, 90.0, crowded.sum())                       # dark, textured cells
+    seen, _range = nm.segmenter_scale(tile, px, geoms, "levelled")
+    bare = inside & ~crowded & (np.hypot(xx - 55.0, yy - 50.0) > 4.5)           # the crowded nanowell's bare floor
+    assert np.median(seen[bare]) == pytest.approx(seen[150, 140], abs=1.0)      # level with another's floor (100)
+
+
 def test_a_bright_nanowell_is_levelled_to_the_others_before_the_pooled_range():
     """Reported: on brightfield, the nanowells counted empty were often the brightest. Under the pooled interior
     range (``nanowells``) a bright nanowell either lies above the range (a rare one: the segmenter is given values it
@@ -256,3 +275,37 @@ def test_a_bright_nanowell_is_levelled_to_the_others_before_the_pooled_range():
     assert (seen[50, 55] - seen[50, 50]) / (hi2 - lo2) > 0.9              # and so do the others' cells
     with pytest.raises(ValueError, match="segmenter scale"):
         nm.segmenter_scale(tile, px, geoms, "percentile")
+
+
+def test_a_cell_near_a_neighbour_s_rim_is_counted_once_where_crops_overlap():
+    """At a pitch under about 2.4 radii a nanowell's crop (1.2 radii) reaches into its neighbour's counting circle
+    (0.9 radii). The part of the neighbour's cell it saw was pasted first, kept those pixels from the cell's own
+    crop, and the cell was counted twice; the whole tile counts it once. A crop now answers only for objects outside
+    every other nanowell's counting circle."""
+    from scipy import ndimage
+
+    image = np.full((100, 200), 100.0)
+    yy, xx = np.mgrid[:100, :200]
+    geoms = [SiteGeometry(0, (56.5, 50.5), 22.0, FITTED, 0.2, 64), SiteGeometry(1, (100.5, 50.5), 22.0, FITTED, 0.2, 64)]
+    image[np.hypot(xx - 83, yy - 50) <= 4] = 40.0                  # one cell in the second nanowell, toward the first
+    seg = lambda crop: ndimage.label(crop < 70)[0]                 # noqa: E731
+    crops = nm.count_cells(nm.segment_sites(image, 1.0, geoms, seg), 1.0, geoms, owned={0, 1})
+    tile = nm.count_cells(nm.segment_tile(image, seg), 1.0, geoms, owned={0, 1})
+    assert {i: c.n_cells for i, c in crops.items()} == {i: c.n_cells for i, c in tile.items()} == {0: 0, 1: 1}
+
+
+def test_a_crop_is_segmented_with_cellpose_s_area_cap_lifted_and_a_tile_is_not():
+    seen = []
+
+    def seg(image, lowhigh=None, max_size_fraction=None):
+        seen.append(("one", max_size_fraction))
+        return np.zeros(np.asarray(image).shape, np.int64)
+
+    def many(images, lowhigh, max_size_fraction=None):
+        seen.append(("many", max_size_fraction))
+        return [np.zeros(np.asarray(im).shape, np.int64) for im in images]
+    seg.accepts_range, seg.accepts_size_cap, seg.segment_many = True, True, many
+    image = np.full((120, 160), 100.0)
+    nm.segment_sites(image, 1.0, _sites([(30.5, 30.5), (90.5, 60.5)]), seg)
+    nm.segment_tile(image, seg, lowhigh=(0.0, 200.0))
+    assert seen == [("many", 1.0), ("one", None)]

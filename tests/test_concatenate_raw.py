@@ -476,3 +476,29 @@ def test_dataset_2_s_images_are_verified_in_a_mixed_merge_too(tmp_path, monkeypa
     monkeypatch.setattr(apply, "_verify_raw", lambda plan, dropped: (calls.append(plan.ds2_raw), real(plan, dropped)))
     _merge(tmp_path, gap_hours=24.0)
     assert calls == [True]
+
+
+@pytest.mark.parametrize("debris", [".AppleDouble", "__MACOSX", "Icon\r"])
+def test_netatalk_and_finder_debris_in_out_leaves_a_plate_raw(tmp_path, debris):
+    # netatalk/AFP shares write .AppleDouble/, unzipping on a Mac leaves __MACOSX/, and a custom folder icon is a
+    # file named "Icon\r". None is analysis output.
+    _raw(tmp_path / "d1", timepoints=["0h"])
+    (tmp_path / "d1" / "out").mkdir()
+    target = tmp_path / "d1" / "out" / debris
+    if debris == "Icon\r":
+        target.write_bytes(b"")
+    else:
+        target.mkdir()
+    assert is_raw_dataset(tmp_path / "d1") is True
+
+
+def test_a_destination_holding_only_finder_debris_is_still_empty(tmp_path):
+    from datasets.core.dataset_paths import DatasetPaths, destination_has_content
+
+    root = tmp_path / "dest"
+    dest = DatasetPaths(root, root / "in", root / "out")
+    dest.in_dir.mkdir(parents=True)
+    (dest.in_dir / ".DS_Store").write_bytes(b"\0\0\0\1Bud1")
+    assert destination_has_content(dest) is False
+    (dest.in_dir / "A01.zip").write_bytes(b"")
+    assert destination_has_content(dest) is True

@@ -568,14 +568,16 @@ def _inner_area_owns_drag(w: QWidget) -> bool:
     """*w* is a scroll area that scrolls by a drag of its own and has range to
     scroll — so a drag starting in it is its, not the page's around it. One
     with nothing to scroll leaves the drag to the page, so a short log does not
-    become a dead spot to swipe the page from."""
+    become a dead spot to swipe the page from. Only vertical range counts: a
+    page drag is vertical, so an unwrapped log with long lines and few rows
+    must not take it."""
     from PySide6.QtWidgets import QAbstractScrollArea
     # Read from :func:`set_drag_scroll`'s own mark: Qt's ``hasScroller`` and
     # ``grabbedGesture`` both still answer yes after ``ungrabGesture``.
     if not isinstance(w, QAbstractScrollArea) or not w.viewport().property(_P_DRAG_SCROLL):
         return False
-    return any(bar.maximum() > bar.minimum()
-               for bar in (w.verticalScrollBar(), w.horizontalScrollBar()))
+    bar = w.verticalScrollBar()
+    return bar.maximum() > bar.minimum()
 
 
 def _plate_owns_drag(w: QWidget) -> bool:

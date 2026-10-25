@@ -88,7 +88,7 @@ _POSITIONS_TIP = ("Measured: where the run found each nanowell, over the image, 
                   "Lattice: each nanowell at its address on an ideal lattice, so it keeps its place from one "
                   "timepoint to the next even when the plate was put back rotated.")
 _LAYERS_TIP = "Turn the Array view's elements on and off, colour the nanowells, or set them all from a preset."
-_OVERLAYS_TIP = ("Show or hide every coloured overlay at once — the nanowells, the tiles and the anchor — to see the "
+_OVERLAYS_TIP = ("Show or hide every coloured overlay at once — the nanowells, the tiles, the anchor and the cells — to see the "
                  "image beneath. The Layers menu's choices are kept: showing them again restores exactly those.")
 _ZOOM_TIP = ("How far the view is zoomed against Fit. The wheel zooms about the pointer (over VNC from a phone, a "
              "two-finger swipe); − and + zoom about the centre.")

@@ -184,18 +184,21 @@ def test_a_count_line_splits_a_nanowell_s_time_between_cellpose_s_network_its_ma
     logger.addHandler(handler)
     old = logger.level
     logger.setLevel(logging.INFO)
-    monkeypatch.setattr(cp, "CELLPOSE_SECONDS", {"network": 100.0, "masks": 50.0})   # an earlier timepoint's
+    monkeypatch.setattr(cp, "CELLPOSE_SECONDS", {"network": 100.0, "masks": 50.0, "timed": 500.0})  # earlier
+    # Cellpose times only a call of several images: of the 100 nanowells, 80 went through such calls and 20 through
+    # lone ones it does not time, so the per-nanowell share is over the 80, not the 100.
     times = iter([0.0, 240.0])
     try:
         _log_sites("D04", "0h", 0, 1000, clock=lambda: next(times))
         cp.CELLPOSE_SECONDS["network"] += 20.0
         cp.CELLPOSE_SECONDS["masks"] += 200.0
+        cp.CELLPOSE_SECONDS["timed"] += 80.0
         _log_sites("D04", "0h", 100, 1000, clock=lambda: next(times))
     finally:
         logger.removeHandler(handler)
         logger.setLevel(old)
     assert seen[1] == ("Well D04 — 0h: 100/1000 nanowells segmented (2.4 s each, about 36 min 0 s left; per "
-                       "nanowell, Cellpose's network 0.20 s, its masks 2.00 s)")
+                       "nanowell, Cellpose's network 0.25 s, its masks 2.50 s)")
 
 
 def test_before_a_timepoint_is_measured_the_run_says_the_scale_cellpose_sees_it_at():

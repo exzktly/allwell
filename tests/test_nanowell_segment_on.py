@@ -137,6 +137,13 @@ def test_the_form_s_segment_choice_reaches_the_run_and_test_detection_and_a_side
     assert combo.currentData() == "nanowells"
     tab._apply_nanowell_settings({"nanowell_format": "100um", "nanowell_segment_scope": None})
     assert combo.currentData() == "tile"                                 # a run that did not choose
+    combo.setCurrentIndex(combo.findData("nanowells"))
+    # A sidecar from before the flag has no key at all (it is vars(args), and the flag was born defaulting to
+    # "nanowells", so no real sidecar holds None): that run segmented whole tiles too.
+    tab._apply_nanowell_settings({"nanowell_format": "100um", "nanowell_segment_on": "rim",
+                                  "nanowell_cellpose_model": "cyto3"})
+    assert combo.currentData() == "tile"
+    assert _flag(_argv(tab), "--nanowell_segment_scope") == "tile"
     tab._nanowell_cb.setChecked(False)
     assert not combo.isEnabled()
 
@@ -257,3 +264,19 @@ def test_the_cell_diameter_is_disabled_while_resize_is_none(tab):  # noqa: F811
     tab._nanowell_cb.setChecked(False)
     tab._nanowell_cb.setChecked(True)
     assert not edit.isEnabled()                                          # still None: still unused
+
+
+def test_a_restored_cell_size_equal_to_the_prefill_is_not_replaced_by_the_carried_pixel_diameter(tab, tmp_path):  # noqa: F811
+    """A size the dataset states is a size already set, even when it reads as the prefilled 19.5: switching the
+    mode off and on must not convert the px diameter over it."""
+    from tests.test_nanowell_form import _plate
+
+    root, _ = _plate(tmp_path)
+    tab._input_edit.setText(str(root))
+    tab._cellpose_diameter_edit.setText("30")
+    tab._nanowell_cb.setChecked(True)
+    tab._apply_nanowell_settings({"nanowell_format": "100um", "nanowell_cell_diameter_um": 19.5})
+    assert tab._nanowell_cell_diameter_edit.text() == "19.5"
+    tab._nanowell_cb.setChecked(False)
+    tab._nanowell_cb.setChecked(True)
+    assert tab._nanowell_cell_diameter_edit.text() == "19.5"

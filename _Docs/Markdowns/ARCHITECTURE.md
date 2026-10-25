@@ -427,7 +427,14 @@ gesture were there, where grabbed blindly it neither selected wells nor scrolled
 `tests/test_phone_form_swipe.py`). A report-only plate
 (`WellPlateSelector.isReportOnly`, the run dashboard's) selects nothing and does
 not keep the drag (`_plate_owns_drag`), so Analyze's Progress page, most of which
-is that plate, scrolls from anywhere on it. **Plot pages scroll by a swipe on the plot** too
+is that plate, scrolls from anywhere on it. A drag that starts inside a scroll
+area of its own that also scrolls by a drag and has range to scroll — a log on
+Analyze's Progress page or on a Datasets tool page — is left to that area
+(`_inner_area_owns_drag`, which reads the `_awDragScroll` property
+`set_drag_scroll` sets, because Qt's `hasScroller` and `grabbedGesture` still
+answer yes after `ungrabGesture`). Without it both viewports accept the gesture
+and the page's wins, so a swipe on the log moved the page and not the log. A log
+with nothing to scroll leaves the drag to the page. **Plot pages scroll by a swipe on the plot** too
 (`PhoneShell._swipe_plot_area`, run from `size_canvas` — so on the switch, on Show
 and from the sweep, and a plot built later gets it): the scroll area holding a
 canvas on a page `band_roots` names grabs the gesture, and gives it back at the

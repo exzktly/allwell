@@ -26,6 +26,7 @@ from pipeline import nanowell_measure as nm
 from pipeline import nanowell_run as nr
 from pipeline.run_report import withdraw_seal
 from util.csv_gz import existing_csv
+from util.timepoint import parse_hours
 
 log = logging.getLogger("allwell.nanowell")
 
@@ -305,6 +306,43 @@ def _tile_index(groups, parse, schema, sep) -> dict:
     return index
 
 
+def timepoint_hours(token) -> float:
+    """A timepoint token in hours, as the per-field path writes ``timepoint_hours``.
+
+    The same rule as ``process_microscopy.parse_filename``: an empty token is ``0.0`` (a single-timepoint
+    plate whose filenames carry none), a token :func:`util.timepoint.parse_hours` cannot read is ``nan``, and
+    Review then falls back to the ``timepoint`` label for that row. Without this column every Review view that
+    selects cells by ``timepoint_hours`` — the per-cell scatter among them — found no cell on a nanowell plate,
+    while the views that parse the label went on drawing.
+    """
+    text = "" if token is None else str(token)
+    if not text.strip():
+        return 0.0
+    hours = parse_hours(text)
+    return float("nan") if hours is None else float(hours)
+
+
+def with_timepoint_hours(row: dict) -> dict:
+    """*row* with ``timepoint_hours`` beside ``timepoint``, derived from it when the row has none.
+
+    An incremental run writes rows read back from the previous run's CSV beside this run's, in one table whose
+    header is taken from its first row (``pipeline/io._write_single_csv``); a kept row from a CSV written before
+    the column existed would otherwise either lack it or, ahead of a new row, make the writer refuse the new one.
+    """
+    if row.get("timepoint_hours") not in (None, ""):
+        return row
+    out = {}
+    for key, value in row.items():
+        if key == "timepoint_hours":
+            continue
+        out[key] = value
+        if key == "timepoint":
+            out["timepoint_hours"] = timepoint_hours(value)
+    if "timepoint_hours" not in out:
+        out["timepoint_hours"] = timepoint_hours(row.get("timepoint"))
+    return out
+
+
 def cell_records(outcome: nr.WellOutcome, well: str, fluor_tokens, px_by_tp: dict) -> list[dict]:
     """The per-cell rows the existing CSV schema carries, plus the ``nw_*`` columns (§3.7).
 
@@ -316,7 +354,8 @@ def cell_records(outcome: nr.WellOutcome, well: str, fluor_tokens, px_by_tp: dic
     rows = []
     for k in range(n):
         tp = cells["timepoint"][k]
-        row = {"well": well, "fov": cells["fov"][k], "timepoint": tp, "nucleus_id": cells["label"][k],
+        row = {"well": well, "fov": cells["fov"][k], "timepoint": tp, "timepoint_hours": timepoint_hours(tp),
+               "nucleus_id": cells["label"][k],
                "area_px": cells["area_um2"][k] / px_by_tp[tp] ** 2}
         for token in fluor_tokens:
             value = cells.get(f"mean_{token}", [None] * n)[k]
@@ -329,7 +368,7 @@ def cell_records(outcome: nr.WellOutcome, well: str, fluor_tokens, px_by_tp: dic
 
 def cell_columns(fluor_tokens) -> list[str]:
     """The per-cell CSV's columns, in the order :func:`cell_records` writes them."""
-    return (["well", "fov", "timepoint", "nucleus_id", "area_px"] + [f"{t}_mean_intensity" for t in fluor_tokens]
+    return (["well", "fov", "timepoint", "timepoint_hours", "nucleus_id", "area_px"] + [f"{t}_mean_intensity" for t in fluor_tokens]
             + ["nw_q", "nw_r", "nw_ring", "nw_label", "well_x_um", "well_y_um"])
 
 
@@ -429,7 +468,7 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
     # A finished well's CSV is gzipped (``write_well_csv``): either spelling, plain winning (``util/csv_gz``).
     cells_path = existing_csv(Path(prior_dir) / f"{csv_prefix}_{well_label}.csv")
     sites = [r for r in _read_rows(sites_path) if r["timepoint"] in kept]
-    cells = [r for r in _read_rows(cells_path) if r["timepoint"] in kept]
+    cells = [with_timepoint_hours(r) for r in _read_rows(cells_path) if r["timepoint"] in kept]
     return {"grid": grid, "kept": kept, "sites": sites, "cells": cells,
             "order": {tp: k for k, tp in enumerate(timepoints)}}
 

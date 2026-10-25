@@ -222,6 +222,28 @@ def test_an_incremental_run_adds_only_the_new_timepoint_onto_the_same_roster(tmp
     assert located_calls["locate"] == [] and located_calls["measure"] == []                 # up to date
 
 
+def test_an_incremental_run_over_a_csv_without_timepoint_hours_writes_it_for_every_row(tmp_path, monkeypatch):
+    """A CSV from a run before the per-cell table carried ``timepoint_hours``: the kept timepoint's rows are read
+    back without it and written ahead of the new timepoint's, in one table whose header comes from its first row."""
+    plate, _record, _ = _two_timepoint_plate(tmp_path, with_second=False, cell=True)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--fluor_tokens", "GFP")
+    old = [{k: v for k, v in row.items() if k != "timepoint_hours"} for row in _cells(out)]
+    assert old and "timepoint_hours" not in old[0]
+    with gzip.open(out / f"measurements_{WELL}.csv.gz", "wt", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(old[0]))
+        writer.writeheader()
+        writer.writerows(old)
+
+    plate2, record2, _ = _two_timepoint_plate(tmp_path / "second", cell=True)
+    (plate / "in" / f"{WELL}.zip").write_bytes((plate2 / "in" / f"{WELL}.zip").read_bytes())
+    write_record_file(plate / "in" / "acquisition.json", record2)
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental")
+    cells = _cells(out)
+    assert {(c["timepoint"], float(c["timepoint_hours"])) for c in cells} == {("0h", 0.0), ("24h", 24.0)}
+    header = list(cells[0])
+    assert header[header.index("timepoint") + 1] == "timepoint_hours"
+
+
 def test_a_changed_setting_or_a_changed_record_recomputes_the_timepoint(tmp_path, monkeypatch, located_calls):
     plate, record, _ = _two_timepoint_plate(tmp_path)
     out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--fluor_tokens", "GFP")
@@ -253,7 +275,7 @@ def test_a_well_with_no_cells_still_has_its_cell_csv_so_it_reads_as_finished(tmp
     plate = _write_plate(tmp_path, rendered, record)
     out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", run_check=True)
     lines = gzip.open(out / f"measurements_{WELL}.csv.gz", "rt").read().splitlines()   # gzipped, even empty
-    assert len(lines) == 1 and lines[0].startswith("well,fov,timepoint,nucleus_id,area_px,PHASE_mean_intensity,GFP_mean_intensity,nw_q")
+    assert len(lines) == 1 and lines[0].startswith("well,fov,timepoint,timepoint_hours,nucleus_id,area_px,PHASE_mean_intensity,GFP_mean_intensity,nw_q")
     sites = _rows(out, f"{WELL}.csv")
     assert sites and all(r["n_cells"] == "0" for r in sites if r["state"] == "empty")
     info = json.loads((out / "pipeline_info.json").read_text())

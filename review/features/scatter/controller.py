@@ -154,9 +154,8 @@ def redraw_scatter(
         return
 
     # ``render_scatter_points`` owns the solid / density / color-by-time branch,
-    # returning the click-interaction points and the legend handles. Density mode,
-    # log state and marker size are this figure's own Properties settings, re-read
-    # each redraw: an edit there restyles only the plot it was made on.
+    # returning the click-interaction points and the legend handles. Density mode and
+    # log state are this figure's own Properties settings, re-read each redraw.
     prefs = figure_prefs(ctx, scatter_fig)
     density_on = bool(prefs.get("scatter_density", False))
     interaction_points, legend_handles = render_scatter_points(

@@ -10873,7 +10873,7 @@ panel's full metrics under it (`render_crop_grid(…, metrics=…)`, `controller
 each crop took more of the figure than the crops did, and three lines over a crop covered the lower third of the
 nanowell, where the cells are. **The layout is computed in inches** (`_extremes_layout`), the panels placed with
 `fig.add_axes`: the Largest and Smallest blocks side by side or one above the other, whichever gives the larger
-square crops, centred both ways. A crop under `_EXT_MIN_SIDE_WITH_METRICS` (0.6 in) writes its fold change only,
+square crops, centred both ways. The view's **Metrics** box (`NanowellState.crop_metrics`, persisted, on by default; `controller.set_crop_metrics`) shows or hides all of that text, leaving the crops bare while the row labels keep the ranking. A crop under `_EXT_MIN_SIDE_WITH_METRICS` (0.6 in) writes its fold change only,
 and the caption says how to read the rest. It returns `{axes: site}`, kept on `st.extreme_axes`, and `on_click` selects the
 row's nanowell (Shift adds), which opens the site detail. The crops of the nanowells not yet in `st.crops` are
 read in one worker fetch (`_fetch(…, deliver=…)` merges the result into `st.crops`, the store the site detail

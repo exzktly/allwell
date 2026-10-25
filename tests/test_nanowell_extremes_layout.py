@@ -148,3 +148,36 @@ def test_the_chosen_timepoints_are_kept_with_the_page_s_settings():
     st = NanowellState()
     st.apply_config({"extremes_tps": ["t_c", "t_d", 3]})
     assert st.extremes_tps == ["t_c", "t_d"] and st.to_config()["extremes_tps"] == ["t_c", "t_d"]
+
+
+def test_the_metrics_box_shows_and_hides_the_numbers_on_the_crops(page, qtbot):  # noqa: F811
+    from PySide6.QtCore import Qt
+
+    _choose_extremes(qtbot, page)
+    nwc.set_extremes_timepoints(page, ["t_d"])                                # one column: crops large enough
+
+    def on_crops(gid):
+        return [t.get_text() for ax in page.widgets.get("_nw_fig").axes for t in ax.texts if t.get_gid() == gid]
+
+    assert on_crops("nw-extremes-value") and on_crops("nw-extremes-metrics")    # shown by default
+    box = page.widgets.get("_nw_extremes_metrics_box")
+    qtbot.waitUntil(lambda: box.isVisible() and box.width() > 0, timeout=5000)
+    qtbot.mouseClick(box, Qt.LeftButton)
+    st = page.state.feature_slice("nanowell")
+    assert st.crop_metrics is False and st.to_config()["crop_metrics"] is False
+    assert on_crops("nw-extremes-value") == [] and on_crops("nw-extremes-metrics") == []
+    assert _fig_texts(page, "nw-extremes-row")                                 # the ranking is still labelled
+    assert len(on_crops("nw-extremes-missing")) == 0 and page.state.feature_slice("nanowell").extreme_axes
+    qtbot.mouseClick(box, Qt.LeftButton)
+    assert on_crops("nw-extremes-value") and on_crops("nw-extremes-metrics")
+
+
+def test_the_metrics_setting_defaults_on_and_is_restored():
+    from review.features.nanowell.state import NanowellState
+
+    st = NanowellState()
+    assert st.crop_metrics is True
+    st.apply_config({"crop_metrics": False})
+    assert st.crop_metrics is False
+    st.apply_config({})
+    assert st.crop_metrics is True

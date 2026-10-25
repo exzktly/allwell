@@ -5098,7 +5098,8 @@ use them.
 - **Well**, **Timepoint** and **Largest & smallest** (on *Extremes*) — the well whose nanowells are ranked, the
   timepoint they are ranked at (the well's latest by default), and how many each block shows (1 to 12, 5 by
   default). **Timepoints** chooses which of the well's timepoints the montage shows (all by default), and
-  **Cells** draws the cells the run counted on every crop (see *Site detail*).
+  **Cells** draws the cells the run counted on every crop (see *Site detail*); **Metrics** shows or hides the
+  numbers written on each crop (its fold change and its line of measurements).
 
 **Reading the figure**
 

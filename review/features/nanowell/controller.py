@@ -956,6 +956,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
     st.extreme_axes = render_extremes(fig, model, {site: st.crops[site] for site in model.sites()
                                                    if site in st.crops},
                                       label=_label(metric, channel), note=note, cells=st.crop_cells,
+                                      numbers=st.crop_metrics,
                                       timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
                                       metrics=crop_metrics(st, model.sites(), channel))
     apply_export_style_to_current(ctx, fig, canvas)
@@ -1275,6 +1276,17 @@ def set_crop_cells(ctx, on: bool) -> None:
     if st is None or st.crop_cells == bool(on):
         return
     st.crop_cells = bool(on)
+    _save_soon(ctx)
+    redraw(ctx)
+
+
+def set_crop_metrics(ctx, on: bool) -> None:
+    """Write the numbers on the Extremes montage's crops (each one's fold change and metrics line), or leave them
+    bare."""
+    st = _state(ctx)
+    if st is None or st.crop_metrics == bool(on):
+        return
+    st.crop_metrics = bool(on)
     _save_soon(ctx)
     redraw(ctx)
 

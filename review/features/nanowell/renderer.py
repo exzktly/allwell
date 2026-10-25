@@ -750,7 +750,7 @@ def _extremes_layout(fig, blocks, cols: int) -> _ExtremesLayout:
 
 
 def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cells: bool = False,
-                    timepoints=None, metrics: dict | None = None) -> dict:
+                    timepoints=None, metrics: dict | None = None, numbers: bool = True) -> dict:
     """The *N* nanowells with the largest fold change and the *N* with the smallest, each a row of its crops at the
     timepoints shown; returns ``{axes: (well, q, r)}`` so a click on a row selects its nanowell.
 
@@ -783,6 +783,7 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
     lo, hi = _one_scale(every)
     layout = _extremes_layout(fig, blocks, len(columns))
     draw = _ExtremesDrawing(fig, layout, model, metrics, lo, hi, cells, ink, faint)
+    draw.numbers = numbers
     hits: dict = {}
     for k, (title, rows) in enumerate(blocks):
         bx, by = draw.block_origin(k, blocks, len(columns))
@@ -794,7 +795,8 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
                 x0 = bx + _EXT_LABELS_W + j * draw.cell_w
                 ax = draw.crop(x0, y_crop_top, crops.get(row.site), tp)
                 hits[ax] = row.site
-                draw.crop_text(ax, row, tp)
+                if numbers:
+                    draw.crop_text(ax, row, tp)
     _ink(fig.text(0.02, 1 - 0.2 / draw.h_in,
                   f"{model.well} · the nanowells with the largest and smallest {label.lower()}",
                   fontsize=10, color=ink, va="top", gid="nw-extremes-title"))
@@ -817,6 +819,7 @@ class _ExtremesDrawing:
         self.sources: set = set()
         self.pending = False
         self.metrics_cut = False                         # some crop had more metrics than its line holds
+        self.numbers = True                              # the numbers are written on the crops (Metrics box)
         self.tally: dict = {}
 
     def text(self, x_in: float, y_in: float, said: str, *, color, **kw):
@@ -913,7 +916,7 @@ class _ExtremesDrawing:
                 + (f" Timepoints not shown: {', '.join(hidden)}." if hidden else "")
                 + (" The crops are too small at this size to write their metrics on: show fewer timepoints or "
                    "nanowells, widen the window, or pop out a nanowell to read them."
-                   if not self.layout.metrics_shown else
+                   if not self.layout.metrics_shown and self.numbers else
                    " Each crop writes the metrics that fit one line along its foot; pop out a nanowell for all of them."
                    if self.metrics_cut else "")]
         return " ".join(([note] if note else []) + said)

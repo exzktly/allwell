@@ -10972,7 +10972,7 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   stay square — and since that holds only at the size it was fitted for, the canvas's `resize_event` re-fits it:
   `tab_view` restarts a `_REFIT_MS` single-shot timer on each resize, and `controller.on_canvas_resized` redraws the
   Array view when its axes no longer have the size its region was fitted to (without it a resize squashed every
-  nanowell into an oval, and a draw made while the canvas was still being laid out showed one flattened row); the image is drawn for exactly that region and those pixels; the nanowells are filled by the
+  nanowell into an oval, and a draw made while the canvas was still being laid out showed one flattened row). It leaves a canvas that is no longer visible alone: the timer can fire after the page closes, and a redraw then queues matplotlib's deferred draw onto a canvas about to be deleted; the image is drawn for exactly that region and those pixels; the nanowells are filled by the
   metric (`MAP_CMAP`, with a colour bar; a nanowell without a value is a grey outline styled by its state,
   `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour`, a fused one
   dashed in `FUSED_COLOUR` either way, at `outline_width_px` of the median drawn diameter (6 % of it, 2.5–8 px), the central nanowell boxed; labels in

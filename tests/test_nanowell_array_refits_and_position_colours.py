@@ -87,3 +87,21 @@ def test_a_range_typed_for_the_distribution_does_not_reach_the_array(page, qtbot
     assert ax.get_xlim() == (x0, x1) and ax.get_ylim() == (y1, y0) and ax.get_yscale() == "linear"
     plot_style.apply_export_style_to_current(page, fig, page.widgets.get("_nw_canvas"))   # the sidebar's route
     assert ax.get_xlim() == (x0, x1) and ax.get_ylim() == (y1, y0) and ax.get_yscale() == "linear"
+
+
+def test_a_re_fit_that_fires_after_the_page_is_closed_draws_nothing(page, qtbot, monkeypatch):  # noqa: F811
+    """The re-fit runs a moment after a resize; a page closed in that moment must not be drawn. A redraw there queues
+    matplotlib's deferred draw, which then ran on a canvas already deleted — the intermittent teardown error
+    ``Internal C++ object (FigureCanvasQTAgg) already deleted`` on the Array tests."""
+    _loaded(qtbot, page)
+    _choose_view(page, "array", "map")
+    st = page.state.feature_slice("nanowell")
+    st.drawn.size_px = (1, 1)                         # a fit the axes no longer match: an open page would redraw
+    calls = []
+    monkeypatch.setattr(nwc, "redraw", lambda ctx: calls.append(ctx))
+    nwc.on_canvas_resized(page)
+    assert calls == [page], "the fixture does not reach the redraw on an open page"
+    calls.clear()
+    page.window.close()
+    page.widgets.get("_nw_refit_timer").timeout.emit()                      # the pending re-fit firing after it
+    assert calls == []

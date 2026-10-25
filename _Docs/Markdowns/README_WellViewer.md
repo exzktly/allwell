@@ -5081,17 +5081,32 @@ use them.
   so they are drawn across wells only.
 - **Baseline** — what a fold change is measured from: the well's *earliest* timepoint, or each nanowell's
   *first measurable* one (for a bubble that clears after the first timepoint).
-- **Starting cells** — use only the nanowells that held a given number of cells at the Baseline: *Any*,
-  *≥1 (occupied)*, *1 (single cell)*, *1–2*, *≥2*, or *Custom…* to type a minimum and a maximum. Distribution,
-  Trajectories, Position and Extremes then draw, summarise and rank only those nanowells, and every figure says
-  how many it kept of how many — and how many were outside the range or had no count at baseline (a nanowell
-  whose count is unknown is left out whenever a bound is set). The filter comes before every other exclusion, so
-  under *≥1* the empty nanowells are counted in that sentence rather than as "empty at baseline". Wells keeping
-  fewer than ten nanowells are named, since each well counts once in a group's statistic whatever its size. The
-  *Array* view keeps every nanowell and dims the ones outside; the occupancy key fades the classes the filter
-  removes; a selected nanowell outside it still opens its detail, which says so. The box is outlined while a
-  filter is on, and the filter is kept with the page's settings. For clonality use the *Earliest* baseline: a
-  count taken at a later first measurable timepoint may follow a division, and the figure counts those nanowells.
+- **Subset** — which nanowells every view uses. The quick choices keep the nanowells that held a given number of
+  cells at the Baseline: *All nanowells*, *Starting cells ≥1 (occupied)*, *1 (single cell)*, *1–2* and *≥2*.
+  *Custom subset…* or **Edit…** opens the subset editor under the controls, where you can combine any number of
+  conditions and choose whether a nanowell must meet *all* of them or *any*. Each condition tests one of:
+  - **Starting cells** — the count at the Baseline;
+  - **a metric** — cell count, confluence, brightness and site signal (per channel), any fold change or the growth
+    rate. A metric with a value per timepoint is read *at baseline*, at the well's *earliest* or *latest*
+    timepoint, at a timepoint you name, or *at any* / *at every* timepoint (*every*: the nanowell needs a passing
+    value at each of its well's timepoints);
+  - **position** — the *ring* (lattice steps from the central nanowell), the *distance from the centre* in µm (on
+    the well's lattice at its measured pitch), or the address *q* / *r*;
+  - **imaging field** — the tile the nanowell was cut from, *is one of* or *is not one of* the tiles you tick.
+
+  A number is compared with ≥, ≤, =, *between* or *not between* (both ends included). Every change is applied as
+  you make it; a range typed upside down is said under the conditions and changes nothing until it is fixed.
+  Distribution, Trajectories, Position and Extremes then draw, summarise and rank only the nanowells in the subset,
+  and every figure says what the subset is and how many nanowells it kept of how many — and how many were outside
+  it or had no value for a condition (a count that was occluded, a timepoint the nanowell was not seen at, a well
+  whose pitch was not recorded: such a nanowell is never treated as zero). The subset comes before every other
+  exclusion, so under *≥1* the empty nanowells are counted in that sentence rather than as "empty at baseline".
+  Wells keeping fewer than ten nanowells are named, since each well counts once in a group's statistic whatever its
+  size. The *Array* view keeps every nanowell and dims the ones outside; the occupancy key fades the classes the
+  subset removes; a selected nanowell outside it still opens its detail, which names the condition it failed. The
+  box is outlined while a subset is set, and the subset is kept with the page's settings. For clonality use the
+  *Earliest* baseline: a count taken at a later first measurable timepoint may follow a division, and the figure
+  counts those nanowells.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
 - **Fixed cohort** (on *Distribution* and *Trajectories*) — use only the nanowells with a value at every
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
@@ -5264,8 +5279,8 @@ is selected and kept, so selecting it again is instant. While a newly selected w
 *Computing…*.
 
 **Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
-draws as one long CSV, with the baseline and where the times came from; with a Starting cells filter on, every
-row is still written, flagged in `in_starting_cells_filter` with the bounds beside it. Right after you change the baseline it waits:
+draws as one long CSV, with the baseline and where the times came from; with a Subset set, every
+row is still written, flagged in `in_subset` with the subset (`subset`) and its baseline (`subset_baseline`) beside it. Right after you change the baseline it waits:
 until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
 drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
 is opened again.
@@ -6076,10 +6091,10 @@ set **Along x**, **Baseline**, **Timepoint** (Latest, Earliest or one of the
 dataset's) and **Fixed cohort** as on the page — each greyed where it does not
 reach the view. **Responding above** asks for a number for each ticked metric,
 filled in from the page's where you set one there, and the run will not start
-while any is empty. **Starting cells** (a minimum, and a maximum or *any*) is filled
-in from the page's filter each time the panel opens and can be changed for the run;
-the figures and the summary CSV are of the nanowells it keeps, and the CSV carries
-the bounds in `starting_cells_min` / `starting_cells_max`. Each group writes one figure per metric, drawn exactly as the
+while any is empty. **Subset** — *Use the page's subset*, ticked by default, draws
+with the Nanowells page's Subset, named beside the box each time the panel opens (build or
+change it on the page); unticked, every nanowell is used. The figures and the summary CSV
+are of the nanowells it keeps, and the CSV names the subset in its `subset` column. Each group writes one figure per metric, drawn exactly as the
 page draws it (the Array map — the page's Array view as *Show as → Array map* draws it, with no image —
 shows one well, so it writes one figure per well),
 and one summary CSV: for each metric, well and timepoint the median, quartiles,

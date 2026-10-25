@@ -1,5 +1,5 @@
-"""The Nanowells page's *Starting cells* filter: only the nanowells that held a given number of cells at the
-baseline are drawn and summarised, on every view but the Array, which dims the rest.
+"""The Nanowells page's *Starting cells* presets of its *Subset*: only the nanowells that held a given number of
+cells at the baseline are drawn and summarised, on every view but the Array, which dims the rest.
 
 Asked for: "filter nanowells for purposes of inclusion … only compute statistics/display [nanowells] that start
 with a minimum number of cells, and then use that for the nanowell montage, trajectories, distributions display".
@@ -18,6 +18,7 @@ pytest.importorskip("PySide6")
 
 from review.features.nanowell import controller as nwc  # noqa: E402
 from review.features.nanowell import starting_cells_compute as sc  # noqa: E402
+from review.features.nanowell import subset_compute as ss  # noqa: E402
 from review.features.nanowell.collect import load_nanowell_data  # noqa: E402
 from review.features.nanowell.series_compute import site_metrics  # noqa: E402
 from review.features.nanowell.state import NanowellState  # noqa: E402
@@ -42,21 +43,23 @@ def _sites(frame):
 
 # ── the filter ───────────────────────────────────────────────────────────────
 def test_the_filter_keeps_the_nanowells_whose_baseline_count_is_in_range_and_counts_the_rest(metrics):
-    kept, done = sc.apply(metrics, 1, 1, "earliest")
+    kept, done = ss.apply(metrics, ss.Subset.starting(1, 1), "earliest")
     assert _sites(kept) == [("A01", 0), ("A01", 2), ("A01", 4), ("B01", 0), ("B01", 1)]
     assert (done.total, done.kept, done.outside, done.unknown) == (10, 5, 4, 1)
     assert done.per_well == {"A01": 3, "B01": 2}
     assert ("A01", 6, 0) in done.outside_sites and ("A01", 0, 0) not in done.outside_sites
-    assert sc.note(done) == ("Starting cells 1 (count at the earliest timepoint): 5 of 10 nanowells kept — 4 outside "
+    assert ss.note(done) == ("Starting cells 1 (count at the earliest timepoint): 5 of 10 nanowells kept — 4 outside "
                              "the range, 1 with no count at baseline. Few nanowells in the filter: A01 (3), B01 (2).")
-    assert sc.apply(metrics, None, None, "earliest") == (metrics, None)          # no bound: no filter at all
+    assert ss.Subset.starting(None, None) == ss.Subset()
+    assert ss.apply(metrics, ss.Subset(), "earliest") == (metrics, None)         # no bound: no filter at all
 
 
 def test_under_first_measurable_a_count_taken_later_is_kept_and_said(tmp_path):
     data = load_nanowell_data(_write_nanowell_dataset(tmp_path, counts=COUNTS))
-    kept, done = sc.apply(site_metrics(data, "first_measurable"), 1, None, "first_measurable", ["A01"])
+    kept, done = ss.apply(site_metrics(data, "first_measurable"), ss.Subset.starting(1, None), "first_measurable",
+                          ["A01"])
     assert ("A01", 6) in _sites(kept) and done.late == 1                         # counted at t_a, not t_c
-    assert "1 kept were counted after the earliest timepoint, when their cells may already have divided" in sc.note(
+    assert "1 kept were counted after the earliest timepoint, when their cells may already have divided" in ss.note(
         done)
 
 
@@ -75,13 +78,15 @@ def test_bounds_are_whole_numbers_and_a_minimum_of_zero_is_no_minimum():
 
 def test_the_bounds_persist_and_a_saved_pair_that_is_not_a_filter_is_refused():
     st = NanowellState()
-    st.start_min, st.start_max = 1, 2
+    st.subset = ss.Subset.starting(1, 2)
     restored = NanowellState()
     restored.apply_config(st.to_config())
-    assert (restored.start_min, restored.start_max) == (1, 2)
+    assert restored.subset == ss.Subset.starting(1, 2)
+    restored.apply_config({"start_min": 1, "start_max": 2})            # a page saved before there was a Subset
+    assert restored.subset == ss.Subset.starting(1, 2)
     for saved in ({"start_min": 3, "start_max": 2}, {"start_min": "1"}, {"start_min": True}, {"start_max": -1}):
         restored.apply_config(saved)
-        assert (restored.start_min, restored.start_max) == (None, None)
+        assert restored.subset == ss.Subset()
 
 
 # ── the page ─────────────────────────────────────────────────────────────────
@@ -100,7 +105,7 @@ def _texts(ctx, fig="_nw_fig"):
 
 
 def _choose(ctx, key):
-    combo = ctx.widgets.get("_nw_start_cb")
+    combo = ctx.widgets.get("_nw_subset_cb")
     combo.setCurrentIndex(combo.findData(key))                   # emits currentIndexChanged, as a click does
 
 
@@ -119,13 +124,13 @@ def test_choosing_a_preset_draws_only_the_nanowells_in_it_and_the_figure_says_so
     assert ("A01", 1) in _dots(page)                             # unfiltered: every nanowell with a value
     _choose(page, "single")
     st = page.state.feature_slice("nanowell")
-    assert (st.start_min, st.start_max) == SINGLE
+    assert st.subset == ss.Subset.starting(*SINGLE)
     assert _dots(page) == [("A01", 0), ("A01", 2), ("A01", 4), ("B01", 0), ("B01", 1)]
     assert any(t.startswith("Starting cells 1 (count at the earliest timepoint): 5 of 10 nanowells kept")
                for t in _texts(page))
-    assert page.widgets.get("_nw_start_cb").property("filterActive") is True
+    assert page.widgets.get("_nw_subset_cb").property("filterActive") is True
     _choose(page, "any")
-    assert ("A01", 1) in _dots(page) and page.widgets.get("_nw_start_cb").property("filterActive") is False
+    assert ("A01", 1) in _dots(page) and page.widgets.get("_nw_subset_cb").property("filterActive") is False
     assert not any(t.startswith("Starting cells") for t in _texts(page))
 
 
@@ -140,19 +145,23 @@ def test_the_occupancy_key_greys_the_classes_the_filter_removes(page):
     assert len(markers) == 1 and list(markers[0].get_alpha()) == [0.2, 1.0, 0.2, 0.2, 0.2]   # 0, 1, 2, 3+, ?
 
 
-def test_custom_bounds_are_typed_in_the_spin_boxes_and_stay_custom(page):
+def test_custom_opens_the_editor_and_a_starting_cells_range_is_typed_in_it(page):
+    """Custom subset… shows the editor without changing the subset; a condition added there is Starting cells ≥1, and
+    turning it into the range 2–3 draws exactly the nanowells that started with two or three cells."""
     _choose(page, "custom")
-    lo, hi = page.widgets.get("_nw_start_min"), page.widgets.get("_nw_start_max")
-    assert lo.isVisibleTo(page.window) and hi.isVisibleTo(page.window)
+    editor = page.widgets.get("_nw_subset_editor")
+    assert editor.isVisibleTo(page.window)
     st = page.state.feature_slice("nanowell")
-    assert (st.start_min, st.start_max) == (None, None)          # choosing Custom changes nothing yet
-    lo.setValue(2)
-    hi.setValue(3)
-    assert (st.start_min, st.start_max) == (2, 3)
-    assert page.widgets.get("_nw_start_cb").currentData() == "custom"
+    assert st.subset == ss.Subset()                              # choosing Custom changes nothing yet
+    editor.add_btn.click()
+    assert st.subset == ss.Subset.starting(1, None)
+    row = editor.rows[0]
+    row.op_cb.setCurrentIndex(row.op_cb.findData("between"))
+    row.a_spin.setValue(2)
+    row.b_spin.setValue(3)
+    assert st.subset == ss.Subset.starting(2, 3)
+    assert page.widgets.get("_nw_subset_cb").currentData() == "custom"
     assert _dots(page) == [("A01", 1), ("A01", 3), ("A01", 7)]
-    hi.setValue(-1)                                              # "any"
-    assert (st.start_min, st.start_max) == (2, None)
 
 
 def test_trajectories_and_position_carry_the_note(page):
@@ -175,15 +184,24 @@ def test_extremes_ranks_only_the_nanowells_in_the_filter(page):
 
 
 def test_a_filter_that_keeps_nothing_says_so(page):
-    _choose(page, "custom")
-    page.widgets.get("_nw_start_min").setValue(50)
+    nwc.set_starting_cells(page, 50, None)
     assert _texts(page) == ["No nanowell of the drawn wells started with ≥50 cells (count at the earliest "
                             "timepoint). Widen Starting cells or choose Any."]
 
 
-def test_the_array_view_dims_the_nanowells_outside_and_counts_them(page):
+def _settled(qtbot, ctx) -> None:
+    """Wait out the Array view's re-fit: switching to it re-flows the band, so the canvas resizes and the page's
+    re-fit timer (``_nw_refit_timer``) queues a redraw. A test that ends inside that window leaves matplotlib a draw
+    queued on a canvas the widget reaper then deletes, and the teardown errors with "Internal C++ object
+    (FigureCanvasQTAgg) already deleted" — intermittently, by how the teardown is scheduled."""
+    timer, canvas = ctx.widgets.get("_nw_refit_timer"), ctx.widgets.get("_nw_canvas")
+    qtbot.waitUntil(lambda: not timer.isActive() and not getattr(canvas, "_draw_pending", False), timeout=5000)
+
+
+def test_the_array_view_dims_the_nanowells_outside_and_counts_them(page, qtbot):
     _view(page, "array")
     _choose(page, "single")
+    _settled(qtbot, page)
     fig = page.widgets.get("_nw_fig")
     veils = [c for ax in fig.axes for c in ax.collections if c.get_gid() == "nw-array-dimmed"]
     st = page.state.feature_slice("nanowell")
@@ -211,8 +229,7 @@ def test_the_long_csv_keeps_every_row_and_flags_it(page, tmp_path):
     table = pd.read_csv(path)
     assert len(table) == 10 * 3                                  # ten nanowells, three timepoints, none dropped
     flagged = table.drop_duplicates(["well", "nw_q"])
-    assert sorted(zip(flagged["well"], flagged["nw_q"], flagged["in_starting_cells_filter"])) == [
+    assert sorted(zip(flagged["well"], flagged["nw_q"], flagged["in_subset"])) == [
         ("A01", 0, True), ("A01", 1, False), ("A01", 2, True), ("A01", 3, False), ("A01", 4, True),
         ("A01", 5, False), ("A01", 6, False), ("A01", 7, False), ("B01", 0, True), ("B01", 1, True)]
-    assert set(zip(table["starting_cells_min"], table["starting_cells_max"], table["starting_cells_baseline"])) == {
-        (1, 1, "earliest")}
+    assert set(zip(table["subset"], table["subset_baseline"])) == {("Starting cells 1", "earliest")}

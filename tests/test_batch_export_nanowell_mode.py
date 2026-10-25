@@ -230,27 +230,28 @@ def test_a_batch_whose_wells_have_no_nanowell_table_says_so_rather_than_raising(
     assert shown and "None of the groups' wells has a nanowell table" in shown[0][1]
 
 
-def test_the_starting_cells_filter_is_seeded_from_the_page_and_the_csv_is_of_the_nanowells_kept(panel, tmp_path,
-                                                                                               monkeypatch):
+def test_the_page_s_subset_is_used_and_the_csv_is_of_the_nanowells_kept(panel, tmp_path, monkeypatch):
     """The run's one cell sits in nanowell (1, 2) at 0h, so "≥1 cell at baseline" keeps that nanowell alone: the
-    figure is drawn with the filter and every CSV row counts one nanowell, carrying the bounds."""
+    figure is drawn with the page's subset and every CSV row counts one nanowell, naming the subset."""
+    from review.features.nanowell.subset_compute import Subset
+
     p, ctx = panel
     st = ctx.state.feature_slice("nanowell")
-    st.start_min, st.start_max = 1, None
-    p.window().show()                                           # seeded from the page on show
+    st.subset = Subset.starting(1, None)
+    p.window().show()                                           # the page's subset is named on show
     p.show()
-    assert (p._start_min.value(), p._start_max.text()) == (1, "any")
+    assert p._subset_label.text() == "Starting cells ≥1"
     calls = []
     from review.features.batch_export import nanowell_panel
     from review.features.nanowell import controller
 
     real = controller.draw_view
     monkeypatch.setattr(nanowell_panel, "_draw_view",
-                        lambda fig, view, *a, **k: calls.append(k["start_cells"]) or real(fig, view, *a, **k))
+                        lambda fig, view, *a, **k: calls.append(k["subset"]) or real(fig, view, *a, **k))
     p._run_batch()
-    assert calls == [(1, None), (1, None)]
+    assert calls == [Subset.starting(1, None)] * 2
     rows = [r for r in csv.DictReader((tmp_path / "export" / "nanowell_Drug_A_summary.csv").open())
             if r["well"] == "A01"]
     assert rows and {int(r["n_sites"]) for r in rows} == {1}
-    assert {(r["starting_cells_min"], r["starting_cells_max"]) for r in rows} == {("1", "")}
+    assert {r["subset"] for r in rows} == {"Starting cells ≥1"}
     assert all(r["note"].startswith("Starting cells ≥1 (count at the earliest timepoint): 1 of ") for r in rows)

@@ -25,7 +25,7 @@ from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
     BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut,
 )
-from review.features.nanowell import starting_cells_compute as sc
+from review.features.nanowell.subset_view import build_subset_control
 from review.features.nanowell.state import EXTREMES_MAX_N
 from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
@@ -77,17 +77,8 @@ _EXTREMES_TIP = ("How many nanowells each block shows: this many with the larges
                  "smallest. A well with fewer shares them between the blocks, never showing one twice.")
 _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their well, so each line over time follows "
                "one set of nanowells. Off, each timepoint's median is over whichever nanowells could be measured "
-               "then. The others are counted as outside the fixed cohort. See also Starting cells, which chooses "
-               "nanowells by how many cells they held at the baseline.")
-_START_TIP = ("Use only the nanowells that held this many cells at the Baseline — at the well's earliest timepoint, "
-              "or at each nanowell's first measurable one. A nanowell whose count there is unknown is left out "
-              "whenever a bound is set. Every figure states how many were kept; the Array view dims the others "
-              "instead of hiding them, and Save nanowell data… keeps every row and flags them.\n"
-              "For clonality, use the Earliest baseline: a count taken later may follow a division.")
-_START_MIN_TIP = "The fewest cells a nanowell may have held at the baseline (0: no minimum)."
-_START_MAX_TIP = "The most cells a nanowell may have held at the baseline (any: no maximum)."
-#: The most cells either bound can be set to: well above any nanowell's seeding.
-_START_LIMIT = 999
+               "then. The others are counted as outside the fixed cohort. See also Subset, which chooses nanowells "
+               "by how many cells they held at the baseline, a metric, their position or their imaging field.")
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
 _METRIC_TIP = ("What each dot is. Brightness and site signal, and their fold changes, are of the fluorescence "
                "channel chosen beside this (Channel); they are greyed when the run measured no fluorescence.")
@@ -202,7 +193,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_baseline_cb", baseline_cb)
     grp_baseline = band.add_scope("Baseline", baseline_cb)
 
-    start = _build_starting_cells(ctx, band)
+    start = build_subset_control(ctx, band, timepoint_text)
 
     cohort_box = QCheckBox("Fixed cohort")
     cohort_box.setToolTip(_COHORT_TIP)
@@ -267,6 +258,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     band.add_action(export_btn)
     band.add_action(make_properties_button(ctx, band, "nanowell"))
     layout.addWidget(band)
+    layout.addWidget(start.editor)                  # the Subset's conditions, under the band when shown
 
     # ── the figures ─────────────────────────────────────────────────────────
     splitter = QSplitter(Qt.Horizontal, plot_area)
@@ -432,68 +424,6 @@ def _fill_timepoints(combo, tps, times_h: dict) -> None:
         combo.addItem(timepoint_text(tp, times_h), tp)
         combo.setItemData(combo.count() - 1, f"Timepoint {tp}", Qt.ToolTipRole)
     combo.setEnabled(len(tps) > 1)
-
-
-def _build_starting_cells(ctx, band) -> SimpleNamespace:
-    """*Starting cells*: a preset combo (Any, ≥1, 1, 1–2, ≥2, Custom…) right after Baseline, on every view, with a
-    minimum and a maximum shown while Custom is chosen. The combo is outlined in the accent while a bound is set,
-    so a filter restored with the page's settings is never forgotten."""
-    reg = ctx.widgets
-    combo = QComboBox()
-    for key, label, _lo, _hi in sc.PRESETS:
-        combo.addItem(label, key)
-    combo.addItem("Custom…", sc.CUSTOM)
-    combo.setToolTip(_START_TIP)
-    lo_spin, hi_spin = QSpinBox(), QSpinBox()
-    lo_spin.setRange(0, _START_LIMIT)
-    hi_spin.setRange(-1, _START_LIMIT)
-    hi_spin.setSpecialValueText("any")                   # shown at -1: no maximum
-    hi_spin.setValue(-1)
-    for spin, tip in ((lo_spin, _START_MIN_TIP), (hi_spin, _START_MAX_TIP)):
-        spin.setToolTip(tip)
-        spin.setKeyboardTracking(False)                  # one change per value typed, not per keystroke
-    custom = {"open": False}                             # Custom stays chosen while its bounds are being typed
-
-    def typed(_value=None) -> None:
-        hi = hi_spin.value()
-        nwc.set_starting_cells(ctx, lo_spin.value() or None, None if hi < 0 else hi)
-
-    def chosen(_index=None) -> None:
-        key = combo.currentData()
-        custom["open"] = key == sc.CUSTOM
-        if custom["open"]:
-            refresh(ctx.state.feature_slice("nanowell"))  # shows the bounds that are set, changing nothing
-            return
-        _key, _label, lo, hi = next(p for p in sc.PRESETS if p[0] == key)
-        nwc.set_starting_cells(ctx, lo, hi)
-
-    def refresh(st) -> None:
-        lo, hi = st.start_min, st.start_max
-        blocked = [w.blockSignals(True) for w in (combo, lo_spin, hi_spin)]
-        try:
-            _select(combo, sc.CUSTOM if custom["open"] else sc.preset_of(lo, hi))
-            lo_spin.setValue(lo or 0)
-            hi_spin.setValue(-1 if hi is None else hi)
-            show = combo.currentData() == sc.CUSTOM
-            lo_spin.setVisible(show)
-            hi_spin.setVisible(show)
-            active = sc.is_active(lo, hi)
-            if combo.property("filterActive") != active:
-                combo.setProperty("filterActive", active)
-                combo.style().unpolish(combo)
-                combo.style().polish(combo)
-        finally:
-            for w, b in zip((combo, lo_spin, hi_spin), blocked):
-                w.blockSignals(b)
-
-    combo.currentIndexChanged.connect(chosen)
-    lo_spin.valueChanged.connect(typed)
-    hi_spin.valueChanged.connect(typed)
-    reg.register("_nw_start_cb", combo)
-    reg.register("_nw_start_min", lo_spin)
-    reg.register("_nw_start_max", hi_spin)
-    group = band.add_scope("Starting cells", combo, lo_spin, hi_spin)
-    return SimpleNamespace(group=group, refresh=refresh, signalling=())
 
 
 def _fill_channels(combo, data, channel) -> None:

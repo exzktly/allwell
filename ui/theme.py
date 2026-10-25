@@ -1353,7 +1353,7 @@ QComboBox:hover {{
 QComboBox:focus, QComboBox:on {{
     border-color: {c.accent};
 }}
-/* A filter control with a bound set (the Nanowells page's Starting cells): outlined in
+/* A filter control with a bound set (the Nanowells page's Subset): outlined in
    the accent whatever its focus, so a filter restored with a page's settings is seen. */
 QComboBox[filterActive="true"] {{
     border-color: {c.accent};

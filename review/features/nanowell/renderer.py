@@ -1078,6 +1078,10 @@ def _array_axes(fig, scene, image, region, *, right: float, bottom: float) -> Ar
     """The axes, looking at *region* (or at everything drawn) widened to their shape, so pixels stay square."""
     ax = fig.add_axes([0.03, bottom, right - 0.03, 0.92 - bottom])
     ax.set_axis_off()
+    # A map in the well frame, with its own zoom: an axis range, log scale or tick choice typed in Properties is the
+    # Distribution's (the page's views share one figure, and its typed prefs with it), and applied here it squeezed
+    # the array into a band. The style pass leaves an image panel's limits and scales alone (``plot_style``).
+    ax._aw_image_panel = True
     extent = scene.extent()
     if image is not None:
         extent = _union(extent, _image_extent(image))

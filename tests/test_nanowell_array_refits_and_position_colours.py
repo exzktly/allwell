@@ -66,3 +66,24 @@ def test_position_draws_each_well_in_its_plate_colour(page, qtbot):  # noqa: F81
     assert to_hex(color_for_well("B01")) != to_hex(WELL_COLORS_TUPLE[0])        # the two rules disagree here
     lines = [ln for ln in page.widgets.get("_nw_fig").axes[0].get_lines() if ln.get_label() == "B01"]
     assert [to_hex(ln.get_color()) for ln in lines] == [to_hex(color_for_well("B01"))]
+
+
+def test_a_range_typed_for_the_distribution_does_not_reach_the_array(page, qtbot):  # noqa: F811
+    """Reported: limits set in Properties while on Distribution carried over to the Array view and were applied
+    to it. The page's views share one figure, so its typed prefs are shared too; the Array, a map in the well frame
+    with its own zoom, takes none of them."""
+    from review.core import plot_style
+
+    _loaded(qtbot, page)
+    fig = page.widgets.get("_nw_fig")
+    plot_style._ensure_axis_prefs_store(page)[plot_style.figure_pref_key(page, fig)].update(
+        {"y_lim_min": "0", "y_lim_max": "10", "x_lim_min": "0", "x_lim_max": "4", "y_log": True})
+    nwc.redraw(page)                                                              # Distribution takes them
+    assert fig.axes[0].get_ylim()[1] == 10.0 and fig.axes[0].get_yscale() == "log"   # (a log axis drops the 0)
+    _choose_view(page, "array", "map")
+    st = page.state.feature_slice("nanowell")
+    x0, y0, x1, y1 = st.drawn.region
+    ax = st.drawn.ax
+    assert ax.get_xlim() == (x0, x1) and ax.get_ylim() == (y1, y0) and ax.get_yscale() == "linear"
+    plot_style.apply_export_style_to_current(page, fig, page.widgets.get("_nw_canvas"))   # the sidebar's route
+    assert ax.get_xlim() == (x0, x1) and ax.get_ylim() == (y1, y0) and ax.get_yscale() == "linear"

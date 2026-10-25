@@ -374,9 +374,12 @@ def test_a_well_its_record_says_was_left_part_way_is_sent_again(tmp_path):
     assert sent == ["B02"] and _forced(argv[-1]) == []
 
 
-def test_a_nanowell_timepoint_that_did_not_finish_ok_is_not_covered(tmp_path):
-    """Reported by review: every timepoint the grid record named counted, whatever its status; the rule
-    (``completeness.nanowell_coverage``) counts only those that finished ``ok``."""
+def test_a_nanowell_timepoint_the_run_reached_without_an_address_is_not_sent_alone_again(tmp_path):
+    """Rewritten around a later review, which found the rule this test first pinned (only ``ok`` counts) to be the
+    defect: a well with an ``unaddressed`` timepoint was re-sent alone and forced, its plate-rigid timepoints came
+    back unaddressed because the host had no other wells to fit the plate's motion from, the worse tables replaced
+    the better, and the well stayed unfinished for every later re-run. A timepoint the run recorded a verdict for
+    is finished for this question; one it never reached is not."""
     inp, out = _plate(tmp_path)
     opts = _opts(**NANOWELL)
     for well in ("A01", "B02"):
@@ -384,7 +387,10 @@ def test_a_nanowell_timepoint_that_did_not_finish_ok_is_not_covered(tmp_path):
         _grid(out, well, "T01")
     (out / "nanowells" / "B02_grid.json").write_text(json.dumps({"timepoints": {"T01": {"status": "unaddressed"}}}))
     sent, _lines = _run(inp, out, opts)
-    assert sent == ["B02"]
+    assert sent is None                                                   # nothing a resend alone could improve
+    (out / "nanowells" / "B02_grid.json").write_text(json.dumps({"timepoints": {}}))
+    sent, _lines = _run(inp, out, opts)
+    assert sent == ["B02"]                                                # never reached: sent
 
 
 def test_a_finished_blank_alone_ends_the_run_without_its_out_zip_and_a_forced_one_is_sent(tmp_path):

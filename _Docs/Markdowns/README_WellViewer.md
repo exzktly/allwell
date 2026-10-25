@@ -1753,8 +1753,12 @@ and by `remote_fetch_report.txt` in the output folder.
   already finished in the output folder under the same settings: it is not
   uploaded or recomputed, the log names it (*already finished here under these
   settings*), and the plate shows it complete. A well named in **Force wells**
-  is redone, and so is a well measured under different settings or one its
-  completeness record says was left part way. A plate with nothing left to do
+  is redone, and so is a well measured under different settings, one its
+  completeness record says was left part way, and one whose input now holds
+  fields or timepoints its results do not. A nanowell timepoint the run reached
+  but could not address does not make its well count as unfinished: sending
+  that well alone could not address it, since locating it from the rest of the
+  plate needs the other wells — Force re-runs the plate, which can. A plate with nothing left to do
   ends without uploading anything. When only part of a plate is sent, the
   cell-gating thresholds are computed on this computer afterwards, over every
   well, so they are the plate's rather than the part's.

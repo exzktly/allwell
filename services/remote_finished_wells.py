@@ -22,8 +22,10 @@ This is that step for a remote run, asked once, before staging, with the pipelin
   in staging instead, so it gets nothing from here;
 * **a field-mode well is finished only when its CSV holds every field and timepoint its input holds now**
   (``_field_coverage``), so a well whose archive gained fields or timepoints since is sent;
-* **a nanowell well is finished only when its tables cover every timepoint its archive holds** — each finished
-  ``ok`` in its grid record (``pipeline.completeness.nanowell_coverage``). A remote nanowell run cannot add a well's
+* **a nanowell well is finished only when its tables cover every timepoint its archive holds** — each with a
+  verdict in its grid record (``pipeline.completeness.nanowell_coverage``). Reached is enough: an ``unaddressed``
+  or ``no_lattice`` timepoint is the run's verdict on those images, which sending the well alone cannot change,
+  and alone it loses the plate the end-of-run re-anchoring fits from; only Force, re-running the plate, can. A remote nanowell run cannot add a well's
   missing timepoints to its earlier tables (the host never has them), so a well short of any — left part way by a
   run that stopped, or given new timepoints since — is not finished: it is sent whole and analysed again in full,
   and the runner forces it (``nanowell_forced``) so an earlier attempt's output on the host cannot stand in for it;
@@ -164,9 +166,9 @@ def argv_forcing(pipeline_argv: Sequence[str], wells: Iterable[str]) -> list[str
 
 
 def _nanowell_coverage(output_dir: Path, args):
-    """``covered(well)`` for a nanowell run: whether every timepoint of the well's archive in ``--input_dir`` is
-    finished ``ok`` in its grid record — the rule the Validate tool and the end-of-run scan use
-    (``pipeline.completeness.nanowell_coverage``). Anything unreadable is not covered."""
+    """``covered(well)`` for a nanowell run: whether the run reached every timepoint of the well's archive in
+    ``--input_dir`` — its grid record holds a verdict for each (``pipeline.completeness.nanowell_coverage``, whose
+    ``ok``-only count is Validate's question, not this one). Anything unreadable is not covered."""
     from pipeline.completeness import nanowell_coverage
     from util.well_token import well_archives
 
@@ -185,7 +187,13 @@ def _nanowell_coverage(output_dir: Path, args):
         cov = nanowell_coverage(well, in_members=members, grid_path=out / "nanowells" / f"{well}_grid.json",
                                 sites_path=out / "nanowells" / f"{well}.csv", has_out_zip=True,
                                 schema=args.filename_schema, sep=args.filename_sep, skip_hidden=True)
-        return cov.intent > 0 and not cov.missing
+        # Reached, not only ok: a timepoint the run recorded a verdict for (unaddressed, no lattice, a bad grid…) is
+        # a verdict on its images under these settings, which sending the well alone cannot change — and a well
+        # sent alone loses the rest of the plate the end-of-run re-anchoring fits from, so a timepoint that pass
+        # had anchored came back unaddressed and replaced the better result, on every re-run. Only a timepoint
+        # with no verdict at all (the run never reached it) makes the well unfinished.
+        reached = {tp for tp, _status in cov.not_addressed}
+        return cov.intent > 0 and all(tp in reached for _fov, tp in cov.missing)
 
     return covered
 

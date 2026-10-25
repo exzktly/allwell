@@ -28,7 +28,7 @@ is deleted by the PR that closes its last row.
 | P4 | 1045 | Low | network/mask timing breakdown missing for single-image calls | open | `pipeline/cellpose.py`, `nanowell_task._log_sites` |
 | P5 | 1045 | Low | MEASURE_VERSION not bumped when the count's normalisation changed | done | bumped to 6 with P1 |
 | P6 | 1047 | Low | a previous run's segmenter-input sheet left beside newer results | open | `nanowell_inspect.write_sheet` |
-| R1 | 1052 | High | a nanowell well resent alone cannot be re-anchored from the plate | open | `services/remote_finished_wells`, `pipeline_runner` |
+| R1 | 1052 | High | a nanowell well resent alone cannot be re-anchored from the plate | done | `remote_finished_wells._nanowell_coverage` counts a reached timepoint (any verdict) as finished, so it is never resent alone; the test that pinned ok-only was asserting the bug and is rewritten |
 | R2 | 1052 | Med | field-mode "finished here" ignores fields/timepoints the input gained | done | `remote_finished_wells._field_coverage`; `test_a_remote_rerun_skips_finished_wells`. Images replaced under the same names are still not seen (nor by a local run) |
 | R3 | 1052 | Med | host wells computed with `--no_auto_threshold` miss every later local reuse | done | `util/settings_digest.settings_key_for`; `test_a_half_finished_well_resumes_across_builds` |
 | R4 | 1052 | Low-Med | an `--only_wells` subset run gates the plate from the subset | done | `pipeline_runner._regate_locally`; `test_a_remote_rerun_skips_finished_wells` |

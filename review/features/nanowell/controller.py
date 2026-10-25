@@ -409,6 +409,48 @@ def page_image_channel(st) -> str:
     return match_channel(st.image_channel, getattr(st.data, "image_channels", ())) or ""
 
 
+def display_key(st) -> str:
+    """The name the page's image channel goes by in the app's shared per-channel display ranges
+    (``AppState.image_view``): the fluorescence channel, or the run's phase token for the phase image — so a range
+    set for a channel in Review Image, the Image Table or the Cell Browser is the one this page draws with, and back."""
+    channel = page_image_channel(st)
+    if channel:
+        return channel.lower()
+    phase = (getattr(st.data, "phase_token", "") or "") if st is not None and st.data is not None else ""
+    return phase.lower() or "phase"
+
+
+def display_range(ctx) -> tuple[float, float] | None:
+    """The **Display range** ``(low, high)`` the page's pictures of its image channel are drawn with, in the raw
+    image's units; ``None`` when unset, and each picture then takes its own percentile scale (Auto)."""
+    st = _state(ctx)
+    image_view = getattr(ctx.state, "image_view", None)
+    if st is None or image_view is None:
+        return None
+    return image_view.get_lut(display_key(st))
+
+
+def set_display_range(ctx, low, high) -> None:
+    """Draw the page's image channel between *low* and *high*, or — either ``None`` — back to Auto. The range is the
+    app's shared one for the channel (:func:`display_key`), so it is also what the other image viewers show.
+
+    Every picture of the channel follows: the crop strip, the pop-out, the Extremes montage and the Array view's
+    full-resolution image. A range whose high is not above its low is refused rather than drawn black."""
+    st = _state(ctx)
+    image_view = getattr(ctx.state, "image_view", None)
+    if st is None or image_view is None:
+        return
+    key = display_key(st)
+    if low is None or high is None:
+        image_view.lut_by_channel.pop(key, None)
+    elif float(high) > float(low):
+        image_view.set_lut(key, float(low), float(high))
+    else:
+        return
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
+
+
 def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
               note: str = "", tableless=(), selected=(), responding_above: float | None = None,
@@ -582,7 +624,9 @@ def _array_image(ctx, st, well: str, timepoint: str) -> tuple[object, str]:
         # The run kept a phase montage only: said on the figure, so a fluorescence choice is never shown phase
         # pixels without a word (CLAUDE.md §7).
         phase_only = (f"The run montage is the phase image; choose Full resolution to see {channel}."
-                      if channel else "")
+                      if channel else
+                      "The run montage is an 8-bit picture, drawn as the run saved it; the Display range applies to "
+                      "Full resolution." if display_range(ctx) is not None else "")
         if (well, timepoint) in st.montages:
             montage, why = st.montages[(well, timepoint)]
             return montage, " ".join(filter(None, [phase_only, "" if montage is not None else why]))
@@ -600,9 +644,12 @@ def _array_image(ctx, st, well: str, timepoint: str) -> tuple[object, str]:
     store = st.tile_store
     if store is None:
         return None, st.tile_why
+    store.display = display_range(ctx)
     source, failed = store.source, dict(store.failed)
     total, read = len(source.tiles), store.loaded()
-    said = [f"Full resolution, {channel or 'phase'}, from the raw tiles in {source.archive.name}."]
+    said = [f"Full resolution, {channel or 'phase'}, from the raw tiles in {source.archive.name}"
+            + (f", on the display range {store.display[0]:.4g} to {store.display[1]:.4g}."
+               if store.display is not None else ".")]
     if read + len(failed) < total:
         said.append(f"Reading tiles: {read} of {total}…")
     placed = {str(t.get("tile")) for t in ((st.data.grids.get(well) or {}).get(timepoint) or {}).get("tiles") or []}
@@ -1022,6 +1069,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                                                    if site in st.crops},
                                       label=_label(metric, channel), note=note, cells=st.crop_cells,
                                       image_channel=image_channel, numbers=st.crop_metrics,
+                                      display_range=display_range(ctx),
                                       timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
                                       metrics=crop_metrics(st, model.sites(), channel))
     apply_export_style_to_current(ctx, fig, canvas)
@@ -1096,7 +1144,8 @@ def draw_popout(ctx) -> None:
             _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site, channel=image_channel),
                    failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
         render_crop_grid(fig, st.crops.get(site), site, cells=st.crop_cells,
-                         metrics=crop_metrics(st, [site], page_channel(ctx)).get(site), image_channel=image_channel)
+                         metrics=crop_metrics(st, [site], page_channel(ctx)).get(site), image_channel=image_channel,
+                         display_range=display_range(ctx))
     canvas.draw_idle()
 
 
@@ -1132,7 +1181,8 @@ def redraw_detail(ctx) -> None:
     canvas.draw_idle()
     strip_fig, strip_canvas = ctx.widgets.get_or_none("_nw_strip_fig"), ctx.widgets.get_or_none("_nw_strip_canvas")
     if strip_fig is not None and strip_canvas is not None:
-        render_crop_strip(strip_fig, crops, first, cells=st.crop_cells, image_channel=image_channel)
+        render_crop_strip(strip_fig, crops, first, cells=st.crop_cells, image_channel=image_channel,
+                          display_range=display_range(ctx))
         strip_canvas.draw_idle()
 
 

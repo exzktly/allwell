@@ -11143,7 +11143,22 @@ crop reads in flight from `st.fetching` and releases the tile store; `_fetch` ta
 was started for and discards a result whose channel is no longer chosen, so a crop of one channel is never stored
 under another. The tile store's key is `(well, timepoint, channel)`. The run montage is phase only, so with a
 fluorescence channel chosen and *Image: Run montage* the footer says so and points at Full resolution. Each crop
-figure names its channel in its caption or title (`renderer._of_channel`). `ensure_loaded` reads the tables of the wells the page draws
+figure names its channel in its caption or title (`renderer._of_channel`).
+
+**The display range** (`display_range_view.py`; `controller.display_key` / `display_range` / `set_display_range`).
+The image channel's brightness window lives in the app's shared per-channel store, `AppState.image_view`
+(`core/image_view_state.py`), under `display_key`: the fluorescence channel's token, or the run's phase token for the
+phase image — the store Review Image, the Image Table and the Cell Browser already share, so a range is the channel's
+own across the app and is cleared with them by `reset_for_new_dataset`. It is one setting offered by three buttons
+(`display_range_view.DISPLAY_RANGE_BUTTONS`, beside each image-channel combo), each naming the range in force and
+opening a *min* / *max* / **Auto** row in a `widgets.popover.Popover`; `refresh_display_range_buttons` runs from
+`_nw_refresh_controls`. Blank or **Auto** clears the entry, a high not above its low is refused, and
+`set_display_range` redraws the page. The three crop renderers take `display_range` and build a
+`renderer.CropScale` with `crop_scale`: without a range one percentile scale (1st–99th) over every crop, as before;
+with one, that range for the crops cut from an owner tile (raw units) while crops cut from the run montage — an
+8-bit picture — keep a percentile scale of their own, which `CropScale.said` puts in the caption. The full-resolution
+montage takes it as `TileStore.display`, drawn in place of the well-wide 1st–99.5th percentile stretch, and the
+footer names it; the run montage is drawn as saved, and its footer says the range applies to Full resolution. `ensure_loaded` reads the tables of the wells the page draws
 (`active_wells`) and computes the metrics on `core.worker_bridge.run_off_thread`. The wells read are kept
 (`state.well_parts`, for the data dir in `parts_for`; `loaded_wells` the wells asked for, a well without a table
 included), so a well selected again reads nothing and a deselection neither reads nor recomputes; the worker

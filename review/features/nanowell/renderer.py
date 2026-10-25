@@ -577,7 +577,8 @@ def _of_channel(image_channel: str) -> str:
     return f"{image_channel} image" if image_channel else "phase image"
 
 
-def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, image_channel: str = "") -> None:
+def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, image_channel: str = "",
+                      display_range=None) -> None:
     """The first selected nanowell's crops, one per timepoint, on the strip under the site detail's **Pop out**
     button: each titled with its timepoint, a timepoint without a crop saying why in its place, and where the crops
     were cut from said once in the caption. *crops* is ``None`` while they are being cut."""
@@ -589,7 +590,7 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, ima
                       va="center", fontsize=7.5, color=faint, gid="nw-crop-pending"), muted=True)
         return
     items = list(crops.items())
-    lo, hi = _one_scale(c.image for _tp, c in items)
+    scale = crop_scale((c for _tp, c in items), display_range)
     notes: set = set()
     mixed = len({c.source for _tp, c in items if c.image is not None}) > 1
     sub = fig.add_gridspec(1, len(items), left=0.03, right=0.97, top=0.84, bottom=0.36, wspace=0.08)
@@ -600,7 +601,8 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, ima
         ax.set_xticks([])
         ax.set_yticks([])
         if crop.image is not None:
-            ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi)
+            lo, hi = scale.of(crop)
+            ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi, gid="nw-crop-image")
             if cells:
                 _draw_crop_cells(ax, crop, tally, size=6.0)
             if crop.source == "montage":
@@ -615,20 +617,21 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, ima
               "from the montage, at its lower resolution" if sources == {"montage"} else
               "from its owner tile, or the montage where marked" if sources else "none could be cut")
     caption = (f"Crops ({_of_channel(image_channel)}): {site[0]} · q {site[1]}, r {site[2]}, {origin}; "
-               "one brightness scale") + "".join(
+               + scale.said(numbers=scale.chosen)) + "".join(
         f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else "")
     _ink(fig.text(0.03, 0.03, caption, fontsize=6, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
 
 
 def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metrics: dict | None = None,
-                     image_channel: str = "") -> None:
+                     image_channel: str = "", display_range=None) -> None:
     """The selected nanowell at every timepoint, large: one panel per timepoint, filling the page's figure.
 
     Asked for: a larger view of a selected nanowell over time than the site detail's strip of small crops. Every
     panel is drawn on **one** brightness scale — the 1st to 99th percentile of all the crops together — so a cell
     that appears, divides or fades reads as a change between panels, not as each crop stretched to its own range.
     *crops* is ``timepoint -> image_compute.Crop`` as the strip takes it, or ``None`` while they are cut; a
-    timepoint without a crop says why in its panel, and the caption says where the crops were cut from."""
+    timepoint without a crop says why in its panel, and the caption says where the crops were cut from. A
+    *display_range* chosen on the page replaces the percentile scale (:func:`crop_scale`)."""
     fig.clear()
     _bg, ink, faint = _inks(fig.add_subplot(111))
     fig.clear()
@@ -637,7 +640,7 @@ def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metr
                       va="center", color=faint, gid="nw-crop-grid-pending"), muted=True)
         return
     items = list(crops.items())
-    lo, hi = _one_scale(c.image for _tp, c in items)
+    scale = crop_scale((c for _tp, c in items), display_range)
     cols = int(min(len(items), max(1, np.ceil(np.sqrt(len(items) * 1.6)))))
     rows = int(np.ceil(len(items) / cols))
     # *metrics* (``timepoint -> [items]``) are written under each panel, so the rows leave room for them.
@@ -653,6 +656,7 @@ def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metr
         ax.set_xticks([])
         ax.set_yticks([])
         if crop.image is not None:
+            lo, hi = scale.of(crop)
             ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi, gid="nw-crop-grid-image")
             if cells:
                 _draw_crop_cells(ax, crop, tally, size=CELL_DOT_PT2 * 2)
@@ -675,9 +679,52 @@ def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metr
     origin = ("cut from its owner tile at full resolution" if sources == {"tile"} else
               "cut from the montage, at its lower resolution" if sources == {"montage"} else
               "cut from its owner tile, or the montage where marked" if sources else "none could be cut")
-    caption = (f"{origin}; every panel on one brightness scale ({lo:.4g} to {hi:.4g})"
+    caption = (f"{origin}; every panel on {scale.said()}"
                + "".join(f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else ""))
     _ink(fig.text(0.02, 0.015, caption, fontsize=8, color=faint, gid="nw-crop-grid-caption", wrap=True), muted=True)
+
+
+@dataclass(frozen=True)
+class CropScale:
+    """How a set of crops is put on screen: one brightness scale for all of them, so a change between crops reads as
+    a change in the nanowell rather than each crop stretched to its own range.
+
+    Without a chosen range the scale is the 1st to 99th percentile of every crop together (:func:`_one_scale`). With
+    the page's **Display range** (``chosen``) it is that range, in the raw image's units — which the crops cut from an
+    owner tile are in. A crop cut from the run's montage is an 8-bit picture whose numbers mean something else, so
+    under a chosen range those crops keep a percentile scale of their own (``montage``), and :meth:`said` says so."""
+
+    lo: float
+    hi: float
+    chosen: bool = False
+    montage: tuple | None = None
+
+    def of(self, crop) -> tuple[float, float]:
+        """The ``(vmin, vmax)`` *crop* is drawn with."""
+        if self.chosen and self.montage is not None and getattr(crop, "source", "") == "montage":
+            return self.montage
+        return self.lo, self.hi
+
+    def said(self, numbers: bool = True) -> str:
+        """The scale as a caption names it."""
+        if not self.chosen:
+            return f"one brightness scale ({self.lo:.4g} to {self.hi:.4g})" if numbers else "one brightness scale"
+        out = f"the display range {self.lo:.4g} to {self.hi:.4g}"
+        if self.montage is not None:
+            out += (f" (the crops cut from the montage, an 8-bit picture, on a scale of their own: "
+                    f"{self.montage[0]:.4g} to {self.montage[1]:.4g})")
+        return out
+
+
+def crop_scale(crops, display_range=None) -> CropScale:
+    """The :class:`CropScale` for *crops* (``image_compute.Crop`` objects; one without an image is skipped):
+    *display_range* ``(low, high)`` when the page has one, else one percentile scale over them all."""
+    crops = [c for c in crops if c is not None and c.image is not None]
+    if display_range is None:
+        return CropScale(*_one_scale(c.image for c in crops))
+    lo, hi = (float(v) for v in display_range)
+    montage = [c.image for c in crops if c.source == "montage"]
+    return CropScale(lo, hi, True, _one_scale(montage) if montage else None)
 
 
 def _one_scale(images) -> tuple[float, float]:
@@ -759,7 +806,7 @@ def _extremes_layout(fig, blocks, cols: int) -> _ExtremesLayout:
 
 def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cells: bool = False,
                     timepoints=None, metrics: dict | None = None, numbers: bool = True,
-                    image_channel: str = "") -> dict:
+                    image_channel: str = "", display_range=None) -> dict:
     """The *N* nanowells with the largest fold change and the *N* with the smallest, each a row of its crops at the
     timepoints shown; returns ``{axes: (well, q, r)}`` so a click on a row selects its nanowell.
 
@@ -787,11 +834,10 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
         render_message(fig, said, gid="nw-extremes-missing")
         return {}
     metrics = metrics or {}
-    every = [crop.image for row in model.largest + model.smallest
+    every = [crop for row in model.largest + model.smallest
              for tp, crop in (crops.get(row.site) or {}).items() if tp in columns or tp == ""]
-    lo, hi = _one_scale(every)
     layout = _extremes_layout(fig, blocks, len(columns))
-    draw = _ExtremesDrawing(fig, layout, model, metrics, lo, hi, cells, ink, faint)
+    draw = _ExtremesDrawing(fig, layout, model, metrics, crop_scale(every, display_range), cells, ink, faint)
     draw.numbers = numbers
     hits: dict = {}
     for k, (title, rows) in enumerate(blocks):
@@ -818,10 +864,10 @@ class _ExtremesDrawing:
     """One Extremes montage being drawn: its sizes in inches from the layout, the figure's inks, and what the crops
     drawn so far said about themselves (their sources, montage notes, cells), which the caption reports."""
 
-    def __init__(self, fig, layout: _ExtremesLayout, model, metrics: dict, lo: float, hi: float, cells: bool,
+    def __init__(self, fig, layout: _ExtremesLayout, model, metrics: dict, scale: CropScale, cells: bool,
                  ink, faint) -> None:
         self.fig, self.layout, self.model, self.metrics = fig, layout, model, metrics
-        self.lo, self.hi, self.cells, self.ink, self.faint = lo, hi, cells, ink, faint
+        self.scale, self.cells, self.ink, self.faint = scale, cells, ink, faint
         self.w_in, self.h_in = fig.get_size_inches()
         self.cell_w = self.row_h = layout.side + _EXT_GAP
         self.notes: set = set()
@@ -872,8 +918,8 @@ class _ExtremesDrawing:
         # A read that failed whole stores its reason under "" (``controller._fetch``).
         crop = (site_crops or {}).get(tp) or (site_crops or {}).get("")
         if crop is not None and crop.image is not None:
-            ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=self.lo, vmax=self.hi,
-                      gid="nw-extremes-image")
+            lo, hi = self.scale.of(crop)
+            ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi, gid="nw-extremes-image")
             if self.cells:
                 _draw_crop_cells(ax, crop, self.tally, size=max(5.0, 9.0 * s))
             self.sources.add(crop.source)
@@ -919,8 +965,7 @@ class _ExtremesDrawing:
                   "still being cut" if self.pending else "none could be cut")
         hidden = [tp for tp in self.model.timepoints if tp not in columns]
         said = [caption(self.model, label) + ".",
-                f"Crops of the {_of_channel(image_channel)}, {origin}; every crop on one brightness scale "
-                f"({self.lo:.4g} to {self.hi:.4g})."
+                f"Crops of the {_of_channel(image_channel)}, {origin}; every crop on {self.scale.said()}."
                 + "".join(f" {_sentence(n_)}." for n_ in sorted(self.notes))
                 + (f" {_sentence(_cells_clause(self.tally))}." if self.tally else "")
                 + (f" Timepoints not shown: {', '.join(hidden)}." if hidden else "")

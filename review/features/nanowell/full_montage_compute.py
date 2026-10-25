@@ -21,7 +21,8 @@ page reads them on a worker and draws again (:class:`Rendered.wants`).
 
 **Contrast** is one stretch for the whole well (the 1st to 99.5th percentile of every tile's coarse level, as
 ``tile_register.build_montage`` stretches its montage), so one tile does not look brighter than its neighbour only
-because it was stretched alone.
+because it was stretched alone. The page's **Display range**, when set, replaces that stretch
+(:attr:`TileStore.display`).
 
 Qt-free; reading tiles is file work, so the page's controller calls :meth:`TileStore.load` on a worker.
 """
@@ -176,6 +177,9 @@ class TileStore:
         self._fine_bytes = 0
         self._in_view: set[str] = set()
         self._stretch: tuple[float, float] | None = None
+        #: The page's **Display range** ``(low, high)`` in the tiles' own units, drawn in place of the well-wide
+        #: stretch when set; ``None`` keeps the stretch. Set by the page before each draw.
+        self.display: tuple[float, float] | None = None
         self._lock = threading.Lock()
         #: Tiles that could not be read, with why: not drawn, never asked for again, and named by the figure.
         self.failed: dict[str, str] = {}
@@ -276,7 +280,7 @@ class TileStore:
         tw, th = self.source.tile_size_um
         in_view = set()
         with self._lock:
-            stretch = self._stretch
+            stretch = self.display if self.display is not None else self._stretch
             for tile in self.source.tiles:
                 cols = np.nonzero((xs >= tile.left_um) & (xs < tile.left_um + tw))[0]
                 rows = np.nonzero((ys >= tile.top_um) & (ys < tile.top_um + th))[0]

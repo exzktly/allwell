@@ -154,10 +154,13 @@ def has_folder_mode_output(paths: DatasetPaths) -> bool:
 
 # ── destination state (crash/restart detection) ──────────────────────────────
 def destination_has_content(dest: DatasetPaths) -> bool:
-    """True if *dest*'s ``in`` or ``out`` folder exists and holds any file."""
+    """True if *dest*'s ``in`` or ``out`` folder exists and holds any file other than operating-system debris
+    (``member_names.is_os_junk_member``): a fresh destination someone opened in Finder holds a ``.DS_Store``, and
+    is still empty."""
+    from datasets.core.member_names import is_os_junk_member
 
     def _has(folder: Path) -> bool:
-        return folder.is_dir() and any(folder.iterdir())
+        return folder.is_dir() and any(not is_os_junk_member(entry.name) for entry in folder.iterdir())
 
     return _has(dest.in_dir) or _has(dest.out_dir)
 

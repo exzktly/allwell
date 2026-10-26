@@ -1615,7 +1615,7 @@ QWidget#ContextBanner {{
 QWidget#ContextBanner QLabel {{
     color: {c.text_primary};
 }}
-QWidget#ContextBannerButtons {{
+QWidget#ContextBannerBody, QWidget#ContextBannerButtons {{
     background: transparent;
 }}
 

@@ -15841,12 +15841,20 @@ host-agnostic — it knows nothing about queues, jobs or datasets, and whoever
 shows it decides what confirming means — and it does not block the page
 beneath it, which is the point, since the user is editing that page. It
 shows its whole sentence at any width: the buttons sit beside the sentence
-until that would leave it narrower than `_MIN_TEXT_W`, then move under it, and
-the strip's height is computed from the sentence as it wraps at the real width
-(`_fit`, on every resize and `setText`). The buttons sit in a container named
-`ContextBannerButtons`, kept transparent in `theme.qss`: unnamed, it took the
-page background and drew them on a black box. In the Analyze form's narrow column a
-one-row strip gave the sentence about 60 px and cut off most of it
+until that would leave it narrower than `_MIN_TEXT_W`, then move under it
+(`_fit`, on resize, `setText`, and a font or style change). Its height is
+height-for-width — `hasHeightForWidth` / `heightForWidth`, measured from the
+sentence as it wraps at the width it would get, with the fonts as they are —
+so the host's layout asks for it at every pass. A height fixed at resize time
+was short of the text whenever the font changed after that resize — measured
+locally by enlarging the font after layout, and seen on CI's runner, where the
+strip came up 28 px short. The content sits on a child (`ContextBannerBody`) rather
+than on the strip, because Qt asks a widget *with* a layout for that layout's
+height-for-width, never the widget's own. The body and the buttons' container
+(`ContextBannerButtons`) are kept transparent in `theme.qss`: unnamed, the
+buttons' container took the page background and drew them on a black box.
+In the Analyze form's narrow column the one-row strip it replaced gave the
+sentence about 60 px and cut off most of it
 (`tests/test_context_banner_fits.py`).
 `DatasetsTab` inserts it at index 0 of the target page's own layout, which
 works uniformly because all seven Datasets pages hold a single `QScrollArea`

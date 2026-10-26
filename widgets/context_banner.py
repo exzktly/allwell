@@ -29,7 +29,7 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -70,29 +70,37 @@ class ContextBanner(QWidget):
         # Without this a QWidget subclass ignores its own background rule, so
         # the strip would read as ordinary page chrome rather than as a mode.
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
 
         # A grid rather than a row, so the buttons can drop under the
         # sentence when the host is narrow. Beside it in a 320 px column (the
         # Analyze form's) the sentence got about 60 px and needed 255 px of
         # height in a strip that stayed one line tall, so it was cut off.
-        self._grid = QGridLayout(self)
+        # The content lives on a child, not on the strip itself: Qt asks a
+        # widget that has a layout for that layout's height-for-width, never
+        # the widget's own, and this strip has to answer from the sentence.
+        # The strip sizes the child to itself in resizeEvent.
+        self._body = QWidget(self)
+        self._body.setObjectName("ContextBannerBody")
+        self._grid = QGridLayout(self._body)
         self._grid.setContentsMargins(theme.Spacing.md, theme.Spacing.sm,
                                       theme.Spacing.md, theme.Spacing.sm)
         self._grid.setHorizontalSpacing(theme.Spacing.sm)
         self._grid.setVerticalSpacing(theme.Spacing.xs)
 
-        glyph = QLabel(self)
+        glyph = QLabel(self._body)
         glyph.setPixmap(make_icon(icon).pixmap(_GLYPH_W, _GLYPH_W))
         self._grid.addWidget(glyph, 0, 0, Qt.AlignTop)
 
-        self._label = QLabel(text, self)
+        self._label = QLabel(text, self._body)
         self._label.setWordWrap(True)
         self._label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._grid.addWidget(self._label, 0, 1)
         self._grid.setColumnStretch(1, 1)
 
-        self._buttons = QWidget(self)
+        self._buttons = QWidget(self._body)
         # Named so theme.qss can keep it see-through: an unnamed QWidget took
         # the app's page background and drew the buttons on a black box.
         self._buttons.setObjectName("ContextBannerButtons")
@@ -113,19 +121,43 @@ class ContextBanner(QWidget):
         """Whether the buttons sit under the sentence (a narrow host)."""
         return self._stacked
 
-    def _fit(self) -> None:
-        """Put the buttons beside the sentence or under it, and size the strip
-        to the sentence as it actually wraps at this width.
-
-        The height is worked out here rather than asked of the grid: the
-        grid's height-for-width answer did not follow the label's real width,
-        and left a wide strip sized for the narrow one it had been.
-        """
+    def _layout_for(self, width: int) -> tuple[bool, int]:
+        """Whether the buttons go under the sentence at *width*, and the
+        strip's height there — measured from the sentence as it wraps in the
+        width it would actually get, with the fonts as they are now."""
         margins = self._grid.contentsMargins()
         gap = self._grid.horizontalSpacing()
-        inner = self.width() - margins.left() - margins.right() - _GLYPH_W - gap
+        inner = width - margins.left() - margins.right() - _GLYPH_W - gap
         buttons = self._buttons.sizeHint()
         stacked = inner - buttons.width() - gap < _MIN_TEXT_W
+        text_w = max(1, inner if stacked else inner - buttons.width() - gap)
+        text_h = self._label.heightForWidth(text_w)
+        body = (text_h + self._grid.verticalSpacing() + buttons.height() if stacked
+                else max(text_h, buttons.height()))
+        return stacked, body + margins.top() + margins.bottom()
+
+    # Height-for-width, asked by the host's layout at every pass, rather than
+    # a height fixed when the strip was last resized: a font that settled
+    # after that (CI's, without the bundled faces, or the phone layout's
+    # rescale) drew the sentence taller than the strip that held it.
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._layout_for(width)[1]
+
+    def sizeHint(self) -> QSize:
+        width = self._body.sizeHint().width()
+        return QSize(width, self.heightForWidth(max(width, self.width())))
+
+    def minimumSizeHint(self) -> QSize:
+        width = self._body.minimumSizeHint().width()
+        return QSize(width, self.heightForWidth(max(width, self.width())))
+
+    def _fit(self) -> None:
+        """Put the buttons beside the sentence or under it, for the width the
+        strip has now, and tell the host its height may have changed."""
+        stacked, _height = self._layout_for(self.width())
         if stacked != self._stacked:
             self._stacked = stacked
             self._grid.removeWidget(self._buttons)
@@ -133,21 +165,21 @@ class ContextBanner(QWidget):
                 self._grid.addWidget(self._buttons, 1, 1, Qt.AlignLeft)
             else:
                 self._grid.addWidget(self._buttons, 0, 2)
-        text_w = max(1, inner if stacked else inner - buttons.width() - gap)
-        text_h = self._label.heightForWidth(text_w)
-        body = (text_h + self._grid.verticalSpacing() + buttons.height() if stacked
-                else max(text_h, buttons.height()))
-        height = body + margins.top() + margins.bottom()
-        if height != self.height():
-            self.setFixedHeight(height)
-        # Moving the buttons only schedules a relayout; apply it now, so the
-        # strip is never drawn for a frame with the sentence squeezed beside
-        # buttons that have already moved under it.
-        self._grid.activate()
+            # Moving the buttons only schedules a relayout; apply it now, so
+            # the strip is never drawn for a frame with the sentence squeezed
+            # beside buttons that have already moved under it.
+            self._grid.activate()
+        self.updateGeometry()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._body.setGeometry(self.rect())
         self._fit()
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() in (QEvent.FontChange, QEvent.StyleChange):
+            self._fit()
 
     def setText(self, text: str) -> None:
         self._label.setText(text)

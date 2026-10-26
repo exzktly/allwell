@@ -34,6 +34,9 @@ def _host(qtbot, text, width):
     host.resize(width, 600)
     host.show()
     qtbot.waitExposed(host)
+    # The host lays the strip out from its height-for-width on the next pass
+    # of the event loop, as it does in the app.
+    qtbot.wait(20)
     return host, banner
 
 
@@ -67,3 +70,19 @@ def test_narrowing_and_widening_again_restores_the_wide_height(qtbot):
     host.resize(1100, 600)
     qtbot.wait(10)
     assert banner.height() == wide
+
+
+def test_a_font_that_changes_after_layout_still_fits(qtbot):
+    """What CI showed: the sentence measured with one font and drawn with
+    another (fonts can settle after the first layout on a machine without the
+    bundled faces), so a height fixed at resize time was short of the text."""
+    from PySide6.QtGui import QFont
+
+    host, banner = _host(qtbot, _LONG, 600)
+    font = QFont(banner.font())
+    font.setPointSizeF(font.pointSizeF() * 1.6)
+    banner.setFont(font)
+    qtbot.wait(20)
+    label = banner._label
+    assert label.height() >= label.heightForWidth(label.width()), (
+        f"needs {label.heightForWidth(label.width())} px, has {label.height()}")

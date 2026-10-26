@@ -7981,10 +7981,10 @@ saving would otherwise quietly widen the job to everything. Editing a job
 that has already finished is allowed, and says so: it updates what the job
 would do, but the job does not run again until you choose **Retry**.
 
-The **⋯** menu also offers **Duplicate** (a copy directly below, ready to
-point at another dataset — the quickest way to queue the same operation over
-several plates), **Retry** on a job that ran and failed, was cancelled or
-finished, **Input from** (below), **New job using this output** (below),
+The **⋯** menu also offers **Duplicate** (a copy directly below — the
+quickest way to queue the same operation over several plates, or to try one
+setting differently on the same input), **Retry** on a job that ran and
+failed, was cancelled or finished, **Input from** (below), **New job using this output** (below),
 **Move up** / **Move down**, and **Remove from queue**. A row can also be
 opened with **Enter** once it has keyboard focus, and its menu with the
 **Menu** key or **Shift+F10**.
@@ -8001,8 +8001,9 @@ Each row names what the job actually runs — "Subset — plateA → plateA_sub"
 failed / cancelled / blocked / interrupted / suspended) and, underneath, the
 folders it works on, the job it waits for, and its latest message. That
 second line is shortened with "…" when it does not fit; hover it for the
-full text. A pending job also shows its position in line ("1.", "2.", …);
-the currently running job shows a moving progress strip instead.
+full text. Every row is numbered by its place in the queue ("1.", "2.", …),
+and the menus that name jobs use the same numbers, so "3." is always the
+same job. The currently running job also shows a moving progress strip.
 
 Drag a row by its handle at the left to reorder it, or use **Move up** /
 **Move down** from the menu. The whole row is a click target — hover it and
@@ -8014,17 +8015,22 @@ a job has reached a final outcome, since there is nothing left to reorder.
 
 Above the list, a one-line summary counts what is in each state, and **Clear
 completed** removes every job that ran — succeeded, failed or cancelled —
-leaving pending, running and blocked ones alone, so a chain held up by a
-failure is still there to retry.
+leaving pending, running and blocked ones alone. A failed or cancelled job
+that blocked jobs are still waiting on is kept too, and All-Well says so
+("Kept “…” — 2 job(s) wait on it; Retry it to release them"): its **Retry** is
+what releases the chain.
 
 **Queuing the next step before the first has run.** Every job's **⋯** menu has
 **New job using this output**, which sets up a job that works on what this one
 will write — before it has written anything:
 
-- **Analyze…**, **Validate…** or **Subset…** of this job's output.
+- **Analyze…**, **Validate…** or **Subset…** of this job's output (an
+  Analyze job is not offered Analyze of itself).
 - **Concatenate with ▸** or **Merge plates with ▸** another queued job's
   output, or a folder you pick on the page. This job's output becomes
-  dataset 1 and the one you name becomes dataset 2.
+  dataset 1 and the one you name becomes dataset 2. The jobs this one reads
+  from, and those that read from it, are not offered — combining a dataset
+  with its own source is never meant.
 
 The tool's page opens with the strip across the top. Each input that comes
 from a queued job shows the folder that job is set up to write, marked **⧗**
@@ -8039,6 +8045,15 @@ nothing there to run on yet — or worse, something an earlier run left behind.
   Concatenate, dataset 1 is the one whose timepoints come first.
 - Browse to a different folder for an input and that input stops waiting on
   the job; it uses the folder you picked.
+- **Starting from the tool's page works too.** Every dataset input on the
+  Datasets pages has an arrow on its **Browse** button, and Analyze has a **▾**
+  beside its own: **Output of a queued job ▸** lists the queued jobs by number.
+  Picking one fills the field with the folder that job will write, marks it
+  **⧗** and shows the strip, exactly as **New job using this output** does —
+  so a Concatenate of two queued conversions can be set up entirely from the
+  Concatenate page. Jobs that failed, were cancelled or are blocked are not
+  listed, since their output is not coming; when nothing can be, the menu
+  says so.
 - The page's own **+ Queue** does the same as **Add to queue** while the strip
   is showing, so the job keeps waiting on the jobs it reads from.
 - Concatenate's gap, left untouched, is worked out from the two datasets'
@@ -8074,10 +8089,14 @@ from**, and pick the job whose output it reads; **Nothing (use the folder on
 its page)** in the same submenu breaks the link again. Concatenate and Merge
 plates, which take two datasets, have **Dataset 1 from** and **Dataset 2
 from** instead, so each dataset can come from a different job (the job already
-feeding one dataset is not offered for the other). Jobs in these menus are
-numbered by their place in the queue, so two copies of one job can be told
-apart. Only jobs above it in the queue are offered, since a job cannot run
-before the one it reads from. The converters and Zip loose read files, not
+feeding one dataset is not offered for the other). Jobs in these menus carry the
+same numbers as the rows, so two copies of one job can be told apart. Jobs
+above it are listed first; jobs below it follow, marked **(moves this job
+below it)** — a job cannot run before the one it reads from, so choosing one
+moves this job to just under it. That is how a conversion re-added at the
+bottom of the queue is linked to an analysis already waiting above it. A job
+that reads from this one is never offered, and when no job can be the input
+the submenu says so. The converters and Zip loose read files, not
 datasets, so they have no **Input from**. The second job's input folder is
 filled in only once the first one finishes, not when you queue it — so you can
 queue a Subset and a Validate of its result together, without knowing yet
@@ -8088,7 +8107,9 @@ where that result will land. A job's row says where its input comes from:
 If a job fails, everything chained after it is marked **blocked**, not
 failed — those jobs never ran. A blocked row starts its second line with why,
 naming the job in the way: "Blocked — waiting on “Convert CZI — day2…”, which
-failed". A job that reads from two jobs is blocked when either one fails, and
+failed". Further down a chain it names the job that actually went wrong: an
+Analyze after a Concatenate after a failed conversion reads "waiting on
+“Concatenate…”, held up because “Convert CZI — day2…” failed". A job that reads from two jobs is blocked when either one fails, and
 goes back to pending once neither is failed — by retrying the failed job, or
 by pointing that input somewhere else with **Dataset 1 from ▸ Nothing** or an
 edit. Linking a job to one that has already failed blocks it at once, rather
@@ -8096,6 +8117,18 @@ than leaving it waiting. **Retry** on the *failed* job puts it back in the
 queue and returns everything it blocked to pending, so a whole chain recovers
 in one step; a blocked job has no Retry of its own — it never ran, and the job
 that stopped it is still there to fix.
+
+**Retrying a job whose output was already used.** When jobs that read from a
+job have already finished, its **Retry** becomes a submenu: **This job and
+the N job(s) that use its output** puts them all back in the queue, so the
+chain runs again end to end; **This job only — mark those out of date** keeps
+their results but starts their second line with "Out of date — “…” was run
+again after this finished", since what they describe no longer exists.
+Retrying an out-of-date job clears the mark.
+
+**Duplicating a linked job** keeps its links: the copy waits on the same jobs
+as the original (and is blocked with it if one of them failed). To point the
+copy at another dataset, use **Input from ▸ Nothing** or Browse on its page.
 
 Removing a finished job hands its folder to the jobs that read from it.
 Removing one that never wrote its output — still waiting, failed or cancelled

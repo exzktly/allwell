@@ -293,6 +293,50 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
     def has_pending_inputs(self) -> bool:
         return self._pending_input is not None
 
+    def show_input_folder(self, path: str) -> None:
+        """Put *path* in the input field, as choosing a folder does, without
+        the folder scan: the folder a queued job will write is not there to
+        scan (the Job Queue's "Output of a queued job ▸")."""
+        if hasattr(self, "_input_edit"):
+            self._input_edit.setText(str(path))
+
+    def offer_queued_outputs(self, title, provider, choose, empty_text, tooltip) -> None:
+        """A small menu button beside Browse offering *title* ▸ — the queued
+        jobs ``provider()`` lists — as the Datasets pages offer it behind
+        their Browse arrow. Added here rather than in the form builder so the
+        Analyze form stays free of the queue, which injects it."""
+        from PySide6.QtWidgets import QMenu, QToolButton
+
+        from widgets.owned_action import owned_action
+
+        browse = getattr(self, "_browse_btn", None)
+        if browse is None or browse.parentWidget() is None:
+            return
+        button = QToolButton(browse.parentWidget())
+        button.setObjectName("QueuedOutputButton")
+        button.setText("▾")
+        button.setToolTip(tooltip)
+        button.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(button)
+        sub = QMenu(title, menu)
+        menu.addMenu(sub)
+
+        def fill() -> None:
+            sub.clear()
+            items = list(provider())
+            if not items:
+                owned_action(sub, empty_text).setEnabled(False)
+                return
+            for key, label in items:
+                owned_action(sub, label).triggered.connect(
+                    lambda _checked=False, k=key: choose(k))
+
+        sub.aboutToShow.connect(fill)
+        button.setMenu(menu)
+        self._queued_output_menu = (button, menu, sub, fill)
+        layout = browse.parentWidget().layout()
+        layout.insertWidget(layout.indexOf(browse) + 1, button)
+
     def _sync_run_for_pending(self) -> None:
         """Grey Run, and say why, while the input is a queued job's output.
 

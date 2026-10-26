@@ -83,7 +83,9 @@ def test_m4_clear_completed_keeps_a_blocked_chain():
     q.mark_running("b")
     q.mark_finished("b", ok=False, message="truncated")
     q.clear_terminal()
-    assert [j.id for j in q.jobs] == ["a", "cat"]
+    # The failed job stays too while a blocked job waits on it: its Retry is
+    # what releases the chain (UX review 2, K3).
+    assert [j.id for j in q.jobs] == ["a", "b", "cat"]
     assert q.get("cat").state == JobState.BLOCKED
 
 

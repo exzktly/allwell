@@ -441,6 +441,10 @@ class SubsetPage(LogPanelMixin, QWidget):
     def has_pending_inputs(self) -> bool:
         return any_pending({"source": self._src_field})
 
+    def input_fields(self) -> dict:
+        """The source field an earlier queued job's output can fill."""
+        return {"source": self._src_field}
+
     def _current_choice(self, dimension, checks, all_selected, selected) -> list[str] | None:
         """The page's choice for one dimension, ``None`` for "all" — or what it
         was last asked to select when it had no boxes to tick it in."""

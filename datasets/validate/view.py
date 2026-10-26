@@ -315,6 +315,10 @@ class ValidatePage(LogPanelMixin, QWidget):
     def has_pending_inputs(self) -> bool:
         return any_pending({"dataset": self._dataset_field})
 
+    def input_fields(self) -> dict:
+        """The dataset field an earlier queued job's output can fill."""
+        return {"dataset": self._dataset_field}
+
     def _on_dataset_changed(self) -> None:
         self._run_btn.setEnabled(self._can_run())
         self._run_btn.setToolTip(RUN_WAITS if self.has_pending_inputs() else "")

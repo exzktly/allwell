@@ -409,9 +409,10 @@ def test_clearing_a_succeeded_job_hands_its_folder_on(qapp, tmp_path):
         tab.shutdown()
 
 
-def test_clearing_a_failed_job_holds_what_waited_on_it_and_says_so(qapp, tmp_path):
-    """The UX review's C1 through Clear completed: a job waiting on a failed
-    job must not be released onto the folder that job left half-written."""
+def test_clearing_keeps_a_failed_job_that_others_wait_on_and_says_so(qapp, tmp_path):
+    """Clearing the failed job used to take its Retry — the one action that
+    releases the jobs it blocked — and leave them to be relinked by hand
+    (UX review 2, K3). It is kept, and the notice says why."""
     tab, _ = _make_tab(tmp_path)
     try:
         tab._add_to_queue("subset", {"source": "/A", "destination": "/A_sub"})
@@ -424,10 +425,9 @@ def test_clearing_a_failed_job_holds_what_waited_on_it_and_says_so(qapp, tmp_pat
 
         notices = _notices(jq)
         jq.page.clearCompletedRequested.emit()
-        survivor = jq.bridge.queue.get(v)
-        assert survivor.state == "blocked", "released onto a half-written folder"
-        assert "was removed without handing on a folder" in survivor.message
-        assert any("held as blocked" in text for _kind, text in notices)
+        assert [j.id for j in jq.bridge.queue.jobs] == [a, v]
+        assert jq.bridge.queue.get(v).state == "blocked"
+        assert any(text.startswith("Kept “") for _kind, text in notices)
     finally:
         tab.shutdown()
 

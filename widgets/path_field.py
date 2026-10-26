@@ -20,6 +20,7 @@ from pathlib import Path
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFileDialog,
+    QMenu,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -31,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from widgets.icons import make_icon
+from widgets.owned_action import owned_action
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -133,6 +135,47 @@ class PathField(QWidget):
         if self._pending_note or not self._path or self._validator is None:
             return ""
         return self._validator(Path(self._path))
+
+    def add_browse_alternative(
+        self,
+        title: str,
+        provider: Callable[[], list[tuple[str, str]]],
+        choose: Callable[[str], None],
+        *,
+        empty_text: str,
+        tooltip: str = "",
+    ) -> None:
+        """Offer a second way to fill the field, behind Browse's arrow.
+
+        Clicking the button still browses; its arrow opens a menu of
+        *Browse…* and a *title* submenu listing ``provider()`` — ``(key,
+        label)`` pairs read each time the menu opens — with *choose* called
+        on the key picked, or *empty_text* when there are none. The widget
+        knows nothing of what the pairs are; the host decides (the Datasets
+        pane lists queued jobs whose output can fill the field).
+        """
+        menu = QMenu(self._browse_btn)
+        owned_action(menu, "Browse…").triggered.connect(lambda _checked=False: self._browse())
+        sub = QMenu(title, menu)
+        menu.addMenu(sub)
+        sub.aboutToShow.connect(lambda: self._fill_alternative(sub, provider, choose, empty_text))
+        self._alternative_menu = (menu, sub)
+        self._browse_btn.setMenu(menu)
+        self._browse_btn.setPopupMode(QToolButton.MenuButtonPopup)
+        if tooltip:
+            self._browse_btn.setToolTip(tooltip)
+
+    @staticmethod
+    def _fill_alternative(sub: QMenu, provider, choose, empty_text: str) -> None:
+        sub.clear()
+        items = list(provider())
+        if not items:
+            note = owned_action(sub, empty_text)
+            note.setEnabled(False)
+            return
+        for key, label in items:
+            owned_action(sub, label).triggered.connect(
+                lambda _checked=False, k=key: choose(k))
 
     def set_pending(self, path: str, note: str) -> None:
         """Hold *path* as one that will exist, saying why it does not yet.

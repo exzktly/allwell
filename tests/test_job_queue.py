@@ -323,15 +323,16 @@ def test_duplicate_deep_copies_the_spec():
     assert q.get("a").spec["opts"]["raw"] == "/data/a"
 
 
-def test_duplicate_drops_the_chain_link():
-    """A clone waiting on its twin's predecessor waits for output it has no
-    relationship to. "Run this same tool against another dataset" is the
-    reason to duplicate, and that job has no predecessor."""
+def test_duplicate_keeps_the_chain_link():
+    """It used to drop it, and the copy then held only the *planned* folder:
+    it stayed pending while the original sat blocked behind a failure, and
+    ran on whatever that folder held (UX review 2, K1). A copy meant for
+    another dataset is re-pointed like any job."""
     q = JobQueue([_job("a"), _job("b", chain_from="a", chain_target="opts.raw",
                                    chain_kind="out_dir")])
     clone = q.duplicate("b", "b2")
-    assert clone.chain_from is None
-    assert clone.chain_target is None and clone.chain_kind is None
+    assert (clone.chain_from, clone.chain_target, clone.chain_kind) == (
+        "a", "opts.raw", "out_dir")
 
 
 def test_duplicate_refuses_an_id_already_in_use():

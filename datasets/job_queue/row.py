@@ -39,6 +39,7 @@ from widgets import menu_exec
 from widgets.icons import make_icon
 from widgets.status_dot import StatusDot
 from services.job_kinds import (
+    INPUT_TARGETS,
     KIND_LABEL,
     describe,
     describe_detail,
@@ -69,13 +70,18 @@ KIND_ICON = {
     "merge_plates": "layout-grid",
 }
 
-#: The one-input tools a dataset can be handed to next, in menu order. The
-#: converters and Zip loose are absent: they read acquisition files or loose
-#: images, never a dataset another job wrote.
-NEXT_STEP_KINDS = ("analyze", "validate", "subset")
-#: The two-input tools, offered with a second dataset: this job's output is
-#: dataset 1, and the second is another job's output or a folder.
-PAIR_STEP_KINDS = ("concatenate", "merge_plates")
+#: The tools a dataset can be handed to next, derived from what each kind
+#: takes as input (``services.job_kinds.INPUT_TARGETS``) rather than written
+#: out: a new tool that reads a dataset appears in the menu by declaring its
+#: inputs, and a hand-kept roster would miss it (CLAUDE.md §3). One-input
+#: kinds are offered directly; two-input kinds as "<tool> with ▸", this job's
+#: output being dataset 1. The converters and Zip loose read files, not
+#: datasets, so they declare no inputs and are absent.
+NEXT_STEP_KINDS = tuple(k for k in INPUT_TARGETS if len(INPUT_TARGETS[k]) == 1)
+PAIR_STEP_KINDS = tuple(k for k in INPUT_TARGETS if len(INPUT_TARGETS[k]) == 2)
+#: A kind not offered as the next step of the same kind: analysing an
+#: analysis's own output re-reads the images it just analysed.
+_NOT_AFTER_ITSELF = frozenset({"analyze"})
 #: The submenu every row offers. One word for one idea across the queue: a
 #: job takes its *input* from another job ("Input from ▸", "Dataset 1 from
 #: ▸"), and this is the same link made from the other end.
@@ -101,7 +107,8 @@ class JobRow(QWidget):
     moveDownClicked = Signal(str)
     editClicked = Signal(str)
     duplicateClicked = Signal(str)
-    retryClicked = Signal(str)
+    # (job_id, with the jobs that used its output too)
+    retryClicked = Signal(str, bool)
     rowClicked = Signal(str)
     # (job_id, predecessor_id or "" to unchain)
     chainRequested = Signal(str, str)
@@ -122,7 +129,9 @@ class JobRow(QWidget):
         self._detail_text = ""
         self._predecessors: list[tuple[str, str]] = []
         self._others: list[tuple[str, str]] = []
+        self._below: list[tuple[str, str]] = []
         self._positions: dict[str, int] = {}
+        self._finished_downstream = 0
         self._drag_y0: float | None = None
         self._drag_steps = 0
 
@@ -220,7 +229,9 @@ class JobRow(QWidget):
     def update_from(self, job: JobSpec, *, ordinal: int | None = None,
                     predecessors: list[tuple[str, str]] | None = None,
                     others: list[tuple[str, str]] | None = None,
-                    positions: dict[str, int] | None = None) -> None:
+                    positions: dict[str, int] | None = None,
+                    below: list[tuple[str, str]] | None = None,
+                    finished_downstream: int = 0) -> None:
         """Rewrite this row for *job*, reusing every widget it already has.
 
         *predecessors* is the (id, label) list offered by the "Input from"
@@ -235,6 +246,8 @@ class JobRow(QWidget):
         self._predecessors = list(predecessors or [])
         self._others = list(others or [])
         self._positions = dict(positions or {})
+        self._below = list(below or [])
+        self._finished_downstream = finished_downstream
 
         self._ordinal.setText(f"{ordinal}." if ordinal is not None else "")
         self._icon.setPixmap(make_icon(KIND_ICON.get(job.kind, "boxes")).pixmap(16, 16))
@@ -259,6 +272,9 @@ class JobRow(QWidget):
         the first line and the second exists to be scanned, not studied.
         """
         parts = []
+        if job.stale_because and job.state == JobState.SUCCEEDED:
+            parts.append(f"Out of date — “{job.stale_because}” was run again "
+                         "after this finished; Retry to bring it up to date")
         if job.state == JobState.BLOCKED and job.message:
             # Why it cannot run comes first: at the end of an elided line it
             # was cut off at every window width, and it is the one thing a
@@ -330,8 +346,7 @@ class JobRow(QWidget):
         # waiting, a running one is already going, and a blocked one never ran
         # — retrying it is refused, so it is not offered (retry what blocked it).
         if job.state in JobState.CLEARABLE:
-            owned_action(menu, "Retry").triggered.connect(
-                lambda: self.retryClicked.emit(self.job_id))
+            self._add_retry(menu)
 
         if len(input_targets(job.kind)) > 1:
             for target in input_targets(job.kind):
@@ -387,16 +402,10 @@ class JobRow(QWidget):
         none_action.setCheckable(True)
         none_action.setChecked(not self._job.chain_from)
         none_action.triggered.connect(lambda: self.chainRequested.emit(self.job_id, ""))
-        if not self._predecessors:
-            sub.setEnabled(bool(self._job.chain_from))
-            return
-        sub.addSeparator()
-        for pred_id, label in self._predecessors:
-            act = owned_action(sub, self._job_entry(pred_id, label))
-            act.setCheckable(True)
-            act.setChecked(self._job.chain_from == pred_id)
-            act.triggered.connect(
-                lambda _checked=False, p=pred_id: self.chainRequested.emit(self.job_id, p))
+        current = self._job.chain_from
+        self._add_sources(sub, self._predecessors, self._below,
+                          lambda source: current == source,
+                          lambda source: self.chainRequested.emit(self.job_id, source))
 
     def _add_input_submenu(self, menu: QMenu, target: str) -> None:
         """"Dataset 1 from ▸" / "Dataset 2 from ▸" — one input of a job that
@@ -416,18 +425,51 @@ class JobRow(QWidget):
         none_action.setChecked(current is None)
         none_action.triggered.connect(
             lambda _checked=False, t=target: self.linkRequested.emit(self.job_id, t, ""))
-        offered = [(pid, plabel) for pid, plabel in self._predecessors if pid not in taken]
-        if not offered:
-            sub.setEnabled(current is not None)
+        above = [(pid, plabel) for pid, plabel in self._predecessors if pid not in taken]
+        below = [(pid, plabel) for pid, plabel in self._below if pid not in taken]
+        self._add_sources(sub, above, below,
+                          lambda source: current is not None and current.source == source,
+                          lambda source, t=target: self.linkRequested.emit(self.job_id, t, source))
+
+    def _add_sources(self, sub: QMenu, above, below, checked, choose) -> None:
+        """The jobs an input can come from: those above, then those below
+        (choosing one moves this job just below it), or a sentence saying
+        why there are none — a disabled submenu said nothing."""
+        if not above and not below:
+            note = owned_action(sub, "No other queued job can be its input yet "
+                                     "— queue one first")
+            note.setEnabled(False)
             return
         sub.addSeparator()
-        for pred_id, pred_label in offered:
-            act = owned_action(sub, self._job_entry(pred_id, pred_label))
+        for pred_id, label in above:
+            act = owned_action(sub, self._job_entry(pred_id, label))
             act.setCheckable(True)
-            act.setChecked(current is not None and current.source == pred_id)
-            act.triggered.connect(
-                lambda _checked=False, t=target, p=pred_id:
-                    self.linkRequested.emit(self.job_id, t, p))
+            act.setChecked(checked(pred_id))
+            act.triggered.connect(lambda _checked=False, p=pred_id: choose(p))
+        if below:
+            sub.addSeparator()
+            for pred_id, label in below:
+                act = owned_action(
+                    sub, f"{self._job_entry(pred_id, label)}  (moves this job below it)")
+                act.triggered.connect(lambda _checked=False, p=pred_id: choose(p))
+
+    def _add_retry(self, menu: QMenu) -> None:
+        """Retry — and, when finished jobs used this job's output, the choice
+        of re-running them too or marking them out of date. Re-running a
+        conversion and leaving its analysis "succeeded" described numbers
+        from output that no longer exists."""
+        n = self._finished_downstream
+        if not n:
+            owned_action(menu, "Retry").triggered.connect(
+                lambda: self.retryClicked.emit(self.job_id, False))
+            return
+        sub = QMenu("Retry", menu)
+        sub.setObjectName("JobRowRetryMenu")
+        menu.addMenu(sub)
+        owned_action(sub, f"This job and the {n} job(s) that use its output").triggered.connect(
+            lambda: self.retryClicked.emit(self.job_id, True))
+        owned_action(sub, "This job only — mark those out of date").triggered.connect(
+            lambda: self.retryClicked.emit(self.job_id, False))
 
     def _add_next_step_submenu(self, menu: QMenu) -> None:
         """"New job using this output ▸" — set up a job that reads what this
@@ -442,6 +484,8 @@ class JobRow(QWidget):
         sub.setObjectName("JobRowNextStepMenu")
         menu.addMenu(sub)
         for kind in NEXT_STEP_KINDS:
+            if kind == self._job.kind and kind in _NOT_AFTER_ITSELF:
+                continue
             owned_action(sub, f"{KIND_LABEL.get(kind, kind)}…").triggered.connect(
                 lambda _checked=False, k=kind: self.nextStepRequested.emit(self.job_id, k, ""))
         sub.addSeparator()

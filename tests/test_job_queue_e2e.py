@@ -304,7 +304,8 @@ def test_failed_concatenate_blocks_validate_and_subset_two_levels_deep(qapp, tmp
     assert bridge.queue.get("s1").state == JobState.BLOCKED
     # Named by the job's label (never its internal id), with what happened.
     assert "“Concatenate”, which failed" in bridge.queue.get("v1").message
-    assert "which is blocked itself" in bridge.queue.get("s1").message
+    # Two levels down, the job that actually failed is named (UX review 2, L2).
+    assert "held up because “Concatenate” failed" in bridge.queue.get("s1").message
     assert validate_ctrl._worker is None  # v1 never started
     assert subset_ctrl._worker is None    # s1 -- two levels down -- never started either
     # Neither downstream controller's page was ever repopulated from the

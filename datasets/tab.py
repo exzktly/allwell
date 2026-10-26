@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from widgets.context_banner import ContextBanner
+from services.job_kinds import INPUT_TARGETS
 from widgets.page_body import build_page_body
 from widgets.rail_nav import RailNav
 from widgets.page_stack import NamedPageStack
@@ -139,8 +140,55 @@ def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | 
             sink(lambda spec: controller.add_job("analyze", spec))
     controller.set_session_hooks(tab._begin_session, tab._end_session)
     controller.set_reveal_hook(tab._reveal_page)
+    _offer_queued_outputs(tab, controller)
     tab._controllers["job_queue"] = controller
     return controller.page, controller.shutdown
+
+
+#: The wording behind each dataset input's Browse arrow. One place, so the
+#: Datasets pages and Analyze say the same thing.
+QUEUED_OUTPUT_MENU = "Output of a queued job"
+QUEUED_OUTPUT_EMPTY = "No queued job writes a dataset yet"
+QUEUED_OUTPUT_TIP = ("Browse for a folder — or, from the arrow, choose the "
+                     "output of a job in the Job Queue, before it has run.")
+
+
+def _offer_queued_outputs(tab: "DatasetsTab", controller) -> None:
+    """Put "Output of a queued job ▸" behind every dataset input's Browse.
+
+    The tool page is where a scientist goes to pick an input, so it is where
+    a queued job's output is offered too, not only from the queue's rows.
+    Derived from ``INPUT_TARGETS`` and each page's ``input_fields()``, so a
+    new tool that declares its inputs is covered without an edit here.
+    """
+    for kind in INPUT_TARGETS:
+        page = getattr(tab._controllers.get(kind), "page", None)
+        fields = page.input_fields() if hasattr(page, "input_fields") else {}
+        for target, field in fields.items():
+            field.add_browse_alternative(
+                QUEUED_OUTPUT_MENU,
+                lambda k=kind: controller.queued_outputs(k),
+                lambda job_id, k=kind, t=target, f=field:
+                    _fill_from_queue(controller, k, t, job_id, f.set_path),
+                empty_text=QUEUED_OUTPUT_EMPTY, tooltip=QUEUED_OUTPUT_TIP)
+    analyze = tab._analyze_controller
+    offer = getattr(analyze, "offer_queued_outputs", None)
+    if callable(offer):
+        offer(QUEUED_OUTPUT_MENU, lambda: controller.queued_outputs("analyze"),
+              lambda job_id: _fill_from_queue(
+                  controller, "analyze", "opts.raw", job_id, analyze.show_input_folder),
+              QUEUED_OUTPUT_EMPTY, QUEUED_OUTPUT_TIP)
+
+
+def _fill_from_queue(controller, kind: str, target: str, job_id: str, fill) -> None:
+    """Link the input, put the folder that job will write in the field, then
+    mark it ⧗: filling a field clears any mark on it, so the mark goes last,
+    and marking it is also what makes the page re-read its inputs."""
+    path = controller.link_from_page(kind, target, job_id)
+    if path is None:
+        return
+    fill(path)
+    controller.show_links(kind)
 
 
 _FEATURES: tuple[_Feature, ...] = (

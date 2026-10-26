@@ -31,7 +31,15 @@ from services.job_kinds import (
     produced_for,
     produced_layout,
 )
-from services.job_queue import ChainLink, JobQueue, JobSpec, JobState, load_queue, save_queue
+from services.job_queue import (
+    ChainLink,
+    JobQueue,
+    JobSpec,
+    JobState,
+    downstream_ids,
+    load_queue,
+    save_queue,
+)
 from datasets.job_queue.session import QueueSession
 from datasets.job_queue.view import JobQueuePage
 
@@ -158,8 +166,8 @@ class QueueBridge(QObject):
         self._advance()
         return True
 
-    def retry_job(self, job_id: str) -> bool:
-        if not self._queue.retry(job_id):
+    def retry_job(self, job_id: str, with_downstream: bool = False) -> bool:
+        if not self._queue.retry(job_id, with_downstream=with_downstream):
             return False
         self._save()
         self.queueChanged.emit()
@@ -743,17 +751,68 @@ class JobQueueController(QObject):
     def _on_duplicate(self, job_id: str) -> None:
         self.bridge.duplicate_job(job_id)
 
-    def _on_retry(self, job_id: str) -> None:
-        self.bridge.retry_job(job_id)
+    def _on_retry(self, job_id: str, with_downstream: bool = False) -> None:
+        self.bridge.retry_job(job_id, with_downstream)
 
     def _on_chain(self, job_id: str, chain_from: str) -> None:
+        if not self._move_below(job_id, chain_from):
+            return
         if not self.bridge.set_chain(job_id, chain_from):
             self._notify("Those two jobs can't be chained that way.", "warn")
 
+    def queued_outputs(self, kind: str) -> list[tuple[str, str]]:
+        """The queued jobs whose output *kind*'s page can take as an input,
+        as ``(job id, "N. label")`` in queue order, for the input fields'
+        "Output of a queued job ▸" menus.
+
+        Not a job whose output is never coming (failed, cancelled, blocked),
+        and not the job open for editing on that page or one that reads from
+        it — linking those would be a loop the queue refuses on Save.
+        """
+        jobs = self.bridge.queue.jobs
+        session = self.sessions.current()
+        editing = session[1] if session and session[0] == kind else None
+        excluded = ({editing} | downstream_ids(jobs, editing)) if editing else set()
+        stopped = JobState.FAILURE_LIKE | {JobState.BLOCKED}
+        return [(j.id, f"{i + 1}. {j.label or j.kind}") for i, j in enumerate(jobs)
+                if j.state not in stopped and j.id not in excluded]
+
+    def link_from_page(self, kind: str, target: str, source_id: str) -> str | None:
+        """See ``QueueSession.link_from_page``; the host fills the field with
+        the folder returned, then calls :meth:`show_links`."""
+        return self.sessions.link_from_page(kind, target, source_id)
+
+    def show_links(self, kind: str) -> None:
+        self.sessions.show_links(kind)
+
     def _on_link(self, job_id: str, target: str, source: str) -> None:
+        if not self._move_below(job_id, source):
+            return
         if not self.bridge.set_link(job_id, target, source):
-            self._notify("That input can't be linked to that job — it may be "
-                         "queued after this one, or wait on this one itself.", "warn")
+            self._notify("That input can't be linked to that job — it reads "
+                         "from this one, directly or through others.", "warn")
+
+    def _move_below(self, job_id: str, source: str) -> bool:
+        """Put *job_id* just below *source* when it is queued above it.
+
+        A job can only read from a job that runs first. Offering only the
+        jobs above made a conversion re-added after Clear completed — which
+        lands at the bottom — impossible to choose, with the menu simply
+        disabled. The menu offers the jobs below too, saying the job moves.
+        Refused, and said, when the move would put this job below a job that
+        reads from it.
+        """
+        jobs = self.bridge.queue.jobs
+        order = [j.id for j in jobs]
+        if not source or source not in order or job_id not in order:
+            return True
+        if order.index(source) < order.index(job_id):
+            return True
+        if self.bridge.move_job_to(job_id, order.index(source)):
+            return True
+        self._notify("That job can't move below it: a job that reads from "
+                     "this one would then run before it.", "warn")
+        return False
 
     def _on_next_step(self, job_id: str, kind: str, other_id: str) -> None:
         """Set up *kind* to read *job_id*'s output — and, for a two-input
@@ -776,8 +835,19 @@ class JobQueueController(QObject):
         write. That is said here, since a tidy-up must not look free.
         """
         orphaned = self._successors_of_unfinished_clearable_jobs()
+        queue = self.bridge.queue
+        kept = [j for j in queue.jobs if queue.kept_on_clear(j.id)]
         removed = self.bridge.clear_completed()
-        if not removed:
+        if kept:
+            waiting = sum(1 for j in queue.jobs
+                          if j.state == JobState.BLOCKED
+                          and any(k.id in j.sources() for k in kept))
+            self._notify(
+                f"Kept “{kept[0].label or kept[0].id}”"
+                + (f" and {len(kept) - 1} more" if len(kept) > 1 else "")
+                + f" — {waiting} job(s) wait on it; Retry it to release them.",
+                "neutral")
+        if not removed and not kept:
             self._notify("Nothing finished to clear.", "neutral")
         elif orphaned:
             self._notify(
@@ -788,8 +858,8 @@ class JobQueueController(QObject):
 
     def _successors_of_unfinished_clearable_jobs(self) -> list[str]:
         jobs = self.bridge.queue.jobs
-        stopped = {j.id for j in jobs
-                   if j.state in JobState.CLEARABLE and j.state != JobState.SUCCEEDED}
+        cleared = set(self.bridge.queue.clearable_ids())
+        stopped = {j.id for j in jobs if j.id in cleared and j.state != JobState.SUCCEEDED}
         return [j.label or j.id for j in jobs
                 if stopped.intersection(j.sources()) and j.state not in JobState.CLEARABLE]
 

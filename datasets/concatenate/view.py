@@ -319,6 +319,11 @@ class ConcatenatePage(LogPanelMixin, QWidget):
     def set_destination_path(self, path: str) -> None:
         self._dest_field.set_path(path)
 
+    def input_fields(self) -> dict:
+        """The dataset fields an earlier queued job's output can fill, by
+        their job-spec key (``services.job_kinds.INPUT_TARGETS``)."""
+        return self._input_fields()
+
     def _input_fields(self) -> dict:
         return {"dataset1": self._ds1_field, "dataset2": self._ds2_field}
 

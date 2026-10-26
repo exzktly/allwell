@@ -33,7 +33,7 @@ from ui import theme
 from widgets.flow_layout import FlowLayout
 from datasets.core.log_panel import hrule as _hrule
 from services.job_kinds import KIND_LABEL
-from services.job_queue import JobSpec, JobState
+from services.job_queue import JobSpec, JobState, downstream_ids, lineage
 from datasets.job_queue.row import JobRow
 from widgets import menu_exec
 from widgets.owned_action import owned_action
@@ -72,7 +72,7 @@ class JobQueuePage(QWidget):
     moveByRequested = Signal(str, int)
     editRequested = Signal(str)
     duplicateRequested = Signal(str)
-    retryRequested = Signal(str)
+    retryRequested = Signal(str, bool)
     chainRequested = Signal(str, str)
     linkRequested = Signal(str, str, str)
     nextStepRequested = Signal(str, str, str)
@@ -264,7 +264,9 @@ class JobQueuePage(QWidget):
         self._empty_hint.setVisible(False)
         self._list.setVisible(True)
 
-        ordinals = self._pending_ordinals(jobs)
+        # One number per job, its place in the queue, on every row and in every
+        # menu: rows used to count pending jobs only while menus counted
+        # positions, so "3." named two different jobs on one screen.
         positions = {job.id: i + 1 for i, job in enumerate(jobs)}
         ids = [job.id for job in jobs]
         if ids != self._order:
@@ -272,25 +274,15 @@ class JobQueuePage(QWidget):
         for job in jobs:
             row = self._rows.get(job.id)
             if row is not None:
-                row.update_from(job, ordinal=ordinals.get(job.id),
+                downstream = downstream_ids(jobs, job.id)
+                row.update_from(job, ordinal=positions[job.id],
                                 predecessors=self._predecessors_for(job.id, jobs),
+                                below=self._below_for(job.id, jobs),
                                 others=self._others_for(job.id, jobs),
-                                positions=positions)
-
-    @staticmethod
-    def _pending_ordinals(jobs: list[JobSpec]) -> dict[str, int]:
-        """Queue positions, counted over pending jobs only.
-
-        A number on a row that already has a final outcome does not mean
-        "queue position" any more, so those rows get none.
-        """
-        ordinals: dict[str, int] = {}
-        n = 0
-        for job in jobs:
-            if job.state == JobState.PENDING:
-                n += 1
-                ordinals[job.id] = n
-        return ordinals
+                                positions=positions,
+                                finished_downstream=sum(
+                                    1 for j in jobs
+                                    if j.id in downstream and j.state in JobState.CLEARABLE))
 
     @staticmethod
     def _predecessors_for(job_id: str, jobs: list[JobSpec]) -> list[tuple[str, str]]:
@@ -308,13 +300,27 @@ class JobQueuePage(QWidget):
         return out
 
     @staticmethod
+    def _below_for(job_id: str, jobs: list[JobSpec]) -> list[tuple[str, str]]:
+        """The jobs below *job_id* it could read from by moving below them:
+        not the ones that read from it, which would make a loop."""
+        ids = [j.id for j in jobs]
+        if job_id not in ids:
+            return []
+        after = jobs[ids.index(job_id) + 1:]
+        readers = downstream_ids(jobs, job_id)
+        return [(j.id, j.label or j.kind) for j in after if j.id not in readers]
+
+    @staticmethod
     def _others_for(job_id: str, jobs: list[JobSpec]) -> list[tuple[str, str]]:
         """Every other job whose output could still arrive, as (id, label),
         for a next step's second dataset. Not limited to the jobs above: the
-        next step is added at the end of the queue, after both."""
+        next step is added at the end of the queue, after both. Not the jobs
+        this one reads from or that read from it: combining a dataset with
+        its own source, or with what was made from it, is never meant."""
         stopped = JobState.FAILURE_LIKE | {JobState.BLOCKED}
+        related = lineage(jobs, job_id)
         return [(job.id, job.label or job.kind) for job in jobs
-                if job.id != job_id and job.state not in stopped]
+                if job.id != job_id and job.state not in stopped and job.id not in related]
 
     def _rebuild_rows(self, jobs: list[JobSpec]) -> None:
         self._clear_rows()

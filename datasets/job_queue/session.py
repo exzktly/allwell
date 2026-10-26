@@ -213,6 +213,42 @@ class QueueSession:
             self._show_links(kind)
         return started
 
+    def link_from_page(self, kind: str, target: str, source_id: str) -> str | None:
+        """The user chose a queued job's output in *kind*'s own input field.
+
+        The field is the user's own page — a form part filled in, or a job
+        under edit — so nothing on it is replaced: a session for that page is
+        opened if none is (said in the banner, so Save is the visible way
+        on), and the link is added to it, kept on Save by the same rule as a
+        next step's. Returns the folder the input should show, or ``None``
+        when the choice is refused (that job left the queue, or the input is
+        not one an earlier job can fill).
+        """
+        queue = self._bridge.queue
+        source = queue.get(source_id)
+        if source is None or target not in input_targets(kind):
+            self._notify("That job can't be this input.", "warn")
+            return None
+        if self._session is None or self._session[0] != kind:
+            self._close_previous(kind, None)
+            # The page is the user's own work, not borrowed: there is nothing
+            # to put back when this session ends.
+            self._bridge.forget_form(kind)
+            label = KIND_LABEL.get(kind, kind)
+            if not self._start(kind, None, (
+                    f"Setting up a queued {label} job that reads from "
+                    f"“{short_label(source.label or source.id)}”. Inputs marked ⧗ "
+                    "are read from that job's output when it runs. Add it to the "
+                    "queue when the page is set.")):
+                return None
+        path = self._source_path(source_id)
+        self._links[target] = (source_id, path)
+        return path
+
+    def show_links(self, kind: str) -> None:
+        """Re-mark the page's linked inputs, after the host filled one in."""
+        self._show_links(kind)
+
     def _source_path(self, source_id: str) -> str:
         """The folder a source job wrote, or is set up to write."""
         source = self._bridge.queue.get(source_id)

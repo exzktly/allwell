@@ -129,6 +129,11 @@ class JobSpec:
     #: for a target by linking or unlinking that input, and for all of them
     #: by saving an edit of the job — each is the user choosing its input.
     orphaned_inputs: dict[str, str] = field(default_factory=dict)
+    #: Set on a finished job when a job it read from was run again after it
+    #: (``retry(..., with_downstream=False)``): the label of that job. Its
+    #: results describe output that no longer exists, and the row says so.
+    #: Cleared when this job is run again.
+    stale_because: str = ""
     state: str = JobState.PENDING
     message: str = ""
     output_dir: str | None = None
@@ -182,6 +187,7 @@ class JobSpec:
             "chain_kind": self.chain_kind,
             "extra_links": [link.to_json() for link in self.extra_links],
             "orphaned_inputs": dict(self.orphaned_inputs),
+            "stale_because": self.stale_because,
             "state": self.state,
             "message": self.message,
             "output_dir": self.output_dir,
@@ -205,6 +211,7 @@ class JobSpec:
             orphaned_inputs={str(k): str(v) for k, v in
                              (data.get("orphaned_inputs") or {}).items()}
             if isinstance(data.get("orphaned_inputs"), dict) else {},
+            stale_because=str(data.get("stale_because") or ""),
             state=data.get("state", JobState.PENDING),
             message=data.get("message", ""),
             output_dir=data.get("output_dir"),
@@ -220,6 +227,39 @@ def set_dotted(target: dict, dotted: str, value: Any) -> None:
     for part in parts[:-1]:
         cur = cur.setdefault(part, {})
     cur[parts[-1]] = value
+
+
+def upstream_ids(jobs: list[JobSpec], job_id: str) -> set[str]:
+    """Every job *job_id* reads from, directly or through others."""
+    by_id = {j.id: j for j in jobs}
+    found: set[str] = set()
+    stack = [job_id]
+    while stack:
+        cur = by_id.get(stack.pop())
+        for s in cur.sources() if cur else []:
+            if s not in found:
+                found.add(s)
+                stack.append(s)
+    return found
+
+
+def downstream_ids(jobs: list[JobSpec], job_id: str) -> set[str]:
+    """Every job that reads from *job_id*, directly or through others."""
+    found = {job_id}
+    changed = True
+    while changed:
+        changed = False
+        for j in jobs:
+            if j.id not in found and found.intersection(j.sources()):
+                found.add(j.id)
+                changed = True
+    return found - {job_id}
+
+
+def lineage(jobs: list[JobSpec], job_id: str) -> set[str]:
+    """Every job *job_id* reads from or that reads from it — the jobs it
+    makes no sense to combine it with."""
+    return upstream_ids(jobs, job_id) | downstream_ids(jobs, job_id)
 
 
 class JobQueue:
@@ -370,12 +410,17 @@ class JobQueue:
     def duplicate(self, job_id: str, new_id: str) -> JobSpec | None:
         """Copy ``job_id`` as a fresh pending job directly after it.
 
-        The chain link is deliberately *not* copied: a clone that inherited
-        its twin's predecessor would wait on output it has no relationship to,
-        and "run this same tool against another dataset" — the reason to
-        duplicate at all — is a job with no predecessor. The new id is passed
-        in rather than generated here so this module needs no ``uuid`` and a
-        test can name the copy.
+        The copy keeps the original's links and any orphaned inputs. Dropping
+        them made the copy an ordinary job holding the *planned* folder in its
+        spec: it stayed pending while the original sat blocked behind a failed
+        conversion, and ran on whatever that folder held — "duplicate it and
+        change one setting" is the commonest way to branch a chain. A copy
+        meant for another dataset is re-pointed the same way any job is
+        (Input from ▸ Nothing, or Browse on its page). Directly after the
+        original is always a legal place for it: everything the original
+        reads from is above the original. The new id is passed in rather than
+        generated here so this module needs no ``uuid`` and a test can name
+        the copy.
         """
         job = self._by_id.get(job_id)
         if job is None or new_id in self._by_id:
@@ -385,12 +430,21 @@ class JobQueue:
             kind=job.kind,
             label=job.label,
             spec=json.loads(json.dumps(job.spec)),
+            orphaned_inputs=dict(job.orphaned_inputs),
         )
+        clone.set_links(job.links())
         self._jobs.insert(self._index(job_id) + 1, clone)
         self._by_id[new_id] = clone
+        self._reassess_block(clone)
         return clone
 
-    def retry(self, job_id: str) -> bool:
+    def downstream(self, job_id: str) -> list[JobSpec]:
+        """Every job that reads, directly or through others, from *job_id*,
+        in queue order."""
+        found = downstream_ids(self._jobs, job_id)
+        return [j for j in self._jobs if j.id in found]
+
+    def retry(self, job_id: str, *, with_downstream: bool = False) -> bool:
         """Put a finished job back in the queue, and unblock what it stranded.
 
         Only a job in a ``TERMINAL`` state can be retried — a pending one is
@@ -406,18 +460,37 @@ class JobQueue:
         did nothing when started, and no longer said what the problem was.
         Retry the ancestor instead — that unblocks the whole chain in one
         step, which is what :meth:`_cascade_unblock` is for.
+
+        Jobs that already finished on this job's *previous* output are the
+        other half. With *with_downstream* they are put back in the queue too,
+        in their order, so the chain runs again end to end. Without it they
+        keep their results and are marked out of date (``stale_because``):
+        left as "succeeded", the morning view reported a finished analysis of
+        a conversion that had since been run again.
         """
         job = self._by_id.get(job_id)
         if job is None or job.state not in JobState.TERMINAL:
             return False
         if job.state == JobState.BLOCKED:
             return False
+        self._reset(job)
+        self._cascade_unblock(job_id)
+        for later in self.downstream(job_id):
+            if later.state not in JobState.CLEARABLE:
+                continue
+            if with_downstream:
+                self._reset(later)
+            elif later.state == JobState.SUCCEEDED:
+                later.stale_because = job.label or job.id
+        return True
+
+    @staticmethod
+    def _reset(job: JobSpec) -> None:
         job.state = JobState.PENDING
         job.message = ""
         job.output_dir = job.dataset_root = job.in_dir = None
         job.layout = None
-        self._cascade_unblock(job_id)
-        return True
+        job.stale_because = ""
 
     def clear_terminal(self) -> int:
         """Drop every finished job, returning how many went.
@@ -427,10 +500,26 @@ class JobQueue:
         instead of keeping a pointer to a job that no longer exists. The ids
         are snapshotted first — ``remove`` mutates the list being read.
         """
-        doomed = [j.id for j in self._jobs if j.state in JobState.CLEARABLE]
+        doomed = self.clearable_ids()
         for job_id in doomed:
             self.remove(job_id)
         return len(doomed)
+
+    def clearable_ids(self) -> list[str]:
+        """What Clear completed removes: jobs that ran, except a failed or
+        cancelled job that blocked jobs still wait on — removing it took away
+        the one Retry that releases them, and left them to be relinked by hand.
+        """
+        return [j.id for j in self._jobs
+                if j.state in JobState.CLEARABLE and not self.kept_on_clear(j.id)]
+
+    def kept_on_clear(self, job_id: str) -> bool:
+        """Whether Clear completed keeps *job_id* although it ran."""
+        job = self._by_id.get(job_id)
+        if job is None or job.state not in JobState.FAILURE_LIKE:
+            return False
+        return any(j.state == JobState.BLOCKED and job_id in j.sources()
+                   for j in self._jobs)
 
     def take_repair_notes(self) -> list[str]:
         """Read the load-time repair notes once, clearing them.
@@ -539,16 +628,40 @@ class JobQueue:
         return ""
 
     def waiting_on(self, source_id: str) -> str:
-        """The sentence a job blocked by *source_id* shows: the job by its
-        name, never its id, and what happened to it."""
+        """The sentence a job blocked by *source_id* shows: jobs by name,
+        never by id, and the job that actually went wrong — a job blocked
+        through another blocked job used to say only "which is blocked
+        itself", leaving the user to trace the chain by hand."""
         source = self._by_id.get(source_id)
         if source is None:
             return f"waiting on a job that is no longer in the queue ({source_id})"
-        what = {JobState.FAILED: "which failed",
-                JobState.CANCELLED: "which was cancelled",
-                JobState.BLOCKED: "which is blocked itself"}.get(source.state, "")
         name = short_label(source.label or source.id)
+        if source.state == JobState.BLOCKED:
+            root, why = self._root_cause(source)
+            if root is not None:
+                return (f"waiting on “{name}”, held up because "
+                        f"“{short_label(root.label or root.id)}” {why}")
+            return f"waiting on “{name}”, which is blocked itself"
+        what = {JobState.FAILED: "which failed",
+                JobState.CANCELLED: "which was cancelled"}.get(source.state, "")
         return f"waiting on “{name}”, {what}" if what else f"waiting on “{name}”"
+
+    def _root_cause(self, job: JobSpec) -> tuple[JobSpec | None, str]:
+        """The job at the bottom of *job*'s block, and what happened to it."""
+        seen: set[str] = set()
+        cur = job
+        while cur is not None and cur.id not in seen:
+            seen.add(cur.id)
+            if cur.state == JobState.FAILED:
+                return cur, "failed"
+            if cur.state == JobState.CANCELLED:
+                return cur, "was cancelled"
+            if cur.orphaned_inputs:
+                return cur, "lost its input (its source was removed)"
+            nxt = next((self._by_id[s] for s in cur.sources()
+                        if s in self._by_id and self._still_stopping(s)), None)
+            cur = nxt
+        return None, ""
 
     def _check_links(self, job_id: str, links: list[ChainLink]) -> None:
         """Refuse links that name an unknown job, the job itself, or a cycle.

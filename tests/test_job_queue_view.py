@@ -197,12 +197,13 @@ def test_detail_line_names_the_predecessor_by_label_not_by_id(qapp):
     assert "Concatenate — A + B" in row._detail.toolTip()
 
 
-def test_only_pending_rows_get_an_ordinal(qapp):
+def test_every_row_carries_its_place_in_the_queue(qapp):
     """Regression guard (UX audit P2-11): "strictly serial … in order" was
-    the blurb's own promise, but nothing on the page said what order --
-    succeeded/failed/cancelled rows interleaved with pending ones with no
-    position numbers. Only pending rows (queue positions still ahead) get
-    one; a finished row's number wouldn't mean "runs next" anymore."""
+    the blurb's own promise, but nothing on the page said what order. Rows
+    used to number pending jobs only, while the menus that name jobs number
+    them by place — so "3." meant two different jobs on one screen (UX
+    review 2, L1). Every row now carries its place, the number every menu
+    and message uses."""
     page = JobQueuePage()
     page.set_jobs([
         _job(id="j-1", state=JobState.SUCCEEDED),
@@ -210,7 +211,7 @@ def test_only_pending_rows_get_an_ordinal(qapp):
         _job(id="j-3", state=JobState.PENDING),
         _job(id="j-4", state=JobState.RUNNING),
     ])
-    assert [row._ordinal.text() for row in _rows(page)] == ["", "1.", "2.", ""]
+    assert [row._ordinal.text() for row in _rows(page)] == ["1.", "2.", "3.", "4."]
 
 
 def test_running_row_shows_an_indeterminate_progress_bar(qapp):

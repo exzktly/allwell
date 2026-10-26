@@ -126,6 +126,50 @@ def test_a_form_run_would_refuse_is_not_queued_and_stays_open(panes, monkeypatch
     assert calls == ["analyze"]          # left on the form to correct it
 
 
+def test_a_refused_save_says_why_on_the_banner_that_was_pressed(panes):
+    """Reported: "Add to queue" on the banner did nothing. The form was
+    refused, but the reason went only to the line under Run — at the bottom
+    of the form, while the banner is at the top — so the click looked dead."""
+    analyze_tab, _datasets, jq, _calls, _notes = panes
+    _click_add_analyze(jq)
+    banner = _banner_on(analyze_tab)
+    analyze_tab._qc_remove_debris_cb.setChecked(True)
+    analyze_tab._qc_min_area_edit.setText("5oo")
+
+    banner._confirm_btn.click()
+
+    assert jq.bridge.queue.jobs == []
+    assert _banner_on(analyze_tab) is banner
+    assert banner.text().startswith("Setting up a new ")
+    assert banner.text().endswith(
+        "\nNot added to the queue — QC minimum area must be a number "
+        "(got '5oo'). Every problem is listed under Run.")
+
+    # Pressing again restates the reason rather than stacking a second one.
+    banner._confirm_btn.click()
+    assert banner.text().count("Not added to the queue") == 1
+
+
+def test_a_save_that_raises_says_so_on_the_banner(panes, monkeypatch):
+    """An exception escaping the banner's slot went to stderr and the button
+    looked dead, exactly like an unexplained refusal."""
+    analyze_tab, _datasets, jq, calls, _notes = panes
+    _click_add_analyze(jq)
+
+    def _boom():
+        raise RuntimeError("remote list unreadable")
+
+    monkeypatch.setitem(jq.sessions._collectors, "analyze", _boom)
+    banner = _banner_on(analyze_tab)
+    banner._confirm_btn.click()
+
+    assert jq.bridge.queue.jobs == []
+    assert jq.session() == ("analyze", None)
+    assert banner.text().endswith(
+        "\nNot added to the queue — RuntimeError: remote list unreadable")
+    assert calls == ["analyze"]
+
+
 def test_cancel_returns_to_the_queue_without_queueing(panes):
     analyze_tab, _datasets, jq, calls, _notes = panes
     _click_add_analyze(jq)

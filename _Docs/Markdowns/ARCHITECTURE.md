@@ -15654,7 +15654,13 @@ watching that run. Saving first asks the kind's registered validator —
 `AnalyzeRunMixin.validate_for_queue`, the same `_validate_run_request` gate
 its own **+ Queue** uses, with the queue path's deferrals (a blank or
 not-yet-written input, and with run-time detection on, the schema and channel
-checks) — and a refusal leaves the session open on the form.
+checks) — and a refusal leaves the session open on the form. Because the
+validator reports in the line under Run, at the bottom of the form, while the
+banner sits at the top, `DatasetsTab._show_save_refusal` also restates the
+reason on the banner itself (`AnalyzeRunProblemsMixin.run_problem_summary`,
+"Not added to the queue — …"); an exception raised while saving is caught in
+`DatasetsTab._save_session` and named there the same way, rather than escaping
+the slot to stderr and leaving the button looking dead.
 
 ---
 

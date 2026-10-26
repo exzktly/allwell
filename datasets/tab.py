@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.safe import swallowed
 from ui import theme
 from widgets.context_banner import ContextBanner
 from widgets.page_body import build_page_body
@@ -207,6 +208,9 @@ class DatasetsTab(QWidget):
         self._controllers: dict[str, object] = {}
         self._teardowns: list[Callable[[], None]] = []
         self._session_banner: ContextBanner | None = None
+        # The banner's own sentence, kept so a refused save can restate it
+        # with the reason appended rather than stacking reasons on each try.
+        self._session_message = ""
         self._pages_by_kind: dict[str | None, QWidget] = {}
         self._build_ui()
 
@@ -328,6 +332,7 @@ class DatasetsTab(QWidget):
         job_queue = self._controllers.get("job_queue")
         session = job_queue.session() if job_queue is not None else None
         confirm = "Save changes" if session and session[1] else "Add to queue"
+        self._session_message = message
         banner = ContextBanner(message, confirm)
         banner.confirmed.connect(self._save_session)
         banner.cancelled.connect(self._cancel_session)
@@ -339,8 +344,42 @@ class DatasetsTab(QWidget):
         job_queue = self._controllers.get("job_queue")
         # A refused save (Analyze's form failed validation) keeps the session
         # and the user on the form they need to correct.
-        if job_queue is not None and job_queue.save_session():
+        if job_queue is None:
+            return
+        try:
+            saved = job_queue.save_session()
+        except Exception as exc:
+            # Escaping this slot, the exception went to stderr and the button
+            # appeared dead. Say it on the banner the user is looking at.
+            swallowed("saving a Job Queue session")
+            self._show_save_refusal(kind, error=f"{type(exc).__name__}: {exc}")
+            return
+        if saved:
             self._return_from_analyze(kind)
+        elif job_queue.session() is not None:
+            self._show_save_refusal(kind)
+
+    def _show_save_refusal(self, kind: str | None, *, error: str = "") -> None:
+        """Say on the banner why its confirm button queued nothing.
+
+        Analyze's validator reports a refused form in the line under its Run
+        button, which is at the bottom of the form while this banner is at the
+        top — so pressing "Add to queue" on a form with any problem appeared to
+        do nothing at all. The reason goes here, beside the button that was
+        pressed, as well as there.
+        """
+        banner = self._session_banner
+        if banner is None:
+            return
+        reason = error
+        if not reason and kind == "analyze":
+            summary = getattr(self._analyze_controller, "run_problem_summary", None)
+            reason = summary() if callable(summary) else ""
+        text = "Not added to the queue"
+        text += f" — {reason}" if reason else "."
+        if kind == "analyze" and not error:
+            text += " Every problem is listed under Run."
+        banner.setText(f"{self._session_message}\n{text}")
 
     def current_help_page(self) -> str:
         """Rail label of the tool page showing now, or ``""`` before build.

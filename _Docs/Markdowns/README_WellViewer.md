@@ -7916,7 +7916,9 @@ instead of babysitting each one.
   to queue**. Picking **Analyze** switches to the Analyze pane, where every
   option on the form is yours to set; **Add to queue** checks the form the
   same way **Run Pipeline** does (a missing input folder or a bad value is
-  named and nothing is queued), then brings you back to the Job Queue.
+  named and nothing is queued — the strip itself then says "Not added to
+  the queue" and why, and the full list is under **Run Pipeline**), then
+  brings you back to the Job Queue.
   **Cancel** brings you back without queueing anything.
 - **+ Queue** beside any Datasets tool's own run button, which queues
   whatever that page currently holds.

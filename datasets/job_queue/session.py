@@ -28,11 +28,20 @@ and lets the whole class be driven in a test with no page at all.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 
-from services.job_kinds import KIND_LABEL
-from services.job_queue import JobSpec, JobState
+from services.job_kinds import (
+    CHAIN_KIND,
+    KIND_LABEL,
+    describe,
+    input_label,
+    input_targets,
+    planned_output,
+)
+from services.job_queue import ChainLink, JobSpec, JobState, set_dotted
 from core.safe import swallowed
+from datasets.job_queue.projection import project
 
 
 class QueueSession:
@@ -54,6 +63,11 @@ class QueueSession:
         self._on_session_end: Callable[[str], None] | None = None
         # (kind, job_id or None) — None means "a new job of this kind".
         self._session: tuple[str, str | None] | None = None
+        # The session's inputs that come from earlier jobs: target ->
+        # (source job id, the path the page was given for it). Save links a
+        # target only while the page still holds that path, which is how a
+        # Browse to a real folder drops the link and a Swap swaps it.
+        self._links: dict[str, tuple[str, str]] = {}
 
     # ── wiring ───────────────────────────────────────────────────────────
     def register_collector(self, kind: str, collect: Callable[[], dict]) -> None:
@@ -121,7 +135,12 @@ class QueueSession:
                         "but it won't run again until you choose Retry.")
         for problem in problems:
             self._notify(problem, "warn")
-        return self._start(job.kind, job_id, message)
+        started = self._start(job.kind, job_id, message)
+        if started:
+            self._links = {link.target: (link.source, _dotted(job.spec, link.target))
+                           for link in job.links() if link.target}
+            self._show_links(job.kind)
+        return started
 
     def begin_new_job(self, kind: str) -> bool:
         """Open *kind*'s page to set up a job that does not exist yet."""
@@ -136,6 +155,78 @@ class QueueSession:
         return self._start(kind, None,
                            f"Setting up a new {KIND_LABEL.get(kind, kind)} job. "
                            "Set every option on the page, then add it to the queue.")
+
+    def begin_next_step(self, kind: str, sources: dict[str, str]) -> bool:
+        """Open *kind*'s page to set up a job that takes its inputs from
+        earlier jobs' outputs — "Analyze the output of that Concatenate".
+
+        *sources* maps each of the new job's input targets to the id of the
+        job whose output fills it. The page starts from a blank job holding
+        only those inputs, each showing the folder its source is set up to
+        write and that it is not written yet; everything else is set as for
+        any new job. Saving adds the job **with** its links, so a running
+        queue cannot start it against the planned paths first.
+        """
+        queue = self._bridge.queue
+        targets = input_targets(kind)
+        label = KIND_LABEL.get(kind, kind)
+        if not sources or any(t not in targets for t in sources):
+            self._notify(f"{label} can't take its input from that job.", "warn")
+            return False
+        if any(queue.get(s) is None for s in sources.values()):
+            self._notify("That job has left the queue.", "warn")
+            return False
+        if self._bridge.runner_busy(kind):
+            self._notify(f"{label} is busy with its own run.", "warn")
+            return False
+        if kind not in self._collectors:
+            self._notify(f"{label} isn't available in this build.", "warn")
+            return False
+        links = {target: (source, self._source_path(source))
+                 for target, source in sources.items()}
+        skeleton: dict = {}
+        for target, (_source, path) in links.items():
+            set_dotted(skeleton, target, path)
+        if not self._bridge.show_spec(kind, skeleton):
+            self._notify(f"{label}'s page isn't available right now.", "warn")
+            return False
+        names = " and ".join(f"“{queue.get(s).label or s}”" for s in dict.fromkeys(sources.values()))
+        started = self._start(kind, None, (
+            f"Setting up a {label} job that runs after {names}. Inputs marked ⧗ "
+            "are read from those jobs' outputs when it runs. Set every other "
+            "option on the page, then add it to the queue."))
+        if started:
+            self._links = links
+            self._show_links(kind)
+        return started
+
+    def _source_path(self, source_id: str) -> str:
+        """The folder a source job wrote, or is set up to write."""
+        source = self._bridge.queue.get(source_id)
+        if source is None:
+            return ""
+        if source.state == JobState.SUCCEEDED and source.dataset_root:
+            return source.dataset_root
+        return planned_output(source.kind, source.spec) or ""
+
+    def _show_links(self, kind: str) -> None:
+        """Tell the page which inputs are other jobs' outputs, and what the
+        first of those is expected to hold — a Subset builds its pickers from
+        it, an Analyze its channels."""
+        queue = self._bridge.queue
+        pending: dict[str, str] = {}
+        projection = None
+        for target in input_targets(kind):
+            if target not in self._links:
+                continue
+            source = queue.get(self._links[target][0])
+            if source is None:
+                continue
+            if source.state != JobState.SUCCEEDED:
+                pending[target] = pending_note(source, kind, target)
+            if projection is None:
+                projection = project(queue, source.id).as_dict()
+        self._bridge.show_pending(kind, pending, projection)
 
     def _round_trip_losses(self, job: JobSpec) -> list[str]:
         """Which of the job's settings the page could not take on.
@@ -172,6 +263,10 @@ class QueueSession:
                 "them. Check the input path first."]
 
     def _start(self, kind: str, job_id: str | None, message: str) -> bool:
+        if self._links and self._session is not None:
+            # The previous session's inputs stop being anyone's output.
+            self._bridge.show_pending(self._session[0], {}, None)
+        self._links = {}
         if self._session is not None and self._session != (kind, job_id):
             # Silently overwriting it discarded whatever the user had typed on
             # the other page, with the banner disappearing from a page they
@@ -206,7 +301,13 @@ class QueueSession:
         if validate is not None and not validate():
             return False        # the page said why; the session stays open
         spec = collect()
-        if job_id is None:
+        kept = self._kept_links(spec)
+        if job_id is None and kept:
+            job = JobSpec(id=uuid.uuid4().hex[:10], kind=kind,
+                          label=describe(kind, spec), spec=spec)
+            refused = self._bridge.add_job(job, links=kept)
+            self._report_refused(kind, refused)
+        elif job_id is None:
             self._add_job(kind, spec)
         elif not self._bridge.update_job(job_id, spec):
             # The job started running, or left the queue, between opening the
@@ -215,11 +316,61 @@ class QueueSession:
                          "changes were not saved.", "warn")
             self.end()
             return False
+        else:
+            self._relink(job_id, kind, kept)
         self.end()
         return True
 
+    def _kept_links(self, spec: dict) -> list[ChainLink]:
+        """The session's links whose input still holds the path it was given.
+
+        Matched by value rather than by field, so the two ways a user changes
+        an input both do the right thing: Browse-ing a real folder replaces
+        the path and drops that link, and swapping two inputs moves each path
+        — and so each link — to the other target.
+        """
+        kind = self._session[0] if self._session else ""
+        kept: list[ChainLink] = []
+        claimed: set[str] = set()
+        for target in input_targets(kind):
+            value = _dotted(spec, target)
+            for source_target, (source, path) in self._links.items():
+                if source_target in claimed or value != path:
+                    continue
+                kept.append(ChainLink(source, target, CHAIN_KIND))
+                claimed.add(source_target)
+                break
+        return kept
+
+    def _relink(self, job_id: str, kind: str, kept: list[ChainLink]) -> None:
+        """Make an edited job's links exactly the kept ones: a link whose
+        input was given another folder is dropped, a swapped one moved."""
+        wanted = {link.target: link.source for link in kept}
+        job = self._bridge.queue.get(job_id)
+        current = {link.target: link.source for link in job.links()} if job else {}
+        refused = []
+        for target in input_targets(kind):
+            if wanted.get(target) == current.get(target):
+                continue
+            if not self._bridge.set_link(job_id, target, wanted.get(target, "")):
+                refused.append(target)
+        self._report_refused(kind, refused)
+
+    def _report_refused(self, kind: str, targets: list[str]) -> None:
+        if targets:
+            names = ", ".join(input_label(kind, t) for t in targets)
+            self._notify(f"Couldn't keep the link for {names} — that input "
+                         "uses the folder shown on the page instead.", "warn")
+
     def end(self) -> None:
+        kind = self._session[0] if self._session else None
+        had_links = bool(self._links)
         self._session = None
+        self._links = {}
+        if kind is not None and had_links:
+            # The page is left as an ordinary page again: nothing marked as a
+            # queued job's output once no session is about to link it.
+            self._bridge.show_pending(kind, {}, None)
         if self._on_session_end is not None:
             self._on_session_end("")
 
@@ -255,3 +406,21 @@ class QueueSession:
         if self._session is None or self._session[0] != kind:
             return False
         return None if self._session[1] == job_id else True
+
+
+def pending_note(source: JobSpec, kind: str, target: str) -> str:
+    """The sentence an input field shows while it waits on *source*."""
+    what = (f"{input_label(kind, target)}: output" if len(input_targets(kind)) > 1
+            else "Output")
+    return (f"⧗ {what} of queued job “{source.label or source.id}” — not "
+            "written yet; filled in when that job finishes.")
+
+
+def _dotted(spec: dict, dotted: str | None) -> str:
+    """The string at *dotted* in *spec*, or ``""``."""
+    cur: object = spec or {}
+    for part in (dotted or "").split("."):
+        if not isinstance(cur, dict):
+            return ""
+        cur = cur.get(part)
+    return str(cur or "").strip()

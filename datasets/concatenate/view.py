@@ -37,6 +37,7 @@ from ui import theme
 from widgets._support import set_variant
 from datasets.core.dataset_paths import preview_wells
 from datasets.core.equation_row import build_equation_row
+from datasets.core.pending_inputs import RUN_WAITS, any_pending, apply_pending
 from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from datasets.concatenate.concatenate_compute import (
     GapPreview,
@@ -55,6 +56,12 @@ from datasets.core.dataset_fields import promote_open_button
 _GAP_FIELD_W = 140
 
 _PICK_BOTH = "Pick dataset 1 and dataset 2 first."
+_GAP_WHEN_IT_RUNS = (
+    "Left as it is, the gap is worked out from the two datasets' recorded "
+    "acquisition times when the job runs. Type one to fix it now.")
+_IN_PLACE_WHEN_IT_RUNS = (
+    "Whether dataset 2 can be added in place is checked when the job runs; a "
+    "pair that can't be fails then, with the reason.")
 _IN_PLACE_NOTE = (
     "Dataset 2's images are added to dataset 1's own archives under their shifted names, so "
     "nothing is copied and no destination is needed. Dataset 1 is changed; dataset 2 is left "
@@ -191,8 +198,11 @@ class ConcatenatePage(LogPanelMixin, QWidget):
             ds1_label="Dataset 1 (base)", ds2_label="Dataset 2 (appended)",
             is_dataset=_is_dataset, is_destination=_is_destination,
             on_changed=self._on_field_changed,
+            on_swap=self.swap_datasets,
+            swap_note="Dataset 1 supplies the earlier timepoints.",
         )
         self._ds1_field, self._ds2_field = eq.ds1, eq.ds2
+        self._swap_btn = eq.swap
         self._dest_field, self._cross_hint = eq.dest, eq.cross_hint
 
     def _build_mode_row(self, outer: QVBoxLayout) -> None:
@@ -309,6 +319,35 @@ class ConcatenatePage(LogPanelMixin, QWidget):
     def set_destination_path(self, path: str) -> None:
         self._dest_field.set_path(path)
 
+    def _input_fields(self) -> dict:
+        return {"dataset1": self._ds1_field, "dataset2": self._ds2_field}
+
+    def set_pending_inputs(self, pending: dict) -> None:
+        """Show the named datasets as outputs of queued jobs not yet run.
+
+        *pending* maps ``"dataset1"`` / ``"dataset2"`` to the note the field
+        shows (``datasets.core.pending_inputs``); an empty dict clears it.
+        """
+        apply_pending(self._input_fields(), pending)
+        self._on_field_changed()
+
+    def has_pending_inputs(self) -> bool:
+        return any_pending(self._input_fields())
+
+    def swap_datasets(self) -> None:
+        """Exchange dataset 1 and dataset 2, each keeping its pending note.
+
+        Dataset 1 is the base whose timepoints come first, so which of two
+        conversions is which matters, and it is easier to see after both are
+        filled in than before.
+        """
+        a, b = self._ds1_field, self._ds2_field
+        state_a = (a.path(), a.pending_note())
+        state_b = (b.path(), b.pending_note())
+        a.set_pending(*state_b)
+        b.set_pending(*state_a)
+        self._on_field_changed()
+
     def gap_text_if_entered(self) -> str:
         """The gap field's text when the user chose it, else ``""`` (use the default)."""
         text = self._gap_edit.text().strip()
@@ -364,8 +403,11 @@ class ConcatenatePage(LogPanelMixin, QWidget):
 
     def set_running(self, running: bool) -> None:
         self._running = running
-        self._run_btn.setEnabled(not running and self._inputs_ready())
+        self._run_btn.setEnabled(not running and self._inputs_ready()
+                                 and not self.has_pending_inputs())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
+        if self._swap_btn is not None:
+            self._swap_btn.setEnabled(not running)
         self._run_btn.setText("Concatenating…" if running else "▶  Concatenate")
         if running:
             self._open_btn.setVisible(False)
@@ -457,7 +499,12 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         """Offer "in place" only for a pair that can be appended, and say why not otherwise."""
         if self._running:
             return
-        if self._ds1_field.is_valid() and self._ds2_field.is_valid():
+        if self.has_pending_inputs():
+            # Whether the pair can be appended is a question about two folders
+            # that do not exist yet; the run answers it and refuses with the
+            # reason (set_in_place).
+            self._in_place_reason = ""
+        elif self._ds1_field.is_valid() and self._ds2_field.is_valid():
             self._in_place_reason = in_place_refusal(self.dataset1_path(), self.dataset2_path())
         else:
             self._in_place_reason = _PICK_BOTH
@@ -474,7 +521,9 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._revalidate_cross()
 
     def _refresh_mode_hint(self) -> None:
-        if self.in_place():
+        if self.in_place() and self.has_pending_inputs() and not self._in_place_reason:
+            text = f"{_IN_PLACE_NOTE} {_IN_PLACE_WHEN_IT_RUNS}"
+        elif self.in_place():
             text = self._in_place_reason or _IN_PLACE_NOTE
         elif self._in_place_reason and self._in_place_reason != _PICK_BOTH:
             text = f"Adding in place is unavailable: {self._in_place_reason}"
@@ -495,6 +544,18 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         touched) and on every edit of the field itself.
         """
         if self._running:
+            return
+        if self.has_pending_inputs():
+            # Nothing to read yet: the default is worked out when the job runs,
+            # which is what an untouched field already means in a queued spec.
+            self._gap_preview = GapPreview()
+            self._gap_box.setVisible(True)
+            self._gap_hint.setObjectName("Muted")
+            self._gap_hint.setText(_GAP_WHEN_IT_RUNS)
+            self._gap_hint.style().unpolish(self._gap_hint)
+            self._gap_hint.style().polish(self._gap_hint)
+            self._gap_hint.setVisible(True)
+            self._gap_labels.setVisible(False)
             return
         if not (self._ds1_field.is_valid() and self._ds2_field.is_valid()):
             self._gap_preview = GapPreview()
@@ -549,7 +610,8 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         # separate.
         if self._running:
             return
-        if not (self._ds1_field.is_valid() and self._ds2_field.is_valid()):
+        if self.has_pending_inputs() or not (
+                self._ds1_field.is_valid() and self._ds2_field.is_valid()):
             self.dashboard.setVisible(False)
             self.dashboard.reset()
             return
@@ -560,5 +622,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self.dashboard.setVisible(True)
 
     def _refresh_run_enabled(self) -> None:
-        self._run_btn.setEnabled(self._inputs_ready())
+        pending = self.has_pending_inputs()
+        self._run_btn.setEnabled(self._inputs_ready() and not pending)
+        self._run_btn.setToolTip(RUN_WAITS if pending else "")
         self._queue_btn.setEnabled(self._inputs_ready())

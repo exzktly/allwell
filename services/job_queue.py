@@ -197,7 +197,7 @@ class JobSpec:
         )
 
 
-def _set_dotted(target: dict, dotted: str, value: Any) -> None:
+def set_dotted(target: dict, dotted: str, value: Any) -> None:
     parts = dotted.split(".")
     cur = target
     for part in parts[:-1]:
@@ -482,6 +482,14 @@ class JobQueue:
             pred = self._by_id.get(cur)
             if pred is not None:
                 stack.extend(pred.sources())
+        for link in links:
+            if self._index(link.source) > self._index(job_id):
+                # The queue runs top to bottom and refuses an order that puts a
+                # job before what it waits on; a link that starts out that way
+                # would leave the job waiting on a job that runs after it.
+                raise ValueError(
+                    f"job {job_id!r} cannot wait on {link.source!r}, which is "
+                    "queued after it")
 
     def _index(self, job_id: str) -> int | None:
         for i, j in enumerate(self._jobs):
@@ -547,7 +555,7 @@ class JobQueue:
                     "which hasn't been produced yet"
                 )
             if link.target:
-                _set_dotted(spec, link.target, value)
+                set_dotted(spec, link.target, value)
             if layout_from is None and pred.layout:
                 layout_from = pred
         # What the source recorded about the files it wrote travels with the

@@ -321,13 +321,39 @@ class PackedConverterController(DatasetToolController):
         roles = self.page.channel_role_pairs()
         if roles:
             spec["channel_roles"] = roles
+        # The wells the page's scan mapped the plate to, so a job queued to
+        # run after this one can offer them before anything is converted
+        # (``datasets.job_queue.projection``). Absent, not empty, when the
+        # page has not read the plate — "unknown" rather than "no wells".
+        wells = self._planned_wells()
+        if wells:
+            spec["planned_wells"] = wells
         return spec
+
+    def _planned_wells(self) -> list[str]:
+        """The wells the page has mapped, else the ones the job it was
+        populated from recorded, while its source is still that job's.
+
+        The fallback is what keeps an edit from dropping them: a job opened
+        for editing shows its source before the page's background scan has
+        read it again, and saving in between would otherwise lose the list.
+        """
+        read = getattr(self.page, "planned_wells", None)
+        wells = list(read() or []) if callable(read) else []
+        if wells:
+            return wells
+        shown_source, shown_wells = getattr(self, "_shown_planned_wells", ("", []))
+        if shown_source and shown_source == self.page.source_path():
+            return list(shown_wells)
+        return []
 
     def _on_queue_requested(self) -> None:
         if self._on_add_to_queue is not None:
             self._on_add_to_queue(self.spec.kind, self.collect_spec())
 
     def show_job(self, spec: dict) -> None:
+        self._shown_planned_wells = (str(spec.get("source", "")),
+                                     list(spec.get("planned_wells") or []))
         self.page.set_source_path(spec.get("source", ""))
         self.page.set_destination_path(spec.get("destination", ""))
         params = dict(spec.get("params") or {})

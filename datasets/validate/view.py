@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from widgets.path_field import PathField, folder_picker
+from datasets.core.pending_inputs import RUN_WAITS, any_pending, apply_pending
 from datasets.core.dataset_paths import preview_wells
 from datasets.validate.dashboard import ValidateDashboard
 from datasets.validate.validate_compute import DatasetReport, wells_needing_force
@@ -245,7 +246,7 @@ class ValidatePage(LogPanelMixin, QWidget):
 
     def set_running(self, running: bool) -> None:
         self._running = running
-        self._run_btn.setEnabled(not running and self._inputs_ready())
+        self._run_btn.setEnabled(not running and self._can_run())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         if running:
             # Only force-disable while starting a run — leave it alone on
@@ -292,15 +293,31 @@ class ValidatePage(LogPanelMixin, QWidget):
             any(w.missing for w in report.wells) or bool(wells_needing_force(report))
         )
         self._complete_btn.setVisible(needs_completion)
-        self._run_btn.setEnabled(self._inputs_ready())
+        self._run_btn.setEnabled(self._can_run())
+        self._run_btn.setToolTip(RUN_WAITS if self.has_pending_inputs() else "")
         self._queue_btn.setEnabled(self._inputs_ready())
 
     # ── internals ────────────────────────────────────────────────────────────
     def _inputs_ready(self) -> bool:
         return self._dataset_field.is_valid()
 
+    def _can_run(self) -> bool:
+        """Ready, and naming a dataset that exists now rather than one a
+        queued job has still to write."""
+        return self._inputs_ready() and not self.has_pending_inputs()
+
+    def set_pending_inputs(self, pending: dict) -> None:
+        """Show the dataset as the output of a queued job not yet run
+        (``datasets.core.pending_inputs``); an empty dict clears it."""
+        apply_pending({"dataset": self._dataset_field}, pending)
+        self._on_dataset_changed()
+
+    def has_pending_inputs(self) -> bool:
+        return any_pending({"dataset": self._dataset_field})
+
     def _on_dataset_changed(self) -> None:
-        self._run_btn.setEnabled(self._inputs_ready())
+        self._run_btn.setEnabled(self._can_run())
+        self._run_btn.setToolTip(RUN_WAITS if self.has_pending_inputs() else "")
         self._queue_btn.setEnabled(self._inputs_ready())
         self._repair_btn.setEnabled(False)
         self._complete_btn.setVisible(False)
@@ -316,7 +333,7 @@ class ValidatePage(LogPanelMixin, QWidget):
         if self._running:
             return
         self.dashboard.reset()
-        if not self._inputs_ready():
+        if not self._can_run():
             self.dashboard.setVisible(False)
             return
         wells = preview_wells(self.dataset_path())

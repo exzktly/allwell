@@ -252,6 +252,45 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         """
         return self._validate_run_request(for_queue=True) is not None
 
+    #: ``(path, note)`` while the input field holds a queued job's output that
+    #: is not written yet, else ``None``. Read by ``_refresh_output``, which
+    #: shows the note instead of planning a folder that does not exist, and
+    #: dropped there as soon as the field holds anything else.
+    _pending_input: tuple[str, str] | None = None
+
+    def set_pending_inputs(self, pending: dict, projection: dict | None = None) -> None:
+        """Show the input as the output of a queued job not yet run.
+
+        *pending* maps ``"opts.raw"`` to the note shown under the input field;
+        an empty dict clears it. Nothing reads the input while it is pending,
+        so run-time detection is switched on — the schema and channels are read
+        from the real files when the job runs, which is the only time there are
+        any. When the job writing the input is expected to carry a known layout
+        (*projection*'s ``layout``: a converter's naming and channel roles,
+        passed through any Concatenate or Merge in between) the form is filled
+        from it, the way a folder scan fills it, so the channel options can be
+        set now; detection still checks them against the files.
+        """
+        note = (pending or {}).get("opts.raw", "")
+        if not note:
+            self._pending_input = None
+            self._refresh_output()
+            return
+        self._pending_input = (self._input_edit.text().strip(), note)
+        layout = (projection or {}).get("layout")
+        if layout:
+            self._apply_pipeline_info(dict(layout), set_input_path=False)
+            settle = getattr(self, "_settle_labelfree_handover", None)
+            if callable(settle):
+                settle(hand_over=True)
+        box = getattr(self, "_auto_detect_cb", None)
+        if box is not None and not box.isChecked():
+            box.setChecked(True)
+        self._refresh_output()
+
+    def has_pending_inputs(self) -> bool:
+        return self._pending_input is not None
+
     def _auto_detect_on(self) -> bool:
         box = getattr(self, "_auto_detect_cb", None)
         return bool(box is not None and box.isChecked())

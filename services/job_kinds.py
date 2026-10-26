@@ -174,6 +174,37 @@ def input_label(kind: str, target: str | None) -> str:
     return dict(INPUT_TARGETS.get(kind, ())).get(target or "", "Input")
 
 
+def planned_output(kind: str, spec: dict) -> str | None:
+    """The dataset folder a queued job is set up to produce, or ``None``.
+
+    What a successor shows in its input field while the job has not run, so a
+    user setting up "the Analyze of that Concatenate" sees which folder they
+    are pointing at. It is a statement of intent, not of fact: the link is what
+    carries the real answer, and ``JobQueue.materialise`` replaces this path
+    with the folder the job reported when it finished. Analyze's is the folder
+    it reads, since it writes ``out/`` beside the input of a dataset root — for
+    other input layouts the real root differs, and the link still carries it.
+    """
+    spec = spec or {}
+
+    def _get(key: str) -> str:
+        return str(spec.get(key) or "").strip()
+
+    if kind == "analyze":
+        value = str((spec.get("opts") or {}).get("raw") or "").strip()
+    elif kind == "concatenate":
+        value = _get("dataset1") if spec.get("in_place") else _get("destination")
+    elif kind == "import_loose":
+        value = _get("source") if spec.get("in_place") else _get("destination")
+    elif kind == "validate":
+        value = _get("dataset")
+    elif kind in (*CONVERTER_KINDS, "subset", "merge_plates"):
+        value = _get("destination")
+    else:
+        value = ""
+    return value or None
+
+
 # Which spec keys name this kind's inputs and its output, in the order a
 # description should read them. Keeping it as data rather than a function per
 # kind is what lets `test_job_kinds` assert every kind is covered.

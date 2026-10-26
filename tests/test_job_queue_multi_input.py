@@ -244,3 +244,12 @@ def test_the_bridge_persists_a_second_link(qapp, tmp_path):
     bridge.set_link("cat", "dataset1", "a")
     bridge.set_link("cat", "dataset2", "b")
     assert load_queue(tmp_path).get("cat").sources() == ["a", "b"]
+
+
+def test_a_link_to_a_job_queued_below_is_refused():
+    """Without this the job would wait for ever: the queue runs top to bottom
+    and the source would never run before it."""
+    q = JobQueue([_concat(), _conv("a")])
+    with pytest.raises(ValueError, match="queued after it"):
+        q.set_link("cat", "dataset1", "a")
+    assert q.get("cat").links() == []

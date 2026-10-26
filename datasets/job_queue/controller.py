@@ -31,7 +31,7 @@ from services.job_kinds import (
     produced_for,
     produced_layout,
 )
-from services.job_queue import JobQueue, JobSpec, JobState, load_queue, save_queue
+from services.job_queue import ChainLink, JobQueue, JobSpec, JobState, load_queue, save_queue
 from datasets.job_queue.session import QueueSession
 from datasets.job_queue.view import JobQueuePage
 
@@ -89,11 +89,27 @@ class QueueBridge(QObject):
         )
 
     # ── editing ──────────────────────────────────────────────────────────
-    def add_job(self, job: JobSpec) -> None:
+    def add_job(self, job: JobSpec, links: list[ChainLink] | None = None) -> list[str]:
+        """Add *job* with its input *links* in place, then let the queue move.
+
+        The links go in **before** the queue is allowed to advance, never
+        after: a running queue with nothing to do starts a newly added job at
+        once, and a job added unlinked would start against the placeholder
+        paths in its spec. Returns the targets whose link was refused (an
+        unknown source, a cycle) so the caller can say so.
+        """
         self._queue.add(job)
+        refused: list[str] = []
+        for link in links or []:
+            try:
+                self._queue.set_link(job.id, link.target, link.source,
+                                     kind=link.kind or CHAIN_KIND)
+            except ValueError:
+                refused.append(str(link.target))
         self._save()
         self.queueChanged.emit()
         self._advance()
+        return refused
 
     def remove_job(self, job_id: str) -> None:
         job = self._queue.get(job_id)
@@ -220,7 +236,17 @@ class QueueBridge(QObject):
         job = self._queue.get(job_id)
         if job is None:
             return False
-        runner = self._runners.get(job.kind)
+        return self.show_spec(job.kind, job.spec)
+
+    def show_spec(self, kind: str, spec: dict) -> bool:
+        """Populate *kind*'s page from *spec*, a job that need not be queued.
+
+        :meth:`show_job` for a spec that is not in the queue yet — the
+        skeleton of a next step, whose only settings are the inputs it takes
+        from earlier jobs. Same refusal while the tool is mid-run, for the
+        same reason.
+        """
+        runner = self._runners.get(kind)
         if runner is None or runner.is_busy():
             # Populating a page mid-run doesn't just show stale information —
             # for the Datasets tools, show_job() writes fields the controller
@@ -238,7 +264,19 @@ class QueueBridge(QObject):
         # makes the same assumption), so a json round-trip is a cheap, total
         # deep copy rather than a shallow dict() that still shares nested
         # dicts/lists (e.g. Analyze's spec["opts"]).
-        runner.show_job(json.loads(json.dumps(job.spec)))
+        runner.show_job(json.loads(json.dumps(spec)))
+        return True
+
+    def show_pending(self, kind: str, pending: dict, projection: dict | None = None) -> bool:
+        """Tell *kind*'s page which inputs are queued jobs' outputs not yet
+        written (``datasets.core.pending_inputs``), with what each is expected
+        to hold. Returns whether the page knows how; one that does not simply
+        shows the planned path as an ordinary one."""
+        runner = self._runners.get(kind)
+        show = getattr(runner, "set_pending_inputs", None)
+        if not callable(show):
+            return False
+        show(dict(pending), projection)
         return True
 
     def runner_busy(self, kind: str) -> bool:
@@ -476,6 +514,8 @@ class JobQueueController(QObject):
         self.page.duplicateRequested.connect(self._on_duplicate)
         self.page.retryRequested.connect(self._on_retry)
         self.page.chainRequested.connect(self._on_chain)
+        self.page.linkRequested.connect(self._on_link)
+        self.page.nextStepRequested.connect(self._on_next_step)
         self.page.removeRequested.connect(self._on_remove)
         self.page.moveUpRequested.connect(lambda job_id: self._on_move(job_id, -1))
         self.page.moveDownRequested.connect(lambda job_id: self._on_move(job_id, 1))
@@ -660,6 +700,22 @@ class JobQueueController(QObject):
     def _on_chain(self, job_id: str, chain_from: str) -> None:
         if not self.bridge.set_chain(job_id, chain_from):
             self._notify("Those two jobs can't be chained that way.", "warn")
+
+    def _on_link(self, job_id: str, target: str, source: str) -> None:
+        if not self.bridge.set_link(job_id, target, source):
+            self._notify("That input can't be linked to that job — it may be "
+                         "queued after this one, or wait on this one itself.", "warn")
+
+    def _on_next_step(self, job_id: str, kind: str, other_id: str) -> None:
+        """Set up *kind* to read *job_id*'s output — and, for a two-input
+        kind, *other_id*'s as dataset 2 — before either has been written."""
+        targets = input_targets(kind)
+        if not targets:
+            return
+        sources = {targets[0]: job_id}
+        if other_id and len(targets) > 1:
+            sources[targets[1]] = other_id
+        self.sessions.begin_next_step(kind, sources)
 
     def _on_clear_completed(self) -> None:
         """Clearing a finished job unlinks any pending job chained to it.

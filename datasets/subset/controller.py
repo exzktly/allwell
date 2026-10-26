@@ -25,11 +25,12 @@ from PySide6.QtCore import QObject
 from util.aw_safe import swallowed
 from util.well_token import canonical_well_label
 from widgets.plate_progress import canon_well, fraction_or_none
-from datasets.core.dataset_paths import shorten_headline
+from datasets.core.dataset_paths import preview_wells, shorten_headline
 from datasets.subset.dashboard import well_color, well_tooltip_label
 from datasets.subset.subset_compute import (
     SubsetFilter,
     destination_has_marker,
+    missing_from_source,
 )
 from datasets.subset.view import SubsetPage
 from datasets.subset.worker import SubsetWorker
@@ -105,7 +106,7 @@ class SubsetController(DestinationToolController):
         return {
             "source": self.page.source_path(),
             "destination": self.page.destination_path(),
-            "wells": self.page.selected_wells() or None,
+            "wells": self.page.wells_for_spec(),
             "timepoint_labels": (
                 None if self.page.all_timepoints_selected() else self.page.selected_timepoints()
             ),
@@ -123,8 +124,31 @@ class SubsetController(DestinationToolController):
         self.page.set_selected_timepoints(spec.get("timepoint_labels"))
         self.page.set_selected_fovs(spec.get("fovs"))
 
+    def set_pending_inputs(self, pending: dict, projection: dict | None = None) -> None:
+        """Show inputs that are queued jobs' outputs not written yet
+        (``QueueBridge.show_pending``). Its pickers are built from *projection*, what that job is expected to write."""
+        self.page.set_pending_inputs(pending, projection)
+
     def start_from_queue(self, spec: dict) -> None:
         self.show_job(spec)
+        shortfall = missing_from_source(
+            wells=spec.get("wells"),
+            timepoints=spec.get("timepoint_labels"),
+            fovs=spec.get("fovs"),
+            source_wells=preview_wells(self.page.source_path()),
+            source_timepoints=self.page.available_timepoints(),
+            source_fovs=self.page.available_fovs(),
+        )
+        if shortfall:
+            # Running would keep less than the job names and look complete.
+            message = ("The source doesn't hold everything this job keeps — no "
+                       + "; ".join(shortfall) + ". Nothing was copied; edit the "
+                       "job to choose from what the source holds.")
+            self.page.append_log(f"✗ {message}")
+            self.page.dashboard.set_headline(message)
+            self.page.dashboard.setVisible(True)
+            self.jobFinished.emit(False, message, "")
+            return
         self._launch()
 
     def _on_source_changed(self) -> None:

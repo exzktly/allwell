@@ -76,6 +76,9 @@ class PathField(QWidget):
         self._pick = pick
         self._validator = validator
         self._path = ""
+        # A path that does not exist yet and is not expected to: something the
+        # host knows about (a queued job) will write it first. See set_pending.
+        self._pending_note = ""
         self.setMinimumWidth(_FIELD_MIN_W)
 
         col = QVBoxLayout(self)
@@ -117,20 +120,50 @@ class PathField(QWidget):
             self.changed.emit()
 
     def set_path(self, path: str) -> None:
+        self._pending_note = ""
         self._path = path
         self._edit.setText(Path(path).name or path)
         self._edit.setToolTip(path)
         self.revalidate()
 
     def _validity_message(self) -> str:
-        if not self._path or self._validator is None:
+        if self._pending_note or not self._path or self._validator is None:
             return ""
         return self._validator(Path(self._path))
+
+    def set_pending(self, path: str, note: str) -> None:
+        """Hold *path* as one that will exist, saying why it does not yet.
+
+        For an input a queued job will write before this field is read: the
+        validator would only report "the folder doesn't exist", which is true
+        and beside the point. The field counts as valid, shows *note* in place
+        of the validator's hint, and stays that way until the path is set
+        again — a Browse, or :meth:`set_path` — which is the user replacing the
+        promised folder with a real one. ``set_pending(path, "")`` is the same
+        as ``set_path(path)``.
+        """
+        self.set_path(path)
+        self._pending_note = note
+        self.revalidate()
+
+    def is_pending(self) -> bool:
+        """Whether the path is one a queued job has still to write."""
+        return bool(self._pending_note)
+
+    def pending_note(self) -> str:
+        """The note :meth:`set_pending` was given, or ``""``."""
+        return self._pending_note
 
     def revalidate(self) -> None:
         """Re-run the validator and show its message, if any. Also clears
         any :meth:`show_note` override — a real re-validation (a fresh path,
-        or the host explicitly re-checking) always wins over a stale note."""
+        or the host explicitly re-checking) always wins over a stale note.
+        A pending path shows its note instead (:meth:`set_pending`)."""
+        if self._pending_note:
+            self._set_hint_style("Muted")
+            self._hint.setText(self._pending_note)
+            self._hint.setVisible(True)
+            return
         self._set_hint_style("Danger")
         message = self._validity_message()
         self._hint.setText(message)

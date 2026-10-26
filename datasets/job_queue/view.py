@@ -74,6 +74,8 @@ class JobQueuePage(QWidget):
     duplicateRequested = Signal(str)
     retryRequested = Signal(str)
     chainRequested = Signal(str, str)
+    linkRequested = Signal(str, str, str)
+    nextStepRequested = Signal(str, str, str)
     showRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -268,7 +270,8 @@ class JobQueuePage(QWidget):
             row = self._rows.get(job.id)
             if row is not None:
                 row.update_from(job, ordinal=ordinals.get(job.id),
-                                predecessors=self._predecessors_for(job.id, jobs))
+                                predecessors=self._predecessors_for(job.id, jobs),
+                                others=self._others_for(job.id, jobs))
 
     @staticmethod
     def _pending_ordinals(jobs: list[JobSpec]) -> dict[str, int]:
@@ -300,6 +303,15 @@ class JobQueuePage(QWidget):
             out.append((job.id, job.label or job.kind))
         return out
 
+    @staticmethod
+    def _others_for(job_id: str, jobs: list[JobSpec]) -> list[tuple[str, str]]:
+        """Every other job whose output could still arrive, as (id, label),
+        for a next step's second dataset. Not limited to the jobs above: the
+        next step is added at the end of the queue, after both."""
+        stopped = JobState.FAILURE_LIKE | {JobState.BLOCKED}
+        return [(job.id, job.label or job.kind) for job in jobs
+                if job.id != job_id and job.state not in stopped]
+
     def _rebuild_rows(self, jobs: list[JobSpec]) -> None:
         self._clear_rows()
         for job in jobs:
@@ -311,6 +323,8 @@ class JobQueuePage(QWidget):
             row.duplicateClicked.connect(self.duplicateRequested)
             row.retryClicked.connect(self.retryRequested)
             row.chainRequested.connect(self.chainRequested)
+            row.linkRequested.connect(self.linkRequested)
+            row.nextStepRequested.connect(self.nextStepRequested)
             row.dragMoveBy.connect(self.moveByRequested)
             row.rowClicked.connect(self.showRequested)
             self._list_layout.addWidget(row)

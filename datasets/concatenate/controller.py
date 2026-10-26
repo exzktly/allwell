@@ -191,6 +191,11 @@ class ConcatenateController(DestinationToolController):
         self.page.set_gap_text(spec.get("gap", ""))
         self.page.set_in_place(bool(spec.get("in_place", False)))
 
+    def set_pending_inputs(self, pending: dict, projection: dict | None = None) -> None:
+        """Show inputs that are queued jobs' outputs not written yet
+        (``QueueBridge.show_pending``). *projection* is unused: nothing on this page is built from the input's contents."""
+        self.page.set_pending_inputs(pending)
+
     def start_from_queue(self, spec: dict) -> None:
         """A queued run is unattended by definition, so a destination that
         needs the restart confirmation proceeds without asking — there is

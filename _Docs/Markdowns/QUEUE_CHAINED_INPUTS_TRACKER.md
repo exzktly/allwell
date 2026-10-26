@@ -58,25 +58,34 @@ States: `todo`, `doing`, `done`, `declined`.
 
 | Row | What | State | Where / evidence |
 |---|---|---|---|
-| 3.1 | `planned_output(kind, spec)`: the folder a queued job will write, or `None` when it cannot be known before it runs | todo | |
-| 3.2 | `PathField` pending mode: shows the planned path and why it is not there yet, counts as valid | todo | |
-| 3.3 | Concatenate page accepts pending inputs; the disk-reading checks (gap, in-place) wait for the run; Run is off | todo | |
-| 3.4 | Merge plates page accepts pending inputs | todo | |
-| 3.5 | Validate and Subset pages accept a pending input | todo | |
-| 3.6 | Analyze's input accepts a pending output and says so | todo | |
-| 3.7 | `QueueSession.begin_next_step`: opens the tool with inputs pre-filled; Save links each input still holding a planned path, so Browse-ing a real folder drops that link and swapping the two fields swaps the links. Editing a linked job shows its links the same way | todo | |
-| 3.8 | Row menu: "Queue next step from this output ▸" (with "Concatenate with ▸ / Merge plates with ▸" naming the second job); "Dataset 1 from ▸ / Dataset 2 from ▸" on two-input jobs; the row's second line names each input's source | todo | |
-| 3.9 | Concatenate page: Swap dataset 1 and 2 | todo | |
+| 3.1 | `planned_output(kind, spec)`: the folder a queued job will write, or `None` when it cannot be known before it runs | done | `job_kinds.planned_output`; `test_queue_next_step.py::test_planned_output_names_the_folder_each_kind_writes` |
+| 3.2 | `PathField` pending mode: shows the planned path and why it is not there yet, counts as valid | done | `PathField.set_pending/is_pending/pending_note`; `test_queue_next_step.py::test_a_pending_path_is_valid_and_says_why_it_is_missing` (fails with the validator not skipped) |
+| 3.3 | Concatenate page accepts pending inputs; the disk-reading checks (gap, in-place) wait for the run; Run is off | done | `ConcatenatePage.set_pending_inputs`, gap and in-place deferred, Run gated; `::test_concatenate_with_fills_both_inputs_as_pending` (fails with Run not gated) |
+| 3.4 | Merge plates page accepts pending inputs | done | `MergePlatesPage.set_pending_inputs`; `::test_merge_plates_with_marks_both_inputs_pending` |
+| 3.5 | Validate and Subset pages accept a pending input | done | `ValidatePage` / `SubsetPage.set_pending_inputs`; `::test_a_one_input_next_step_links_its_input`, `test_queue_projection.py` Subset page cases |
+| 3.6 | Analyze's input accepts a pending output and says so | done | `AnalyzeRunMixin.set_pending_inputs`; `_refresh_output` moved from `analyze/tab.py` to `analyze/domain/input.py` (budget 620 → 583); `test_queue_projection.py::test_analyze_forgets_the_pending_input_once_another_folder_is_chosen` |
+| 3.7 | `QueueSession.begin_next_step`: opens the tool with inputs pre-filled; Save links each input still holding a planned path, so Browse-ing a real folder drops that link and swapping the two fields swaps the links. Editing a linked job shows its links the same way | done | `QueueSession.begin_next_step`, `_kept_links`, `_relink`; `QueueBridge.add_job(job, links)` links before advancing; `test_queue_next_step.py` save / swap / browse / edit / running-queue cases (each fails under its mutation) |
+| 3.8 | Row menu: "Queue next step from this output ▸" (with "Concatenate with ▸ / Merge plates with ▸" naming the second job); "Dataset 1 from ▸ / Dataset 2 from ▸" on two-input jobs; the row's second line names each input's source | done | `JobRow` per-input and next-step submenus, detail line; `::test_the_row_links_one_input_from_its_own_menu`, `::test_a_failed_job_offers_no_next_step`. Two-dataset next steps are chosen as "Concatenate with ▸ <job>" rather than by selecting two rows (the mock-up): the queue has no row selection, and a row click already opens the job |
+| 3.9 | Concatenate page: Swap dataset 1 and 2 | done | `build_equation_row(on_swap=…)`, `ConcatenatePage/MergePlatesPage.swap_datasets`; `::test_swapping_the_datasets_swaps_the_links` |
 
 ## Part 4 — pickers from a projection, checked at run time
 
 | Row | What | State | Where / evidence |
 |---|---|---|---|
-| 4.1 | `projected_inventory(kind, spec, upstream)`: wells / fields / timepoints / channels a queued job will produce, each `None` when it cannot be known | todo | |
-| 4.2 | Converter jobs record what their page scanned (wells, fields, timepoints, channels) at queue time | todo | |
-| 4.3 | Subset page with a pending source builds its pickers from the projection; an unknown dimension says "all — decided when it runs" and queues as all | todo | |
-| 4.4 | Analyze form with a pending input is pre-filled from the projected layout | todo | |
-| 4.5 | A Subset job naming wells, timepoints or fields its real source lacks fails, naming them, instead of quietly running on fewer | todo | |
+| 4.1 | `projected_inventory(kind, spec, upstream)`: wells / fields / timepoints / channels a queued job will produce, each `None` when it cannot be known | done | `datasets/job_queue/projection.py` (`project`, `on_disk`, `Projection`); `test_queue_projection.py` projection cases (each fails under its mutation). Lives in the Datasets pane, not `services/`, because it reads datasets with `datasets.core.dataset_paths` and merges with `merge_plates_compute` |
+| 4.2 | Converter jobs record what their page scanned (wells, fields, timepoints, channels) at queue time | done | `PackedConverterController.collect_spec` records `planned_wells` from `page.planned_wells()` (CZI, ND2). The OME page has no well list, so an OME job records none and its projection's wells are unknown; `test_queue_projection.py::test_a_queued_conversion_records_the_page_s_wells`, `::test_editing_a_conversion_keeps_its_wells_before_the_rescan` |
+| 4.3 | Subset page with a pending source builds its pickers from the projection; an unknown dimension says "all — decided when it runs" and queues as all | done | `SubsetPage._load_projected_metadata`, `wells_for_spec`; `test_queue_projection.py` Subset page cases |
+| 4.4 | Analyze form with a pending input is pre-filled from the projected layout | done | `AnalyzeRunMixin.set_pending_inputs` applies `projection['layout']` and turns run-time detection on; `test_queue_projection.py::test_analyze_queued_after_a_concatenate_of_two_conversions` |
+| 4.5 | A Subset job naming wells, timepoints or fields its real source lacks fails, naming them, instead of quietly running on fewer | done | `subset_compute.missing_from_source`, `SubsetController.start_from_queue`; `test_queue_projection.py::test_a_queued_subset_naming_an_absent_well_fails_and_copies_nothing` (fails without the check) |
+
+### Found along the way
+
+| Row | What | State | Where / evidence |
+|---|---|---|---|
+| 1.9 | `set_link` must refuse a source queued *below* the job, or the job waits for ever (the old "Run after" only offered jobs above, so nothing checked) | done | `JobQueue._check_links`; `test_job_queue_multi_input.py::test_a_link_to_a_job_queued_below_is_refused` |
+| 3.10 | A running, idle queue starts a newly added job at once, so a next step added and *then* linked started against its planned paths | done | `QueueBridge.add_job(job, links)`; `test_queue_next_step.py::test_the_links_are_in_place_before_a_running_queue_can_start_the_job` (fails with the link after the advance) |
+| 4.6 | A Subset over a projection with every well ticked must queue as "every well", or a well the job writes that the projection missed is dropped | done | `SubsetPage.wells_for_spec`; `test_queue_projection.py::test_every_projected_well_ticked_queues_as_every_well` |
+| 4.7 | The Analyze queue row does not name the channels it will receive through a chain; it still says they are read at run time. The run receives them (`upstream_layout`); only the row's wording lags | declined | Computing it needs a projection per row on every refresh, which reads disk for finished jobs; stated in the PR body |
 
 ## Closing
 

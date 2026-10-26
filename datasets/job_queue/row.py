@@ -38,7 +38,13 @@ from widgets.icon_button import IconButton
 from widgets import menu_exec
 from widgets.icons import make_icon
 from widgets.status_dot import StatusDot
-from services.job_kinds import KIND_LABEL, describe, describe_detail
+from services.job_kinds import (
+    KIND_LABEL,
+    describe,
+    describe_detail,
+    input_label,
+    input_targets,
+)
 from services.job_queue import JobSpec, JobState
 from widgets.owned_action import owned_action
 
@@ -59,6 +65,14 @@ KIND_ICON = {
     "import_loose": "download",
     "merge_plates": "layout-grid",
 }
+
+#: The one-input tools a dataset can be handed to next, in menu order. The
+#: converters and Zip loose are absent: they read acquisition files or loose
+#: images, never a dataset another job wrote.
+NEXT_STEP_KINDS = ("analyze", "validate", "subset")
+#: The two-input tools, offered with a second dataset: this job's output is
+#: dataset 1, and the second is another job's output or a folder.
+PAIR_STEP_KINDS = ("concatenate", "merge_plates")
 
 _STATE_DOT = {
     JobState.PENDING: "neutral",
@@ -84,6 +98,12 @@ class JobRow(QWidget):
     rowClicked = Signal(str)
     # (job_id, predecessor_id or "" to unchain)
     chainRequested = Signal(str, str)
+    # (job_id, input target, source job id or "" to unlink) — one input of a
+    # job that takes two, so the other keeps its link
+    linkRequested = Signal(str, str, str)
+    # (this job's id, the kind to set up next, a second job's id or "") — the
+    # second job fills a two-input kind's dataset 2
+    nextStepRequested = Signal(str, str, str)
     # (job_id, net ± rows) — emitted once, on release
     dragMoveBy = Signal(str, int)
 
@@ -94,6 +114,7 @@ class JobRow(QWidget):
         self._job = job
         self._detail_text = ""
         self._predecessors: list[tuple[str, str]] = []
+        self._others: list[tuple[str, str]] = []
         self._drag_y0: float | None = None
         self._drag_steps = 0
 
@@ -177,23 +198,27 @@ class JobRow(QWidget):
 
     # ── content ──────────────────────────────────────────────────────────
     def update_from(self, job: JobSpec, *, ordinal: int | None = None,
-                    predecessors: list[tuple[str, str]] | None = None) -> None:
+                    predecessors: list[tuple[str, str]] | None = None,
+                    others: list[tuple[str, str]] | None = None) -> None:
         """Rewrite this row for *job*, reusing every widget it already has.
 
         *predecessors* is the (id, label) list offered by the "Run after"
         submenu — the jobs above this one, which are the only ones it could
-        legally chain from without violating queue order.
+        legally chain from without violating queue order. *others* is every
+        other job that could still produce an output, offered as the second
+        dataset of a next step ("Concatenate with ▸").
         """
         self._job = job
         self.job_id = job.id
         self._predecessors = list(predecessors or [])
+        self._others = list(others or [])
 
         self._ordinal.setText(f"{ordinal}." if ordinal is not None else "")
         self._icon.setPixmap(make_icon(KIND_ICON.get(job.kind, "boxes")).pixmap(16, 16))
         self._name.setText(job.label or describe(job.kind, job.spec)
                            or KIND_LABEL.get(job.kind, job.kind))
 
-        self._chain_glyph.setVisible(bool(job.chain_from))
+        self._chain_glyph.setVisible(bool(job.sources()))
         self._progress.setVisible(job.state == JobState.RUNNING)
         self._dot.setStatus(_STATE_DOT.get(job.state, "neutral"))
         self._dot.setLabel(job.state)
@@ -210,9 +235,20 @@ class JobRow(QWidget):
         the first line and the second exists to be scanned, not studied.
         """
         parts = []
-        if job.chain_from:
-            pred = dict(self._predecessors).get(job.chain_from)
-            parts.append(f"after “{pred}”" if pred else f"after {job.chain_from}")
+        names = dict(self._predecessors)
+        if len(input_targets(job.kind)) > 1 and job.links():
+            # A two-input job says which input waits on which job: "after A"
+            # would not say whether A is dataset 1 or dataset 2.
+            for target in input_targets(job.kind):
+                link = job.link_for(target)
+                if link is not None:
+                    pred = names.get(link.source, link.source)
+                    parts.append(f"{input_label(job.kind, target).lower()} "
+                                 f"from “{pred}”")
+        elif job.sources():
+            for source in job.sources():
+                pred = names.get(source)
+                parts.append(f"after “{pred}”" if pred else f"after {source}")
         elif job.kind == "analyze" and job.state == JobState.PENDING \
                 and not str((job.spec.get("opts") or {}).get("raw") or "").strip():
             # Allowed to be queued blank so chaining can fill it, and refused
@@ -265,7 +301,12 @@ class JobRow(QWidget):
             owned_action(menu, "Retry").triggered.connect(
                 lambda: self.retryClicked.emit(self.job_id))
 
-        self._add_chain_submenu(menu)
+        if len(input_targets(job.kind)) > 1:
+            for target in input_targets(job.kind):
+                self._add_input_submenu(menu, target)
+        else:
+            self._add_chain_submenu(menu)
+        self._add_next_step_submenu(menu)
 
         # Reordering a row that has already run, or never will without an
         # explicit retry, means nothing — so the moves are offered only while
@@ -311,6 +352,60 @@ class JobRow(QWidget):
             act.setChecked(self._job.chain_from == pred_id)
             act.triggered.connect(
                 lambda _checked=False, p=pred_id: self.chainRequested.emit(self.job_id, p))
+
+    def _add_input_submenu(self, menu: QMenu, target: str) -> None:
+        """"Dataset 1 from ▸" / "Dataset 2 from ▸" — one input of a job that
+        takes two, linked on its own so the other input keeps its link."""
+        label = input_label(self._job.kind, target)
+        sub = QMenu(f"{label} from", menu)
+        sub.setObjectName("JobRowInputMenu")
+        menu.addMenu(sub)
+        current = self._job.link_for(target)
+        none_action = owned_action(sub, "Nothing (use the folder on its page)")
+        none_action.setCheckable(True)
+        none_action.setChecked(current is None)
+        none_action.triggered.connect(
+            lambda _checked=False, t=target: self.linkRequested.emit(self.job_id, t, ""))
+        if not self._predecessors:
+            sub.setEnabled(current is not None)
+            return
+        sub.addSeparator()
+        for pred_id, pred_label in self._predecessors:
+            act = owned_action(sub, pred_label)
+            act.setCheckable(True)
+            act.setChecked(current is not None and current.source == pred_id)
+            act.triggered.connect(
+                lambda _checked=False, t=target, p=pred_id:
+                    self.linkRequested.emit(self.job_id, t, p))
+
+    def _add_next_step_submenu(self, menu: QMenu) -> None:
+        """"Queue next step from this output ▸" — set up a job that reads what
+        this one writes, before it has written anything.
+
+        Not offered for a job whose output is never coming (failed, cancelled,
+        blocked): a successor linked to it could never run.
+        """
+        if self._job.state in JobState.FAILURE_LIKE or self._job.state == JobState.BLOCKED:
+            return
+        sub = QMenu("Queue next step from this output", menu)
+        sub.setObjectName("JobRowNextStepMenu")
+        menu.addMenu(sub)
+        for kind in NEXT_STEP_KINDS:
+            owned_action(sub, f"{KIND_LABEL.get(kind, kind)}…").triggered.connect(
+                lambda _checked=False, k=kind: self.nextStepRequested.emit(self.job_id, k, ""))
+        sub.addSeparator()
+        for kind in PAIR_STEP_KINDS:
+            pair = QMenu(f"{KIND_LABEL.get(kind, kind)} with", sub)
+            pair.setObjectName("JobRowPairMenu")
+            sub.addMenu(pair)
+            owned_action(pair, "A folder you pick on the page…").triggered.connect(
+                lambda _checked=False, k=kind: self.nextStepRequested.emit(self.job_id, k, ""))
+            if self._others:
+                pair.addSeparator()
+            for other_id, other_label in self._others:
+                owned_action(pair, other_label).triggered.connect(
+                    lambda _checked=False, k=kind, o=other_id:
+                        self.nextStepRequested.emit(self.job_id, k, o))
 
     def _open_menu(self) -> None:
         menu = self.build_menu()

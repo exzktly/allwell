@@ -284,3 +284,33 @@ def test_merge_plates_with_marks_both_inputs_pending(queue):
     assert page._queue_btn.isEnabled()
     assert not page._run_btn.isEnabled()
     assert not page.dashboard.isVisibleTo(page)
+
+
+# ── review findings R7 / R8a ─────────────────────────────────────────────────
+
+def test_removing_a_source_closes_its_next_step_setup(queue):
+    jq = queue
+    _row_menu_action(jq, "day1", "Queue next step from this output",
+                     "Concatenate with", "Convert CZI — day2")
+    jq.bridge.remove_job("day2")
+    assert jq.session() is None
+    assert any("removed" in n for n in jq.notices)
+    assert not any(j.kind == "concatenate" for j in jq.bridge.queue.jobs)
+
+
+def test_unlinking_an_input_lets_a_started_queue_run_the_job(queue):
+    jq = queue
+    started: list[dict] = []
+    jq.tools["validate"].start_from_queue = started.append
+    for job_id in ("day1", "day2"):
+        jq.bridge.remove_job(job_id)
+    jq.bridge.add_job(JobSpec(id="a", kind="subset", label="a", spec={}))
+    jq.bridge.add_job(JobSpec(id="v", kind="validate", label="v",
+                              spec={"dataset": "/somewhere"}))
+    jq.tools["subset"].start_from_queue = lambda spec: None
+    jq.bridge.set_link("v", "dataset", "a")
+    jq.bridge.queue.mark_running("a")    # 'a' is busy elsewhere, so v waits
+    jq.bridge._current = None
+    jq.bridge.queue.start()
+    jq.bridge.set_link("v", "dataset", "")
+    assert len(started) == 1 and started[0]["dataset"] == "/somewhere"

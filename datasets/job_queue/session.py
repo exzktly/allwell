@@ -28,7 +28,9 @@ and lets the whole class be driven in a test with no page at all.
 
 from __future__ import annotations
 
+import os
 import uuid
+from pathlib import Path
 from collections.abc import Callable
 
 from services.job_kinds import (
@@ -213,6 +215,11 @@ class QueueSession:
         """Tell the page which inputs are other jobs' outputs, and what the
         first of those is expected to hold — a Subset builds its pickers from
         it, an Analyze its channels."""
+        if not self._links:
+            # A job with no links has nothing to show, and telling the page
+            # "nothing is pending" is not free: a page that rebuilds itself on
+            # it would discard what the edit just loaded into it.
+            return
         queue = self._bridge.queue
         pending: dict[str, str] = {}
         projection = None
@@ -335,7 +342,7 @@ class QueueSession:
         for target in input_targets(kind):
             value = _dotted(spec, target)
             for source_target, (source, path) in self._links.items():
-                if source_target in claimed or value != path:
+                if source_target in claimed or not _same_path(value, path):
                     continue
                 kept.append(ChainLink(source, target, CHAIN_KIND))
                 claimed.add(source_target)
@@ -384,6 +391,15 @@ class QueueSession:
         if self._session is None:
             return
         _kind, job_id = self._session
+        gone = [source for source, _path in self._links.values()
+                if self._bridge.queue.get(source) is None]
+        if gone:
+            # Saving would add the job with that input unlinked, and a running
+            # queue could start it at once against a folder nothing will write.
+            self._notify("A job this one was set up to read from was removed — "
+                         "the setup was closed without saving.", "warn")
+            self.end()
+            return
         if job_id is None:
             return
         job = self._bridge.queue.get(job_id)
@@ -414,6 +430,21 @@ def pending_note(source: JobSpec, kind: str, target: str) -> str:
             else "Output")
     return (f"⧗ {what} of queued job “{source.label or source.id}” — not "
             "written yet; filled in when that job finishes.")
+
+
+def _same_path(a: str, b: str) -> bool:
+    """Whether two spellings name the same folder.
+
+    A path makes a round trip through each page's form before it is
+    collected, and the form may respell it: Analyze stores ``Path(text)``,
+    which on Windows turns ``C:/data/plate`` into ``C:\\data\\plate`` and
+    everywhere drops a trailing separator. Compared as raw strings, those
+    dropped the link without a word.
+    """
+    if not a or not b:
+        return a == b
+    return (os.path.normcase(os.path.normpath(str(Path(a))))
+            == os.path.normcase(os.path.normpath(str(Path(b)))))
 
 
 def _dotted(spec: dict, dotted: str | None) -> str:

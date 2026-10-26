@@ -87,6 +87,23 @@ States: `todo`, `doing`, `done`, `declined`.
 | 4.6 | A Subset over a projection with every well ticked must queue as "every well", or a well the job writes that the projection missed is dropped | done | `SubsetPage.wells_for_spec`; `test_queue_projection.py::test_every_projected_well_ticked_queues_as_every_well` |
 | 4.7 | The Analyze queue row does not name the channels it will receive through a chain; it still says they are read at run time. The run receives them (`upstream_layout`); only the row's wording lags | declined | Computing it needs a projection per row on every refresh, which reads disk for finished jobs; stated in the PR body |
 
+### Adversarial review of the pushed branch
+
+| Row | What | State | Where / evidence |
+|---|---|---|---|
+| R1 | A no-op edit of any queued Subset with explicit wells saved every well: `_show_links` called `show_pending({})` on a job with no links, and `SubsetPage.set_pending_inputs` reloaded the plate and only restored the wells when a source was pending. Regression against `main` | done | `SubsetPage.set_pending_inputs` returns early when nothing was or is pending and restores the wells either way; `QueueSession._show_links` skips a job with no links; `test_queue_projection.py::test_a_no_op_edit_of_an_explicit_subset_keeps_its_wells` (fails on the reviewed code; each guard alone is enough) |
+| R2 | A pending projection that does not know a dimension rebuilt that picker empty, so an edited Subset's explicit timepoints/FOVs became "all" | done | `SubsetPage._requested`, `_job_only_choices`, `_only_from_job`; `::test_an_edited_subset_keeps_explicit_timepoints_the_projection_does_not_know` |
+| R3 | Links were matched by exact string, so a path re-spelled on the way through a form (Analyze's `Path` round trip: separators, trailing slash) silently dropped the link and queued an unlinked job | done | `session._same_path`; `::test_a_path_respelled_by_the_form_keeps_its_link` (trailing separator; the Windows separator case is the same normalisation) |
+| R4 | The docs say Run is off while an input is ⧗; Analyze's Run was not, and would analyse whatever an earlier run left in the planned folder | done | `AnalyzeRunMixin._validate_run_request` adds "Input not written yet"; `::test_analyze_refuses_to_run_on_a_pending_input` |
+| R5 | Ending or cancelling an Analyze next-step session left the user's own form with run-time detection on and the converter's channels | done | `_form_before_pending`, `_raw_before_show`, `_restore_form_before_pending`; `::test_ending_an_analyze_next_step_restores_the_user_s_form` |
+| R6 | Linking an input to a failed, cancelled or blocked job left the job pending for ever with nothing said | done | `JobQueue._block_if_stopped`; `test_job_queue_multi_input.py::test_linking_to_a_failed_job_blocks_rather_than_waiting_for_ever` |
+| R7 | A source removed while a next-step session was open let Save add the job unlinked, and a running queue could start it on the planned path | done | `QueueSession.abandon_if_stale` checks link sources; `test_queue_next_step.py::test_removing_a_source_closes_its_next_step_setup` |
+| R8a | Unlinking an input on a started, idle queue started nothing until something else advanced the queue | done | `QueueBridge.set_link` advances; `::test_unlinking_an_input_lets_a_started_queue_run_the_job` |
+| R8b | A job left blocked by its other source after a retry kept a message naming the retried one | done | `_cascade_unblock` rewrites the message; `::test_a_job_still_blocked_after_a_retry_names_the_other_source` |
+| R8c | The ⧗ notes and the disabled Run stay up if a source finishes or fails while its next-step session is open | declined | The link is still right and is what the run uses; refreshing the notes on every queue change would re-apply the projection (Analyze's layout, Subset's pickers) on each status tick. A finished source's note says "not written yet" until the setup is saved or cancelled |
+| R8d | A next step from a blank chained Analyze job opens with an empty input (no planned path) | declined | Only a blank chained Analyze has no planned path; the field shows the note with no path and the link still carries the real folder |
+| R8e | An older All-Well reading a queue with two-input links keeps only the first, so dataset 2 runs on its planned path | declined | An older version cannot be changed; it keeps the first link (the documented compatibility). Stated in the PR body |
+
 ## Closing
 
 | Row | What | State | Where / evidence |

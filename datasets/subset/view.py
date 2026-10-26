@@ -71,6 +71,12 @@ _WELLS_UNKNOWN = (
     "plate empty to take every well, or pick the wells to keep.")
 _TP_UNKNOWN = ("All timepoints — which ones the earlier job writes is known "
                "only when it runs.")
+_ONLY_THESE_TIMEPOINTS = (
+    "The timepoints this job keeps. Which others the earlier job writes is "
+    "known only when it runs; untick all to keep every timepoint.")
+_ONLY_THESE_FOVS = (
+    "The FOVs this job keeps. Which others the earlier job writes is known "
+    "only when it runs; untick all to keep every FOV.")
 _FOV_UNKNOWN = ("All FOVs — which ones the earlier job writes is known only "
                 "when it runs.")
 
@@ -93,6 +99,13 @@ class SubsetPage(LogPanelMixin, QWidget):
         # (``services.job_projection``); read instead of the disk while the
         # source does not exist yet. Empty when the source is a real folder.
         self._projection: dict = {}
+        # An edited job's explicit timepoints / FOVs, kept while its pending
+        # source's projection does not know that dimension — the picker then
+        # offers exactly these rather than nothing (see _load_projected_metadata).
+        self._job_only_choices: dict = {}
+        # What set_selected_timepoints / set_selected_fovs were last asked for,
+        # since the current source was set (see set_selected_timepoints).
+        self._requested: dict = {}
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -272,12 +285,25 @@ class SubsetPage(LogPanelMixin, QWidget):
         return wells
 
     def all_timepoints_selected(self) -> bool:
+        if self._only_from_job("timepoints"):
+            return not self.selected_timepoints()    # unticking them all is "every one"
         return len(self.selected_timepoints()) == len(self._tp_checks)
 
     def all_fovs_selected(self) -> bool:
+        if self._only_from_job("fovs"):
+            return not self.selected_fovs()    # unticking them all is "every one"
         return len(self.selected_fovs()) == len(self._fov_checks)
 
+    def _only_from_job(self, dimension: str) -> bool:
+        """Whether this picker lists only the job's own choices, because the
+        pending source's full list is not known. Every box ticked then means
+        "these", not "all": the source may hold more."""
+        return (self.has_pending_inputs()
+                and (self._projection or {}).get(dimension) is None
+                and bool(self._job_only_choices.get(dimension)))
+
     def set_source_path(self, path: str) -> None:
+        self._requested = {}
         self._src_field.set_path(path)
         self._reload_source_metadata()
         self._refresh_run_enabled()
@@ -293,6 +319,10 @@ class SubsetPage(LogPanelMixin, QWidget):
             self._plate.setSelectedWellIds(list(wells))
 
     def set_selected_timepoints(self, labels: list[str] | None) -> None:
+        # Remembered as asked, not only as ticked: a source that does not
+        # exist yet has no boxes to tick, and an edit must not lose the job's
+        # choice before set_pending_inputs can offer it.
+        self._requested["timepoints"] = list(labels) if labels is not None else None
         if labels is None:
             return
         wanted = set(labels)
@@ -300,6 +330,7 @@ class SubsetPage(LogPanelMixin, QWidget):
             cb.setChecked(label in wanted)
 
     def set_selected_fovs(self, labels: list[str] | None) -> None:
+        self._requested["fovs"] = list(labels) if labels is not None else None
         if labels is None:
             return
         wanted = set(labels)
@@ -377,13 +408,23 @@ class SubsetPage(LogPanelMixin, QWidget):
         the disk. Choices already made on the page (an edited job's own) are
         kept where the projection still offers them.
         """
+        if not pending and not self.has_pending_inputs():
+            # Nothing was pending and nothing is: leave the page exactly as it
+            # is. Reloading here re-ticked every well of the source, which
+            # turned a no-op edit of an explicit subset into "every well".
+            return
         wells = self.selected_wells()
-        tps = None if self.all_timepoints_selected() else self.selected_timepoints()
-        fovs = None if self.all_fovs_selected() else self.selected_fovs()
+        tps = self._current_choice("timepoints", self._tp_checks,
+                                   self.all_timepoints_selected, self.selected_timepoints)
+        fovs = self._current_choice("fovs", self._fov_checks,
+                                    self.all_fovs_selected, self.selected_fovs)
         apply_pending({"source": self._src_field}, pending)
         self._projection = dict(projection or {}) if self.has_pending_inputs() else {}
+        self._job_only_choices = (
+            {"timepoints": list(tps or []), "fovs": list(fovs or [])}
+            if self.has_pending_inputs() else {})
         self._reload_source_metadata()
-        if wells and self.has_pending_inputs():
+        if wells:
             self.set_selected_wells(wells)
         self.set_selected_timepoints(tps)
         self.set_selected_fovs(fovs)
@@ -392,6 +433,14 @@ class SubsetPage(LogPanelMixin, QWidget):
 
     def has_pending_inputs(self) -> bool:
         return any_pending({"source": self._src_field})
+
+    def _current_choice(self, dimension, checks, all_selected, selected) -> list[str] | None:
+        """The page's choice for one dimension, ``None`` for "all" — or what it
+        was last asked to select when it had no boxes to tick it in."""
+        asked = self._requested.get(dimension)
+        if asked is not None and not checks:
+            return asked
+        return None if all_selected() else selected()
 
     def _reload_source_metadata(self) -> None:
         if self.has_pending_inputs():
@@ -445,14 +494,26 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._wells_hint.setVisible(wells is None)
         self._plate.setEnabledWells(list(wells) if wells else None)
         self._plate.setSelectedWellIds(list(wells or []))
-        tps = proj.get("timepoints")
+        # An edited job's own explicit choices are offered whether or not the
+        # projection lists them: built from the projection alone, a picker
+        # that does not know a dimension came up empty and saved the job as
+        # "all", and one that knows a different list dropped the job's
+        # choices it did not contain. The run checks them against the real
+        # source (SubsetController.start_from_queue).
+        own = self._job_only_choices
+        tps = set(proj.get("timepoints") or []) | set(own.get("timepoints") or [])
         self._tp_hint.setText(_TP_UNKNOWN)
         self._rebuild_checks(self._tp_flow, self._tp_checks,
-                             sorted(tps, key=tp_sort_key) if tps else [], self._tp_hint)
-        fovs = proj.get("fovs")
+                             sorted(tps, key=tp_sort_key), self._tp_hint)
+        fovs = set(proj.get("fovs") or []) | set(own.get("fovs") or [])
         self._fov_hint.setText(_FOV_UNKNOWN)
-        self._rebuild_checks(self._fov_flow, self._fov_checks,
-                             sorted(fovs) if fovs else [], self._fov_hint)
+        self._rebuild_checks(self._fov_flow, self._fov_checks, sorted(fovs), self._fov_hint)
+        if self._only_from_job("timepoints"):
+            self._tp_hint.setText(_ONLY_THESE_TIMEPOINTS)
+            self._tp_hint.setVisible(True)
+        if self._only_from_job("fovs"):
+            self._fov_hint.setText(_ONLY_THESE_FOVS)
+            self._fov_hint.setVisible(True)
 
     def _rebuild_checks(
         self, flow: FlowLayout, store: dict, labels: list[str], hint: QLabel,

@@ -432,6 +432,7 @@ class JobQueue:
                  if chain_from is not None else [])
         self._check_links(job_id, links)
         self._by_id[job_id].set_links(links)
+        self._block_if_stopped(self._by_id[job_id])
 
     def set_link(
         self,
@@ -454,6 +455,23 @@ class JobQueue:
             links.append(ChainLink(source, target, kind))
         self._check_links(job_id, links)
         job.set_links(links)
+        self._block_if_stopped(job)
+
+    def _block_if_stopped(self, job: JobSpec) -> None:
+        """Block a pending job linked to a source whose output is never coming.
+
+        The cascade only runs when a job *finishes*; a link made afterwards to
+        a job that already failed would otherwise leave this one pending for
+        ever, with nothing said. Blocked, it says which job stopped it, and
+        retrying that job releases it like any other cascade.
+        """
+        if job.state != JobState.PENDING:
+            return
+        stopped = next((s for s in job.sources() if self._still_stopping(s)), None)
+        if stopped is not None:
+            job.state = JobState.BLOCKED
+            job.message = f"predecessor {stopped} did not complete"
+            self._cascade_block(job.id)
 
     def _check_links(self, job_id: str, links: list[ChainLink]) -> None:
         """Refuse links that name an unknown job, the job itself, or a cycle.
@@ -651,7 +669,12 @@ class JobQueue:
                 sources = j.sources()
                 if not any(s in unblocking for s in sources):
                     continue
-                if any(self._still_stopping(s) for s in sources if s not in unblocking):
+                still = next((s for s in sources
+                              if s not in unblocking and self._still_stopping(s)), None)
+                if still is not None:
+                    # Still blocked, now by the other source: say so, rather
+                    # than go on naming the one that was just retried.
+                    j.message = f"predecessor {still} did not complete"
                     continue
                 j.state = JobState.PENDING
                 j.message = ""

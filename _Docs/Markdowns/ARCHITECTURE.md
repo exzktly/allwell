@@ -15303,7 +15303,10 @@ Qt event loop. Four layers:
   the others alone. Both reject a self-link, a cycle (walking every ancestor
   through every link, since a cycle can now close through a job's second
   input), and a source queued *below* the job, which would leave it waiting
-  for ever on a job that runs after it. A reorder placing a job before any of
+  for ever on a job that runs after it. A link to a source that has already
+  failed, been cancelled or been blocked blocks the job at once
+  (`_block_if_stopped`) — the cascade runs only when a job finishes, so
+  without it the job would wait for ever with nothing said. A reorder placing a job before any of
   its sources is refused.
 
   A finished converter job also records a **`layout`** — what it knows about
@@ -15329,7 +15332,8 @@ Qt event loop. Four layers:
   different, un-retried failure stays blocked. A job with two sources stays
   blocked while its *other* source is still failed, cancelled or blocked —
   retrying one of two failed conversions must not release a Concatenate that
-  still has nothing to read for the other dataset. `duplicate` drops the clone's chain link (a clone inheriting its
+  still has nothing to read for the other dataset — and its message is
+  rewritten to name that other source. `duplicate` drops the clone's chain link (a clone inheriting its
   twin's predecessor would wait on output it has no relationship to) and
   takes its new id as a parameter, so the module needs no `uuid` and a test
   can name the copy. `clear_terminal` goes through `remove` per id rather
@@ -15586,14 +15590,20 @@ Qt event loop. Four layers:
 
   **A link is kept only while its input still holds the path it was given.**
   The session records each link as target → (source, path) and, on Save,
-  links a target whose collected value equals one of those paths. That one
+  links a target whose collected value names the same folder as one of those
+  paths — compared normalised (`_same_path`), because a form may respell a
+  path on the way through: Analyze stores `Path(text)`, which drops a trailing
+  separator and on Windows turns `/` into `\`. That one
   rule covers both ways a user changes an input: Browse-ing a real folder
   replaces the path and drops the link, and Swap dataset 1 and 2 moves each
   path — and so each link — to the other target. `begin_edit` records an
   edited job's existing links the same way, and Save on an edit re-links
   through `set_link` only where the kept set differs (`_relink`). Ending a
   session takes the pending marks off the page, so it is an ordinary page
-  again; opening another session first drops the previous one's links.
+  again; opening another session first drops the previous one's links. A
+  next-step session whose source leaves the queue is closed with a note
+  (`abandon_if_stale`): saving it would add the job with that input unlinked,
+  and a running queue could start it against a folder nothing will write.
 
   It holds no widgets and imports no Qt, reaching outside through three
   injected callables — `notify`, `add_job`, and the `on_session` /
@@ -15739,7 +15749,10 @@ folder with a real one. `apply_pending(fields, pending)` / `any_pending` apply
 a page's whole set at once. Each page that can be a next step implements
 `set_pending_inputs(pending, projection=None)`, defers whatever would read the
 input, and keeps its own Run button off while an input is pending (tooltip
-`RUN_WAITS`) — queueing is what the page is for in that state. Concatenate
+`RUN_WAITS`; Analyze's Run, which reports problems rather than greying out,
+lists "Input not written yet") — queueing is what the page is for in that
+state, and running could analyse whatever an earlier run left in the planned
+folder. Concatenate
 leaves the gap to be worked out when the job runs (an untouched gap field
 already means that in a queued spec) and offers in-place mode with the check
 deferred, since the run refuses a pair that cannot be appended; Merge plates
@@ -15749,7 +15762,17 @@ note under its input field in place of the readout (`_refresh_output`, in
 `analyze/domain/input.py`, which drops the pending state once the field holds
 any other folder), fills the schema and channels from the projected layout as
 a folder scan would, and turns run-time detection on, so the real files are
-still checked when the job runs. `build_equation_row(on_swap=…)` adds the
+still checked when the job runs. It keeps the whole form as it was before
+(`collect_spec`, with the input folder `show_job` replaced) and puts it back
+through `hydrate_job` when the pending input is cleared — the session ending,
+saved or cancelled — so the user's own form is not left with another job's
+channels. A Subset page given nothing pending while nothing was pending does
+nothing (the session also skips the call for a job with no links): reloading
+re-ticked every well and turned a no-op edit of an explicit subset into "every
+well". It remembers the timepoints and FOVs `show_job` asked for even when the
+missing source left no boxes to tick, and offers them as the only choices
+when the projection does not know that dimension — ticked, they mean "these",
+not "all". `build_equation_row(on_swap=…)` adds the
 *Swap dataset 1 and 2* button Concatenate and Merge plates both carry; a swap
 moves each field's path and pending note together.
 

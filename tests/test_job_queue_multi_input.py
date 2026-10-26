@@ -253,3 +253,24 @@ def test_a_link_to_a_job_queued_below_is_refused():
     with pytest.raises(ValueError, match="queued after it"):
         q.set_link("cat", "dataset1", "a")
     assert q.get("cat").links() == []
+
+
+# ── review findings R6 / R8b ─────────────────────────────────────────────────
+
+def test_linking_to_a_failed_job_blocks_rather_than_waiting_for_ever():
+    q = JobQueue([_conv("a"), _concat()])
+    _fail(q, "a")
+    q.set_link("cat", "dataset1", "a", kind="dataset_root")
+    assert q.get("cat").state == JobState.BLOCKED
+    assert "predecessor a" in q.get("cat").message
+    assert q.retry("a")
+    assert q.get("cat").state == JobState.PENDING
+
+
+def test_a_job_still_blocked_after_a_retry_names_the_other_source():
+    q = _two_inputs()
+    _fail(q, "a")
+    q.get("b").state = JobState.CANCELLED
+    assert q.retry("a")
+    assert q.get("cat").state == JobState.BLOCKED
+    assert "predecessor b" in q.get("cat").message

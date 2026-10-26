@@ -224,6 +224,9 @@ class QueueBridge(QObject):
             return False
         self._save()
         self.queueChanged.emit()
+        # Unlinking an input can make a waiting job runnable; a started, idle
+        # queue should not sit on it until something else happens.
+        self._advance()
         return True
 
     def show_job(self, job_id: str) -> bool:

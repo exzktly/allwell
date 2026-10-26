@@ -321,3 +321,106 @@ def test_analyze_queued_after_a_concatenate_of_two_conversions(qtbot, tmp_path):
     assert [(link.target, link.source) for link in an.links()] == [("opts.raw", "cat")]
     assert an.spec["auto_detect"]
     assert not tab.has_pending_inputs()
+
+
+# ── review findings R1 / R2: an edit must not widen a Subset ─────────────────
+
+def test_a_no_op_edit_of_an_explicit_subset_keeps_its_wells(qtbot, tmp_path):
+    """Regression: editing a Subset with explicit wells and saving unchanged
+    saved every well of the source."""
+    from datasets.job_queue.controller import JobQueueController
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "plate"
+    build_dataset(src, wells=["A01", "A02", "B01"], timepoints=["0h", "24h"])
+    jq = JobQueueController(state_dir=tmp_path / "state")
+    jq._notify = lambda text, kind="warn": None
+    jq.set_session_hooks(lambda _kind, _message: True, lambda _text: None)
+    sub = SubsetController()
+    qtbot.addWidget(sub.page)
+    qtbot.addWidget(jq.page)
+    jq.register("subset", sub)
+    spec = {"source": str(src), "destination": str(tmp_path / "out"),
+            "wells": ["A02"], "timepoint_labels": ["24h"], "fovs": None}
+    jq.bridge.add_job(JobSpec(id="s", kind="subset", label="s", spec=dict(spec)))
+    assert jq.begin_edit("s")
+    assert jq.save_session()
+    saved = jq.bridge.queue.get("s").spec
+    assert saved["wells"] == ["A02"]
+    assert saved["timepoint_labels"] == ["24h"]
+    sub.shutdown()
+
+
+def test_an_edited_subset_keeps_explicit_timepoints_the_projection_does_not_know(subset, tmp_path):
+    page = subset.page
+    subset.show_job({"source": str(tmp_path / "not_written"), "destination": "",
+                     "wells": None, "timepoint_labels": ["0h"], "fovs": ["F002"]})
+    # A folder that does not exist has no boxes to tick, which is exactly the
+    # case: the edit's choices must survive until the pending call offers them.
+    assert page.available_timepoints() == []
+    subset.set_pending_inputs(_NOTE, {"wells": ["A01"], "timepoints": None, "fovs": None})
+    assert page.available_timepoints() == ["0h"]
+    spec = subset.collect_spec()
+    assert spec["timepoint_labels"] == ["0h"], "an explicit timepoint became 'all'"
+    assert spec["fovs"] == ["F002"]
+    for cb in page._tp_checks.values():
+        cb.setChecked(False)
+    assert subset.collect_spec()["timepoint_labels"] is None
+
+
+# ── review findings R3 / R4 / R5: the Analyze next step ──────────────────────
+
+def _analyze_queue(qtbot, tmp_path, destination):
+    from analyze.tab import AnalyzeTab
+    from datasets.job_queue.controller import JobQueueController
+
+    jq = JobQueueController(state_dir=tmp_path / "state")
+    jq._notify = lambda text, kind="warn": None
+    jq.set_session_hooks(lambda _kind, _message: True, lambda _text: None)
+    tab = AnalyzeTab()
+    qtbot.addWidget(tab)
+    qtbot.addWidget(jq.page)
+    jq.register("analyze", tab)
+    jq.set_analyze_provider(tab.collect_spec, tab.validate_for_queue)
+    jq.bridge.add_job(JobSpec(id="sub", kind="subset", label="sub",
+                              spec={"source": "/x", "destination": destination}))
+    jq._refresh_page()
+    return jq, tab
+
+
+def test_a_path_respelled_by_the_form_keeps_its_link(qtbot, tmp_path):
+    """Analyze collects its input through ``Path``, which drops a trailing
+    separator (and on Windows turns ``/`` into ``\\``). Compared as raw
+    strings, the link was dropped and an unlinked job queued."""
+    jq, tab = _analyze_queue(qtbot, tmp_path, str(tmp_path / "subset_out") + "/")
+    jq.page.nextStepRequested.emit("sub", "analyze", "")
+    assert jq.save_session()
+    an = next(j for j in jq.bridge.queue.jobs if j.kind == "analyze")
+    assert an.spec["opts"]["raw"] == str(tmp_path / "subset_out"), "fixture: the form respelled it"
+    assert [(link.target, link.source) for link in an.links()] == [("opts.raw", "sub")]
+
+
+def test_analyze_refuses_to_run_on_a_pending_input(qtbot, tmp_path):
+    """If an earlier run left the planned folder behind, Run would analyse
+    that and say nothing."""
+    planned = tmp_path / "subset_out"
+    build_dataset(planned, wells=["A01"], timepoints=["0h"])
+    jq, tab = _analyze_queue(qtbot, tmp_path, str(planned))
+    jq.page.nextStepRequested.emit("sub", "analyze", "")
+    assert tab.has_pending_inputs()
+    assert tab._validate_run_request() is None
+    assert tab._validate_run_request(for_queue=True) is not None
+
+
+def test_ending_an_analyze_next_step_restores_the_user_s_form(qtbot, tmp_path):
+    jq, tab = _analyze_queue(qtbot, tmp_path, str(tmp_path / "subset_out"))
+    tab._auto_detect_cb.setChecked(False)
+    tab._input_edit.setText(str(tmp_path / "my_own_plate"))
+    tab._nuclear_token_edit.setText("NIR")
+    before = tab.collect_spec()
+    jq.page.nextStepRequested.emit("sub", "analyze", "")
+    assert tab._auto_detect_cb.isChecked()
+    jq.end_session()
+    assert not tab._auto_detect_cb.isChecked()
+    assert tab._input_edit.text() == str(tmp_path / "my_own_plate")
+    assert tab.collect_spec() == before

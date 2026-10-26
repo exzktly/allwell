@@ -8028,7 +8028,8 @@ from a queued job shows the folder that job is set up to write, marked **⧗**
 and naming the job, with a note that it is not written yet. Set the rest of
 the page as usual — a destination, a gap, the wells to keep — and press **Add
 to queue**. The page's own run button stays greyed out while an input is
-marked ⧗, because there is nothing there to run on yet.
+marked ⧗ (Analyze's **Run Pipeline** says why instead), because there is
+nothing there to run on yet — or worse, something an earlier run left behind.
 
 - **Swap dataset 1 and 2** under the Concatenate and Merge plates fields
   exchanges the two, together with which job each comes from. For a
@@ -8049,7 +8050,11 @@ marked ⧗, because there is nothing there to run on yet.
   earlier in the chain — through a Concatenate or Merge of two conversions too,
   as long as both were set up with the same channel roles — and ticks **Detect
   schema & channels at run time**, so the real files are still checked when it
-  runs.
+  runs. When you add the job or cancel, the Analyze form goes back to exactly
+  what it held before.
+- Editing a queued Subset whose source is still to be written keeps the
+  timepoints and FOVs it names, even when which others exist cannot be known
+  yet; untick them all to keep every one.
 
 For example, to convert two scans of one plate, join them into one timelapse
 and analyse it: queue both conversions, choose **Queue next step from this
@@ -8073,7 +8078,9 @@ job that waits on two others starts only once both have finished.
 
 If a job fails, everything chained after it is marked **blocked**, not
 failed — those jobs never ran. A job that waits on two jobs is blocked when
-either one fails, and goes back to pending only once neither is failed. **Retry** on the *failed* job puts it back in
+either one fails, and goes back to pending only once neither is failed; its
+row names whichever is still in the way. Linking a job to one that has
+already failed blocks it at once, rather than leaving it waiting. **Retry** on the *failed* job puts it back in
 the queue and returns everything it blocked to pending, so a whole chain
 recovers in one step. Retrying a blocked job itself is refused: it never ran,
 and the job that stopped it is still there to fix. Stopping the currently-running job pauses the queue

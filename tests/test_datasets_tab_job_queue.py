@@ -383,10 +383,11 @@ def test_editing_a_finished_job_says_it_will_not_rerun(qapp, tmp_path):
         tab.shutdown()
 
 
-def test_clearing_completed_warns_about_the_jobs_it_unlinks(qapp, tmp_path):
-    """A survivor chained to a cleared job loses its link — it has to, or it
-    could never run — and then falls back to whatever placeholder its own spec
-    still holds. Silence made a tidy-up look free."""
+def test_clearing_a_succeeded_job_hands_its_folder_on(qapp, tmp_path):
+    """A survivor linked to a cleared job loses its link — it has to, or it
+    could never run. When that job succeeded, the folder it wrote is the
+    answer the link was waiting for, so it is written into the survivor and
+    there is nothing to warn about."""
     tab, _ = _make_tab(tmp_path)
     try:
         tab._add_to_queue("subset", {"source": "/A", "destination": "/A_sub"})
@@ -399,8 +400,34 @@ def test_clearing_completed_warns_about_the_jobs_it_unlinks(qapp, tmp_path):
 
         notices = _notices(jq)
         jq.page.clearCompletedRequested.emit()
-        assert any("waiting on a job you cleared" in text for _kind, text in notices)
-        assert jq.bridge.queue.get(v).chain_from is None
+        survivor = jq.bridge.queue.get(v)
+        assert survivor.chain_from is None
+        assert survivor.spec["dataset"] == "/A_sub"
+        assert survivor.state == "pending"
+        assert not any("cleared" in text for _kind, text in notices)
+    finally:
+        tab.shutdown()
+
+
+def test_clearing_keeps_a_failed_job_that_others_wait_on_and_says_so(qapp, tmp_path):
+    """Clearing the failed job used to take its Retry — the one action that
+    releases the jobs it blocked — and leave them to be relinked by hand
+    (UX review 2, K3). It is kept, and the notice says why."""
+    tab, _ = _make_tab(tmp_path)
+    try:
+        tab._add_to_queue("subset", {"source": "/A", "destination": "/A_sub"})
+        tab._add_to_queue("validate", {"dataset": "/PLACEHOLDER"})
+        jq = tab._controllers["job_queue"]
+        a, v = [j.id for j in jq.bridge.queue.jobs]
+        jq.bridge.set_chain(v, a)
+        jq.bridge.queue.mark_running(a)
+        jq.bridge.queue.mark_finished(a, ok=False, message="truncated")
+
+        notices = _notices(jq)
+        jq.page.clearCompletedRequested.emit()
+        assert [j.id for j in jq.bridge.queue.jobs] == [a, v]
+        assert jq.bridge.queue.get(v).state == "blocked"
+        assert any(text.startswith("Kept “") for _kind, text in notices)
     finally:
         tab.shutdown()
 

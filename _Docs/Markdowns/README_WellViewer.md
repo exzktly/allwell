@@ -7939,8 +7939,11 @@ that analyses what a converter earlier in the queue will produce:
   a channel chosen from the names would be a nuclear stain, so the run refuses
   to guess.
 - The input folder may be one that has not been written yet, or blank if you
-  are about to chain the job with the row's **Run after…** menu. A blank job
-  that is never chained says so on its row, and fails when it starts.
+  are about to link the job with the row's **Input from…** menu. A blank job
+  that is never linked says so on its row, and fails when it starts. The
+  easiest way to set one up is **New job using this output ▸ Analyze…** on
+  the earlier job's row (below), which fills the input in and ticks **Detect
+  schema & channels at run time** for you.
 - If the layout cannot be read — a single-channel plate, no image files, no
   channel that can be segmented — the job **fails and says why** rather than
   running with the form's values. It also fails if an option that names a
@@ -7978,10 +7981,13 @@ saving would otherwise quietly widen the job to everything. Editing a job
 that has already finished is allowed, and says so: it updates what the job
 would do, but the job does not run again until you choose **Retry**.
 
-The **⋯** menu also offers **Duplicate** (a copy directly below, ready to
-point at another dataset — the quickest way to queue the same operation over
-several plates), **Retry** on a job that has finished, **Run after** (below),
-**Move up** / **Move down**, and **Remove from queue**.
+The **⋯** menu also offers **Duplicate** (a copy directly below — the
+quickest way to queue the same operation over several plates, or to try one
+setting differently on the same input), **Retry** on a job that ran and
+failed, was cancelled or finished, **Input from** (below), **New job using this output** (below),
+**Move up** / **Move down**, and **Remove from queue**. A row can also be
+opened with **Enter** once it has keyboard focus, and its menu with the
+**Menu** key or **Shift+F10**.
 
 The queue runs strictly one job at a time, in the order shown, and never
 starts on its own — press **▶ Start queue** to begin working through it, and
@@ -7995,8 +8001,9 @@ Each row names what the job actually runs — "Subset — plateA → plateA_sub"
 failed / cancelled / blocked / interrupted / suspended) and, underneath, the
 folders it works on, the job it waits for, and its latest message. That
 second line is shortened with "…" when it does not fit; hover it for the
-full text. A pending job also shows its position in line ("1.", "2.", …);
-the currently running job shows a moving progress strip instead.
+full text. Every row is numbered by its place in the queue ("1.", "2.", …),
+and the menus that name jobs use the same numbers, so "3." is always the
+same job. The currently running job also shows a moving progress strip.
 
 Drag a row by its handle at the left to reorder it, or use **Move up** /
 **Move down** from the menu. The whole row is a click target — hover it and
@@ -8007,23 +8014,128 @@ running, is refused, and All-Well says why. The move actions disappear once
 a job has reached a final outcome, since there is nothing left to reorder.
 
 Above the list, a one-line summary counts what is in each state, and **Clear
-completed** removes every finished job at once — succeeded, failed,
-cancelled or blocked — leaving pending and running ones alone.
+completed** removes every job that ran — succeeded, failed or cancelled —
+leaving pending, running and blocked ones alone. A failed or cancelled job
+that blocked jobs are still waiting on is kept too, and All-Well says so
+("Kept “…” — 2 job(s) wait on it; Retry it to release them"): its **Retry** is
+what releases the chain.
 
-**Chaining** links one job's input to another's output. Open the **⋯** menu
-on the job that should run second, choose **Run after**, and pick the job it
-should follow; **Nothing (run on its own)** in the same submenu breaks the
-link again. Only jobs above it in the queue are offered, since a job cannot
-run before the one it waits for. The second job's input folder is filled in
-only once the first one finishes, not when you queue it — so you can queue a
-Subset and a Validate of its result together, without knowing yet where that
-result will land.
+**Queuing the next step before the first has run.** Every job's **⋯** menu has
+**New job using this output**, which sets up a job that works on what this one
+will write — before it has written anything:
+
+- **Analyze…**, **Validate…** or **Subset…** of this job's output (an
+  Analyze job is not offered Analyze of itself).
+- **Concatenate with ▸** or **Merge plates with ▸** another queued job's
+  output, or a folder you pick on the page. This job's output becomes
+  dataset 1 and the one you name becomes dataset 2. The jobs this one reads
+  from, and those that read from it, are not offered — combining a dataset
+  with its own source is never meant.
+
+The tool's page opens with the strip across the top. Each input that comes
+from a queued job shows the folder that job is set up to write, marked **⧗**
+and naming the job, with a note that it is not written yet. Set the rest of
+the page as usual — a destination, a gap, the wells to keep — and press **Add
+to queue**. The page's own run button stays greyed out while an input is
+marked ⧗ (Analyze's **Run Pipeline** says why instead), because there is
+nothing there to run on yet — or worse, something an earlier run left behind.
+
+- **Swap dataset 1 and 2** under the Concatenate and Merge plates fields
+  exchanges the two, together with which job each comes from. For a
+  Concatenate, dataset 1 is the one whose timepoints come first.
+- Browse to a different folder for an input and that input stops waiting on
+  the job; it uses the folder you picked.
+- **Starting from the tool's page works too.** Every dataset input on the
+  Datasets pages has an arrow on its **Browse** button, and Analyze has a **▾**
+  beside its own: **Output of a queued job ▸** lists the queued jobs by number.
+  Picking one fills the field with the folder that job will write, marks it
+  **⧗** and shows the strip, exactly as **New job using this output** does —
+  so a Concatenate of two queued conversions can be set up entirely from the
+  Concatenate page. Jobs that failed, were cancelled or are blocked are not
+  listed, since their output is not coming; when nothing can be, the menu
+  says so.
+- The page's own **+ Queue** does the same as **Add to queue** while the strip
+  is showing, so the job keeps waiting on the jobs it reads from.
+- Concatenate's gap, left untouched, is worked out from the two datasets'
+  acquisition times when the job runs. Whether dataset 2 can be added in place
+  is also checked then.
+- **Subset** offers the wells the earlier job is expected to write — for a
+  conversion, the wells its page mapped the plate to; for a Concatenate or a
+  Merge, both datasets' wells together. Timepoints and FOVs it cannot know
+  yet say *All — known only when it runs*. Leaving every well ticked keeps
+  every well the job actually writes. If the job names a well, timepoint or
+  FOV that the real output turns out not to hold, it **fails and names
+  them** rather than copying less than you asked for.
+- **Analyze** takes the file naming and channel roles from the conversions
+  earlier in the chain — through a Concatenate or Merge of two conversions too,
+  as long as both were set up with the same channel roles — and ticks **Detect
+  schema & channels at run time**, so the real files are still checked when it
+  runs. When you add the job or cancel, the Analyze form goes back to exactly
+  what it held before.
+- Editing a queued Subset whose source is still to be written keeps the
+  timepoints and FOVs it names, even when which others exist cannot be known
+  yet; untick them all to keep every one.
+
+For example, to convert two scans of one plate, join them into one timelapse
+and analyse it: queue both conversions, choose **New job using this output ▸
+Concatenate with ▸ (the second conversion)** on the first one and add it,
+then **New job using this output ▸ Analyze…** on the Concatenate.
+Start the queue and the four jobs run in order, each reading what the one
+before it wrote.
+
+**Linking an existing job** to another's output works from the other end.
+Open the **⋯** menu on the job that should read the output, choose **Input
+from**, and pick the job whose output it reads; **Nothing (use the folder on
+its page)** in the same submenu breaks the link again. Concatenate and Merge
+plates, which take two datasets, have **Dataset 1 from** and **Dataset 2
+from** instead, so each dataset can come from a different job (the job already
+feeding one dataset is not offered for the other). Jobs in these menus carry the
+same numbers as the rows, so two copies of one job can be told apart. Jobs
+above it are listed first; jobs below it follow, marked **(moves this job
+below it)** — a job cannot run before the one it reads from, so choosing one
+moves this job to just under it. That is how a conversion re-added at the
+bottom of the queue is linked to an analysis already waiting above it. A job
+that reads from this one is never offered, and when no job can be the input
+the submenu says so. The converters and Zip loose read files, not
+datasets, so they have no **Input from**. The second job's input folder is
+filled in only once the first one finishes, not when you queue it — so you can
+queue a Subset and a Validate of its result together, without knowing yet
+where that result will land. A job's row says where its input comes from:
+"input from “…”", or on a two-dataset job "dataset 1 from “…” · dataset 2 from
+“…”". A job that reads from two others starts only once both have finished.
 
 If a job fails, everything chained after it is marked **blocked**, not
-failed — those jobs never ran. **Retry** on the *failed* job puts it back in
-the queue and returns everything it blocked to pending, so a whole chain
-recovers in one step. Retrying a blocked job itself is refused: it never ran,
-and the job that stopped it is still there to fix. Stopping the currently-running job pauses the queue
+failed — those jobs never ran. A blocked row starts its second line with why,
+naming the job in the way: "Blocked — waiting on “Convert CZI — day2…”, which
+failed". Further down a chain it names the job that actually went wrong: an
+Analyze after a Concatenate after a failed conversion reads "waiting on
+“Concatenate…”, held up because “Convert CZI — day2…” failed". A job that reads from two jobs is blocked when either one fails, and
+goes back to pending once neither is failed — by retrying the failed job, or
+by pointing that input somewhere else with **Dataset 1 from ▸ Nothing** or an
+edit. Linking a job to one that has already failed blocks it at once, rather
+than leaving it waiting. **Retry** on the *failed* job puts it back in the
+queue and returns everything it blocked to pending, so a whole chain recovers
+in one step; a blocked job has no Retry of its own — it never ran, and the job
+that stopped it is still there to fix.
+
+**Retrying a job whose output was already used.** When jobs that read from a
+job have already finished, its **Retry** becomes a submenu: **This job and
+the N job(s) that use its output** puts them all back in the queue, so the
+chain runs again end to end; **This job only — mark those out of date** keeps
+their results but starts their second line with "Out of date — “…” was run
+again after this finished", since what they describe no longer exists.
+Retrying an out-of-date job clears the mark.
+
+**Duplicating a linked job** keeps its links: the copy waits on the same jobs
+as the original (and is blocked with it if one of them failed). To point the
+copy at another dataset, use **Input from ▸ Nothing** or Browse on its page.
+
+Removing a finished job hands its folder to the jobs that read from it.
+Removing one that never wrote its output — still waiting, failed or cancelled
+— leaves the jobs that read from it **blocked**, saying that job was removed,
+until you choose their input again (**Input from**, **Dataset 1 from**, or an
+edit). They are not released onto the folder they were set up with, which
+nothing will now write — or which a failed job left half-written. Stopping the currently-running job pauses the queue
 rather than skipping ahead to the next one, so a run you meant to cancel
 cannot be silently followed by one you did not get to review.
 

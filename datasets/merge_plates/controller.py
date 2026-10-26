@@ -127,6 +127,11 @@ class MergePlatesController(DestinationToolController):
         self.page.set_remap_enabled(bool(spec.get("remap_enabled", False)))
         self.page.set_remap_origin(spec.get("remap_origin", ""))
 
+    def set_pending_inputs(self, pending: dict, projection: dict | None = None) -> None:
+        """Show inputs that are queued jobs' outputs not written yet
+        (``QueueBridge.show_pending``). *projection* is unused: nothing on this page is built from the input's contents."""
+        self.page.set_pending_inputs(pending)
+
     def start_from_queue(self, spec: dict) -> None:
         self.show_job(spec)
         self._launch()

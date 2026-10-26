@@ -199,7 +199,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         signal the phone view's run-start watcher reads — still fires while
         the button is on its way onto the screen.
         """
-        self._run_btn.setEnabled(not running)
+        self._run_btn.setEnabled(not running and not self.has_pending_inputs())
         self._stop_btn.setEnabled(running)
         self._suspend_btn.setEnabled(running)
         self._run_btn.setVisible(not running)
@@ -252,6 +252,133 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         """
         return self._validate_run_request(for_queue=True) is not None
 
+    #: ``(path, note)`` while the input field holds a queued job's output that
+    #: is not written yet, else ``None``. Read by ``_refresh_output``, which
+    #: shows the note instead of planning a folder that does not exist, and
+    #: dropped there as soon as the field holds anything else.
+    _pending_input: tuple[str, str] | None = None
+
+    def set_pending_inputs(self, pending: dict, projection: dict | None = None) -> None:
+        """Show the input as the output of a queued job not yet run.
+
+        *pending* maps ``"opts.raw"`` to the note shown under the input field;
+        an empty dict clears it. Nothing reads the input while it is pending,
+        so run-time detection is switched on — the schema and channels are read
+        from the real files when the job runs, which is the only time there are
+        any. When the job writing the input is expected to carry a known layout
+        (*projection*'s ``layout``: a converter's naming and channel roles,
+        passed through any Concatenate or Merge in between) the form is filled
+        from it, the way a folder scan fills it, so the channel options can be
+        set now; detection still checks them against the files.
+        """
+        note = (pending or {}).get("opts.raw", "")
+        if not note:
+            self._pending_input = None
+            self._sync_run_for_pending()
+            self._refresh_output()
+            return
+        self._pending_input = (self._input_edit.text().strip(), note)
+        self._sync_run_for_pending()
+        layout = (projection or {}).get("layout")
+        if layout:
+            self._apply_pipeline_info(dict(layout), set_input_path=False)
+            settle = getattr(self, "_settle_labelfree_handover", None)
+            if callable(settle):
+                settle(hand_over=True)
+        box = getattr(self, "_auto_detect_cb", None)
+        if box is not None and not box.isChecked():
+            box.setChecked(True)
+        self._refresh_output()
+
+    def has_pending_inputs(self) -> bool:
+        return self._pending_input is not None
+
+    def show_input_folder(self, path: str) -> None:
+        """Put *path* in the input field, as choosing a folder does, without
+        the folder scan: the folder a queued job will write is not there to
+        scan (the Job Queue's "Output of a queued job ▸")."""
+        if hasattr(self, "_input_edit"):
+            self._input_edit.setText(str(path))
+
+    def offer_queued_outputs(self, title, provider, choose, empty_text, tooltip) -> None:
+        """A small menu button beside Browse offering *title* ▸ — the queued
+        jobs ``provider()`` lists — as the Datasets pages offer it behind
+        their Browse arrow. Added here rather than in the form builder so the
+        Analyze form stays free of the queue, which injects it."""
+        from PySide6.QtWidgets import QMenu, QToolButton
+
+        from widgets.owned_action import owned_action
+
+        browse = getattr(self, "_browse_btn", None)
+        if browse is None or browse.parentWidget() is None:
+            return
+        button = QToolButton(browse.parentWidget())
+        button.setObjectName("QueuedOutputButton")
+        button.setText("▾")
+        button.setToolTip(tooltip)
+        button.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(button)
+        sub = QMenu(title, menu)
+        menu.addMenu(sub)
+
+        def fill() -> None:
+            sub.clear()
+            items = list(provider())
+            if not items:
+                owned_action(sub, empty_text).setEnabled(False)
+                return
+            for key, label in items:
+                owned_action(sub, label).triggered.connect(
+                    lambda _checked=False, k=key: choose(k))
+
+        sub.aboutToShow.connect(fill)
+        button.setMenu(menu)
+        self._queued_output_menu = (button, menu, sub, fill)
+        layout = browse.parentWidget().layout()
+        layout.insertWidget(layout.indexOf(browse) + 1, button)
+
+    def _sync_run_for_pending(self) -> None:
+        """Grey Run, and say why, while the input is a queued job's output.
+
+        As every Datasets page does (``datasets.core.pending_inputs``): a Run
+        that stays lit and then refuses reads as a broken button, and the
+        reason belongs on the button before it is pressed.
+        """
+        btn = getattr(self, "_run_btn", None)
+        if btn is None:
+            return
+        pending = self.has_pending_inputs()
+        btn.setEnabled(not getattr(self, "_running", False) and not pending)
+        btn.setToolTip(
+            "The input folder is the output of a queued job that hasn't run "
+            "yet — add this to the queue to run it after that job."
+            if pending else "")
+
+    #: The whole form as it was before the Job Queue borrowed it
+    #: (:meth:`remember_form`), put back by :meth:`restore_form` when a setup
+    #: that changed it for its links ends — saved or cancelled — so the user's
+    #: own form is not left with another job's input, channels and run-time
+    #: detection.
+    _form_before_borrow: dict | None = None
+
+    def remember_form(self) -> None:
+        """Keep the form as it is, before a queue session writes to it.
+
+        Taken by the session before it populates the page, never inside
+        :meth:`set_pending_inputs`: by then ``show_job`` or ``hydrate_job``
+        has already replaced the input folder, and an edit's snapshot came
+        back with an empty one.
+        """
+        self._form_before_borrow = self.collect_spec()
+
+    def restore_form(self) -> None:
+        before, self._form_before_borrow = self._form_before_borrow, None
+        if before is not None:
+            self.hydrate_job(before)
+
+    def forget_form(self) -> None:
+        self._form_before_borrow = None
+
     def _auto_detect_on(self) -> bool:
         box = getattr(self, "_auto_detect_cb", None)
         return bool(box is not None and box.isChecked())
@@ -275,6 +402,14 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         ``services.run_detect`` re-asks them of the detected layout.
         """
         problems = self._run_problems(for_queue=for_queue)
+        if not for_queue and self._pending_input is not None:
+            # The folder is a queued job's output, not written yet. If an
+            # earlier run left something there, running now would analyse
+            # that instead — and say nothing about it.
+            problems.append(RunProblem(
+                "", "Input not written yet",
+                "The input folder is the output of a queued job that hasn't "
+                "run yet. Add this to the queue to run it after that job."))
         pipeline = find_pipeline_script()
         if pipeline is None:
             problems.append(RunProblem(

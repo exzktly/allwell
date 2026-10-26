@@ -735,7 +735,8 @@ allwell/
 │   │   │                          so it is testable without building a window
 │   │   ├── fields.py           ← entry-boundary numeric validation + the field tables
 │   │   ├── input.py            ← run-dir resolver, OME-TIFF redirect, channel rows,
-│   │   │                          browse-time folder scan
+│   │   │                          browse-time folder scan, and the input readout
+│   │   │                          (_refresh_output) the scan and a pending input feed
 │   │   ├── job_edit.py         ← the inverse of collect_spec, for the queue's edit flow
 │   │   ├── nanowell_fields.py  ← the Nanowells fields' meaning, bounds and errors, Qt-free
 │   │   ├── well_list.py        ← the one parse of a typed well list, and the sentence a
@@ -786,13 +787,16 @@ allwell/
 │   ├── core/                   ← what more than one tool needs: dataset_paths,
 │   │                              containers, zip_passthrough, member_names,
 │   │                              concurrency, log_panel, tool_controller,
-│   │                              dataset_fields, equation_row, convert_marker
+│   │                              dataset_fields, equation_row, convert_marker, well_block,
+│   │                              pending_inputs (an input a queued job has still to write)
 │   ├── concatenate/            ← Concatenate datasets (compute/apply/in_place/worker/view/controller/dashboard)
 │   ├── merge_plates/           ← Merge two plates into one, remapping wells
 │   ├── subset/                 ← Subset / Split a dataset by well, FOV or timepoint
 │   ├── import_loose/           ← Zip a loose image folder into per-well archives
 │   ├── validate/               ← Validate & Repair an existing dataset
-│   ├── job_queue/              ← the queue the eight tools (and Analyze) submit runs to
+│   ├── job_queue/              ← the queue the eight tools (and Analyze) submit runs to,
+│   │                              and projection.py: what a queued job will write, for
+│   │                              the next step set up before it runs
 │   ├── ome_import/             ← Convert OME-TIFF (de-interleave a packed OME-TIFF → dataset folder)
 │   ├── czi_import/             ← Convert CZI (a Zeiss .czi plate scan, or a folder of
 │   │                              per-scene ones → dataset folder; wells read from the
@@ -13411,7 +13415,9 @@ deletable:
 | `datasets/core/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate — plus `is_os_junk_member`, the shared answer to "is this member operating-system debris rather than data?" (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `__MACOSX/`, AppleDouble `._` sidecars, the Spotlight and Trash directories). It is deliberately a *named set*, not "anything that isn't an image": a `notes.txt` a user put in an archive on purpose is real content, and a caller that refuses to reconcile two conflicting copies of a real file should keep refusing. Concatenate is its only caller — see §6b's Verification note for what carrying that debris through a merge used to do. |
 | `datasets/core/tool_controller.py` | `DatasetToolController` — the worker lifecycle every tool controller shares (`jobFinished`, `stop`, `is_busy`, `shutdown`), with the two things that differ between tools as knobs: `_shutdown_label`, and a `_request_worker_stop` hook. The hook exists for one tool. Import Loose's worker spends the run blocked inside the zipper subprocess's stdout read loop and never polls `isInterruptionRequested()`, so Qt's cooperative flag is a no-op there and `request_stop` — which also signals the tracked child — is what actually stops it; a base that hard-coded `requestInterruption()` would have left an orphan process on app close, and `shutdown` swallows the failure it would then hit. `DestinationToolController` adds the run-and-confirm-restart cluster the three copy-into-a-destination tools share (Subset, Merge Plates, Concatenate), with `_destination_has_marker` supplied per tool because a folder holding *this* tool's interrupted attempt is a resume and another tool's leftovers are not. Deliberately **not** on either base: `_on_queue_requested`, `_on_finished` and `_on_succeeded`. Measured across the tool controllers by hashing each one's normalised body, `_on_queue_requested` has a distinct body in every one of them and `_on_finished` five distinct bodies across seven, while `_on_succeeded` diverges further up — Validate's takes `(report, result)` where the others take `(dest_root, summary)`. Pulling them up would trade plain methods for a base full of flags. |
 | `datasets/core/dataset_fields.py` | `is_dataset` / `is_free_destination` / `promote_open_button` — the destination-field validators and the success-state button swap the pages share. `is_free_destination` takes its two predicates as arguments for the same marker reason as above. Cross-field rules ("the destination must differ from both sources") stay on the page, since they read fields the helper cannot see. Sharing the *wording* is part of the point: a user moving between Subset and Merge Plates should not be told the same thing two different ways. |
-| `datasets/core/equation_row.py` | `build_equation_row` / `EquationRow` — the `dataset 1 + dataset 2 = destination` row, for the two tools that take two datasets and write a third. Merge Plates and Concatenate had built it twice in twenty statements each, differing only in two field labels and the name of the slot the fields report to, down to a byte-identical nested operator-glyph helper and a second copy of that column's width. What stays at the call site is what genuinely differs: the two dataset labels — Concatenate names its inputs "base" and "appended" because the operation is ordered, Merge Plates does not because its is not — and each page's own destination validator, which is bound to that tool's own in-progress marker and must **not** be shared. The builder returns the four widgets rather than assigning them, so each page keeps its own `_ds1_field` / `_ds2_field` / `_dest_field` / `_cross_hint` names, which its validation, its run spec and its reset all read. |
+| `datasets/core/equation_row.py` | `build_equation_row` / `EquationRow` — the `dataset 1 + dataset 2 = destination` row, for the two tools that take two datasets and write a third. Merge Plates and Concatenate had built it twice in twenty statements each, differing only in two field labels and the name of the slot the fields report to, down to a byte-identical nested operator-glyph helper and a second copy of that column's width. What stays at the call site is what genuinely differs: the two dataset labels — Concatenate names its inputs "base" and "appended" because the operation is ordered, Merge Plates does not because its is not — and each page's own destination validator, which is bound to that tool's own in-progress marker and must **not** be shared. The builder returns the four widgets rather than assigning them, so each page keeps its own `_ds1_field` / `_ds2_field` / `_dest_field` / `_cross_hint` names, which its validation, its run spec and its reset all read. `on_swap` adds a *Swap dataset 1 and 2* button under the row (returned as `EquationRow.swap`), with a one-line note saying what the order means on that page. |
+| `datasets/core/well_block.py` | `block_shift_well_map` / `WellBlockError` — move a set of wells as one rigid block so its top-left corner lands on a given well, refusing a shift off the 96-well plate. Merge plates' "place dataset 2 starting at well" and the Job Queue's projection of a queued Merge both use it; `merge_plates_compute.block_shift_well_map` wraps it to raise `MergePlatesError`. |
+| `datasets/core/pending_inputs.py` | `apply_pending` / `any_pending` / `RUN_WAITS` — the page side of an input a queued job has still to write (see *Pending inputs* under the Job Queue). |
 | `datasets/core/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count) every tool below uses for its per-well `ThreadPoolExecutor`. It **re-exports** `pipeline.explode_common.pick_workers` rather than defining it: the exploders take it from there, and this module used to hold a second implementation of the same three lines under a comment saying it mirrored the first — which is a heuristic that will be tuned in one place and not the other. |
 | `datasets/core/convert_marker.py` | The resume marker the three **packed-file converters** share (Convert OME-TIFF, Convert CZI, Convert ND2) — `mapping_signature`, the marker read/write/clear trio, `converted_wells`, `ResumeState`, `resume_state` and `destination_problem`. It is a different question from `dataset_paths.make_dataset_api`'s, which the copy tools use: theirs is "did I leave leftovers here?", answerable from the presence of a file and cleared by rebuilding. This one is "may I carry on from what is here?", which is a question about **settings** — two different mappings of one source write *identical* filenames, so nothing on disk distinguishes an `A01.zip` made from scene 0 from one made from scene 7, and only a marker recording the mapping can tell a run that may finish another's work from one that must refuse. Each converter passes its own marker filename (a folder carrying *another* converter's leftovers is not a resume either) and its own list of mapping fields; the signature also carries the source's resolved path, size and mtime, so a file replaced at the same name — a re-export, a restore, the next plate saved over the last — is a different source. `workers` is deliberately not a mapping field: it changes how fast the conversion goes and nothing about what it writes, so refusing a resume over it would refuse one that was safe. |
 
@@ -15270,24 +15276,70 @@ Qt event loop. Four layers:
   step), and `JobQueue`, which only orders and gates jobs; it never runs one
   itself.
 
-  Chaining links a job to a predecessor by **id**, never a list index (an
-  index would silently re-point on reorder), a dotted path into its own
-  `spec` to set, and which of the predecessor's three possible outputs it
-  wants (`chain_kind`). Resolution happens at **dequeue**, via
-  `JobQueue.materialise(job_id)`, never at enqueue — Analyze's own output
-  location is only knowable after `resolve_input_output` runs. A failed or
-  cancelled predecessor cascades every transitive successor still `pending`
-  to `blocked` rather than `failed`, so those jobs are distinguishable from
-  ones that ran and failed; `set_chain()` rejects a self-chain or a cycle
-  before writing the link, and a reorder placing a dependent before its
-  predecessor is refused.
+  A job's inputs are filled from earlier jobs' outputs through **links**,
+  one per input (`ChainLink`: the source job's **id**, never a list index —
+  an index would silently re-point on reorder — the dotted path into this
+  job's own `spec` it fills, and which of the source's three possible outputs
+  it takes). A Concatenate can therefore take dataset 1 from one conversion
+  and dataset 2 from another. `JobSpec.links()` / `set_links()` /
+  `sources()` / `link_for(target)` are the only way the rest of the code
+  reads or writes them. On disk the first link is stored in `chain_from` /
+  `chain_target` / `chain_kind` and any further ones in `extra_links`. That
+  is the single-link shape older versions read and write, so a file holding
+  only single links loads unchanged, and an older version reading a file
+  with two-input links keeps the first link and ignores the rest.
+
+  Resolution happens at **dequeue**, via `JobQueue.materialise(job_id)`,
+  never at enqueue — Analyze's own output location is only knowable after
+  `resolve_input_output` runs, and the path a job was set up with is only the
+  one its source was *expected* to write. `materialise` fills every linked
+  input and raises naming the input whose source produced nothing.
+  `next_runnable` waits for **every** source to succeed. One failed or
+  cancelled source is enough to cascade a job, and every transitive
+  successor still `pending`, to `blocked` rather than `failed` — a
+  Concatenate missing either dataset has nothing to concatenate — and the
+  message names that source. `set_chain()` makes one link the job's only
+  one; `set_link(job, target, source)` links or unlinks one input and leaves
+  the others alone. Both reject a self-link, a cycle (walking every ancestor
+  through every link, since a cycle can now close through a job's second
+  input), and a source queued *below* the job, which would leave it waiting
+  for ever on a job that runs after it. Every change to a job's links ends in
+  `_reassess_block`, both ways: a link to a source that has already failed,
+  been cancelled or been blocked blocks the job at once (the cascade runs only
+  when a job finishes, so without it the job would wait for ever with nothing
+  said), and a blocked job whose stopped source was unlinked is released with
+  what it was holding up — otherwise it stayed blocked naming a job it no
+  longer waits for, out of reach of any retry. The message a blocked job
+  carries (`waiting_on`) names the source by its *label* with what happened
+  to it — "waiting on “X”, which failed" — never by its ten-character id.
+  When the source is itself blocked, `_root_cause` follows the chain to the
+  job that actually failed, was cancelled or lost its input, and the message
+  names it: "waiting on “X”, held up because “R” failed". "Which is blocked
+  itself" left the user to trace the chain by hand; it remains only for a
+  chain with no root to name.
+
+  `remove` drops only the removed job's links. When that job *succeeded* it
+  first writes the folder it reported into each successor's linked input, so
+  the successor runs on what was written. When it did not — still pending,
+  failed, cancelled — the successor's input is recorded in
+  `JobSpec.orphaned_inputs` (target → the removed job's label, persisted) and
+  the successor is held `blocked`, saying the job was removed, until the user
+  chooses that input: `set_link` on it, `set_chain`, or saving an edit
+  (`update_spec`) clears it. Releasing it instead ran a Concatenate on the
+  folder a failed conversion had left half-written. Removing such a source,
+  or clearing it, says which queued jobs were waiting on it. Loading a file
+  drops, and notes, a link to a job that is not in it. A reorder placing a job before any of
+  its sources is refused.
 
   A finished converter job also records a **`layout`** — what it knows about
   the files it wrote (`services.job_kinds.produced_layout`, below) — and
   `materialise` copies it into an Analyze successor's spec as
-  `upstream_layout`, beside the path. Only an Analyze successor receives it, and
-  only a job that asked for run-time detection reads it; `retry` clears it
-  with the other outputs, and a failed job records none.
+  `upstream_layout`, beside the path. A Concatenate, Merge plates, Subset or
+  Validate job passes its inputs' layout on as its own when every input's is
+  known and they agree, so the layout reaches an Analyze job at the end of
+  "convert, convert, concatenate, analyse". Only an Analyze successor
+  receives it, and only a job that asked for run-time detection reads it;
+  `retry` clears it with the other outputs, and a failed job records none.
 
   The editing half — everything that changes a job after it is queued —
   is `update_spec`, `set_label`, `duplicate`, `retry`, `clear_terminal`,
@@ -15299,14 +15351,35 @@ Qt event loop. Four layers:
   fixing a failed job and re-running it is two clear steps. `retry` runs
   `_cascade_unblock`, the mirror of `_cascade_block`, returning to `pending`
   only the successors reachable from the retried job; one blocked by a
-  different, un-retried failure stays blocked, and since `chain_from` is a
-  single id the links form a forest with no second parent to still be
-  failing. `duplicate` drops the clone's chain link (a clone inheriting its
-  twin's predecessor would wait on output it has no relationship to) and
-  takes its new id as a parameter, so the module needs no `uuid` and a test
-  can name the copy. `clear_terminal` goes through `remove` per id rather
-  than filtering the list, so a survivor chained to a cleared job loses the
-  link instead of pointing at a job that no longer exists. `move_to` is the
+  different, un-retried failure stays blocked. A job with two sources stays
+  blocked while its *other* source is still failed, cancelled or blocked —
+  retrying one of two failed conversions must not release a Concatenate that
+  still has nothing to read for the other dataset — and its message is
+  rewritten to name that other source. Jobs that already *finished* on the
+  retried job's previous output are the other half: `retry(job_id,
+  with_downstream=True)` resets them too (`_reset`), so the chain runs again
+  end to end; without it, each succeeded one keeps its results and records
+  `JobSpec.stale_because` (the retried job's label, persisted, cleared by its
+  own reset), and its row says it is out of date — left as "succeeded" it
+  described numbers from output that no longer existed. `downstream(job_id)`
+  and the module functions `upstream_ids` / `downstream_ids` / `lineage` walk
+  the links in either direction for these and for the menus. `duplicate`
+  keeps the clone's links and orphaned inputs and runs `_reassess_block`, so
+  a copy of a linked job waits, or is blocked, exactly as the original is —
+  dropping them left the copy pending on the *planned* folder in its spec
+  while the original sat blocked behind a failed conversion, and duplicating
+  to change one setting is the commonest way to branch a chain. Directly
+  after the original is always a legal place for it. It takes its new id as
+  a parameter, so the module needs no `uuid` and a test can name the copy.
+  `clear_terminal` removes `clearable_ids()`: the jobs that *ran*
+  (`JobState.CLEARABLE`: succeeded, failed, cancelled), except one that
+  `kept_on_clear` — a failed or cancelled job that a blocked job still reads
+  from, since its Retry is what releases them. Blocked jobs are kept too,
+  which never ran — clearing them threw away a chain the user would have to
+  rebuild to retry the job that blocked it. It goes through `remove` per id
+  rather than filtering the list, so a survivor linked to a cleared job loses
+  the link — taking the folder a succeeded job wrote, or held blocked after a
+  failed one — instead of pointing at a job that no longer exists. `move_to` is the
   drag counterpart of `move`: it shifts the rows it passes rather than
   swapping, because dragging picks a destination, and it validates through
   the same whole-list `_chain_order_valid`. The two are wired to different
@@ -15346,16 +15419,29 @@ Qt event loop. Four layers:
 
 - **`services/job_kinds.py`** — the per-kind tables, Qt-free because none of
   it is a view concern and all of it is worth testing without an event loop.
-  `KIND_LABEL` (a tool's human name), `CHAIN_TARGET` (the dotted path into a
-  job's *own* spec that a predecessor's output fills: `opts.raw` for Analyze,
-  `dataset` for Validate, `source` for Subset / OME / Zip-loose, `dataset1`
-  for the two-dataset tools), and the sending end of the same link —
-  `produced_for(kind, path)` and `CHAIN_KIND`. Together they are why the
-  interface can derive a chain from "run after that one" alone; a user should
-  not also have to know where each tool receives its input.
+  `KIND_LABEL` (a tool's human name), `INPUT_TARGETS` (every dotted path into
+  a job's *own* spec that an earlier job's output can fill, with the name a
+  menu calls it: `opts.raw` for Analyze, `dataset` for Validate, `source` for
+  Subset / the converters / Zip-loose, and `dataset1` *and* `dataset2` for
+  Concatenate and Merge plates), `CHAIN_TARGET` (the first of those — what
+  "Input from ▸" fills; `tests/test_job_kinds.py` holds the two together;
+  the converters and Zip loose are in neither, with the reason written in
+  that test — they read files, not datasets), and
+  the sending end of the same link — `produced_for(kind, path)` and
+  `CHAIN_KIND`. Together they are why the interface can derive a link from
+  "run after that one" or "dataset 2 from that one" alone; a user should not
+  also have to know where each tool receives its input.
 
-  `CONVERTER_KINDS` and `produced_layout(kind, spec)` are the other thing a
-  finished job can hand along a chain. The three converters name every image
+  `planned_output(kind, spec)` is the folder a queued job is *set up* to
+  write — the destination, dataset 1 for an in-place Concatenate, the source
+  for an in-place Zip-loose, the dataset itself for Validate, the input for
+  Analyze — or `None` when its spec names none. It is what a next step's
+  input field shows before the job has run, and nothing more: the link
+  carries the real answer, and `materialise` replaces the planned path with
+  the folder the job reported.
+
+  `CONVERTER_KINDS` and `produced_layout(kind, spec, upstream)` are the other
+  thing a finished job can hand along a chain. The three converters name every image
   themselves, `<experiment>_<channel>_<well>_f<fov>_<tp>` with each token
   passed through `util.filename_token.safe_token`, so the schema and separator
   are stated rather than scanned; the channel roles come from the converter
@@ -15364,6 +15450,18 @@ Qt event loop. Four layers:
   `services.run_detect.detect_layout` prefers it to a scan for the parts it
   states, still checks its channel names against every name on disk, and
   fails the run naming both lists when they disagree.
+
+  `LAYOUT_PRESERVING_KINDS` (Concatenate, Merge plates, Subset, Validate)
+  name their output's images exactly as their input's — a Concatenate
+  relabels dataset 2's timepoints, not the slots they sit in; a Merge's remap
+  changes which well a file belongs to, not how its name is built. For those,
+  *upstream* holds the layout each input's source job recorded, one entry per
+  `INPUT_TARGETS` input, `None` for an input read from a folder; the layout
+  is passed on only when every entry is known and identical. Two conversions
+  set up with different channel roles disagree, and an input from disk is
+  unknown — either way nothing is passed on and the Analyze job scans, as it
+  would with no queue. `QueueBridge._input_layouts` collects the list when a
+  job finishes.
 
   **`CHAIN_KIND` is a constant, `"dataset_root"`, not a per-kind table**, and
   that is the correction it exists to record. Every tool here — Analyze
@@ -15443,9 +15541,12 @@ Qt event loop. Four layers:
 
   Beside `add_job`/`remove_job`/`move_job` the bridge carries the editing
   mutators the page needs — `update_job`, `duplicate_job`, `retry_job`,
-  `clear_completed`, `move_job_to`, `set_chain`, `clear_chain` — each
-  following the same mutate → `_save()` → `queueChanged.emit()` shape and
-  returning a `bool` so the caller can report a refusal. `update_job`
+  `clear_completed`, `move_job_to`, `set_chain`, `set_link` — each following
+  the same mutate → `_save()` → `queueChanged.emit()` shape and returning a
+  `bool` so the caller can report a refusal. `add_job(job, links)` puts a new
+  job's links in place **before** it lets the queue advance: a running queue
+  with nothing to do starts a newly added job at once, and one added first and
+  linked after would start against the planned paths in its spec. `update_job`
   re-derives the label from the new spec: a label describes its spec, so an
   edited job still named after what it used to run against would be worse
   than one with no name.
@@ -15490,6 +15591,14 @@ Qt event loop. Four layers:
   without a shell (tests, Datasets-only profiles) reports failure so the click
   says why rather than appearing to work.
 
+  `QueueBridge.show_spec(kind, spec)` is `show_job` for a spec that is not in
+  the queue yet — a next step's skeleton, holding only the inputs it takes
+  from earlier jobs — with the same busy-runner refusal.
+  `show_pending(kind, pending, projection)` tells a page which of its inputs
+  are queued jobs' outputs not yet written, through an optional
+  `set_pending_inputs(pending, projection)` on the runner (the five tools that
+  can be a next step: Analyze, Validate, Subset, Concatenate, Merge plates).
+
   `QueueBridge.hydrate_job` is the edit-path counterpart. For the seven
   Datasets tools `show_job` is already a complete inverse of `collect_spec` —
   the two read and write the same handful of keys — so hydration falls back
@@ -15512,6 +15621,50 @@ Qt event loop. Four layers:
   rather than inside it because its rules are substantial and none of them are
   about wiring a page to a bridge; `JobQueueController` keeps a thin façade
   (`begin_edit`, `begin_new_job`, `session`, `save_session`, `end_session`).
+
+  `begin_next_step(kind, sources)` opens *kind*'s page to set up a job whose
+  inputs come from earlier jobs — `sources` maps each input target to the
+  job filling it. The page is populated from a blank job holding only those
+  inputs (`show_spec`), each showing the folder its source is set up to write
+  (or, for a source that already succeeded, the folder it wrote), and marked
+  as pending with a note naming the job (`show_pending`). The first linked
+  source's projection (`datasets/job_queue/projection.py`, below) goes with
+  it. Saving adds the job **with** its links through `QueueBridge.add_job`.
+
+  **A link is kept only while its input still holds the path it was given.**
+  The session records each link as target → (source, path) and, on Save,
+  links a target whose collected value names the same folder as one of those
+  paths — compared normalised (`_same_path`), because a form may respell a
+  path on the way through: Analyze stores `Path(text)`, which drops a trailing
+  separator and on Windows turns `/` into `\`. That one
+  rule covers both ways a user changes an input: Browse-ing a real folder
+  replaces the path and drops the link, and Swap dataset 1 and 2 moves each
+  path — and so each link — to the other target. `begin_edit` records an
+  edited job's existing links the same way, and Save on an edit re-links
+  through `set_link` only where the kept set differs (`_relink`). Ending a
+  session takes the pending marks off the page, so it is an ordinary page
+  again. A next-step session whose source leaves the queue is closed with a
+  note (`abandon_if_stale`): saving it would add the job with that input
+  unlinked, and a running queue could start it against a folder nothing will
+  write.
+
+  **The order of a session's page work is load-bearing.** Every `begin_*`
+  closes the open session (`_close_previous`, which says so unless the very
+  job is being reopened — two new jobs or two next steps of one kind are both
+  `(kind, None)`) *before* it writes to any page, because closing hands back
+  what the old session borrowed, and doing that after a next step's skeleton
+  was shown wrote the previous form over the new input. It then asks the page
+  to `remember_form` before populating it. `save` collects the page, hands it
+  back (`_release_page`: pending marks cleared, a form changed for links
+  restored, otherwise forgotten) and only *then* adds the job, because adding
+  can start it at once on an idle running queue, and restoring a form after
+  that rewrote the page of the run in flight; `show_pending` and the form
+  hooks also refuse a runner that is busy. A tool page's own "+ Queue" while a
+  session has that page open goes through the session
+  (`JobQueueController.add_job` → `queue_from_page`): a new job's session is
+  saved as its banner would, an edit's adds a linked copy — queued directly,
+  the planned paths went in with no links and the session stayed open for a
+  second copy.
 
   It holds no widgets and imports no Qt, reaching outside through three
   injected callables — `notify`, `add_job`, and the `on_session` /
@@ -15554,21 +15707,63 @@ Qt event loop. Four layers:
   icon, derived name, an indeterminate progress strip while running (a
   controller only ever reports a free-text status message, never a
   percentage), a `widgets.status_dot.StatusDot` state chip, and a `⋯` menu.
-  The second is muted and descriptive — the predecessor's *label* (not its
-  ten-hex-character id), `describe_detail`'s paths, and the latest status
-  message — elided with `QFontMetrics` against the width the label is
-  actually given, from `resizeEvent`, and hidden when empty. The `⋯` menu
-  carries *Edit…*, *Duplicate*, *Retry* (terminal states only), *Run after ▸*,
-  *Move up*/*Move down* (hidden on terminal rows, where reordering means
-  nothing) and *Remove*; it is built by `build_menu()` and `exec()`d only
+  The second is muted and descriptive — on a blocked job its reason first
+  ("Blocked — waiting on “X”, which failed", since at the end of an elided
+  line it was cut off at every width), then each source's *label* ("input
+  from “X”", or on a two-input job "dataset 1 from “X” · dataset 2 from “Y”",
+  since "input from X" would not say which input X fills), `describe_detail`'s
+  paths, and the latest status message. Both lines are elided with
+  `QFontMetrics` against the width each label is actually given, from
+  `resizeEvent`, with the full text on the tooltip; the name used to be
+  unelided, and a long one pushed the status chip and ⋯ off the row. The row
+  takes keyboard focus: Enter opens the job as a click does, the Menu key or
+  Shift+F10 opens ⋯ (at least `_MENU_BTN_MIN` square). The chain glyph's
+  tooltip says what it means. The `⋯` menu carries *Edit…*, *Duplicate*,
+  *Retry* (jobs that ran: a blocked job's Retry was refused, so it is not
+  offered; when finished jobs read its output — `finished_downstream`, from
+  the view — it is a submenu: retry them too, or this job only and mark them
+  out of date; `retryClicked(job_id, with_downstream)`), *Input from ▸* — or, on a two-input job, *Dataset 1 from ▸* and
+  *Dataset 2 from ▸*, each linking that one input (`linkRequested`) so the
+  other keeps its link, and neither offering the job already feeding the
+  other — *New job using this output ▸* (`NEXT_STEP_MENU`), *Move up*/*Move down* (hidden on
+  terminal rows, where reordering means nothing) and *Remove*. An input
+  submenu lists the jobs above (`predecessors`), then the jobs below that do
+  not read from this one (`below`, from `JobQueuePage._below_for`), suffixed
+  "(moves this job below it)": choosing one goes through
+  `JobQueueController._move_below`, which moves this job to just under its
+  new source, or refuses and says so when that would put it below a job that
+  reads from it. Offering only the jobs above left a conversion re-added
+  after Clear completed — which lands at the bottom — impossible to choose.
+  With nothing to offer, the submenu holds one disabled sentence saying why
+  (`_add_sources`) rather than being disabled silently. The next-step submenu
+  offers the one-input kinds (`NEXT_STEP_KINDS`) of this job's output — not
+  Analyze of an Analyze (`_NOT_AFTER_ITSELF`), which re-reads the images it
+  just analysed — and the two-input kinds (`PAIR_STEP_KINDS`) as
+  *Concatenate with ▸* / *Merge plates with ▸* naming a second job (any other
+  job whose output can still arrive, above or below, outside this job's own
+  `lineage` — the new job goes at the end) or "a folder you pick on the page"
+  (`nextStepRequested`). Both rosters are derived from
+  `services.job_kinds.INPUT_TARGETS` by input count, so a new tool that
+  declares its inputs is offered without an edit here. The submenu is absent
+  on a failed, cancelled or blocked job, whose output is never coming. The
+  converters and Zip loose declare no inputs and are not offered: they read
+  acquisition files or loose images, never a dataset another job wrote. A two-dataset next step is
+  chosen this way rather than by selecting two rows because the queue has no
+  row selection and a row click already opens the job; it is built by `build_menu()` and `exec()`d only
   from the click handler, so a test can inspect and `trigger()` actions
-  without opening a popup that would block under the offscreen QPA. The
-  *Run after* submenu is constructed as `QMenu(title, parent)` rather than
+  without opening a popup that would block under the offscreen QPA. Entries
+  naming another job carry its queue position ("2. Convert …"), since two
+  duplicated jobs have identical names. One word runs through all of it: a job
+  takes its *input* from another, and "New job using this output" is the same
+  link made from the other end. The
+  *Input from* submenu is constructed as `QMenu(title, parent)` rather than
   via `addMenu(str)` — the menu that call returns is not kept alive on the
   Python side and can be collected out from under the menu that owns it.
 
-  The ordinal is shown only on `pending` rows: a number on a row that already
-  has a terminal outcome doesn't mean "queue position" any more. Rows are
+  The ordinal is the job's place in the queue, on every row: it is the same
+  number the menus put on entries naming that job, so "3." names one job
+  everywhere on screen (rows numbered pending jobs only while menus numbered
+  positions, and the two disagreed). Rows are
   styled from `theme.qss` keyed on the `#JobRow` object name, **not** an
   inline stylesheet — a bare `border-bottom` set on the row widget has no
   selector, so Qt applies it to every child and each label, tool button and
@@ -15603,13 +15798,123 @@ Qt event loop. Four layers:
   result up through an injected `on_add_to_queue(kind, spec)` callback to
   `DatasetsTab._add_to_queue`.
 
+- **`datasets/job_queue/projection.py`** — what a queued job is expected to
+  write, before it has run, for the pages that build their controls from the
+  input's contents: Subset's well, timepoint and FOV pickers and Analyze's
+  channel options. `project(queue, job_id)` returns a `Projection` whose
+  `wells` / `timepoints` / `fovs` are each a tuple or `None`, and a
+  `layout`. **`None` is "not known until it runs", never "empty"**: offering
+  an empty timepoint list would queue a Subset that keeps no timepoints. A
+  job that already succeeded is read from the folder it reported
+  (`on_disk`, which reads the way the Subset page reads: wells from `in/`,
+  timepoints and FOVs from `out/pipeline_info.json`). Otherwise: a converter
+  projects the wells its page mapped — `PackedConverterController.collect_spec`
+  records them as `planned_wells` from `page.planned_wells()` on the CZI and
+  ND2 pages; the OME page has no well list, so an OME job's wells are
+  unknown — and leaves timepoints and FOVs unknown, as a converted plate with
+  no sidecar would; Analyze and Validate project their input; a Subset
+  narrows its input's; a Concatenate takes the union of its inputs' wells and
+  FOVs and leaves timepoints unknown, because dataset 2's are relabelled by a
+  gap only the run settles; a Merge moves dataset 2's wells as a block when
+  the job places it at another origin. The layout is `produced_layout`'s.
+  It lives in the Datasets pane rather than `services/` because it reads
+  datasets with `datasets.core.dataset_paths`; it moves a Merge's wells with
+  `datasets.core.well_block`, which Merge plates uses too, because one Datasets
+  tool never imports another.
+
+  The projection is checked when the job runs, not trusted.
+  `SubsetController.start_from_queue` compares the job's wells, timepoints and
+  FOVs with what the real source holds (`subset_compute.missing_from_source`)
+  and fails the job naming what is missing, before any copy — the filter would
+  otherwise intersect them away and the subset would look complete. A Subset
+  page over a projection queues "every well" (`None`), not the projected list,
+  when every offered well is ticked (`SubsetPage.wells_for_spec`), so a well
+  the job writes that the projection did not know about is not dropped.
+
+**Pending inputs** (`datasets/core/pending_inputs.py`, `PathField.set_pending`).
+An input a queued job has still to write is held as a path that will exist:
+`PathField.set_pending(path, note)` counts as valid, shows *note* (muted) in
+place of the validator's "the folder doesn't exist", and lasts until the path
+is set again — a Browse or `set_path` is the user replacing the promised
+folder with a real one. `apply_pending(fields, pending)` / `any_pending` apply
+a page's whole set at once. Each page that can be a next step implements
+`set_pending_inputs(pending, projection=None)`, defers whatever would read the
+input, and keeps its own Run button off while an input is pending (tooltip
+`RUN_WAITS`; Analyze's Run greys the same way with its own tooltip,
+`_sync_run_for_pending`, and still lists "Input not written yet" if reached)
+— queueing is what the page is for in that
+state, and running could analyse whatever an earlier run left in the planned
+folder. Concatenate
+leaves the gap to be worked out when the job runs (an untouched gap field
+already means that in a queued spec) and offers in-place mode with the check
+deferred, since the run refuses a pair that cannot be appended; Merge plates
+hides its preview; Subset builds its pickers from the projection and says
+"all — known only when it runs" for a dimension it lacks; Analyze shows the
+note under its input field in place of the readout (`_refresh_output`, in
+`analyze/domain/input.py`, which drops the pending state once the field holds
+any other folder), fills the schema and channels from the projected layout as
+a folder scan would, and turns run-time detection on, so the real files are
+still checked when the job runs. Its `remember_form` / `restore_form` /
+`forget_form` keep the whole form (`collect_spec`) from before the session
+borrowed it and put it back (`hydrate_job`) when a setup that changed it for
+its links ends, saved or cancelled; the session takes the snapshot before it
+writes anything to the page, since by `set_pending_inputs` the input folder
+has already been replaced. The session sends nothing to a job with no links,
+and a Subset page re-ticks the wells it held after any reload: reloading
+re-ticked every well and turned a no-op edit of an explicit subset into "every
+well". It remembers the wells, timepoints and FOVs `show_job` asked for, even
+when the missing source left no boxes to tick: an edited job's wells stay
+offered over a projection that does not list them and stay a list even when
+they equal it, and its timepoints and FOVs are offered as the only choices
+when the projection does not know that dimension — ticked, they mean "these",
+not "all". `build_equation_row(on_swap=…)` adds the
+*Swap dataset 1 and 2* button Concatenate and Merge plates both carry; a swap
+moves each field's path and pending note together.
+
+**Choosing a queued output from the page** (`datasets/tab.py::_offer_queued_outputs`).
+The same link can be made from the tool page itself, where a scientist goes
+to pick an input. For every kind in `INPUT_TARGETS`, each field the page
+returns from `input_fields()` (target → `PathField`; Concatenate, Merge
+plates, Validate and Subset implement it) gets
+`PathField.add_browse_alternative("Output of a queued job", provider, choose,
+…)`, which turns Browse into a split button whose arrow carries that
+submenu; Analyze, whose input is not a `PathField`, gets the same menu from
+`offer_queued_outputs` as a "▾" button beside its Browse. The provider is
+`JobQueueController.queued_outputs(kind)` — `(job id, "N. label")` in queue
+order, leaving out jobs whose output is never coming (failed, cancelled,
+blocked) and the job open for editing on that page with everything that
+reads from it, which would be a loop. Choosing one calls
+`link_from_page(kind, target, source_id)` on the session — starting a new-job
+session with its banner when the page has none — then fills the field with
+the folder that job will write and calls `show_links`, which marks it ⧗:
+filling clears a mark, so the mark goes last. Both pickers read their
+wording from one set of constants (`QUEUED_OUTPUT_MENU`, `_EMPTY`, `_TIP`),
+and an empty provider shows a disabled sentence saying no queued job writes
+a dataset yet.
+
 **`widgets/context_banner.py`** carries a session on screen. `ContextBanner`
 is a strip of glyph + sentence + confirm + cancel that says a page is being
 used for something other than its own job; without it the borrowed page looks
 exactly as it always does and the only way to finish is to guess. It is
 host-agnostic — it knows nothing about queues, jobs or datasets, and whoever
 shows it decides what confirming means — and it does not block the page
-beneath it, which is the point, since the user is editing that page.
+beneath it, which is the point, since the user is editing that page. It
+shows its whole sentence at any width: the buttons sit beside the sentence
+until that would leave it narrower than `_MIN_TEXT_W`, then move under it
+(`_fit`, on resize, `setText`, and a font or style change). Its height is
+height-for-width — `hasHeightForWidth` / `heightForWidth`, measured from the
+sentence as it wraps at the width it would get, with the fonts as they are —
+so the host's layout asks for it at every pass. A height fixed at resize time
+was short of the text whenever the font changed after that resize — measured
+locally by enlarging the font after layout, and seen on CI's runner, where the
+strip came up 28 px short. The content sits on a child (`ContextBannerBody`) rather
+than on the strip, because Qt asks a widget *with* a layout for that layout's
+height-for-width, never the widget's own. The body and the buttons' container
+(`ContextBannerButtons`) are kept transparent in `theme.qss`: unnamed, the
+buttons' container took the page background and drew them on a black box.
+In the Analyze form's narrow column the one-row strip it replaced gave the
+sentence about 60 px and cut off most of it
+(`tests/test_context_banner_fits.py`).
 `DatasetsTab` inserts it at index 0 of the target page's own layout, which
 works uniformly because all seven Datasets pages hold a single `QScrollArea`
 there; for Analyze it goes at index 0 of `_form_layout`, where the resume
@@ -16155,7 +16460,7 @@ Notable members worth knowing about by name:
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
 | `WellPlateSelector` | **The app's only painted well grid.** Every 8×12 plate the user sees is this control — Review's rails and the sample-definitions editor, the Datasets tools' pickers and status maps, Convert OME-TIFF's acquisition-path editor, and Batch Export's group map. What differs between them is which *selection model* the host drives it in (`setSelectionModel`): `"set"` (the default, an unordered selection), `"path"` (an ordered acquisition route — a click appends an off-path well or removes an on-path one, the wells carry their visit numbers derived from the list's own order, and an alpha-blended arrow traces the route across the plate), or `"paint"` (the grid owns **nothing** — it reports the press/drag/release gesture as `wellPaintPressed` / `wellPaintDragged` / `paintDragFinished` and the host applies it to whatever it is editing). The corner select-all toggle appears only in `"set"`, since it toggles a selection set the other two models do not have, and a paint gesture ends with `paintDragFinished` rather than `selectionDragFinished` — the latter means "the selection settled", and a paint gesture never changed one. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). **`setSelectionRim(True)`** is for a host that has spent the fill on data of its own. Normally selection is said by the fill — a selected well is lit and an unselected one recessed — but `_paint_lit` takes a colour override as its `base` whether or not the well is in the selection, so on a plate whose colour *is* the data a selected well and an unselected one render identically, and "select these wells, then act on them" has no feedback at all. The rim is drawn **inset**, because outside is taken: `_paint_ring` annotates a well from 7% beyond its edge and a host may need both marks on one well at once. It is `text_primary` rather than the accent for the same reason — the accent is the ring's, and a near-white rim is the one ink no host value can take, so it cannot read as one more category. Turning it on also stops selection *lighting* an uncoloured well: the rank-cycled `traces` palette a lit selection reaches for opens with the same `#6AB2FB` that `variable_series.VALUE_PICKS` opens with, so picking an unannotated well used to paint it the exact colour of a value nobody had given it. Off by default, so every other plate is unchanged — on a plate whose fill is free, lit-versus-recessed already says it and a second mark saying the same thing is noise. `tests/test_plate_selection_rim.py` measures one well rendered twice, selected and not, at one position: its first version compared two neighbouring wells and reported them different against the *unfixed* painter, because each cell rasterises at its own sub-pixel offset and no two wells ever hash alike whatever is drawn in them. The per-well body is `_paint_well`, lifted out of `paintEvent` — that method carries the headers, the grid, the rubber band, the path and the disabled scrim, and a well is the one part of it with a decision tree of its own. Every lightening of a state colour goes through `_lighten` (an RGB blend toward white), never `QColor.lighter`: Qt's version raises the HSV *value* and, once value is at the ceiling, starts dropping *saturation* — it lightens toward white rather than toward a pale version of the hue. Every state colour in the app sits at value 245–253, so `accent2 #B98CF7` came back as literally `#ffffff`; a dial's unfilled share and the sphere gradient's highlight both used it, which is how an uploaded well rendered as a white disc with no hue left to say which stage it was in. `_blend` is the one lerp behind `_lighten` and `_mix_with_rail`. `darker()` needs no equivalent — lowering value never touches saturation. **The sphere gradient is damped on a dial and only on a dial** (`_DIAL_RELIEF`, scaling the stops `_sphere_stops` returns). Blending toward white keeps the hue but *compresses two tones together* — the nearer both are to white, the smaller the gap — so at a plain well's full relief the done and remaining halves of a green well came within 25 luminance of each other under the highlight, against 39 at the centre, and the completed wedge was itself 35 % of the way to white. Reported as "the completed portion is too light and I can't see the difference between complete and incomplete". At 0.43 relief the highlight is 15 % toward white and that worst case is 33. A plain well keeps the full relief because it has no internal boundary for the highlight to compress; only the dial carries a second signal in the same pixels, so only the dial pays. Tone alone still cannot carry green, so the wedge's radii and arc are **stroked** in `base.darker(170)` — skipped at a full dial, where the boundary *is* the rim the well already has. A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus three decoration layers that stack independently of each other and of the fill: a `setWellMarker` glyph, a `setWellFraction` / `clearWellFractions` progress dial, and a `setWellRing` / `setWellRings` / `clearWellRings` accent ring drawn just *outside* the well body. The dial is used by every live plate map that reports a run, whether that is a dashboard's own status plate (Analyze, Concatenate, Import Loose, Merge Plates) or a page's input plate doubling as the progress display (Subset's picker, Convert OME-TIFF's path editor); Validate has no dial because it inspects rather than copies. The ring exists because a host can need a third channel: Batch Export colours a well by which group owns it and rings the wells of the group *currently being edited*, two different questions that would otherwise fight over the same fill. **Every Batch Export mode shares one set of export groups.** Line, Bar, Scatter (cells) and Scatter (aggregate) used to persist under four private slots chosen by `_compute_persist_key`, so groups built in one mode were invisible in the others and anyone exporting the same conditions four ways built them four times; the groups describe the dataset's conditions, not the plot type, so they live in one slot (`base_panel.SHARED_PERSIST_KEY`). A document written before that has its four legacy keys merged in a fixed order and de-duplicated by name, and only when the shared key is absent — otherwise deleting a group would be undone by a legacy slot re-supplying it on the next load. The four panels are cached children of one host toggled by `setVisible`, so `tab_view._show_mode` calls `_reload_persisted_groups()` on the panel it reveals; that is not the auto-resync from the *sample-definition* replicate sets which the same function's comment rules out (that one wiped the user's export groups on every visit). No `EventBus` signal — the catalogue is capped at five by contract and a mode switch is local. Batch Export drives the plate in `"paint"` because an export group's model is replicate sets plus solo wells, not a flat set of clicked wells: `_apply_drag` resolves the well under the cursor to the sample definition that owns it and adds or removes that whole **member**, falling back to a solo well only for a well no sample claims. Membership is compared **by name** — `domain.selections_model.replicate_sets_loaded` builds a fresh `ReplicateSet` on every call and the class defines no `__eq__`, so an identity test never matched an already-present member: dragging across two wells of one sample appended it twice (and the group then exported that condition twice), while dragging a sample back off a group removed nothing. The name is already the identity key everywhere else, being what `_serialize_groups` persists and what hydration matches on. All three decorations, plus the path, are pruned by `setEnabledWells` / `setWellEnabled` — a disabled well paints as an empty socket, and a ring or a dial on a socket describes a well that is not there. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. Every host sizes and places its plate through `plate_geometry.apply_plate_geometry` (below) rather than setting its own caps. |
 | `plate_geometry` (`widgets/plate_geometry.py`) | The single sizing and placement rule for every `WellPlateSelector` in the app — Review's five rail pickers, the "New Replicate Set" dialog, the saved-selections compose popover, Subset's well picker, Batch Export's group map, Convert OME-TIFF's acquisition-path plate, and each run dashboard's status map. **Every well grid the user can see goes through it**, with two documented exceptions that are not `WellPlateSelector`s at all: Home's *Well Labels* grid (`features/home/labels/tab_view.py`), which is 96 `QLineEdit`s because each cell takes free text, and the window icon's decorative plate in `allwell.py`, which is a painted graphic with no model behind it. `apply_plate_geometry(plate, *, role)` takes a `role` of `"rail"` (action row hidden, host has its own buttons), `"picker"` (action row shown), `"status"` (action row hidden, selection `"passive"`), `"editor"` (action row hidden, interactive, and — unlike `"rail"` — subject to the size caps) or `"canvas"` (an editor whose plate *is* its page's primary surface, taking the larger `PLATE_CANVAS_WIDTH` / `PLATE_CANVAS_HEIGHT` of 470 × 300); the role decides **only** those behavioural things and which of the three ceilings applies. Size, panel treatment and alignment are identical across all of them, which is the point: the same control used to render at three different cell scales depending on the pane. `"editor"` exists for an interactive plate that sits in a page rather than the rail and supplies its own actions — Convert OME-TIFF's acquisition-path plate, whose Generate/Clear buttons sit beneath it; uncapped it grows to the scroll area's full width and pushes the run button below the fold, which is why that page used to restate `330` / `210` as literals of its own. `"canvas"` exists for the opposite case in the same page: the Variables tab's plate is not one control among several but the surface every gesture on the page operates, and it carries four independent marks at once — a value's colour, a ring for an unannotated well, a selection rim, and a second variable's glyph *inside* the well. At the editor ceiling that resolves to roughly 16.5 px of well with a 10 px glyph in it. It is a named third ceiling rather than the rail's exemption, because the exemption is uncapped and reusing it would both inherit an argument written about Review's rail specifically and let this plate grow to whatever width the page has — the failure the width cap exists to prevent. `PLATE_MAX_WIDTH` (330, the rail's own width) caps the card because the selector paints its panel background across its *entire* allocated box while the grid inside sizes cells to `min(width / 12, height / 8)` — past the height cap, extra width stretches the panel into a wide, mostly-empty card with a small grid floating in it. `PLATE_MAX_HEIGHT` (210) is the budget for a plate with its action row hidden; for a `"picker"` the helper *measures* that row from the widget's own layout and adds its height on top, so the grid budget — and therefore the cell size — is the same either way, and no caller re-derives an empirical "+48". `PLATE_ALIGNMENT` is the alignment flag every host passes to `addWidget`, so a container wider than the width cap centres the card instead of stranding it against an edge. **The `"rail"` role is exempt from both caps.** Review's left-rail picker is the app's primary interaction surface rather than a status readout: it scales to whatever width the rail gives it, with no ceiling. Capping it alongside the others shrank its cells from 23.7px to 20.8px — unifying the two by making the one people actually click on smaller, which is the wrong direction. It still takes the shared size *policy*, because the aspect-locked scaling genuinely is the same rule; only the ceiling differs. The module lives under `widgets/` rather than in `review/core/ui_helpers.py` because `widgets/` and `datasets/` both need it and `widgets/` must not import `review` (`test_architecture_contracts.py::test_widgets_do_not_import_the_app`). Every caller names its own role; Review's sidebar plate asks for `"rail"`. One rule the helper cannot enforce for its callers: a plate's container must add no horizontal inset, since the grid paints from the widget's own `width()` and a gutter on one host shrinks that host's plate in both dimensions. |
-| `PathField` (`widgets/path_field.py`) | A labelled folder/file picker: caption + read-only path box (basename shown, full path on hover) + icon Browse button, with an optional inline validity hint. Unifies two near-duplicate private widgets the Concatenate and Convert OME-TIFF pages grew independently. The dialog is opened by an injected `pick(current, parent)` callable rather than hardcoded, so the same widget serves a folder dialog (`folder_picker(prompt)`, the common case) or a page-owned file dialog (Convert OME-TIFF's `.ome.tif` source picker) — the picker takes *parent* explicitly because an unparented `QFileDialog` opens as a detached window on macOS instead of an app sheet. `setLocked(locked)` disables only the Browse button, not the whole widget — every Datasets tool page uses it (not `setEnabled(False)`) to lock a field for a run's duration, since the latter dims the *entire* field, including the already-read-only path text, the one piece of context a user watching a long run most wants to check. `show_note(text)` shows a neutral, "Muted"-styled inline note in place of the validator's own red "Danger"-styled hint, until the next `revalidate()` call — used after a successful run, when the validator's own message would otherwise be the exact "already holds a finished dataset" wording a pre-run pick gets, which is technically true but reads as a warning about the very output that run just correctly produced. `show_warning(text)` is its red counterpart, for a rule the validator cannot reach because it spans two fields — a validator sees one path, so "this destination is also the source" can only be decided by the page, and without somewhere to say it the page's Run button goes dark with no reason attached. |
+| `PathField` (`widgets/path_field.py`) | A labelled folder/file picker: caption + read-only path box (basename shown, full path on hover) + icon Browse button, with an optional inline validity hint. Unifies two near-duplicate private widgets the Concatenate and Convert OME-TIFF pages grew independently. The dialog is opened by an injected `pick(current, parent)` callable rather than hardcoded, so the same widget serves a folder dialog (`folder_picker(prompt)`, the common case) or a page-owned file dialog (Convert OME-TIFF's `.ome.tif` source picker) — the picker takes *parent* explicitly because an unparented `QFileDialog` opens as a detached window on macOS instead of an app sheet. `setLocked(locked)` disables only the Browse button, not the whole widget — every Datasets tool page uses it (not `setEnabled(False)`) to lock a field for a run's duration, since the latter dims the *entire* field, including the already-read-only path text, the one piece of context a user watching a long run most wants to check. `show_note(text)` shows a neutral, "Muted"-styled inline note in place of the validator's own red "Danger"-styled hint, until the next `revalidate()` call — used after a successful run, when the validator's own message would otherwise be the exact "already holds a finished dataset" wording a pre-run pick gets, which is technically true but reads as a warning about the very output that run just correctly produced. `show_warning(text)` is its red counterpart, for a rule the validator cannot reach because it spans two fields — a validator sees one path, so "this destination is also the source" can only be decided by the page, and without somewhere to say it the page's Run button goes dark with no reason attached. `set_pending(path, note)` holds a path that does not exist yet and is not expected to — a queued job's output — as valid, showing *note* instead of the validator's message until the path is set again; `is_pending()` / `pending_note()` read it back. `add_browse_alternative(title, provider, choose, *, empty_text, tooltip)` turns Browse into a split button whose arrow holds a *title* submenu filled from `provider()` each time it opens — `(key, label)` pairs, `choose(key)` on a pick, *empty_text* disabled when there are none; the widget knows nothing of what the entries are. |
 | `StagePathView` (`widgets/stage_path_view.py`) | **Carries its own size hint** (`plate_geometry`'s shared caps) and a `Fixed` vertical policy. A bare `QWidget` has none, so a `QVBoxLayout` gives it nothing and it lays out at 0×0 — every visibility flag true, `setPath` full, and not one pixel drawn; asserting the points it holds cannot see that, only its geometry can. **Navigable, and self-labelling.** The wheel zooms about the cursor (`setZoom`, bounded 1–40×), a drag pans, a double-click fits — zooming about the cursor rather than the widget's centre is what makes a scan of hundreds of positions usable, since the well being looked at stays put instead of sliding away while the view grows around the middle. Fully zoomed out always resets the pan, so "out" is the whole map and never a panned fragment. Positions number themselves when there is **room** — the gap to the nearest neighbour exceeding `_LABEL_ROOM_PX` — rather than under a count: at full extent the marks are pixels apart and labels would overlap each other and the dots they name, while zoomed in the numbers are the reason to have zoomed, so they appear exactly where the eye already went. That spacing test is necessary and not sufficient, so each label is also measured before it is drawn (`QFontMetricsF`) and **skipped where its padded box hits one already drawn**. The gap it clears is between *consecutive* marks and says nothing about a mark from another row landing in the same place, and a four-digit number — which a scan of a few thousand positions reaches — is nearly twice as wide as the gap the test asks for; every label then sat on its neighbours and the result read as white scribble rather than as numbers. Text also gets its own render hint (`TextAntialiasing`), a point-size floor (`_LABEL_MIN_PT`) below which digits stop being distinguishable and a label is not worth drawing, and the panel colour laid under it first — the digits are white and the thing they annotate is the accent route line, which inside a well doubles back through its own labels, so unbacked text is white-on-accent exactly where the numbers matter most. `tests/test_stage_path_view.py` asserts this at the painter, not on the widget's own values: what makes a label legible is where it lands beside the others, and nothing inside the widget knows that. One transform serves the lattice and the path together; drawn at plate scale while the path zoomed, the lattice stopped being the frame the path is read against and became a decoration the path had flown off. **Plate scale only while the path fits a plate.** A run whose well pitch was read too small out of the coordinates spans far more than twelve cells, and at true scale everything past the first few wells falls outside the widget — the user sees a fragment with nothing saying there is more. Then the drawing is scaled to its own bounding box and centred instead, and `isFitted()` says so, because a picture where a square is no longer a well must not be read as one; the page swaps its caption to say the same and to point at the grid, since a pitch that wrong usually means the layout is wrong too. The microscope's actual travel, drawn at a plate's scale and normally directly under it. A plate map answers "which well?"; every field of view inside one well is the same cell there, so the route the stage took through them, and how far off-centre they sit, has nowhere else to appear. Takes points already in cell units (`datasets.ome_import.stage_layout.path_in_cells`) and a reference plate — `setPlate`, anything exposing `cellRect(row, col)` — and does no coordinate maths of its own beyond scaling cells to pixels. It borrows geometry rather than deriving it from its own width because a `WellPlateSelector` reserves room for its row and column headers before sizing cells, so equal widths do not give equal cells. Dots, line widths and the lattice are fractions of a cell, so the drawing scales with the plate instead of pinning sizes that only look right at one width; past `_DOT_BUDGET` positions the per-point dots are dropped and only the route is drawn, since a plate scan's thousands of points merge into a blob that hides the route they were decorating. The first position always keeps a dot, in `success` rather than `accent`: where the scan begins is the one thing on the drawing the user chose rather than read. Carries no All-Well knowledge, so it stays inside the `widgets/` no-app-coupling contract. |
 | `PlateOrderEditor` (`widgets/plate_order_editor.py`) | A `WellPlateSelector` driven in its ordered `"path"` selection model, so it is the same painted control as every other plate in the app; this ~90-line subclass adds only what the shared widget has no opinion about. The path model itself — lit wells carrying their 1-based visit number, the alpha-blended arrow tracing the order across the plate, and the click that appends an off-path well or removes an on-path one and renumbers the rest — lives in `well_plate_selector`. A *dirty* flag distinguishes a hand-drawn order from a `set_preview` seed (which is ignored once dirty). Used by the Convert OME-TIFF page to define an arbitrary, possibly non-rectangular `well_order`. |
 | `PlateProgress` (`widgets/plate_progress.py`) | The shared chrome behind every live run dashboard: a header (title/status/eta/collapse toggle), a headline label, one overall completion bar, and a 3-column body — a subclass-owned left "rail" slot, the plate map, and a legend. `RunDashboard` (Analyze), `ConcatDashboard`, `SubsetDashboard`, `MergePlatesDashboard`, `ValidateDashboard`, and `ImportLooseDashboard` each subclass it, building their own rail content and well-colour rules into the shared layout so none of them can visually drift apart. **The legend is drawn here, not just hosted here.** Every dashboard's legend is the same picture — a heading over one coloured dot per state, each with its label — so `PlateProgress._build_legend` renders it and the subclass supplies only the heading and the `(colour, label)` rows, through `_legend_items()`. Five subclasses had written those eighteen lines out separately, which is how a legend comes to describe a colour rule the plate beside it stopped using. `_legend_items` still raises `NotImplementedError` by default rather than returning no rows: a subclass that asks for a legend and forgets to say what is in it should fail at construction, not draw an empty column — one that wants no legend passes `show_legend=False` and is never asked. The two dashboards whose rows come from a state token (`ImportLooseDashboard`, `ValidateDashboard`) map them through their own `_state_color`, so the legend and the plate cannot disagree about what a state looks like, and `RunDashboard` builds its list at call time because a remote run gains an Upload row and renames the two after it. The plate map (`self._plate`, a `WellPlateSelector`) takes its size and placement from the shared `widgets/plate_geometry.apply_plate_geometry(plate, role="status")` — the one rule every plate map in the app goes through, so the status map here renders at exactly the cell scale of the Review rail's picker and of the Datasets tools' own pickers. `well_plate_selector._metrics()` derives cell size as `min(available_width / 12, available_height / 8)`, so a height-starved plate renders illegibly small even with hundreds of spare horizontal pixels — every Datasets tool page with a dashboard wraps its whole content in a `QScrollArea` (mirroring `analyze/tab.py`'s own form panel) for that reason: at the app's default launch size (`1640×980`, `allwell.py`), a plain `QVBoxLayout` crushes whatever's at the bottom of a long page instead of letting the user scroll to it. The plate is added with `center.addWidget(self._plate, 0, PLATE_ALIGNMENT)` and no layout stretch, so it sits centred in a centre column that is as wide as the page allows. `PlateProgress` also promotes the selector's per-well dial API onto the dashboard itself — `set_well_fraction(well, fraction)`, `set_well_progress(well, done, total)` and `clear_well_fractions()` — so a controller reports a well's progress without reaching through `self._plate`, which does not exist at all under `show_plate=False`; all three no-op in that case. The `done`/`total` arithmetic lives in the module-level `plate_progress.fraction_or_none`, which returns `None` for a non-positive `total` rather than dividing by it, since "not counted yet" must not render as a definite zero-filled dial — the same picture as a well that has genuinely done nothing. It is module-level because both kinds of dial host need it: `set_well_progress`, and a controller painting its page's *own* plate. **A no-op is the right base-class behaviour but it is not a progress report**, so a controller whose dashboard was built `show_plate=False` must drive the plate it does own instead of calling these and assuming something happened — `SubsetController` routes its worker's `wellFraction` signal to the picker plate's `setWellFraction` for exactly that reason (see the Subset rows in §11). Each host page's own outer layout ends in a trailing `outer.addStretch(1)` after its last real widget (and adds the dashboard itself with no stretch factor) for the same class of reason one level up: `QScrollArea.setWidgetResizable(True)` grows the page's content widget to fill the viewport, and with the raw log hidden by default nothing else in the column was willing to absorb that leftover height — the dashboard was, turning into a growing dead zone below the plate via its own internal `center.addStretch(1)`. The trailing stretch outranks every 0-stretch item above it, so slack collects as blank page background below everything instead. (Validate's page needs neither fix itself — its findings list is always visible with its own stretch factor, so it was already absorbing the slack correctly.) `PlateProgress.__init__` also takes `show_plate: bool = True` — a page whose input already has its own interactive plate map (Subset) passes `False` to skip the centre column entirely rather than leave a redundant second plate map, or worse, an empty-but-still-stretch-1 dead column between the rail and legend; see `SubsetDashboard` above. A second parameter, `show_legend: bool = True`, independently skips the legend column — `SubsetDashboard` passes `show_legend=False` alongside `show_plate=False`, since its counts rail already pairs a coloured dot with a state label per row, and a separate legend column would only repeat those same pairs without the live counts. Skipping either column when the centre plate column is also skipped no longer leaves a wide dead gap between whatever's left: with no widget left carrying a layout stretch factor, a trailing `body.addStretch(1)` collects the leftover width at the row's own right edge instead of Qt distributing it as blank padding around the remaining fixed-width items. The five dashboards on the Datasets-pane tools (`ConcatDashboard`, `ValidateDashboard`, `SubsetDashboard`, `ImportLooseDashboard`, `MergePlatesDashboard`) are each constructed **hidden** (`setVisible(False)`) by their host page, then revealed by that page's own `_update_status_preview` as soon as its inputs are valid enough to answer "what would this actually touch" — seeded with the real wells a run would touch (via `core.dataset_paths.preview_wells`, or the tool's own live preview — Import Loose's `scan_folder`, Subset's own picker selection, Merge Plates' remap-applied union of both sources) and a "Ready — N well(s)" headline, rather than gated on the tool's own run/check method actually starting; each page hides it again on the next input edit that invalidates the preview. This replaced an earlier convention, gating the same reveal on a run actually starting, that read as "something is wrong" — an idle, empty status strip before anything had happened looked like a stuck or broken state rather than "nothing has run yet" (and, for `ConcatDashboard` specifically, an even earlier construction-time-visible default that painted a coloured plate with *zero* wells enabled from the moment the page loaded). `RunDashboard` (Analyze) is the one dashboard that still stays visible from construction — Analyze's own form has no comparable "not yet valid" gate to key a reveal off. Every well-coloured dashboard also marks a well's *terminal* states with a glyph layer (`WellPlateSelector.setWellMarker`), not just its colour: colour alone doesn't distinguish success-green from a warning hue for a user who can't tell the two apart, so each terminal state carries its own glyph (`✓` for success, `!` for a problem, `✕` for an error, and Merge Plates' persistent `"2"` for "this well came from dataset 2"). **A well being worked on carries no glyph anywhere in the app** — it is drawn as a progress dial, and a glyph sits in the middle of exactly the area the dial fills, while the fill and the colour already say the well is working. That is one rule across every plate map, not a per-dashboard choice: the `⚙` a computing/merging/writing/copying well used to wear is gone from Analyze's run dashboard, Concatenate, Import Loose, Merge Plates and Subset alike. Merge Plates' `"2"` is the one glyph that survives on a well mid-dial, because it reports *origin* rather than progress and is the only thing telling the two datasets apart once both sides are coloured dots on a small plate. |

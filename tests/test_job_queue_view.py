@@ -41,13 +41,13 @@ def _actions(row):
 
 
 def _chain_submenu(row):
-    """The "Run after" submenu, with its parent menu kept alive.
+    """The "Input from" submenu, with its parent menu kept alive.
 
     Dropping the parent takes the C++ QMenu with it and every action under it
     becomes a dangling reference, so the caller has to hold both.
     """
     menu = row.build_menu()
-    sub = next(a.menu() for a in menu.actions() if a.text() == "Run after")
+    sub = next(a.menu() for a in menu.actions() if a.text() == "Input from")
     return menu, sub
 
 
@@ -197,12 +197,13 @@ def test_detail_line_names_the_predecessor_by_label_not_by_id(qapp):
     assert "Concatenate — A + B" in row._detail.toolTip()
 
 
-def test_only_pending_rows_get_an_ordinal(qapp):
+def test_every_row_carries_its_place_in_the_queue(qapp):
     """Regression guard (UX audit P2-11): "strictly serial … in order" was
-    the blurb's own promise, but nothing on the page said what order --
-    succeeded/failed/cancelled rows interleaved with pending ones with no
-    position numbers. Only pending rows (queue positions still ahead) get
-    one; a finished row's number wouldn't mean "runs next" anymore."""
+    the blurb's own promise, but nothing on the page said what order. Rows
+    used to number pending jobs only, while the menus that name jobs number
+    them by place — so "3." meant two different jobs on one screen (UX
+    review 2, L1). Every row now carries its place, the number every menu
+    and message uses."""
     page = JobQueuePage()
     page.set_jobs([
         _job(id="j-1", state=JobState.SUCCEEDED),
@@ -210,7 +211,7 @@ def test_only_pending_rows_get_an_ordinal(qapp):
         _job(id="j-3", state=JobState.PENDING),
         _job(id="j-4", state=JobState.RUNNING),
     ])
-    assert [row._ordinal.text() for row in _rows(page)] == ["", "1.", "2.", ""]
+    assert [row._ordinal.text() for row in _rows(page)] == ["1.", "2.", "3.", "4."]
 
 
 def test_running_row_shows_an_indeterminate_progress_bar(qapp):
@@ -270,7 +271,7 @@ def test_run_after_offers_only_the_jobs_above_this_one(qapp):
     row.update_from(job, predecessors=[("j-1", "First"), ("j-2", "Second")])
     _menu, sub = _chain_submenu(row)
     labels = [a.text() for a in sub.actions() if a.text()]
-    assert labels == ["Nothing (run on its own)", "First", "Second"]
+    assert labels == ["Nothing (use the folder on its page)", "First", "Second"]
 
 
 def test_run_after_emits_the_chosen_predecessor(qapp):

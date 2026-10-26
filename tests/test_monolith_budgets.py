@@ -281,7 +281,11 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 870
 # 729 -> 620: the channel rows (_fluor_add_row and the readers beside it) moved
 # to analyze.channel_rows.AnalyzeChannelRowsMixin when each row gained its Role
 # dropdown. Genuine extraction -- the whole group moved.
-ANALYZE_TAB_BUDGET = 620
+# 620 -> 583: `_refresh_output`, the input readout, moved to
+# analyze.domain.input.AnalyzeInputMixin beside the folder scan it reports on,
+# when it learned to show a queued job's not-yet-written output. Genuine
+# extraction -- the whole method moved.
+ANALYZE_TAB_BUDGET = 583
 
 # analyze/form.py carried no budget while analyze/tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it

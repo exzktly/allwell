@@ -36,6 +36,7 @@ from util.well_token import canonical_well_label
 from widgets._support import set_variant
 from datasets.core.dataset_paths import preview_wells
 from datasets.core.equation_row import build_equation_row
+from datasets.core.pending_inputs import RUN_WAITS, any_pending, apply_pending
 from datasets.merge_plates.dashboard import MergePlatesDashboard
 from datasets.merge_plates.merge_plates_compute import (
     MergePlatesError,
@@ -155,8 +156,11 @@ class MergePlatesPage(LogPanelMixin, QWidget):
             ds1_label="Dataset 1", ds2_label="Dataset 2",
             is_dataset=_is_dataset, is_destination=_is_destination,
             on_changed=self._on_input_changed,
+            on_swap=self.swap_datasets,
+            swap_note="Dataset 2 is the one moved by “Place dataset 2 starting at well”.",
         )
         self._ds1_field, self._ds2_field = eq.ds1, eq.ds2
+        self._swap_btn = eq.swap
         self._dest_field, self._cross_hint = eq.dest, eq.cross_hint
 
     def _build_remap_row(self, outer: QVBoxLayout) -> None:
@@ -220,6 +224,32 @@ class MergePlatesPage(LogPanelMixin, QWidget):
     def set_destination_path(self, path: str) -> None:
         self._dest_field.set_path(path)
 
+    def input_fields(self) -> dict:
+        """The dataset fields an earlier queued job's output can fill, by
+        their job-spec key (``services.job_kinds.INPUT_TARGETS``)."""
+        return self._input_fields()
+
+    def _input_fields(self) -> dict:
+        return {"dataset1": self._ds1_field, "dataset2": self._ds2_field}
+
+    def set_pending_inputs(self, pending: dict) -> None:
+        """Show the named datasets as outputs of queued jobs not yet run
+        (``datasets.core.pending_inputs``); an empty dict clears it."""
+        apply_pending(self._input_fields(), pending)
+        self._on_input_changed()
+
+    def has_pending_inputs(self) -> bool:
+        return any_pending(self._input_fields())
+
+    def swap_datasets(self) -> None:
+        """Exchange dataset 1 and dataset 2, each keeping its pending note."""
+        a, b = self._ds1_field, self._ds2_field
+        state_a = (a.path(), a.pending_note())
+        state_b = (b.path(), b.pending_note())
+        a.set_pending(*state_b)
+        b.set_pending(*state_a)
+        self._on_input_changed()
+
     def set_remap_enabled(self, enabled: bool) -> None:
         self._remap_cb.setChecked(bool(enabled))
 
@@ -228,8 +258,11 @@ class MergePlatesPage(LogPanelMixin, QWidget):
 
     def set_running(self, running: bool) -> None:
         self._running = running
-        self._run_btn.setEnabled(not running and self._inputs_ready())
+        self._run_btn.setEnabled(not running and self._inputs_ready()
+                                 and not self.has_pending_inputs())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
+        if self._swap_btn is not None:
+            self._swap_btn.setEnabled(not running)
         self._run_btn.setText("Merging…" if running else "▶  Merge")
         if running:
             self._open_btn.setVisible(False)
@@ -311,7 +344,8 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         # duration) or as part of run completion.
         if self._running:
             return
-        if not (self._ds1_field.is_valid() and self._ds2_field.is_valid()):
+        if self.has_pending_inputs() or not (
+                self._ds1_field.is_valid() and self._ds2_field.is_valid()):
             self.dashboard.setVisible(False)
             return
         wells1 = set(preview_wells(self.dataset1_path()))
@@ -340,5 +374,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         remap_msg = self._remap_message()
         self._remap_hint.setText(remap_msg)
         self._remap_hint.setVisible(bool(remap_msg))
-        self._run_btn.setEnabled(self._inputs_ready())
+        pending = self.has_pending_inputs()
+        self._run_btn.setEnabled(self._inputs_ready() and not pending)
+        self._run_btn.setToolTip(RUN_WAITS if pending else "")
         self._queue_btn.setEnabled(self._inputs_ready())

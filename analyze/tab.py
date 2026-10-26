@@ -29,7 +29,6 @@ from PySide6.QtWidgets import (
 )
 
 from analyze.phone_view import AnalyzePhoneView
-from services.input_resolution_service import plan_input_layout
 from services.pipeline_runner import (
     PipelineRunner,
     ProgressTracker,
@@ -356,42 +355,6 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
         finally:
             self._suspend_output_refresh = False
             self._refresh_output()
-
-    def _refresh_output(self, *, immediate: bool = False) -> None:
-        """Show where the run will read from and write to, and what it will do.
-
-        Every word of this comes from ``plan_input_layout`` — the same function
-        ``resolve_input_output`` executes when Run is pressed. The readout used
-        to re-implement the layout rules with a looser idea of what counts as
-        well content, so a folder holding ``in/Plate1_A1.zip`` displayed
-        "using as input" and then failed the run outright.
-        """
-        if self._suspend_output_refresh:
-            return
-        raw_str = self._input_edit.text().strip()
-        if not raw_str:
-            self._output_lbl.setText("—"); self._set_status(self._layout_lbl, "", quiet="")
-            self._output_row.setVisible(False)
-            self._refresh_folder_banners(None, immediate=immediate)
-            return
-        # The form's schema goes with it, so the fold-loose readout counts the
-        # files the run would actually fold rather than everything with a TIF
-        # suffix — the two disagree on a duplicate, a calibration frame, and
-        # anything whose well token will not parse.
-        plan = plan_input_layout(
-            Path(raw_str),
-            filename_schema="" if self._auto_detect_on() else self._build_schema_arg(),
-            filename_sep=self._filename_sep(),
-        )
-        self._output_lbl.setText(
-            str(plan.output_dir) if plan.output_dir is not None else "—")
-        self._output_row.setVisible(plan.output_dir is not None)
-        self._set_status(self._layout_lbl, plan.message, error=not plan.runnable, quiet="")
-        # The same planner that names the output folder is what makes a pre-run
-        # report possible at all: it resolves that path without writing
-        # anything, so what an earlier run left there can be read while the
-        # form is still being filled in.
-        self._refresh_folder_banners(plan, immediate=immediate)
 
     # ------------------------------------------------------------------
     # Run / Stop

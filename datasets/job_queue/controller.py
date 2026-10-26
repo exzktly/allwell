@@ -27,10 +27,19 @@ from services.job_kinds import (
     CHAIN_KIND,
     CHAIN_TARGET,
     describe,
+    input_targets,
     produced_for,
     produced_layout,
 )
-from services.job_queue import JobQueue, JobSpec, JobState, load_queue, save_queue
+from services.job_queue import (
+    ChainLink,
+    JobQueue,
+    JobSpec,
+    JobState,
+    downstream_ids,
+    load_queue,
+    save_queue,
+)
 from datasets.job_queue.session import QueueSession
 from datasets.job_queue.view import JobQueuePage
 
@@ -88,11 +97,27 @@ class QueueBridge(QObject):
         )
 
     # ── editing ──────────────────────────────────────────────────────────
-    def add_job(self, job: JobSpec) -> None:
+    def add_job(self, job: JobSpec, links: list[ChainLink] | None = None) -> list[str]:
+        """Add *job* with its input *links* in place, then let the queue move.
+
+        The links go in **before** the queue is allowed to advance, never
+        after: a running queue with nothing to do starts a newly added job at
+        once, and a job added unlinked would start against the placeholder
+        paths in its spec. Returns the targets whose link was refused (an
+        unknown source, a cycle) so the caller can say so.
+        """
         self._queue.add(job)
+        refused: list[str] = []
+        for link in links or []:
+            try:
+                self._queue.set_link(job.id, link.target, link.source,
+                                     kind=link.kind or CHAIN_KIND)
+            except ValueError:
+                refused.append(str(link.target))
         self._save()
         self.queueChanged.emit()
         self._advance()
+        return refused
 
     def remove_job(self, job_id: str) -> None:
         job = self._queue.get(job_id)
@@ -141,8 +166,8 @@ class QueueBridge(QObject):
         self._advance()
         return True
 
-    def retry_job(self, job_id: str) -> bool:
-        if not self._queue.retry(job_id):
+    def retry_job(self, job_id: str, with_downstream: bool = False) -> bool:
+        if not self._queue.retry(job_id, with_downstream=with_downstream):
             return False
         self._save()
         self.queueChanged.emit()
@@ -187,6 +212,31 @@ class QueueBridge(QObject):
         self.queueChanged.emit()
         return True
 
+    def set_link(self, job_id: str, target: str, source: str) -> bool:
+        """Link (or, with an empty *source*, unlink) one input of a job.
+
+        *target* must be one of the job's kind's ``INPUT_TARGETS``: a
+        Concatenate's ``dataset2`` can be filled from a second job while
+        ``dataset1`` keeps whatever it already had. Returns ``False`` for a
+        target the kind does not have, an unknown job, or a link that would
+        make a cycle — the caller says so.
+        """
+        job = self._queue.get(job_id)
+        if job is None or target not in input_targets(job.kind):
+            return False
+        if source and self._queue.get(source) is None:
+            return False
+        try:
+            self._queue.set_link(job_id, target, source or None, kind=CHAIN_KIND)
+        except ValueError:
+            return False
+        self._save()
+        self.queueChanged.emit()
+        # Unlinking an input can make a waiting job runnable; a started, idle
+        # queue should not sit on it until something else happens.
+        self._advance()
+        return True
+
     def show_job(self, job_id: str) -> bool:
         """Populate the job's own tool page. Returns whether it happened.
 
@@ -197,7 +247,17 @@ class QueueBridge(QObject):
         job = self._queue.get(job_id)
         if job is None:
             return False
-        runner = self._runners.get(job.kind)
+        return self.show_spec(job.kind, job.spec)
+
+    def show_spec(self, kind: str, spec: dict) -> bool:
+        """Populate *kind*'s page from *spec*, a job that need not be queued.
+
+        :meth:`show_job` for a spec that is not in the queue yet — the
+        skeleton of a next step, whose only settings are the inputs it takes
+        from earlier jobs. Same refusal while the tool is mid-run, for the
+        same reason.
+        """
+        runner = self._runners.get(kind)
         if runner is None or runner.is_busy():
             # Populating a page mid-run doesn't just show stale information —
             # for the Datasets tools, show_job() writes fields the controller
@@ -215,7 +275,44 @@ class QueueBridge(QObject):
         # makes the same assumption), so a json round-trip is a cheap, total
         # deep copy rather than a shallow dict() that still shares nested
         # dicts/lists (e.g. Analyze's spec["opts"]).
-        runner.show_job(json.loads(json.dumps(job.spec)))
+        runner.show_job(json.loads(json.dumps(spec)))
+        return True
+
+    def _form_hook(self, kind: str, name: str) -> None:
+        """Call a runner's optional form hook, never on a runner mid-run."""
+        runner = self._runners.get(kind)
+        hook = getattr(runner, name, None)
+        if callable(hook) and not runner.is_busy():
+            hook()
+
+    def remember_form(self, kind: str) -> None:
+        """Ask *kind*'s page to keep its form as it is now, before a session
+        borrows it (only Analyze has a form the queue changes beyond the
+        job's own fields)."""
+        self._form_hook(kind, "remember_form")
+
+    def restore_form(self, kind: str) -> None:
+        """Put back what :meth:`remember_form` kept."""
+        self._form_hook(kind, "restore_form")
+
+    def forget_form(self, kind: str) -> None:
+        """Drop what :meth:`remember_form` kept, leaving the page as it is."""
+        runner = self._runners.get(kind)
+        hook = getattr(runner, "forget_form", None)
+        if callable(hook):
+            hook()
+
+    def show_pending(self, kind: str, pending: dict, projection: dict | None = None) -> bool:
+        """Tell *kind*'s page which inputs are queued jobs' outputs not yet
+        written (``datasets.core.pending_inputs``), with what each is expected
+        to hold. Returns whether the page knows how; one that does not simply
+        shows the planned path as an ordinary one."""
+        runner = self._runners.get(kind)
+        show = getattr(runner, "set_pending_inputs", None)
+        if not callable(show) or runner.is_busy():
+            # A page mid-run is that run's progress display (show_spec's rule).
+            return False
+        show(dict(pending), projection)
         return True
 
     def runner_busy(self, kind: str) -> bool:
@@ -347,7 +444,8 @@ class QueueBridge(QObject):
         self._current = None
         produced = produced_for(kind, output_path) if ok else {}
         finished = self._queue.get(job_id)
-        layout = produced_layout(kind, finished.spec) if ok and finished else None
+        layout = (produced_layout(kind, finished.spec, self._input_layouts(finished))
+                  if ok and finished else None)
         if layout is not None:
             produced["layout"] = layout
         if not ok and self._was_suspended(kind, job_id):
@@ -368,6 +466,20 @@ class QueueBridge(QObject):
         if cancelled:
             self.pause()
         self._advance()
+
+    def _input_layouts(self, job: JobSpec) -> list[dict | None]:
+        """What each of *job*'s inputs' source jobs recorded about its files.
+
+        One entry per input in ``INPUT_TARGETS`` order, ``None`` for an input
+        read from a folder rather than a job, so ``produced_layout`` can tell
+        "every input is known and they agree" from "one of them is unknown".
+        """
+        out: list[dict | None] = []
+        for target in input_targets(job.kind):
+            link = job.link_for(target)
+            source = self._queue.get(link.source) if link is not None else None
+            out.append(source.layout if source is not None else None)
+        return out
 
     def _was_suspended(self, kind: str, job_id: str) -> bool:
         """Whether this job wound down rather than failing or being cancelled.
@@ -426,7 +538,7 @@ class JobQueueController(QObject):
         self.sessions = QueueSession(
             self.bridge,
             notify=lambda text, kind="warn": self._notify(text, kind),
-            add_job=lambda kind, spec: self.add_job(kind, spec),
+            add_job=lambda kind, spec: self._add_plain(kind, spec),
         )
 
         self.page = JobQueuePage()
@@ -438,6 +550,8 @@ class JobQueueController(QObject):
         self.page.duplicateRequested.connect(self._on_duplicate)
         self.page.retryRequested.connect(self._on_retry)
         self.page.chainRequested.connect(self._on_chain)
+        self.page.linkRequested.connect(self._on_link)
+        self.page.nextStepRequested.connect(self._on_next_step)
         self.page.removeRequested.connect(self._on_remove)
         self.page.moveUpRequested.connect(lambda job_id: self._on_move(job_id, -1))
         self.page.moveDownRequested.connect(lambda job_id: self._on_move(job_id, 1))
@@ -490,7 +604,16 @@ class JobQueueController(QObject):
         self._reveal = reveal
 
     def add_job(self, kind: str, spec: dict) -> None:
-        """Called by each Datasets controller's ``on_add_to_queue`` callback."""
+        """Called by each Datasets controller's ``on_add_to_queue`` callback,
+        and by Analyze's "+ Queue". While a session has that tool's page open
+        the press goes through the session, which knows the page's links
+        (``QueueSession.queue_from_page``)."""
+        if self.sessions.queue_from_page(kind, spec):
+            return
+        self._add_plain(kind, spec)
+
+    def _add_plain(self, kind: str, spec: dict) -> None:
+        """Queue *spec* as a job of its own, with no links."""
         job = JobSpec(id=uuid.uuid4().hex[:10], kind=kind,
                       label=describe(kind, spec), spec=spec)
         self.bridge.add_job(job)
@@ -570,7 +693,19 @@ class JobQueueController(QObject):
         if job is not None and job.state == JobState.RUNNING:
             self._notify("Can't remove the running job — stop it first.", "warn")
             return
+        # A finished job's folder is written into what waited on it
+        # (JobQueue.remove); anything else leaves those jobs on the path they
+        # were set up with, which nothing will now write. Said, as Clear
+        # completed says it, rather than discovered when they run.
+        orphaned = ([] if job is None or job.state == JobState.SUCCEEDED else
+                    [j.label or j.id for j in self.bridge.queue.jobs
+                     if job_id in j.sources() and j.state not in JobState.CLEARABLE])
         self.bridge.remove_job(job_id)
+        if orphaned:
+            self._notify(
+                f"{len(orphaned)} queued job(s) were waiting on the job you "
+                "removed and are held as blocked until you choose their input: "
+                + ", ".join(orphaned[:3]), "warn")
 
     def _on_move(self, job_id: str, delta: int) -> None:
         """The menu's Move up / Move down: one step, a swap with the neighbour."""
@@ -609,43 +744,124 @@ class JobQueueController(QObject):
         index = next((i for i, j in enumerate(jobs) if j.id == job_id), None)
         if index is None or not (0 <= index + delta < len(jobs)):
             return
-        if job is not None and (job.chain_from or any(j.chain_from == job_id for j in jobs)):
+        if job is not None and (job.sources() or any(job_id in j.sources() for j in jobs)):
             self._notify("That job is chained — it can't move past the job it "
                          "runs after, or the ones that run after it.", "warn")
 
     def _on_duplicate(self, job_id: str) -> None:
         self.bridge.duplicate_job(job_id)
 
-    def _on_retry(self, job_id: str) -> None:
-        self.bridge.retry_job(job_id)
+    def _on_retry(self, job_id: str, with_downstream: bool = False) -> None:
+        self.bridge.retry_job(job_id, with_downstream)
 
     def _on_chain(self, job_id: str, chain_from: str) -> None:
+        if not self._move_below(job_id, chain_from):
+            return
         if not self.bridge.set_chain(job_id, chain_from):
             self._notify("Those two jobs can't be chained that way.", "warn")
 
-    def _on_clear_completed(self) -> None:
-        """Clearing a finished job unlinks any pending job chained to it.
+    def queued_outputs(self, kind: str) -> list[tuple[str, str]]:
+        """The queued jobs whose output *kind*'s page can take as an input,
+        as ``(job id, "N. label")`` in queue order, for the input fields'
+        "Output of a queued job ▸" menus.
 
-        It has to — a survivor pointing at an id that is gone can never become
-        runnable — but the consequence is that the survivor falls back to
-        whatever placeholder path its own spec still holds and runs against
-        that. Silence made a tidy-up look free.
+        Not a job whose output is never coming (failed, cancelled, blocked),
+        and not the job open for editing on that page or one that reads from
+        it — linking those would be a loop the queue refuses on Save.
         """
-        orphaned = self._pending_successors_of_terminal_jobs()
+        jobs = self.bridge.queue.jobs
+        session = self.sessions.current()
+        editing = session[1] if session and session[0] == kind else None
+        excluded = ({editing} | downstream_ids(jobs, editing)) if editing else set()
+        stopped = JobState.FAILURE_LIKE | {JobState.BLOCKED}
+        return [(j.id, f"{i + 1}. {j.label or j.kind}") for i, j in enumerate(jobs)
+                if j.state not in stopped and j.id not in excluded]
+
+    def link_from_page(self, kind: str, target: str, source_id: str) -> str | None:
+        """See ``QueueSession.link_from_page``; the host fills the field with
+        the folder returned, then calls :meth:`show_links`."""
+        return self.sessions.link_from_page(kind, target, source_id)
+
+    def show_links(self, kind: str) -> None:
+        self.sessions.show_links(kind)
+
+    def _on_link(self, job_id: str, target: str, source: str) -> None:
+        if not self._move_below(job_id, source):
+            return
+        if not self.bridge.set_link(job_id, target, source):
+            self._notify("That input can't be linked to that job — it reads "
+                         "from this one, directly or through others.", "warn")
+
+    def _move_below(self, job_id: str, source: str) -> bool:
+        """Put *job_id* just below *source* when it is queued above it.
+
+        A job can only read from a job that runs first. Offering only the
+        jobs above made a conversion re-added after Clear completed — which
+        lands at the bottom — impossible to choose, with the menu simply
+        disabled. The menu offers the jobs below too, saying the job moves.
+        Refused, and said, when the move would put this job below a job that
+        reads from it.
+        """
+        jobs = self.bridge.queue.jobs
+        order = [j.id for j in jobs]
+        if not source or source not in order or job_id not in order:
+            return True
+        if order.index(source) < order.index(job_id):
+            return True
+        if self.bridge.move_job_to(job_id, order.index(source)):
+            return True
+        self._notify("That job can't move below it: a job that reads from "
+                     "this one would then run before it.", "warn")
+        return False
+
+    def _on_next_step(self, job_id: str, kind: str, other_id: str) -> None:
+        """Set up *kind* to read *job_id*'s output — and, for a two-input
+        kind, *other_id*'s as dataset 2 — before either has been written."""
+        targets = input_targets(kind)
+        if not targets:
+            return
+        sources = {targets[0]: job_id}
+        if other_id and len(targets) > 1:
+            sources[targets[1]] = other_id
+        self.sessions.begin_next_step(kind, sources)
+
+    def _on_clear_completed(self) -> None:
+        """Clear the jobs that ran, and say what that leaves waiting.
+
+        A job waiting on a cleared job that *succeeded* takes the folder that
+        job wrote (``JobQueue.remove``). One waiting on a cleared job that
+        failed or was cancelled is held blocked until the user chooses its
+        input, because the folder in its spec is a plan nothing will now
+        write. That is said here, since a tidy-up must not look free.
+        """
+        orphaned = self._successors_of_unfinished_clearable_jobs()
+        queue = self.bridge.queue
+        kept = [j for j in queue.jobs if queue.kept_on_clear(j.id)]
         removed = self.bridge.clear_completed()
-        if not removed:
+        if kept:
+            waiting = sum(1 for j in queue.jobs
+                          if j.state == JobState.BLOCKED
+                          and any(k.id in j.sources() for k in kept))
+            self._notify(
+                f"Kept “{kept[0].label or kept[0].id}”"
+                + (f" and {len(kept) - 1} more" if len(kept) > 1 else "")
+                + f" — {waiting} job(s) wait on it; Retry it to release them.",
+                "neutral")
+        if not removed and not kept:
             self._notify("Nothing finished to clear.", "neutral")
         elif orphaned:
             self._notify(
                 f"{len(orphaned)} queued job(s) were waiting on a job you "
-                "cleared — check their input before starting the queue: "
+                "cleared that never wrote its output; they are held as "
+                "blocked until you choose their input: "
                 + ", ".join(orphaned[:3]), "warn")
 
-    def _pending_successors_of_terminal_jobs(self) -> list[str]:
+    def _successors_of_unfinished_clearable_jobs(self) -> list[str]:
         jobs = self.bridge.queue.jobs
-        terminal = {j.id for j in jobs if j.state in JobState.TERMINAL}
+        cleared = set(self.bridge.queue.clearable_ids())
+        stopped = {j.id for j in jobs if j.id in cleared and j.state != JobState.SUCCEEDED}
         return [j.label or j.id for j in jobs
-                if j.chain_from in terminal and j.state not in JobState.TERMINAL]
+                if stopped.intersection(j.sources()) and j.state not in JobState.CLEARABLE]
 
     def _on_start_toggled(self) -> None:
         if self.bridge.queue.is_started:

@@ -115,6 +115,11 @@ class ValidateController(DatasetToolController):
     def show_job(self, spec: dict) -> None:
         self.page.set_dataset_path(spec.get("dataset", ""))
 
+    def set_pending_inputs(self, pending: dict, projection: dict | None = None) -> None:
+        """Show inputs that are queued jobs' outputs not written yet
+        (``QueueBridge.show_pending``). *projection* is unused: nothing on this page is built from the input's contents."""
+        self.page.set_pending_inputs(pending)
+
     def start_from_queue(self, spec: dict) -> None:
         self.show_job(spec)
         self._run(apply_repair=bool(spec.get("apply_repair", False)))

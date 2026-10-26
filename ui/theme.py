@@ -1615,6 +1615,9 @@ QWidget#ContextBanner {{
 QWidget#ContextBanner QLabel {{
     color: {c.text_primary};
 }}
+QWidget#ContextBannerBody, QWidget#ContextBannerButtons {{
+    background: transparent;
+}}
 
 /* ── The Analyze pane's folder banners ───────────────────────────────── */
 /* Two strips at the head of the Analyze sidebar, reporting what the folder in

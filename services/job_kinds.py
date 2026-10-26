@@ -26,6 +26,7 @@ and its tooltip.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 KIND_LABEL = {
@@ -80,15 +81,45 @@ def produced_for(kind: str, path: str) -> dict:
 CONVERTER_KINDS = ("ome_import", "czi_import", "nd2_import")
 
 
-def produced_layout(kind: str, spec: dict) -> dict | None:
-    """What a finished converter job knows about the files it wrote, or ``None``.
+#: The kinds whose output names its images exactly as their input did, so
+#: what was known about the input's files is still true of the output's. A
+#: Concatenate relabels dataset 2's timepoints but not the slots they sit in;
+#: a Subset and a Merge copy images under their own names (a Merge's remap
+#: changes which well a file belongs to, not how its name is built); Validate
+#: reports on a dataset and writes no images.
+LAYOUT_PRESERVING_KINDS = ("concatenate", "merge_plates", "subset", "validate")
 
-    The schema and separator are the converters' own naming; the channel roles
-    are the ones set on the converter's page, which its queued spec carries as
-    ``channel_roles`` (``[[name, role], …]``). A converter job queued before
-    its page could read the source has no roles, and then only the schema is
-    stated — the chained Analyze job scans for the rest.
+
+def produced_layout(kind: str, spec: dict,
+                    upstream: "list[dict | None] | None" = None) -> dict | None:
+    """What a finished job knows about the files it wrote, or ``None``.
+
+    A converter names every image itself: the schema and separator are its own
+    naming, and the channel roles are the ones set on its page, which its
+    queued spec carries as ``channel_roles`` (``[[name, role], …]``). A
+    converter job queued before its page could read the source has no roles,
+    and then only the schema is stated — a chained Analyze job scans for the
+    rest.
+
+    A :data:`LAYOUT_PRESERVING_KINDS` job passes on what its inputs' source
+    jobs recorded. *upstream* holds one entry per input in
+    :data:`INPUT_TARGETS` order — the layout that input's source job recorded,
+    or ``None`` when the input was not linked to a job or its source recorded
+    nothing. The layout is passed on only when **every** input's is known and
+    they are identical: an input read from a folder on disk is unknown, and two
+    conversions set up with different channel roles disagree. Either way
+    nothing is passed on, and the Analyze job after it scans the files, as it
+    would have with no queue at all.
     """
+    if kind in LAYOUT_PRESERVING_KINDS:
+        layouts = list(upstream or [])
+        if len(layouts) != len(input_targets(kind)) or not layouts:
+            return None
+        if any(layout is None for layout in layouts):
+            return None
+        if any(layout != layouts[0] for layout in layouts[1:]):
+            return None
+        return json.loads(json.dumps(layouts[0]))
     if kind not in CONVERTER_KINDS:
         return None
     from util.channel_roles import channel_tokens_from_roles
@@ -103,17 +134,72 @@ def produced_layout(kind: str, spec: dict) -> dict | None:
     return layout
 
 
+#: The converters and Zip loose are absent from both tables, on purpose: they
+#: read acquisition files or a loose image folder, never a dataset, so no
+#: earlier job's output can be their input. Offering "Input from ▸" on them
+#: let a user link two conversions, and the second then failed at dequeue.
 CHAIN_TARGET = {
     "analyze": "opts.raw",
     "concatenate": "dataset1",
-    "ome_import": "source",
-    "czi_import": "source",
-    "nd2_import": "source",
     "validate": "dataset",
     "subset": "source",
-    "import_loose": "source",
     "merge_plates": "dataset1",
 }
+
+# Every input an earlier job's output can fill, in the order a user reads them,
+# with the name a menu calls each one. CHAIN_TARGET above is the first of these
+# — the one "Input from ▸" fills — and the two-dataset tools have a second,
+# which is how a Concatenate can take dataset 1 from one conversion and
+# dataset 2 from another.
+INPUT_TARGETS = {
+    "analyze": (("opts.raw", "Input"),),
+    "concatenate": (("dataset1", "Dataset 1"), ("dataset2", "Dataset 2")),
+    "validate": (("dataset", "Dataset"),),
+    "subset": (("source", "Source"),),
+    "merge_plates": (("dataset1", "Dataset 1"), ("dataset2", "Dataset 2")),
+}
+
+
+def input_targets(kind: str) -> tuple[str, ...]:
+    """The dotted spec paths *kind* receives earlier jobs' outputs at."""
+    return tuple(target for target, _label in INPUT_TARGETS.get(kind, ()))
+
+
+def input_label(kind: str, target: str | None) -> str:
+    """What a menu or a queue row calls the input at *target*."""
+    return dict(INPUT_TARGETS.get(kind, ())).get(target or "", "Input")
+
+
+def planned_output(kind: str, spec: dict) -> str | None:
+    """The dataset folder a queued job is set up to produce, or ``None``.
+
+    What a successor shows in its input field while the job has not run, so a
+    user setting up "the Analyze of that Concatenate" sees which folder they
+    are pointing at. It is a statement of intent, not of fact: the link is what
+    carries the real answer, and ``JobQueue.materialise`` replaces this path
+    with the folder the job reported when it finished. Analyze's is the folder
+    it reads, since it writes ``out/`` beside the input of a dataset root — for
+    other input layouts the real root differs, and the link still carries it.
+    """
+    spec = spec or {}
+
+    def _get(key: str) -> str:
+        return str(spec.get(key) or "").strip()
+
+    if kind == "analyze":
+        value = str((spec.get("opts") or {}).get("raw") or "").strip()
+    elif kind == "concatenate":
+        value = _get("dataset1") if spec.get("in_place") else _get("destination")
+    elif kind == "import_loose":
+        value = _get("source") if spec.get("in_place") else _get("destination")
+    elif kind == "validate":
+        value = _get("dataset")
+    elif kind in (*CONVERTER_KINDS, "subset", "merge_plates"):
+        value = _get("destination")
+    else:
+        value = ""
+    return value or None
+
 
 # Which spec keys name this kind's inputs and its output, in the order a
 # description should read them. Keeping it as data rather than a function per
@@ -128,6 +214,22 @@ _DESCRIBE_KEYS = {
     "import_loose": (("source",), "destination"),
     "merge_plates": (("dataset1", "dataset2"), "destination"),
 }
+
+
+#: The longest a job's name runs inside a sentence before its middle gives
+#: way to "…". A converter's label carries the source file name and the
+#: destination in full, and one long unbroken token cannot wrap, so a sentence
+#: naming it was cut off before saying what happened to it.
+NAME_IN_SENTENCE = 56
+
+
+def short_label(label: str) -> str:
+    """*label* shortened in the middle when it would not fit in a sentence,
+    keeping both ends — the tool at the start, the output at the end."""
+    if len(label) <= NAME_IN_SENTENCE:
+        return label
+    keep = NAME_IN_SENTENCE - 1
+    return f"{label[: keep // 2]}…{label[-(keep - keep // 2):]}"
 
 
 def _name(value: object) -> str:

@@ -39,7 +39,16 @@ from services.job_kinds import (
 #: and one nobody remembered look identical in code six months later
 #: (CLAUDE.md §7.5 #10). Paired with a liveness check below, so an exemption
 #: that stops describing a real decision fails rather than lingering.
+_NO_DATASET_INPUT = (
+    "Reads acquisition files or a loose image folder, never a dataset, so no "
+    "earlier job's output can be its input; offering \"Input from\" on it "
+    "let two conversions be linked, and the second then failed at dequeue.")
+
 _EXEMPT = {
+    "CHAIN_TARGET": {kind: _NO_DATASET_INPUT for kind in
+                     ("ome_import", "czi_import", "nd2_import", "import_loose")},
+    "INPUT_TARGETS": {kind: _NO_DATASET_INPUT for kind in
+                      ("ome_import", "czi_import", "nd2_import", "import_loose")},
     "_DESCRIBE_KEYS": {
         "analyze": (
             "Analyze does not describe itself from spec keys. Its spec holds "
@@ -58,7 +67,7 @@ def _queueable_kinds() -> list[str]:
 
 
 @pytest.mark.parametrize("table_name", ["KIND_LABEL", "CHAIN_TARGET",
-                                        "_DESCRIBE_KEYS", "ADD_KINDS",
+                                        "INPUT_TARGETS", "_DESCRIBE_KEYS", "ADD_KINDS",
                                         "KIND_ICON"])
 def test_every_queueable_tool_appears_in_every_kind_table(table_name):
     """A tool missing from one of these does not fail — it degrades quietly.
@@ -77,6 +86,7 @@ def test_every_queueable_tool_appears_in_every_kind_table(table_name):
     tables = {
         "KIND_LABEL": jk.KIND_LABEL,
         "CHAIN_TARGET": jk.CHAIN_TARGET,
+        "INPUT_TARGETS": jk.INPUT_TARGETS,
         "_DESCRIBE_KEYS": jk._DESCRIBE_KEYS,
         "ADD_KINDS": ADD_KINDS,
         "KIND_ICON": KIND_ICON,
@@ -104,9 +114,11 @@ def test_every_exemption_names_a_kind_that_still_exists():
             f"{table_name} exempts {unknown}, which no feature declares")
 
 
-def test_every_kind_can_receive_a_chained_input():
-    """A kind missing from CHAIN_TARGET is a job that cannot be chained to."""
-    missing = sorted(set(KIND_LABEL) - set(CHAIN_TARGET))
+def test_every_kind_that_reads_a_dataset_can_receive_a_chained_input():
+    """A kind missing from CHAIN_TARGET cannot take an earlier job's output.
+    That is right only for the kinds that read files, not datasets, each
+    exempted above with its reason."""
+    missing = sorted(set(KIND_LABEL) - set(CHAIN_TARGET) - set(_EXEMPT["CHAIN_TARGET"]))
     assert not missing, f"CHAIN_TARGET has no entry for: {missing}"
 
 
@@ -207,3 +219,23 @@ def test_detail_is_empty_when_there_is_nothing_to_say():
     """The caller hides the line rather than drawing a bare arrow."""
     assert describe_detail("subset", {}) == ""
     assert describe_detail("analyze", {"opts": {}}) == ""
+
+
+def test_the_first_input_is_the_one_run_after_fills():
+    """``CHAIN_TARGET`` is what "Run after ▸" links; it must be the first of
+    the kind's ``INPUT_TARGETS``, or the two menus would fill different
+    fields for the same job."""
+    import services.job_kinds as jk
+
+    wrong = {kind: (jk.CHAIN_TARGET[kind], jk.input_targets(kind))
+             for kind in jk.CHAIN_TARGET
+             if jk.input_targets(kind)[:1] != (jk.CHAIN_TARGET[kind],)}
+    assert not wrong, wrong
+
+
+def test_the_two_dataset_tools_take_two_inputs():
+    import services.job_kinds as jk
+
+    assert jk.input_targets("concatenate") == ("dataset1", "dataset2")
+    assert jk.input_targets("merge_plates") == ("dataset1", "dataset2")
+    assert jk.input_label("concatenate", "dataset2") == "Dataset 2"

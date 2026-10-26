@@ -443,6 +443,13 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._source_facts_for = str(source)
         self._source_problem = _nd2_source_problem(source)
 
+    def planned_wells(self) -> list[str]:
+        """The wells the plate map shows the conversion writing, or ``[]``
+        before the source has been read. Recorded on a queued job so the
+        next step can offer them (``PackedConverterController.collect_spec``).
+        """
+        return list(self._dashboard.well_ids())
+
     def source_path(self) -> str:
         return self._src_field.path().strip()
 

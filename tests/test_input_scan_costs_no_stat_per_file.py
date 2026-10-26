@@ -180,7 +180,8 @@ def test_the_readout_is_computed_once_per_pick_and_with_the_inferred_schema(
     first of those is both wasted and wrong, and the count is what says so —
     asserting only the final schema would pass against the two-walk version.
     """
-    import analyze.tab as tab_mod
+    # The readout lives in AnalyzeInputMixin, beside the folder scan.
+    import analyze.domain.input as tab_mod
     from analyze.tab import AnalyzeTab
 
     folder = _plate(tmp_path / "ds", 24)

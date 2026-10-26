@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from util.timepoint import parse_hours
+from util.well_token import canonical_well_label
 from domain.image_identity import (
     PipelineSchema,
     load_schema,
@@ -211,6 +212,46 @@ def build_subset_plan(
         src=src, dest=dest, schema=schema, channels=channels, filt=filt,
         wells_kept=wells_kept, merged_info=merged_info, dest_is_restart=dest_is_restart,
     )
+
+
+def missing_from_source(
+    *,
+    wells: list[str] | None,
+    timepoints: list[str] | None,
+    fovs: list[str] | None,
+    source_wells: list[str],
+    source_timepoints: list[str],
+    source_fovs: list[str],
+) -> list[str]:
+    """What a queued Subset names that its source does not hold, as phrases.
+
+    A Subset set up against a queued job's output picked its wells,
+    timepoints and FOVs from what that job was *expected* to write. When the
+    real output turns out not to hold one of them, the filter would quietly
+    keep less than was asked for — :func:`build_subset_plan` intersects the
+    wells, and the page has no checkbox to tick for a timepoint that is not
+    there — and the result would look like a complete subset. The queue
+    refuses the job instead, naming what is missing.
+
+    ``None`` for a choice means "all", which nothing can be missing from. A
+    dimension the source does not list (an empty *source_…*) cannot be
+    judged and is skipped; the run reports on it as it always has.
+    """
+    out: list[str] = []
+
+    def check(word: str, wanted, have, norm) -> None:
+        if not wanted or not have:
+            return
+        have_set = {norm(str(h)) for h in have}
+        gone = [str(w) for w in wanted if norm(str(w)) not in have_set]
+        if gone:
+            out.append(f"{word} {', '.join(gone)}")
+
+    check("wells", wells, source_wells,
+          lambda w: canonical_well_label(w) or w.strip().upper())
+    check("timepoints", timepoints, source_timepoints, lambda t: t.strip())
+    check("FOVs", fovs, source_fovs, lambda f: normalize_fov(f.strip()))
+    return out
 
 
 # ── member/row filter predicates ─────────────────────────────────────────────

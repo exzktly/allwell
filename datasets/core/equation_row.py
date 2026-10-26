@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ui import theme
 from widgets.path_field import PathField, folder_picker
@@ -55,6 +55,8 @@ class EquationRow:
     #: The red line under the row, hidden until the page has something to say
     #: about the two datasets not fitting together.
     cross_hint: QLabel
+    #: "Swap dataset 1 and 2", or ``None`` when the page asked for none.
+    swap: QPushButton | None = None
 
 
 def build_equation_row(
@@ -66,6 +68,8 @@ def build_equation_row(
     is_dataset: Callable[[Path], str],
     is_destination: Callable[[Path], str],
     on_changed: Callable[[], None],
+    on_swap: Callable[[], None] | None = None,
+    swap_note: str = "",
 ) -> EquationRow:
     """Build the equation row into *outer* and return its four widgets.
 
@@ -106,7 +110,28 @@ def build_equation_row(
     cross_hint.setVisible(False)
     outer.addWidget(cross_hint)
 
+    swap = None
+    if on_swap is not None:
+        # Under the row rather than between the fields: the operator column is
+        # sized for one glyph, and the button is a correction made after both
+        # are filled in, not part of reading the equation.
+        swap_row = QWidget(parent)
+        sl = QHBoxLayout(swap_row)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(theme.Spacing.sm)
+        swap = QPushButton("⇄  Swap dataset 1 and 2", swap_row)
+        swap.setObjectName("EquationSwap")
+        swap.setProperty("variant", "secondary")
+        swap.clicked.connect(lambda _checked=False: on_swap())
+        sl.addWidget(swap)
+        if swap_note:
+            note = QLabel(swap_note, swap_row)
+            note.setObjectName("Muted")
+            sl.addWidget(note)
+        sl.addStretch(1)
+        outer.addWidget(swap_row)
+
     for field in (ds1, ds2, dest):
         field.changed.connect(on_changed)
 
-    return EquationRow(ds1=ds1, ds2=ds2, dest=dest, cross_hint=cross_hint)
+    return EquationRow(ds1=ds1, ds2=ds2, dest=dest, cross_hint=cross_hint, swap=swap)

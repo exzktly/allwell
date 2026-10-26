@@ -544,6 +544,13 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             with QSignalBlocker(self._folder_cb):
                 self._folder_cb.setChecked(True)
 
+    def planned_wells(self) -> list[str]:
+        """The wells the plate map shows the conversion writing, or ``[]``
+        before the source has been read. Recorded on a queued job so the
+        next step can offer them (``PackedConverterController.collect_spec``).
+        """
+        return list(self._dashboard.well_ids())
+
     def source_path(self) -> str:
         return self._src_field.path().strip()
 

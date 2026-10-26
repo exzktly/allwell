@@ -20,6 +20,7 @@ from pathlib import Path
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFileDialog,
+    QMenu,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -31,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from widgets.icons import make_icon
+from widgets.owned_action import owned_action
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -76,6 +78,9 @@ class PathField(QWidget):
         self._pick = pick
         self._validator = validator
         self._path = ""
+        # A path that does not exist yet and is not expected to: something the
+        # host knows about (a queued job) will write it first. See set_pending.
+        self._pending_note = ""
         self.setMinimumWidth(_FIELD_MIN_W)
 
         col = QVBoxLayout(self)
@@ -117,20 +122,94 @@ class PathField(QWidget):
             self.changed.emit()
 
     def set_path(self, path: str) -> None:
+        self._pending_note = ""
         self._path = path
         self._edit.setText(Path(path).name or path)
+        # From the start: a long name otherwise shows only its tail, which
+        # for a plate folder is the date and drops the plate.
+        self._edit.setCursorPosition(0)
         self._edit.setToolTip(path)
         self.revalidate()
 
     def _validity_message(self) -> str:
-        if not self._path or self._validator is None:
+        if self._pending_note or not self._path or self._validator is None:
             return ""
         return self._validator(Path(self._path))
+
+    def add_browse_alternative(
+        self,
+        title: str,
+        provider: Callable[[], list[tuple[str, str]]],
+        choose: Callable[[str], None],
+        *,
+        empty_text: str,
+        tooltip: str = "",
+    ) -> None:
+        """Offer a second way to fill the field, behind Browse's arrow.
+
+        Clicking the button still browses; its arrow opens a menu of
+        *Browse…* and a *title* submenu listing ``provider()`` — ``(key,
+        label)`` pairs read each time the menu opens — with *choose* called
+        on the key picked, or *empty_text* when there are none. The widget
+        knows nothing of what the pairs are; the host decides (the Datasets
+        pane lists queued jobs whose output can fill the field).
+        """
+        menu = QMenu(self._browse_btn)
+        owned_action(menu, "Browse…").triggered.connect(lambda _checked=False: self._browse())
+        sub = QMenu(title, menu)
+        menu.addMenu(sub)
+        sub.aboutToShow.connect(lambda: self._fill_alternative(sub, provider, choose, empty_text))
+        self._alternative_menu = (menu, sub)
+        self._browse_btn.setMenu(menu)
+        self._browse_btn.setPopupMode(QToolButton.MenuButtonPopup)
+        if tooltip:
+            self._browse_btn.setToolTip(tooltip)
+
+    @staticmethod
+    def _fill_alternative(sub: QMenu, provider, choose, empty_text: str) -> None:
+        sub.clear()
+        items = list(provider())
+        if not items:
+            note = owned_action(sub, empty_text)
+            note.setEnabled(False)
+            return
+        for key, label in items:
+            owned_action(sub, label).triggered.connect(
+                lambda _checked=False, k=key: choose(k))
+
+    def set_pending(self, path: str, note: str) -> None:
+        """Hold *path* as one that will exist, saying why it does not yet.
+
+        For an input a queued job will write before this field is read: the
+        validator would only report "the folder doesn't exist", which is true
+        and beside the point. The field counts as valid, shows *note* in place
+        of the validator's hint, and stays that way until the path is set
+        again — a Browse, or :meth:`set_path` — which is the user replacing the
+        promised folder with a real one. ``set_pending(path, "")`` is the same
+        as ``set_path(path)``.
+        """
+        self.set_path(path)
+        self._pending_note = note
+        self.revalidate()
+
+    def is_pending(self) -> bool:
+        """Whether the path is one a queued job has still to write."""
+        return bool(self._pending_note)
+
+    def pending_note(self) -> str:
+        """The note :meth:`set_pending` was given, or ``""``."""
+        return self._pending_note
 
     def revalidate(self) -> None:
         """Re-run the validator and show its message, if any. Also clears
         any :meth:`show_note` override — a real re-validation (a fresh path,
-        or the host explicitly re-checking) always wins over a stale note."""
+        or the host explicitly re-checking) always wins over a stale note.
+        A pending path shows its note instead (:meth:`set_pending`)."""
+        if self._pending_note:
+            self._set_hint_style("Muted")
+            self._hint.setText(self._pending_note)
+            self._hint.setVisible(True)
+            return
         self._set_hint_style("Danger")
         message = self._validity_message()
         self._hint.setText(message)

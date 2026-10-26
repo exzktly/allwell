@@ -91,7 +91,7 @@ States: `todo`, `doing`, `done`, `declined`.
 
 | Row | What | State | Where / evidence |
 |---|---|---|---|
-| C.1 | ARCHITECTURE.md Job Queue section rewritten for multi-input links, pass-through layout, pending inputs, projection | todo | |
-| C.2 | README_WellViewer.md: queueing a next step, two-input chains | todo | |
+| C.1 | ARCHITECTURE.md Job Queue section rewritten for multi-input links, pass-through layout, pending inputs, projection | done | Job Queue section of ARCHITECTURE.md rewritten (links, layout pass-through, `planned_output`, `begin_next_step`, row menus, projection, pending inputs); layout tree, `equation_row` / `pending_inputs` / `PathField` rows |
+| C.2 | README_WellViewer.md: queueing a next step, two-input chains | done | README_WellViewer.md Job Queue: *Queuing the next step before the first has run*, two-dataset chaining, blocking rule |
 | C.3 | Version bump, guard family, touched test files, fast lane | todo | |
 | C.4 | Reconcile every row against the tree; delete this file | todo | |

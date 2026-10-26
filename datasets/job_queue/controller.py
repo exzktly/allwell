@@ -106,6 +106,33 @@ class QueueBridge(QObject):
         runner.jobFinished.connect(
             lambda ok, msg, path, k=kind: self._on_job_finished(k, ok, msg, path)
         )
+        started = getattr(runner, "runStarted", None)
+        if started is not None:
+            started.connect(lambda spec, k=kind: self._on_run_started(k, spec))
+
+    def _on_run_started(self, kind: str, spec: dict) -> None:
+        """Take in a run started on its tool's own page.
+
+        A run the queue started is already its job (``_dispatch`` records it
+        before launching), so only a run started any other way arrives here
+        new. It joins the queue as a running job above every job still
+        waiting (``JobQueue.adopt``) and is tracked like a queue job, so
+        what is queued after it waits for it — the same lane, the same
+        folders, or a link to its output — and its outcome is recorded on
+        its row when the tool's ``jobFinished`` arrives. Before, the queue
+        could only skip the busy tool, and a job added behind a run by hand
+        could start beside it on the folder that run was writing.
+        """
+        if kind in self._running:
+            return
+        spec = json.loads(json.dumps(spec or {}))
+        job = JobSpec(id=uuid.uuid4().hex[:10], kind=kind,
+                      label=describe(kind, spec), spec=spec)
+        self._queue.adopt(job)
+        job.message = "started on its own page"
+        self._running[kind] = (job.id, run_lane(kind, spec))
+        self._save()
+        self.queueChanged.emit()
 
     # ── editing ──────────────────────────────────────────────────────────
     def add_job(self, job: JobSpec, links: list[ChainLink] | None = None) -> list[str]:

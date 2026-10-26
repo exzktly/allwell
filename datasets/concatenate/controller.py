@@ -78,8 +78,7 @@ class ConcatenateController(DestinationToolController):
         worker.succeeded.connect(self._on_succeeded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_finished)
-        self._worker = worker
-        worker.start()
+        self._start_worker(worker)
 
     def _on_run(self) -> None:
         # In place there is no destination folder, so nothing to resume into

@@ -15536,10 +15536,33 @@ Qt event loop. Four layers:
   its dataset, since a repair rewrites its metadata, and Analyze as writing
   its dataset root (the folder above an `in/` input). In-flight jobs are
   tracked as `_running: kind -> (job_id, lane)` — a tool runs one job at a
-  time, so the kind names the run — and a `jobFinished` from a kind with no
-  queue job in flight (the user pressed that tool's own Run button by hand)
-  is dropped rather than misattributed, then nudges `_advance`, since a job
-  skipped for that busy tool may now start. `jobFinished` carries no job id,
+  time, so the kind names the run.
+
+  **A run started on its tool's own page joins the queue.** Every tool
+  announces a run as it starts: the Datasets controllers through
+  `DatasetToolController._start_worker`, which starts the worker and emits
+  `runStarted(collect_spec())`, and Analyze from `start_run`, which every
+  entry point shares, as `runStarted(spec.to_json())`. `register` connects it
+  to `_on_run_started`, which ignores a kind already in `_running` — the
+  queue's own dispatch records the job before launching — and otherwise
+  takes the run in with `JobQueue.adopt`: a `JobSpec` with `adopted=True`,
+  running, inserted above every unfinished job and below the finished ones,
+  labelled with `describe` and the message "started on its own page", and
+  tracked in `_running` like a queue job. So whatever is queued after it
+  waits for it — the same lane, its folders, or a link to its output — and
+  its `jobFinished` records its outcome on its row, hands its folder to linked
+  jobs or blocks them, and lets the next job start. Before, the queue could
+  only skip the busy tool, and a job added behind a run by hand could start
+  beside it on the folder it was writing. `test_queue_adopts_a_page_run.py`
+  holds the seam: no Datasets controller may call `.start()` on a worker
+  except through `_start_worker`, with the Concatenate undo worker (not a
+  run) exempt by function name. After a restart an adopted job that was
+  running is marked **cancelled**, not interrupted, and its successors
+  blocked: its page owns resuming it — Analyze offers the run back from its
+  own banner, and the queue resuming it too would run one plate twice into
+  one output folder. A `jobFinished` from a kind with no queue job in flight
+  (a tool that announces nothing) is dropped rather than misattributed, then
+  nudges `_advance`, since a job skipped for that busy tool may now start. `jobFinished` carries no job id,
   so the guard's soundness depends on every `start_from_queue` path
   eventually emitting `jobFinished` exactly once: a launch that silently
   no-ops on invalid input would leave its kind in `_running` for ever,

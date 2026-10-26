@@ -136,6 +136,11 @@ class JobSpec:
     #: results describe output that no longer exists, and the row says so.
     #: Cleared when this job is run again.
     stale_because: str = ""
+    #: A run the user started on the tool's own page, which the queue took in
+    #: (:meth:`JobQueue.adopt`) so jobs could wait behind it. Persisted: after
+    #: a restart such a job is not resumed by the queue (see
+    #: ``_repair_after_load``).
+    adopted: bool = False
     state: str = JobState.PENDING
     message: str = ""
     output_dir: str | None = None
@@ -190,6 +195,7 @@ class JobSpec:
             "extra_links": [link.to_json() for link in self.extra_links],
             "orphaned_inputs": dict(self.orphaned_inputs),
             "stale_because": self.stale_because,
+            "adopted": self.adopted,
             "state": self.state,
             "message": self.message,
             "output_dir": self.output_dir,
@@ -214,6 +220,7 @@ class JobSpec:
                              (data.get("orphaned_inputs") or {}).items()}
             if isinstance(data.get("orphaned_inputs"), dict) else {},
             stale_because=str(data.get("stale_because") or ""),
+            adopted=bool(data.get("adopted", False)),
             state=data.get("state", JobState.PENDING),
             message=data.get("message", ""),
             output_dir=data.get("output_dir"),
@@ -306,6 +313,25 @@ class JobQueue:
         if job.id in self._by_id:
             raise ValueError(f"duplicate job id {job.id!r}")
         self._jobs.append(job)
+        self._by_id[job.id] = job
+
+    def adopt(self, job: JobSpec) -> None:
+        """Take in a run already going, started on its tool's own page.
+
+        It goes in as a running job above every job still waiting — directly
+        below the jobs that already finished — so whatever is queued after it
+        waits for it as it would for a queue job: a job of the same lane, one
+        sharing its folders, or one linked to its output. Nothing it does is
+        decided here; the tool's ``jobFinished`` records its outcome as for
+        any job.
+        """
+        if job.id in self._by_id:
+            raise ValueError(f"duplicate job id {job.id!r}")
+        job.adopted = True
+        job.state = JobState.RUNNING
+        index = next((i for i, j in enumerate(self._jobs) if j.state in self.UNFINISHED),
+                     len(self._jobs))
+        self._jobs.insert(index, job)
         self._by_id[job.id] = job
 
     def remove(self, job_id: str) -> None:
@@ -945,7 +971,19 @@ class JobQueue:
         from opening the queue page at all."""
         notes: list[str] = []
         for j in self._jobs:
-            if j.state == JobState.RUNNING:
+            if j.state == JobState.RUNNING and j.adopted:
+                # Started on its own page, so its page owns picking it up
+                # again: Analyze offers that run back from its own banner, and
+                # the queue resuming it too would run one plate twice into one
+                # output folder. Cancelled rather than interrupted, so the
+                # queue never starts it on its own; Retry is still there.
+                j.state = JobState.CANCELLED
+                j.message = ("interrupted by an app restart — it was started on its "
+                             "own page, so resume it there (or Retry it here)")
+                self._cascade_block(j.id)
+                notes.append(f"{j.id}: was running at last save, started on its own "
+                             "page — marked cancelled; resume it on that page")
+            elif j.state == JobState.RUNNING:
                 # Not a failure and not a dead end. Whatever the run had
                 # finished is on disk, and INTERRUPTED is resumable, so
                 # starting the queue picks this job up again rather than

@@ -8005,7 +8005,17 @@ one is analysed on the cluster, say. Its row says which host it runs on
 a remote Analyze waits for a conversion above it that writes the folder it
 reads, linked or not, and a job below it that writes the folder it is
 reading waits for it to finish. A remote and a local Analyze also take turns,
-since they share the Analyze pane. While two jobs run, **■ Stop job** reads
+since they share the Analyze pane.
+
+**A run you start on a tool's own page joins the queue.** Press **Run** on
+Analyze or any Datasets tool and the run appears in the Job Queue as a
+running job, above every job still waiting, marked "started on its own
+page". Jobs you queue after it wait for it as they would for any queued job
+— and run when it finishes, once the queue is started — and you can link
+one to its output with **Input from**. Its row records how it ended. If the
+app is closed while it runs, it comes back **cancelled** rather than
+resuming from the queue: resume it on its own page (Analyze offers it
+there), or choose **Retry** on its row. While two jobs run, **■ Stop job** reads
 **■ Stop both jobs** and cancels both; to cancel one, choose **Stop this job**
 from that row's **⋯** menu. Either way the queue pauses. Queued
 jobs persist across app restarts, but a relaunch always comes up paused —

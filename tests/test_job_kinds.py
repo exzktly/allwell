@@ -58,7 +58,7 @@ def _queueable_kinds() -> list[str]:
 
 
 @pytest.mark.parametrize("table_name", ["KIND_LABEL", "CHAIN_TARGET",
-                                        "_DESCRIBE_KEYS", "ADD_KINDS",
+                                        "INPUT_TARGETS", "_DESCRIBE_KEYS", "ADD_KINDS",
                                         "KIND_ICON"])
 def test_every_queueable_tool_appears_in_every_kind_table(table_name):
     """A tool missing from one of these does not fail — it degrades quietly.
@@ -77,6 +77,7 @@ def test_every_queueable_tool_appears_in_every_kind_table(table_name):
     tables = {
         "KIND_LABEL": jk.KIND_LABEL,
         "CHAIN_TARGET": jk.CHAIN_TARGET,
+        "INPUT_TARGETS": jk.INPUT_TARGETS,
         "_DESCRIBE_KEYS": jk._DESCRIBE_KEYS,
         "ADD_KINDS": ADD_KINDS,
         "KIND_ICON": KIND_ICON,
@@ -207,3 +208,23 @@ def test_detail_is_empty_when_there_is_nothing_to_say():
     """The caller hides the line rather than drawing a bare arrow."""
     assert describe_detail("subset", {}) == ""
     assert describe_detail("analyze", {"opts": {}}) == ""
+
+
+def test_the_first_input_is_the_one_run_after_fills():
+    """``CHAIN_TARGET`` is what "Run after ▸" links; it must be the first of
+    the kind's ``INPUT_TARGETS``, or the two menus would fill different
+    fields for the same job."""
+    import services.job_kinds as jk
+
+    wrong = {kind: (jk.CHAIN_TARGET[kind], jk.input_targets(kind))
+             for kind in jk.CHAIN_TARGET
+             if jk.input_targets(kind)[:1] != (jk.CHAIN_TARGET[kind],)}
+    assert not wrong, wrong
+
+
+def test_the_two_dataset_tools_take_two_inputs():
+    import services.job_kinds as jk
+
+    assert jk.input_targets("concatenate") == ("dataset1", "dataset2")
+    assert jk.input_targets("merge_plates") == ("dataset1", "dataset2")
+    assert jk.input_label("concatenate", "dataset2") == "Dataset 2"

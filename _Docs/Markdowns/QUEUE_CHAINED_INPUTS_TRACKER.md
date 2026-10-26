@@ -38,14 +38,14 @@ States: `todo`, `doing`, `done`, `declined`.
 
 | Row | What | State | Where / evidence |
 |---|---|---|---|
-| 1.1 | `JobSpec` holds every input link (`links()` / `sources()`); old queue files load unchanged, and a file written now still loads in an older version (which keeps the first link) | todo | |
-| 1.2 | `JobQueue.set_link(job, target, source)` per input; `set_chain` keeps its meaning; cycle check walks every source | todo | |
-| 1.3 | `next_runnable` waits for every source to succeed | todo | |
-| 1.4 | `materialise` fills every linked input, and names the one it could not | todo | |
-| 1.5 | `_cascade_block`: a job is blocked when any source fails; the message names that source | todo | |
-| 1.6 | `_cascade_unblock`: retrying one source unblocks a job only when no other source is still failed or blocked | todo | |
-| 1.7 | Order check, topological repair, `remove` and `clear_terminal` handle every link | todo | |
-| 1.8 | `services/job_kinds.INPUT_TARGETS` (two inputs for Concatenate and Merge plates); `QueueBridge.set_link` | todo | |
+| 1.1 | `JobSpec` holds every input link (`links()` / `sources()`); old queue files load unchanged, and a file written now still loads in an older version (which keeps the first link) | done | `services/job_queue.py` `ChainLink`, `JobSpec.links/set_links/sources`; `test_job_queue_multi_input.py::test_both_links_survive_a_save_and_load`, `::test_a_file_from_before_multi_input_links_loads_unchanged`, `::test_an_older_reader_keeps_the_first_link` |
+| 1.2 | `JobQueue.set_link(job, target, source)` per input; `set_chain` keeps its meaning; cycle check walks every source | done | `JobQueue.set_link`, `_check_links`; `::test_set_link_keeps_the_other_input`, `::test_a_cycle_through_an_ancestors_second_input_is_refused` (fails with the cycle walk cut to first links) |
+| 1.3 | `next_runnable` waits for every source to succeed | done | `next_runnable`; `::test_waits_for_every_source_not_just_the_first` (fails with first-source-only) |
+| 1.4 | `materialise` fills every linked input, and names the one it could not | done | `materialise`; `::test_materialise_fills_both_inputs_from_their_own_sources`, `::test_materialise_names_the_input_it_could_not_fill` (both fail with first-link-only) |
+| 1.5 | `_cascade_block`: a job is blocked when any source fails; the message names that source | done | `_cascade_block`; `::test_a_failure_of_the_second_source_blocks_the_job` (fails with first-source-only) |
+| 1.6 | `_cascade_unblock`: retrying one source unblocks a job only when no other source is still failed or blocked | done | `_cascade_unblock`, `_still_stopping`; `::test_retrying_one_of_two_failed_sources_keeps_the_job_blocked` (fails without the other-source check) |
+| 1.7 | Order check, topological repair, `remove` and `clear_terminal` handle every link | done | `_chain_order_valid`, `_topological_order`, `remove`; `::test_order_check_sees_the_second_source`, `::test_topological_repair_respects_every_source`, `::test_removing_one_source_drops_only_its_link` (each fails under its mutation) |
+| 1.8 | `services/job_kinds.INPUT_TARGETS` (two inputs for Concatenate and Merge plates); `QueueBridge.set_link` | done | `job_kinds.INPUT_TARGETS`, `QueueBridge.set_link`; `test_job_kinds.py::test_the_first_input_is_the_one_run_after_fills`, `test_job_queue_multi_input.py::test_the_bridge_links_two_conversions_into_one_concatenate` |
 
 ## Part 2 — a converter's layout survives Concatenate / Merge
 

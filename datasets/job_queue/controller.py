@@ -27,6 +27,7 @@ from services.job_kinds import (
     CHAIN_KIND,
     CHAIN_TARGET,
     describe,
+    input_targets,
     produced_for,
     produced_layout,
 )
@@ -183,6 +184,28 @@ class QueueBridge(QObject):
             )
         except ValueError:
             return False       # self-chain or cycle; the caller reports it
+        self._save()
+        self.queueChanged.emit()
+        return True
+
+    def set_link(self, job_id: str, target: str, source: str) -> bool:
+        """Link (or, with an empty *source*, unlink) one input of a job.
+
+        *target* must be one of the job's kind's ``INPUT_TARGETS``: a
+        Concatenate's ``dataset2`` can be filled from a second job while
+        ``dataset1`` keeps whatever it already had. Returns ``False`` for a
+        target the kind does not have, an unknown job, or a link that would
+        make a cycle — the caller says so.
+        """
+        job = self._queue.get(job_id)
+        if job is None or target not in input_targets(job.kind):
+            return False
+        if source and self._queue.get(source) is None:
+            return False
+        try:
+            self._queue.set_link(job_id, target, source or None, kind=CHAIN_KIND)
+        except ValueError:
+            return False
         self._save()
         self.queueChanged.emit()
         return True
@@ -609,7 +632,7 @@ class JobQueueController(QObject):
         index = next((i for i, j in enumerate(jobs) if j.id == job_id), None)
         if index is None or not (0 <= index + delta < len(jobs)):
             return
-        if job is not None and (job.chain_from or any(j.chain_from == job_id for j in jobs)):
+        if job is not None and (job.sources() or any(job_id in j.sources() for j in jobs)):
             self._notify("That job is chained — it can't move past the job it "
                          "runs after, or the ones that run after it.", "warn")
 
@@ -645,7 +668,7 @@ class JobQueueController(QObject):
         jobs = self.bridge.queue.jobs
         terminal = {j.id for j in jobs if j.state in JobState.TERMINAL}
         return [j.label or j.id for j in jobs
-                if j.chain_from in terminal and j.state not in JobState.TERMINAL]
+                if terminal.intersection(j.sources()) and j.state not in JobState.TERMINAL]
 
     def _on_start_toggled(self) -> None:
         if self.bridge.queue.is_started:

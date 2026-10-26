@@ -115,6 +115,34 @@ CHAIN_TARGET = {
     "merge_plates": "dataset1",
 }
 
+# Every input a predecessor's output can fill, in the order a user reads them,
+# with the name a menu calls each one. CHAIN_TARGET above is the first of these
+# — the one "Run after ▸" fills — and the two-dataset tools have a second,
+# which is how a Concatenate can take dataset 1 from one conversion and
+# dataset 2 from another.
+INPUT_TARGETS = {
+    "analyze": (("opts.raw", "Input"),),
+    "concatenate": (("dataset1", "Dataset 1"), ("dataset2", "Dataset 2")),
+    "ome_import": (("source", "Source"),),
+    "czi_import": (("source", "Source"),),
+    "nd2_import": (("source", "Source"),),
+    "validate": (("dataset", "Dataset"),),
+    "subset": (("source", "Source"),),
+    "import_loose": (("source", "Source"),),
+    "merge_plates": (("dataset1", "Dataset 1"), ("dataset2", "Dataset 2")),
+}
+
+
+def input_targets(kind: str) -> tuple[str, ...]:
+    """The dotted spec paths *kind* receives earlier jobs' outputs at."""
+    return tuple(target for target, _label in INPUT_TARGETS.get(kind, ()))
+
+
+def input_label(kind: str, target: str | None) -> str:
+    """What a menu or a queue row calls the input at *target*."""
+    return dict(INPUT_TARGETS.get(kind, ())).get(target or "", "Input")
+
+
 # Which spec keys name this kind's inputs and its output, in the order a
 # description should read them. Keeping it as data rather than a function per
 # kind is what lets `test_job_kinds` assert every kind is covered.

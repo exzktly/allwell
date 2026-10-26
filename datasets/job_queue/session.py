@@ -194,7 +194,7 @@ class QueueSession:
             return False
         names = " and ".join(f"“{queue.get(s).label or s}”" for s in dict.fromkeys(sources.values()))
         started = self._start(kind, None, (
-            f"Setting up a {label} job that runs after {names}. Inputs marked ⧗ "
+            f"Setting up a queued {label} job that runs after {names}. Inputs marked ⧗ "
             "are read from those jobs' outputs when it runs. Set every other "
             "option on the page, then add it to the queue."))
         if started:

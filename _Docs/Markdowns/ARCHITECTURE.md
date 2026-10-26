@@ -15782,7 +15782,13 @@ used for something other than its own job; without it the borrowed page looks
 exactly as it always does and the only way to finish is to guess. It is
 host-agnostic — it knows nothing about queues, jobs or datasets, and whoever
 shows it decides what confirming means — and it does not block the page
-beneath it, which is the point, since the user is editing that page.
+beneath it, which is the point, since the user is editing that page. It
+shows its whole sentence at any width: the buttons sit beside the sentence
+until that would leave it narrower than `_MIN_TEXT_W`, then move under it, and
+the strip's height is computed from the sentence as it wraps at the real width
+(`_fit`, on every resize and `setText`). In the Analyze form's narrow column a
+one-row strip gave the sentence about 60 px and cut off most of it
+(`tests/test_context_banner_fits.py`).
 `DatasetsTab` inserts it at index 0 of the target page's own layout, which
 works uniformly because all seven Datasets pages hold a single `QScrollArea`
 there; for Analyze it goes at index 0 of `_form_layout`, where the resume

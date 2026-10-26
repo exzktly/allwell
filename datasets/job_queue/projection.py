@@ -32,6 +32,7 @@ from pathlib import Path
 
 from core.safe import swallow
 from datasets.core.dataset_paths import preview_wells
+from datasets.core.well_block import WellBlockError, block_shift_well_map
 from services.job_kinds import CONVERTER_KINDS, input_targets, produced_layout
 from services.job_queue import JobQueue, JobSpec, JobState
 from util.timepoint import sort_key as tp_sort_key
@@ -186,15 +187,10 @@ def _merge(inputs: list[Projection], spec: dict, layout: dict | None) -> Project
     """Merge plates: dataset 1's wells plus dataset 2's, moved as a block when
     the job places dataset 2 at another origin."""
     if len(inputs) == 2 and spec.get("remap_enabled") and inputs[1].wells is not None:
-        from datasets.merge_plates.merge_plates_compute import (
-            MergePlatesError,
-            block_shift_well_map,
-        )
-
         try:
             moved = tuple(block_shift_well_map(
                 inputs[1].wells, target_origin=str(spec.get("remap_origin") or "")).values())
-        except MergePlatesError:
+        except WellBlockError:
             moved = None
         inputs = [inputs[0], replace(inputs[1], wells=moved)]
     return _combine(inputs, layout, timepoints_known=True)

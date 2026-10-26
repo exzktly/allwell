@@ -28,6 +28,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+
+from datasets.core.well_block import WellBlockError
+from datasets.core.well_block import block_shift_well_map as _block_shift
 from pathlib import Path
 
 from util.acquisition_record import AcquisitionRecordError, merge_plate_records, read_record
@@ -71,9 +74,6 @@ destination_has_marker = _api.destination_has_marker
 destination_is_failed_run = _api.destination_is_failed_run
 destination_has_unrecognized_content = _api.destination_has_unrecognized_content
 
-_PLATE_ROWS = "ABCDEFGH"
-_PLATE_MAX_COL = 12
-
 
 def _refuse_well_collisions(paths: DatasetPaths, label: str) -> None:
     """Refuse *paths* when two files claim one well under different
@@ -94,39 +94,17 @@ def _refuse_well_collisions(paths: DatasetPaths, label: str) -> None:
 def block_shift_well_map(wells, *, target_origin: str) -> dict[str, str]:
     """Translate *wells* as a rigid block so their minimum (row, col) corner
     lands at *target_origin* — the "place dataset 2 starting at E01" UI
-    control. Covers the common quadrant-placement case; an arbitrary,
-    non-rectangular remap still goes through ``well_map`` directly.
+    control (``datasets.core.well_block``). Covers the common
+    quadrant-placement case; an arbitrary, non-rectangular remap still goes
+    through ``well_map`` directly.
 
     Raises :class:`MergePlatesError` if the shifted block would run off the
     96-well plate (a column past 12 or a row past H).
     """
-    tokens = [canonical_well_label(w) for w in wells]
-    if any(t is None for t in tokens):
-        raise MergePlatesError("Cannot shift: one or more wells aren't valid 96-well positions.")
-    if not tokens:
-        return {}
-    target = canonical_well_label(target_origin)
-    if target is None:
-        raise MergePlatesError(f"{target_origin!r} isn't a valid 96-well position.")
-
-    rcs = [(_PLATE_ROWS.index(t[0]), int(t[1:]) - 1) for t in tokens]
-    min_row = min(r for r, _ in rcs)
-    min_col = min(c for _, c in rcs)
-    target_row = _PLATE_ROWS.index(target[0])
-    target_col = int(target[1:]) - 1
-    delta_row = target_row - min_row
-    delta_col = target_col - min_col
-
-    result: dict[str, str] = {}
-    for token, (row, col) in zip(tokens, rcs):
-        new_row, new_col = row + delta_row, col + delta_col
-        if not (0 <= new_row < len(_PLATE_ROWS)) or not (0 <= new_col < _PLATE_MAX_COL):
-            raise MergePlatesError(
-                f"Shifting to {target_origin} would place well {token} outside "
-                "the 96-well plate."
-            )
-        result[token] = f"{_PLATE_ROWS[new_row]}{new_col + 1:02d}"
-    return result
+    try:
+        return _block_shift(wells, target_origin=target_origin)
+    except WellBlockError as exc:
+        raise MergePlatesError(str(exc)) from exc
 
 
 def _ordered_union(first, second) -> list:

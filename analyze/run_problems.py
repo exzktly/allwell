@@ -137,6 +137,21 @@ class AnalyzeRunProblemsMixin:
         label.setToolTip("\n\n".join(
             f"{p.section or p.title}: {p.message}" for p in problems))
 
+    def run_problem_summary(self) -> str:
+        """The problems last shown under Run, as one line, or ``""``.
+
+        The Job Queue's session banner reads this when its "Add to queue" is
+        refused. The banner sits at the top of the form and the footer line
+        at the bottom of it, so without repeating the reason beside the button
+        that was pressed, a refused save looked like a click that did nothing.
+        """
+        shown = getattr(self, "_shown_run_problems", None) or []
+        if not shown:
+            return ""
+        first = shown[0].message.split("\n\n")[0].strip()
+        more = len(shown) - 1
+        return first + (f" (+{more} more)" if more else "")
+
     def _report_run_problems(self, problems: list[RunProblem]) -> None:
         """Run or + Queue was pressed: show the problems in the error colour and
         take the user to the first one."""

@@ -270,6 +270,30 @@ class QueueBridge(QObject):
         runner.show_job(json.loads(json.dumps(spec)))
         return True
 
+    def _form_hook(self, kind: str, name: str) -> None:
+        """Call a runner's optional form hook, never on a runner mid-run."""
+        runner = self._runners.get(kind)
+        hook = getattr(runner, name, None)
+        if callable(hook) and not runner.is_busy():
+            hook()
+
+    def remember_form(self, kind: str) -> None:
+        """Ask *kind*'s page to keep its form as it is now, before a session
+        borrows it (only Analyze has a form the queue changes beyond the
+        job's own fields)."""
+        self._form_hook(kind, "remember_form")
+
+    def restore_form(self, kind: str) -> None:
+        """Put back what :meth:`remember_form` kept."""
+        self._form_hook(kind, "restore_form")
+
+    def forget_form(self, kind: str) -> None:
+        """Drop what :meth:`remember_form` kept, leaving the page as it is."""
+        runner = self._runners.get(kind)
+        hook = getattr(runner, "forget_form", None)
+        if callable(hook):
+            hook()
+
     def show_pending(self, kind: str, pending: dict, projection: dict | None = None) -> bool:
         """Tell *kind*'s page which inputs are queued jobs' outputs not yet
         written (``datasets.core.pending_inputs``), with what each is expected
@@ -277,7 +301,8 @@ class QueueBridge(QObject):
         shows the planned path as an ordinary one."""
         runner = self._runners.get(kind)
         show = getattr(runner, "set_pending_inputs", None)
-        if not callable(show):
+        if not callable(show) or runner.is_busy():
+            # A page mid-run is that run's progress display (show_spec's rule).
             return False
         show(dict(pending), projection)
         return True
@@ -505,7 +530,7 @@ class JobQueueController(QObject):
         self.sessions = QueueSession(
             self.bridge,
             notify=lambda text, kind="warn": self._notify(text, kind),
-            add_job=lambda kind, spec: self.add_job(kind, spec),
+            add_job=lambda kind, spec: self._add_plain(kind, spec),
         )
 
         self.page = JobQueuePage()
@@ -571,7 +596,16 @@ class JobQueueController(QObject):
         self._reveal = reveal
 
     def add_job(self, kind: str, spec: dict) -> None:
-        """Called by each Datasets controller's ``on_add_to_queue`` callback."""
+        """Called by each Datasets controller's ``on_add_to_queue`` callback,
+        and by Analyze's "+ Queue". While a session has that tool's page open
+        the press goes through the session, which knows the page's links
+        (``QueueSession.queue_from_page``)."""
+        if self.sessions.queue_from_page(kind, spec):
+            return
+        self._add_plain(kind, spec)
+
+    def _add_plain(self, kind: str, spec: dict) -> None:
+        """Queue *spec* as a job of its own, with no links."""
         job = JobSpec(id=uuid.uuid4().hex[:10], kind=kind,
                       label=describe(kind, spec), spec=spec)
         self.bridge.add_job(job)
@@ -651,7 +685,19 @@ class JobQueueController(QObject):
         if job is not None and job.state == JobState.RUNNING:
             self._notify("Can't remove the running job — stop it first.", "warn")
             return
+        # A finished job's folder is written into what waited on it
+        # (JobQueue.remove); anything else leaves those jobs on the path they
+        # were set up with, which nothing will now write. Said, as Clear
+        # completed says it, rather than discovered when they run.
+        orphaned = ([] if job is None or job.state == JobState.SUCCEEDED else
+                    [j.label or j.id for j in self.bridge.queue.jobs
+                     if job_id in j.sources() and j.state not in JobState.TERMINAL])
         self.bridge.remove_job(job_id)
+        if orphaned:
+            self._notify(
+                f"{len(orphaned)} queued job(s) were waiting on the job you "
+                "removed — check their input before starting the queue: "
+                + ", ".join(orphaned[:3]), "warn")
 
     def _on_move(self, job_id: str, delta: int) -> None:
         """The menu's Move up / Move down: one step, a swap with the neighbour."""

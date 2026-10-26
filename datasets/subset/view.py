@@ -279,6 +279,11 @@ class SubsetPage(LogPanelMixin, QWidget):
         wells = self.selected_wells()
         if not wells:
             return None
+        if self._requested.get("wells"):
+            # An edited job's explicit list stays a list: collapsing it to
+            # "every well" because it happens to equal the projection widens
+            # the job to wells it never named.
+            return wells
         offered = (self._projection or {}).get("wells")
         if self.has_pending_inputs() and offered and set(wells) >= set(offered):
             return None
@@ -314,7 +319,12 @@ class SubsetPage(LogPanelMixin, QWidget):
     def set_selected_wells(self, wells: list[str] | None) -> None:
         """``None`` keeps whatever _reload_source_metadata already selected
         (everything) — a queued job with no explicit well filter subsets
-        nothing away rather than silently selecting zero wells."""
+        nothing away rather than silently selecting zero wells.
+
+        Remembered as asked (see set_selected_timepoints): an edited job's
+        explicit wells stay explicit, and stay offered, over a projection
+        that does not list them."""
+        self._requested["wells"] = list(wells) if wells else None
         if wells:
             self._plate.setSelectedWellIds(list(wells))
 
@@ -408,11 +418,6 @@ class SubsetPage(LogPanelMixin, QWidget):
         the disk. Choices already made on the page (an edited job's own) are
         kept where the projection still offers them.
         """
-        if not pending and not self.has_pending_inputs():
-            # Nothing was pending and nothing is: leave the page exactly as it
-            # is. Reloading here re-ticked every well of the source, which
-            # turned a no-op edit of an explicit subset into "every well".
-            return
         wells = self.selected_wells()
         tps = self._current_choice("timepoints", self._tp_checks,
                                    self.all_timepoints_selected, self.selected_timepoints)
@@ -425,7 +430,9 @@ class SubsetPage(LogPanelMixin, QWidget):
             if self.has_pending_inputs() else {})
         self._reload_source_metadata()
         if wells:
-            self.set_selected_wells(wells)
+            # Re-ticked on the plate directly: the page's own selection, not
+            # a new request (set_selected_wells would record it as one).
+            self._plate.setSelectedWellIds(list(wells))
         self.set_selected_timepoints(tps)
         self.set_selected_fovs(fovs)
         self._refresh_run_enabled()
@@ -491,8 +498,13 @@ class SubsetPage(LogPanelMixin, QWidget):
         """
         proj = self._projection
         wells = proj.get("wells")
+        own = self._requested.get("wells") or []
         self._wells_hint.setVisible(wells is None)
-        self._plate.setEnabledWells(list(wells) if wells else None)
+        # The job's own wells are offered whether or not the projection lists
+        # them: enabling only the projection's dropped a well the job names
+        # on a no-op save, and the run's shortfall check never saw it.
+        offered = sorted(set(wells) | set(own)) if wells else None
+        self._plate.setEnabledWells(offered)
         self._plate.setSelectedWellIds(list(wells or []))
         # An edited job's own explicit choices are offered whether or not the
         # projection lists them: built from the projection alone, a picker

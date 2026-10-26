@@ -15303,10 +15303,20 @@ Qt event loop. Four layers:
   the others alone. Both reject a self-link, a cycle (walking every ancestor
   through every link, since a cycle can now close through a job's second
   input), and a source queued *below* the job, which would leave it waiting
-  for ever on a job that runs after it. A link to a source that has already
-  failed, been cancelled or been blocked blocks the job at once
-  (`_block_if_stopped`) — the cascade runs only when a job finishes, so
-  without it the job would wait for ever with nothing said. A reorder placing a job before any of
+  for ever on a job that runs after it. Every change to a job's links ends in
+  `_reassess_block`, both ways: a link to a source that has already failed,
+  been cancelled or been blocked blocks the job at once (the cascade runs only
+  when a job finishes, so without it the job would wait for ever with nothing
+  said), and a blocked job whose stopped source was unlinked or removed is
+  released with what it was holding up — otherwise it stayed blocked naming a
+  job it no longer waits for, out of reach of any retry.
+
+  `remove` drops only the removed job's links, and when that job *succeeded*
+  first writes the folder it reported into each successor's linked input, so
+  the successor runs on what was written rather than on the path it was set up
+  with. Removing an unfinished source says which queued jobs were waiting on
+  it, as Clear completed does. Loading a file drops, and notes, a link to a job
+  that is not in it. A reorder placing a job before any of
   its sources is refused.
 
   A finished converter job also records a **`layout`** — what it knows about
@@ -15600,10 +15610,28 @@ Qt event loop. Four layers:
   edited job's existing links the same way, and Save on an edit re-links
   through `set_link` only where the kept set differs (`_relink`). Ending a
   session takes the pending marks off the page, so it is an ordinary page
-  again; opening another session first drops the previous one's links. A
-  next-step session whose source leaves the queue is closed with a note
-  (`abandon_if_stale`): saving it would add the job with that input unlinked,
-  and a running queue could start it against a folder nothing will write.
+  again. A next-step session whose source leaves the queue is closed with a
+  note (`abandon_if_stale`): saving it would add the job with that input
+  unlinked, and a running queue could start it against a folder nothing will
+  write.
+
+  **The order of a session's page work is load-bearing.** Every `begin_*`
+  closes the open session (`_close_previous`, which says so unless the very
+  job is being reopened — two new jobs or two next steps of one kind are both
+  `(kind, None)`) *before* it writes to any page, because closing hands back
+  what the old session borrowed, and doing that after a next step's skeleton
+  was shown wrote the previous form over the new input. It then asks the page
+  to `remember_form` before populating it. `save` collects the page, hands it
+  back (`_release_page`: pending marks cleared, a form changed for links
+  restored, otherwise forgotten) and only *then* adds the job, because adding
+  can start it at once on an idle running queue, and restoring a form after
+  that rewrote the page of the run in flight; `show_pending` and the form
+  hooks also refuse a runner that is busy. A tool page's own "+ Queue" while a
+  session has that page open goes through the session
+  (`JobQueueController.add_job` → `queue_from_page`): a new job's session is
+  saved as its banner would, an edit's adds a linked copy — queued directly,
+  the planned paths went in with no links and the session stayed open for a
+  second copy.
 
   It holds no widgets and imports no Qt, reaching outside through three
   injected callables — `notify`, `add_job`, and the `on_session` /
@@ -15762,15 +15790,18 @@ note under its input field in place of the readout (`_refresh_output`, in
 `analyze/domain/input.py`, which drops the pending state once the field holds
 any other folder), fills the schema and channels from the projected layout as
 a folder scan would, and turns run-time detection on, so the real files are
-still checked when the job runs. It keeps the whole form as it was before
-(`collect_spec`, with the input folder `show_job` replaced) and puts it back
-through `hydrate_job` when the pending input is cleared — the session ending,
-saved or cancelled — so the user's own form is not left with another job's
-channels. A Subset page given nothing pending while nothing was pending does
-nothing (the session also skips the call for a job with no links): reloading
+still checked when the job runs. Its `remember_form` / `restore_form` /
+`forget_form` keep the whole form (`collect_spec`) from before the session
+borrowed it and put it back (`hydrate_job`) when a setup that changed it for
+its links ends, saved or cancelled; the session takes the snapshot before it
+writes anything to the page, since by `set_pending_inputs` the input folder
+has already been replaced. The session sends nothing to a job with no links,
+and a Subset page re-ticks the wells it held after any reload: reloading
 re-ticked every well and turned a no-op edit of an explicit subset into "every
-well". It remembers the timepoints and FOVs `show_job` asked for even when the
-missing source left no boxes to tick, and offers them as the only choices
+well". It remembers the wells, timepoints and FOVs `show_job` asked for, even
+when the missing source left no boxes to tick: an edited job's wells stay
+offered over a projection that does not list them and stay a list even when
+they equal it, and its timepoints and FOVs are offered as the only choices
 when the projection does not know that dimension — ticked, they mean "these",
 not "all". `build_equation_row(on_swap=…)` adds the
 *Swap dataset 1 and 2* button Concatenate and Merge plates both carry; a swap

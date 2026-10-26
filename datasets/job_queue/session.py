@@ -123,6 +123,8 @@ class QueueSession:
             self._notify(f"{KIND_LABEL.get(job.kind, job.kind)} is busy with its "
                          "own run — try again when it finishes.", "warn")
             return False
+        self._close_previous(job.kind, job_id)
+        self._bridge.remember_form(job.kind)
         problems = self._bridge.hydrate_job(job_id)
         if problems is None:
             self._notify("That job's page isn't available to edit.", "warn")
@@ -154,6 +156,7 @@ class QueueSession:
             self._notify(f"{KIND_LABEL.get(kind, kind)} isn't available in this build.",
                          "warn")
             return False
+        self._close_previous(kind, None)
         return self._start(kind, None,
                            f"Setting up a new {KIND_LABEL.get(kind, kind)} job. "
                            "Set every option on the page, then add it to the queue.")
@@ -184,6 +187,11 @@ class QueueSession:
         if kind not in self._collectors:
             self._notify(f"{label} isn't available in this build.", "warn")
             return False
+        # Closed before anything is written to the page: closing a session
+        # restores what it borrowed, and doing that after the skeleton was
+        # shown wrote the previous setup's form over this one's input.
+        self._close_previous(kind, None)
+        self._bridge.remember_form(kind)
         links = {target: (source, self._source_path(source))
                  for target, source in sources.items()}
         skeleton: dict = {}
@@ -216,9 +224,6 @@ class QueueSession:
         first of those is expected to hold — a Subset builds its pickers from
         it, an Analyze its channels."""
         if not self._links:
-            # A job with no links has nothing to show, and telling the page
-            # "nothing is pending" is not free: a page that rebuilds itself on
-            # it would discard what the edit just loaded into it.
             return
         queue = self._bridge.queue
         pending: dict[str, str] = {}
@@ -269,16 +274,23 @@ class QueueSession:
                 f"({', '.join(sorted(lost))}) — saving would clear "
                 "them. Check the input path first."]
 
-    def _start(self, kind: str, job_id: str | None, message: str) -> bool:
-        if self._links and self._session is not None:
-            # The previous session's inputs stop being anyone's output.
-            self._bridge.show_pending(self._session[0], {}, None)
-        self._links = {}
-        if self._session is not None and self._session != (kind, job_id):
-            # Silently overwriting it discarded whatever the user had typed on
-            # the other page, with the banner disappearing from a page they
-            # were no longer looking at.
+    def _close_previous(self, kind: str, job_id: str | None) -> None:
+        """End whatever session is open, before a new one touches any page.
+
+        Said aloud unless it is the very same queued job being reopened:
+        silently replacing a session discarded whatever the user had typed on
+        the other page, with the banner disappearing from a page they were no
+        longer looking at — and two *new* jobs of one kind, or two next steps,
+        are both ``(kind, None)``, so comparing the pairs missed exactly them.
+        """
+        if self._session is None:
+            return
+        if not (job_id is not None and self._session == (kind, job_id)):
             self._notify("Your previous edit was closed without saving.", "warn")
+        self.end()
+
+    def _start(self, kind: str, job_id: str | None, message: str) -> bool:
+        self._links = {}
         self._session = (kind, job_id)
         if self._on_session is None:
             return True
@@ -309,6 +321,10 @@ class QueueSession:
             return False        # the page said why; the session stays open
         spec = collect()
         kept = self._kept_links(spec)
+        # The page is handed back before the job is added, never after:
+        # adding can start the job at once on a running, idle queue, and
+        # restoring a borrowed form then rewrote the page of the run in flight.
+        self._release_page()
         if job_id is None and kept:
             job = JobSpec(id=uuid.uuid4().hex[:10], kind=kind,
                           label=describe(kind, spec), spec=spec)
@@ -369,15 +385,46 @@ class QueueSession:
             self._notify(f"Couldn't keep the link for {names} — that input "
                          "uses the folder shown on the page instead.", "warn")
 
+    def queue_from_page(self, kind: str, spec: dict) -> bool:
+        """The page's own "+ Queue" pressed while a session has that page open.
+
+        Without this the button bypassed the session: a next step's inputs
+        were queued as plain folders — the planned paths — with no link, and
+        a running queue could start the job against them at once; the session
+        then stayed open for a second copy. A new job's session is saved, as
+        its banner would. An edit's adds a new job with the edit's links and
+        leaves the edit open. Returns ``False`` when no session has *kind*'s
+        page, so the caller queues the spec as it always did.
+        """
+        if self._session is None or self._session[0] != kind:
+            return False
+        if self._session[1] is None:
+            self.save()
+            return True
+        kept = self._kept_links(spec)
+        job = JobSpec(id=uuid.uuid4().hex[:10], kind=kind,
+                      label=describe(kind, spec), spec=spec)
+        self._report_refused(kind, self._bridge.add_job(job, links=kept))
+        return True
+
+    def _release_page(self) -> None:
+        """Hand the session's page back: nothing on it marked as a queued
+        job's output, and a form the session changed for its links (Analyze's
+        channels and run-time detection) put back as it was."""
+        if self._session is None:
+            return
+        kind = self._session[0]
+        if self._links:
+            self._bridge.show_pending(kind, {}, None)
+            self._bridge.restore_form(kind)
+        else:
+            self._bridge.forget_form(kind)
+        self._links = {}
+
     def end(self) -> None:
-        kind = self._session[0] if self._session else None
-        had_links = bool(self._links)
+        self._release_page()
         self._session = None
         self._links = {}
-        if kind is not None and had_links:
-            # The page is left as an ordinary page again: nothing marked as a
-            # queued job's output once no session is about to link it.
-            self._bridge.show_pending(kind, {}, None)
         if self._on_session_end is not None:
             self._on_session_end("")
 

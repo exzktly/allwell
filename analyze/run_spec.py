@@ -274,16 +274,8 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         note = (pending or {}).get("opts.raw", "")
         if not note:
             self._pending_input = None
-            self._restore_form_before_pending()
             self._refresh_output()
             return
-        if self._form_before_pending is None:
-            # The form is borrowed for the queued job and changed below (the
-            # projected channels, run-time detection): keep what the user had,
-            # input folder included, to put back when the setup ends.
-            before = self.collect_spec()
-            before.setdefault("opts", {})["raw"] = self._raw_before_show
-            self._form_before_pending = before
         self._pending_input = (self._input_edit.text().strip(), note)
         layout = (projection or {}).get("layout")
         if layout:
@@ -299,19 +291,30 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
     def has_pending_inputs(self) -> bool:
         return self._pending_input is not None
 
-    #: The whole form as it was before a queued job's pending input was shown
-    #: on it, put back by :meth:`_restore_form_before_pending` when the setup
-    #: ends — saved or cancelled — so the user's own form is not left with
-    #: another job's channels and run-time detection switched on.
-    _form_before_pending: dict | None = None
-    #: The input folder before the last :meth:`show_job`, since a next step's
-    #: skeleton is shown before its pending input is.
-    _raw_before_show = ""
+    #: The whole form as it was before the Job Queue borrowed it
+    #: (:meth:`remember_form`), put back by :meth:`restore_form` when a setup
+    #: that changed it for its links ends — saved or cancelled — so the user's
+    #: own form is not left with another job's input, channels and run-time
+    #: detection.
+    _form_before_borrow: dict | None = None
 
-    def _restore_form_before_pending(self) -> None:
-        before, self._form_before_pending = self._form_before_pending, None
+    def remember_form(self) -> None:
+        """Keep the form as it is, before a queue session writes to it.
+
+        Taken by the session before it populates the page, never inside
+        :meth:`set_pending_inputs`: by then ``show_job`` or ``hydrate_job``
+        has already replaced the input folder, and an edit's snapshot came
+        back with an empty one.
+        """
+        self._form_before_borrow = self.collect_spec()
+
+    def restore_form(self) -> None:
+        before, self._form_before_borrow = self._form_before_borrow, None
         if before is not None:
             self.hydrate_job(before)
+
+    def forget_form(self) -> None:
+        self._form_before_borrow = None
 
     def _auto_detect_on(self) -> bool:
         box = getattr(self, "_auto_detect_cb", None)
@@ -364,7 +367,6 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         needs to look right, not be authoritative."""
         raw = (spec.get("opts") or {}).get("raw")
         if raw and hasattr(self, "_input_edit"):
-            self._raw_before_show = self._input_edit.text().strip()
             self._input_edit.setText(str(raw))
 
     #: What run-time detection found for the run in flight, as one sentence,

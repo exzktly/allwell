@@ -256,10 +256,22 @@ class JobQueue:
         # A successor chained to the removed job loses that link rather than
         # being left pointing at a job that no longer exists. Only that link:
         # a Concatenate fed by two jobs keeps the input the other one fills.
+        # When the removed job finished, what it wrote is written into the
+        # successor first — that folder is the answer the link was waiting
+        # for, and the path the successor was set up with was only a plan.
         for successor in self._jobs:
-            if job_id in successor.sources():
-                successor.set_links([link for link in successor.links()
-                                     if link.source != job_id])
+            if job_id not in successor.sources():
+                continue
+            if job.state == JobState.SUCCEEDED:
+                produced = {"out_dir": job.output_dir,
+                            "dataset_root": job.dataset_root, "in_dir": job.in_dir}
+                for link in successor.links():
+                    value = produced.get(link.kind or "") if link.source == job_id else None
+                    if value and link.target:
+                        set_dotted(successor.spec, link.target, value)
+            successor.set_links([link for link in successor.links()
+                                 if link.source != job_id])
+            self._reassess_block(successor)
 
     def move(self, job_id: str, delta: int) -> bool:
         """Reorder ``job_id`` by ``delta`` positions. Refuses (returns
@@ -432,7 +444,7 @@ class JobQueue:
                  if chain_from is not None else [])
         self._check_links(job_id, links)
         self._by_id[job_id].set_links(links)
-        self._block_if_stopped(self._by_id[job_id])
+        self._reassess_block(self._by_id[job_id])
 
     def set_link(
         self,
@@ -455,23 +467,31 @@ class JobQueue:
             links.append(ChainLink(source, target, kind))
         self._check_links(job_id, links)
         job.set_links(links)
-        self._block_if_stopped(job)
+        self._reassess_block(job)
 
-    def _block_if_stopped(self, job: JobSpec) -> None:
-        """Block a pending job linked to a source whose output is never coming.
+    def _reassess_block(self, job: JobSpec) -> None:
+        """Make *job*'s blocked-or-not match its links, after they changed.
 
-        The cascade only runs when a job *finishes*; a link made afterwards to
-        a job that already failed would otherwise leave this one pending for
-        ever, with nothing said. Blocked, it says which job stopped it, and
-        retrying that job releases it like any other cascade.
+        Both directions. A pending job linked to a source whose output is
+        never coming is blocked — the cascade only runs when a job *finishes*,
+        so a link made afterwards to a failed job left this one pending for
+        ever, with nothing said. And a blocked job whose stopped source was
+        unlinked (or removed) is released, with whatever it was holding up —
+        otherwise it stayed blocked naming a job it no longer waits for, and
+        no retry could reach it. A job still blocked names the source that is
+        still in the way.
         """
-        if job.state != JobState.PENDING:
-            return
         stopped = next((s for s in job.sources() if self._still_stopping(s)), None)
-        if stopped is not None:
+        if job.state == JobState.PENDING and stopped is not None:
             job.state = JobState.BLOCKED
             job.message = f"predecessor {stopped} did not complete"
             self._cascade_block(job.id)
+        elif job.state == JobState.BLOCKED and stopped is None:
+            job.state = JobState.PENDING
+            job.message = ""
+            self._cascade_unblock(job.id)
+        elif job.state == JobState.BLOCKED:
+            job.message = f"predecessor {stopped} did not complete"
 
     def _check_links(self, job_id: str, links: list[ChainLink]) -> None:
         """Refuse links that name an unknown job, the job itself, or a cycle.
@@ -718,6 +738,16 @@ class JobQueue:
                 notes.append(
                     f"{j.id}: was running at last save, marked interrupted "
                     f"(start the queue to resume it)")
+        for j in self._jobs:
+            # A link to a job that is not in the file can never be resolved:
+            # the job would fail at dequeue naming an id nobody can find.
+            # Dropped here, and said, like every other repair.
+            dangling = [link for link in j.links() if link.source not in self._by_id]
+            if dangling:
+                j.set_links([link for link in j.links() if link.source in self._by_id])
+                notes.append(
+                    f"{j.id}: dropped its link to {', '.join(l.source for l in dangling)}, "
+                    "which is not in the queue — check its input before starting")
         if not self._chain_order_valid(self._jobs):
             fixed = self._topological_order(self._jobs)
             if fixed is not None:

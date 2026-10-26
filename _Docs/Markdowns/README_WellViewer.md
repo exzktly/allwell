@@ -8036,6 +8036,8 @@ nothing there to run on yet — or worse, something an earlier run left behind.
   Concatenate, dataset 1 is the one whose timepoints come first.
 - Browse to a different folder for an input and that input stops waiting on
   the job; it uses the folder you picked.
+- The page's own **+ Queue** does the same as **Add to queue** while the strip
+  is showing, so the job keeps waiting on the jobs it reads from.
 - Concatenate's gap, left untouched, is worked out from the two datasets'
   acquisition times when the job runs. Whether dataset 2 can be added in place
   is also checked then.
@@ -8078,9 +8080,13 @@ job that waits on two others starts only once both have finished.
 
 If a job fails, everything chained after it is marked **blocked**, not
 failed — those jobs never ran. A job that waits on two jobs is blocked when
-either one fails, and goes back to pending only once neither is failed; its
-row names whichever is still in the way. Linking a job to one that has
-already failed blocks it at once, rather than leaving it waiting. **Retry** on the *failed* job puts it back in
+either one fails, and goes back to pending once neither is failed — by
+retrying the failed job, or by pointing that input somewhere else with
+**Dataset 1 from ▸ Nothing**; its row names whichever is still in the way.
+Linking a job to one that has already failed blocks it at once, rather than
+leaving it waiting. Removing a finished job hands its folder to the jobs that
+were waiting on it; removing one that has not run says which jobs were
+waiting on it, since they are left with the folder they were set up with. **Retry** on the *failed* job puts it back in
 the queue and returns everything it blocked to pending, so a whole chain
 recovers in one step. Retrying a blocked job itself is refused: it never ran,
 and the job that stopped it is still there to fix. Stopping the currently-running job pauses the queue

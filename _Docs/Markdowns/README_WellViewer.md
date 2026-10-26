@@ -7991,9 +7991,23 @@ failed, was cancelled or finished, **Input from** (below), **New job using this 
 opened with **Enter** once it has keyboard focus, and its menu with the
 **Menu** key or **Shift+F10**.
 
-The queue runs strictly one job at a time, in the order shown, and never
-starts on its own — press **▶ Start queue** to begin working through it, and
-**⏸ Pause queue** (the same button) to stop after the current job. Queued
+The queue works through the jobs in the order shown, and never starts on
+its own — press **▶ Start queue** to begin, and **⏸ Pause queue** (the same
+button) to stop: a running Analyze job is wound down so it can resume where
+it left off, and a running Datasets tool is cancelled.
+
+**One job at a time — except a remote Analyze.** Jobs on this computer run one
+at a time, because each works it hard and two at once would each be slower.
+An Analyze job set to run on a remote host does its work there, so it can run
+beside one job on this computer — converting the next plate while the last
+one is analysed on the cluster, say. Its row says which host it runs on
+("runs on “cluster”"). Two jobs never run together when they share a folder:
+a remote Analyze waits for a conversion above it that writes the folder it
+reads, linked or not, and a job below it that writes the folder it is
+reading waits for it to finish. A remote and a local Analyze also take turns,
+since they share the Analyze pane. While two jobs run, **■ Stop job** reads
+**■ Stop both jobs** and cancels both; to cancel one, choose **Stop this job**
+from that row's **⋯** menu. Either way the queue pauses. Queued
 jobs persist across app restarts, but a relaunch always comes up paused —
 you always decide when unattended work resumes. If a restart interrupted a
 job, the page says so above the list when it next opens.
@@ -8005,7 +8019,7 @@ folders it works on, the job it waits for, and its latest message. That
 second line is shortened with "…" when it does not fit; hover it for the
 full text. Every row is numbered by its place in the queue ("1.", "2.", …),
 and the menus that name jobs use the same numbers, so "3." is always the
-same job. The currently running job also shows a moving progress strip.
+same job. A running job also shows a moving progress strip.
 
 Drag a row by its handle at the left to reorder it, or use **Move up** /
 **Move down** from the menu. The whole row is a click target — hover it and

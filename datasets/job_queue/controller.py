@@ -31,6 +31,7 @@ from services.job_kinds import (
     produced_for,
     produced_layout,
 )
+from services.job_lanes import LANES, run_lane
 from services.job_queue import (
     ChainLink,
     JobQueue,
@@ -68,10 +69,12 @@ class QueueableController(Protocol):
 
 class QueueBridge(QObject):
     """Owns the persisted queue and drives it against the controller
-    registry. Strictly serial: only ever one job in flight, tracked as
-    ``(job_id, kind)`` so a completion signal from a controller that isn't
-    the queue's own in-flight job — e.g. the user pressed that tool's own Run
-    button by hand — is dropped rather than misattributed.
+    registry. At most one job in flight per lane (``services.job_lanes``):
+    a remote Analyze beside one local job, never two local ones. Each running
+    job is tracked by its kind — a tool runs one job at a time, so the kind
+    names the run — and a completion signal from a controller with no queue
+    job in flight (the user pressed that tool's own Run button by hand) is
+    dropped rather than misattributed.
     """
 
     queueChanged = Signal()
@@ -81,14 +84,22 @@ class QueueBridge(QObject):
         self._state_dir = state_dir
         self._runners: dict[str, QueueableController] = {}
         self._queue: JobQueue = load_queue(state_dir)
-        self._current: tuple[str, str] | None = None  # (job_id, kind)
+        # kind -> (job_id, lane) for every queue job in flight.
+        self._running: dict[str, tuple[str, str]] = {}
 
     @property
     def queue(self) -> JobQueue:
         return self._queue
 
+    def running_job_ids(self) -> list[str]:
+        """The queue's jobs in flight, in queue order."""
+        ids = {job_id for job_id, _lane in self._running.values()}
+        return [j.id for j in self._queue.jobs if j.id in ids]
+
     def current_job_id(self) -> str | None:
-        return self._current[0] if self._current is not None else None
+        """The first job in flight, or ``None`` when none is."""
+        running = self.running_job_ids()
+        return running[0] if running else None
 
     def register(self, kind: str, runner: QueueableController) -> None:
         self._runners[kind] = runner
@@ -359,39 +370,53 @@ class QueueBridge(QObject):
         self._queue.pause()
         self._save()
 
-    def stop_current(self) -> None:
-        """Cancel the in-flight job. Per the queue's decision table,
-        cancelling pauses the queue — resuming afterward is explicit."""
-        if self._current is None:
-            return
-        _job_id, kind = self._current
+    def _kind_of_running(self, job_id: str) -> str | None:
+        return next((kind for kind, (jid, _lane) in self._running.items() if jid == job_id), None)
+
+    def stop_job(self, job_id: str) -> bool:
+        """Cancel one in-flight job, and pause. Per the queue's decision
+        table, cancelling pauses the queue — resuming afterward is explicit;
+        another job already in flight runs on to its end."""
+        kind = self._kind_of_running(job_id)
+        if kind is None:
+            return False
         runner = self._runners.get(kind)
         if runner is not None:
             runner.stop()
         self.pause()
+        return True
+
+    def stop_current(self) -> None:
+        """Cancel every in-flight job, and pause."""
+        for job_id in self.running_job_ids():
+            self.stop_job(job_id)
 
     def suspend_current(self) -> bool:
-        """Wind the in-flight job down instead of killing it, and pause.
+        """Wind every in-flight job down instead of killing it, and pause.
 
-        The job keeps its place in the queue and its progress on disk, so
-        starting the queue again picks it up rather than needing it re-added.
-        Returns whether a runner actually supported being suspended — only
-        Analyze does today; the Datasets tools have no equivalent boundary to
-        stop at, so for those this is a plain cancel and the caller is told so.
+        A suspended job keeps its place in the queue and its progress on disk,
+        so starting the queue again picks it up rather than needing it
+        re-added. Returns whether any runner actually supported being
+        suspended — only Analyze does today; the Datasets tools have no
+        equivalent boundary to stop at, so for those this is a plain cancel.
         """
-        if self._current is None:
+        suspended = False
+        for job_id in self.running_job_ids():
+            kind = self._kind_of_running(job_id)
+            runner = self._runners.get(kind) if kind else None
+            suspender = getattr(runner, "suspend", None) if runner is not None else None
+            if not callable(suspender):
+                self.stop_job(job_id)
+                continue
+            suspender()
+            suspended = True
+            # Marked here rather than waiting for jobFinished: the run may take
+            # a while to wind down, and the row should say what is happening
+            # now. _on_job_finished sees the state is already SUSPENDED and
+            # leaves it.
+            self._queue.mark_suspended(job_id, "suspending — finishing the current field")
+        if not suspended:
             return False
-        job_id, kind = self._current
-        runner = self._runners.get(kind)
-        suspender = getattr(runner, "suspend", None) if runner is not None else None
-        if not callable(suspender):
-            self.stop_current()
-            return False
-        suspender()
-        # Marked here rather than waiting for jobFinished: the run may take a
-        # while to wind down, and the row should say what is happening now.
-        # _on_job_finished sees the state is already SUSPENDED and leaves it.
-        self._queue.mark_suspended(job_id, "suspending — finishing the current field")
         self._save()
         self.queueChanged.emit()
         self.pause()
@@ -399,23 +424,46 @@ class QueueBridge(QObject):
 
     # ── scheduling ───────────────────────────────────────────────────────
     def _advance(self) -> None:
-        if not self._queue.is_started or self._current is not None:
-            return
-        job = self._queue.next_runnable()
-        if job is None:
-            return
-        runner = self._runners.get(job.kind)
-        if runner is None:
-            return  # no adapter registered for this kind — leave it pending
-        if runner.is_busy():
-            # The user started this tool by hand while the queue was running.
-            # Every tool's ``_launch`` opens with "if a worker is already
-            # running, return" and emits no ``jobFinished``, so dispatching now
-            # would mark the job running against a controller that never
-            # reports back — ``_current`` stays set and the whole queue stops
-            # for the session. The job keeps its place instead, and the manual
-            # run's own completion is what starts it (see ``_on_job_finished``).
-            return
+        """Start whatever can start: one job in each free lane.
+
+        A lane is free when no queue job of its lane is in flight. Its next
+        job is ``JobQueue.next_to_start``'s answer, which skips jobs whose
+        tool is busy — another queue job (a remote and a local Analyze share
+        one Analyze pane), or a run the user started by hand. A tool started
+        by hand while the queue was running used to stop the whole queue
+        behind it: every tool's ``_launch`` opens with "if a worker is already
+        running, return" and emits no ``jobFinished``, so dispatching to it
+        would mark the job running against a controller that never reports
+        back. The job keeps its place instead, and that run's own completion
+        starts it (see ``_on_job_finished``).
+        """
+        while self._queue.is_started:
+            busy = {kind for kind, runner in self._runners.items() if runner.is_busy()}
+            unavailable = busy | set(self._running)
+            occupied = {lane for _job_id, lane in self._running.values()}
+            unavailable |= self._unregistered_kinds()
+            candidates = [job for lane in LANES if lane not in occupied
+                          for job in [self._queue.next_to_start(lane, unavailable=unavailable)]
+                          if job is not None]
+            if not candidates:
+                return
+            # The earliest in the queue first, whichever lane it is in. Asking
+            # the lanes in a fixed order let a later local Analyze take the one
+            # Analyze pane ahead of an earlier remote one.
+            order = [j.id for j in self._queue.jobs]
+            job = min(candidates, key=lambda j: order.index(j.id))
+            if not self._dispatch(job, run_lane(job.kind, job.spec)):
+                return
+
+    def _unregistered_kinds(self) -> set[str]:
+        """Kinds queued with no tool registered to run them; their jobs stay
+        pending."""
+        return {j.kind for j in self._queue.jobs if j.kind not in self._runners}
+
+    def _dispatch(self, job: JobSpec, lane: str) -> bool:
+        """Start *job*. Returns whether :meth:`_advance` may look for another
+        job straight away."""
+        runner = self._runners[job.kind]
         try:
             spec = self._queue.materialise(job.id)
         except ValueError as exc:
@@ -423,25 +471,25 @@ class QueueBridge(QObject):
             self._save()
             self.queueChanged.emit()
             QTimer.singleShot(0, self._advance)
-            return
-        self._current = (job.id, job.kind)
+            return False
+        self._running[job.kind] = (job.id, lane)
         self._queue.mark_running(job.id)
         self._save()
         self.queueChanged.emit()
         runner.start_from_queue(spec)
+        return True
 
     def _on_job_finished(self, kind: str, ok: bool, message: str, output_path: str) -> None:
-        if self._current is None or self._current[1] != kind:
-            # Not the queue's own in-flight job — the user ran this tool by
-            # hand. Nothing to record, but that controller has just become free,
-            # and a job ``_advance`` declined to dispatch because the runner was
-            # busy is waiting on exactly this. Without the nudge the queue would
-            # sit still until something else happened to call ``_advance``.
-            if self._current is None:
-                QTimer.singleShot(0, self._advance)
+        entry = self._running.pop(kind, None)
+        if entry is None:
+            # Not a queue job — the user ran this tool by hand. Nothing to
+            # record, but that controller has just become free, and a job
+            # ``_advance`` skipped because the tool was busy is waiting on
+            # exactly this. Without the nudge the queue would sit still until
+            # something else happened to call ``_advance``.
+            QTimer.singleShot(0, self._advance)
             return
-        job_id, _kind = self._current
-        self._current = None
+        job_id, _lane = entry
         produced = produced_for(kind, output_path) if ok else {}
         finished = self._queue.get(job_id)
         layout = (produced_layout(kind, finished.spec, self._input_layouts(finished))
@@ -544,6 +592,7 @@ class JobQueueController(QObject):
         self.page = JobQueuePage()
         self.page.startToggled.connect(self._on_start_toggled)
         self.page.stopRequested.connect(self._on_stop_requested)
+        self.page.stopJobRequested.connect(self._on_stop_job)
         self.page.clearCompletedRequested.connect(self._on_clear_completed)
         self.page.addKindRequested.connect(self.sessions.begin_new_job)
         self.page.editRequested.connect(self.sessions.begin_edit)
@@ -880,6 +929,11 @@ class JobQueueController(QObject):
         self.bridge.stop_current()
         self._refresh_page()
 
+    def _on_stop_job(self, job_id: str) -> None:
+        if not self.bridge.stop_job(job_id):
+            self._notify("That job is no longer running.", "neutral")
+        self._refresh_page()
+
     # ── plumbing ─────────────────────────────────────────────────────────
     def _notify(self, text: str, kind: str = "warn") -> None:
         """One seam for every "that did nothing, and here is why".
@@ -904,7 +958,7 @@ class JobQueueController(QObject):
         if notes:
             self.page.set_repair_notes(notes)
         self.page.set_started(queue.is_started)
-        self.page.set_job_running(self.bridge.current_job_id() is not None)
+        self.page.set_job_running(len(self.bridge.running_job_ids()))
 
     def shutdown(self) -> None:
         """Stop the in-flight job (called on app close), mirroring every

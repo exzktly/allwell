@@ -26,6 +26,7 @@ and its tooltip.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 KIND_LABEL = {
@@ -80,15 +81,45 @@ def produced_for(kind: str, path: str) -> dict:
 CONVERTER_KINDS = ("ome_import", "czi_import", "nd2_import")
 
 
-def produced_layout(kind: str, spec: dict) -> dict | None:
-    """What a finished converter job knows about the files it wrote, or ``None``.
+#: The kinds whose output names its images exactly as their input did, so
+#: what was known about the input's files is still true of the output's. A
+#: Concatenate relabels dataset 2's timepoints but not the slots they sit in;
+#: a Subset and a Merge copy images under their own names (a Merge's remap
+#: changes which well a file belongs to, not how its name is built); Validate
+#: reports on a dataset and writes no images.
+LAYOUT_PRESERVING_KINDS = ("concatenate", "merge_plates", "subset", "validate")
 
-    The schema and separator are the converters' own naming; the channel roles
-    are the ones set on the converter's page, which its queued spec carries as
-    ``channel_roles`` (``[[name, role], …]``). A converter job queued before
-    its page could read the source has no roles, and then only the schema is
-    stated — the chained Analyze job scans for the rest.
+
+def produced_layout(kind: str, spec: dict,
+                    upstream: "list[dict | None] | None" = None) -> dict | None:
+    """What a finished job knows about the files it wrote, or ``None``.
+
+    A converter names every image itself: the schema and separator are its own
+    naming, and the channel roles are the ones set on its page, which its
+    queued spec carries as ``channel_roles`` (``[[name, role], …]``). A
+    converter job queued before its page could read the source has no roles,
+    and then only the schema is stated — a chained Analyze job scans for the
+    rest.
+
+    A :data:`LAYOUT_PRESERVING_KINDS` job passes on what its inputs' source
+    jobs recorded. *upstream* holds one entry per input in
+    :data:`INPUT_TARGETS` order — the layout that input's source job recorded,
+    or ``None`` when the input was not linked to a job or its source recorded
+    nothing. The layout is passed on only when **every** input's is known and
+    they are identical: an input read from a folder on disk is unknown, and two
+    conversions set up with different channel roles disagree. Either way
+    nothing is passed on, and the Analyze job after it scans the files, as it
+    would have with no queue at all.
     """
+    if kind in LAYOUT_PRESERVING_KINDS:
+        layouts = list(upstream or [])
+        if len(layouts) != len(input_targets(kind)) or not layouts:
+            return None
+        if any(layout is None for layout in layouts):
+            return None
+        if any(layout != layouts[0] for layout in layouts[1:]):
+            return None
+        return json.loads(json.dumps(layouts[0]))
     if kind not in CONVERTER_KINDS:
         return None
     from util.channel_roles import channel_tokens_from_roles

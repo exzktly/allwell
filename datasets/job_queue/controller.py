@@ -370,7 +370,8 @@ class QueueBridge(QObject):
         self._current = None
         produced = produced_for(kind, output_path) if ok else {}
         finished = self._queue.get(job_id)
-        layout = produced_layout(kind, finished.spec) if ok and finished else None
+        layout = (produced_layout(kind, finished.spec, self._input_layouts(finished))
+                  if ok and finished else None)
         if layout is not None:
             produced["layout"] = layout
         if not ok and self._was_suspended(kind, job_id):
@@ -391,6 +392,20 @@ class QueueBridge(QObject):
         if cancelled:
             self.pause()
         self._advance()
+
+    def _input_layouts(self, job: JobSpec) -> list[dict | None]:
+        """What each of *job*'s inputs' source jobs recorded about its files.
+
+        One entry per input in ``INPUT_TARGETS`` order, ``None`` for an input
+        read from a folder rather than a job, so ``produced_layout`` can tell
+        "every input is known and they agree" from "one of them is unknown".
+        """
+        out: list[dict | None] = []
+        for target in input_targets(job.kind):
+            link = job.link_for(target)
+            source = self._queue.get(link.source) if link is not None else None
+            out.append(source.layout if source is not None else None)
+        return out
 
     def _was_suspended(self, kind: str, job_id: str) -> bool:
         """Whether this job wound down rather than failing or being cancelled.

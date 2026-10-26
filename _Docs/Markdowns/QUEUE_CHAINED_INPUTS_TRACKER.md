@@ -51,8 +51,8 @@ States: `todo`, `doing`, `done`, `declined`.
 
 | Row | What | State | Where / evidence |
 |---|---|---|---|
-| 2.1 | `produced_layout` passes the inputs' layout through Concatenate, Merge plates, Subset and Validate when every input's layout is known and they agree; otherwise records none | todo | |
-| 2.2 | `QueueBridge._on_job_finished` hands `produced_layout` the layout of each input's source job | todo | |
+| 2.1 | `produced_layout` passes the inputs' layout through Concatenate, Merge plates, Subset and Validate when every input's layout is known and they agree; otherwise records none | done | `job_kinds.LAYOUT_PRESERVING_KINDS`, `produced_layout(kind, spec, upstream)`; `test_layout_passes_through_the_queue.py` unit cases (agree / disagree / one from disk / short list) |
+| 2.2 | `QueueBridge._on_job_finished` hands `produced_layout` the layout of each input's source job | done | `QueueBridge._input_layouts`; `test_layout_passes_through_the_queue.py::test_analyze_after_a_concatenate_of_two_conversions_gets_their_layout` fails with the bridge passing no upstream |
 
 ## Part 3 — set up the next job against an output that is not written yet
 

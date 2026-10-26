@@ -316,6 +316,7 @@ class AnalyzeInputMixin:
         if pending is not None and pending[0] != raw_str:
             # The user replaced the queued job's output with a real folder.
             self._pending_input = pending = None
+            self._sync_run_for_pending()
         if pending is not None:
             # A queued job's output, not written yet: planning it would only
             # say the folder does not exist. Say whose output it is instead.

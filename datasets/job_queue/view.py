@@ -21,7 +21,6 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFrame,
-    QHBoxLayout,
     QLabel,
     QMenu,
     QPushButton,
@@ -31,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
+from widgets.flow_layout import FlowLayout
 from datasets.core.log_panel import hrule as _hrule
 from services.job_kinds import KIND_LABEL
 from services.job_queue import JobSpec, JobState
@@ -131,7 +131,9 @@ class JobQueuePage(QWidget):
         # a page-height empty panel.
         self._empty_hint = QLabel(
             "No jobs queued yet — use “+ Add job” above, or “+ Queue” on any "
-            "tool's own page.", self,
+            "tool's own page. Once a job is here, its ⋯ menu can set up the "
+            "next one to work on its output — “New job using this output” — "
+            "before it has run.", self,
         )
         self._empty_hint.setObjectName("Muted")
         self._empty_hint.setWordWrap(True)
@@ -151,9 +153,11 @@ class JobQueuePage(QWidget):
 
     def _build_header(self) -> QWidget:
         header = QWidget(self)
-        hl = QHBoxLayout(header)
-        hl.setContentsMargins(0, 0, 0, 0)
-        hl.setSpacing(theme.Spacing.sm)
+        # Wraps rather than holding the four buttons on one line: in one row
+        # they set the page's least width, and in a narrow window the rows
+        # beneath were stretched past it, pushing every status chip and ⋯ off
+        # the right edge.
+        hl = FlowLayout(header, h_spacing=theme.Spacing.sm, v_spacing=theme.Spacing.xs)
 
         # Primary action at the left edge, matching every other Datasets
         # page's own Run/Check/Convert button.
@@ -184,8 +188,6 @@ class JobQueuePage(QWidget):
             "Open a tool's page to set up a new queued job.")
         self._add_btn.clicked.connect(self._open_add_menu)
         hl.addWidget(self._add_btn)
-
-        hl.addStretch(1)
 
         self._clear_btn = QPushButton("Clear completed", self)
         self._clear_btn.setToolTip(
@@ -263,6 +265,7 @@ class JobQueuePage(QWidget):
         self._list.setVisible(True)
 
         ordinals = self._pending_ordinals(jobs)
+        positions = {job.id: i + 1 for i, job in enumerate(jobs)}
         ids = [job.id for job in jobs]
         if ids != self._order:
             self._rebuild_rows(jobs)
@@ -271,7 +274,8 @@ class JobQueuePage(QWidget):
             if row is not None:
                 row.update_from(job, ordinal=ordinals.get(job.id),
                                 predecessors=self._predecessors_for(job.id, jobs),
-                                others=self._others_for(job.id, jobs))
+                                others=self._others_for(job.id, jobs),
+                                positions=positions)
 
     @staticmethod
     def _pending_ordinals(jobs: list[JobSpec]) -> dict[str, int]:

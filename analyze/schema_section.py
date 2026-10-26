@@ -185,7 +185,7 @@ class AnalyzeSchemaSectionMixin:
             self._schema_preview_lbl.setText(
                 "Read from the input's filenames when the run starts.")
             if hasattr(self, "_run_btn"):
-                self._run_btn.setEnabled(not self._running)
+                self._run_btn.setEnabled(not self._running and not self.has_pending_inputs())
             return
         if hasattr(self, "_run_btn"):
             # A valid schema is necessary, not sufficient. This runs from four
@@ -195,7 +195,7 @@ class AnalyzeSchemaSectionMixin:
             # plate was still going, and pressing it started a second pipeline
             # into the same output directory. `_set_running_ui_state` owns the
             # other half of this flag; both must agree.
-            self._run_btn.setEnabled(not self._running)
+            self._run_btn.setEnabled(not self._running and not self.has_pending_inputs())
 
         nuclear_tok = (self._nuclear_token_edit.text().strip() if hasattr(self, "_nuclear_token_edit") else "NIR") or "NIR"
         fluor_toks  = self._fluor_tokens_list() if self._fluor_rows else ["GFP"]

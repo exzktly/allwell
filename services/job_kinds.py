@@ -134,32 +134,28 @@ def produced_layout(kind: str, spec: dict,
     return layout
 
 
+#: The converters and Zip loose are absent from both tables, on purpose: they
+#: read acquisition files or a loose image folder, never a dataset, so no
+#: earlier job's output can be their input. Offering "Input from ▸" on them
+#: let a user link two conversions, and the second then failed at dequeue.
 CHAIN_TARGET = {
     "analyze": "opts.raw",
     "concatenate": "dataset1",
-    "ome_import": "source",
-    "czi_import": "source",
-    "nd2_import": "source",
     "validate": "dataset",
     "subset": "source",
-    "import_loose": "source",
     "merge_plates": "dataset1",
 }
 
-# Every input a predecessor's output can fill, in the order a user reads them,
+# Every input an earlier job's output can fill, in the order a user reads them,
 # with the name a menu calls each one. CHAIN_TARGET above is the first of these
-# — the one "Run after ▸" fills — and the two-dataset tools have a second,
+# — the one "Input from ▸" fills — and the two-dataset tools have a second,
 # which is how a Concatenate can take dataset 1 from one conversion and
 # dataset 2 from another.
 INPUT_TARGETS = {
     "analyze": (("opts.raw", "Input"),),
     "concatenate": (("dataset1", "Dataset 1"), ("dataset2", "Dataset 2")),
-    "ome_import": (("source", "Source"),),
-    "czi_import": (("source", "Source"),),
-    "nd2_import": (("source", "Source"),),
     "validate": (("dataset", "Dataset"),),
     "subset": (("source", "Source"),),
-    "import_loose": (("source", "Source"),),
     "merge_plates": (("dataset1", "Dataset 1"), ("dataset2", "Dataset 2")),
 }
 
@@ -218,6 +214,22 @@ _DESCRIBE_KEYS = {
     "import_loose": (("source",), "destination"),
     "merge_plates": (("dataset1", "dataset2"), "destination"),
 }
+
+
+#: The longest a job's name runs inside a sentence before its middle gives
+#: way to "…". A converter's label carries the source file name and the
+#: destination in full, and one long unbroken token cannot wrap, so a sentence
+#: naming it was cut off before saying what happened to it.
+NAME_IN_SENTENCE = 56
+
+
+def short_label(label: str) -> str:
+    """*label* shortened in the middle when it would not fit in a sentence,
+    keeping both ends — the tool at the start, the output at the end."""
+    if len(label) <= NAME_IN_SENTENCE:
+        return label
+    keep = NAME_IN_SENTENCE - 1
+    return f"{label[: keep // 2]}…{label[-(keep - keep // 2):]}"
 
 
 def _name(value: object) -> str:

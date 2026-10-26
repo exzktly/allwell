@@ -55,7 +55,8 @@ def test_failed_predecessor_cascades_block_to_transitive_successors():
     assert q.get("a").state == JobState.FAILED
     assert q.get("b").state == JobState.BLOCKED
     assert q.get("c").state == JobState.BLOCKED
-    assert "predecessor a" in q.get("b").message
+    # Named by label, never by its internal id.
+    assert "“Analyze — a”, which failed" in q.get("b").message
     assert q.next_runnable() is None
 
 
@@ -109,7 +110,7 @@ def test_materialise_raises_if_predecessor_output_not_yet_produced():
         _job("a"),
         _job("b", chain_from="a", chain_target="opts.raw", chain_kind="out_dir"),
     ])
-    with pytest.raises(ValueError, match="hasn't been produced"):
+    with pytest.raises(ValueError, match="did not report the folder"):
         q.materialise("b")
 
 
@@ -402,7 +403,12 @@ def test_clear_terminal_unlinks_a_survivor_chained_to_a_cleared_job():
                        chain_kind="out_dir")])
     q.clear_terminal()
     assert q.get("b").chain_from is None
-    assert q.next_runnable().id == "b"
+    # 'a' succeeded but reported no folder, so there is nothing to hand on:
+    # 'b' is held blocked, saying so, rather than released to run on the
+    # placeholder in its spec (the UX review's C1).
+    assert q.get("b").state == JobState.BLOCKED
+    assert "“Analyze — a”" in q.get("b").message
+    assert q.next_runnable() is None
 
 
 # ── move_to (drag reorder) ────────────────────────────────────────────────────

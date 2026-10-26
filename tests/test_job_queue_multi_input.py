@@ -93,7 +93,7 @@ def test_a_failure_of_the_second_source_blocks_the_job():
     _succeed(q, "a")
     _fail(q, "b")
     assert q.get("cat").state == JobState.BLOCKED
-    assert "predecessor b" in q.get("cat").message
+    assert "“b”, which" in q.get("cat").message
 
 
 def test_retrying_one_of_two_failed_sources_keeps_the_job_blocked():
@@ -262,7 +262,7 @@ def test_linking_to_a_failed_job_blocks_rather_than_waiting_for_ever():
     _fail(q, "a")
     q.set_link("cat", "dataset1", "a", kind="dataset_root")
     assert q.get("cat").state == JobState.BLOCKED
-    assert "predecessor a" in q.get("cat").message
+    assert "“a”, which" in q.get("cat").message
     assert q.retry("a")
     assert q.get("cat").state == JobState.PENDING
 
@@ -273,4 +273,4 @@ def test_a_job_still_blocked_after_a_retry_names_the_other_source():
     q.get("b").state = JobState.CANCELLED
     assert q.retry("a")
     assert q.get("cat").state == JobState.BLOCKED
-    assert "predecessor b" in q.get("cat").message
+    assert "“b”, which" in q.get("cat").message

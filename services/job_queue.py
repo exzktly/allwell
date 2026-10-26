@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from services.job_kinds import short_label
 from services.remote_config import default_state_dir
 from util.state_dir import adopt_legacy_file, legacy_config_dirs
 
@@ -66,6 +67,11 @@ class JobState:
 
     # Nothing more will happen to these without the user editing the queue.
     TERMINAL = frozenset({SUCCEEDED, FAILED, CANCELLED, BLOCKED})
+
+    # What "Clear completed" removes: jobs that ran. A blocked job never ran,
+    # and clearing it threw away a chain the user would have to rebuild just
+    # to retry the job that blocked it.
+    CLEARABLE = frozenset({SUCCEEDED, FAILED, CANCELLED})
 
 
 # The three shapes a chained job's predecessor might have produced. Only
@@ -116,6 +122,13 @@ class JobSpec:
     chain_target: str | None = None  # dotted path into `spec`, e.g. "opts.raw"
     chain_kind: str | None = None    # one of _CHAIN_KINDS
     extra_links: list[ChainLink] = field(default_factory=list)
+    #: Inputs whose source job was removed before it wrote anything, as
+    #: target -> that job's label. The job is held ``blocked`` while any is
+    #: here, because the folder in its spec is only the plan of a job that
+    #: will now never run (or, after a failure, a half-written one). Cleared
+    #: for a target by linking or unlinking that input, and for all of them
+    #: by saving an edit of the job — each is the user choosing its input.
+    orphaned_inputs: dict[str, str] = field(default_factory=dict)
     state: str = JobState.PENDING
     message: str = ""
     output_dir: str | None = None
@@ -168,6 +181,7 @@ class JobSpec:
             "chain_target": self.chain_target,
             "chain_kind": self.chain_kind,
             "extra_links": [link.to_json() for link in self.extra_links],
+            "orphaned_inputs": dict(self.orphaned_inputs),
             "state": self.state,
             "message": self.message,
             "output_dir": self.output_dir,
@@ -188,6 +202,9 @@ class JobSpec:
             chain_kind=data.get("chain_kind"),
             extra_links=[ChainLink.from_json(d) for d in (data.get("extra_links") or [])
                          if isinstance(d, dict) and d.get("source")],
+            orphaned_inputs={str(k): str(v) for k, v in
+                             (data.get("orphaned_inputs") or {}).items()}
+            if isinstance(data.get("orphaned_inputs"), dict) else {},
             state=data.get("state", JobState.PENDING),
             message=data.get("message", ""),
             output_dir=data.get("output_dir"),
@@ -259,16 +276,25 @@ class JobQueue:
         # When the removed job finished, what it wrote is written into the
         # successor first — that folder is the answer the link was waiting
         # for, and the path the successor was set up with was only a plan.
+        #
+        # When it had *not* finished, the successor's input is now the plan of
+        # a job that will never run — or, after a failure, the folder it left
+        # half-written. The input is marked orphaned and the successor held
+        # blocked, saying which job went, until the user picks its input.
+        # Releasing it instead ran a Concatenate on a truncated conversion.
+        produced = {"out_dir": job.output_dir,
+                    "dataset_root": job.dataset_root, "in_dir": job.in_dir}
         for successor in self._jobs:
             if job_id not in successor.sources():
                 continue
-            if job.state == JobState.SUCCEEDED:
-                produced = {"out_dir": job.output_dir,
-                            "dataset_root": job.dataset_root, "in_dir": job.in_dir}
-                for link in successor.links():
-                    value = produced.get(link.kind or "") if link.source == job_id else None
-                    if value and link.target:
-                        set_dotted(successor.spec, link.target, value)
+            for link in successor.links():
+                if link.source != job_id or not link.target:
+                    continue
+                value = produced.get(link.kind or "")
+                if job.state == JobState.SUCCEEDED and value:
+                    set_dotted(successor.spec, link.target, value)
+                else:
+                    successor.orphaned_inputs[link.target] = job.label or job.id
             successor.set_links([link for link in successor.links()
                                  if link.source != job_id])
             self._reassess_block(successor)
@@ -325,6 +351,11 @@ class JobQueue:
         if job is None or job.state == JobState.RUNNING:
             return False
         job.spec = spec
+        # Saving an edit is the user choosing this job's inputs: an input
+        # orphaned by a removed source is theirs now.
+        if job.orphaned_inputs:
+            job.orphaned_inputs = {}
+            self._reassess_block(job)
         return True
 
     def set_label(self, job_id: str, label: str) -> bool:
@@ -396,7 +427,7 @@ class JobQueue:
         instead of keeping a pointer to a job that no longer exists. The ids
         are snapshotted first — ``remove`` mutates the list being read.
         """
-        doomed = [j.id for j in self._jobs if j.state in JobState.TERMINAL]
+        doomed = [j.id for j in self._jobs if j.state in JobState.CLEARABLE]
         for job_id in doomed:
             self.remove(job_id)
         return len(doomed)
@@ -444,6 +475,7 @@ class JobQueue:
                  if chain_from is not None else [])
         self._check_links(job_id, links)
         self._by_id[job_id].set_links(links)
+        self._by_id[job_id].orphaned_inputs = {}
         self._reassess_block(self._by_id[job_id])
 
     def set_link(
@@ -467,6 +499,7 @@ class JobQueue:
             links.append(ChainLink(source, target, kind))
         self._check_links(job_id, links)
         job.set_links(links)
+        job.orphaned_inputs.pop(target or "", None)
         self._reassess_block(job)
 
     def _reassess_block(self, job: JobSpec) -> None:
@@ -476,22 +509,46 @@ class JobQueue:
         never coming is blocked — the cascade only runs when a job *finishes*,
         so a link made afterwards to a failed job left this one pending for
         ever, with nothing said. And a blocked job whose stopped source was
-        unlinked (or removed) is released, with whatever it was holding up —
-        otherwise it stayed blocked naming a job it no longer waits for, and
-        no retry could reach it. A job still blocked names the source that is
-        still in the way.
+        unlinked is released, with whatever it was holding up — otherwise it
+        stayed blocked naming a job it no longer waits for, and no retry could
+        reach it. An input orphaned by a removed source also holds it blocked
+        (see :attr:`JobSpec.orphaned_inputs`). A job still blocked says what
+        is still in the way.
         """
-        stopped = next((s for s in job.sources() if self._still_stopping(s)), None)
-        if job.state == JobState.PENDING and stopped is not None:
+        reason = self._block_reason(job)
+        if job.state == JobState.PENDING and reason:
             job.state = JobState.BLOCKED
-            job.message = f"predecessor {stopped} did not complete"
+            job.message = reason
             self._cascade_block(job.id)
-        elif job.state == JobState.BLOCKED and stopped is None:
+        elif job.state == JobState.BLOCKED and not reason:
             job.state = JobState.PENDING
             job.message = ""
             self._cascade_unblock(job.id)
         elif job.state == JobState.BLOCKED:
-            job.message = f"predecessor {stopped} did not complete"
+            job.message = reason
+
+    def _block_reason(self, job: JobSpec) -> str:
+        """Why *job* cannot run, in words a user can act on, or ``""``."""
+        stopped = next((s for s in job.sources() if self._still_stopping(s)), None)
+        if stopped is not None:
+            return self.waiting_on(stopped)
+        if job.orphaned_inputs:
+            label = short_label(next(iter(job.orphaned_inputs.values())))
+            return (f"“{label}” was removed without handing on a folder — "
+                    "choose this job's input again (Input from, or Edit…)")
+        return ""
+
+    def waiting_on(self, source_id: str) -> str:
+        """The sentence a job blocked by *source_id* shows: the job by its
+        name, never its id, and what happened to it."""
+        source = self._by_id.get(source_id)
+        if source is None:
+            return f"waiting on a job that is no longer in the queue ({source_id})"
+        what = {JobState.FAILED: "which failed",
+                JobState.CANCELLED: "which was cancelled",
+                JobState.BLOCKED: "which is blocked itself"}.get(source.state, "")
+        name = short_label(source.label or source.id)
+        return f"waiting on “{name}”, {what}" if what else f"waiting on “{name}”"
 
     def _check_links(self, job_id: str, links: list[ChainLink]) -> None:
         """Refuse links that name an unknown job, the job itself, or a cycle.
@@ -579,7 +636,9 @@ class JobQueue:
         for link in job.links():
             pred = self._by_id.get(link.source)
             if pred is None:
-                raise ValueError(f"job {job_id!r} chains from unknown job {link.source!r}")
+                raise ValueError(
+                    "the job this one reads from is no longer in the queue "
+                    f"({link.source}) — choose its input again")
             produced = {
                 "out_dir": pred.output_dir,
                 "dataset_root": pred.dataset_root,
@@ -587,11 +646,11 @@ class JobQueue:
             }
             value = produced.get(link.kind)
             if not value:
-                where = f" for {link.target!r}" if link.target else ""
+                where = f" for its {link.target}" if link.target else ""
                 raise ValueError(
-                    f"job {job_id!r} chains from {link.source!r}'s {link.kind!r}{where}, "
-                    "which hasn't been produced yet"
-                )
+                    f"“{pred.label or pred.id}” did not report the folder this "
+                    f"job reads{where}, so there is nothing to run on — choose "
+                    "its input again")
             if link.target:
                 set_dotted(spec, link.target, value)
             if layout_from is None and pred.layout:
@@ -664,7 +723,7 @@ class JobQueue:
                 stopped_by = next((s for s in j.sources() if s in blocking), None)
                 if stopped_by is not None:
                     j.state = JobState.BLOCKED
-                    j.message = f"predecessor {stopped_by} did not complete"
+                    j.message = self.waiting_on(stopped_by)
                     blocking.add(j.id)
                     changed = True
 
@@ -691,10 +750,11 @@ class JobQueue:
                     continue
                 still = next((s for s in sources
                               if s not in unblocking and self._still_stopping(s)), None)
-                if still is not None:
-                    # Still blocked, now by the other source: say so, rather
-                    # than go on naming the one that was just retried.
-                    j.message = f"predecessor {still} did not complete"
+                if still is not None or j.orphaned_inputs:
+                    # Still blocked, by the other source or by an input whose
+                    # source was removed: say so, rather than go on naming the
+                    # one that was just retried.
+                    j.message = self._block_reason(j)
                     continue
                 j.state = JobState.PENDING
                 j.message = ""

@@ -691,12 +691,12 @@ class JobQueueController(QObject):
         # completed says it, rather than discovered when they run.
         orphaned = ([] if job is None or job.state == JobState.SUCCEEDED else
                     [j.label or j.id for j in self.bridge.queue.jobs
-                     if job_id in j.sources() and j.state not in JobState.TERMINAL])
+                     if job_id in j.sources() and j.state not in JobState.CLEARABLE])
         self.bridge.remove_job(job_id)
         if orphaned:
             self._notify(
                 f"{len(orphaned)} queued job(s) were waiting on the job you "
-                "removed — check their input before starting the queue: "
+                "removed and are held as blocked until you choose their input: "
                 + ", ".join(orphaned[:3]), "warn")
 
     def _on_move(self, job_id: str, delta: int) -> None:
@@ -767,28 +767,31 @@ class JobQueueController(QObject):
         self.sessions.begin_next_step(kind, sources)
 
     def _on_clear_completed(self) -> None:
-        """Clearing a finished job unlinks any pending job chained to it.
+        """Clear the jobs that ran, and say what that leaves waiting.
 
-        It has to — a survivor pointing at an id that is gone can never become
-        runnable — but the consequence is that the survivor falls back to
-        whatever placeholder path its own spec still holds and runs against
-        that. Silence made a tidy-up look free.
+        A job waiting on a cleared job that *succeeded* takes the folder that
+        job wrote (``JobQueue.remove``). One waiting on a cleared job that
+        failed or was cancelled is held blocked until the user chooses its
+        input, because the folder in its spec is a plan nothing will now
+        write. That is said here, since a tidy-up must not look free.
         """
-        orphaned = self._pending_successors_of_terminal_jobs()
+        orphaned = self._successors_of_unfinished_clearable_jobs()
         removed = self.bridge.clear_completed()
         if not removed:
             self._notify("Nothing finished to clear.", "neutral")
         elif orphaned:
             self._notify(
                 f"{len(orphaned)} queued job(s) were waiting on a job you "
-                "cleared — check their input before starting the queue: "
+                "cleared that never wrote its output; they are held as "
+                "blocked until you choose their input: "
                 + ", ".join(orphaned[:3]), "warn")
 
-    def _pending_successors_of_terminal_jobs(self) -> list[str]:
+    def _successors_of_unfinished_clearable_jobs(self) -> list[str]:
         jobs = self.bridge.queue.jobs
-        terminal = {j.id for j in jobs if j.state in JobState.TERMINAL}
+        stopped = {j.id for j in jobs
+                   if j.state in JobState.CLEARABLE and j.state != JobState.SUCCEEDED}
         return [j.label or j.id for j in jobs
-                if terminal.intersection(j.sources()) and j.state not in JobState.TERMINAL]
+                if stopped.intersection(j.sources()) and j.state not in JobState.CLEARABLE]
 
     def _on_start_toggled(self) -> None:
         if self.bridge.queue.is_started:

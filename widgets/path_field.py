@@ -123,6 +123,9 @@ class PathField(QWidget):
         self._pending_note = ""
         self._path = path
         self._edit.setText(Path(path).name or path)
+        # From the start: a long name otherwise shows only its tail, which
+        # for a plate folder is the date and drops the plate.
+        self._edit.setCursorPosition(0)
         self._edit.setToolTip(path)
         self.revalidate()
 

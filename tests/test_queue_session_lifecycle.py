@@ -181,7 +181,7 @@ def test_unlinking_one_of_two_stopped_inputs_names_the_other():
     q.get("b").state = JobState.FAILED
     q.set_link("c", "dataset1", None)
     assert q.get("c").state == JobState.BLOCKED
-    assert "predecessor b" in q.get("c").message
+    assert "“b”, which" in q.get("c").message
 
 
 # ── N6: an edited Subset's explicit wells over a projection ──────────────────

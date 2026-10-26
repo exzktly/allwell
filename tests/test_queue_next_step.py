@@ -1,7 +1,7 @@
 """Setting up the next job against an output that is not written yet.
 
 Two CZI scans of one plate are queued for conversion. From the first one's row
-the user picks "Queue next step from this output ▸ Concatenate with ▸ <the
+the user picks "New job using this output ▸ Concatenate with ▸ <the
 second>", and the Concatenate page opens with both datasets filled in from
 folders that do not exist yet. Saving it queues a Concatenate whose two inputs
 are linked to the two conversions.
@@ -19,6 +19,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
+from datasets.job_queue.row import NEXT_STEP_MENU
 from services.job_kinds import planned_output
 from services.job_queue import JobSpec
 
@@ -110,7 +111,9 @@ def _row_menu_action(jq, job_id, *path):
     """Trigger a row menu entry by its labels, the way a click would."""
     menu = jq.page._rows[job_id].build_menu()
     for label in path:
-        action = next(a for a in menu.actions() if a.text() == label)
+        # An entry naming another job carries its queue position ("2. …").
+        action = next(a for a in menu.actions()
+                      if a.text() == label or a.text().split(". ", 1)[-1] == label)
         if action.menu() is not None:
             menu = action.menu()
         else:
@@ -121,7 +124,7 @@ def _row_menu_action(jq, job_id, *path):
 
 def test_concatenate_with_fills_both_inputs_as_pending(queue):
     jq = queue
-    _row_menu_action(jq, "day1", "Queue next step from this output",
+    _row_menu_action(jq, "day1", NEXT_STEP_MENU,
                      "Concatenate with", "Convert CZI — day2")
     page = jq.tools["concatenate"].page
     assert page.dataset1_path() == str(jq.tmp / "plate_day1")
@@ -142,7 +145,7 @@ def test_concatenate_with_fills_both_inputs_as_pending(queue):
 
 def test_saving_queues_the_concatenate_with_both_links(queue):
     jq = queue
-    _row_menu_action(jq, "day1", "Queue next step from this output",
+    _row_menu_action(jq, "day1", NEXT_STEP_MENU,
                      "Concatenate with", "Convert CZI — day2")
     jq.tools["concatenate"].page.set_destination_path(str(jq.tmp / "combined"))
     assert jq.save_session()
@@ -155,7 +158,7 @@ def test_saving_queues_the_concatenate_with_both_links(queue):
 
 def test_swapping_the_datasets_swaps_the_links(queue):
     jq = queue
-    _row_menu_action(jq, "day1", "Queue next step from this output",
+    _row_menu_action(jq, "day1", NEXT_STEP_MENU,
                      "Concatenate with", "Convert CZI — day2")
     page = jq.tools["concatenate"].page
     page.set_destination_path(str(jq.tmp / "combined"))
@@ -170,7 +173,7 @@ def test_swapping_the_datasets_swaps_the_links(queue):
 
 def test_browsing_a_real_folder_drops_that_input_s_link(queue):
     jq = queue
-    _row_menu_action(jq, "day1", "Queue next step from this output",
+    _row_menu_action(jq, "day1", NEXT_STEP_MENU,
                      "Concatenate with", "Convert CZI — day2")
     page = jq.tools["concatenate"].page
     page.set_destination_path(str(jq.tmp / "combined"))
@@ -182,7 +185,7 @@ def test_browsing_a_real_folder_drops_that_input_s_link(queue):
 
 def test_a_one_input_next_step_links_its_input(queue):
     jq = queue
-    _row_menu_action(jq, "day1", "Queue next step from this output", "Validate…")
+    _row_menu_action(jq, "day1", NEXT_STEP_MENU, "Validate…")
     page = jq.tools["validate"].page
     assert page._dataset_field.is_pending()
     assert not page._run_btn.isEnabled()
@@ -202,7 +205,7 @@ def test_the_links_are_in_place_before_a_running_queue_can_start_the_job(queue):
     jq = queue
     started: list[dict] = []
     jq.tools["concatenate"].start_from_queue = started.append
-    _row_menu_action(jq, "day1", "Queue next step from this output",
+    _row_menu_action(jq, "day1", NEXT_STEP_MENU,
                      "Concatenate with", "Convert CZI — day2")
     page = jq.tools["concatenate"].page
     page.set_destination_path(str(jq.tmp / "combined"))
@@ -240,7 +243,7 @@ def test_a_failed_job_offers_no_next_step(queue):
     jq.bridge.queue.mark_finished("day1", ok=False, message="boom")
     jq._refresh_page()
     labels = [a.text() for a in jq.page._rows["day1"].build_menu().actions()]
-    assert "Queue next step from this output" not in labels
+    assert NEXT_STEP_MENU not in labels
 
 
 def test_editing_a_linked_job_shows_its_links_and_keeps_them(queue):
@@ -261,7 +264,7 @@ def test_editing_a_linked_job_shows_its_links_and_keeps_them(queue):
 
 def test_a_subset_next_step_offers_the_wells_the_conversion_mapped(queue):
     jq = queue
-    _row_menu_action(jq, "day1", "Queue next step from this output", "Subset…")
+    _row_menu_action(jq, "day1", NEXT_STEP_MENU, "Subset…")
     page = jq.tools["subset"].page
     assert page._src_field.is_pending()
     assert sorted(page.selected_wells()) == ["A01", "A02", "B01"]
@@ -275,7 +278,7 @@ def test_a_subset_next_step_offers_the_wells_the_conversion_mapped(queue):
 
 def test_merge_plates_with_marks_both_inputs_pending(queue):
     jq = queue
-    _row_menu_action(jq, "day1", "Queue next step from this output",
+    _row_menu_action(jq, "day1", NEXT_STEP_MENU,
                      "Merge plates with", "Convert CZI — day2")
     page = jq.tools["merge_plates"].page
     assert page.has_pending_inputs()
@@ -290,7 +293,7 @@ def test_merge_plates_with_marks_both_inputs_pending(queue):
 
 def test_removing_a_source_closes_its_next_step_setup(queue):
     jq = queue
-    _row_menu_action(jq, "day1", "Queue next step from this output",
+    _row_menu_action(jq, "day1", NEXT_STEP_MENU,
                      "Concatenate with", "Convert CZI — day2")
     jq.bridge.remove_job("day2")
     assert jq.session() is None

@@ -39,7 +39,16 @@ from services.job_kinds import (
 #: and one nobody remembered look identical in code six months later
 #: (CLAUDE.md §7.5 #10). Paired with a liveness check below, so an exemption
 #: that stops describing a real decision fails rather than lingering.
+_NO_DATASET_INPUT = (
+    "Reads acquisition files or a loose image folder, never a dataset, so no "
+    "earlier job's output can be its input; offering \"Input from\" on it "
+    "let two conversions be linked, and the second then failed at dequeue.")
+
 _EXEMPT = {
+    "CHAIN_TARGET": {kind: _NO_DATASET_INPUT for kind in
+                     ("ome_import", "czi_import", "nd2_import", "import_loose")},
+    "INPUT_TARGETS": {kind: _NO_DATASET_INPUT for kind in
+                      ("ome_import", "czi_import", "nd2_import", "import_loose")},
     "_DESCRIBE_KEYS": {
         "analyze": (
             "Analyze does not describe itself from spec keys. Its spec holds "
@@ -105,9 +114,11 @@ def test_every_exemption_names_a_kind_that_still_exists():
             f"{table_name} exempts {unknown}, which no feature declares")
 
 
-def test_every_kind_can_receive_a_chained_input():
-    """A kind missing from CHAIN_TARGET is a job that cannot be chained to."""
-    missing = sorted(set(KIND_LABEL) - set(CHAIN_TARGET))
+def test_every_kind_that_reads_a_dataset_can_receive_a_chained_input():
+    """A kind missing from CHAIN_TARGET cannot take an earlier job's output.
+    That is right only for the kinds that read files, not datasets, each
+    exempted above with its reason."""
+    missing = sorted(set(KIND_LABEL) - set(CHAIN_TARGET) - set(_EXEMPT["CHAIN_TARGET"]))
     assert not missing, f"CHAIN_TARGET has no entry for: {missing}"
 
 

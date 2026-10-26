@@ -53,6 +53,9 @@ _ORDINAL_W = 20
 # Inline per-job progress bar.
 _ROW_BAR_W = 60
 _ROW_BAR_H = 8
+# The ⋯ button's least size: a pointer target the row's 14 px glyph alone
+# made about 20 px square.
+_MENU_BTN_MIN = 28
 
 KIND_ICON = {
     "analyze": "sliders-horizontal",
@@ -73,6 +76,10 @@ NEXT_STEP_KINDS = ("analyze", "validate", "subset")
 #: The two-input tools, offered with a second dataset: this job's output is
 #: dataset 1, and the second is another job's output or a folder.
 PAIR_STEP_KINDS = ("concatenate", "merge_plates")
+#: The submenu every row offers. One word for one idea across the queue: a
+#: job takes its *input* from another job ("Input from ▸", "Dataset 1 from
+#: ▸"), and this is the same link made from the other end.
+NEXT_STEP_MENU = "New job using this output"
 
 _STATE_DOT = {
     JobState.PENDING: "neutral",
@@ -115,13 +122,18 @@ class JobRow(QWidget):
         self._detail_text = ""
         self._predecessors: list[tuple[str, str]] = []
         self._others: list[tuple[str, str]] = []
+        self._positions: dict[str, int] = {}
         self._drag_y0: float | None = None
         self._drag_steps = 0
 
         self.setObjectName("JobRow")          # styled in theme.qss, not inline
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("Click to open this job on its own page.")
+        # Reachable from the keyboard as well as the pointer: Tab to the row,
+        # Enter opens the job, the Menu key (or Shift+F10) opens its actions.
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setToolTip("Click (or press Enter) to open this job on its own "
+                        "page. Its actions are under ⋯ (Menu key).")
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs,
@@ -162,12 +174,19 @@ class JobRow(QWidget):
         top.setSpacing(theme.Spacing.sm)
         body.addLayout(top)
 
+        # Ignored, and elided with the full name on its tooltip: a long name
+        # used to push the status chip and ⋯ off the row (and the page into a
+        # sideways scroll), which hid the two things a queue is read for.
         self._name = QLabel(self)
-        self._name.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self._name_text = ""
         top.addWidget(self._name, 1)
 
         self._chain_glyph = QLabel(self)
         self._chain_glyph.setPixmap(make_icon("waypoints").pixmap(14, 14))
+        self._chain_glyph.setToolTip(
+            "Reads its input from another queued job's output — see the line "
+            "below, and Input from ▸ in the ⋯ menu.")
         top.addWidget(self._chain_glyph)
 
         # Indeterminate: a controller only ever reports a free-text status
@@ -182,6 +201,7 @@ class JobRow(QWidget):
         top.addWidget(self._dot)
 
         self._menu_btn = IconButton("more-horizontal", self, tooltip="Job actions")
+        self._menu_btn.setMinimumSize(_MENU_BTN_MIN, _MENU_BTN_MIN)
         self._menu_btn.clicked.connect(self._open_menu)
         top.addWidget(self._menu_btn)
 
@@ -199,24 +219,28 @@ class JobRow(QWidget):
     # ── content ──────────────────────────────────────────────────────────
     def update_from(self, job: JobSpec, *, ordinal: int | None = None,
                     predecessors: list[tuple[str, str]] | None = None,
-                    others: list[tuple[str, str]] | None = None) -> None:
+                    others: list[tuple[str, str]] | None = None,
+                    positions: dict[str, int] | None = None) -> None:
         """Rewrite this row for *job*, reusing every widget it already has.
 
-        *predecessors* is the (id, label) list offered by the "Run after"
+        *predecessors* is the (id, label) list offered by the "Input from"
         submenu — the jobs above this one, which are the only ones it could
         legally chain from without violating queue order. *others* is every
         other job that could still produce an output, offered as the second
-        dataset of a next step ("Concatenate with ▸").
+        dataset of a next step ("Concatenate with ▸"). *positions* is every
+        job's place in the queue, shown beside its name in those menus.
         """
         self._job = job
         self.job_id = job.id
         self._predecessors = list(predecessors or [])
         self._others = list(others or [])
+        self._positions = dict(positions or {})
 
         self._ordinal.setText(f"{ordinal}." if ordinal is not None else "")
         self._icon.setPixmap(make_icon(KIND_ICON.get(job.kind, "boxes")).pixmap(16, 16))
-        self._name.setText(job.label or describe(job.kind, job.spec)
+        self._name_text = (job.label or describe(job.kind, job.spec)
                            or KIND_LABEL.get(job.kind, job.kind))
+        self._name.setToolTip(self._name_text)
 
         self._chain_glyph.setVisible(bool(job.sources()))
         self._progress.setVisible(job.state == JobState.RUNNING)
@@ -235,10 +259,15 @@ class JobRow(QWidget):
         the first line and the second exists to be scanned, not studied.
         """
         parts = []
+        if job.state == JobState.BLOCKED and job.message:
+            # Why it cannot run comes first: at the end of an elided line it
+            # was cut off at every window width, and it is the one thing a
+            # blocked row is read for.
+            parts.append(f"Blocked — {job.message}")
         names = dict(self._predecessors)
         if len(input_targets(job.kind)) > 1 and job.links():
-            # A two-input job says which input waits on which job: "after A"
-            # would not say whether A is dataset 1 or dataset 2.
+            # A two-input job says which input comes from which job: "input
+            # from A" would not say whether A is dataset 1 or dataset 2.
             for target in input_targets(job.kind):
                 link = job.link_for(target)
                 if link is not None:
@@ -248,28 +277,30 @@ class JobRow(QWidget):
         elif job.sources():
             for source in job.sources():
                 pred = names.get(source)
-                parts.append(f"after “{pred}”" if pred else f"after {source}")
+                parts.append(f"input from “{pred}”" if pred else f"input from {source}")
         elif job.kind == "analyze" and job.state == JobState.PENDING \
                 and not str((job.spec.get("opts") or {}).get("raw") or "").strip():
-            # Allowed to be queued blank so chaining can fill it, and refused
+            # Allowed to be queued blank so a link can fill it, and refused
             # when it starts if nothing did. Said here first, because a blank
             # job otherwise reads exactly like a ready one until it fails.
-            parts.append("no input folder — chain it after a job (Run after…) "
-                         "or edit it")
+            parts.append("no input folder — choose one with Input from ▸ or "
+                         "edit the job")
         detail = describe_detail(job.kind, job.spec)
         if detail:
             parts.append(detail)
-        if job.message:
+        if job.message and job.state != JobState.BLOCKED:
             parts.append(job.message)
         return "  ·  ".join(parts)
 
     def _apply_elision(self) -> None:
-        width = max(0, self._detail.width())
-        if not self._detail_text or width <= 0:
-            self._detail.setText(self._detail_text)
-            return
-        metrics = QFontMetrics(self._detail.font())
-        self._detail.setText(metrics.elidedText(self._detail_text, Qt.ElideRight, width))
+        for label, text in ((self._detail, self._detail_text),
+                            (self._name, self._name_text)):
+            width = max(0, label.width())
+            if not text or width <= 0:
+                label.setText(text)
+                continue
+            metrics = QFontMetrics(label.font())
+            label.setText(metrics.elidedText(text, Qt.ElideRight, width))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -295,9 +326,10 @@ class JobRow(QWidget):
         owned_action(menu, "Duplicate").triggered.connect(
             lambda: self.duplicateClicked.emit(self.job_id))
 
-        # Only a finished job can be retried: a pending one is already waiting
-        # and a running one is already going.
-        if job.state in JobState.TERMINAL:
+        # Only a job that ran can be retried: a pending one is already
+        # waiting, a running one is already going, and a blocked one never ran
+        # — retrying it is refused, so it is not offered (retry what blocked it).
+        if job.state in JobState.CLEARABLE:
             owned_action(menu, "Retry").triggered.connect(
                 lambda: self.retryClicked.emit(self.job_id))
 
@@ -323,22 +355,35 @@ class JobRow(QWidget):
             lambda: self.removeClicked.emit(self.job_id))
         return menu
 
-    def _add_chain_submenu(self, menu: QMenu) -> None:
-        """"Run after ▸" — the only way to build a chain from the interface.
+    def _job_entry(self, job_id: str, label: str) -> str:
+        """A menu entry naming another job: its queue position and its name.
 
-        Offers the jobs *above* this one, since a chain that ran backwards
-        would be refused by the queue's own order check anyway; showing the
-        rest would be offering choices that cannot be made.
+        The position is what tells two duplicated jobs apart — their names
+        are identical by construction.
         """
+        position = self._positions.get(job_id)
+        return f"{position}. {label}" if position else label
+
+    def _add_chain_submenu(self, menu: QMenu) -> None:
+        """"Input from ▸" — which earlier job's output this job reads.
+
+        Offers the jobs *above* this one, since a link that ran backwards
+        would be refused by the queue's own order check anyway; showing the
+        rest would be offering choices that cannot be made. Absent on a kind
+        that reads files rather than a dataset (the converters, Zip loose):
+        no earlier job's output can be its input.
+        """
+        if not input_targets(self._job.kind):
+            return
         # Constructed with the parent menu rather than via addMenu(str): the
         # QMenu that call returns is not kept alive by its parent on the
         # Python side, so the submenu can be collected out from under the
         # menu that owns it. Passing the parent to the constructor gives it a
         # real C++ owner.
-        sub = QMenu("Run after", menu)
+        sub = QMenu("Input from", menu)
         sub.setObjectName("JobRowChainMenu")
         menu.addMenu(sub)
-        none_action = owned_action(sub, "Nothing (run on its own)")
+        none_action = owned_action(sub, "Nothing (use the folder on its page)")
         none_action.setCheckable(True)
         none_action.setChecked(not self._job.chain_from)
         none_action.triggered.connect(lambda: self.chainRequested.emit(self.job_id, ""))
@@ -347,7 +392,7 @@ class JobRow(QWidget):
             return
         sub.addSeparator()
         for pred_id, label in self._predecessors:
-            act = owned_action(sub, label)
+            act = owned_action(sub, self._job_entry(pred_id, label))
             act.setCheckable(True)
             act.setChecked(self._job.chain_from == pred_id)
             act.triggered.connect(
@@ -355,23 +400,29 @@ class JobRow(QWidget):
 
     def _add_input_submenu(self, menu: QMenu, target: str) -> None:
         """"Dataset 1 from ▸" / "Dataset 2 from ▸" — one input of a job that
-        takes two, linked on its own so the other input keeps its link."""
+        takes two, linked on its own so the other input keeps its link.
+
+        The job already feeding the *other* input is left out: a dataset
+        concatenated or merged with itself is never what was meant.
+        """
         label = input_label(self._job.kind, target)
         sub = QMenu(f"{label} from", menu)
         sub.setObjectName("JobRowInputMenu")
         menu.addMenu(sub)
         current = self._job.link_for(target)
+        taken = {link.source for link in self._job.links() if link.target != target}
         none_action = owned_action(sub, "Nothing (use the folder on its page)")
         none_action.setCheckable(True)
         none_action.setChecked(current is None)
         none_action.triggered.connect(
             lambda _checked=False, t=target: self.linkRequested.emit(self.job_id, t, ""))
-        if not self._predecessors:
+        offered = [(pid, plabel) for pid, plabel in self._predecessors if pid not in taken]
+        if not offered:
             sub.setEnabled(current is not None)
             return
         sub.addSeparator()
-        for pred_id, pred_label in self._predecessors:
-            act = owned_action(sub, pred_label)
+        for pred_id, pred_label in offered:
+            act = owned_action(sub, self._job_entry(pred_id, pred_label))
             act.setCheckable(True)
             act.setChecked(current is not None and current.source == pred_id)
             act.triggered.connect(
@@ -379,15 +430,15 @@ class JobRow(QWidget):
                     self.linkRequested.emit(self.job_id, t, p))
 
     def _add_next_step_submenu(self, menu: QMenu) -> None:
-        """"Queue next step from this output ▸" — set up a job that reads what
-        this one writes, before it has written anything.
+        """"New job using this output ▸" — set up a job that reads what this
+        one writes, before it has written anything.
 
         Not offered for a job whose output is never coming (failed, cancelled,
-        blocked): a successor linked to it could never run.
+        blocked): a job linked to it could never run.
         """
         if self._job.state in JobState.FAILURE_LIKE or self._job.state == JobState.BLOCKED:
             return
-        sub = QMenu("Queue next step from this output", menu)
+        sub = QMenu(NEXT_STEP_MENU, menu)
         sub.setObjectName("JobRowNextStepMenu")
         menu.addMenu(sub)
         for kind in NEXT_STEP_KINDS:
@@ -403,9 +454,21 @@ class JobRow(QWidget):
             if self._others:
                 pair.addSeparator()
             for other_id, other_label in self._others:
-                owned_action(pair, other_label).triggered.connect(
+                owned_action(pair, self._job_entry(other_id, other_label)).triggered.connect(
                     lambda _checked=False, k=kind, o=other_id:
                         self.nextStepRequested.emit(self.job_id, k, o))
+
+    def keyPressEvent(self, event) -> None:
+        """Enter opens the job, as a click does; the Menu key or Shift+F10
+        opens its actions, as ⋯ does."""
+        key = event.key()
+        if key in (Qt.Key_Return, Qt.Key_Enter):
+            self.rowClicked.emit(self.job_id)
+            return
+        if key == Qt.Key_Menu or (key == Qt.Key_F10 and event.modifiers() & Qt.ShiftModifier):
+            self._open_menu()
+            return
+        super().keyPressEvent(event)
 
     def _open_menu(self) -> None:
         menu = self.build_menu()

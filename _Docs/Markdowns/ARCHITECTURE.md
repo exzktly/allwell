@@ -15307,16 +15307,23 @@ Qt event loop. Four layers:
   `_reassess_block`, both ways: a link to a source that has already failed,
   been cancelled or been blocked blocks the job at once (the cascade runs only
   when a job finishes, so without it the job would wait for ever with nothing
-  said), and a blocked job whose stopped source was unlinked or removed is
-  released with what it was holding up — otherwise it stayed blocked naming a
-  job it no longer waits for, out of reach of any retry.
+  said), and a blocked job whose stopped source was unlinked is released with
+  what it was holding up — otherwise it stayed blocked naming a job it no
+  longer waits for, out of reach of any retry. The message a blocked job
+  carries (`waiting_on`) names the source by its *label* with what happened
+  to it — "waiting on “X”, which failed" — never by its ten-character id.
 
-  `remove` drops only the removed job's links, and when that job *succeeded*
+  `remove` drops only the removed job's links. When that job *succeeded* it
   first writes the folder it reported into each successor's linked input, so
-  the successor runs on what was written rather than on the path it was set up
-  with. Removing an unfinished source says which queued jobs were waiting on
-  it, as Clear completed does. Loading a file drops, and notes, a link to a job
-  that is not in it. A reorder placing a job before any of
+  the successor runs on what was written. When it did not — still pending,
+  failed, cancelled — the successor's input is recorded in
+  `JobSpec.orphaned_inputs` (target → the removed job's label, persisted) and
+  the successor is held `blocked`, saying the job was removed, until the user
+  chooses that input: `set_link` on it, `set_chain`, or saving an edit
+  (`update_spec`) clears it. Releasing it instead ran a Concatenate on the
+  folder a failed conversion had left half-written. Removing such a source,
+  or clearing it, says which queued jobs were waiting on it. Loading a file
+  drops, and notes, a link to a job that is not in it. A reorder placing a job before any of
   its sources is refused.
 
   A finished converter job also records a **`layout`** — what it knows about
@@ -15346,9 +15353,13 @@ Qt event loop. Four layers:
   rewritten to name that other source. `duplicate` drops the clone's chain link (a clone inheriting its
   twin's predecessor would wait on output it has no relationship to) and
   takes its new id as a parameter, so the module needs no `uuid` and a test
-  can name the copy. `clear_terminal` goes through `remove` per id rather
-  than filtering the list, so a survivor chained to a cleared job loses the
-  link instead of pointing at a job that no longer exists. `move_to` is the
+  can name the copy. `clear_terminal` removes the jobs that *ran*
+  (`JobState.CLEARABLE`: succeeded, failed, cancelled) and keeps blocked ones,
+  which never ran — clearing them threw away a chain the user would have to
+  rebuild to retry the job that blocked it. It goes through `remove` per id
+  rather than filtering the list, so a survivor linked to a cleared job loses
+  the link — taking the folder a succeeded job wrote, or held blocked after a
+  failed one — instead of pointing at a job that no longer exists. `move_to` is the
   drag counterpart of `move`: it shifts the rows it passes rather than
   swapping, because dragging picks a destination, and it validates through
   the same whole-list `_chain_order_valid`. The two are wired to different
@@ -15393,7 +15404,9 @@ Qt event loop. Four layers:
   menu calls it: `opts.raw` for Analyze, `dataset` for Validate, `source` for
   Subset / the converters / Zip-loose, and `dataset1` *and* `dataset2` for
   Concatenate and Merge plates), `CHAIN_TARGET` (the first of those — what
-  "Run after ▸" fills; `tests/test_job_kinds.py` holds the two together), and
+  "Input from ▸" fills; `tests/test_job_kinds.py` holds the two together;
+  the converters and Zip loose are in neither, with the reason written in
+  that test — they read files, not datasets), and
   the sending end of the same link — `produced_for(kind, path)` and
   `CHAIN_KIND`. Together they are why the interface can derive a link from
   "run after that one" or "dataset 2 from that one" alone; a user should not
@@ -15674,15 +15687,23 @@ Qt event loop. Four layers:
   icon, derived name, an indeterminate progress strip while running (a
   controller only ever reports a free-text status message, never a
   percentage), a `widgets.status_dot.StatusDot` state chip, and a `⋯` menu.
-  The second is muted and descriptive — each source's *label* (not its
-  ten-hex-character id: "after “X”", or on a two-input job "dataset 1 from
-  “X” · dataset 2 from “Y”", since "after X" would not say which input X
-  fills), `describe_detail`'s paths, and the latest status message — elided with `QFontMetrics` against the width the label is
-  actually given, from `resizeEvent`, and hidden when empty. The `⋯` menu
-  carries *Edit…*, *Duplicate*, *Retry* (terminal states only), *Run after ▸*
-  — or, on a two-input job, *Dataset 1 from ▸* and *Dataset 2 from ▸*, each
-  linking that one input (`linkRequested`) so the other keeps its link —
-  *Queue next step from this output ▸*, *Move up*/*Move down* (hidden on
+  The second is muted and descriptive — on a blocked job its reason first
+  ("Blocked — waiting on “X”, which failed", since at the end of an elided
+  line it was cut off at every width), then each source's *label* ("input
+  from “X”", or on a two-input job "dataset 1 from “X” · dataset 2 from “Y”",
+  since "input from X" would not say which input X fills), `describe_detail`'s
+  paths, and the latest status message. Both lines are elided with
+  `QFontMetrics` against the width each label is actually given, from
+  `resizeEvent`, with the full text on the tooltip; the name used to be
+  unelided, and a long one pushed the status chip and ⋯ off the row. The row
+  takes keyboard focus: Enter opens the job as a click does, the Menu key or
+  Shift+F10 opens ⋯ (at least `_MENU_BTN_MIN` square). The chain glyph's
+  tooltip says what it means. The `⋯` menu carries *Edit…*, *Duplicate*,
+  *Retry* (jobs that ran: a blocked job's Retry was refused, so it is not
+  offered), *Input from ▸* — or, on a two-input job, *Dataset 1 from ▸* and
+  *Dataset 2 from ▸*, each linking that one input (`linkRequested`) so the
+  other keeps its link, and neither offering the job already feeding the
+  other — *New job using this output ▸* (`NEXT_STEP_MENU`), *Move up*/*Move down* (hidden on
   terminal rows, where reordering means nothing) and *Remove*. The next-step
   submenu offers Analyze, Validate and Subset of this job's output, and
   *Concatenate with ▸* / *Merge plates with ▸* naming a second job (any other
@@ -15694,8 +15715,12 @@ Qt event loop. Four layers:
   chosen this way rather than by selecting two rows because the queue has no
   row selection and a row click already opens the job; it is built by `build_menu()` and `exec()`d only
   from the click handler, so a test can inspect and `trigger()` actions
-  without opening a popup that would block under the offscreen QPA. The
-  *Run after* submenu is constructed as `QMenu(title, parent)` rather than
+  without opening a popup that would block under the offscreen QPA. Entries
+  naming another job carry its queue position ("2. Convert …"), since two
+  duplicated jobs have identical names. One word runs through all of it: a job
+  takes its *input* from another, and "New job using this output" is the same
+  link made from the other end. The
+  *Input from* submenu is constructed as `QMenu(title, parent)` rather than
   via `addMenu(str)` — the menu that call returns is not kept alive on the
   Python side and can be collected out from under the menu that owns it.
 
@@ -15777,8 +15802,9 @@ folder with a real one. `apply_pending(fields, pending)` / `any_pending` apply
 a page's whole set at once. Each page that can be a next step implements
 `set_pending_inputs(pending, projection=None)`, defers whatever would read the
 input, and keeps its own Run button off while an input is pending (tooltip
-`RUN_WAITS`; Analyze's Run, which reports problems rather than greying out,
-lists "Input not written yet") — queueing is what the page is for in that
+`RUN_WAITS`; Analyze's Run greys the same way with its own tooltip,
+`_sync_run_for_pending`, and still lists "Input not written yet" if reached)
+— queueing is what the page is for in that
 state, and running could analyse whatever an earlier run left in the planned
 folder. Concatenate
 leaves the gap to be worked out when the job runs (an untouched gap field
@@ -15817,7 +15843,9 @@ beneath it, which is the point, since the user is editing that page. It
 shows its whole sentence at any width: the buttons sit beside the sentence
 until that would leave it narrower than `_MIN_TEXT_W`, then move under it, and
 the strip's height is computed from the sentence as it wraps at the real width
-(`_fit`, on every resize and `setText`). In the Analyze form's narrow column a
+(`_fit`, on every resize and `setText`). The buttons sit in a container named
+`ContextBannerButtons`, kept transparent in `theme.qss`: unnamed, it took the
+page background and drew them on a black box. In the Analyze form's narrow column a
 one-row strip gave the sentence about 60 px and cut off most of it
 (`tests/test_context_banner_fits.py`).
 `DatasetsTab` inserts it at index 0 of the target page's own layout, which

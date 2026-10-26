@@ -93,6 +93,9 @@ class ContextBanner(QWidget):
         self._grid.setColumnStretch(1, 1)
 
         self._buttons = QWidget(self)
+        # Named so theme.qss can keep it see-through: an unnamed QWidget took
+        # the app's page background and drew the buttons on a black box.
+        self._buttons.setObjectName("ContextBannerButtons")
         buttons = QHBoxLayout(self._buttons)
         buttons.setContentsMargins(0, 0, 0, 0)
         buttons.setSpacing(theme.Spacing.sm)

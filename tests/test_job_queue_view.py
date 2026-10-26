@@ -41,13 +41,13 @@ def _actions(row):
 
 
 def _chain_submenu(row):
-    """The "Run after" submenu, with its parent menu kept alive.
+    """The "Input from" submenu, with its parent menu kept alive.
 
     Dropping the parent takes the C++ QMenu with it and every action under it
     becomes a dangling reference, so the caller has to hold both.
     """
     menu = row.build_menu()
-    sub = next(a.menu() for a in menu.actions() if a.text() == "Run after")
+    sub = next(a.menu() for a in menu.actions() if a.text() == "Input from")
     return menu, sub
 
 
@@ -270,7 +270,7 @@ def test_run_after_offers_only_the_jobs_above_this_one(qapp):
     row.update_from(job, predecessors=[("j-1", "First"), ("j-2", "Second")])
     _menu, sub = _chain_submenu(row)
     labels = [a.text() for a in sub.actions() if a.text()]
-    assert labels == ["Nothing (run on its own)", "First", "Second"]
+    assert labels == ["Nothing (use the folder on its page)", "First", "Second"]
 
 
 def test_run_after_emits_the_chosen_predecessor(qapp):

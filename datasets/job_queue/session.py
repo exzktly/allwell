@@ -40,6 +40,7 @@ from services.job_kinds import (
     input_label,
     input_targets,
     planned_output,
+    short_label,
 )
 from services.job_queue import ChainLink, JobSpec, JobState, set_dotted
 from core.safe import swallowed
@@ -200,10 +201,12 @@ class QueueSession:
         if not self._bridge.show_spec(kind, skeleton):
             self._notify(f"{label}'s page isn't available right now.", "warn")
             return False
-        names = " and ".join(f"“{queue.get(s).label or s}”" for s in dict.fromkeys(sources.values()))
+        unique = list(dict.fromkeys(sources.values()))
+        names = " and ".join(f"“{short_label(queue.get(s).label or s)}”" for s in unique)
+        whose = "that job's output" if len(unique) == 1 else "those jobs' outputs"
         started = self._start(kind, None, (
-            f"Setting up a queued {label} job that runs after {names}. Inputs marked ⧗ "
-            "are read from those jobs' outputs when it runs. Set every other "
+            f"Setting up a queued {label} job that reads from {names}. Inputs "
+            f"marked ⧗ are read from {whose} when it runs. Set every other "
             "option on the page, then add it to the queue."))
         if started:
             self._links = links
@@ -475,8 +478,8 @@ def pending_note(source: JobSpec, kind: str, target: str) -> str:
     """The sentence an input field shows while it waits on *source*."""
     what = (f"{input_label(kind, target)}: output" if len(input_targets(kind)) > 1
             else "Output")
-    return (f"⧗ {what} of queued job “{source.label or source.id}” — not "
-            "written yet; filled in when that job finishes.")
+    return (f"⧗ {what} of queued job “{short_label(source.label or source.id)}” "
+            "— not written yet; filled in when that job finishes.")
 
 
 def _same_path(a: str, b: str) -> bool:

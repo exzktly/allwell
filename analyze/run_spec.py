@@ -199,7 +199,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         signal the phone view's run-start watcher reads — still fires while
         the button is on its way onto the screen.
         """
-        self._run_btn.setEnabled(not running)
+        self._run_btn.setEnabled(not running and not self.has_pending_inputs())
         self._stop_btn.setEnabled(running)
         self._suspend_btn.setEnabled(running)
         self._run_btn.setVisible(not running)
@@ -274,9 +274,11 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         note = (pending or {}).get("opts.raw", "")
         if not note:
             self._pending_input = None
+            self._sync_run_for_pending()
             self._refresh_output()
             return
         self._pending_input = (self._input_edit.text().strip(), note)
+        self._sync_run_for_pending()
         layout = (projection or {}).get("layout")
         if layout:
             self._apply_pipeline_info(dict(layout), set_input_path=False)
@@ -290,6 +292,23 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
 
     def has_pending_inputs(self) -> bool:
         return self._pending_input is not None
+
+    def _sync_run_for_pending(self) -> None:
+        """Grey Run, and say why, while the input is a queued job's output.
+
+        As every Datasets page does (``datasets.core.pending_inputs``): a Run
+        that stays lit and then refuses reads as a broken button, and the
+        reason belongs on the button before it is pressed.
+        """
+        btn = getattr(self, "_run_btn", None)
+        if btn is None:
+            return
+        pending = self.has_pending_inputs()
+        btn.setEnabled(not getattr(self, "_running", False) and not pending)
+        btn.setToolTip(
+            "The input folder is the output of a queued job that hasn't run "
+            "yet — add this to the queue to run it after that job."
+            if pending else "")
 
     #: The whole form as it was before the Job Queue borrowed it
     #: (:meth:`remember_form`), put back by :meth:`restore_form` when a setup

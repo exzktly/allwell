@@ -1110,6 +1110,30 @@ QToolButton[hasMenu="true"]::menu-indicator {{
     background: transparent;
 }}
 
+/* Split tool buttons (``MenuButtonPopup``, ``popupMode`` 1): clicking the body
+   runs the button's own action and only the strip on the right opens the menu
+   (``widgets.path_field.PathField.add_browse_alternative`` is the one in use).
+   Both of that strip's subcontrols are styled here on purpose: any subcontrol
+   the stylesheet leaves unstyled is handed to the platform style, and macOS
+   then paints its own drop-down bevel *and* its own arrow — two arrows of
+   different sizes beside each other. Styling both makes the shared chevron
+   the only arrow drawn, the same 10x10 as every ``hasMenu`` caret. */
+QToolButton[popupMode="1"] {{
+    padding-right: 16px;
+}}
+QToolButton[popupMode="1"]::menu-button {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 16px;
+    border: none;
+    background: transparent;
+}}
+QToolButton[popupMode="1"]::menu-arrow {{
+    image: url({_chev});
+    width: 10px;
+    height: 10px;
+}}
+
 QPushButton#Primary {{
     background-color: {c.accent};
     border-color: {c.accent};

@@ -119,6 +119,8 @@ class RunDashboard(PlateProgress):
         # did not finish) or why its new output is not here (a short pull), for
         # its hover text.
         self._reanchor_note: dict[str, str] = {}
+        # Wells a batch left to the run's final re-anchoring pass, not yet re-run.
+        self._held: set = set()
         self._active_stage = ""
         # Plate-wide transfer, as a fraction, while one is in flight — None
         # when there is not one. State rather than a formatted string because
@@ -150,6 +152,7 @@ class RunDashboard(PlateProgress):
         self._reanchoring = {}
         self._refetch = set()
         self._reanchor_note = {}
+        self._held = set()
         self._active_stage = ""
         self._transfer = None
         self._bar.setRange(0, 100); self._bar.setValue(0)
@@ -286,7 +289,19 @@ class RunDashboard(PlateProgress):
         w = canon_well(well_id)
         if not w:
             return
-        if what == "start":
+        if what == "held":
+            # Its results are here and stand; its unaddressed timepoints wait for the last batch.
+            self._held.add(w)
+            waiting = timepoints or "its unaddressed timepoints"
+            self._reanchor_note[w] = f"held for the end-of-run re-anchoring: {waiting} re-run once the last batch is done"
+        elif what == "unplaced":
+            # The pass found no anchor for this timepoint from the plate; it says why, per timepoint.
+            self._held.discard(w)
+            earlier = self._reanchor_note.get(w, "") if w not in self._reanchoring else ""
+            prefix = earlier + "; " if earlier.startswith("re-anchoring could not place") else ""
+            self._reanchor_note[w] = (prefix or "re-anchoring could not place ") + timepoints
+        elif what == "start":
+            self._held.discard(w)
             self._reanchoring[w] = timepoints
             self._reanchor_note.pop(w, None)
             self._fov.pop(w, None)          # the re-run reports its own steps
@@ -524,8 +539,9 @@ class RunDashboard(PlateProgress):
         """The run ended — finished, failed or stopped. A well still being
         re-anchored never finished it, so it goes back to what it was and says
         so, instead of staying amber "processing again" on a run that is over."""
-        for w in list(self._reanchoring):
-            self._reanchoring.pop(w)
+        for w in [*self._reanchoring, *self._held]:
+            self._reanchoring.pop(w, None)
+            self._held.discard(w)
             self._reanchor_note[w] = _REANCHOR_LEFT_AS_IT_WAS["unfinished"]
             self._plate.setWellColor(w, self._well_color(w))
             self.set_well_fraction(w, self._well_fraction(w))

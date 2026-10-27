@@ -10547,7 +10547,13 @@ anchor (`review/features/home/collect.py`; `tests/test_an_unaddressed_nanowell_w
 Validate's scan does not use this rule for nanowell wells — it counts (fov, timepoint) pairs from the
 measurements CSV — so a record Validate rewrites carries no `not_addressed`.
 
-**End of run.** `nanowell_endgame` re-runs each unaddressed (well, timepoint) the rest of the plate can anchor:
+**End of run.** `nanowell_endgame` re-runs each unaddressed (well, timepoint) the rest of the plate can anchor,
+the wells in parallel on the run's worker pool (`pool`, which `process_microscopy` gives as `_well_pool` — the same
+spawned, `_worker_init`-ed pool the wells ran on; `reanchor_plate` → `_each_reanchored` → `_reanchor_well`, a
+module-level function a worker can be handed, which catches a well's failure in the worker). It used to run in the
+pipeline's own process after the pool had closed, one well after another. In a batched remote run it runs once,
+after the last batch, instead of per batch (`--nanowell_hold_dir` / `--nanowell_reanchor_only`, below).
+What it does:
 the wells anchored on their own evidence at a reference timepoint and at this one fix the plate's rigid
 motion (`fit_plate_rigid`), and the well's origin at the reference carried through it is handed to
 `resolve_origin` as a prediction, accepted only when its error is under a third of half a pitch. It needs a
@@ -10707,16 +10713,34 @@ are read and never rewritten. A copy that fails is said in the run log and costs
 A nanowell well announces itself with the same `Well X — done.` marker a field-mode well does, which is what the
 Fetcher and Analyze's progress count. The run record knows it is a nanowell run from its argv
 (`_RemoteRun.nanowell`), and three things follow. Nothing of a well is deleted from the remote as it is
-fetched (`well_files_to_delete`), because the re-anchoring at the end of the pipeline invocation re-runs some
-wells from their input archives and earlier output. In a batched run the well is deleted when its batch ends
-instead: that re-anchoring re-runs only the invocation's own wells and reads nothing of the others but their
-grid records under `nanowells/`, so after `_await_batch` returns, `_run_batches` queues
+fetched (`well_files_to_delete`), because the end-of-run re-anchoring re-runs some wells from their input
+archives and earlier output. **In a batched run that pass is one more batch, after the last data batch.** Each
+data batch's pipeline is given `--nanowell_hold_dir <run>/keep` and, instead of re-anchoring, hard-links into it the
+archive of every well `nanowell_task.awaits_final_pass` says the pass could anchor (an unaddressed timepoint with
+stage positions, in a well anchored on its own evidence at another timepoint — the conditions of `plan_reanchor`
+one well's record can answer). The driver is built with `final_pass=True`
+(`remote_commands._batch_driver_snippet`), which adds batch `n + 1`; after the data batches
+`services/remote_final_pass.py` (`finish_with_final_pass` → `run_final_pass`, split out so `_run_batches` stays the
+batch loop) moves `keep/` into `b<n+1>`, flags it `BATCH_REANCHOR` (the driver then adds `--nanowell_reanchor_only`,
+under which `process_well_zips(reanchor_only=…)` processes no well, the pass runs over the held archives fitted from
+every grid record in the output folder, and `replaced_wells` names none, so no well's earlier coverage record is
+dropped — `nanowell_task.reanchor_only_run`, `hold_dir_for` and `replaced_wells` keep those decisions out of
+`main`) or `BATCH_SKIP` when nothing was held, and releases the held wells after it. A non-zero exit of the pass is
+not a failed batch — every well has its batch's results — but it is the run's exit code, so verification keeps the
+remote copies. Per batch the pass was blind to later batches: a well its
+own batch could not anchor stayed unaddressed even when the whole plate would have anchored it, and its archive was
+deleted when the next batch was swapped in. The cost is remote disk: a held well's archive and output stay until
+the pass. A suspend, a Stop or a lost driver before the pass leaves the held wells as their batches left them, and
+says so on Analyze's plate. A data batch's well is otherwise deleted when its batch ends: the pass reads nothing of
+the others but their grid records under `nanowells/`, so after `_await_batch` returns, `_run_batches` queues
 `remote_fetch_nanowells.release_batch` on the Fetcher (`Fetcher.after_queued`, which runs it on the worker behind
 every well the batch announced). It pulls the batch's `nanowells/` tables again, pulls the CSV and
 `<well>_out.zip` of each well the batch re-anchored (saying so per well, which is what turns the well back to
 downloaded on Analyze's plate), and then deletes each landed well's input archive, output
-archive and cell CSVs, recording it in `_RemoteRun.nanowell_released`. A well that never landed, or whose second
-pull came up short, is kept for verification; `nanowells/` is never deleted mid-run, since every later batch's
+archive and cell CSVs, recording it in `_RemoteRun.nanowell_released` — except, for a data batch (`hold_dir`),
+a well whose archive is in `keep/` (`held_wells`, the remote's own listing: the pipeline decided, so the app reads
+its answer), which the final pass's release frees. A well that never landed, or whose second pull came up short,
+is kept for verification; `nanowells/` is never deleted mid-run, since every later batch's
 plate fit reads it. That is what lets the batch size bound a nanowell run's remote disk. At verification the
 whole `nanowells/` directory and every re-anchored well not already released have their CSV and
 `<well>_out.zip` pulled again — the wells of this run (`fetched_wells`; the local folder holds the whole plate's

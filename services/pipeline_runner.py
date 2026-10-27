@@ -288,18 +288,27 @@ _RE_WELL_REANCHORING = re.compile(r"Well (\S+)\s+\S+\s+re-anchoring (.+?) from t
 _RE_WELL_REANCHORED = re.compile(r"Well (\S+)\s+\S+\s+re-anchored\.")
 _RE_WELL_REANCHOR_FAILED = re.compile(r"Well (\S+)\s+\S+\s+re-anchoring failed")
 _RE_WELL_REANCHOR_UNCHANGED = re.compile(r"Well (\S+)\s+\S+\s+re-anchoring placed none of")
+_RE_WELL_UNPLACED = re.compile(r"Unaddressed ([A-Za-z]\d{1,2})/(\S+): (.+)")
+_RE_WELL_HELD = re.compile(r"Well (\S+)\s+\S+\s+held for the end-of-run re-anchoring \((.+?) unaddressed\)")
 _RE_WELL_REFETCHED = re.compile(r"\[remote\] (\S+): pulled again after the end-of-run re-anchoring")
 _RE_WELL_REFETCH_SHORT = re.compile(r"\[remote\] (\S+): the re-anchored output did not all arrive")
 
 
 def _reanchor_events(line: str) -> list[tuple[str, object]]:
     """``("well_reanchor", (well, what, timepoints))`` for a re-anchoring line: *what* is ``start`` (with the
-    timepoints it re-runs), ``done`` (a timepoint was placed, so the well is pulled again), ``unchanged`` (none was;
+    timepoints it re-runs), ``held`` (a batch left the well to the run's final pass, with the timepoints that
+    wait), ``unplaced`` (the pass could not anchor a timepoint, with ``"<timepoint>: <why>"``), ``done`` (a timepoint
+    was placed, so the well is pulled again), ``unchanged`` (none was;
     the copy already fetched stands), ``failed``, ``fetched`` (the second pull landed) or ``short`` (it did not all
     arrive)."""
-    start = _RE_WELL_REANCHORING.search(line)
-    if start:
-        return [("well_reanchor", (start.group(1), "start", start.group(2)))]
+    for pattern, what in ((_RE_WELL_REANCHORING, "start"), (_RE_WELL_HELD, "held")):
+        found = pattern.search(line)
+        if found:
+            return [("well_reanchor", (found.group(1), what, found.group(2)))]
+    unplaced = _RE_WELL_UNPLACED.search(line)
+    if unplaced:
+        return [("well_reanchor", (unplaced.group(1), "unplaced",
+                                   f"{unplaced.group(2)}: {unplaced.group(3).strip()}"))]
     for pattern, what in ((_RE_WELL_REANCHORED, "done"), (_RE_WELL_REANCHOR_FAILED, "failed"),
                           (_RE_WELL_REANCHOR_UNCHANGED, "unchanged"), (_RE_WELL_REFETCHED, "fetched"),
                           (_RE_WELL_REFETCH_SHORT, "short")):

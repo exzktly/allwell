@@ -482,8 +482,13 @@ unfinished earlier run of the plate), pressing Run or Resume goes well by well. 
 cover all of its timepoints under the same settings is skipped; every other well — left part way, never finished,
 or given new timepoints since — is uploaded whole and analysed again in full, and its tables replace the partial
 ones when it comes back. The log says so before anything is sent. Test detection is not affected: it runs on this
-computer. A remote nanowell run keeps every well's files on the remote until the run ends, because the
-end-of-run re-anchoring may re-run a well, and then brings the final tables home with the re-anchored wells.
+computer. The end-of-run re-anchoring — re-running the timepoints whose nanowells could not be numbered from
+the well's own images, placed from the plate's other wells — runs once at the end of a remote nanowell run, its
+wells in parallel. On a batched run, a well that needs it keeps its files on the remote after its batch (its hover
+text on the plate says "held for the end-of-run re-anchoring"), and is re-run after the last batch against the
+whole plate, so a well its own batch had too few anchored wells to place can still be placed. The final tables are
+then brought home with the re-anchored wells. If the run is stopped or suspended before then, the held wells keep
+the results their batch gave them and say their re-anchoring did not happen.
 While a well is being re-anchored the plate shows it processing again — its hover text names the timepoints
 ("re-anchoring T03, T05 from the plate's other wells") and counts their nanowells, and the Process and Download
 counts leave it out. When the re-run placed at least one timepoint, the well is then blue, on the server, until
@@ -1695,9 +1700,12 @@ because none of it applies:
   of input plus about one well of output, at the cost of reloading the
   segmentation model once per batch (a few seconds each). Set it from the
   remote's free disk, not from its core count. A nanowell run holds a whole
-  batch's input and output until that batch ends — its end-of-batch
-  re-anchoring may re-run any of those wells — and then frees them, so for
-  nanowells the peak is about `N` wells of input plus `N` wells of output.
+  batch's input and output until that batch ends, and then frees them, so for
+  nanowells the peak is about `N` wells of input plus `N` wells of output —
+  plus every well kept for the end-of-run re-anchoring: a well with a
+  timepoint whose nanowells could not be numbered keeps its input and output
+  on the remote until the last batch is done, when every such well is re-run
+  at once, in parallel, against the whole plate.
 - **Auto-delete remote files when done.** On by default. After a run the app
   verifies succeeded, it deletes both the per-run output directory and the
   cached input on the remote, so a shared machine does not fill up. It never

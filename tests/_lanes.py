@@ -169,6 +169,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_batch_release.py": "A batched nanowell run frees each batch's wells on the remote once the batch has ended",
     "test_nanowell_cell_dots.py": "The Array view's Cells layer: a dot at the centre of each cell the run counted (nanowell …",
     "test_nanowell_cell_rows_are_linear.py": "A nanowell well's per-cell rows cost the same per cell at a million cells as at ten",
+    "test_nanowell_final_pass.py": "A batched nanowell run's re-anchoring is one parallel pass after the last batch",
     "test_nanowell_cellpose_model.py": "The Cellpose model the nanowell count segments with (nanowell tracker L2)",
     "test_nanowell_completeness.py": "Completeness of a nanowell well is counted in timepoints, the unit of work there (tracker P8)",
     "test_nanowell_contents.py": "Section C: what is inside each nanowell (tracker §3.5, §3.6)",

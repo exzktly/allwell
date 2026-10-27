@@ -39,6 +39,19 @@ _CONFIG_UNAVAILABLE = (
 )
 _RUN = 'echo "srun: job $JOB has been allocated resources" >&2\n' \
        'shift_to_bash "$@"\n'
+#: Queued, and stays queued until ``scancel`` (the stand-in removes the marker) or SIGTERM — then exits the way
+#: srun does when its pending allocation is revoked. Gives up by itself after four seconds, so a test whose wrapper
+#: never cancels fails rather than hangs.
+_PENDING = (
+    'echo "srun: job $JOB queued and waiting for resources" >&2\n'
+    ': > "$S/pending$JOB"\n'
+    "trap 'rm -f \"$S/pending$JOB\"' TERM\n"
+    'i=0; while [ "$i" -lt 40 ] && [ -f "$S/pending$JOB" ]; do sleep 0.1; i=$((i+1)); done\n'
+    'echo "srun: error: Job allocation $JOB has been revoked" >&2\n'
+    "exit 1\n"
+)
+#: Allocated at once, then busy for a while before the job's script runs.
+_RUN_SLOW = 'echo "srun: job $JOB has been allocated resources" >&2\nsleep 3\nshift_to_bash "$@"\n'
 
 
 def _write_exe(path: Path, body: str) -> None:
@@ -47,12 +60,16 @@ def _write_exe(path: Path, body: str) -> None:
 
 
 def _fake_cluster(tmp_path: Path, outcomes: list[tuple[str, str]],
-                  sinfo: str | None, *, test_only_fits: bool = True) -> Path:
+                  sinfo: str | None, *, test_only_fits: bool = True,
+                  start_at: str = "2026-01-01T00:00:00") -> Path:
     """A bin dir whose ``srun`` plays *outcomes* in order: (kind, node).
 
     ``srun --test-only`` queues nothing and consumes no outcome; it answers
-    whether the request could run, per *test_only_fits*, and is logged to
-    ``state/test_only``.
+    whether the request could run, per *test_only_fits*, with *start_at* as the
+    expected start, and is logged to ``state/test_only`` (with the
+    ``SLURM_TIME_FORMAT`` it was run under). ``scancel`` records the job id in
+    ``state/scancelled`` and ends a pending job; ``squeue`` lists a job as
+    pending while it is.
     """
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -62,17 +79,19 @@ def _fake_cluster(tmp_path: Path, outcomes: list[tuple[str, str]],
         (state / "test_only_fails").write_text("")
     for i, (kind, node) in enumerate(outcomes, start=1):
         body = {"boot_fail": _BOOT_FAIL, "unavailable": _CONFIG_UNAVAILABLE,
-                "run": _RUN}[kind]
+                "run": _RUN, "pending": _PENDING, "run_slow": _RUN_SLOW}[kind]
         _write_exe(state / f"outcome{i}", f"JOB={1000 + i}\nNODE={node}\n" + body)
     _write_exe(bindir / "srun", (
         f'S={shlex.quote(str(state))}\n'
         'case " $* " in *" --test-only "*)\n'
         '  printf "%s\\n" "$*" >> "$S/test_only"\n'
+        '  printf "%s\\n" "${SLURM_TIME_FORMAT-unset}" >> "$S/test_only_time_format"\n'
         '  if [ -f "$S/test_only_fails" ]; then\n'
         "    echo 'srun: error: Unable to allocate resources: "
         "Requested node configuration is not available' >&2; exit 1\n"
         '  fi\n'
-        '  echo "srun: Job 9 to start at 2026-01-01T00:00:00" >&2; exit 0;;\n'
+        f'  echo "srun: Job 9 to start at {start_at} using 16 processors on nodes n01 in partition cpu" >&2\n'
+        '  exit 0;;\n'
         'esac\n'
         'n=$(( $(cat "$S/count" 2>/dev/null || echo 0) + 1 ))\n'
         'echo "$n" > "$S/count"\n'
@@ -84,14 +103,24 @@ def _fake_cluster(tmp_path: Path, outcomes: list[tuple[str, str]],
     ))
     if sinfo is not None:
         _write_exe(bindir / "sinfo", f"cat <<'EOF'\n{sinfo}EOF\n")
+    _write_exe(bindir / "scancel", (
+        f'S={shlex.quote(str(state))}\n'
+        'echo "$1" >> "$S/scancelled"; rm -f "$S/pending$1"\n'))
+    # Called as `squeue -h -j <id> -t PD -o %i`.
+    _write_exe(bindir / "squeue", (
+        f'S={shlex.quote(str(state))}\n'
+        'while [ $# -gt 0 ]; do [ "$1" = "-j" ] && j=$2; shift; done\n'
+        'echo "$j" >> "$S/squeued"\n'
+        '[ -f "$S/pending$j" ] && echo "$j"\nexit 0\n'))
     return bindir
 
 
-def _run(tmp_path: Path, bindir: Path, launcher: str):
+def _run(tmp_path: Path, bindir: Path, launcher: str, **wrap_kwargs):
     pidfile = tmp_path / "run.pid"
     cmd = wrap_srun_launch(
         launcher, shlex.quote("echo pipeline ran on the node"),
-        shlex.quote(str(pidfile)), shlex.quote(str(pidfile) + ".srun-err"))
+        shlex.quote(str(pidfile)), shlex.quote(str(pidfile) + ".srun-err"),
+        **wrap_kwargs)
     env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path)}
     out = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True,
                          env=env, timeout=60)
@@ -361,3 +390,101 @@ def test_with_every_node_busy_and_none_asleep_nothing_is_said_to_boot(tmp_path):
     assert "will boot" not in out.stdout, out.stdout
     assert ("[remote] scheduler: every powered-on node in cpu is busy and none is powered down to boot — "
             "the job waits in the queue for one to free") in out.stdout, out.stdout
+
+
+def _local_iso(seconds_from_now: int) -> str:
+    """A time *seconds_from_now* in Slurm's ``standard`` format, local time as Slurm prints it."""
+    from datetime import datetime, timedelta
+
+    return (datetime.now() + timedelta(seconds=seconds_from_now)).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def test_a_mix_node_does_not_count_as_room_for_the_run(tmp_path):
+    """The reported case: a second app instance asked for the node shape the first had just been given. The only
+    powered-on node was the one running the first run, partly allocated — ``mix`` — and with no memory or GPU left
+    for a second. Counted as free, it excluded the 400-odd powered-down nodes, and the second run waited for the
+    first to end. ``mix`` says only that some CPUs are taken; it is not room."""
+    sinfo = "n01 mix\nn02 idle~\nn03 idle~\nn04 alloc\n"
+    bindir = _fake_cluster(tmp_path, [("run", "n02")], sinfo)
+    out, args, _ = _run(tmp_path, bindir, "srun -p gpu --mem=60G --gres=gpu:1")
+    assert out.returncode == 0, out.stdout
+    assert _excluded(args[0]) == set()
+    assert "avoiding" not in out.stdout
+    assert "no free powered-on node in gpu — Slurm will boot one" in out.stdout
+
+
+def test_an_idle_node_still_keeps_the_preference_beside_a_mix_one(tmp_path):
+    sinfo = "n01 mix\nn02 idle~\nn03 idle\n"
+    bindir = _fake_cluster(tmp_path, [("run", "n03")], sinfo, start_at=_local_iso(0))
+    out, args, _ = _run(tmp_path, bindir, "srun -p gpu")
+    assert _excluded(args[0]) == {"n02"}
+    assert "avoiding 1 node(s) in gpu" in out.stdout
+
+
+def test_a_powered_on_node_that_frees_only_later_gives_way_to_booting_one(tmp_path):
+    """``srun --test-only`` says a powered-on node fits — but not for two hours, because it is running somebody's
+    job with that much time left. Booting a powered-down node takes minutes, so the exclusion is dropped. The check
+    runs with ``SLURM_TIME_FORMAT=standard`` so a user's own time format cannot change what is read."""
+    later = _local_iso(2 * 3600)
+    bindir = _fake_cluster(tmp_path, [("run", "n02")], _SINFO, start_at=later)
+    out, args, _ = _run(tmp_path, bindir, "srun -p cpu")
+    assert out.returncode == 0, out.stdout
+    assert len(args) == 1 and _excluded(args[0]) == set()
+    assert (f"[remote] scheduler: the powered-on nodes that fit this request are busy until about {later} — "
+            "letting Slurm boot one instead") in out.stdout
+    assert "avoiding" not in out.stdout
+    formats = (tmp_path / "state" / "test_only_time_format").read_text().split()
+    assert formats == ["standard"]
+
+
+def test_a_powered_on_node_free_within_the_slack_keeps_the_preference(tmp_path):
+    bindir = _fake_cluster(tmp_path, [("run", "n01")], _SINFO, start_at=_local_iso(30))
+    out, args, _ = _run(tmp_path, bindir, "srun -p cpu")
+    assert _excluded(args[0]) == {"n02", "n04", "n06"}
+    assert "busy until" not in out.stdout
+
+
+def test_an_unreadable_start_time_keeps_the_preference(tmp_path):
+    """``date -d`` is GNU; a login node without it cannot compare, and guessing would be worse than the backstop."""
+    bindir = _fake_cluster(tmp_path, [("run", "n01")], _SINFO, start_at="Unknown")
+    out, args, _ = _run(tmp_path, bindir, "srun -p cpu")
+    assert out.returncode == 0, out.stdout
+    assert _excluded(args[0]) == {"n02", "n04", "n06"}
+
+
+def test_a_launch_left_queued_on_powered_on_nodes_is_asked_for_again(tmp_path):
+    """The backstop for what the two checks cannot see — the cluster changing between the check and the launch.
+    Still queued after the wait, the job is cancelled (it is still pending, Slurm confirms) and asked for once more
+    without the exclusion, with the line that puts the progress view back into its queue-wait state."""
+    bindir = _fake_cluster(tmp_path, [("pending", ""), ("run", "n02")], _SINFO, start_at=_local_iso(0))
+    out, args, _ = _run(tmp_path, bindir, "srun -p cpu", pending_fallback_s=1)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "pipeline ran on the node" in out.stdout
+    assert len(args) == 2
+    assert _excluded(args[0]) == {"n02", "n04", "n06"}
+    assert _excluded(args[1]) == set()
+    state = tmp_path / "state"
+    assert (state / "scancelled").read_text().split() == ["1001"]
+    assert (state / "squeued").read_text().split() == ["1001"]
+    assert ("[remote] scheduler: still queued for a powered-on node after 1 s — cancelled it and asking again "
+            "without excluding the powered-down ones") in out.stdout
+    assert "[remote] scheduler: requesting allocation via: srun -p cpu" in out.stdout
+    assert not list(tmp_path.glob("run.pid.srun-err*"))
+
+
+def test_a_launch_that_was_allocated_is_never_cancelled(tmp_path):
+    bindir = _fake_cluster(tmp_path, [("run_slow", "n01")], _SINFO, start_at=_local_iso(0))
+    out, args, _ = _run(tmp_path, bindir, "srun -p cpu", pending_fallback_s=1)
+    assert out.returncode == 0, out.stdout
+    assert len(args) == 1
+    assert not (tmp_path / "state" / "scancelled").exists()
+    assert "still queued" not in out.stdout
+
+
+def test_without_the_exclusion_a_queued_launch_is_left_alone(tmp_path):
+    """Nothing excluded means nothing to give up: the queue is the queue. No watchdog, no cancel."""
+    bindir = _fake_cluster(tmp_path, [("pending", "")], "n01 alloc\nn02 idle~\n")
+    out, args, _ = _run(tmp_path, bindir, "srun -p cpu", pending_fallback_s=1)
+    assert len(args) == 1
+    assert not (tmp_path / "state" / "scancelled").exists()
+    assert "still queued" not in out.stdout

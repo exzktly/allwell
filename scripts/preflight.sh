@@ -9,7 +9,7 @@
 # you deleted — and scratch output about to be committed by accident, which is
 # how 21 JUnit XMLs once reached main.
 #
-#   scripts/preflight.sh          # lint + fast lane (+ nanowell lane when touched) + tree check
+#   scripts/preflight.sh          # lint + fast lane (+ nanowell / UI lanes when touched) + tree check
 #   scripts/preflight.sh --quick  # skip the fast lane (lint + tree only, ~2s)
 #
 # Exit status: 0 only when every check passes.
@@ -82,6 +82,16 @@ if (( QUICK == 0 )); then
         run_lane "nanowell lane" --nanowell
     else
         echo "   skipped (nothing on this branch touches the pipeline or nanowell code)"
+    fi
+
+    # The UI lane (tests/_lanes.py UI_LANE_FILES): widget geometry, fit, colours, phone layout.
+    # Only a change to the UI surface can break it, so it runs when scripts/ui_lane.py finds one
+    # on this branch — the same question CI asks before its UI job runs the lane.
+    step "UI lane (scripts/test.sh --ui)"
+    if python scripts/ui_lane.py needed | sed 's/^/   /'; then
+        run_lane "UI lane" --ui
+    else
+        echo "   skipped"
     fi
 else
     step "fast lane"

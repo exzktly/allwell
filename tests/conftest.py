@@ -34,6 +34,8 @@ from review.domain.stats_compute import compute_rep_stats
 from services import remote_fetch
 from services import remote_upload
 
+from tests._lanes import UI_LANE_FILES
+
 
 # ── AggPoint helpers ────────────────────────────────────────────────────────
 
@@ -979,14 +981,22 @@ def pytest_collection_modifyitems(config, items):
     Marking by fixture (rather than by hand on each test) keeps ``-m "not slow"``
     a fast, reliable, auto-maintained gate; the full-app tests run in the
     local/manual full pass. The lightweight ``mock_app`` fixture is unaffected.
+
+    The two rosters mark their files for their own lanes: ``nanowell_e2e``
+    (``NANOWELL_E2E_FILES`` below) and ``ui_lane`` (``tests/_lanes.py``, the
+    layout and appearance tests ``scripts/test.sh --ui`` runs).
     """
     slow = pytest.mark.slow
     nanowell = pytest.mark.nanowell_e2e
+    ui_lane = pytest.mark.ui_lane
     for item in items:
         if "viewer_app" in getattr(item, "fixturenames", ()):
             item.add_marker(slow)
-        if Path(str(item.fspath)).name in NANOWELL_E2E_FILES:
+        name = Path(str(item.fspath)).name
+        if name in NANOWELL_E2E_FILES:
             item.add_marker(nanowell)
+        if name in UI_LANE_FILES:
+            item.add_marker(ui_lane)
 
 
 #: The nanowell end-to-end files, which run in their own lane

@@ -368,12 +368,12 @@ def test_every_nanowell_lane_file_exists():
 def test_the_fast_lane_leaves_the_nanowell_lane_out_and_ci_runs_it():
     root = Path(__file__).resolve().parents[1]
     script = (root / "scripts" / "test.sh").read_text()
-    assert 'MARK="not slow and not nanowell_e2e"' in script
+    assert 'MARK="not slow and not nanowell_e2e and not ui_lane"' in script
     assert 'MARK="nanowell_e2e and not slow"' in script
     workflow = (root / ".github" / "workflows" / "ci.yml").read_text()
     assert "scripts/test.sh --nanowell --junitxml=.pytest-report.xml" in workflow, \
         "CI no longer runs the nanowell lane"
-    assert workflow.count("python scripts/junit_gate.py .pytest-report.xml") >= 2, \
+    assert workflow.count("python scripts/junit_gate.py .pytest-report.xml") >= 3, \
         "a CI test job is not gated on its JUnit report"
 
 
@@ -397,3 +397,107 @@ def test_the_roster_marks_its_tests():
     outside = _Item(fspath=Path(__file__), fixturenames=(), marks=[])
     harness.pytest_collection_modifyitems(None, [inside, outside])
     assert inside.marks == ["nanowell_e2e"] and outside.marks == []
+
+
+# ── The UI lane ─────────────────────────────────────────────────────────────
+# Layout and appearance tests (tests/_lanes.py) run in a lane of their own that
+# preflight and CI start only when a change touches the UI surface. The same
+# two silent failures as the nanowell lane apply — a renamed file falls back
+# into the fast lane, a CI job that stops running the lane runs 600 tests
+# nowhere — plus a third of its own: a trigger that stops seeing the modules
+# its tests import skips the lane on exactly the change that breaks it.
+
+def _ui_lane_module():
+    import importlib.util
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("ui_lane", root / "scripts" / "ui_lane.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_every_ui_lane_file_exists_and_belongs_to_no_other_lane():
+    from tests._lanes import UI_LANE_FILES
+    from tests.conftest import NANOWELL_E2E_FILES
+
+    here = Path(__file__).resolve().parent
+    missing = [name for name in UI_LANE_FILES if not (here / name).is_file()]
+    assert not missing, f"UI roster names files that do not exist: {missing}"
+    both = sorted(set(UI_LANE_FILES) & set(NANOWELL_E2E_FILES))
+    assert not both, f"in both the UI and the nanowell roster: {both}"
+    unexplained = [name for name, why in UI_LANE_FILES.items() if not why.strip()]
+    assert not unexplained, f"UI roster entries with no reason: {unexplained}"
+
+
+def test_no_full_app_file_is_in_the_ui_lane():
+    """A full-app test there would be deselected by the lane's ``not slow`` and run nowhere."""
+    import re
+
+    from tests._lanes import UI_LANE_FILES
+
+    here = Path(__file__).resolve().parent
+    full_app = re.compile(r"\b(viewer_app|loaded_app|loaded_app_shape|image_table_app)\b")
+    offenders = [name for name in UI_LANE_FILES
+                 if full_app.search((here / name).read_text(encoding="utf-8"))]
+    assert not offenders, f"full-app files in the UI roster: {offenders}"
+
+
+def test_the_fast_lane_leaves_the_ui_lane_out_and_ci_runs_it():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "test.sh").read_text()
+    assert 'MARK="ui_lane and not slow"' in script
+    workflow = (root / ".github" / "workflows" / "ci.yml").read_text()
+    assert "scripts/test.sh --ui --junitxml=.pytest-report.xml" in workflow, \
+        "CI no longer runs the UI lane"
+    assert "python scripts/ui_lane.py needed" in workflow, \
+        "CI runs the UI lane without asking whether the change needs it"
+    preflight = (root / "scripts" / "preflight.sh").read_text()
+    assert 'run_lane "UI lane" --ui' in preflight, "preflight no longer runs the UI lane"
+
+
+def test_the_hook_marks_the_ui_roster():
+    from types import SimpleNamespace
+
+    import tests.conftest as harness
+    from tests._lanes import UI_LANE_FILES
+
+    class _Item(SimpleNamespace):
+        def add_marker(self, mark):
+            self.marks.append(mark.name)
+
+    inside = _Item(fspath=Path(__file__).parent / next(iter(UI_LANE_FILES)),
+                   fixturenames=(), marks=[])
+    outside = _Item(fspath=Path(__file__), fixturenames=(), marks=[])
+    harness.pytest_collection_modifyitems(None, [inside, outside])
+    assert inside.marks == ["ui_lane"] and outside.marks == []
+
+
+def test_the_trigger_sees_the_surface_and_what_ui_tests_import():
+    """Each kind of path the trigger must see, and two it must not.
+
+    ``services/run_journal.py`` matches no surface pattern; only reading
+    ``test_analyze_banners_are_readable.py``'s imports puts it in the surface,
+    so a trigger that stopped reading them answers it wrongly.
+    """
+    lane = _ui_lane_module()
+    imports = lane.roster_imports()
+    # The patterns alone, with no imports to lean on.
+    for path in ("widgets/flow_layout.py", "ui/theme.py", "datasets/subset/dashboard.py",
+                 "analyze/tab.py", "review/features/home/_phone.py", "allwell.py"):
+        assert lane.surface_reason(path, set()).startswith("UI surface"), path
+    # Matched by no pattern: only the roster's imports can put these in.
+    for path in ("review/features/home/plate_panel.py", "services/run_journal.py"):
+        assert lane.surface_reason(path, set()) == "", path
+        assert lane.surface_reason(path, imports) == "imported directly by a UI-lane test", path
+    assert lane.surface_reason("tests/test_button_row.py", imports) == "a UI-lane test file"
+    for path in ("pipeline/io.py", "review/domain/stats_compute.py",
+                 "tests/test_bar_geometry.py", "analyze/domain/input.py"):
+        assert lane.surface_reason(path, imports) == "", path
+
+
+def test_an_unanswerable_diff_runs_the_lane():
+    """No base to compare with must mean "run it", never a silent skip."""
+    lane = _ui_lane_module()
+    assert lane.main(["needed", "--base", "no-such-ref-anywhere"]) == 0
+

@@ -41,6 +41,7 @@ python process_microscopy.py --input_dir … --output_dir …   # pipeline only,
 ruff check .                                   # lint — CI pins ruff==0.15.8, config in pyproject.toml
 scripts/test.sh                                # THE test command — CI runs this same script
 scripts/test.sh --nanowell                     # the nanowell end-to-end lane (CI's second test job)
+scripts/test.sh --ui                           # the GUI layout / appearance lane (only when UI changes)
 scripts/test.sh tests/test_app_smoke.py -m ""  # full-app tests: one or two files at a time
 
 scripts/build_executable.sh --clean            # macOS .app (always pass --clean)
@@ -66,7 +67,7 @@ for a bare `python -m pytest`.
 
 ## 2. Running tests — read this before typing `pytest`
 
-The suite has three lanes and **running the wrong one hangs the run and OOM-kills
+The suite has four lanes and **running the wrong one hangs the run and OOM-kills
 the container**:
 
 - **Fast lane** (~12,340 tests of ~13,160 collected): `scripts/test.sh`.
@@ -83,6 +84,15 @@ the container**:
   because one of its files is 475 s. Naming files (`scripts/test.sh
   tests/test_nanowell_run.py`) runs them whichever lane they belong to. A new
   nanowell test that renders tiles and detects joins the roster.
+- **UI lane** (~620 tests): `scripts/test.sh --ui`. GUI layout and appearance —
+  widget geometry, fit, colours, theme, dashboards, phone layout, and the bare
+  widgets in `widgets/` (`tests/_lanes.py::UI_LANE_FILES`, each with its
+  reason). It runs only when `scripts/ui_lane.py needed` finds a changed path in
+  the UI surface (the patterns in `tests/_lanes.py` plus every module a UI test
+  imports directly): preflight and CI's UI job both ask it, and CI runs the lane
+  on every push to `main` regardless. A test that drives a control and asserts
+  what reached a spec, argv, state or file is *behaviour* and belongs in the fast
+  lane, not here. When you touch the UI, run `scripts/test.sh --ui` yourself.
 - **Full-app tests** (~440 tests): anything using the `viewer_app`
   / `loaded_app` / `loaded_app_shape` / `image_table_app` fixtures, auto-marked
   `slow` by `conftest.py`. Each builds a real `ReviewApp` (~1,800 QObjects)

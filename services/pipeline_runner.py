@@ -32,6 +32,7 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
 from __future__ import annotations
 
 import collections
+import json
 import logging
 import os
 import queue
@@ -62,6 +63,7 @@ from services.remote_run_state import refuse_remote_nanowell_incremental
 from services.subprocess_kill import signal_subprocess
 from pipeline.slurm_node import parse_node_specs
 from util.aw_safe import swallow, swallowed
+from util.json_write import try_write_json_atomic
 from util.zip_append import recover_paths as recover_appends
 from pipeline.suspend import LOG_MARKER as _SUSPEND_LOG_MARKER
 
@@ -722,6 +724,45 @@ def scope_staged_to_only_wells(zipped, only_wells, *, keep=()):
                     if canonical_well_label(w) in wanted)
     return (replace(zipped, well_zips=zips, up_to_date_wells=current),
             sorted(wanted & present))
+
+
+def record_remote_batch_size(output_dir: Path, opts: dict) -> bool:
+    """Write the run's remote batch size into the local ``pipeline_info.json``.
+
+    The sidecar's ``execution_options`` is the pipeline's own ``vars(args)``,
+    and the batch size never reaches the pipeline: it is a client-side choice
+    about how ``RemoteRunner`` slices the plate into launches. So without this
+    the sidecar has no record of it, and **Open pipeline_info.json** restored
+    every option of a batched run except the batch size, leaving whatever the
+    field held — a run reproduced from its own sidecar then uploaded the whole
+    plate at once onto a remote sized for a few wells.
+
+    Called after the end-of-run fetch, because that fetch replaces the local
+    sidecar with the remote one. A non-batched remote run records ``0``, so
+    loading it resets the field rather than inheriting a previous value. An
+    unreadable value, or a sidecar that is missing or not a dict, records
+    nothing: the loader leaves the field alone when the key is absent, which is
+    the honest outcome when the value is unknown. Returns whether it wrote.
+    """
+    try:
+        batch_size = max(0, int(str(opts.get("remote_batch_size", 0) or 0).strip() or 0))
+    except (ValueError, TypeError):
+        return False
+    info_path = Path(output_dir) / "pipeline_info.json"
+    try:
+        info = json.loads(info_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError) as exc:
+        _LOG.warning("could not record the batch size in %s (%s)", info_path, exc)
+        return False
+    if not isinstance(info, dict):
+        return False
+    exec_opts = info.get("execution_options")
+    exec_opts = dict(exec_opts) if isinstance(exec_opts, dict) else {}
+    exec_opts["remote_batch_size"] = batch_size
+    info["execution_options"] = exec_opts
+    return try_write_json_atomic(info_path, info)
 
 
 def argv_with_only_wells(argv, wells):
@@ -2099,6 +2140,8 @@ class PipelineRunner:
                 dry_run=self._dry_run_cleanup,
                 log_fn=lambda m: self._enqueue(("line", m)),
             )
+            # After the fetch above, which replaced the local sidecar.
+            record_remote_batch_size(output_dir, opts)
             if rc == 0 and ok and self._suspend_requested.is_set():
                 self._enqueue_suspended(where="Remote pipeline")
             elif rc == 0 and self._stop_requested.is_set():

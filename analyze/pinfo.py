@@ -344,6 +344,10 @@ class AnalyzePipelineInfoMixin:
         s("_workers_edit", d.get("workers"))
         s("_stardist_tile_px_edit", d.get("stardist_tile_px"))
         chk("_cpu_only_cb", d.get("cpu_only"))
+        # Not a pipeline argument: the client stamps it into the sidecar after
+        # a remote run's fetch (``services.pipeline_runner.record_remote_batch_size``).
+        # Absent on a local run's sidecar, which leaves the field alone.
+        s("_remote_batch_size_edit", d.get("remote_batch_size"))
         restore_storage_options(self, d)
         # ``allow_low_disk`` is deliberately NOT restored, though the sidecar
         # records it. Every other option here describes how a plate was

@@ -7059,6 +7059,15 @@ channel-role handoff, and Validate & Repair's "Complete this run in Analyze".
 snapshot the pipeline records) and falls back to the top-level/`qc_options` keys
 for older sidecars; `None`-valued keys are dropped so a sparse sidecar can't
 clobber widget defaults with blanks.
+One key in `execution_options` is not the pipeline's: `remote_batch_size`. The
+batch size never reaches the pipeline — it is how `RemoteRunner` slices the
+plate into launches — so `vars(args)` cannot carry it, and the client stamps it
+in instead (`services.pipeline_runner.record_remote_batch_size`) after a remote
+run's end-of-run fetch, which is the moment the local sidecar has just been
+replaced by the remote one. A non-batched remote run records `0`; a local run
+records nothing, so loading its sidecar leaves the Batch size field as it
+stands. `tests/test_remote_batch_size_round_trips.py` drives the runner's real
+order, with a stub fetch that overwrites the sidecar.
 It restores settings and never resumes: nothing here reads the run journal or
 the suspend record, chooses Fill in what's missing or starts a run — resuming is the resume
 banner's job (`analyze.suspend`). **A sidecar can describe another machine.** A
@@ -7635,7 +7644,8 @@ sidecar, which is wrong for an Otsu run carrying dormant control wells; the
 two StarDist thresholds are raw text where blank means "the model's own
 default", while `_restore_stardist_thresholds` skips anything it cannot read
 as a float and would leave the previous job's number in the field; and
-`remote_batch_size` has no sidecar equivalent at all. `RunSpec`'s
+`remote_batch_size`, which a sidecar carries only when a remote run's client
+stamped it in, is set from the spec explicitly so a job always states it. `RunSpec`'s
 `remote_name`, `cleanup_remote` and `dry_run_cleanup` live beside `opts`
 rather than inside it and no sidecar restore touches them.
 `tests/test_analyze_job_edit.py` is the guard — a `collect` → `hydrate` →

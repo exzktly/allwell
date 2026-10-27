@@ -1708,6 +1708,9 @@ because none of it applies:
   timepoint whose nanowells could not be numbered keeps its input and output
   on the remote until the last batch is done, when every such well is re-run
   at once, in parallel, against the whole plate.
+  The batch size a remote run used is saved in its `pipeline_info.json`, so
+  **Load previous run** puts it back. Loading a local run's settings leaves
+  the field as it is.
 - **Auto-delete remote files when done.** On by default. After a run the app
   verifies succeeded, it deletes both the per-run output directory and the
   cached input on the remote, so a shared machine does not fill up. It never

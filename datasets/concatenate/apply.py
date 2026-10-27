@@ -24,6 +24,7 @@ import threading
 import zipfile
 from datasets.core.dataset_paths import dataset_wells
 from datasets.core.nanowell_tables import carry_nanowell_tables
+from datasets.concatenate.nanowell_link import MONTAGE_SUFFIX, carry_linked_tables
 from datasets.core.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
 from collections.abc import Callable
@@ -161,6 +162,8 @@ class _MemberRename:
             # prefer, so skipping would just delete the user's file.
             self.junk_skipped += 1
             return None
+        if self._plan.nanowell_link is not None and name.endswith(MONTAGE_SUFFIX):
+            return self._montage(name)
         new_name, rewrote = rewrite_member_name(
             name, schema=self._plan.schema, channels=self._plan.channels,
             offset_hours=self._plan.offset_hours, tp_format=self._plan.tp_format,
@@ -168,6 +171,19 @@ class _MemberRename:
         if not rewrote:
             self.unmatched += 1
         return new_name
+
+    def _montage(self, name: str) -> str | None:
+        """A nanowell montage, ``<well>_<timepoint>_montage.png``: named for dataset 2's renamed timepoint, or left
+        out with that timepoint when it is set aside for Analyze (whose run draws it again)."""
+        well, _sep, token = name[: -len(MONTAGE_SUFFIX)].partition("_")
+        try:
+            timepoint = remap_timepoint_label(token, self._plan.offset_hours, self._plan.tp_format)
+        except ConcatError:
+            self.unmatched += 1
+            return name
+        if self._plan.nanowell_link.sets_aside(well, timepoint):
+            return None
+        return f"{well}_{timepoint}{MONTAGE_SUFFIX}"
 
 
 def _copy_container_as_is(src: Path, dest_in_dir: Path, well: str) -> None:
@@ -376,6 +392,10 @@ def merge_measurements(
         _backfill_hours(rows1)
     if rows2:
         stats.unmatched_filenames = _remap_ds2_rows(plan, rows2)
+        if plan.nanowell_link is not None:
+            # A nanowell timepoint left for Analyze takes its cells with it: rows here with no grid block or site
+            # rows behind them would read as measured.
+            rows2 = [r for r in rows2 if not plan.nanowell_link.sets_aside(well, str(r.get(_TIMEPOINT_COLUMN)))]
         if ds2_in_names is not None:
             for row in rows2:
                 fname = row.get(_FILENAME_COLUMN)
@@ -486,7 +506,9 @@ def _verify(
         )
 
     total_rows = sum(s.rows_ds1 + s.rows_ds2 for s in well_stats.values())
-    if well_stats and total_rows == 0:
+    # A nanowell well none of whose nanowells holds a cell writes its per-cell CSV with a header and no rows — a
+    # measurement, whose rows are in its sites table — so no cell rows is not, there, a merge that matched nothing.
+    if well_stats and total_rows == 0 and plan.nanowell_link is None:
         raise ConcatError(
             "Verification failed: the merge wrote zero measurement rows "
             f"across {len(well_stats)} well(s) — no measurements_<WELL>.csv "
@@ -677,6 +699,38 @@ def _keep_nanowell_tables(plan: MergePlan, emit) -> None:
     if carried:
         emit(f"Kept dataset 1's nanowell tables for {len(carried)} well(s); Analyze adds dataset 2's "
              "timepoints to them incrementally.")
+
+
+def _join_nanowell_tables(plan: MergePlan, emit) -> None:
+    """Analysed + analysed: dataset 2's nanowell timepoints joined onto dataset 1's nanowells where the two analyses
+    agree, the rest left for an incremental Analyze (:mod:`datasets.concatenate.nanowell_link`)."""
+    def relabel(token: str) -> str:
+        return remap_timepoint_label(token, plan.offset_hours, plan.tp_format)
+
+    try:
+        carry_linked_tables(plan.nanowell_link, plan.ds1.out_dir, plan.ds2.out_dir, plan.dest.out_dir, relabel)
+    except (OSError, ValueError) as exc:
+        raise ConcatError(f"The nanowell tables could not be joined: {exc}") from exc
+    for line in plan.nanowell_link.summary():
+        emit(line)
+
+
+def _carry_nanowell_results(plan: MergePlan, emit) -> None:
+    """Dataset 1's nanowell tables kept (analysed + raw), or dataset 2's joined onto them (analysed + analysed)."""
+    if plan.ds2_raw:
+        _keep_nanowell_tables(plan, emit)
+    if plan.nanowell_link is not None:
+        _join_nanowell_tables(plan, emit)
+
+
+def _analyze_next(plan: MergePlan) -> str:
+    """The summary's last sentence: what an Analyze run still has to do on the merged dataset, if anything."""
+    if plan.ds2_raw:
+        return " Run Analyze on it to process dataset 2's timepoints."
+    if plan.nanowell_link is not None and plan.nanowell_link.set_aside:
+        return (f" {sum(map(len, plan.nanowell_link.set_aside.values()))} nanowell timepoint(s) of dataset 2 wait "
+                "for Analyze (Fill in what's missing); see the log.")
+    return ""
 
 
 def execute_plan(
@@ -891,8 +945,7 @@ def execute_plan(
     _merge_acquisition_records(plan, emit)
 
     _merge_cell_overrides(plan, emit)
-    if plan.ds2_raw:
-        _keep_nanowell_tables(plan, emit)
+    _carry_nanowell_results(plan, emit)
 
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)
     marker_path.unlink(missing_ok=True)
@@ -901,8 +954,7 @@ def execute_plan(
                       offset_hours=plan.offset_hours, gap_hours=plan.gap_hours,
                       gap_source=plan.gap_source)
 
-    extra = " Run Analyze on it to process dataset 2's timepoints." if plan.ds2_raw else ""
     return (
         f"Concatenated {len(all_wells)} well(s) into {plan.dest.root} "
-        f"(dataset 2 shifted +{plan.offset_hours:g}h).{extra}"
+        f"(dataset 2 shifted +{plan.offset_hours:g}h).{_analyze_next(plan)}"
     )

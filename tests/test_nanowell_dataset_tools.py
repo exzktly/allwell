@@ -1,4 +1,5 @@
-"""Subset, Merge Plates and Concatenate refuse nanowell results by name; Validate checks the tables (tracker P10)."""
+"""Subset, Merge Plates and Concatenate refuse nanowell results they cannot carry, by name; Validate checks the tables
+(tracker P10)."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import pytest
 
 from datasets.concatenate.concatenate_compute import ConcatError, build_merge_plan
 from datasets.core.dataset_paths import DatasetPaths
-from datasets.core.nanowell_tables import has_nanowell_tables, nanowell_findings, refuse_nanowell_tables
+from datasets.core.nanowell_tables import has_nanowell_tables, nanowell_findings, refuse_unjoinable_nanowell_tables
 from datasets.subset.subset_compute import SubsetError, SubsetFilter, build_subset_plan
 
 SCHEMA = ["experiment", "channel", "well", "fov", "timepoint"]
@@ -59,10 +60,10 @@ def test_a_dataset_with_nanowell_tables_is_recognised(nanowell_ds, plain_ds):
     assert has_nanowell_tables(_paths(nanowell_ds)) and not has_nanowell_tables(_paths(plain_ds))
 
 
-def test_the_concatenate_refusal_names_the_tool_and_the_way_out(nanowell_ds):
-    with pytest.raises(ValueError, match="Concatenate the analysed dataset with dataset 2.s raw images") as raised:
-        refuse_nanowell_tables(_paths(nanowell_ds), "Dataset 1", ValueError, "Concatenate")
-    assert "Concatenate cannot carry them" in str(raised.value) and "Dataset 1" in str(raised.value)
+def test_the_concatenate_refusal_names_the_dataset_without_nanowell_results_and_the_way_out(nanowell_ds, plain_ds):
+    with pytest.raises(ValueError, match="concatenate the analysed dataset with the other.s raw images") as raised:
+        refuse_unjoinable_nanowell_tables(_paths(nanowell_ds), _paths(plain_ds), {}, {}, ValueError)
+    assert "Dataset 1 holds nanowell results" in str(raised.value) and "dataset 2 holds none" in str(raised.value)
 
 
 def test_subset_refuses_a_field_selection_of_a_nanowell_dataset_before_writing_anything(nanowell_ds, tmp_path):

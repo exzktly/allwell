@@ -10520,7 +10520,7 @@ and the 100 µm, 50 µm and two custom geometries at 1.3 and 2.0 µm per pixel �
 exactly (`tests/test_nanowell_run.py::test_a_circular_array_s_roster_is_every_drawn_site_and_no_other`). What it
 gives up: a rim nanowell a bubble hides at every timepoint, wholly imaged, is left out (2 sites under a rendered
 rim bubble on a one-timepoint well; detected at any other timepoint, it stays). A timepoint whose detections sit
-a lattice step from the other timepoints' (`_misanchored`: its detected sites overlap theirs better moved by one
+a lattice step from the other timepoints' (`misanchored`: its detected sites overlap theirs better moved by one
 step than where they are) is anchored a step off: its detections do not widen the rim — taken at face value one such
 timepoint put 17 rows of floor into every timepoint — it is compared on its own evidence and so is a
 `roster_mismatch`, and its note says why; with two timepoints a step apart both are, since which is wrong cannot be
@@ -10808,10 +10808,37 @@ they are, and an incremental Analyze adds dataset 2's timepoints onto the same n
 the successive-imaging workflow, pinned end to end by `tests/test_nanowell_merge_endtoend.py`. The merge writes
 an acquisition record only when both datasets have one, so raw images without a record are refused onto a
 dataset 1 whose tables were addressed from its record (`_refuse_dropping_the_nanowell_record`, at plan time):
-the destination would keep tables nothing could extend. Two analysed
-datasets with nanowell tables are refused (`refuse_nanowell_tables`): each analysis addressed its own nanowells,
-and the message names the two routes that work. Validate checks the tables against the grid record and the input
-archives.
+the destination would keep tables nothing could extend.
+
+Concatenate of **two analysed nanowell datasets** joins dataset 2's timepoints onto dataset 1's nanowells
+(`datasets/concatenate/nanowell_link.py`). Every timepoint is anchored on its own, so an address `(q, r)` names the
+same physical nanowell in both analyses; what two analyses do not share is what one run fixes across a well's
+timepoints — the roster, the check that no timepoint sits a lattice step off the others, and the earliest template a
+sparse timepoint falls back to. `plan_link` decides at plan time, well by well, where dataset 2's rows already agree
+with what an incremental run onto dataset 1's tables would write: a well whose two rosters differ (`roster_of`: the
+recorded set, else the addresses a disk-rule well's ok timepoints have rows for), or whose two analyses used
+different roster rules, has every dataset 2 timepoint **set aside**; so does a single dataset 2 timepoint anchored a
+step off dataset 1's detections (`nanowell_run.misanchored`, given dataset 1's detected sites as an incremental run
+gives it the kept ones) or measured on dataset 2's own fallback template (`template.source == "earliest"`). The rest
+are joined: `carry_linked_tables` carries dataset 1's tables (`carry_nanowell_tables`), adds dataset 2's blocks and
+site rows under their renamed timepoints onto dataset 1's grid record — its `array_radius` and roster kept — and
+re-runs `flag_template_drift` over the merged blocks, so every timepoint is compared with the well's earliest. A
+well only dataset 2 analysed comes whole, renamed, with its template re-saved under the new timepoint. A set-aside
+timepoint has no grid block, site rows, cell rows (`merge_measurements` drops them) or montage (`_MemberRename`
+renames dataset 2's `<well>_<timepoint>_montage.png` members and drops a set-aside one), so Validate reports it as
+never analysed and Home as partial until an incremental Analyze measures it onto dataset 1's roster; the joined ones
+keep their record digests (`record_digest` does not hash the label), so that run keeps them. The plan refuses, before
+writing, two analyses under different nanowell settings, scheme or measurement version
+(`refuse_unjoinable_nanowell_tables` through `nanowell_block_conflict`), a pair in which only one dataset holds
+nanowell results, and a pair in which only one has an acquisition record (`_refuse_dropping_the_nanowell_record`
+with `both_analysed`). The merged sidecar's `acquisition` block takes both datasets', dataset 2's renamed. What a
+join does not equalise, and the log says so: each half keeps the nanowell diameter (a median over its own run's
+timepoints) and array radius its own run measured. `_verify`'s zero-cell-rows refusal is waived for these merges,
+because a nanowell well with no cells writes an empty per-cell table as its measurement.
+`tests/test_nanowell_concatenate_link.py` drives each decision through `build_merge_plan` and `execute_plan`;
+`tests/test_nanowell_merge_endtoend.py` joins two real analyses (an incremental Analyze then measures nothing) and
+sets aside one whose roster differs (it then measures exactly that timepoint). Validate checks the tables against
+the grid record and the input archives.
 
 ### 6.2j Nanowells in Review: data and calculations
 

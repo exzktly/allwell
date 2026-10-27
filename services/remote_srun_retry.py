@@ -85,6 +85,7 @@ runs it under ``sh`` with stand-in ``srun`` and ``sinfo`` programs.
 
 from __future__ import annotations
 
+import re
 import shlex
 
 #: How many times a launch that fails to boot its node is retried.
@@ -128,6 +129,39 @@ def is_srun(launcher: str) -> bool:
     except ValueError:
         return False
     return bool(tokens) and tokens[0].rsplit("/", 1)[-1] == "srun"
+
+
+#: Words in an ``srun`` launcher that already decide whether the node is shared:
+#: an explicit ``--exclusive`` (bare or ``=user`` / ``=mcs``) is kept as written,
+#: and ``--oversubscribe`` / ``-s`` asks to share, which an added
+#: ``--exclusive`` would contradict.
+_SHARING_WORDS = ("--exclusive", "--oversubscribe", "-s")
+
+
+def with_exclusive(launcher: str) -> str:
+    """*launcher* with ``--exclusive`` added after ``srun``, so Slurm gives the
+    job its node to itself.
+
+    Without it Slurm may place another job on the same node whenever the node
+    looks to have room by the resources the jobs asked for — and on a cluster
+    that does not count memory as a resource (AWS ParallelCluster's default),
+    two runs that each size their workers to the whole node fit by CPU count
+    and then compete for its memory. Two app instances running at once is the
+    ordinary way to get there.
+
+    Unchanged when *launcher* is not ``srun``, cannot be tokenised, or already
+    says how the node is shared (:data:`_SHARING_WORDS`). The word is inserted
+    into the text rather than the command being rebuilt from tokens, so the
+    user's quoting survives exactly as written.
+    """
+    if not is_srun(launcher):
+        return launcher
+    tokens = shlex.split(launcher)
+    if any(t in _SHARING_WORDS or t.startswith("--exclusive=") for t in tokens[1:]):
+        return launcher
+    end = re.match(r"\s*\S+", launcher).end()     # the program word, as written
+    rest = launcher[end:]
+    return f"{launcher[:end]} --exclusive" + (f" {rest.lstrip()}" if rest.strip() else "")
 
 
 def stray_launcher_words(launcher: str) -> list[str]:

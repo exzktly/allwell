@@ -369,6 +369,18 @@ class RemoteFormDialog(QDialog):
         launcher_row.addWidget(self._test_sched_btn)
         sched_layout.addLayout(launcher_row)
 
+        # On by default: without it Slurm may put another job — a second app
+        # instance's run included — on the same node (RemoteHost.exclusive_node).
+        self._exclusive_cb = QCheckBox("Reserve the whole node (--exclusive)", self._scheduled_box)
+        self._exclusive_cb.setToolTip(
+            "Ask Slurm for the node to yourself, so no other job — another "
+            "All-Well run included — lands on the same machine and competes "
+            "for its memory. Added to the srun command when a run is sent; "
+            "a command that already says --exclusive or --oversubscribe is "
+            "left as written.")
+        self._exclusive_cb.setChecked(host.exclusive_node)
+        sched_layout.addWidget(self._exclusive_cb)
+
         # Optional override for where jupyterhub_config.py lives on the remote
         # (blank → probe conventional locations like /etc/jupyterhub/...).
         jhub_row = QHBoxLayout()
@@ -655,6 +667,7 @@ class RemoteFormDialog(QDialog):
                 if self._compute_loc_combo.currentData() == "scheduled"
                 else ""
             ),
+            exclusive_node=self._exclusive_cb.isChecked(),
             jupyterhub_config_path=self._jhub_path_edit.text().strip(),
             queue_wait_timeout_min=self._queue_wait_spin.value(),
         )

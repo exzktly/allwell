@@ -237,6 +237,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_resume_keeps_checkpoints_when_the_blank_moves.py": "A resumed batched run keeps its wells' part-way checkpoints though the blank's path changed",
     "test_a_resumed_remote_run_downloads_before_uploading.py": "Resuming a remote run downloads what the server finished; it never re-uploads it",
     "test_a_retry_keeps_the_staged_batches.py": "A batched run that dies before its node boots does not re-send its uploads",
+    "test_a_run_reserves_its_node.py": "A scheduled run asks Slurm for its node to itself (--exclusive) unless the Remotes dialog says not to",
     "test_a_second_incremental_remote_run_does_its_work.py": "A resumed remote run must run the groups it uploaded, however often it resumes",
     "test_a_slow_merge_does_not_hold_the_next_download.py": "One well's merge does not hold the next well's download — or anyone's remote copy but its own",
     "test_a_starved_slurm_job_says_so.py": "A Slurm job given one core of a big node says so in the run log",

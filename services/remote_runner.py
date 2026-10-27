@@ -712,7 +712,7 @@ class RemoteRunner:
         # directory that is still filling.
         overlap = bool(self.host.compute_launcher.strip()) and not cache_hit
         remote_cmd = _compose_remote_cmd(
-            self.host.compute_launcher,
+            self.host.launch_command,
             remote_pidfile,
             remote_argv,
             cache_hit=cache_hit,
@@ -739,7 +739,7 @@ class RemoteRunner:
         if not cache_hit:
             # A cache hit short-circuits to a ``true`` no-op and consumes no
             # allocation, so it is not waiting for one.
-            log(_scheduler_handoff_lines(self.host.compute_launcher))
+            log(_scheduler_handoff_lines(self.host.launch_command))
         return overlap, ssh_argv
 
     def _start_ssh(self, ssh_argv: list[str]) -> subprocess.Popen:

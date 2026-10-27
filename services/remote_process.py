@@ -760,8 +760,8 @@ class _BatchedRemoteProcess:
 
         # The budget for one batch is what the operator wrote before this
         # change: their --time sized a single launch.
-        per_batch_s = launcher_time_seconds(host.compute_launcher)
-        launcher, note = scale_launcher_time(host.compute_launcher, total)
+        per_batch_s = launcher_time_seconds(host.launch_command)
+        launcher, note = scale_launcher_time(host.launch_command, total)
         if note:
             self._log(note)
         # One hand-off for the run rather than one per batch — there is one

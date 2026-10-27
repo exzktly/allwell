@@ -94,7 +94,7 @@ def test_a_field_resumed_from_its_checkpoint_never_reads_the_archive(tmp_path, m
     """The resumed field's members are not read at all — the old upfront unpack
     copied them out even though the checkpoint already held the field."""
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path / "scratch"))
-    staging = pm._staging_dir_for(tmp_path / "out", "A01", "")
+    staging = _ckpt._staging_dir_for(tmp_path / "out", "A01", "")
     staging.mkdir(parents=True)
     _ckpt._save_fov_checkpoint(staging, "exp_DAPI_A01_F001_0h",
                                [{"nucleus_id": 1, "well": "A01"}], "")

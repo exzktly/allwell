@@ -2122,6 +2122,7 @@ def test_required_files_list_is_what_we_promised():
     "pipeline/incremental_keys.py",
         "pipeline/well_skip.py",
         "pipeline/io.py",
+        "pipeline/zip_members.py",
         # The per-FOV image writer and the names of its two storage options.
         "pipeline/output_images.py",
         "pipeline/output_policy.py",

@@ -120,7 +120,7 @@ def test_process_image_group_forwards_phase_token(monkeypatch):
     # must do before anything corrects the array, and reports each input's
     # integer ceiling for the storage policy.
     monkeypatch.setattr(pm, "_load_image_group",
-                        lambda n, f, t: (nir, [bf], {}, [None, None]))
+                        lambda n, f, t, *_: (nir, [bf], {}, [None, None]))
 
     def _capture(nir_raw, fluor_raws, **kwargs):
         seen["phase_token"] = kwargs.get("phase_token")

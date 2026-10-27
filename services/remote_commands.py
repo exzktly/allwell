@@ -206,11 +206,13 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     def flag(template: str) -> str:
         return _remote_quote(run_dir) + '"/' + template.format(i="${_aw_i}") + '"'
 
-    # The final pass: skipped when nothing was held, else the same argv with the re-anchoring alone asked for.
-    # `$_aw_x` is unquoted on purpose: empty, it adds no argument at all.
+    # The final pass: the same argv with the re-anchoring alone asked for, run only when the app flagged it so —
+    # skipped when it flagged nothing was held, and when its flag is missing (a `touch` that failed must not run
+    # the whole pipeline over the held wells). `$_aw_x` is unquoted on purpose: empty, it adds no argument at all.
     final = (
         f'_aw_x=""; '
-        f'if [ -f {flag(BATCH_SKIP)} ]; then echo "0" > {done}; '
+        f'if [ -f {flag(BATCH_SKIP)} ] || {{ [ "$_aw_i" -eq {total} ] && [ ! -f {flag(BATCH_REANCHOR)} ]; }}; '
+        f'then echo "0" > {done}; '
         f'echo "{BATCH_DONE_MARKER.format(i="$_aw_i", rc="0")}"; _aw_i=$((_aw_i+1)); continue; fi; '
         f'[ -f {flag(BATCH_REANCHOR)} ] && _aw_x="--nanowell_reanchor_only"; '
     ) if final_pass else ""

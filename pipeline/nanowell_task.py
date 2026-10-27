@@ -1023,10 +1023,9 @@ def hold_for_final_pass(output_dir, well_zips, hold_dir) -> list[str]:
     """Link into *hold_dir* the archive of every well of *well_zips* the end-of-run re-anchoring could anchor
     (:func:`awaits_final_pass`), for the run's final pass; returns those wells.
 
-    A batched remote run deletes each batch's archives when the next batch is swapped in, and a batch can re-anchor
-    only from what it holds, so a well left unaddressed because its own batch had too few anchored wells stayed so
-    even when later batches would have supplied them. Held, it is re-run once, after the last batch, from the whole
-    plate. A hard link moves no bytes; a copy is the fallback where one cannot be made.
+    A batched remote run deletes each batch's archives when the next batch is swapped in, and a well's anchors can
+    come from any batch, so the re-anchoring has to wait for the last one; until then the archive is kept here. A
+    hard link moves no bytes; a copy is the fallback where one cannot be made.
     """
     import shutil
 
@@ -1161,16 +1160,25 @@ def _reanchor_well(job, *, output_dir, shared_kwargs_template, nuclear_token, fl
 
 
 def _each_reanchored(rerun, jobs, pool):
-    """*rerun* over *jobs*, each well in a worker of *pool* (``pool()`` gives an executor) when there is one.
+    """*rerun* over *jobs*, each well in a worker of *pool* (``pool()`` gives an executor) when there is one, so the
+    node's cores share the pass rather than one segmenting while the rest wait.
 
-    The pass used to run in the pipeline's own process after the wells' pool had closed, one well after another,
-    so on a node of many cores one segmented and the rest waited — on a large well, for an hour.
+    A worker that dies (``BrokenProcessPool``) fails its own well, with the reason, not the whole pass: the wells
+    that finished keep what they did.
     """
     if pool is None or len(jobs) < 2:
         return [rerun(job) for job in jobs]
+    results = []
     with pool() as executor:
         futures = [executor.submit(rerun, job) for job in jobs]
-        return [future.result() for future in futures]
+        for (well, _zip, by_tp), future in zip(jobs, futures):
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                log.error("Well %s — re-anchoring failed (%s: %s); its timepoints stay unaddressed.", well,
+                          type(exc).__name__, exc)
+                results.append((well, by_tp, f"{type(exc).__name__}: {exc}"))
+    return results
 
 
 def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix, schema,

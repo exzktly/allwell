@@ -133,15 +133,21 @@ def missing_nanowell_tables(run, well: str) -> list[str]:
             if not (folder / name).is_file()]
 
 
-def held_wells(fetcher, hold_dir: str) -> set[str]:
+def held_wells(ssh_run, hold_dir: str) -> set[str] | None:
     """The wells whose archive a batch held in *hold_dir* for the run's final re-anchoring pass, as the remote lists
     them: the pipeline decided (``pipeline.nanowell_task.hold_for_final_pass``), so the app reads its answer rather
-    than deciding again from records it may not have pulled yet."""
-    _host, paths, _total = fetcher._list_remote_glob(f"{fetcher.host.ssh_alias}:{hold_dir}/*.zip")
-    return {Path(p).stem.upper() for p in paths}
+    than deciding again from records it may not have pulled yet. ``None`` when the listing failed — the caller keeps
+    every well then, since a held well released here loses the archive and the output its pass re-runs from."""
+    from util.well_token import canonical_well_label
+
+    listed = ssh_run(["find", hold_dir, "-maxdepth", "1", "-name", "*.zip", "-print"], check=False)
+    if listed is None or getattr(listed, "returncode", 1) != 0:       # `_start_driver` made the directory
+        return None
+    stems = [Path(line.strip()).stem for line in (getattr(listed, "stdout", "") or "").splitlines() if line.strip()]
+    return {canonical_well_label(stem) or stem.upper() for stem in stems}
 
 
-def release_batch(fetcher, wells, *, log, hold_dir: str | None = None) -> list[str]:
+def release_batch(fetcher, wells, *, log, held=()) -> list[str]:
     """After a nanowell batch's pipeline has exited: pull again what its re-anchoring rewrote, then delete the
     batch's per-well files from the remote. Returns the wells released.
 
@@ -150,9 +156,9 @@ def release_batch(fetcher, wells, *, log, hold_dir: str | None = None) -> list[s
     re-anchored well whose second pull did not land: the remote copy is then the only current one. ``nanowells/``
     is never deleted here — every later batch's plate fit reads the grid records in it.
 
-    With *hold_dir* (a data batch of a run whose re-anchoring is one pass at the end), a well the batch held there is
-    kept too: the final pass re-runs it from its archive and its earlier output, so all three stay until that pass's
-    own release, which passes no *hold_dir*.
+    A well in *held* (a data batch of a run whose re-anchoring is one pass at the end, listed when the batch ended)
+    is kept too: the final pass re-runs it from its archive and its earlier output, so all three stay until that
+    pass's own release, which passes none.
     """
     from services.remote_csv import retire_superseded_csvs
     from services.remote_transport import delete_remote_paths
@@ -161,11 +167,10 @@ def release_batch(fetcher, wells, *, log, hold_dir: str | None = None) -> list[s
     if not run.nanowell:
         return []
     landed = [w for w in wells if w in run.fetched_wells and w not in run.nanowell_released]
-    if hold_dir:
-        held = held_wells(fetcher, hold_dir)
-        for well in [w for w in landed if w.upper() in held]:
-            log(f"[remote] {well}: kept on the remote for the end-of-run re-anchoring.\n")
-        landed = [w for w in landed if w.upper() not in held]
+    held = {w.upper() for w in held}
+    for well in [w for w in landed if w.upper() in held]:
+        log(f"[remote] {well}: kept on the remote for the end-of-run re-anchoring.\n")
+    landed = [w for w in landed if w.upper() not in held]
     local = Path(run.local_output_dir)
     for well in landed:
         fetch_nanowell_tables(fetcher, well)              # the re-anchoring rewrote the grid and sites of the re-run

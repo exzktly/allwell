@@ -487,8 +487,10 @@ the well's own images, placed from the plate's other wells — runs once at the 
 wells in parallel. On a batched run, a well that needs it keeps its files on the remote after its batch (its hover
 text on the plate says "held for the end-of-run re-anchoring"), and is re-run after the last batch against the
 whole plate, so a well its own batch had too few anchored wells to place can still be placed. The final tables are
-then brought home with the re-anchored wells. If the run is stopped or suspended before then, the held wells keep
-the results their batch gave them and say their re-anchoring did not happen.
+then brought home with the re-anchored wells. If the run is suspended before then, the held wells stay on the
+remote and the resumed run re-anchors them at its own end. If it is stopped, or the resume starts over (Force, or
+the earlier attempt's results are gone from the remote), the held wells keep the results their batch gave them and
+say their re-anchoring did not happen. If the re-anchoring itself fails, the held wells' files stay on the remote.
 While a well is being re-anchored the plate shows it processing again — its hover text names the timepoints
 ("re-anchoring T03, T05 from the plate's other wells") and counts their nanowells, and the Process and Download
 counts leave it out. When the re-run placed at least one timepoint, the well is then blue, on the server, until

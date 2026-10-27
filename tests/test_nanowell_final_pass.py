@@ -109,6 +109,20 @@ def test_the_pass_hands_each_well_to_the_pool(tmp_path):
     assert results[2][2] == "ValueError: no fit"
 
 
+def test_a_worker_that_dies_fails_its_own_well_only(tmp_path):
+    from concurrent.futures.process import BrokenProcessPool
+
+    def rerun(job):
+        if job[0] == "B03":
+            raise BrokenProcessPool("a worker died")
+        return job[0], job[2], ""
+
+    jobs = [(w, tmp_path / f"{w}.zip", {"T05": 1}) for w in ("A01", "B03", "C05")]
+    results = nt._each_reanchored(rerun, jobs, lambda: ThreadPoolExecutor(max_workers=3))
+    assert [(w, e) for w, _tp, e in results] == [("A01", ""), ("B03", "BrokenProcessPool: a worker died"),
+                                                   ("C05", "")]
+
+
 def test_without_a_pool_the_wells_run_here(tmp_path):
     calls: list = []
     jobs = [(w, tmp_path / f"{w}.zip", {}) for w in ("A01", "B03")]
@@ -179,6 +193,13 @@ def test_with_nothing_held_the_driver_runs_no_third_pipeline(tmp_path):
     assert "batch 3 finished rc=0" in stdout
 
 
+def test_a_final_batch_with_no_flag_runs_no_pipeline(tmp_path):
+    """A `touch` of the re-anchoring flag that failed must not run the whole pipeline over the held wells."""
+    ran, stdout = _drive(tmp_path, ".aw_batch_{i}_unrelated")
+    assert ran == ["RAN [] ['A01.zip']", "RAN [] ['B02.zip']"]
+    assert "batch 3 finished rc=0" in stdout
+
+
 def test_a_run_that_is_not_nanowell_keeps_its_batches_alone():
     from services.remote_commands import _batch_driver_snippet
 
@@ -198,21 +219,67 @@ def test_a_data_batch_keeps_the_wells_it_held(tmp_path, monkeypatch):
         run=types.SimpleNamespace(nanowell=True, fetched_wells={"A01", "B03"}, nanowell_released=set(),
                                   local_output_dir=tmp_path, remote_output_dir="/r/out", remote_input_dir="/r/in"),
         host=types.SimpleNamespace(ssh_alias="gpu"),
-        _list_remote_glob=lambda glob: ("gpu", ["/r/keep/B03.zip"] if glob == "gpu:/r/keep/*.zip" else [], 0),
         _rsync_glob=lambda *a: (0, 0))
     monkeypatch.setattr(rfn, "fetch_nanowell_tables", lambda f, w: None)
     lines: list = []
-    released = rfn.release_batch(fetcher, ["A01", "B03"], log=lines.append, hold_dir="/r/keep")
+    released = rfn.release_batch(fetcher, ["A01", "B03"], log=lines.append, held={"B03"})
     assert released == ["A01"]
     assert all("B03" not in p for paths in deleted for p in paths), "a held well's files were deleted"
     assert "[remote] B03: kept on the remote for the end-of-run re-anchoring.\n" in lines
     assert rfn.release_batch(fetcher, ["B03"], log=lines.append) == ["B03"], "the final pass's release frees it"
 
 
-def _final_pass_process(tmp_path, listing, *, mv_rc=0):
+def _listing(stdout, rc=0):
+    return lambda argv, **k: types.SimpleNamespace(stdout=stdout, returncode=rc)
+
+
+def test_the_held_wells_are_listed_by_their_well_name():
+    from services.remote_fetch_nanowells import held_wells
+
+    assert held_wells(_listing("/r/keep/b3.zip\n/r/keep/C05.zip\n"), "/r/keep") == {"B03", "C05"}
+    assert held_wells(_listing(""), "/r/keep") == set()
+
+
+def test_a_listing_that_fails_is_not_an_empty_one():
+    """Read as "nothing held", a failed listing would release — delete — the archive and output the pass needs."""
+    from services.remote_fetch_nanowells import held_wells
+
+    assert held_wells(_listing("", rc=124), "/r/keep") is None
+    assert held_wells(lambda argv, **k: None, "/r/keep") is None
+
+
+def _releasing(tmp_path, listing):
     from tests.test_batch_driver import _batched
 
-    p = _batched(tmp_path, ["A01"])
+    p = _batched(tmp_path, ["A01", "B03"])
+    p._runner = types.SimpleNamespace(_cache=types.SimpleNamespace(_ssh_run=listing),
+                                      host=types.SimpleNamespace(remote_staging_dir="/r"))
+    queued: list = []
+    p._fetcher = types.SimpleNamespace(run=types.SimpleNamespace(nanowell=True), after_queued=queued.append)
+    return p, queued
+
+
+def test_a_batch_s_held_wells_are_read_when_it_ends_not_when_its_release_runs(tmp_path):
+    """The release runs later, behind the batch's downloads — by then the final pass may have moved ``keep/`` away,
+    and a listing taken then finds nothing held and deletes the pass's own input."""
+    state = {"listing": "/r/runs/run-test/keep/B03.zip\n"}
+    p, queued = _releasing(tmp_path, lambda argv, **k: types.SimpleNamespace(stdout=state["listing"], returncode=0))
+    p._release_nanowell_batch(0, [tmp_path / "A01.zip", tmp_path / "B03.zip"])
+    state["listing"] = ""                                    # `keep/` moved into the final batch
+    assert queued[0].keywords["held"] == {"B03"}
+
+
+def test_a_batch_whose_held_wells_cannot_be_listed_keeps_them_all(tmp_path):
+    p, queued = _releasing(tmp_path, _listing("", rc=255))
+    p._release_nanowell_batch(0, [tmp_path / "A01.zip", tmp_path / "B03.zip"])
+    assert set(queued[0].keywords["held"]) == {"A01", "B03"}
+    assert "could not list the wells held" in "".join(p._logged)
+
+
+def _final_pass_process(tmp_path, listing, *, mv_rc=0, upload_rc=0, pass_rc=0):
+    from tests.test_batch_driver import _batched
+
+    p = _batched(tmp_path, ["A01", "B03", "C05"])
     asked: list = []
 
     def ssh_run(argv, *, check, **kw):
@@ -223,9 +290,16 @@ def _final_pass_process(tmp_path, listing, *, mv_rc=0):
             return types.SimpleNamespace(stdout="", returncode=mv_rc)
         return types.SimpleNamespace(stdout="", returncode=0)
 
-    p._runner = types.SimpleNamespace(_cache=types.SimpleNamespace(_ssh_run=ssh_run),
+    uploaded: list = []
+
+    def upload_subset(zips, dest, **kw):
+        uploaded.append(([z.stem for z in zips], dest, kw.get("acquisition_input")))
+        return 0, 0.0, upload_rc
+
+    p._runner = types.SimpleNamespace(_cache=types.SimpleNamespace(_ssh_run=ssh_run, upload_subset=upload_subset),
                                       host=types.SimpleNamespace(remote_staging_dir="/r"))
-    p._await_batch = lambda index, n: 0
+    p._uploaded = uploaded
+    p._await_batch = lambda index, n: pass_rc
     released: list = []
     p._release_nanowell_batch = lambda rc, zips, final=False: released.append(([z.stem for z in zips], final))
     return p, asked, released
@@ -241,6 +315,49 @@ def test_the_final_pass_takes_the_held_wells_and_releases_them(tmp_path, monkeyp
     assert touched == ["/r/run/.aw_batch_3_reanchor", "/r/run/.aw_batch_3_ready"]
     assert released == [(["B03", "C05"], True)]
     assert "end-of-run re-anchoring: 2 held well(s) — B03, C05" in "".join(p._logged)
+    assert p._uploaded == [(["B03", "C05"], "/r/run/b3", p._zipped)], (
+        "the pipeline reads the acquisition record and anchors from the archives' folder; keep/ has neither")
+    assert asked.index(["mv", "/r/run/keep", "/r/run/b3"]) < [a[0] for a in asked].index("touch")
+
+
+def test_a_record_that_cannot_be_sent_runs_no_pass(tmp_path, monkeypatch):
+    for module in ("services.remote_final_pass", "services.remote_process"):
+        monkeypatch.setattr(f"{module}.remote_run_dir", lambda host, run_id: "/r/run")
+    p, asked, released = _final_pass_process(tmp_path, "/r/run/keep/B03.zip\n", upload_rc=23)
+    run_final_pass(p, 2)
+    assert [a[1] for a in asked if a[0] == "touch"][0] == "/r/run/.aw_batch_3_skip"
+    assert "could not send the acquisition record" in "".join(p._logged)
+
+
+def test_a_pass_that_fails_keeps_its_wells_on_the_remote(tmp_path, monkeypatch):
+    for module in ("services.remote_final_pass", "services.remote_process"):
+        monkeypatch.setattr(f"{module}.remote_run_dir", lambda host, run_id: "/r/run")
+    p, _asked, released = _final_pass_process(tmp_path, "/r/run/keep/B03.zip\n", pass_rc=1)
+    assert run_final_pass(p, 2) == 1
+    assert released == [], "a failed pass's wells were released (deleted from the remote)"
+
+
+def test_the_staged_record_is_the_one_the_pipeline_reads(tmp_path, monkeypatch):
+    """Through the real upload: the acquisition record and the anchors travel beside the held archive."""
+    import services.remote_upload as ru
+    from services.acquisition_transport import ANCHORS_FILENAME, RECORD_FILENAME
+
+    sent: list = []
+    monkeypatch.setattr(ru, "_stream_rsync_with_retry",
+                        lambda cmd, **k: sent.append([Path(c).name for c in cmd]) or (0, 0.0, 0, 1))
+    monkeypatch.setattr(ru, "resolve_rsync_binary", lambda: "rsync")
+    monkeypatch.setattr(ru, "_rsync_ssh_transport", lambda host: [])
+    monkeypatch.setattr(ru, "_rsync_progress_flags", lambda: [])
+    archive = tmp_path / "B03.zip"
+    archive.write_bytes(b"x")
+    zipped = types.SimpleNamespace(acquisition_record={"wells": {}}, acquisition_schema=None, acquisition_sep="_",
+                                   nanowell_anchors=b"{}")
+    monkeypatch.setattr("services.acquisition_transport.filter_record_to_paths", lambda paths, record, **k: record)
+    monkeypatch.setattr("services.acquisition_transport.write_record_file", lambda path, record: path.write_text("{}"))
+    cache = object.__new__(ru.DatasetCache)
+    cache.host = types.SimpleNamespace(ssh_alias="gpu")
+    cache.upload_subset([archive], "/r/run/b3", acquisition_input=zipped)
+    assert {"B03.zip", RECORD_FILENAME, ANCHORS_FILENAME} <= set(sent[0])
 
 
 def test_with_nothing_held_the_final_pass_is_skipped(tmp_path, monkeypatch):
@@ -250,7 +367,7 @@ def test_with_nothing_held_the_final_pass_is_skipped(tmp_path, monkeypatch):
     run_final_pass(p, 2)
     assert [a[1] for a in asked if a[0] == "touch"] == ["/r/run/.aw_batch_3_skip", "/r/run/.aw_batch_3_ready"]
     assert not any(a[0] == "mv" for a in asked)
-    assert released == [([], True)]
+    assert released == []
 
 
 def test_a_staging_failure_says_the_held_wells_stay_unaddressed(tmp_path, monkeypatch):
@@ -260,7 +377,7 @@ def test_a_staging_failure_says_the_held_wells_stay_unaddressed(tmp_path, monkey
     run_final_pass(p, 2)
     assert [a[1] for a in asked if a[0] == "touch"][0] == "/r/run/.aw_batch_3_skip"
     assert "their unaddressed timepoints stay unaddressed" in "".join(p._logged)
-    assert released == [([], True)], "nothing to release: the held wells were never re-run"
+    assert released == [], "nothing to release: the held wells were never re-run"
 
 
 # ── the plate says which wells wait, and why one was not placed ──────────────
@@ -366,8 +483,7 @@ def _nanowell_batched(tmp_path, monkeypatch, ordering):
     p = _batched(tmp_path, ["A01", "A02"])
     _stub_runner(p, proc, ordering)
     p._fetcher.run.nanowell = True
-    p._fetcher.after_queued = lambda fn: ordering.append(f"release:{','.join(fn.keywords['wells'])}"
-                                                         f":{'final' if fn.keywords['hold_dir'] is None else 'held'}")
+    p._fetcher.after_queued = lambda fn: ordering.append(f"release:{','.join(fn.keywords['wells'])}")
     import services.remote_process as rp
 
     built: list = []
@@ -394,7 +510,7 @@ def test_the_loop_runs_the_final_pass_after_the_last_data_batch(tmp_path, monkey
     assert (n_data, final_pass) == (2, True), "two data batches, then the final pass"
     assert argv[argv.index("--nanowell_hold_dir") + 1].endswith("/keep")
     releases = [o for o in ordering if o.startswith("release:")]
-    assert releases == ["release:A01:held", "release:A02:held", "release::final"]
+    assert releases == ["release:A01", "release:A02"], "nothing held: nothing for the pass to release"
     assert [o for o in ordering if o.startswith("touch") and "_3_" in o] == [
         "touch /r/runs/run-test/.aw_batch_3_skip", "touch /r/runs/run-test/.aw_batch_3_ready"], "nothing held: skipped"
 
@@ -417,9 +533,9 @@ def test_a_suspend_before_the_end_runs_no_final_pass(tmp_path, monkeypatch):
     proc.finish()
     worker.join(timeout=20)
     assert not worker.is_alive()
-    assert not any(o.endswith("/keep") for o in ordering), "a final pass was staged for a suspended run"
+    assert not any("_3_" in o or o.startswith("mv") for o in ordering), "a final pass was staged for a suspended run"
     assert not any("_3_" in o for o in ordering)
-    assert [o for o in ordering if o.startswith("release:")] == ["release:A01:held"]
+    assert [o for o in ordering if o.startswith("release:")] == ["release:A01"]
 
 
 def test_the_end_of_run_pass_is_given_the_run_s_pool(tmp_path, monkeypatch):
@@ -432,3 +548,62 @@ def test_the_end_of_run_pass_is_given_the_run_s_pool(tmp_path, monkeypatch):
     nt.nanowell_endgame({"plate_format": "100um"}, tmp_path, [], KWARGS, "P", [], "m", ["experiment"], "_", "k",
                         grouper=None, parse=None, pool=pool)
     assert seen == [pool]
+
+
+def test_a_suspend_during_the_last_data_batch_runs_no_final_pass(tmp_path, monkeypatch):
+    """The suspend lands while batch 2 of 2 runs: nothing breaks out of the loop, so the pass must check itself —
+    staged, it would be handed to a driver that has already exited, and the run read as a Stop."""
+    ordering: list = []
+    p, proc, _built = _nanowell_batched(tmp_path, monkeypatch, ordering)
+    p._runner.close_remote_job = lambda **kw: None
+    worker = threading.Thread(target=p._run_batches, daemon=True)
+    worker.start()
+    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    import time
+
+    deadline = time.monotonic() + 10
+    while not any("_2_ready" in o for o in ordering) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    p.note_suspend_requested()
+    proc.say("[remote] batch-driver: batch 2 finished rc=0\n")
+    proc.say("[remote] batch-driver: suspended — no further batches\n")
+    proc.finish()
+    worker.join(timeout=20)
+    assert not worker.is_alive()
+    assert not any("_3_" in o for o in ordering), "a final pass was staged for a suspended run"
+    assert p._returncode == 0
+    assert "suspended before the end-of-run re-anchoring" in "".join(p._logged)
+
+
+def test_a_driver_lost_during_the_final_pass_is_lost_not_stopped(tmp_path, monkeypatch):
+    ordering: list = []
+    p, proc, _built = _nanowell_batched(tmp_path, monkeypatch, ordering)
+    p._fetcher.cancel = lambda: None
+    worker = threading.Thread(target=p._run_batches, daemon=True)
+    worker.start()
+    for i in (1, 2):
+        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+    proc.finish()                                   # the allocation ends before batch 3 reports
+    worker.join(timeout=20)
+    assert not worker.is_alive()
+    assert p._driver_lost.is_set(), "the final batch is counted among the batches the driver owes"
+
+
+def test_a_resumed_run_takes_over_the_wells_its_earlier_attempt_held(tmp_path):
+    from services.remote_final_pass import adopt_earlier_holds
+
+    asked: list = []
+    proc = types.SimpleNamespace(
+        _final_pass=True,
+        _fetcher=types.SimpleNamespace(run=types.SimpleNamespace(reattached=True,
+                                                                 remote_output_dir="/r/runs/run-old/out/")),
+        _runner=types.SimpleNamespace(_cache=types.SimpleNamespace(
+            _ssh_run=lambda argv, **k: asked.append(list(argv)))))
+    adopt_earlier_holds(proc, "/r/runs/run-new")
+    assert asked == [["mkdir", "-p", "/r/runs/run-new/keep"],
+                     ["find", "/r/runs/run-old/keep", "-maxdepth", "1", "-name", "*.zip",
+                      "-exec", "mv", "-t", "/r/runs/run-new/keep", "{}", "+"]]
+    asked.clear()
+    proc._fetcher.run.reattached = False
+    adopt_earlier_holds(proc, "/r/runs/run-new")
+    assert asked == [["mkdir", "-p", "/r/runs/run-new/keep"]], "a fresh run's directory has none of their outputs"

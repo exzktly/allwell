@@ -75,8 +75,8 @@ from services.remote_run_id import (
     remote_run_paths,
 )
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
-from services.remote_fetch_nanowells import release_batch
-from services.remote_final_pass import finish_with_final_pass
+from services.remote_fetch_nanowells import held_wells, release_batch
+from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_batch_resume import (
     _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
     reattach_output_dir, stage_leftovers, take_from_remote)
@@ -714,8 +714,8 @@ class _BatchedRemoteProcess:
         # Clear any handshake files a previous run of this same dataset left:
         # `run_id` is deterministic, so the driver would otherwise find batch 1
         # already flagged ready and start against an empty input directory.
-        # A nanowell run's re-anchoring is one more batch at the end (`_run_final_pass`), over the wells the
-        # data batches hold in `keep/`; an earlier attempt's `keep/` holds wells of a plate this attempt re-slices.
+        # A nanowell run's re-anchoring is one more batch at the end (`remote_final_pass`), over the wells the
+        # data batches hold in `keep/`; a resumed run takes over the earlier attempt's (`adopt_earlier_holds`).
         self._final_pass = bool(getattr(self._fetcher.run, "nanowell", False))
         total = n_batches + (1 if self._final_pass else 0)
         self._runner._cache._ssh_run(["mkdir", "-p", run_dir], check=False)
@@ -730,6 +730,7 @@ class _BatchedRemoteProcess:
         # attempt's directory — go into the batch they now belong to first; then the half-processed `in/` is
         # cleared, its staged batches and `bg/` kept for the retry (`remote_batch_staging`).
         stage_leftovers(self, run_dir)
+        adopt_earlier_holds(self, run_dir)      # and makes `keep/`, which every batch's release lists
         self._runner._cache._ssh_run(["rm", "-rf", f"{run_dir}/in"], check=False)
 
         # The empty-well blank(s): the driver is told where they will be (`background_dir`) and they are uploaded
@@ -794,7 +795,7 @@ class _BatchedRemoteProcess:
         )
         with self._current_proc_lock:
             self._current_proc = proc
-        self._n_batches = n_batches
+        self._n_batches = total     # the final pass too: the driver lost during it is lost, not stopped
         # From here on there is an allocation of ours to hand back, which is
         # what `_release_driver` acts on. Set only after the launch: an abort
         # before it would otherwise `scancel` a sidecar written by a *previous*
@@ -906,14 +907,21 @@ class _BatchedRemoteProcess:
         """A nanowell batch that ended: free its wells on the remote (``remote_fetch_nanowells.release_batch``).
 
         Queued behind the wells the batch announced, so each one's download has been attempted first. A data
-        batch's wells held for the final re-anchoring pass are kept (*hold_dir*); the pass's own release (*final*)
+        batch's wells held for the final re-anchoring pass are kept (*held*); the pass's own release (*final*)
         frees them. ``None`` means the driver is gone and the batch's end is unknown, so nothing is released.
         """
         if rc is None or not self._fetcher.run.nanowell:
             return
         wells = [canonical_well_label(z.stem) or z.stem.upper() for z in batch_zips]
-        hold = None if final else f"{remote_run_dir(self._runner.host, self._run_id)}/{HOLD_DIR}"
-        self._fetcher.after_queued(functools.partial(release_batch, wells=wells, log=self._log, hold_dir=hold))
+        # Read now, on this thread, before the next batch or the final pass moves `keep/`: the release runs later,
+        # behind the batch's downloads, and by then `keep/` may be the final pass's input. Unreadable keeps them all.
+        held = () if final else held_wells(self._runner._cache._ssh_run,
+                                           f"{remote_run_dir(self._runner.host, self._run_id)}/{HOLD_DIR}")
+        if held is None:
+            self._log("[remote] could not list the wells held for the end-of-run re-anchoring; keeping this batch's "
+                      "wells on the remote\n")
+            held = wells
+        self._fetcher.after_queued(functools.partial(release_batch, wells=wells, log=self._log, held=held))
 
     def _upload_blanks(self) -> bool:
         """Upload the empty-well blank(s) into ``bg/``, once for the whole run, after the driver is launched.

@@ -102,6 +102,20 @@ def _staging_dir_for(output_dir: Path, well_label: str,
     return here
 
 
+def extract_dir_for(output_dir: Path, well_label: str) -> Path:
+    """Where one well's archive is unpacked: named for the plate *and* the well.
+
+    The scratch base is shared by every run on the machine or remote host, and
+    the folder was named ``_tmp_extract_<WELL>`` alone, so two plates working on
+    the same well at the same moment — two app instances, two remote jobs, two
+    test workers — shared one folder, and each run's start and end deleted the
+    other's images out from under it. The plate stamp is the one
+    :func:`_staging_dir_for` already uses, so the sweep tells this plate's
+    folders from another run's by the same prefix.
+    """
+    return scratch_base_for(output_dir) / f"_tmp_extract_{_output_stamp(output_dir)}_{well_label}"
+
+
 def _output_stamp(output_dir: Path) -> str:
     return hashlib.blake2b(
         str(Path(output_dir).resolve()).encode(), digest_size=6).hexdigest()
@@ -287,5 +301,6 @@ def sweep_run_scratch(output_dir: Path, settings_key: str, *,
     protected a resume became a leak. This removes the ones this plate can no
     longer use, and leaves every other plate's alone.
     """
-    _sweep_stale_scratch_dirs_all(output_dir, extra_extract=extra_extract)
+    _sweep_stale_scratch_dirs_all(output_dir, extra_extract=extra_extract,
+                                  own_stamp=_output_stamp(output_dir))
     prune_superseded_staging(output_dir, settings_key)

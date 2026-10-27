@@ -534,9 +534,11 @@ def _the_suite_runs_as_the_desktop_app():
 def _pipeline_scratch_goes_to_a_scratch_directory(_autouse_scratch_root, monkeypatch):
     """No test extracts a well into the developer's real ``~/.allwell/scratch``.
 
-    ``pipeline.io.scratch_base_for`` defaults there, and the extraction directory is named for the well alone
-    (``_tmp_extract_<well>``) — so two tests processing ``A01`` at the same moment shared one directory, each
-    deleting the other's images out from under it. That happened whenever two lanes ran at once, and it is
+    ``pipeline.io.scratch_base_for`` defaults there, and the extraction directory used to be named for the well
+    alone (``_tmp_extract_<well>``) — so two tests processing ``A01`` at the same moment shared one directory,
+    each deleting the other's images out from under it. It now carries the plate's stamp too
+    (``pipeline.fov_checkpoint.extract_dir_for``), and a test still gets a scratch of its own, so nothing it
+    leaves behind reaches another test or the developer's real folder. That happened whenever two lanes ran at once, and it is
     what every test would do to its neighbour under the parallel lane (``scripts/test.sh``, pytest-xdist).
     A test that means to measure the default resolution unsets the variable itself (``test_scratch_base.py``).
     """

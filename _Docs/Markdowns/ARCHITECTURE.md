@@ -18252,7 +18252,7 @@ you're in before you type the command.
     `test_nanowell_run.py` alone at 475 s. Marked `nanowell_e2e`;
     **`scripts/test.sh --nanowell`** runs them, distributed by test rather than
     by file so the 475 s file does not set the wall time.
-  - **Nanowell features** (`NANOWELL_FEATURE_FILES`, ~1,020 tests in sixty-one
+  - **Nanowell features** (`NANOWELL_FEATURE_FILES`, ~1,030 tests in sixty-three
     files). Every other nanowell test: the Analyze form's Nanowells section, the
     Nanowells page and its views, the Playground's array search, Review's
     nanowell data, tile registration. About 530 s of work — a third of what the

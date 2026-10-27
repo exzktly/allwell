@@ -418,6 +418,24 @@ def test_every_roster_file_exists_and_is_in_one_roster_only():
             seen[name] = roster_name
 
 
+def test_a_nanowell_test_file_joins_a_nanowell_roster():
+    """A new ``test_nanowell_*.py`` left off both rosters falls back into the fast
+    lane, which is how the fast lane came to spend a third of its time on them."""
+    from tests._lanes import NANOWELL_E2E_FILES, NANOWELL_FEATURE_FILES, UI_LANE_FILES
+
+    import re
+
+    here = Path(__file__).resolve().parent
+    rostered = set(NANOWELL_E2E_FILES) | set(NANOWELL_FEATURE_FILES) | set(UI_LANE_FILES)
+    # Exempt by what they are, not by name: a full-app file is ``slow`` and in no
+    # fast lane, and a whole-tree guard runs on every push.
+    exempt = re.compile(r"\b(viewer_app|loaded_app|loaded_app_shape|image_table_app"
+                        r"|python_sources|parsed_sources|root_modules)\b")
+    loose = sorted(p.name for p in here.glob("test_nanowell*.py")
+                   if p.name not in rostered and not exempt.search(p.read_text(encoding="utf-8")))
+    assert not loose, f"nanowell test files in no roster (tests/_lanes.py): {loose}"
+
+
 def test_no_guard_is_in_a_lane():
     """A guard reads the whole tree, so any change can break it: it runs on every push."""
     import re

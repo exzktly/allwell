@@ -207,7 +207,7 @@ def remove_directory(path: Path, *, retries: int = 4, backoff: float = 0.5) -> N
       files open.
 
     The previous implementation logged a single warning and gave up,
-    leaving stale ``_tmp_extract_<well>`` / ``_tmp_images_<well>``
+    leaving stale ``_tmp_extract_*`` / ``_tmp_images_*``
     directories behind on every pipeline run. The retry loop here:
 
     1. Strips the read-only bit on individual files that raise
@@ -299,16 +299,65 @@ def _commit_staging_dir(tmp_images: Path, final_out: Path) -> None:
             spent.unlink()
 
 
-def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool) -> None:
-    """Remove stale ``_tmp_*`` staging dirs from a previous crashed run under
-    *root*, but keep any ``_tmp_images_*`` dir holding ``.fov_*.done`` checkpoint
-    markers (v5.2.0) so the worker resumes from them. ``extra_extract`` also
-    sweeps the zip-mode ``_tmp_extract_*`` scratch (audit A10)."""
+#: How long a working folder that belongs to no plate this run can name must
+#: sit untouched before a run's sweep removes it. The scratch base is shared:
+#: every run on the machine (or, remotely, on the host) uses the same one unless
+#: its scratch is set per job, so a folder that is not this plate's may be a
+#: live run's in another app instance, a second remote job, or a parallel test
+#: worker. A live well writes into its folders every few seconds, so a day of
+#: silence is an abandoned run, never a slow one.
+FOREIGN_SCRATCH_IDLE_S = 24 * 3600
+
+
+def _idle_seconds(path: Path, now: float) -> float:
+    """Seconds since anything in *path* last changed: the newest mtime of the
+    directory and everything under it. A file vanishing mid-walk, or a folder
+    that cannot be read, counts as in use (0), because a sweep that cannot tell
+    must not delete."""
+    try:
+        newest = path.stat().st_mtime
+        for dirpath, dirnames, filenames in os.walk(path):
+            for name in dirnames + filenames:
+                newest = max(newest, os.stat(os.path.join(dirpath, name)).st_mtime)
+    except OSError:
+        return 0.0
+    return max(0.0, now - newest)
+
+
+def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool,
+                              own_stamp: str = "", now: float | None = None) -> None:
+    """Remove stale ``_tmp_*`` working folders under *root*.
+
+    A folder named for this plate (``_tmp_extract_<own_stamp>_*`` /
+    ``_tmp_images_<own_stamp>_*``) is this plate's left-over and goes now. Any
+    other — another plate's, or a name from before folders carried a plate stamp
+    — goes only once untouched for :data:`FOREIGN_SCRATCH_IDLE_S`, because it
+    may belong to a run that is going at this moment: two remote jobs on one
+    host, or two app instances on one machine, share this directory, and
+    sweeping every folder at each batch start deleted the other run's images and
+    staging mid-well. A ``_tmp_images_*`` folder holding ``.fov_*.done``
+    checkpoint markers is kept whoever owns it, so a stopped well resumes from
+    them (:func:`pipeline.fov_checkpoint.prune_superseded_staging` removes this
+    plate's own superseded ones). *extra_extract* also sweeps the zip-mode
+    ``_tmp_extract_*`` folders.
+    """
+    now = time.time() if now is None else now
+
+    def _removable(folder: Path, kind: str) -> bool:
+        if own_stamp and folder.name.startswith(f"_tmp_{kind}_{own_stamp}_"):
+            return True
+        return _idle_seconds(folder, now) >= FOREIGN_SCRATCH_IDLE_S
+
+    kept_live = 0
     if extra_extract:
         for _stale in sorted(root.glob("_tmp_extract_*")):
-            if _stale.is_dir():
-                log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
-                remove_directory(_stale)
+            if not _stale.is_dir():
+                continue
+            if not _removable(_stale, "extract"):
+                kept_live += 1
+                continue
+            log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
+            remove_directory(_stale)
     for _stale in sorted(root.glob("_tmp_images_*")):
         if not _stale.is_dir():
             continue
@@ -319,22 +368,32 @@ def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool) -> None:
                 _stale.name, n_done,
             )
             continue
+        if not _removable(_stale, "images"):
+            kept_live += 1
+            continue
         log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
         remove_directory(_stale)
+    if kept_live:
+        log.info("Leaving %d working folder(s) in %s that another run may be using "
+                 "(removed once untouched for %d h).",
+                 kept_live, root, FOREIGN_SCRATCH_IDLE_S // 3600)
 
 
-def _sweep_stale_scratch_dirs_all(output_dir: Path, *, extra_extract: bool) -> None:
+def _sweep_stale_scratch_dirs_all(output_dir: Path, *, extra_extract: bool,
+                                  own_stamp: str = "") -> None:
     """Sweep stale staging dirs from both the scratch base and *output_dir*.
 
     The scratch base is where staging lives now. ``output_dir`` is swept too
     (when it differs) because runs from before the scratch default moved to
     ``~/.allwell/scratch`` left their ``_tmp_images_*`` / ``_tmp_extract_*``
-    dirs there, and nothing else would ever clean them up.
+    dirs there, and nothing else would ever clean them up. *own_stamp* names
+    this plate's folders (:func:`_sweep_stale_scratch_dirs`).
     """
     base = scratch_base_for(output_dir)
-    _sweep_stale_scratch_dirs(base, extra_extract=extra_extract)
+    _sweep_stale_scratch_dirs(base, extra_extract=extra_extract, own_stamp=own_stamp)
     if base.resolve() != output_dir.resolve():
-        _sweep_stale_scratch_dirs(output_dir, extra_extract=extra_extract)
+        _sweep_stale_scratch_dirs(output_dir, extra_extract=extra_extract,
+                                  own_stamp=own_stamp)
 
 
 # One definition of "make these bytes durable", shared with the well-archive

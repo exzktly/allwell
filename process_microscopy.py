@@ -177,7 +177,7 @@ from pipeline.fov_checkpoint import (
     _load_fov_checkpoint,
     _save_fov_checkpoint,
     _staging_dir_for,
-    release_staging, sweep_run_scratch,
+    release_staging, sweep_run_scratch, extract_dir_for,
 )
 from pipeline.settings_record import (
     record_well_settings,
@@ -2229,7 +2229,7 @@ def process_well_zip_task(
     if _well_not_started_for_suspend(well_label):
         return [], []
     log.info("Well %s — starting (pid %d)", well_label, os.getpid())
-    tmp_extract = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
+    tmp_extract = extract_dir_for(output_dir, well_label)
     tmp_images  = _staging_dir_for(output_dir, well_label, settings_key)
     if force:
         # `--force` means recompute this well, and that has to include the

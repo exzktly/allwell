@@ -13,6 +13,8 @@ dir can live anywhere.
 from __future__ import annotations
 
 import errno
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -69,9 +71,18 @@ def test_commit_staging_dir_propagates_other_oserrors(monkeypatch, tmp_path):
     assert ei.value.errno == errno.EACCES
 
 
+def _abandon(*folders):
+    """Make *folders* look untouched for longer than the sweep's idle limit: a
+    folder that is not this plate's is removed only then, because it may be a
+    live run's (``pipeline.io.FOREIGN_SCRATCH_IDLE_S``)."""
+    old = time.time() - pio.FOREIGN_SCRATCH_IDLE_S - 60
+    for folder in folders:
+        os.utime(folder, (old, old))
+
+
 def test_stale_sweep_covers_both_scratch_and_output_dir(monkeypatch, tmp_path):
     """Runs from before the default moved left staging under output_dir; the
-    sweep must still reclaim it."""
+    sweep must still reclaim it once it is abandoned."""
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     out = tmp_path / "out"
@@ -80,6 +91,7 @@ def test_stale_sweep_covers_both_scratch_and_output_dir(monkeypatch, tmp_path):
     (scratch / "_tmp_images_A01").mkdir()
     (out / "_tmp_images_B02").mkdir()      # legacy location
     (out / "_tmp_extract_B02").mkdir()
+    _abandon(scratch / "_tmp_images_A01", out / "_tmp_images_B02", out / "_tmp_extract_B02")
 
     monkeypatch.setattr(pio, "scratch_base_for", lambda _out: scratch)
     pio._sweep_stale_scratch_dirs_all(out, extra_extract=True)
@@ -112,13 +124,14 @@ def test_stale_sweep_does_not_double_sweep_when_equal(monkeypatch, tmp_path):
     out = tmp_path / "out"
     out.mkdir()
     (out / "_tmp_images_A01").mkdir()
+    _abandon(out / "_tmp_images_A01")
 
     calls = []
     real = pio._sweep_stale_scratch_dirs
 
-    def _spy(root, *, extra_extract):
+    def _spy(root, **kwargs):
         calls.append(Path(root))
-        return real(root, extra_extract=extra_extract)
+        return real(root, **kwargs)
 
     monkeypatch.setattr(pio, "scratch_base_for", lambda o: o)
     monkeypatch.setattr(pio, "_sweep_stale_scratch_dirs", _spy)

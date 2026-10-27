@@ -817,15 +817,15 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
     and with it the resume checkpoints) and the removal of both directories are its own, exactly as for a
     per-field well; a caller without them (the end-of-run pass) gets directories of its own, removed after.
     """
-    from pipeline.fov_checkpoint import _staging_dir_for
-    from pipeline.io import extract_zip, remove_directory, scratch_base_for, write_well_csv
+    from pipeline.fov_checkpoint import _staging_dir_for, extract_dir_for
+    from pipeline.io import extract_zip, remove_directory, write_well_csv
     from pipeline.run_report import seal_well_complete, write_well_report
     from pipeline.settings_record import record_well_settings
 
     output_dir = Path(output_dir)
     owned = scratch is None
     if owned:
-        scratch = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
+        scratch = extract_dir_for(output_dir, well_label)
         staging = _staging_dir_for(output_dir, well_label, settings_key)
         for stale in (scratch,) + ((staging,) if not any(staging.glob(".fov_*.done")) else ()):
             if stale.exists():

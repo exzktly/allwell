@@ -1798,6 +1798,15 @@ and by `remote_fetch_report.txt` in the output folder.
     repeats the request beside the wait.
   - All-Well does not query the scheduler itself, so it can tell you the run is
     queued and for how long, but not *why*. The number is what lets you ask.
+  - **On a cluster that powers idle nodes down**, the run first asks for a node
+    that is already on, because those start at once — but only while one is
+    sitting completely idle, and only if Slurm expects the job to start within
+    two minutes. A node that is partly used (for example by your own run in
+    another All-Well window) does not count. If the job is still queued after
+    three minutes anyway, it is cancelled and asked for again, letting Slurm
+    boot a powered-down node; the log says so (*still queued for a powered-on
+    node after 180 s — cancelled it and asking again…*) and the job number
+    changes.
 - **Suspend** winds the run down cleanly. It finishes the fields already being
   computed, then lets every well that got any work done write its results, and
   remembers what you were running. Use it when the run is fine but you need the

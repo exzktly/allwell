@@ -83,8 +83,9 @@ def test_the_whole_windows_command_line_stays_under_the_limit(aliases):
     """What the limit is about: the ssh command line Windows builds (``list2cmdline``) and Git for Windows'
     ssh.exe parses again, which cut a launch past 8,191 characters. Measured whole — ssh, its options, the host and
     the packed command — for a run with a blank and as many earlier attempts as the journal can name, because each
-    alias is a path of incompressible hex. Measured: the packed command is 4,172 / 4,224 / 4,948 characters for
-    0 / 1 / 21 aliases, and the whole line 4,418 / 4,470 / 5,194. This replaced a bar of 4,096 on the packed
+    alias is a path of incompressible hex. Measured: the packed command is 5,256 / 5,308 / 6,048 characters for
+    0 / 1 / 21 aliases, and the whole line 5,502 / 5,554 / 6,294 — about 1,100 of that the ``srun`` wrapper's
+    expected-start check and pending watchdog (``services.remote_srun_retry``). This replaced a bar of 4,096 on the packed
     command alone, which the fixture met only because it left out the blank's flags that every blank run sends."""
     from services.run_journal import REMOTE_HISTORY_MAX
 

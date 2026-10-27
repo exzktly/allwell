@@ -51,6 +51,9 @@ _SEP_CANDIDATES = ("_", "-", ".")
 _MIN_SLOT_FRACTION = 0.7      # a slot must parse this uniformly to earn a role
 _SAMPLE_LIMIT = 400           # names sampled — "briefly scanning", not a full walk
 _MISS_EXAMPLES = 3            # unparsed names quoted in the readout, not counted
+_PARTNER_PICKS = 8            # sampled names whose one-token siblings are added (see with_tile_partners)
+_PARTNER_CONTAINERS = 2       # per-well archives / folders whose picks get siblings
+_TOKEN_SPLIT_RE = re.compile(r"[_.\-]")
 
 _TP_RE = re.compile(r"(?i)^t\d+$")
 _FOV_RE = re.compile(r"(?i)^f\d+$")
@@ -220,11 +223,49 @@ def _spread(names: list[str], take: int, phase: int = 0) -> list[str]:
     return [names[min(last, int(i * step) + shift)] for i in range(take)]
 
 
+def with_tile_partners(sample: list[str], pool: list[str], picks: int = _PARTNER_PICKS) -> list[str]:
+    """*sample* plus, for up to *picks* of its names, each name in *pool* that differs from it in exactly one token
+    (at most one sibling per token position).
+
+    The channel slot is told from an experiment prefix by whether it changes **within one tile** — two images of the
+    same well, field and timepoint (:func:`_pick_channel_slot`). That needs two images of one tile in the sample, and
+    a strided sample rarely holds them: the Analyze form reads about four names from each per-well archive of a
+    96-well plate, so a concatenation of two acquisitions — ``expA``/``expB`` against ``PHASE``/``GFP``/``RFP`` —
+    showed no slot changing within a tile and its prefix, the slot with fewest values, was taken for the channel. A
+    name's channel partner is exactly a name that differs from it in the channel token alone, while names with
+    different prefixes also differ in their (shifted) timepoints, so adding the one-token siblings of a few names
+    supplies the pairs without knowing the schema. Tokens are split on every separator candidate, since the
+    separator is not known yet; a sibling under that finer split is still a sibling under the real one."""
+    seen = set(sample)
+    out = list(sample)
+    if not sample or not pool:
+        return out
+    split_pool = [(name, _TOKEN_SPLIT_RE.split(name)) for name in pool]
+    for pick in _spread(sample, picks):
+        tokens = _TOKEN_SPLIT_RE.split(pick)
+        covered: set[int] = set()
+        for name, other in split_pool:
+            if len(other) != len(tokens) or name in seen:
+                continue
+            diff = -1
+            for i, (a, b) in enumerate(zip(tokens, other)):
+                if a != b:
+                    if diff >= 0:
+                        diff = -2
+                        break
+                    diff = i
+            if diff >= 0 and diff not in covered:
+                covered.add(diff)
+                seen.add(name)
+                out.append(name)
+    return out
+
+
 def _tif_stems_in(root: Path, limit: int) -> list[str]:
     if not root.is_dir():
         return []
     stems = [f.stem for f in files_in(root) if is_run_input_member(f.name)]
-    return _spread(stems, limit)
+    return with_tile_partners(_spread(stems, limit), stems)
 
 
 def _zip_stems_in(root: Path, limit: int) -> list[str]:
@@ -247,7 +288,10 @@ def _zip_stems_in(root: Path, limit: int) -> list[str]:
                            if is_run_input_member(m)]
         except (zipfile.BadZipFile, OSError):
             continue
-        stems.extend(_spread(members, min(per_zip, limit - len(stems)), phase))
+        picked = _spread(members, min(per_zip, limit - len(stems)), phase)
+        if phase < _PARTNER_CONTAINERS:
+            picked = with_tile_partners(picked, members)
+        stems.extend(picked)
         if len(stems) >= limit:
             break
     return stems
@@ -282,7 +326,10 @@ def _well_folder_stems_in(root: Path, limit: int) -> list[str]:
                      if is_run_input_member(f.name)]
         except OSError:
             continue
-        stems.extend(_spread(names, min(per_well, limit - len(stems)), phase))
+        picked = _spread(names, min(per_well, limit - len(stems)), phase)
+        if phase < _PARTNER_CONTAINERS:
+            picked = with_tile_partners(picked, names)
+        stems.extend(picked)
         if len(stems) >= limit:
             break
     return stems
@@ -336,20 +383,18 @@ def _best_slot(cols, pred, used: set[int]) -> int | None:
 
 
 def _pick_channel_slot(cols, used: set[int], tile_slots: tuple[int, ...] = ()) -> int | None:
-    """The unused slot that reads as a small alphabetic categorical set and is the channel: the one with the fewest
-    distinct values; on a tie, one that takes more than one value within a single tile; then the leftmost.
+    """The unused slot that reads as a small alphabetic categorical set and is the channel: one that takes more than
+    one value within a single tile, then the one with the fewest distinct values, then the leftmost.
 
-    **Within a tile breaks a tie, and only a tie.** A tile — one well, field and timepoint (*tile_slots*) — is imaged once per channel, so
-    the channel slot changes inside it, while an experiment prefix is the same for every image of a tile. Fewest-
-    distinct alone could not tell them apart once a plate held two prefixes: a concatenation of two acquisitions,
-    each named by its own run, reads ``expA``/``expB`` against ``PHASE``/``GFP``, two values each, and the leftmost —
-    the prefix — was taken for the channel, confidently, so no image matched its channel token and the run found
-    "no image groups". It cannot rank ahead of fewest-distinct: the names are a sample (:func:`_zip_stems_in` takes
-    a strided few from each archive), and a slot no predicate claims — ImageXpress's ``s<n>`` site — also changes
-    within a tile. On a per-well zip of 4 sites by 3 channels the stride equalled the channel count, every sampled
-    name of a well had one channel, and the site slot, varying within the tile, was taken for the channel,
-    confidently. Two prefixes that outnumber the channels therefore still win; only the tie, the reported
-    two-against-two concatenation, is decided by the tile.
+    **Within a tile ranks first.** A tile — one well, field and timepoint (*tile_slots*) — is imaged once per
+    channel, so the channel slot changes inside it, while an experiment prefix is the same for every image of a tile.
+    A concatenation of two acquisitions, each named by its own run, reads ``expA``/``expB`` against the channels;
+    with fewest-distinct deciding, two prefixes against three channels (or against two, on a tie broken leftmost)
+    took the prefix for the channel, confidently, so no image matched its channel token and the run found "no image
+    groups". Ranking this first is sound only when the sample holds two images of one tile, which a strided sample
+    rarely does; :func:`with_tile_partners` adds them, and without it a slot no predicate claims — ImageXpress's
+    ``s<n>`` site — could be the only slot seen changing within a tile and be taken for the channel. With the
+    partners both the site and the channel change within the tile, and fewest-distinct decides between them.
 
     Fewest-distinct rather than leftmost outright: a plate has more wells than
     channels, so on any layout where both slots survive the earlier passes the
@@ -366,7 +411,7 @@ def _pick_channel_slot(cols, used: set[int], tile_slots: tuple[int, ...] = ()) -
             continue
         if not all(_HAS_ALPHA_RE.search(v) for v in distinct):
             continue
-        candidates.append((len(distinct), not _varies_within_a_tile(cols, i, tile_slots), i))
+        candidates.append((not _varies_within_a_tile(cols, i, tile_slots), len(distinct), i))
     return min(candidates)[2] if candidates else None
 
 

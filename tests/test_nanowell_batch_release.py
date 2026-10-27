@@ -96,6 +96,10 @@ def test_a_finished_batch_s_wells_are_deleted_and_the_re_anchored_one_pulled_aga
     assert "/r/out/A01_out.zip" not in fetcher.pulled, "a well the re-anchoring did not re-run is not pulled again"
     assert fetcher.run.nanowell_released == {"A01", "B02"}
     assert "freed the remote copies of 2 nanowell well(s), 1 pulled again" in "".join(lines)
+    # Per well too, in verification's words: the plate turns the well back to downloaded on this line, and the
+    # total alone named no well.
+    assert [line for line in lines if "pulled again after the end-of-run re-anchoring" in line] == [
+        "[remote] B02: pulled again after the end-of-run re-anchoring re-ran it.\n"]
 
 
 def test_a_re_anchored_well_whose_second_pull_fails_is_kept(tmp_path, monkeypatch):
@@ -108,6 +112,7 @@ def test_a_re_anchored_well_whose_second_pull_fails_is_kept(tmp_path, monkeypatc
     assert deleted == [], "the remote copy is the only current one once the local pull failed"
     assert fetcher.run.nanowell_released == set()
     assert "keeping it on the remote" in "".join(lines)
+    assert "pulled again" not in "".join(lines), "a pull that fell short must not turn the well back to downloaded"
 
 
 def test_a_well_is_released_once(tmp_path, monkeypatch):

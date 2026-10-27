@@ -280,6 +280,28 @@ _RE_THRESH_WELL = re.compile(r"Auto-threshold: completed well \d+/\d+ \(([A-Ha-h
 _RE_WELL_FOV_TOTAL = re.compile(r"Well (\S+)\s+\S+\s+(\d+) (FOV-group|step)")
 _RE_WELL_FOV_DONE = re.compile(r"Well (\S+)\s+\S+\s+(FOV|step) (\d+)/(\d+) done")
 _RE_WELL_SITES = re.compile(r"Well (\S+)\s+\S+\s+(.+?): (\d+)/(\d+) nanowells segmented")
+# A nanowell well the end-of-run re-anchoring re-runs, after it finished — and, on a remote run, after it was
+# fetched (``pipeline.nanowell_task.reanchor_plate``): its start, its end, its failure, and the second pull of its
+# output (``services.remote_fetch_nanowells``). Without them the plate kept such a well "downloaded" while the log
+# counted its nanowells again and the data on disk was about to be replaced.
+_RE_WELL_REANCHORING = re.compile(r"Well (\S+)\s+\S+\s+re-anchoring (.+?) from the plate's other wells")
+_RE_WELL_REANCHORED = re.compile(r"Well (\S+)\s+\S+\s+re-anchored\.")
+_RE_WELL_REANCHOR_FAILED = re.compile(r"Well (\S+)\s+\S+\s+re-anchoring failed")
+_RE_WELL_REFETCHED = re.compile(r"\[remote\] (\S+): pulled again after the end-of-run re-anchoring")
+
+
+def _reanchor_events(line: str) -> list[tuple[str, object]]:
+    """``("well_reanchor", (well, what, timepoints))`` for a re-anchoring line: *what* is ``start`` (with the
+    timepoints it re-runs), ``done``, ``failed`` or ``fetched`` (the second pull landed)."""
+    start = _RE_WELL_REANCHORING.search(line)
+    if start:
+        return [("well_reanchor", (start.group(1), "start", start.group(2)))]
+    for pattern, what in ((_RE_WELL_REANCHORED, "done"), (_RE_WELL_REANCHOR_FAILED, "failed"),
+                          (_RE_WELL_REFETCHED, "fetched")):
+        found = pattern.search(line)
+        if found:
+            return [("well_reanchor", (found.group(1), what, ""))]
+    return []
 # Finalize-phase status lines. After the last well the run is still busy
 # (auto-threshold scans every well's zip; a remote run then drains downloads
 # and cleans up) — surface what it's doing so "Finalizing…" doesn't look hung.
@@ -548,6 +570,7 @@ class ProgressTracker:
         mns = _RE_WELL_SITES.search(line)
         if mns:
             events.append(("well_sites", (mns.group(1), mns.group(2), int(mns.group(3)), int(mns.group(4)))))
+        events.extend(_reanchor_events(line))
         # Auto-threshold pass runs after the last well → the "Threshold" stage.
         if not self._finalize_emitted and line.lstrip().startswith("Auto-threshold:"):
             self._finalize_emitted = True

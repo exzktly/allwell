@@ -587,6 +587,9 @@ class AnalyzeProgressMixin:
         elif kind == "well_sites":
             well, timepoint, done, total = payload  # type: ignore[misc]
             self._dashboard.set_well_sites(str(well), str(timepoint), int(done), int(total))
+        elif kind == "well_reanchor":
+            well, what, timepoints = payload  # type: ignore[misc]
+            self._dashboard.set_well_reanchor(str(well), str(what), str(timepoints))
         elif kind == "well_xfer":
             well, direction, frac = payload  # type: ignore[misc]
             self._dashboard.set_well_transfer(str(well), str(direction), float(frac))

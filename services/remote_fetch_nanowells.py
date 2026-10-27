@@ -154,6 +154,8 @@ def release_batch(fetcher, wells, *, log) -> list[str]:
                     f"verification to pull.\n")
                 continue
             retire_superseded_csvs([str(p) for p in local.glob(f"*_{well}.csv.gz")], local)
+            # Per well, as verification says it: the plate turns the well back to downloaded on this line.
+            log(f"[remote] {well}: pulled again after the end-of-run re-anchoring re-ran it.\n")
         delete_remote_paths(fetcher.host, _per_well_remote_paths(run, well), what=f"per-well files of {well}",
                             log_fn=log)
         run.nanowell_released.add(well)

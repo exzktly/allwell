@@ -99,6 +99,15 @@ class RunDashboard(PlateProgress):
         # Entries are added when a transfer starts and dropped when it reaches
         # 1.0, so membership *is* "this well is moving bytes at the moment".
         self._xfer: dict[str, tuple] = {}
+        # A nanowell well the end-of-run re-anchoring is re-running, after it
+        # finished: well -> the timepoints it names. Then, on a remote run, one
+        # re-anchored on the server whose output has not been pulled again.
+        # Both outrank every stage the well reached before: its data on disk is
+        # about to be replaced, and a well shown "downloaded" meanwhile looked
+        # exactly like one that was done (``set_well_reanchor``).
+        self._reanchoring: dict[str, str] = {}
+        self._refetch: set = set()
+        self._reanchor_failed: set = set()
         self._active_stage = ""
         # Plate-wide transfer, as a fraction, while one is in flight — None
         # when there is not one. State rather than a formatted string because
@@ -127,6 +136,9 @@ class RunDashboard(PlateProgress):
         self._fov_unit = {}
         self._sites = {}
         self._xfer = {}
+        self._reanchoring = {}
+        self._refetch = set()
+        self._reanchor_failed = set()
         self._active_stage = ""
         self._transfer = None
         self._bar.setRange(0, 100); self._bar.setValue(0)
@@ -240,6 +252,39 @@ class RunDashboard(PlateProgress):
         self._sites[w] = (str(timepoint), int(done), int(total))
         self.set_well_fraction(w, self._well_fraction(w))
 
+    def set_well_reanchor(self, well_id: str, what: str, timepoints: str = "") -> None:
+        """A finished nanowell well that the end-of-run re-anchoring runs again.
+
+        *what* is ``"start"`` (with the *timepoints* it re-runs), ``"done"``,
+        ``"failed"`` or ``"fetched"`` (the second pull of its output landed).
+        From the start until it is done — and, on a remote run, until its output
+        is pulled again — the well is shown computing, then on the server, not
+        in the state it had reached: its tables are being rewritten, and a well
+        painted "downloaded" meanwhile was indistinguishable from a finished
+        one while the log counted its nanowells again. A failure leaves the well
+        as it was (its timepoints stay unaddressed) and its hover text says so.
+        """
+        w = canon_well(well_id)
+        if not w:
+            return
+        if what == "start":
+            self._reanchoring[w] = timepoints
+            self._reanchor_failed.discard(w)
+            self._fov.pop(w, None)          # the re-run reports its own steps
+            self._sites.pop(w, None)
+        elif what == "done":
+            if self._reanchoring.pop(w, None) is not None and self._remote:
+                self._refetch.add(w)
+        elif what == "failed":
+            self._reanchoring.pop(w, None)
+            self._reanchor_failed.add(w)
+        elif what == "fetched":
+            self._refetch.discard(w)
+        else:
+            return
+        self._plate.setWellColor(w, self._well_color(w))
+        self.set_well_fraction(w, self._well_fraction(w))
+
     def set_well_transfer(self, well_id: str, direction: str,
                           fraction: float) -> None:
         """Per-well upload (``"up"``) or download (``"down"``) progress, 0..1.
@@ -320,6 +365,16 @@ class RunDashboard(PlateProgress):
         """
         if well in self._errored:
             return None
+        if well in self._reanchoring:
+            # Its own steps and nanowells, as any computing well's — not the
+            # full dial of the stages it had reached before the re-run.
+            done, total = self._fov.get(well, (0, 0))
+            if total <= 0:
+                return 0.0
+            _tp, seg, of = self._sites.get(well, ("", 0, 1))
+            return max(0.0, min(1.0, (done + seg / of) / total))
+        if well in self._refetch:
+            return 1.0                      # computed again, on the server
         xfer = self._xfer.get(well)
         if xfer is not None:
             direction, frac = xfer
@@ -379,6 +434,10 @@ class RunDashboard(PlateProgress):
         the threshold. Blue is "computed but the data isn't local yet"."""
         if w in self._errored:
             return theme.Colors.danger
+        if w in self._reanchoring:
+            return theme.Colors.warn                       # computing again
+        if w in self._refetch:
+            return theme.Colors.accent                     # re-anchored on the server, not pulled again yet
         if self._remote:
             # A transfer in flight is painted in the colour of the state it is
             # travelling TOWARD, not the one the well is leaving. The dial fills
@@ -499,6 +558,17 @@ class RunDashboard(PlateProgress):
         circle — this is where the counts live now that the per-well progress
         bars beneath the plate are gone.
         """
+        if w in self._reanchoring:
+            done, total = self._fov.get(w, (0, 0))
+            sites = self._sites.get(w)
+            count = (f", {sites[0]}: {sites[1]}/{sites[2]} nanowells segmented" if sites is not None
+                     else (f", step {done}/{total}" if total else ""))
+            return (f" — re-anchoring {self._reanchoring[w] or 'its unaddressed timepoints'} "
+                    f"from the plate's other wells{count}")
+        if w in self._refetch:
+            return " — re-anchored on the server; its output is downloaded again when the batch ends"
+        if w in self._reanchor_failed:
+            return " — re-anchoring failed; its unaddressed timepoints stay unaddressed"
         xfer = self._xfer.get(w)
         if xfer is not None:
             direction, frac = xfer
@@ -516,6 +586,10 @@ class RunDashboard(PlateProgress):
         w = canon_well(well_id)
         if w in self._errored:
             state = "failed"
+        elif w in self._reanchoring:
+            state = "processing again"
+        elif w in self._refetch:
+            state = "on server"
         elif self._remote and self._has("download", w):
             state = "fetched locally"
         elif self._has("threshold", w):

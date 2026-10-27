@@ -236,7 +236,8 @@ def carry_linked_tables(link: NanowellLink, ds1_out, ds2_out, dest_out, relabel:
         rows = [row for row in rows if row["timepoint"] in kept]
         if not kept:
             continue
-        if well in first:
+        # Dataset 1's well may have written nothing (a grid record naming no timepoint): dataset 2's then stand alone.
+        if (dest / f"{well}_grid.json").is_file():
             grid, rows1, header = _read_table(dest / f"{well}_grid.json")
             merged = {**grid.get("timepoints", {}), **{tp: blocks[tp] for tp in kept}}
             order = _by_time(merged)

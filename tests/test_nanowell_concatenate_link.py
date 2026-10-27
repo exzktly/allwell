@@ -205,3 +205,18 @@ def test_a_record_only_dataset_2_has_is_refused_when_both_are_analysed(tmp_path,
     with pytest.raises(cc.ConcatError, match="Dataset 2 has nanowell tables addressed from its acquisition record"):
         cc.build_merge_plan(first, second, tmp_path / "dest", gap_hours=24.0)
     assert not (tmp_path / "dest").exists()
+
+
+def test_a_dataset_1_well_whose_record_names_no_timepoint_still_takes_dataset_2s(tmp_path):
+    """Dataset 1's tables of the well carry nothing (``carry_nanowell_tables`` writes no table for a record with no
+    timepoint), so dataset 2's are written on their own rather than joined onto a table that does not exist."""
+    first = _dataset(tmp_path / "d1")
+    grid_path = first / "out" / "nanowells" / "A01_grid.json"
+    grid = json.loads(grid_path.read_text())
+    grid["timepoints"] = {}
+    grid_path.write_text(json.dumps(grid))
+    (first / "out" / "nanowells" / "A01.csv").write_text("timepoint,nw_q,nw_r,detected,consistency,n_cells\n")
+    second = _dataset(tmp_path / "d2", cells=7)
+    _plan, _summary, _lines, dest = _concatenate(tmp_path, first, second)
+    grid, rows = _tables(dest)
+    assert list(grid["timepoints"]) == ["48h", "72h"] and {r["n_cells"] for r in rows} == {"7"}

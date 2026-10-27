@@ -2124,6 +2124,7 @@ def test_required_files_list_is_what_we_promised():
         # The per-worker process settings `_worker_init` makes; the re-anchoring's pool runs it too.
         "pipeline/worker_env.py",
         "pipeline/io.py",
+        "pipeline/zip_members.py",
         # The per-FOV image writer and the names of its two storage options.
         "pipeline/output_images.py",
         "pipeline/output_policy.py",

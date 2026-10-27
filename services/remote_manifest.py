@@ -191,6 +191,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # The per-worker process settings ``_worker_init`` makes (the open-file limit).
     "pipeline/worker_env.py",
     "pipeline/io.py",
+    # A zip-mode well's images, read from the archive in place one field at a
+    # time. process_microscopy imports it at module scope.
+    "pipeline/zip_members.py",
     # The per-FOV image writer and the two storage options it applies
     # (--phase_output / --tophat_dtype); process_microscopy and cli_args
     # import them at module scope.

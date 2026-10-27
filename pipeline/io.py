@@ -82,7 +82,7 @@ def load_2d_gray(path: Path) -> np.ndarray:
     return load_2d_gray_with_ceiling(path)[0]
 
 
-def load_2d_gray_with_ceiling(path: Path) -> tuple[np.ndarray, float | None]:
+def load_2d_gray_with_ceiling(path) -> tuple[np.ndarray, float | None]:
     """:func:`load_2d_gray`, plus the sensor maximum the file was stored at.
 
     The array is identical — this calls the same reader and the same cast, and
@@ -106,7 +106,9 @@ def load_2d_gray_with_ceiling(path: Path) -> tuple[np.ndarray, float | None]:
     for ``uint32`` or ``int64``, which no camera emits here; those are still
     reported, and a value one ULP below the ceiling would read as saturated.
     """
-    img = imread(str(path))
+    # A path, or an open binary file — a zip-mode well hands over a member it
+    # read from the archive in place (pipeline.zip_members).
+    img = imread(path if hasattr(path, "read") else str(path))
     while img.ndim > 2:
         img = img[0]
     ceiling: float | None = None

@@ -1543,9 +1543,10 @@ archives and outputs are always written as per-well `.zip` archives. See
 One field plus **Browse…**.
 
 A run does most of its file churn somewhere other than your input and output
-folders: each well's archive is extracted, intermediate images are written, and
+folders: intermediate images are written and
 per-FOV checkpoints are kept so a crashed run can be completed later. All of
-that lands on the scratch disk.
+that lands on the scratch disk. A well's input images are read straight out of
+its archive, one field at a time, and are not copied to scratch first.
 
 - **Leave it blank** and the run uses the `scratch` folder inside the app's own
   folder — `~/.allwell/scratch` on macOS and Linux,
@@ -1661,9 +1662,8 @@ which profile lost what. Check the filled-in command before saving.
 
 **Remote scratch dir**, under *Advanced (remote paths)* in that dialog, is worth
 setting on a cluster. It is where the pipeline keeps its per-well working files
-*on the remote* — every extracted input image and roughly six uncompressed
-intermediates per field, for as many wells as run at once. Left empty it uses
-the remote's home directory, which on an HPC system is exactly the volume with
+*on the remote* — roughly six uncompressed intermediates per field, for as
+many wells as run at once. Left empty it uses the remote's home directory, which on an HPC system is exactly the volume with
 the small quota, and a run that overflows it fails partway through with a
 message about space. Set it to your site's real scratch: `$TMPDIR`,
 `$SLURM_TMPDIR` and `/scratch/$USER` all work as written — the value is expanded
@@ -4284,8 +4284,7 @@ still exported (see below).
 - **"No space left on device" when there is clearly space free** — the yardstick
   is misleading rather than the disk. Your `in/` archives are compressed, and
   nothing else in a run is: while a well is being processed its staging holds
-  the extracted frames plus about six intermediate images per field of view, all
-  uncompressed, for as many wells as are running at once — and every finished
+  about six intermediate images per field of view, all uncompressed, for as many wells as are running at once — and every finished
   `<well>_out.zip` stays on the output volume for the rest of the plate. A run
   can therefore need many times the size of its own input folder, and it can
   start with room and run out at the fortieth well. Three things say so rather
@@ -6445,7 +6444,7 @@ The dialog lists what can go, each with its size, and clears what you tick:
   `C:\Users\<you>\.allwell\scratch`; it is listed here too, unless the
   *Scratch folder* field points at it. Nothing reads them any more.
 - **Analyze run scratch** — unticked to begin with, and marked with a warning.
-  The extracted images and per-field checkpoints Analyze runs keep in the
+  The intermediate images and per-field checkpoints Analyze runs keep in the
   `scratch` folder inside the folder above. It can grow to many gigabytes. A
   suspended or interrupted run resumes from these files, so clearing them makes
   that run reprocess those wells from the beginning; results already in your

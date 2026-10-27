@@ -890,9 +890,12 @@ allwell/
 │   │                              it applies: phase reference, source bit depth
 │   ├── output_policy.py        ← those two options' names and defaults, with no
 │   │                              imports, so the CLI and the form can name them
-│   └── io.py                   ← atomic output writers (images / CSVs / overlay)
-│                                  + a well's own archive, read and written
-│                                 + the scratch base & staging-dir lifecycle (§6.5)
+│   ├── io.py                   ← atomic output writers (images / CSVs / overlay)
+│   │                              + a well's own archive, read and written
+│   │                             + the scratch base & staging-dir lifecycle (§6.5)
+│   └── zip_members.py          ← ZipMemberReader: a zip-mode well's images read
+│                                  from the archive in place, one field at a time,
+│                                  one handle per thread — never unpacked (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
 │   ├── csv_gz.py               ← a per-well CSV in either spelling, `name.csv` or `name.csv.gz`:
 │   │                              existing_csv / glob_csvs (one entry per logical file, plain
@@ -12142,13 +12145,27 @@ parent process supervises the per-well worker pool:
   complete-looking per-well outputs. Point `$ALLWELL_SCRATCH_DIR` (or the
   Analyze tab's *Scratch folder* field) at a roomier volume when the home volume
   is tight.
-- **A well's extracted inputs are reclaimed before its zip-up.** Building
-  `<well>_out.zip` while the staging directory still holds every intermediate is
-  the well's peak footprint, and on a single-volume setup the extracted TIFs are
-  competing for the same bytes at exactly that moment. `process_well_zip_task`
-  removes `_tmp_extract_<plate stamp>_<well>` as soon as the groups are processed; the
-  `finally` block still removes it (it has to cover the failure paths) and is a
-  no-op by then.
+- **A zip-mode well's inputs are never unpacked.** `process_well_zip_task`
+  reads the archive's directory (`find_image_groups_in_zip`) and hands
+  `_process_groups_in_worker` a `pipeline.zip_members.ZipMemberReader`; each
+  field reads its own members' bytes from the archive when it runs, and
+  `load_2d_gray_with_ceiling` decodes them from memory (it takes a path or an
+  open binary file). The groups' paths still sit under `_tmp_extract_<plate stamp>_<well>`,
+  but as *names* only — the processing code takes `.name` / `.stem` from them
+  for output naming and the filename schema, and the loader was the only thing
+  that ever opened one, so nothing creates that directory any more (the
+  `finally` block and the stale-dir sweep still remove one an older run left).
+  Unpacking the whole well before its first field used to hold the start of
+  every remote batch for about ten minutes on a cluster whose scratch is the
+  networked home directory, eight workers unpacking at once, while each field
+  then took two seconds. Reading in place also means a field resumed from its
+  checkpoint never reads its images at all, and the well's peak scratch
+  footprint is its intermediates alone. Each thread of `--fov_threads` keeps its
+  own `ZipFile` handle, because one shared handle serialises reads behind its
+  lock. The nanowell path (`pipeline.nanowell_task.run_zip_task`) has its own
+  extraction and still unpacks. `tests/test_a_zip_well_is_read_in_place.py`
+  drives the task and fails if any input image reaches scratch before the
+  fields run, or if a resumed field reads the archive.
 - **Per-FOV failure traces.** A failed FOV-group persists its full traceback to
   `<output_dir>/errors/<well>_<fov>_pid<N>.txt` (`_dump_fov_failure_trace`,
   mirroring `_dump_well_failure_trace`), and `classify_log_line` treats

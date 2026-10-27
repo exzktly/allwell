@@ -15879,7 +15879,9 @@ plates, Validate and Subset implement it) gets
 `PathField.add_browse_alternative("Output of a queued job", provider, choose,
 …)`, which turns Browse into a split button whose arrow carries that
 submenu; Analyze, whose input is not a `PathField`, gets the same menu from
-`offer_queued_outputs` as a "▾" button beside its Browse. The provider is
+`offer_queued_outputs` as a square arrow button beside its Browse (no label;
+`hasMenu` gives it the theme's shared chevron, so Qt's own indicator is the
+only arrow, and its side is Browse's height). The provider is
 `JobQueueController.queued_outputs(kind)` — `(job id, "N. label")` in queue
 order, leaving out jobs whose output is never coming (failed, cancelled,
 blocked) and the job open for editing on that page with everything that

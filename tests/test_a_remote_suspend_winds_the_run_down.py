@@ -651,7 +651,7 @@ def test_a_well_suspended_before_its_first_group_leaves_nothing(tmp_path):
     """The task began, then the suspend landed before any group was attempted.
 
     That is the window between the task's own entry check and the group loop's
-    first one — extracting the archive, finding its groups. The well ran the
+    first one — reading the archive's directory and finding its groups. The well ran the
     whole end-of-well path with nothing in it and printed ``— done.``, which a
     remote Fetcher reads as "a CSV to fetch": the suspended run then failed its
     verification instead of ending suspended.
@@ -669,12 +669,12 @@ def test_a_well_suspended_before_its_first_group_leaves_nothing(tmp_path):
         sys.path.insert(0, {str(_REPO)!r})
         logging.basicConfig(level=logging.INFO, stream=sys.stdout)
         import process_microscopy as pm
-        real = pm.extract_zip
-        def extract_then_suspend(*a, **k):
-            n = real(*a, **k)
+        real = pm.find_image_groups_in_zip
+        def group_then_suspend(*a, **k):
+            found = real(*a, **k)
             pm._suspend.request_suspend()     # lands mid-task
-            return n
-        pm.extract_zip = extract_then_suspend
+            return found
+        pm.find_image_groups_in_zip = group_then_suspend
         out = pm.process_well_zip_task(
             "A01", pathlib.Path({str(tmp_path / "A01.zip")!r}),
             pathlib.Path({str(tmp_path / "out")!r}), {{}},

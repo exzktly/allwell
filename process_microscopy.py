@@ -161,7 +161,6 @@ from pipeline.io import (
     _commit_staging_dir,
     _compress_images_to_zip,
     compress_images_to_zip,
-    extract_zip,
     _safe_atomic_text_write,
     _safe_well,
     write_well_csv,
@@ -199,6 +198,7 @@ from pipeline.run_report import (
 from pipeline.completeness import record_run_check
 from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
 from pipeline.nanowell_task import nanowell_endgame, prepare_nanowell_run
+from pipeline.zip_members import ZipMemberReader
 
 
 def _report_worker_failure(well_label: str, output_dir: Path | None, exc: BaseException) -> None:
@@ -462,10 +462,10 @@ def organize_loose_tifs_into_well_folders(
 # ---------------------------------------------------------------------------
 # Zip extraction / compression helpers
 #
-# ``extract_zip`` / ``compress_images_to_zip`` / ``_compress_images_to_zip``
-# live in ``pipeline.io`` beside ``merge_images_into_zip`` and
-# ``_verify_files_complete``, which are the same job: they are re-exported at
-# the top of this file, so every call site here and in the tests is unchanged.
+# ``compress_images_to_zip`` / ``_compress_images_to_zip`` live in
+# ``pipeline.io`` beside ``merge_images_into_zip`` and ``_verify_files_complete``,
+# which are the same job, and are re-exported at the top of this file. A
+# zip-mode well's inputs are not unpacked at all: ``pipeline.zip_members``.
 # ---------------------------------------------------------------------------
 
 
@@ -926,7 +926,7 @@ from pipeline.output_policy import (
 # the orchestrator reads as correct -> segment -> write -> quantify.
 
 
-def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
+def _load_image_group(nuclear_path, fluor_paths, fluor_tokens, open_image=None):
     """Load the nuclear frame + every fluor channel; verify shape consistency.
 
     Returns ``(nir_raw, fluor_raws, acquisition, ceilings)``. *ceilings* is
@@ -935,7 +935,9 @@ def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
     writer needs to store a corrected frame back in its input's type
     (:func:`pipeline.output_images.storage_array`). *acquisition* holds the
     two metrics that can only be read **here**, and the two reasons are
-    different:
+    different (*open_image*, when given, turns each path into the file to read —
+    a zip-mode well's :meth:`pipeline.zip_members.ZipMemberReader.open`, so the
+    paths are only names and nothing was unpacked):
 
     * ``sat_frac`` needs the camera's integer ceiling, which
       :func:`pipeline.io.load_2d_gray` erases with its unconditional
@@ -973,7 +975,8 @@ def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
     _stardist.set_fov_label(nuclear_path.name)
 
     _t = time.perf_counter()
-    nir_raw, _ceiling = load_2d_gray_with_ceiling(nuclear_path)
+    _open = open_image or (lambda p: p)
+    nir_raw, _ceiling = load_2d_gray_with_ceiling(_open(nuclear_path))
     log.info("  load nuclear: %.1f s  (shape %s)", time.perf_counter() - _t, nir_raw.shape)
 
     _t = time.perf_counter()
@@ -989,7 +992,7 @@ def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
     ceilings: list[float | None] = [_ceiling]
     for fp in fluor_paths:
         _t = time.perf_counter()
-        img, fluor_ceiling = load_2d_gray_with_ceiling(fp)
+        img, fluor_ceiling = load_2d_gray_with_ceiling(_open(fp))
         ceilings.append(fluor_ceiling)
         if img.shape != nir_raw.shape:
             raise ValueError(
@@ -1338,6 +1341,7 @@ def process_image_group(
     phase_token: str = "",
     phase_output: str = DEFAULT_PHASE_OUTPUT,
     tophat_dtype: str = DEFAULT_TOPHAT_DTYPE,
+    open_image=None,
 ) -> tuple[list[dict], dict]:
     """
     Process one nuclear image together with an arbitrary number of fluorescent
@@ -1361,12 +1365,14 @@ def process_image_group(
                            written for it, ``copy`` resaves the original.
     *tophat_dtype*       : ``source`` stores each ``_tophat`` in its input's
                            integer type where that is lossless up to rounding.
+    *open_image*         : path -> file to read; a zip-mode well reads its
+                           members in place (``pipeline.zip_members``).
 
     Output CSV columns for each fluor channel are prefixed with the lower-cased
     token, e.g. "gfp_total_intensity", "mcherry_mean_intensity".
     """
     nir_raw, fluor_raws, acquisition, ceilings = _load_image_group(
-        nuclear_path, fluor_paths, fluor_tokens)
+        nuclear_path, fluor_paths, fluor_tokens, open_image)
 
     nir_raw, fluor_raws, nir_corr, fluor_tophat, fluor_corr = _correct_image_group(
         nir_raw, fluor_raws, nuclear_path=nuclear_path, nuclear_token=nuclear_token,
@@ -1889,6 +1895,7 @@ def _process_groups_in_worker(
     errors_dir: Path | None = None,
     settings_key: str = "",
     measured_of: int | None = None,
+    open_image=None,
 ) -> tuple[list[dict], list[str]]:
     """
     Process all image groups for one well within a single worker process.
@@ -1898,6 +1905,7 @@ def _process_groups_in_worker(
 
     *fov_threads* controls concurrent FOV processing via ThreadPoolExecutor.
     fov_threads=1 (default) is safe for any backend; >1 benefits multi-core CPU.
+    *open_image* reaches :func:`process_image_group` (zip mode reads in place).
 
     *errors_dir* is the persistent dataset output dir (NOT the ``tmp_images``
     staging dir); a per-FOV-group failure trace is written under
@@ -1956,7 +1964,7 @@ def _process_groups_in_worker(
 
     def _run_group(nuclear_path: Path, fluor_paths: list[Path]) -> list[dict]:
         _t0 = time.perf_counter()
-        recs, quality = process_image_group(nuclear_path, fluor_paths, **kwargs)
+        recs, quality = process_image_group(nuclear_path, fluor_paths, open_image=open_image, **kwargs)
         log.info("FOV %s processed in %.1f s (%d nuclei)",
                  nuclear_path.name, time.perf_counter() - _t0, len(recs))
         for r in recs:
@@ -2258,10 +2266,12 @@ def process_well_zip_task(
                                     grouper=find_image_groups_in_zip, parse=parse_filename,
                                     incremental=incremental, incremental_prior_dir=incremental_prior_dir,
                                     scratch=tmp_extract, staging=tmp_images)
-            tmp_extract.mkdir(parents=True, exist_ok=True)
             tmp_images.mkdir(parents=True,  exist_ok=True)
 
-            groups, needed_members = find_image_groups_in_zip(
+            # The groups' paths sit under tmp_extract as names only: nothing is
+            # unpacked there, each field reads its members from the archive in
+            # place when it runs (pipeline.zip_members says why).
+            groups, _members = find_image_groups_in_zip(
                 zip_path,
                 nuclear_token,
                 fluor_tokens,
@@ -2316,37 +2326,17 @@ def process_well_zip_task(
                         return [], []
                     log.info("Well %s — merging %d new FOV(s).", well_label, len(new_groups))
                     groups = new_groups
-                    needed_members = set()
-                    for nuc, fl in groups:
-                        needed_members.add(nuc.name)
-                        for f in fl:
-                            needed_members.add(f.name)
                 # else: no prior CSV or out.zip → new well → process all (full).
 
-            n_extracted = extract_zip(zip_path, tmp_extract, members_to_extract=needed_members)
-            log.info(
-                "Well %s: extracted %d/%d required image file(s).",
-                well_label,
-                n_extracted,
-                len(needed_members),
-            )
-
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
-            records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
-                groups, kwargs, well_label, errors_dir=output_dir,
-                settings_key=settings_key,
-                measured_of=groups_in_input if incremental else None)
+            with ZipMemberReader(zip_path) as members:
+                records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
+                    groups, kwargs, well_label, errors_dir=output_dir,
+                    settings_key=settings_key, open_image=members.open,
+                    measured_of=groups_in_input if incremental else None)
             if _suspended_before_any_group(well_label, records, failed):
                 return [], []
             withdraw_seal(output_dir, well_label)    # before the CSV / out.zip rewrite; raises if it cannot
-
-            # The extracted inputs are dead weight from here on, and what
-            # follows — building <well>_out.zip beside a staging dir that still
-            # holds every intermediate — is this well's peak disk footprint.
-            # Reclaiming now is the difference between fitting and not on the
-            # usual single-volume setup. The finally block still removes it (it
-            # has to cover the failure paths) and is a no-op once this has run.
-            remove_directory(tmp_extract)
 
             if incremental:
                 if records:

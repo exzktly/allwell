@@ -426,3 +426,51 @@ def test_imagexpress_sites_in_per_well_zips_are_not_taken_for_the_channel(tmp_pa
     guess = infer_from_dir(tmp_path)
     assert guess.schema_str == "experiment:well:ignore:channel"
     assert sorted(guess.channels) == ["w1", "w2", "w3"]
+
+
+def _concatenated_zip_plate(root, channels, prefixes=("expA", "expB")):
+    """Per-well archives of a concatenation: each acquisition keeps its own prefix, and Concatenate shifts the
+    second's timepoints past the first's, so no two images of one tile carry different prefixes."""
+    import zipfile
+
+    (root / "in").mkdir()
+    for well in [f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)]:
+        with zipfile.ZipFile(root / "in" / f"{well}.zip", "w") as zf:
+            for n, prefix in enumerate(prefixes):
+                for t in (2 * n, 2 * n + 1):
+                    for f in (1, 2):
+                        for chan in channels:
+                            zf.writestr(f"{prefix}_{chan}_{well}_f{f}_t{t}.tif", b"")
+
+
+@pytest.mark.parametrize("channels", [("PHASE", "GFP"), ("PHASE", "GFP", "RFP")])
+def test_a_concatenated_plate_s_prefix_is_not_taken_for_the_channel_through_the_form_s_sample(tmp_path, channels):
+    """Reported twice: a concatenated nanowell plate whose two acquisitions carry different prefixes ran remotely
+    and found "no image groups". The first fix was tested on a full list of names; the form's scan reads about four
+    names from each per-well archive, which almost never holds two images of one tile, so the prefix still won —
+    for two channels on the leftmost tie-break, for three because two prefixes are fewer than three channels."""
+    from util.schema_infer import infer_from_dir
+
+    _concatenated_zip_plate(tmp_path, channels)
+    guess = infer_from_dir(tmp_path)
+    assert guess.schema_str == "ignore:channel:well:fov:timepoint"
+    assert guess.channels == list(channels)
+    assert guess.confident
+
+
+def test_two_prefixes_against_three_channels_on_a_full_list_of_names():
+    """Fewest-distinct alone took two prefixes over three channels; the slot that changes within a tile is the
+    channel whatever the counts."""
+    stems = (_default_stems(channels=("PHASE", "GFP", "RFP"), tps=("t0",), experiment="expA")
+             + _default_stems(channels=("PHASE", "GFP", "RFP"), tps=("t1",), experiment="expB"))
+    guess = infer_schema(stems)
+    assert guess.fields[1:] == ["channel", "well", "fov", "timepoint"]
+    assert guess.channels == ["PHASE", "GFP", "RFP"]
+
+
+def test_tile_partners_are_the_one_token_siblings_of_a_pick():
+    from util.schema_infer import with_tile_partners
+
+    pool = ["expA_GFP_A01_t0", "expA_PHASE_A01_t0", "expA_GFP_A01_t1", "expB_PHASE_A01_t2", "expA_GFP_A02_t0"]
+    out = with_tile_partners(["expA_GFP_A01_t0"], pool, picks=1)
+    assert out == ["expA_GFP_A01_t0", "expA_PHASE_A01_t0", "expA_GFP_A01_t1", "expA_GFP_A02_t0"]

@@ -44,6 +44,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from services.remote_srun_retry import with_exclusive
 from services.subprocess_text import TEXT_UTF8
 from util.state_dir import (
     REMOTES_NAME, adopt_legacy_file, app_file, gui_state_dir, legacy_config_dirs,
@@ -165,6 +166,17 @@ class RemoteHost:
     behaviour. The string is tokenised with ``shlex.split`` at use time,
     so it stays human-readable on disk.
     """
+    exclusive_node: bool = True
+    """Whether an ``srun`` :attr:`compute_launcher` asks for the node to
+    itself (``--exclusive``), so no other job — another app instance's run
+    included — is placed on the same machine.
+
+    On by default, which every config saved before the field existed gets
+    too: :attr:`launch_command` adds the word at launch time, and
+    :attr:`compute_launcher` stays exactly what the user wrote. A launcher
+    that already says ``--exclusive`` or ``--oversubscribe`` is left as it is.
+    Written to ``remotes.toml`` only when switched off.
+    """
     jupyterhub_config_path: str = ""
     """Optional path to the cluster's ``jupyterhub_config.py`` on the remote.
 
@@ -191,6 +203,17 @@ class RemoteHost:
     is editable in the remote-server manager. Applies to direct hosts too,
     where it just makes a transiently-slow login more forgiving.
     """
+
+    @property
+    def launch_command(self) -> str:
+        """The scheduler command a run is actually sent with:
+        :attr:`compute_launcher`, plus ``--exclusive`` when
+        :attr:`exclusive_node` is set (:func:`services.remote_srun_retry.with_exclusive`).
+        Every launch site reads this rather than the raw field, so the run,
+        the batched driver and the scheduler test ask for the same node."""
+        if not self.exclusive_node:
+            return self.compute_launcher
+        return with_exclusive(self.compute_launcher)
 
     def _server_alive_count_max(self) -> int:
         """``ServerAliveCountMax`` derived from :attr:`queue_wait_timeout_min`.
@@ -636,6 +659,9 @@ def _format_block(host: RemoteHost) -> str:
         f"compute_launcher = {_toml_string(host.compute_launcher)}\n"
         if host.compute_launcher else ""
     )
+    # exclusive_node is only emitted when switched off: on is the default,
+    # and loaders default the field to true when absent.
+    exclusive_line = "" if host.exclusive_node else "exclusive_node = false\n"
     jhub_line = (
         f"jupyterhub_config_path = {_toml_string(host.jupyterhub_config_path)}\n"
         if host.jupyterhub_config_path else ""
@@ -649,6 +675,7 @@ def _format_block(host: RemoteHost) -> str:
         f"ssh_alias = {_toml_string(host.ssh_alias)}\n"
         f"{key_line}"
         f"{launcher_line}"
+        f"{exclusive_line}"
         f"{jhub_line}"
         f"remote_project_dir = {_toml_string(host.remote_project_dir)}\n"
         f"remote_staging_dir = {_toml_string(host.remote_staging_dir)}\n"
@@ -829,6 +856,7 @@ def _parse_entry(name: str, entry: dict[str, Any]) -> RemoteHost:
         ),
         ssh_key_path=str(entry.get("ssh_key_path", defaults.ssh_key_path)),
         compute_launcher=str(entry.get("compute_launcher", defaults.compute_launcher)),
+        exclusive_node=bool(entry.get("exclusive_node", defaults.exclusive_node)),
         jupyterhub_config_path=str(
             entry.get("jupyterhub_config_path", defaults.jupyterhub_config_path)
         ),

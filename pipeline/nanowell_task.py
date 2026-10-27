@@ -27,6 +27,7 @@ import numpy as np
 from pipeline import nanowell_measure as nm
 from pipeline import nanowell_run as nr
 from pipeline.run_report import withdraw_seal
+from pipeline.zip_members import ZipMemberReader
 from util.csv_gz import existing_csv
 from util.timepoint import parse_hours
 
@@ -236,10 +237,12 @@ def timepoint_order(record: dict, well: str) -> list[str]:
     return sorted(found, key=key)
 
 
-def _read_tif(path: Path):
+def _read_tif(path):
+    """A tile as float32, from a path or from an open binary file (a member read out of the well's archive in
+    place, :class:`pipeline.zip_members.ZipMemberReader`)."""
     import tifffile
 
-    return np.asarray(tifffile.imread(str(path)), dtype=np.float32)
+    return np.asarray(tifffile.imread(path if hasattr(path, "read") else str(path)), dtype=np.float32)
 
 
 def _placing_record(record: dict | None, well: str, pattern: dict | None) -> dict | None:
@@ -634,14 +637,18 @@ def _stamp_anchors(outcome, todo, digest: str) -> None:
 
 
 def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
-                     csv_prefix, schema, sep, *, grouper, parse, extract, scratch_dir, write_csv, segmenter=None,
+                     csv_prefix, schema, sep, *, grouper, parse, scratch_dir, write_csv, segmenter=None,
                      incremental=False, prior_dir=None, settings_key="", staging_dir=None, plate_rigid=None):
     """Run one zipped well in nanowell mode; returns ``(records, failed_timepoints)`` like its counterpart.
 
-    *grouper*, *parse*, *extract*, *write_csv* are ``process_microscopy``'s ``find_image_groups_in_zip``,
-    ``parse_filename``, ``extract_zip`` and ``_write_single_csv``; *scratch_dir* is where this well's
-    members are extracted (the caller removes it). With *incremental*, timepoints an earlier run finished
-    under the same settings and record are kept and only the rest are computed, onto the same roster.
+    *grouper*, *parse*, *write_csv* are ``process_microscopy``'s ``find_image_groups_in_zip``,
+    ``parse_filename`` and ``_write_single_csv``. The tiles are never unpacked: each is read out of the archive
+    in place when a timepoint loads it (:class:`pipeline.zip_members.ZipMemberReader`). Unpacking the whole
+    well first — every tile of every timepoint, phase and fluorescence — held a remote batch silent for about ten
+    minutes after ``Found N image group(s)`` on a cluster whose scratch is the networked home directory.
+    *scratch_dir* now holds only the located montages (``.montages``) and the caller removes it. With
+    *incremental*, timepoints an earlier run finished under the same settings and record are kept and only the
+    rest are computed, onto the same roster.
     """
     from util.acquisition_record import read_record_file
 
@@ -654,7 +661,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
             "tells the run where each tile sits in the well; it is written when a CZI/ND2/OME dataset is converted. "
             "For a dataset converted without one, give the grid instead: --nanowell_grid, --nanowell_scan, "
             "--nanowell_overlap_percent and --nanowell_pixel_size_um")
-    groups, needed = grouper(zip_path, nuclear_token, fluor_tokens, scratch_dir, schema=schema, sep=sep)
+    groups, _needed = grouper(zip_path, nuclear_token, fluor_tokens, scratch_dir, schema=schema, sep=sep)
     if not groups:
         raise NanowellInputError(f"No image groups found in {Path(zip_path).name}: "
                                  f"{no_groups_reason(zip_path, nuclear_token, fluor_tokens, schema, sep)}")
@@ -678,9 +685,6 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
                                    well_label)
 
     def run(prior, todo):
-        wanted = {Path(p).name for (tp, _), (nuclear, fluors) in index.items() if tp in todo
-                  for p in [nuclear, *fluors]}
-        extract(zip_path, scratch_dir, members_to_extract=wanted & set(needed))
         return _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
                                Path(prior_dir or output_dir) / NANOWELL_DIR / template_path.name, staging_dir,
                                settings_key, scratch_dir, tuple(pattern["grid"]) if described else None, placements,
@@ -688,18 +692,29 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
 
     def load_phase(tp, tile) -> np.ndarray | None:
         found = index.get((tp, tile))
-        return None if found is None else _read_tif(found[0])
+        return None if found is None else _read_tif(members.open(found[0]))
 
     def channel_loader(position):
         def load(tp, tile) -> np.ndarray | None:
             found = index.get((tp, tile))
             if found is None or position >= len(found[1]):
                 return None
-            return _read_tif(found[1][position])
+            return _read_tif(members.open(found[1][position]))
         return load
 
     channels = {t: channel_loader(k) for k, t in enumerate(fluor_tokens)}
     template_path = output_dir / NANOWELL_DIR / f"{well_label}{TEMPLATE_SUFFIX}"
+    members = ZipMemberReader(zip_path)
+    try:
+        return _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints,
+                            digest, prior, todo, run, staging_dir, write_csv, template_path)
+    finally:
+        members.close()
+
+
+def _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints, digest,
+                 prior, todo, run, staging_dir, write_csv, template_path):
+    """:func:`process_well_zip`'s run and its writing, while the well's archive is open to read tiles from."""
     outcome, fixed, fixed_roster, saved = run(prior, todo)
     if prior is not None and outcome.roster_change:
         # An incremental run must give the roster a run over every timepoint would (tracker X35a-R1): a rim nanowell
@@ -811,14 +826,14 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
                  incremental_prior_dir=None, plate_rigid=None, scratch=None, staging=None, reanchoring=False):
     """The whole lifecycle of one zipped well in nanowell mode (what ``process_well_zip_task`` does otherwise).
 
-    Extract to *scratch*, run, write the three tables and the montage archive, record completeness (in
+    Read the tiles from the archive in place (montages spill to *scratch*), run, write the three tables and the montage archive, record completeness (in
     timepoints, the unit of work here) and the settings that produced it. ``process_well_zip_task`` calls
     this from inside its own ``try``, so the failure trace, ``--force`` (which clears the staging directory
     and with it the resume checkpoints) and the removal of both directories are its own, exactly as for a
     per-field well; a caller without them (the end-of-run pass) gets directories of its own, removed after.
     """
     from pipeline.fov_checkpoint import _staging_dir_for, extract_dir_for
-    from pipeline.io import extract_zip, remove_directory, write_well_csv
+    from pipeline.io import remove_directory, write_well_csv
     from pipeline.run_report import seal_well_complete, write_well_report
     from pipeline.settings_record import record_well_settings
 
@@ -834,7 +849,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
     try:
         records, failed = process_well_zip(
             well_label, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
-            schema, sep, grouper=grouper, parse=parse, extract=extract_zip, scratch_dir=scratch,
+            schema, sep, grouper=grouper, parse=parse, scratch_dir=scratch,
             write_csv=write_well_csv, segmenter=segmenter, incremental=incremental,
             prior_dir=incremental_prior_dir, settings_key=settings_key, staging_dir=staging, plate_rigid=plate_rigid)
         grid_path = output_dir / NANOWELL_DIR / f"{well_label}_grid.json"

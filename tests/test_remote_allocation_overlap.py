@@ -29,7 +29,7 @@ from services.remote_runner import (
     RemoteRunner,
     ZippedInput,
 )
-from services.remote_commands import _compose_remote_cmd
+from services.remote_commands import _compose_remote_cmd, unpack_login_shell_command
 from services.remote_config import RemoteHost
 from services.remote_run_id import (
     UPLOAD_HEARTBEAT,
@@ -119,7 +119,7 @@ def test_the_pipeline_is_always_the_last_thing_the_job_does(sentinel):
 # ── the order the two waits are actually spent in ────────────────────────────
 
 
-def _host(launcher: str) -> RemoteHost:
+def _host(launcher: str, **kw) -> RemoteHost:
     return RemoteHost(
         name="test",
         ssh_alias="test-host",
@@ -131,11 +131,12 @@ def _host(launcher: str) -> RemoteHost:
         cache_budget_gb=10,
         measured_bandwidth_mbps=100.0,
         compute_launcher=launcher,
+        **kw,
     )
 
 
 def _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers, launcher, *,
-                           upload_raises=None):
+                           upload_raises=None, spawned=None, **host_kw):
     """Run ``spawn`` against fakes, returning the order of the outbound calls."""
     order: list[str] = []
     key = "cachekey" + "0" * 24
@@ -167,6 +168,8 @@ def _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers, launcher, *,
 
     def fake_popen(argv, **kw):
         order.append("allocate")
+        if spawned is not None:
+            spawned.append(list(argv))
         m = MagicMock()
         m.stdout = iter(())
         m.wait.return_value = 0
@@ -188,7 +191,7 @@ def _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers, launcher, *,
     zip_path.write_bytes(b"PK\x05\x06" + b"\0" * 18)
     zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP,
                          well_zips=(zip_path,))
-    runner = RemoteRunner(_host(launcher))
+    runner = RemoteRunner(_host(launcher, **host_kw))
     stop_fetchers(runner)
     runner.spawn(zipped, tmp_path / "out",
                  ["python", "process_microscopy.py"],
@@ -462,3 +465,24 @@ def test_the_sweep_only_cancels_what_it_can_prove_is_dead(
                             heartbeat_age=hb_age, sidecar_age=sc_age,
                             heartbeat_exists=hb_exists, owner=owner)
     assert got == expected
+
+
+@pytest.mark.parametrize("exclusive, expected", [
+    (True, "srun --exclusive --partition=gpu --time=1:00:00"),
+    (False, "srun --partition=gpu --time=1:00:00"),
+])
+def test_a_scheduled_run_asks_for_the_node_to_itself(
+        monkeypatch, tmp_path, stop_fetchers, exclusive, expected):
+    """The single-launch path sends ``RemoteHost.launch_command``: with
+    ``exclusive_node`` on (the default) srun carries ``--exclusive``, so a
+    second run — another app instance's — cannot be placed on the same machine;
+    off, the command is exactly what the user wrote
+    (``tests/test_a_run_reserves_its_node.py`` covers the other launch sites)."""
+    spawned: list[list[str]] = []
+    _spawn_recording_order(monkeypatch, tmp_path, stop_fetchers,
+                           "srun --partition=gpu --time=1:00:00",
+                           spawned=spawned, exclusive_node=exclusive)
+    assert len(spawned) == 1
+    script = unpack_login_shell_command(spawned[0][-1])
+    assert expected in script
+    assert ("--exclusive" in script) is exclusive

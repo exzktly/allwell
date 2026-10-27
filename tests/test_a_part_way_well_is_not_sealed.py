@@ -171,7 +171,9 @@ def test_a_seal_that_cannot_be_withdrawn_stops_the_rewrite(tmp_path, monkeypatch
      ("merge_well_records(", "write_well_csv(", "merge_images_into_zip(", "compress_images_to_zip(")),
     ("process_microscopy.process_well_folder_task",
      ("merge_well_records(", "write_well_csv(", "merge_images_into_zip(", "compress_images_to_zip(")),
-    ("pipeline.nanowell_task.process_well_zip",
+    # The nanowell well's writes live in ``_finish_well``, which ``process_well_zip`` runs while the well's
+    # archive is open to read tiles from.
+    ("pipeline.nanowell_task._finish_well",
      ("write_csv(", "write_empty_cells_csv(", "write_sites_csv(", "write_grid_json(", "update_montage_archive(")),
 ])
 def test_every_well_path_withdraws_the_seal_before_its_first_write(fn_name, writers):

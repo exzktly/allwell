@@ -179,7 +179,7 @@ class ProbeRun:
         # Raises ValueError for a launcher with a loose word, or a scratch
         # directory carrying shell syntax, as a run does — so it is composed
         # with the run's scratch directory too.
-        script = _compose_remote_cmd(host.compute_launcher, pidfile, argv,
+        script = _compose_remote_cmd(host.launch_command, pidfile, argv,
                                      cache_hit=False, env_selector=selector,
                                      scratch_dir=host.remote_scratch_dir)
         self.argv = host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(script)]

@@ -8369,7 +8369,11 @@ worker loads StarDist once and reuses it across every FOV in that well.
 
 Temporary directories (`_tmp_extract_*`, `_tmp_images_*`) are removed when
 each well completes, even after a worker error. Stragglers from a crashed
-run are cleaned up at the start of the next run.
+run of the same plate are cleaned up at the start of its next run; those of
+any other plate are left alone until nothing in them has changed for a day,
+because the scratch folder is shared and they may belong to a run that is
+still going — a second app instance, or a second remote job on the same host.
+That is what lets two runs work side by side.
 
 ---
 

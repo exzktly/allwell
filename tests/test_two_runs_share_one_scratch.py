@@ -66,6 +66,8 @@ def test_a_batch_start_leaves_another_plates_live_folders_alone(tmp_path):
 
     sweep_run_scratch(plate_b, "settings-b", extra_extract=True)
 
+    assert a_extract.exists() and a_staging.exists(), (
+        "plate B's batch start deleted plate A's live folders")
     assert sorted(p.name for p in a_extract.iterdir()) == ["exp_DAPI_A01_F001_0h.tif"]
     assert sorted(p.name for p in a_staging.iterdir()) == ["partial.tif"]
     assert not b_extract.exists() and not b_staging.exists(), (
@@ -143,5 +145,6 @@ def test_two_plates_running_the_same_well_do_not_share_an_unpack_folder(tmp_path
 
     assert failed == [] and len(records) == 1
     assert b_seen and b_seen[0] != a_extract
+    assert a_extract.exists(), "plate B's well task removed plate A's unpack folder for the same well"
     assert sorted(p.name for p in a_extract.iterdir()) == ["exp_DAPI_A01_F001_0h.tif"], (
         "plate B's well task removed plate A's unpacked images for the same well")

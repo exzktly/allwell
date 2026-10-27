@@ -12146,7 +12146,7 @@ parent process supervises the per-well worker pool:
   `<well>_out.zip` while the staging directory still holds every intermediate is
   the well's peak footprint, and on a single-volume setup the extracted TIFs are
   competing for the same bytes at exactly that moment. `process_well_zip_task`
-  removes `_tmp_extract_<well>` as soon as the groups are processed; the
+  removes `_tmp_extract_<plate stamp>_<well>` as soon as the groups are processed; the
   `finally` block still removes it (it has to cover the failure paths) and is a
   no-op by then.
 - **Per-FOV failure traces.** A failed FOV-group persists its full traceback to
@@ -13153,6 +13153,26 @@ spent, and left behind they were all `out/<WELL>/` held once its images had
 been archived.
 `_sweep_stale_scratch_dirs_all` sweeps the scratch base *and* `output_dir` (when
 they differ) so staging left by pre-change runs is still reclaimed.
+
+**The scratch base is shared, so the sweep removes only what is provably
+abandoned.** One base serves every run on the machine or remote host — two app
+instances, or two remote jobs whose *Remote scratch dir* is not set per job
+(`$SLURM_TMPDIR` is; a fixed path or the default is not) — and the sweep runs at
+the start of every batch. Every working folder therefore carries the plate's
+stamp (`fov_checkpoint._output_stamp`, a digest of the output directory):
+staging is `_tmp_images_<plate>_<settings>_<well>` (`_staging_dir_for`) and the
+unpack folder `_tmp_extract_<plate>_<well>` (`extract_dir_for`), so two plates
+working on the same well at once never share one. `sweep_run_scratch` passes
+this plate's stamp, and `_sweep_stale_scratch_dirs` removes a folder carrying it
+at once; any other folder — another plate's, or a name from before folders
+carried a stamp — only once nothing anywhere in it has changed for
+`FOREIGN_SCRATCH_IDLE_S` (24 h), measured as the newest mtime under it, with an
+unreadable folder counting as in use. A live well writes into its folders every
+few seconds, so that limit can only catch an abandoned run. Folders holding
+`.fov_*.done` checkpoints are kept whoever owns them, as before. Sweeping every
+folder at each batch start deleted a second run's unpacked images and in-flight
+staging mid-well; `tests/test_two_runs_share_one_scratch.py` drives both
+collisions.
 
 **Results (small, durable).** Only two writes per well must land on `output_dir`:
 the per-well CSV and `<well>_out.zip`. Both carry the same retry-with-backoff

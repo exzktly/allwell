@@ -205,7 +205,7 @@ def remove_directory(path: Path, *, retries: int = 4, backoff: float = 0.5) -> N
       files open.
 
     The previous implementation logged a single warning and gave up,
-    leaving stale ``_tmp_extract_<well>`` / ``_tmp_images_<well>``
+    leaving stale ``_tmp_extract_*`` / ``_tmp_images_*``
     directories behind on every pipeline run. The retry loop here:
 
     1. Strips the read-only bit on individual files that raise

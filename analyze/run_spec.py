@@ -321,9 +321,16 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
             return
         button = QToolButton(browse.parentWidget())
         button.setObjectName("QueuedOutputButton")
-        button.setText("▾")
+        # No caret in the text: ``hasMenu`` gives it the theme's one shared
+        # chevron. A "▾" label beside Qt's own menu indicator drew two arrows
+        # of different sizes.
+        button.setProperty("hasMenu", True)
         button.setToolTip(tooltip)
         button.setPopupMode(QToolButton.InstantPopup)
+        # Level with Browse, which is a push button and sizes differently, and
+        # square: with no text, the width a tool button reserves is empty space.
+        side = browse.sizeHint().height()
+        button.setFixedSize(side, side)
         menu = QMenu(button)
         sub = QMenu(title, menu)
         menu.addMenu(sub)

@@ -11,6 +11,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtGui import QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from widgets.path_field import PathField, folder_picker  # noqa: E402
@@ -146,3 +147,40 @@ def test_folder_picker_forwards_parent(monkeypatch, qapp):
     assert captured["parent"] is field
     assert captured["prompt"] == "Pick a folder"
     assert field.path() == "/chosen"
+
+
+def _render_split_browse(style_name: str) -> QImage:
+    """The Browse button with a menu behind its arrow, styled by the app's QSS
+    over the named Qt base style, rendered to an image."""
+    from PySide6.QtWidgets import QStyleFactory
+
+    from ui import theme
+
+    field = PathField("Label", pick=lambda current, parent=None: "")
+    field.add_browse_alternative("Queued jobs", lambda: [], lambda _k: None, empty_text="none")
+    btn = field._browse_btn
+    base = QStyleFactory.create(style_name)
+    btn.setStyle(base)
+    btn.setStyleSheet(theme.qss())
+    btn.resize(btn.sizeHint())
+    image = btn.grab().toImage()
+    field.deleteLater()
+    return image
+
+
+def test_the_split_browse_button_draws_no_part_with_the_platform_style(qapp):
+    """Every part of the split Browse button comes from the stylesheet.
+
+    A ``MenuButtonPopup`` subcontrol the QSS leaves unstyled is painted by the
+    platform style, and on macOS that put a native drop-down arrow beside the
+    app's chevron — two arrows of different sizes. macOS cannot be rendered
+    here, so the property is measured instead: the same button over two
+    different base styles must come out pixel-identical, which holds only when
+    no part of it was delegated to either. Without the ``popupMode="1"`` rules
+    in ``ui/theme.py`` the two renders differ (Fusion draws a bevelled strip,
+    Windows a bare arrow).
+    """
+    fusion = _render_split_browse("Fusion")
+    windows = _render_split_browse("Windows")
+    assert fusion.size() == windows.size()
+    assert fusion == windows

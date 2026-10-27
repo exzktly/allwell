@@ -12162,8 +12162,14 @@ parent process supervises the per-well worker pool:
   checkpoint never reads its images at all, and the well's peak scratch
   footprint is its intermediates alone. Each thread of `--fov_threads` keeps its
   own `ZipFile` handle, because one shared handle serialises reads behind its
-  lock. The nanowell path (`pipeline.nanowell_task.run_zip_task`) has its own
-  extraction and still unpacks. `tests/test_a_zip_well_is_read_in_place.py`
+  lock. The nanowell path reads in place the same way: `nanowell_task.process_well_zip`
+  opens a `ZipMemberReader` for the well (closed in a `finally` around `_finish_well`)
+  and its phase and channel loaders decode each tile from the archive when a
+  timepoint asks for it, so its scratch holds only the located montages
+  (`.montages`); `nanowell_run.run_well` logs when it starts reading, placing and
+  registering a timepoint's tiles and how long that took, the longest quiet stretch
+  left in a nanowell well (`tests/test_a_nanowell_well_is_read_in_place.py`).
+  `tests/test_a_zip_well_is_read_in_place.py`
   drives the task and fails if any input image reaches scratch before the
   fields run, or if a resumed field reads the archive.
 - **Per-FOV failure traces.** A failed FOV-group persists its full traceback to

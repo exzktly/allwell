@@ -1747,7 +1747,11 @@ and by `remote_fetch_report.txt` in the output folder.
   its timepoints, each located and then measured — two steps a timepoint, so
   a well of 2 timepoints is 4 steps, and the log says both
   (`Well A01 — 4 step(s): its 2 timepoint(s), each located, then measured`) —
-  and while a timepoint is measured, with how many of its nanowells are
+  and while a timepoint is located the log says it has started and, when it is
+  done, how long it took (`Well A01 — 24h: reading, placing and registering 36
+  tile(s)`, then `24h: tiles placed and registered in 40 s (ok)`), because that
+  step can take minutes on a large well and prints nothing else meanwhile;
+  while a timepoint is measured, with how many of its nanowells are
   segmented so far. Hovering the
   well says where it is (`step 5/8, 24h: 120/400 nanowells segmented`), and the
   run log prints the same count about every tenth of a timepoint's nanowells

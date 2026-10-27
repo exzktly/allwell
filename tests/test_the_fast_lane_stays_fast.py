@@ -348,42 +348,43 @@ def test_a_module_fixture_extracts_into_this_worker_s_own_scratch(_scratch_seen_
     assert Path(seen).resolve().is_relative_to(tmp_path_factory.getbasetemp().resolve())
 
 
-# ── the nanowell end-to-end lane ────────────────────────────────────────────
+# ── the lanes beside the fast lane ──────────────────────────────────────────
 #
-# About 1,075 s of rendered-tile nanowell tests took the fast lane from ~2.5 to
-# ~9.5 min and CI to within three minutes of its cap. They run in a lane of
-# their own; these keep that split from quietly undoing itself. Either way it
-# fails silently: a renamed file drops out of the roster back into the fast
-# lane, and a CI job that stopped running the lane would leave 250 tests run
-# nowhere while every check stays green.
+# tests/_lanes.py holds four rosters, each a lane of its own: the nanowell
+# end-to-end runs, the other nanowell tests, the remote / HPC tests (all three
+# gated on whether a change can reach them) and the GUI layout tests (local
+# fast lane only, never CI). Every way this split can break fails silently: a
+# renamed file drops out of its roster back into the fast lane; a CI job that
+# stops running a lane leaves hundreds of tests run nowhere while every check
+# stays green; a gate that stops seeing what its tests import skips the lane on
+# exactly the change that breaks it; and a behaviour test that joins the UI
+# roster stops being run by CI at all.
 
-def test_every_nanowell_lane_file_exists():
-    from tests.conftest import NANOWELL_E2E_FILES
+_ROSTER_MARKS = {
+    "NANOWELL_E2E_FILES": ("nanowell_e2e", "--nanowell"),
+    "NANOWELL_FEATURE_FILES": ("nanowell_feature", "--nanowell-features"),
+    "REMOTE_FILES": ("remote_lane", "--remote"),
+    "UI_LANE_FILES": ("ui_lane", "--ui"),
+}
 
-    here = Path(__file__).resolve().parent
-    missing = [name for name in NANOWELL_E2E_FILES if not (here / name).is_file()]
-    assert not missing, f"roster names files that do not exist: {missing}"
+
+def _rosters():
+    import tests._lanes as lanes
+
+    return {name: getattr(lanes, name) for name in _ROSTER_MARKS}
 
 
-def test_the_fast_lane_leaves_the_nanowell_lane_out_and_ci_runs_it():
+def _lane_needed_module():
+    import importlib.util
+
     root = Path(__file__).resolve().parents[1]
-    script = (root / "scripts" / "test.sh").read_text()
-    assert 'MARK="not slow and not nanowell_e2e"' in script
-    assert 'MARK="nanowell_e2e and not slow"' in script
-    workflow = (root / ".github" / "workflows" / "ci.yml").read_text()
-    assert "scripts/test.sh --nanowell --junitxml=.pytest-report.xml" in workflow, \
-        "CI no longer runs the nanowell lane"
-    assert workflow.count("python scripts/junit_gate.py .pytest-report.xml") >= 2, \
-        "a CI test job is not gated on its JUnit report"
+    spec = importlib.util.spec_from_file_location("lane_needed", root / "scripts" / "lane_needed.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def test_the_roster_marks_its_tests():
-    """The collection hook marks a roster file's tests, and only those.
-
-    Asked of the hook directly: in a fast-lane run the roster's tests are
-    deselected, so looking for them among the session's items would find none
-    and pass without measuring anything.
-    """
+def _marks_for(path):
     from types import SimpleNamespace
 
     import tests.conftest as harness
@@ -392,8 +393,153 @@ def test_the_roster_marks_its_tests():
         def add_marker(self, mark):
             self.marks.append(mark.name)
 
-    inside = _Item(fspath=Path(__file__).parent / next(iter(harness.NANOWELL_E2E_FILES)),
-                   fixturenames=(), marks=[])
-    outside = _Item(fspath=Path(__file__), fixturenames=(), marks=[])
-    harness.pytest_collection_modifyitems(None, [inside, outside])
-    assert inside.marks == ["nanowell_e2e"] and outside.marks == []
+    item = _Item(fspath=path, fixturenames=(), marks=[])
+    harness.pytest_collection_modifyitems(None, [item])
+    return item.marks
+
+
+def test_the_conftest_still_exposes_the_nanowell_roster():
+    from tests._lanes import NANOWELL_E2E_FILES as from_lanes
+    from tests.conftest import NANOWELL_E2E_FILES as from_conftest
+
+    assert from_conftest is from_lanes
+
+
+def test_every_roster_file_exists_and_is_in_one_roster_only():
+    here = Path(__file__).resolve().parent
+    seen: dict[str, str] = {}
+    for roster_name, roster in _rosters().items():
+        missing = [name for name in roster if not (here / name).is_file()]
+        assert not missing, f"{roster_name} names files that do not exist: {missing}"
+        unexplained = [name for name, why in roster.items() if not why.strip()]
+        assert not unexplained, f"{roster_name} entries with no description: {unexplained}"
+        for name in roster:
+            assert name not in seen, f"{name} is in both {seen[name]} and {roster_name}"
+            seen[name] = roster_name
+
+
+def test_a_nanowell_test_file_joins_a_nanowell_roster():
+    """A new ``test_nanowell_*.py`` left off both rosters falls back into the fast
+    lane, which is how the fast lane came to spend a third of its time on them."""
+    from tests._lanes import NANOWELL_E2E_FILES, NANOWELL_FEATURE_FILES, UI_LANE_FILES
+
+    import re
+
+    here = Path(__file__).resolve().parent
+    rostered = set(NANOWELL_E2E_FILES) | set(NANOWELL_FEATURE_FILES) | set(UI_LANE_FILES)
+    # Exempt by what they are, not by name: a full-app file is ``slow`` and in no
+    # fast lane, and a whole-tree guard runs on every push.
+    exempt = re.compile(r"\b(viewer_app|loaded_app|loaded_app_shape|image_table_app"
+                        r"|python_sources|parsed_sources|root_modules)\b")
+    loose = sorted(p.name for p in here.glob("test_nanowell*.py")
+                   if p.name not in rostered and not exempt.search(p.read_text(encoding="utf-8")))
+    assert not loose, f"nanowell test files in no roster (tests/_lanes.py): {loose}"
+
+
+def test_no_guard_is_in_a_lane():
+    """A guard reads the whole tree, so any change can break it: it runs on every push."""
+    import re
+
+    here = Path(__file__).resolve().parent
+    whole_tree = re.compile(r"\b(python_sources|parsed_sources|root_modules)\b")
+    offenders = [name for roster in _rosters().values() for name in roster
+                 if whole_tree.search((here / name).read_text(encoding="utf-8"))]
+    assert not offenders, f"guards in a gated or local-only lane: {offenders}"
+
+
+def test_no_full_app_file_is_in_the_ui_lane():
+    """A full-app test there is ``slow`` already; listing it here says nothing true."""
+    import re
+
+    from tests._lanes import UI_LANE_FILES
+
+    here = Path(__file__).resolve().parent
+    full_app = re.compile(r"\b(viewer_app|loaded_app|loaded_app_shape|image_table_app)\b")
+    offenders = [name for name in UI_LANE_FILES
+                 if full_app.search((here / name).read_text(encoding="utf-8"))]
+    assert not offenders, f"full-app files in the UI roster: {offenders}"
+
+
+@pytest.mark.parametrize("roster_name", sorted(_ROSTER_MARKS))
+def test_the_hook_marks_each_roster_with_its_own_mark(roster_name):
+    """Asked of the hook directly: a lane run deselects the other rosters' tests,
+    so looking for them among the session's items would find none."""
+    mark = _ROSTER_MARKS[roster_name][0]
+    first = next(iter(_rosters()[roster_name]))
+    assert _marks_for(Path(__file__).parent / first) == [mark]
+    assert _marks_for(Path(__file__)) == []
+
+
+def test_the_script_runs_each_roster_in_its_own_lane_only():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "test.sh").read_text()
+    fast = script.split('FAST="', 1)[1].split('"', 1)[0]
+    for mark in ("nanowell_e2e", "nanowell_feature", "remote_lane"):
+        assert f"not {mark}" in fast, f"the fast lane runs the {mark} tests"
+    assert "ui_lane" not in fast, "the local fast lane no longer runs the UI tests"
+    assert 'MARK="$FAST"' in script
+    assert 'MARK="$FAST and not ui_lane"' in script, "--no-ui no longer leaves the UI tests out"
+    for mark, flag in _ROSTER_MARKS.values():
+        assert f'{flag})' in script and f'MARK="{mark} and not slow"' in script, flag
+
+
+def test_ci_runs_every_gated_lane_behind_its_gate_and_never_the_ui_tests():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "ci.yml").read_text()
+    assert "scripts/test.sh --no-ui --junitxml=" in workflow, "CI's fast lane runs the UI tests"
+    assert "scripts/test.sh --ui" not in workflow, "a CI job runs the UI tests"
+    for flag in ("--nanowell", "--nanowell-features", "--remote"):
+        assert f"scripts/test.sh {flag} --junitxml=" in workflow, f"CI no longer runs {flag}"
+    for gate in ("nanowell", "remote"):
+        assert f"python scripts/lane_needed.py {gate} --base" in workflow, f"CI skips the {gate} gate"
+    assert workflow.count("python scripts/junit_gate.py") >= 4, \
+        "a CI test run is not gated on its JUnit report"
+
+
+def test_preflight_runs_every_gated_lane_behind_its_gate():
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    preflight = (root / "scripts" / "preflight.sh").read_text()
+    for flag in ("--nanowell", "--nanowell-features", "--remote"):
+        assert re.search(rf'run_lane "[^"]+" {flag}\n', preflight), f"preflight skips {flag}"
+    for gate in ("nanowell", "remote"):
+        assert f"python scripts/lane_needed.py {gate}" in preflight
+
+
+def test_the_nanowell_gate_sees_its_patterns_and_what_its_tests_import():
+    """``analyze/tab.py`` matches no nanowell pattern; only reading the roster's
+    imports (the nanowell form tests drive the real AnalyzeTab) puts it in."""
+    lane = _lane_needed_module()
+    imports = lane.roster_imports("nanowell")
+    for path in ("pipeline/io.py", "process_microscopy.py", "review/features/nanowell/controller.py",
+                 "util/nanowell_anchors.py", "tests/conftest.py"):
+        assert lane.surface_reason("nanowell", path, set()).startswith("lane surface"), path
+    for path in ("analyze/tab.py", "datasets/subset/subset_compute.py"):
+        assert lane.surface_reason("nanowell", path, set()) == "", path
+        assert lane.surface_reason("nanowell", path, imports) == \
+            "imported directly by a test in this lane", path
+    assert lane.surface_reason("nanowell", "tests/test_nanowell_form.py", imports) == \
+        "a test file in this lane"
+    for path in ("review/domain/stats_compute.py", "widgets/flow_layout.py", "tests/test_bar_geometry.py"):
+        assert lane.surface_reason("nanowell", path, imports) == "", path
+
+
+def test_the_remote_gate_sees_its_patterns_and_what_its_tests_import():
+    lane = _lane_needed_module()
+    imports = lane.roster_imports("remote")
+    for path in ("services/remote_runner.py", "services/ssh_key_setup.py", "scripts/allwell_remote.py",
+                 "analyze/remote_dialog.py", "services/slurm_batch_script.py"):
+        assert lane.surface_reason("remote", path, set()).startswith("lane surface"), path
+    assert lane.surface_reason("remote", "services/pipeline_service.py", set()) == ""
+    assert lane.surface_reason("remote", "services/pipeline_service.py", imports) == \
+        "imported directly by a test in this lane"
+    for path in ("review/domain/stats_compute.py", "pipeline/nanowell_detect.py",
+                 "tests/test_nanowell_form.py"):
+        assert lane.surface_reason("remote", path, imports) == "", path
+
+
+def test_an_unanswerable_diff_runs_the_lane():
+    """No base to compare with must mean "run it", never a silent skip."""
+    lane = _lane_needed_module()
+    assert lane.main(["remote", "--base", "no-such-ref-anywhere"]) == 0

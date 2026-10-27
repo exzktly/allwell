@@ -7206,22 +7206,36 @@ listing can hold a single channel token. A slot with one distinct value is not
 recognised as the channel slot at all, so a prefix sample reports *no* channels
 on exactly the largest plates.
 
-**On a tie, the channel slot is the one that changes within a tile.**
-`_pick_channel_slot` takes the categorical slot with the fewest distinct values;
-between slots with as many, it prefers one that takes more than one value among
-the names of one tile — one well, field and timepoint (`_varies_within_a_tile`,
-keyed on the slots found before it) — since a tile is imaged once per channel and
-an experiment prefix is the same for every image of a tile. It is only a
-tie-break because the names are a strided sample of each archive and an
-unclaimed slot such as ImageXpress's `s<n>` site also varies within a tile: ranked
-first, it took a 4-site, 3-channel per-well zip plate's sites for its channels.
-Without the tie-break a plate holding two prefixes — a Concatenate of two
-acquisitions, each named by its own run — read `expA`/`expB` against
-`PHASE`/`GFP`, two values each, and the leftmost, the prefix, was confidently
-taken for the channel, so no image matched the phase token and the run stopped
-with "No image groups found". That error now says why
-(`pipeline.nanowell_task.no_groups_reason`): what the channel position holds, or
-the partner image it looked for and did not find.
+**The channel slot is the one that changes within a tile.**
+`_pick_channel_slot` ranks the categorical slots first by whether they take more
+than one value among the names of one tile — one well, field and timepoint
+(`_varies_within_a_tile`, keyed on the slots found before it) — then by fewest
+distinct values, then leftmost. A tile is imaged once per channel, so the channel
+changes inside it, while an experiment prefix is the same for every image of a
+tile: a Concatenate of two acquisitions, each named by its own run, reads
+`expA`/`expB` against the channels, and Concatenate shifts the second run's
+timepoints past the first's, so no tile mixes the two prefixes. Ranked on
+fewest-distinct instead, two prefixes were confidently taken for the channel
+against three channels, or against two on the leftmost tie-break, and the run
+stopped with "No image groups found".
+
+That ranking is only sound when the sample holds two images of one tile, and a
+strided sample rarely does — the Analyze form's scan reads about four names from
+each per-well archive of a 96-well plate. So the samplers add, for a few picked
+names in the first two archives or folders (or among loose TIFs), every name that
+differs from the pick in exactly one token, one per token position
+(`schema_infer.with_tile_partners`; tokens split on every separator candidate,
+since the separator is not known yet). A name's channel partner is such a
+sibling. Without the partners an unclaimed slot such as ImageXpress's `s<n>` site
+could be the only slot seen changing within a tile — a 4-site, 3-channel per-well
+zip plate's stride held one channel per well — and be taken for the channel; with
+them both slots change within the tile and fewest-distinct decides. Run-time
+detection (`services.run_detect.detect_layout`) adds the partners too when a plate
+is larger than its `_INFER_SAMPLE` and the stride has thinned it.
+
+"No image groups found" says why (`pipeline.nanowell_task.no_groups_reason`):
+what the channel position holds, or the partner image it looked for and did not
+find.
 
 The optional sections fold by default; **Auto-threshold** is one of them, and it
 owns every threshold-related control: a checkbox driving the pipeline's

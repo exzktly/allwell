@@ -46,7 +46,7 @@ from util.channel_roles import (
     default_channel_roles,
     phase_role_conflicts,
 )
-from util.schema_infer import InferredSchema, _spread, infer_schema, sample_stems
+from util.schema_infer import InferredSchema, _spread, infer_schema, sample_stems, with_tile_partners
 
 #: The ``RunSpec`` JSON key that asks for detection at run time. Beside
 #: ``opts`` rather than inside it, so it can never reach the pipeline's argv.
@@ -236,7 +236,12 @@ def detect_layout(
             "layout from. Check that the job before this one wrote its output "
             "there, or turn off run-time detection and set the schema and "
             "channels by hand.")
-    guess = infer_schema(_spread(stems, _INFER_SAMPLE))
+    sample = _spread(stems, _INFER_SAMPLE)
+    if len(sample) < len(stems):
+        # A stride can drop every pair of images from one tile, and the channel is told from a prefix by changing
+        # within a tile (util.schema_infer._pick_channel_slot).
+        sample = with_tile_partners(sample, stems)
+    guess = infer_schema(sample)
     if guess is None:
         raise DetectionError(f"No filename layout could be read from {name!r}.")
 

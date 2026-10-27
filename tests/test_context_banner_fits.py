@@ -42,11 +42,26 @@ def _host(qtbot, text, width):
 
 @pytest.mark.parametrize("width", [320, 600, 1100])
 def test_the_whole_sentence_is_shown(qtbot, width):
+    """Once the layout has settled — up to two seconds of event-loop passes,
+    not one look at 20 ms. CI once found the label a line short at 320 px
+    (56 px for 84) and the next run did not; a layout still settling and one
+    that never does read the same at a single instant, so the wait tells them
+    apart and the message below says what the strip looked like if it never
+    settles."""
     _host_widget, banner = _host(qtbot, _LONG, width)
     label = banner._label
-    assert label.height() >= label.heightForWidth(label.width()), (
-        f"at {width} px the sentence needs {label.heightForWidth(label.width())} px "
-        f"and has {label.height()}")
+
+    def fits() -> bool:
+        return label.height() >= label.heightForWidth(label.width())
+
+    for _ in range(100):           # 100 × 20 ms; the message below says what never settled
+        if fits():
+            break
+        qtbot.wait(20)
+    assert fits(), (
+        f"at {width} px the sentence needs {label.heightForWidth(label.width())} px and has "
+        f"{label.height()} (label {label.width()} px wide, banner {banner.width()}x{banner.height()}, "
+        f"stacked={banner.is_stacked()}, font {label.font().family()} {label.font().pointSizeF()}pt)")
 
 
 def test_a_narrow_host_puts_the_buttons_under_the_sentence(qtbot):

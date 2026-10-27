@@ -72,6 +72,14 @@ _RAIL_REMOTE = [("group", "Group"), ("upload", "Upload"), ("process", "Process")
 # is in flight the dial shows the fetch.
 _COMPUTED_STAGES = ("process", "threshold", "download")
 
+# What a well's hover text says when its end-of-run re-anchoring left it as it
+# was, keyed by the outcome that did it.
+_REANCHOR_LEFT_AS_IT_WAS = {
+    "failed": "re-anchoring failed; its unaddressed timepoints stay unaddressed",
+    "unchanged": "re-anchoring placed none of its unaddressed timepoints; the result here stands",
+    "unfinished": "the run ended before its re-anchoring did; its unaddressed timepoints stay unaddressed",
+}
+
 
 class RunDashboard(PlateProgress):
     """At-a-glance per-well run view. Driven entirely by the host."""
@@ -107,7 +115,10 @@ class RunDashboard(PlateProgress):
         # exactly like one that was done (``set_well_reanchor``).
         self._reanchoring: dict[str, str] = {}
         self._refetch: set = set()
-        self._reanchor_failed: set = set()
+        # well -> why its re-anchoring left it as it was (failed, placed nothing,
+        # did not finish) or why its new output is not here (a short pull), for
+        # its hover text.
+        self._reanchor_note: dict[str, str] = {}
         self._active_stage = ""
         # Plate-wide transfer, as a fraction, while one is in flight — None
         # when there is not one. State rather than a formatted string because
@@ -138,7 +149,7 @@ class RunDashboard(PlateProgress):
         self._xfer = {}
         self._reanchoring = {}
         self._refetch = set()
-        self._reanchor_failed = set()
+        self._reanchor_note = {}
         self._active_stage = ""
         self._transfer = None
         self._bar.setRange(0, 100); self._bar.setValue(0)
@@ -210,6 +221,11 @@ class RunDashboard(PlateProgress):
             if w not in self._errored:
                 self._active.add(w)
         else:
+            if stage == "download" and w not in self._reanchoring:
+                # A fetch after the re-run ended — the end-of-run retry of a
+                # well whose first download failed — brought the re-anchored
+                # output, so nothing is owed any more.
+                self._refetch.discard(w)
             self._done.setdefault(stage, set()).add(w)
             self._active.discard(w)
             if stage == "download":
@@ -255,31 +271,38 @@ class RunDashboard(PlateProgress):
     def set_well_reanchor(self, well_id: str, what: str, timepoints: str = "") -> None:
         """A finished nanowell well that the end-of-run re-anchoring runs again.
 
-        *what* is ``"start"`` (with the *timepoints* it re-runs), ``"done"``,
-        ``"failed"`` or ``"fetched"`` (the second pull of its output landed).
-        From the start until it is done — and, on a remote run, until its output
-        is pulled again — the well is shown computing, then on the server, not
-        in the state it had reached: its tables are being rewritten, and a well
-        painted "downloaded" meanwhile was indistinguishable from a finished
-        one while the log counted its nanowells again. A failure leaves the well
-        as it was (its timepoints stay unaddressed) and its hover text says so.
+        *what* is ``"start"`` (with the *timepoints* it re-runs), ``"done"`` (a
+        timepoint was placed, so a remote well is pulled again), ``"unchanged"``
+        (none was), ``"failed"``, ``"fetched"`` (the second pull landed) or
+        ``"short"`` (it did not all arrive). From the start until it is done —
+        and, on a remote run, until its output is pulled again — the well is
+        shown computing, then on the server, not in the state it had reached:
+        its tables are being rewritten, and a well painted "downloaded"
+        meanwhile was indistinguishable from a finished one while the log
+        counted its nanowells again. A re-run that placed nothing or failed
+        leaves the well as it was, and a short second pull leaves it on the
+        server; the hover text says which.
         """
         w = canon_well(well_id)
         if not w:
             return
         if what == "start":
             self._reanchoring[w] = timepoints
-            self._reanchor_failed.discard(w)
+            self._reanchor_note.pop(w, None)
             self._fov.pop(w, None)          # the re-run reports its own steps
             self._sites.pop(w, None)
         elif what == "done":
             if self._reanchoring.pop(w, None) is not None and self._remote:
                 self._refetch.add(w)
-        elif what == "failed":
+        elif what in _REANCHOR_LEFT_AS_IT_WAS:
             self._reanchoring.pop(w, None)
-            self._reanchor_failed.add(w)
+            self._reanchor_note[w] = _REANCHOR_LEFT_AS_IT_WAS[what]
         elif what == "fetched":
             self._refetch.discard(w)
+            self._reanchor_note.pop(w, None)
+        elif what == "short":
+            self._reanchor_note[w] = ("its re-anchored output did not all arrive; the copy here predates "
+                                      "the re-anchoring, and the remote keeps the new one")
         else:
             return
         self._plate.setWellColor(w, self._well_color(w))
@@ -486,7 +509,27 @@ class RunDashboard(PlateProgress):
         return None
 
     def _count(self, stage: str) -> int:
-        return len(self._done.get(stage, ()))
+        """Wells that reached *stage* — not counting, for the stages after
+        computing, a well being re-anchored (it is computing again) or, for the
+        download, one whose re-anchored output is not here yet. The rail used to
+        read "Download N/N" over a plate showing those wells amber and blue."""
+        wells = self._done.get(stage, set())
+        if stage in _COMPUTED_STAGES:
+            wells = wells - set(self._reanchoring)
+        if stage == "download":
+            wells = wells - self._refetch
+        return len(wells)
+
+    def _on_outcome_changed(self) -> None:
+        """The run ended — finished, failed or stopped. A well still being
+        re-anchored never finished it, so it goes back to what it was and says
+        so, instead of staying amber "processing again" on a run that is over."""
+        for w in list(self._reanchoring):
+            self._reanchoring.pop(w)
+            self._reanchor_note[w] = _REANCHOR_LEFT_AS_IT_WAS["unfinished"]
+            self._plate.setWellColor(w, self._well_color(w))
+            self.set_well_fraction(w, self._well_fraction(w))
+        self._refresh_rail()
 
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
@@ -565,10 +608,11 @@ class RunDashboard(PlateProgress):
                      else (f", step {done}/{total}" if total else ""))
             return (f" — re-anchoring {self._reanchoring[w] or 'its unaddressed timepoints'} "
                     f"from the plate's other wells{count}")
+        if w in self._reanchor_note:
+            return f" — {self._reanchor_note[w]}"
         if w in self._refetch:
-            return " — re-anchored on the server; its output is downloaded again when the batch ends"
-        if w in self._reanchor_failed:
-            return " — re-anchoring failed; its unaddressed timepoints stay unaddressed"
+            return (" — re-anchored on the server; its output is downloaded again when its batch or the "
+                    "run ends")
         xfer = self._xfer.get(w)
         if xfer is not None:
             direction, frac = xfer

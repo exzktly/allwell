@@ -12,14 +12,14 @@ the fix. States: `todo`, `done`, `declined`.
 
 | Row | Finding | State | Where / evidence |
 |---|---|---|---|
-| D1 | A re-run that anchors none of its timepoints still logs "re-anchored.", nothing pulls it again, so the well stays blue for good | todo | |
-| D2 | Verification prints "pulled again" even when its rsyncs failed, so the plate turns green over the stale first copy | todo | |
-| D3 | A re-anchored well first downloaded by the end-of-run retry stays blue: `_refetch` outranks the `download` that came after the re-run | todo | |
-| D4 | Hover text says "when the batch ends" on a run with no batches | todo | |
-| D5 | The rail still counts a re-anchoring well as processed and downloaded while the plate shows it amber | todo | |
-| D6 | A run stopped during the re-anchoring leaves the well amber "processing again" | todo | |
-| D7 | `test_a_second_pull_that_falls_short_leaves_it_on_the_server` feeds a line nothing parses; no test covers D1–D3 | todo | |
-| D8 | README and ARCHITECTURE claim green only after the second download lands, false given D1/D2 | todo | |
+| D1 | A re-run that anchors none of its timepoints still logs "re-anchored.", nothing pulls it again, so the well stays blue for good | done | pipeline/nanowell_task.py::reanchored_line, `unchanged` event; test_a_re_run_that_placed_nothing…, test_the_pipeline_says_re_anchored_only… (mutations `line_always`, `unchanged_parse` bite) |
+| D2 | Verification prints "pulled again" even when its rsyncs failed, so the plate turns green over the stale first copy | done | pull_nanowell_results returns the short wells, verify adds them to `missing`; test_verification_says_a_short…, test_verification_keeps_the_remote… (mutations `short_ignored`, `keep` bite) |
+| D3 | A re-anchored well first downloaded by the end-of-run retry stays blue: `_refetch` outranks the `download` that came after the re-run | done | set_well_stage('download') clears `_refetch`; test_a_download_after_the_re_run… (mutation `d3` bites) |
+| D4 | Hover text says "when the batch ends" on a run with no batches | done | `_detail`: "when its batch or the run ends"; test_it_waits_on_the_server… asserts the text |
+| D5 | The rail still counts a re-anchoring well as processed and downloaded while the plate shows it amber | done | `_count`; test_the_rail_does_not_count… (mutation `d5` bites) |
+| D6 | A run stopped during the re-anchoring leaves the well amber "processing again" | done | `_on_outcome_changed`; test_a_run_that_ends_during… (mutation `d6` bites) |
+| D7 | `test_a_second_pull_that_falls_short_leaves_it_on_the_server` feeds a line nothing parses; no test covers D1–D3 | done | the short-pull test now feeds both real lines, which parse to `short`, and asserts the hover text; D1–D3 covered above |
+| D8 | README and ARCHITECTURE claim green only after the second download lands, false given D1/D2 | done | README and ARCHITECTURE rewritten for unchanged / failed / short / unfinished |
 
 ## One pass at the end of a batched run
 

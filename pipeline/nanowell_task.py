@@ -850,7 +850,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
         # A re-anchoring re-run says something else: the well finished once already, and a second "done" read as a
         # repeated completion (roll-up review X31). Its results are pulled at verification from the grid records.
         if reanchoring:
-            log.info("Well %s — re-anchored. %d timepoint(s), %d without rows.", well_label, total, len(failed))
+            log.info("%s", reanchored_line(well_label, grid, plate_rigid, total, len(failed)))
         else:
             log.info("Well %s — done. %d timepoint(s), %d without rows.", well_label, total, len(failed))
         return records, failed
@@ -858,6 +858,21 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
         if owned:
             remove_directory(scratch)
             remove_directory(staging)
+
+
+def reanchored_line(well_label: str, grid: dict, asked, total: int, n_failed: int) -> str:
+    """What a re-anchoring re-run of *well_label* says when it ends, from its grid record as written.
+
+    Said apart: only a timepoint the plate's motion placed (``origin_method`` "plate_rigid", which
+    ``services.remote_fetch_nanowells.reanchored_wells`` reads) makes the fetcher pull the well again, and a well
+    that said "re-anchored" with none of the *asked* timepoints placed then waited on Analyze's plate for a pull
+    that never came.
+    """
+    placed = [tp for tp in (asked or {}) if grid["timepoints"].get(tp, {}).get("origin_method") == "plate_rigid"]
+    if placed:
+        return f"Well {well_label} — re-anchored. {total} timepoint(s), {n_failed} without rows."
+    return (f"Well {well_label} — re-anchoring placed none of {', '.join(sorted(asked or {}))}; "
+            "its earlier result stands.")
 
 
 def prepare_nanowell_run(options: dict, args, well_zips, refuse, input_dir, info_path) -> None:

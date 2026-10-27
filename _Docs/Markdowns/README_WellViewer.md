@@ -485,9 +485,13 @@ ones when it comes back. The log says so before anything is sent. Test detection
 computer. A remote nanowell run keeps every well's files on the remote until the run ends, because the
 end-of-run re-anchoring may re-run a well, and then brings the final tables home with the re-anchored wells.
 While a well is being re-anchored the plate shows it processing again — its hover text names the timepoints
-("re-anchoring T03, T05 from the plate's other wells") and counts their nanowells — then blue, on the server,
-until its new output has been downloaded again, and only then green. A well that has already turned green once can
-therefore go back to amber near the end of a batch; its earlier download is about to be replaced.
+("re-anchoring T03, T05 from the plate's other wells") and counts their nanowells, and the Process and Download
+counts leave it out. When the re-run placed at least one timepoint, the well is then blue, on the server, until
+its new output has been downloaded again, and only then green. When it placed none, or failed, or the run ended
+before it finished, the well goes back to green — the copy already downloaded stands — and its hover text says
+which. When the second download does not all arrive, the well stays blue, its hover text says the copy here
+predates the re-anchoring, and the run keeps the remote copy so it is not lost. A well that has already turned
+green once can therefore go back to amber near the end of a batch; its earlier download is about to be replaced.
 
 **Datasets tools and nanowell results.** *Subset* carries the nanowell tables of the wells and timepoints it
 keeps; it refuses a selection of fields, because a well's nanowell results are measured over all of its tiles

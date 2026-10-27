@@ -91,14 +91,19 @@ def reanchored_wells(nanowell_dir) -> list[str]:
     return sorted(wells)
 
 
-def pull_nanowell_results(verifier, *, log) -> None:
+def pull_nanowell_results(verifier, *, log) -> list[str]:
     """At verification, for a nanowell run: the whole ``nanowells/`` directory as the run left it, then the cell
-    CSV and ``<well>_out.zip`` of every well the re-anchoring re-ran (fetched once already, before it did)."""
+    CSV and ``<well>_out.zip`` of every well the re-anchoring re-ran (fetched once already, before it did).
+
+    Returns, as verification's "missing" entries, the wells whose second pull did not all arrive: their copy here
+    predates the re-anchoring, so they say so rather than "pulled again", and the remote copy is kept for them.
+    """
     from services.remote_csv import retire_superseded_csvs
 
     run = verifier._run
     if run is None or not run.nanowell:
-        return
+        return []
+    short: list[str] = []
     remote, local = f"{verifier.host.ssh_alias}:{run.remote_output_dir}", Path(run.local_output_dir)
     verifier._rsync_optional(f"{remote}/{NANOWELL_DIR}/", local / NANOWELL_DIR, log_fn=log)
     for well in reanchored_wells(local / NANOWELL_DIR):
@@ -108,10 +113,15 @@ def pull_nanowell_results(verifier, *, log) -> None:
             # Not a well of this run: the local folder holds the whole plate's grid records (and the run was sent
             # the others', ``services.remote_plate_grids``), and the re-anchoring re-runs only this run's wells.
             continue
-        verifier._rsync_optional(f"{remote}/{well}_out.zip", local / f"{well}_out.zip", log_fn=log)
-        verifier._rsync_optional(f"{remote}/*_{well}.csv.gz", local, log_fn=log)
+        zip_ok = verifier._rsync_optional(f"{remote}/{well}_out.zip", local / f"{well}_out.zip", log_fn=log)
+        csv_ok = verifier._rsync_optional(f"{remote}/*_{well}.csv.gz", local, log_fn=log)
+        if not (zip_ok and csv_ok):
+            log(f"[remote] {well}: the re-anchored output did not all arrive; keeping it on the remote.\n")
+            short.append(f"the re-anchored output of {well} (the copy here predates the re-anchoring)")
+            continue
         retire_superseded_csvs([str(p) for p in local.glob(f"*_{well}.csv.gz")], local)
         log(f"[remote] {well}: pulled again after the end-of-run re-anchoring re-ran it.\n")
+    return short
 
 
 def missing_nanowell_tables(run, well: str) -> list[str]:

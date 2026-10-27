@@ -1557,7 +1557,7 @@ class FetchedOutputVerifier:
                         "FOV-group fails, so a clean run has none.",
         )
 
-        pull_nanowell_results(self, log=log)      # the final tables and the re-anchored wells, for a nanowell run
+        short_reanchored = pull_nanowell_results(self, log=log)      # nanowell tables + re-anchored wells
         # The fetched pipeline_info.json reflects only the (partial) input the
         # remote saw — for an incremental run that's just the uploaded new-FOV
         # members, so its available_timepoints/available_fovs miss the rest of
@@ -1592,6 +1592,7 @@ class FetchedOutputVerifier:
             # Journalled from verify's own verdict, so "did this well arrive"
             # has one answer rather than two that can disagree.
             self._journal_retry_outcomes(attempted, missing)
+        missing = [*missing, *short_reanchored]      # the remote holds their only re-anchored copy
 
         # Written *after* the retry, because the retry is what turns a failed
         # pull into a fetched well and the report has to describe the outcome
@@ -1614,8 +1615,8 @@ class FetchedOutputVerifier:
     def _rsync_optional(
         self, src: str, dest: Path, *, log_fn: Callable[[str], None],
         absent_note: str = "",
-    ) -> None:
-        """Pull *src* if the remote has it; say so plainly if it does not.
+    ) -> bool:
+        """Pull *src* if the remote has it — returning whether it was pulled — and say so plainly if not.
 
         ``absent_note`` explains what the absence *means* for this particular
         source, because "not present" alone reads as a fault for a source whose
@@ -1632,10 +1633,8 @@ class FetchedOutputVerifier:
         )
         if result.returncode != 0:
             tail = f" {absent_note}" if absent_note else ""
-            log_fn(
-                f"[remote] note: {src} not pulled "
-                f"(rc={result.returncode}).{tail}\n"
-            )
+            log_fn(f"[remote] note: {src} not pulled (rc={result.returncode}).{tail}\n")
+        return result.returncode == 0
 
 
     def _retry_missing_wells(

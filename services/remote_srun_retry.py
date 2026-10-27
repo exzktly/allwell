@@ -26,16 +26,37 @@ retried: the app saw the stream end and reported the allocation lost.
    words and drops the state-based exclusion, rather than letting the real
    ``srun`` fail with ``Requested node configuration is not available``, which
    reads as an error. **Awake is not the same as free**: the preference holds
-   only while some awake node is ``idle`` or ``mix`` (:data:`FREE_STATES`).
-   With every awake node busy, excluding the asleep ones left the job queued
-   behind other people's jobs — for as long as they ran — while hundreds of
-   powered-down nodes that boot in minutes were ruled out. (A ``mix`` node
-   without room for this particular request can still hold the job in the
-   queue; Slurm's expected start would tell, but reading it pushed the launch
-   command past its size budget, see ``pack_for_login_shell``.) A node's state can change between the check and the start
-   of the job, so a real launch that still fails that way is retried once
-   without the exclusion, and a boot failure is what the retry below is for.
-2. **Retries a boot failure** up to :data:`SRUN_BOOT_RETRIES` times, adding the
+   only while some awake node is ``idle`` (:data:`FREE_STATES`). With every
+   awake node busy, excluding the asleep ones left the job queued behind other
+   people's jobs — for as long as they ran — while hundreds of powered-down
+   nodes that boot in minutes were ruled out. ``mix`` does not count: it says
+   some of a node's CPUs are taken and nothing about its memory or GPUs, and a
+   second app instance asking for the node shape the first had just been given
+   found that node ``mix`` with no room left, excluded every powered-down node
+   on the strength of it, and waited for the first run to end.
+   **Even an awake node that fits may only fit later.** ``--test-only`` also
+   reports when the job would start; when that is more than
+   :data:`START_SLACK_S` away, the awake nodes that fit are busy and the
+   exclusion is dropped, so Slurm boots one. The time is read with
+   ``SLURM_TIME_FORMAT=standard`` and GNU ``date -d``; a login node whose
+   ``date`` cannot read it keeps the preference, and the watchdog below is the
+   backstop.
+   A node's state can change between the check and the start of the job, so a
+   real launch that still fails that way is retried once without the
+   exclusion, and a boot failure is what the retry below is for.
+2. **Gives up waiting on the awake nodes** after :data:`PENDING_FALLBACK_S`.
+   While the exclusion is in force a watchdog runs beside ``srun``: if the job
+   is still queued then (``srun`` printed ``queued and waiting`` and not
+   ``has been allocated``, and ``squeue`` still lists it pending), it is
+   cancelled with ``scancel`` — a ``kill -TERM`` of ``srun`` where there is no
+   ``scancel`` — and asked for once more without the exclusion, with a
+   ``requesting allocation via:`` line so the Analyze progress view shows the
+   wait again. A job cancelled while still pending has written nothing: the
+   ``<pidfile>.slurm`` sidecar is written from inside the allocation. There is
+   a narrow race — the job allocated between ``squeue`` and ``scancel`` — in
+   which a job that had just started is cancelled and asked for again; nothing
+   is lost but the start.
+3. **Retries a boot failure** up to :data:`SRUN_BOOT_RETRIES` times, adding the
    node(s) ``srun`` named to ``--exclude`` each time so Slurm picks another.
    Each retry prints a line saying which node failed, and a ``requesting
    allocation via:`` line that puts the Analyze progress view back into its
@@ -74,9 +95,27 @@ SRUN_BOOT_RETRIES = 3
 #: exists.
 AWAKE_STATES = ("idle", "mix", "alloc", "comp")
 
-#: The awake states with room for a new job now. ``alloc`` and ``comp`` are
-#: awake but full: preferring them means waiting for someone else's job to end.
-FREE_STATES = ("idle", "mix")
+#: The awake state that reliably has room for a new job now. ``alloc`` and
+#: ``comp`` are awake but full: preferring them means waiting for someone else's
+#: job to end. ``mix`` is left out on purpose: it means *some* of a node's CPUs
+#: are allocated, and says nothing about its memory or GPUs, so a node running
+#: one of this user's own runs reads ``mix`` while having no room at all for a
+#: second run of the same size — and counting it as free excluded every
+#: powered-down node and queued the second run behind the first for as long as
+#: the first ran.
+FREE_STATES = ("idle",)
+
+#: How far ahead of now the expected start that ``srun --test-only`` reports may
+#: be before the powered-on nodes stop being preferred. Booting a powered-down
+#: node takes minutes; a start further away than this means the powered-on
+#: nodes are busy, and booting one is the faster way to a node.
+START_SLACK_S = 120
+
+#: How long a launch restricted to powered-on nodes may sit in the queue before
+#: it is cancelled and asked for again without that restriction. The backstop
+#: for what neither check above can see: the cluster changing between the check
+#: and the launch, or a login node whose ``date`` cannot read Slurm's times.
+PENDING_FALLBACK_S = 180
 
 #: What ``srun`` prints when the node it was granted did not boot.
 _BOOT_FAILURE_RE = "Something is wrong with the boot of the nodes|Node failure on"
@@ -167,12 +206,15 @@ def _split_launcher(tokens: list[str]) -> tuple[list[str], list[str], str]:
 
 
 def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
-                     err_file_q: str) -> str:
+                     err_file_q: str, *, start_slack_s: int = START_SLACK_S,
+                     pending_fallback_s: int = PENDING_FALLBACK_S) -> str:
     """The login-shell command that runs ``<launcher> bash -lc <inner>`` with the
     awake-node preference and the boot-failure retry.
 
     *inner_quoted* is the inner script already quoted for the login shell;
     *remote_pidfile_q* and *err_file_q* are already shell-quoted paths.
+    *start_slack_s* and *pending_fallback_s* are :data:`START_SLACK_S` and
+    :data:`PENDING_FALLBACK_S`; the tests shorten them.
     """
     tokens, user_excl, partition = _split_launcher(shlex.split(launcher))
     launcher_str = shlex.join(tokens)
@@ -184,7 +226,7 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
     merge = "tr , '\\n' | grep -v '^$' | sort -u | paste -sd, -"
     total = SRUN_BOOT_RETRIES + 1
     return "".join((
-        f"_aw_pid={remote_pidfile_q}; _aw_err={err_file_q}; _aw_rcf={err_file_q}.rc; ",
+        f"_aw_pid={remote_pidfile_q}; _aw_err={err_file_q}; _aw_rcf={err_file_q}.rc; _aw_pend={err_file_q}.pend; ",
         f"_aw_part={part_q}; _aw_x={shlex.quote(','.join(user_excl))}; ",
         "_aw_try=1; _aw_awake=1; ",
         "while :; do ",
@@ -211,21 +253,52 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         # rather than let srun fail with "Requested node configuration is not
         # available" before the real attempt.
         'if [ -n "$_aw_asleep" ]; then ',
-        f'if ! {launcher_str} --test-only ${{_aw_ex:+--exclude="$_aw_ex"}} true >/dev/null 2>&1; then ',
+        # `standard` pins the time format the expected start is read in, whatever the user's environment sets.
+        f'if ! _aw_t=$(SLURM_TIME_FORMAT=standard {launcher_str} --test-only ${{_aw_ex:+--exclude="$_aw_ex"}} '
+        "true 2>&1); then ",
         f'_aw_asleep=""; _aw_awake=0; _aw_ex=$(printf \'%s\' "$_aw_x" | {merge}); ',
         'echo "[remote] scheduler: no powered-on node matches this request — Slurm will '
         'start one, which can take several minutes"; ',
-        "fi; fi; ",
+        # 1c. A powered-on node could take it, but when? `--test-only` says. Further off than booting one would
+        # take means they are busy. A time `date` cannot read (BSD `date` has no `-d`) leaves the preference on,
+        # and the pending fallback below is the backstop.
+        "else _aw_at=$(printf '%s\n' \"$_aw_t\" | sed -nE 's/.* to start at ([^ ]+).*/\\1/p' | head -n1); ",
+        '_aw_s=$(date -d "$_aw_at" +%s 2>/dev/null); _aw_n=$(date +%s 2>/dev/null); ',
+        f'if [ -n "$_aw_at" ] && [ -n "$_aw_s" ] && [ -n "$_aw_n" ] && [ $((_aw_s - _aw_n)) -gt {int(start_slack_s)} ]; '
+        "then ",
+        f'_aw_asleep=""; _aw_awake=0; _aw_ex=$(printf \'%s\' "$_aw_x" | {merge}); ',
+        'echo "[remote] scheduler: the powered-on nodes that fit this request are busy until about $_aw_at — '
+        'letting Slurm boot one instead"; ',
+        "fi; fi; fi; ",
         'if [ -n "$_aw_asleep" ]; then ',
         "echo \"[remote] scheduler: avoiding $(printf '%s' \"$_aw_asleep\" | awk -F, '{print NF}') "
         f"node(s) in {where} that are powered down, booting or out of service\"; fi; ",
         # 2. The launch. srun's PID goes to the pidfile; its output is copied (tee).
-        ': > "$_aw_err"; rm -f "$_aw_rcf"; ',
+        ': > "$_aw_err"; rm -f "$_aw_rcf" "$_aw_pend"; _aw_wd=""; ',
+        # 2a. While powered-down nodes are excluded, a watchdog: still queued after `pending_fallback_s`, the job
+        # is cancelled — only if Slurm still lists it as pending — and the loop asks again without the exclusion.
+        'if [ -n "$_aw_asleep" ]; then ( _aw_w=0; ',
+        f'while [ "$_aw_w" -lt {int(pending_fallback_s)} ]; do sleep 1; _aw_w=$((_aw_w+1)); '
+        '[ -f "$_aw_rcf" ] && exit 0; done; ',
+        "grep -q '^srun: .*has been allocated resources' \"$_aw_err\" && exit 0; ",
+        "_aw_j=$(sed -nE 's/^srun: job ([0-9]+) queued and waiting for resources.*/\\1/p' \"$_aw_err\" | tail -n1); ",
+        '[ -n "$_aw_j" ] || exit 0; ',
+        'if command -v squeue >/dev/null 2>&1; then '
+        '[ -n "$(squeue -h -j "$_aw_j" -t PD -o %i 2>/dev/null)" ] || exit 0; fi; ',
+        ': > "$_aw_pend"; scancel "$_aw_j" 2>/dev/null || kill -TERM "$(cat "$_aw_pid")" 2>/dev/null; ',
+        ') & _aw_wd=$!; fi; ',
         "{ sh -c 'echo $$ > \"$0\"; exec \"$@\"' \"$_aw_pid\" ",
         f"{launcher_str} ${{_aw_ex:+--exclude=\"$_aw_ex\"}} bash -lc {inner_quoted} 2>&1; ",
         'echo $? > "$_aw_rcf"; } ',
         '| tee -a "$_aw_err"; ',
+        '[ -n "$_aw_wd" ] && kill "$_aw_wd" 2>/dev/null; ',
         '_aw_rc=$(cat "$_aw_rcf" 2>/dev/null || echo 1); ',
+        # 3. Queued too long on the powered-on nodes: ask again, letting Slurm boot one. Once — no exclusion now.
+        'if [ -f "$_aw_pend" ]; then rm -f "$_aw_pend"; _aw_awake=0; ',
+        f'echo "[remote] scheduler: still queued for a powered-on node after {int(pending_fallback_s)} s — '
+        'cancelled it and asking again without excluding the powered-down ones"; ',
+        f'echo "[remote] scheduler: requesting allocation via: {launcher_str}${{_aw_x:+ --exclude=$_aw_x}}"; ',
+        "continue; fi; ",
         # 3a. Awake nodes cannot satisfy the request: once, try without that.
         'if [ "$_aw_rc" != 0 ] && [ -n "$_aw_asleep" ] '
         "&& grep -q '^srun: .*Requested node configuration is not available' \"$_aw_err\"; then ",
@@ -246,6 +319,6 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         '$_aw_x — the cluster cannot start a node here; send these names to its '
         'admins, or add --exclude for them to the launcher"; ',
         "fi; ",
-        'rm -f "$_aw_err" "$_aw_rcf"; exit "$_aw_rc"; ',
+        'rm -f "$_aw_err" "$_aw_rcf" "$_aw_pend"; exit "$_aw_rc"; ',
         "done",
     ))

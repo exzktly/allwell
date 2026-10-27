@@ -554,6 +554,13 @@ def build_parser() -> argparse.ArgumentParser:
                          "algorithm); any other is registered afresh, so the positions are always the ones "
                          "registering would give. The output folder's own earlier registration is reused the same "
                          "way without this flag."))
+    p.add_argument("--nanowell_hold_dir", default=None,
+                   help=("One batch of a batched run: leave the end-of-run re-anchoring to the run's final pass "
+                         "(--nanowell_reanchor_only) and link into this folder the archive of every well it could "
+                         "anchor, so that pass can re-run them against the whole plate."))
+    p.add_argument("--nanowell_reanchor_only", action="store_true",
+                   help=("Process no well: run only the end-of-run re-anchoring, over the well archives in the input "
+                         "folder, fitted from every grid record in the output folder. A batched run's final pass."))
     p.add_argument("--nanowell_cell_diameter_um", type=float, default=15.0,
                    help=("The scale the cell count looks for cells at, micrometres: Cellpose resizes each image so a cell "
                          "of this diameter becomes 30 px. 30 x the pixel size means no resize (the fastest); the "

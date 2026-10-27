@@ -198,7 +198,9 @@ from pipeline.run_report import (
 )
 from pipeline.completeness import record_run_check
 from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
-from pipeline.nanowell_task import nanowell_endgame, prepare_nanowell_run
+from pipeline.nanowell_task import (
+    hold_dir_for, nanowell_endgame, prepare_nanowell_run, reanchor_only_run, replaced_wells,
+)
 
 
 def _report_worker_failure(well_label: str, output_dir: Path | None, exc: BaseException) -> None:
@@ -1711,21 +1713,8 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
         os.environ["TF_NUM_INTRAOP_THREADS"] = t
         os.environ["TF_NUM_INTEROP_THREADS"] = t
 
-    # Raise the per-worker open-file ceiling. macOS's default soft limit
-    # (256) is easily exceeded by TF + StarDist + tifffile in a well with
-    # many FOVs; the resulting EMFILE typically surfaces as a confusing
-    # OSError downstream. We push the soft limit up to whatever the kernel
-    # already permits (hard limit, capped at 4096) without requiring root.
-    try:
-        import resource as _resource
-        _soft, _hard = _resource.getrlimit(_resource.RLIMIT_NOFILE)
-        _target = max(_soft, min(_hard, 4096))
-        if _target > _soft:
-            _resource.setrlimit(_resource.RLIMIT_NOFILE, (_target, _hard))
-    except (ImportError, ValueError, OSError):
-        # resource is POSIX-only; ignore on platforms / environments where
-        # the bump isn't permitted.
-        swallowed("could not raise the open-file limit")
+    from pipeline.worker_env import raise_open_file_limit
+    raise_open_file_limit()         # macOS's 256 is exceeded by TF + StarDist + tifffile on a large well
 
     # Restore stdout/stderr before configuring logging — the worker may
     # have inherited a windowed-PyInstaller-bootloader-detached
@@ -2725,15 +2714,7 @@ def _run_well_worker_pool(
     # well and projected forward, which warns while there is still space to act.
     capacity = OutputCapacityMonitor(output_dir, len(to_process), log=log)
 
-    ctx = mp.get_context("spawn")
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=ctx,
-        initializer=_worker_init,
-        initargs=(force_cpu, threads_per_worker,
-                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD),
-                  dict(shared_kwargs_template.get("_stardist_params") or {})),
-    ) as executor:
+    with _well_pool(workers, force_cpu, threads_per_worker, shared_kwargs_template) as executor:
         future_to_well = {
             submit_task(executor, well_label, path): well_label
             for well_label, path in to_process
@@ -2797,6 +2778,16 @@ def _run_well_worker_pool(
 
 
 
+def _well_pool(workers: int, force_cpu: bool, threads_per_worker: int, shared_kwargs_template: dict):
+    """The per-well worker pool: spawned processes, each set up by :func:`_worker_init` for the run's segmenter.
+    The wells' own pass and the nanowell re-anchoring pass (``nanowell_task.reanchor_plate``) both run on one."""
+    return ProcessPoolExecutor(
+        max_workers=workers, mp_context=mp.get_context("spawn"), initializer=_worker_init,
+        initargs=(force_cpu, threads_per_worker,
+                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD),
+                  dict(shared_kwargs_template.get("_stardist_params") or {})))
+
+
 def process_well_zips(
     input_dir: Path,
     output_dir: Path,
@@ -2815,9 +2806,11 @@ def process_well_zips(
     schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
     settings_key: str = "",
+    reanchor_only: bool = False,
 ) -> list[str]:
     """
-    Dispatch one worker process per well zip.
+    Dispatch one worker process per well zip — none with *reanchor_only*, a batched nanowell run's final pass,
+    whose wells were computed by their batches (``nanowell_task.reanchor_only_run``).
 
     Each worker: extracts its zip, processes all image pairs sequentially
     (StarDist loaded once), writes the CSV, compresses QC images, and cleans up.
@@ -2828,6 +2821,9 @@ def process_well_zips(
     FOV-groups and merges the result. New wells process fully; truly-unchanged
     wells return a cheap "up to date" no-op.
     """
+    if reanchor_only:
+        log.info("Re-anchoring only: %d held well zip(s), none processed.", len(well_zips))
+        return []
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
 
@@ -3378,7 +3374,7 @@ def main() -> None:
     plate_containers = dict(well_zips or well_folders or [])  # run_check's, below
     well_zips, well_folders = scope_to_only_wells(well_zips, well_folders, args.only_wells, refuse=parser.error,
                                                   log=log, absent_ok=args.only_wells_absent_ok)
-    ran_wells = [w for w, _p in well_zips or well_folders or []]
+    ran_wells = replaced_wells(nanowell, args, [w for w, _p in well_zips or well_folders or []])
 
     # Precompute per-channel flat-field models once (basic / empty_well). The
     # gaussian mode needs no precompute (estimated per image in the worker), and
@@ -3477,10 +3473,13 @@ def main() -> None:
             schema=schema,
             sep=sep,
             settings_key=settings_key,
+            reanchor_only=reanchor_only_run(nanowell, args),     # a batched run's final pass processes no well
         )
         nanowell_endgame(nanowell, output_dir, well_zips, shared_kwargs, args.nuclear_token,
                          fluor_tokens_for_quant, args.csv_prefix, schema, sep, settings_key,
-                         grouper=find_image_groups_in_zip, parse=parse_filename)
+                         grouper=find_image_groups_in_zip, parse=parse_filename,
+                         hold_dir=hold_dir_for(nanowell, args),
+                         pool=partial(_well_pool, workers, args.cpu_only, threads_per_worker, shared_kwargs))
     elif well_folders:
         log.info("Folder mode: %d well folder(s) detected.", len(well_folders))
         failed_wells = process_well_folders(

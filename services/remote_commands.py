@@ -92,6 +92,14 @@ BATCH_DONE = ".aw_batch_{i}_done"
 # stream is already being read, so a marker costs no extra ssh and has no poll
 # interval to wait out.
 BATCH_DONE_MARKER = "[remote] batch-driver: batch {i} finished rc={rc}"
+#: The final pass of a batched nanowell run (``_batch_driver_snippet(final_pass=True)``): present beside a batch's
+#: ``ready``, it runs the pipeline with ``--nanowell_reanchor_only`` — or, ``_skip``, does not run it at all, when no
+#: batch held a well for the pass.
+BATCH_REANCHOR = ".aw_batch_{i}_reanchor"
+#: Where a batch of a nanowell run holds, under the run directory, the archives of the wells left to the final
+#: pass (``--nanowell_hold_dir``).
+HOLD_DIR = "keep"
+BATCH_SKIP = ".aw_batch_{i}_skip"
 _BATCH_DONE_RE = re.compile(
     r"\[remote\] batch-driver: batch (\d+) finished rc=(-?\d+)")
 
@@ -100,7 +108,8 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
                           heartbeat: str = "",
                           per_batch_timeout_s: int = 0,
                           link_blanks: tuple[str, ...] = (),
-                          suspend_request: str = "") -> str:
+                          suspend_request: str = "",
+                          final_pass: bool = False) -> str:
     """A loop that runs the pipeline once per batch **inside one allocation**.
 
     Batched mode launched every batch separately, so on a scheduler-backed host
@@ -139,6 +148,14 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     patiently (:data:`MID_BATCH_HEARTBEAT_STALE_S`), and answers a silent app by
     writing *suspend_request*: the batch winds down keeping what it finished, the
     driver then exits, and a later Resume adopts that work from the remote.
+
+    **A nanowell run's final pass** (*final_pass*) is one more batch after the
+    *n_batches* data batches. The app stages into it the archives the batches
+    held for the end-of-run re-anchoring and flags it :data:`BATCH_REANCHOR`,
+    which adds ``--nanowell_reanchor_only`` to the pipeline's argv, or flags it
+    :data:`BATCH_SKIP` when no batch held one, and the driver reports it done
+    without running anything. The blank is still linked into the last *data*
+    batch, which is the one that processes it.
     """
     pipeline = _remote_join(argv)
     waits = int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S)
@@ -184,6 +201,22 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     done = (_remote_quote(run_dir)
             + '"/' + BATCH_DONE.format(i="${_aw_i}") + '"')
     marker = BATCH_DONE_MARKER.format(i="$_aw_i", rc="$_aw_rc")
+    total = int(n_batches) + (1 if final_pass else 0)
+
+    def flag(template: str) -> str:
+        return _remote_quote(run_dir) + '"/' + template.format(i="${_aw_i}") + '"'
+
+    # The final pass: the same argv with the re-anchoring alone asked for, run only when the app flagged it so —
+    # skipped when it flagged nothing was held, and when its flag is missing (a `touch` that failed must not run
+    # the whole pipeline over the held wells). `$_aw_x` is unquoted on purpose: empty, it adds no argument at all.
+    final = (
+        f'_aw_x=""; '
+        f'if [ -f {flag(BATCH_SKIP)} ] || {{ [ "$_aw_i" -eq {total} ] && [ ! -f {flag(BATCH_REANCHOR)} ]; }}; '
+        f'then echo "0" > {done}; '
+        f'echo "{BATCH_DONE_MARKER.format(i="$_aw_i", rc="0")}"; _aw_i=$((_aw_i+1)); continue; fi; '
+        f'[ -f {flag(BATCH_REANCHOR)} ] && _aw_x="--nanowell_reanchor_only"; '
+    ) if final_pass else ""
+    tail = " $_aw_x" if final_pass else ""
     suspended = (
         f'if [ -f {_remote_quote(suspend_request)} ]; then '
         f'echo "[remote] batch-driver: suspended — no further batches"; '
@@ -207,10 +240,10 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
                  if watch else "")
     return (
         f'_aw_i=1; '
-        f'while [ "$_aw_i" -le {int(n_batches)} ]; do '
+        f'while [ "$_aw_i" -le {total} ]; do '
         f'{suspended}'
         f'echo "[remote] batch-driver: waiting for batch $_aw_i of '
-        f'{int(n_batches)}"; '
+        f'{total}"; '
         f'_aw_w=0; {hb_init}'
         f'while [ ! -f {ready} ]; do '
         f'{suspended}'
@@ -220,6 +253,7 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         f'echo "[remote] ERROR batch $_aw_i never arrived"; '
         f'exit {_UPLOAD_WAIT_EXIT}; fi; '
         f'sleep {UPLOAD_WAIT_POLL_S}; done; '
+        f'{final}'
         # Swap this batch's staged directory into the place the pipeline
         # reads. `mv` within one filesystem is atomic and instant, so the
         # pipeline cannot see a partially-populated input dir, and it cannot
@@ -231,11 +265,11 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         f'_aw_i=$((_aw_i+1)); continue; }}; '
         f'{blank_link}'
         f'echo "[remote] batch-driver: batch $_aw_i starting"; '
-        f'{watch_on}{budget}{pipeline}; _aw_rc=$?; {watch_off}'
+        f'{watch_on}{budget}{pipeline}{tail}; _aw_rc=$?; {watch_off}'
         f'echo "$_aw_rc" > {done}; '
         f'echo "{marker}"; '
         f'_aw_i=$((_aw_i+1)); done; '
-        f'echo "[remote] batch-driver: all {int(n_batches)} batch(es) done"'
+        f'echo "[remote] batch-driver: all {total} batch(es) done"'
     )
 
 

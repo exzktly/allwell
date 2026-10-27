@@ -188,6 +188,8 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/mixed_input.py",
     "pipeline/incremental_keys.py",
     "pipeline/well_skip.py",
+    # The per-worker process settings ``_worker_init`` makes (the open-file limit).
+    "pipeline/worker_env.py",
     "pipeline/io.py",
     # The per-FOV image writer and the two storage options it applies
     # (--phase_output / --tophat_dtype); process_microscopy and cli_args

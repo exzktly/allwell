@@ -107,6 +107,7 @@ class JobRow(QWidget):
     moveDownClicked = Signal(str)
     editClicked = Signal(str)
     duplicateClicked = Signal(str)
+    stopClicked = Signal(str)
     # (job_id, with the jobs that used its output too)
     retryClicked = Signal(str, bool)
     rowClicked = Signal(str)
@@ -334,6 +335,13 @@ class JobRow(QWidget):
         job = self._job
         menu = QMenu(self)
         menu.setObjectName("JobRowMenu")
+
+        if job.state == JobState.RUNNING:
+            # Its own Stop, because the header's stops every job in flight and
+            # a remote Analyze may be running beside this one.
+            owned_action(menu, "Stop this job").triggered.connect(
+                lambda: self.stopClicked.emit(self.job_id))
+            menu.addSeparator()
 
         edit = owned_action(menu, "Edit…")
         edit.setEnabled(job.state != JobState.RUNNING)

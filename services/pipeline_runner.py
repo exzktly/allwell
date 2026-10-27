@@ -280,6 +280,42 @@ _RE_THRESH_WELL = re.compile(r"Auto-threshold: completed well \d+/\d+ \(([A-Ha-h
 _RE_WELL_FOV_TOTAL = re.compile(r"Well (\S+)\s+\S+\s+(\d+) (FOV-group|step)")
 _RE_WELL_FOV_DONE = re.compile(r"Well (\S+)\s+\S+\s+(FOV|step) (\d+)/(\d+) done")
 _RE_WELL_SITES = re.compile(r"Well (\S+)\s+\S+\s+(.+?): (\d+)/(\d+) nanowells segmented")
+# A nanowell well the end-of-run re-anchoring re-runs, after it finished — and, on a remote run, after it was
+# fetched (``pipeline.nanowell_task.reanchor_plate``): its start, its end, its failure, and the second pull of its
+# output (``services.remote_fetch_nanowells``). Without them the plate kept such a well "downloaded" while the log
+# counted its nanowells again and the data on disk was about to be replaced.
+_RE_WELL_REANCHORING = re.compile(r"Well (\S+)\s+\S+\s+re-anchoring (.+?) from the plate's other wells")
+_RE_WELL_REANCHORED = re.compile(r"Well (\S+)\s+\S+\s+re-anchored\.")
+_RE_WELL_REANCHOR_FAILED = re.compile(r"Well (\S+)\s+\S+\s+re-anchoring failed")
+_RE_WELL_REANCHOR_UNCHANGED = re.compile(r"Well (\S+)\s+\S+\s+re-anchoring placed none of")
+_RE_WELL_UNPLACED = re.compile(r"Unaddressed ([A-Za-z]\d{1,2})/(\S+): (.+)")
+_RE_WELL_HELD = re.compile(r"Well (\S+)\s+\S+\s+held for the end-of-run re-anchoring \((.+?) unaddressed\)")
+_RE_WELL_REFETCHED = re.compile(r"\[remote\] (\S+): pulled again after the end-of-run re-anchoring")
+_RE_WELL_REFETCH_SHORT = re.compile(r"\[remote\] (\S+): the re-anchored output did not all arrive")
+
+
+def _reanchor_events(line: str) -> list[tuple[str, object]]:
+    """``("well_reanchor", (well, what, timepoints))`` for a re-anchoring line: *what* is ``start`` (with the
+    timepoints it re-runs), ``held`` (a batch left the well to the run's final pass, with the timepoints that
+    wait), ``unplaced`` (the pass could not anchor a timepoint, with ``"<timepoint>: <why>"``), ``done`` (a timepoint
+    was placed, so the well is pulled again), ``unchanged`` (none was;
+    the copy already fetched stands), ``failed``, ``fetched`` (the second pull landed) or ``short`` (it did not all
+    arrive)."""
+    for pattern, what in ((_RE_WELL_REANCHORING, "start"), (_RE_WELL_HELD, "held")):
+        found = pattern.search(line)
+        if found:
+            return [("well_reanchor", (found.group(1), what, found.group(2)))]
+    unplaced = _RE_WELL_UNPLACED.search(line)
+    if unplaced:
+        return [("well_reanchor", (unplaced.group(1), "unplaced",
+                                   f"{unplaced.group(2)}: {unplaced.group(3).strip()}"))]
+    for pattern, what in ((_RE_WELL_REANCHORED, "done"), (_RE_WELL_REANCHOR_FAILED, "failed"),
+                          (_RE_WELL_REANCHOR_UNCHANGED, "unchanged"), (_RE_WELL_REFETCHED, "fetched"),
+                          (_RE_WELL_REFETCH_SHORT, "short")):
+        found = pattern.search(line)
+        if found:
+            return [("well_reanchor", (found.group(1), what, ""))]
+    return []
 # Finalize-phase status lines. After the last well the run is still busy
 # (auto-threshold scans every well's zip; a remote run then drains downloads
 # and cleans up) — surface what it's doing so "Finalizing…" doesn't look hung.
@@ -548,6 +584,7 @@ class ProgressTracker:
         mns = _RE_WELL_SITES.search(line)
         if mns:
             events.append(("well_sites", (mns.group(1), mns.group(2), int(mns.group(3)), int(mns.group(4)))))
+        events.extend(_reanchor_events(line))
         # Auto-threshold pass runs after the last well → the "Threshold" stage.
         if not self._finalize_emitted and line.lstrip().startswith("Auto-threshold:"):
             self._finalize_emitted = True

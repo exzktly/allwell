@@ -166,6 +166,9 @@ NOT_KEYED_ON: dict[str, str] = {
     "nanowell_registration_from": "where a nanowell run looks for tile registration to reuse; a stored one "
                                   "is taken only when its own key matches this run's inputs exactly, so "
                                   "what is computed is unchanged",
+    "nanowell_hold_dir":     "where a batch holds the wells left to the run's final re-anchoring pass; "
+                             "that pass computes what the batch's own pass would have, from more wells",
+    "nanowell_reanchor_only": "runs only the re-anchoring over wells already computed under these settings",
     "suspend_file":          "where a request to stop early may appear; what "
                              "is computed for the groups that run is unchanged",
     "background_dir_alias":  "earlier paths of the same blank; it only widens "

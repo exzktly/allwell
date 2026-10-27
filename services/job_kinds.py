@@ -252,8 +252,8 @@ def _analyze_label(spec: dict) -> str:
 
 
 def _analyze_detail(spec: dict) -> str:
-    """The input path, plus a note when the job reads its schema and channels
-    from that input when it runs.
+    """The input path, a note when the job reads its schema and channels
+    from that input when it runs, and the remote host it runs on.
 
     The note is there because the row is the only place a queued job
     describes itself, and a job whose schema and channels are settled at run
@@ -263,6 +263,11 @@ def _analyze_detail(spec: dict) -> str:
     parts = [raw] if raw else []
     if spec.get("auto_detect"):
         parts.append("schema and channels read from the input when it runs")
+    remote = str(spec.get("remote_name") or "").strip()
+    if remote:
+        # Said on the row because it decides what may run beside the job: a
+        # remote Analyze can run alongside a local one (services.job_lanes).
+        parts.append(f"runs on “{remote}”")
     return " · ".join(parts)
 
 

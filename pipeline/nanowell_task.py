@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import logging
 import time
 import zipfile
+from functools import partial
 from pathlib import Path
 from types import MappingProxyType
 
@@ -850,7 +852,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
         # A re-anchoring re-run says something else: the well finished once already, and a second "done" read as a
         # repeated completion (roll-up review X31). Its results are pulled at verification from the grid records.
         if reanchoring:
-            log.info("Well %s — re-anchored. %d timepoint(s), %d without rows.", well_label, total, len(failed))
+            log.info("%s", reanchored_line(well_label, grid, plate_rigid, total, len(failed)))
         else:
             log.info("Well %s — done. %d timepoint(s), %d without rows.", well_label, total, len(failed))
         return records, failed
@@ -858,6 +860,21 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
         if owned:
             remove_directory(scratch)
             remove_directory(staging)
+
+
+def reanchored_line(well_label: str, grid: dict, asked, total: int, n_failed: int) -> str:
+    """What a re-anchoring re-run of *well_label* says when it ends, from its grid record as written.
+
+    Said apart: only a timepoint the plate's motion placed (``origin_method`` "plate_rigid", which
+    ``services.remote_fetch_nanowells.reanchored_wells`` reads) makes the fetcher pull the well again, and a well
+    that said "re-anchored" with none of the *asked* timepoints placed then waited on Analyze's plate for a pull
+    that never came.
+    """
+    placed = [tp for tp in (asked or {}) if grid["timepoints"].get(tp, {}).get("origin_method") == "plate_rigid"]
+    if placed:
+        return f"Well {well_label} — re-anchored. {total} timepoint(s), {n_failed} without rows."
+    return (f"Well {well_label} — re-anchoring placed none of {', '.join(sorted(asked or {}))}; "
+            "its earlier result stands.")
 
 
 def prepare_nanowell_run(options: dict, args, well_zips, refuse, input_dir, info_path) -> None:
@@ -964,6 +981,73 @@ def _read_grids(output_dir: Path, settings: dict | None = None) -> dict[str, dic
     return grids
 
 
+def awaits_final_pass(grid: dict) -> list[str]:
+    """The timepoints of a well's grid record (*grid*) that the end-of-run re-anchoring could anchor: unaddressed,
+    with stage positions, in a well anchored on its own evidence at another timepoint — the conditions of
+    :func:`plan_reanchor` that one well's record can answer. The rest (the plate's fit) is only known at the end.
+
+    The one test a batched remote run asks of a well twice: the batch's pipeline, to hold the well's archive for the
+    final pass (:func:`hold_for_final_pass`), and the app, to keep its files on the remote until that pass has run
+    (``services.remote_fetch_nanowells.release_batch``), so the two cannot disagree about a well.
+    """
+    well = grid.get("well")
+    timepoints = grid.get("timepoints", {})
+    grids = {well: grid}
+    if not any(_origin(grids, well, tp) for tp in timepoints):
+        return []
+    return sorted((tp for tp, block in timepoints.items()
+                   if block.get("status") == nr.UNADDRESSED and block.get("stage_offset_um") is not None),
+                  key=_tp_rank)
+
+
+def reanchor_only_run(options, args) -> bool:
+    """Whether this invocation is a batched nanowell run's final pass (``--nanowell_reanchor_only``): it processes no
+    well, and runs only the end-of-run re-anchoring over the archives the batches held."""
+    return bool(options and getattr(args, "nanowell_reanchor_only", False))
+
+
+def hold_dir_for(options, args) -> str | None:
+    """Where this invocation holds wells for the final pass — none in the final pass itself, whose argv still names
+    the folder, since the driver gives every batch the same argv."""
+    return None if reanchor_only_run(options, args) else getattr(args, "nanowell_hold_dir", None)
+
+
+def replaced_wells(options, args, wells: list[str]) -> list[str]:
+    """The wells whose earlier coverage records this invocation replaces: every well it ran, but none in the final
+    pass, which processes no well — a held well it cannot place keeps the record its batch wrote, and a re-run well's
+    new record replaces it by itself."""
+    return [] if reanchor_only_run(options, args) else wells
+
+
+def hold_for_final_pass(output_dir, well_zips, hold_dir) -> list[str]:
+    """Link into *hold_dir* the archive of every well of *well_zips* the end-of-run re-anchoring could anchor
+    (:func:`awaits_final_pass`), for the run's final pass; returns those wells.
+
+    A batched remote run deletes each batch's archives when the next batch is swapped in, and a well's anchors can
+    come from any batch, so the re-anchoring has to wait for the last one; until then the archive is kept here. A
+    hard link moves no bytes; a copy is the fallback where one cannot be made.
+    """
+    import shutil
+
+    grids = _read_grids(output_dir)
+    held = []
+    for well, zip_path in well_zips:
+        waiting = awaits_final_pass(grids.get(well, {}))
+        if not waiting:
+            continue
+        hold_dir = Path(hold_dir)
+        hold_dir.mkdir(parents=True, exist_ok=True)
+        target = hold_dir / Path(zip_path).name
+        try:
+            target.unlink(missing_ok=True)
+            os.link(zip_path, target)
+        except OSError:
+            shutil.copy2(zip_path, target)
+        log.info("Well %s — held for the end-of-run re-anchoring (%s unaddressed).", well, ", ".join(waiting))
+        held.append(well)
+    return held
+
+
 def _origin(grids: dict, well: str, timepoint: str) -> tuple | None:
     block = grids.get(well, {}).get("timepoints", {}).get(timepoint, {})
     if block.get("status") == nr.OK and block.get("origin_method") in _INDEPENDENT and block.get("origin_stage_um"):
@@ -1055,13 +1139,56 @@ def plan_reanchor(grids: dict[str, dict]) -> tuple[dict, dict]:
     return predictions, reasons
 
 
+def _reanchor_well(job, *, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix, schema, sep,
+                   settings_key, grouper, parse, segmenter):
+    """One well's re-run with the plate's prediction; ``(well, timepoints, error)``, *error* ``""`` when it ran.
+
+    A module-level function, so a worker process can be handed it. A failure is caught here, in the worker: one
+    well's re-run must not cost the rest, nor the finished run's records.
+    """
+    well, zip_path, by_tp = job
+    log.info("Well %s — re-anchoring %s from the plate's other wells.", well, ", ".join(sorted(by_tp)))
+    try:
+        run_zip_task(well, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
+                     csv_prefix, schema, sep, settings_key, grouper=grouper, parse=parse, segmenter=segmenter,
+                     incremental=True, incremental_prior_dir=output_dir, plate_rigid=by_tp, reanchoring=True)
+    except Exception as exc:
+        log.error("Well %s — re-anchoring failed (%s: %s); its timepoints stay unaddressed.", well,
+                  type(exc).__name__, exc, exc_info=True)
+        return well, by_tp, f"{type(exc).__name__}: {exc}"
+    return well, by_tp, ""
+
+
+def _each_reanchored(rerun, jobs, pool):
+    """*rerun* over *jobs*, each well in a worker of *pool* (``pool()`` gives an executor) when there is one, so the
+    node's cores share the pass rather than one segmenting while the rest wait.
+
+    A worker that dies (``BrokenProcessPool``) fails its own well, with the reason, not the whole pass: the wells
+    that finished keep what they did.
+    """
+    if pool is None or len(jobs) < 2:
+        return [rerun(job) for job in jobs]
+    results = []
+    with pool() as executor:
+        futures = [executor.submit(rerun, job) for job in jobs]
+        for (well, _zip, by_tp), future in zip(jobs, futures):
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                log.error("Well %s — re-anchoring failed (%s: %s); its timepoints stay unaddressed.", well,
+                          type(exc).__name__, exc)
+                results.append((well, by_tp, f"{type(exc).__name__}: {exc}"))
+    return results
+
+
 def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix, schema,
-                   sep, settings_key, *, grouper, parse, segmenter=None) -> dict:
+                   sep, settings_key, *, grouper, parse, segmenter=None, pool=None) -> dict:
     """Re-run the unaddressed (well, timepoint)s the rest of the plate can anchor; report what it did.
 
     Only those wells' rows for those timepoints are rewritten (an incremental run with the prediction
     handed in; every other timepoint is kept as it is). Returns the counts the sidecar records:
-    ``anchored`` (now addressed), ``remaining`` (still unaddressed) and why for each.
+    ``anchored`` (now addressed), ``remaining`` (still unaddressed) and why for each. With *pool* (a callable
+    returning an executor) the wells are re-run in parallel.
     """
     output_dir = Path(output_dir)
     here = settings_from_kwargs(shared_kwargs_template).key()
@@ -1074,19 +1201,18 @@ def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token,
         predictions.update(found)
         reasons.update(why)
     zips = dict(well_zips)
+    jobs = []
     for well, by_tp in predictions.items():
         if well not in zips:
             reasons.update({(well, tp): "this well is not part of this run, so it was not re-run" for tp in by_tp})
             continue
-        log.info("Well %s — re-anchoring %s from the plate's other wells.", well, ", ".join(sorted(by_tp)))
-        try:
-            run_zip_task(well, zips[well], output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
-                         csv_prefix, schema, sep, settings_key, grouper=grouper, parse=parse, segmenter=segmenter,
-                         incremental=True, incremental_prior_dir=output_dir, plate_rigid=by_tp, reanchoring=True)
-        except Exception as exc:          # one well's re-run must not cost the rest, or the finished run's records
-            log.error("Well %s — re-anchoring failed (%s: %s); its timepoints stay unaddressed.", well,
-                      type(exc).__name__, exc, exc_info=True)
-            reasons.update({(well, tp): f"the re-run failed: {type(exc).__name__}: {exc}" for tp in by_tp})
+        jobs.append((well, zips[well], by_tp))
+    rerun = partial(_reanchor_well, output_dir=output_dir, shared_kwargs_template=shared_kwargs_template,
+                    nuclear_token=nuclear_token, fluor_tokens=fluor_tokens, csv_prefix=csv_prefix, schema=schema,
+                    sep=sep, settings_key=settings_key, grouper=grouper, parse=parse, segmenter=segmenter)
+    for well, by_tp, error in _each_reanchored(rerun, jobs, pool):
+        if error:
+            reasons.update({(well, tp): f"the re-run failed: {error}" for tp in by_tp})
     after = _read_grids(output_dir, here)
     anchored, remaining = [], {}
     for well, grid in after.items():
@@ -1104,13 +1230,22 @@ def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token,
 
 
 def nanowell_endgame(options, output_dir, well_zips, shared_kwargs_template, nuclear_token, fluor_tokens, csv_prefix,
-                     schema, sep, settings_key, *, grouper, parse) -> None:
-    """What nanowell mode does after every well has run; a no-op when the mode is off (the caller does not branch)."""
+                     schema, sep, settings_key, *, grouper, parse, pool=None, hold_dir=None) -> None:
+    """What nanowell mode does after every well has run; a no-op when the mode is off (the caller does not branch).
+
+    With *hold_dir* (one batch of a batched remote run) the re-anchoring is left to the run's final pass and the
+    wells it could anchor are held for it (:func:`hold_for_final_pass`); the plate's records are written by that
+    pass. Otherwise the pass runs here, its wells in parallel on *pool*.
+    """
     if not options:
+        return
+    if hold_dir:
+        held = hold_for_final_pass(output_dir, well_zips, hold_dir)
+        log.info("Re-anchoring left to the end of the run: %d well(s) of this batch held for it.", len(held))
         return
     try:
         summary = reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token, fluor_tokens,
-                                 csv_prefix, schema, sep, settings_key, grouper=grouper, parse=parse)
+                                 csv_prefix, schema, sep, settings_key, grouper=grouper, parse=parse, pool=pool)
     except Exception as exc:               # the run is finished; a pass that cannot describe the plate says so
         log.error("Re-anchoring could not run (%s: %s).", type(exc).__name__, exc, exc_info=True)
         summary = {"anchored": [], "remaining": {}, "error": f"{type(exc).__name__}: {exc}"}

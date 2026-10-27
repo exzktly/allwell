@@ -40,6 +40,10 @@ class DatasetToolController(QObject):
 
     #: QueueableController hook: ``(ok, message, dest_root — "" for none)``.
     jobFinished = Signal(bool, str, str)
+    #: Emitted as a run starts, with that run as a queue spec. The Job Queue
+    #: takes in a run started on this page (``QueueBridge._on_run_started``)
+    #: so jobs queued after it wait for it; it ignores the runs it started.
+    runStarted = Signal(dict)
 
     #: Named in the DEBUG breadcrumb if the teardown race raises.
     _shutdown_label = "datasets tool"
@@ -70,6 +74,24 @@ class DatasetToolController(QObject):
         Called before the early return below, since a tool can have nothing to
         stop and still have something to tear down.
         """
+
+    def _start_worker(self, worker) -> None:
+        """Start *worker* as this tool's run, and say so.
+
+        Every run goes through here rather than calling ``worker.start()``
+        directly, so none can start without the queue hearing of it —
+        ``tests/test_queue_adopts_a_page_run.py`` fails a controller that
+        starts a run worker any other way.
+        """
+        self._worker = worker
+        worker.start()
+        try:
+            spec = self.collect_spec()
+        except Exception:
+            # The run is going either way; only its queue row is lost.
+            swallowed("collect_spec for runStarted", logger=_logger)
+            return
+        self.runStarted.emit(spec)
 
     def stop(self) -> None:
         """QueueableController hook: cancel the run in flight, if any."""

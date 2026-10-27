@@ -5462,3 +5462,29 @@ def test_app_wide_style_guard_clears_a_figure_s_own_style(tmp_path, monkeypatch)
         "def size(ctx, fig):\n    return figure_prefs(ctx, fig)['marker_size']\n"))
     assert _run_scan(monkeypatch, "tests.test_app_wide_style_is_read_only",
                      "test_nothing_but_its_owners_reaches_the_app_wide_style", [good]) is None
+
+
+# ── a Datasets run starts through _start_worker ─────────────────────────────
+
+def test_run_start_guard_catches_a_bare_worker_start(tmp_path, monkeypatch):
+    bad = _write(tmp_path, "bad_controller.py",
+                 "class C:\n    def _launch(self):\n        worker = W()\n"
+                 "        self._worker = worker\n        worker.start()\n")
+    exc = _run_scan(monkeypatch, "tests.test_queue_adopts_a_page_run",
+                    "test_every_datasets_run_starts_through_start_worker", [bad])
+    assert exc is not None and "bad_controller.py" in str(exc)
+
+
+def test_run_start_guard_catches_self_worker_start(tmp_path, monkeypatch):
+    bad = _write(tmp_path, "bad_controller.py",
+                 "class C:\n    def _launch(self):\n        self._worker = W()\n"
+                 "        self._worker.start()\n")
+    assert _run_scan(monkeypatch, "tests.test_queue_adopts_a_page_run",
+                     "test_every_datasets_run_starts_through_start_worker", [bad]) is not None
+
+
+def test_run_start_guard_clears_start_worker(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_controller.py",
+                  "class C:\n    def _launch(self):\n        self._start_worker(W())\n")
+    assert _run_scan(monkeypatch, "tests.test_queue_adopts_a_page_run",
+                     "test_every_datasets_run_starts_through_start_worker", [good]) is None

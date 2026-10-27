@@ -58,6 +58,9 @@ from services.remote_commands import (
     _BATCH_DONE_RE,
     BATCH_DONE,
     BATCH_READY,
+    BATCH_REANCHOR,
+    BATCH_SKIP,
+    HOLD_DIR,
     _batch_driver_snippet,
     _compose_driver_cmd, batch_pipeline_argv, pack_for_login_shell,
 )
@@ -72,7 +75,8 @@ from services.remote_run_id import (
     remote_run_paths,
 )
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
-from services.remote_fetch_nanowells import release_batch
+from services.remote_fetch_nanowells import held_wells, release_batch
+from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_batch_resume import (
     _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
     reattach_output_dir, stage_leftovers, take_from_remote)
@@ -710,18 +714,23 @@ class _BatchedRemoteProcess:
         # Clear any handshake files a previous run of this same dataset left:
         # `run_id` is deterministic, so the driver would otherwise find batch 1
         # already flagged ready and start against an empty input directory.
+        # A nanowell run's re-anchoring is one more batch at the end (`remote_final_pass`), over the wells the
+        # data batches hold in `keep/`; a resumed run takes over the earlier attempt's (`adopt_earlier_holds`).
+        self._final_pass = bool(getattr(self._fetcher.run, "nanowell", False))
+        total = n_batches + (1 if self._final_pass else 0)
         self._runner._cache._ssh_run(["mkdir", "-p", run_dir], check=False)
         self._runner._cache._ssh_run(
-            ["rm", "-f", paths.suspend_request]
+            ["rm", "-rf", paths.suspend_request, f"{run_dir}/{HOLD_DIR}"]
             + [self._batch_flag(t, i)
-               for i in range(1, n_batches + 1)
-               for t in (BATCH_READY, BATCH_DONE)],
+               for i in range(1, total + 1)
+               for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP)],
             check=False,
         )
         # Whatever input archives the remote already holds — in `in/`, in a staged batch, or in an earlier
         # attempt's directory — go into the batch they now belong to first; then the half-processed `in/` is
         # cleared, its staged batches and `bg/` kept for the retry (`remote_batch_staging`).
         stage_leftovers(self, run_dir)
+        adopt_earlier_holds(self, run_dir)      # and makes `keep/`, which every batch's release lists
         self._runner._cache._ssh_run(["rm", "-rf", f"{run_dir}/in"], check=False)
 
         # The empty-well blank(s): the driver is told where they will be (`background_dir`) and they are uploaded
@@ -745,13 +754,14 @@ class _BatchedRemoteProcess:
         )
         remote_argv = batch_pipeline_argv(remote_argv)
         remote_argv = (list(remote_argv) + ["--suspend_file", paths.suspend_request]
-                       + background_aliases(self, run_dir, bool(blanks)))     # the blank's earlier paths
+                       + background_aliases(self, run_dir, bool(blanks))     # the blank's earlier paths
+                       + (["--nanowell_hold_dir", f"{run_dir}/{HOLD_DIR}"] if self._final_pass else []))
         run.suspend_request = paths.suspend_request
 
         # The budget for one batch is what the operator wrote before this
         # change: their --time sized a single launch.
         per_batch_s = launcher_time_seconds(host.compute_launcher)
-        launcher, note = scale_launcher_time(host.compute_launcher, n_batches)
+        launcher, note = scale_launcher_time(host.compute_launcher, total)
         if note:
             self._log(note)
         # One hand-off for the run rather than one per batch — there is one
@@ -763,7 +773,8 @@ class _BatchedRemoteProcess:
                                        link_blanks=(
                                            getattr(self, "_link_blank_stems", ())
                                            if blanks else ()),
-                                       suspend_request=paths.suspend_request)
+                                       suspend_request=paths.suspend_request,
+                                       final_pass=self._final_pass)
         ssh_argv = host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(
             _compose_driver_cmd(launcher, run.remote_pidfile, driver,
                                 env_selector=self._runner.env_selector,
@@ -784,7 +795,7 @@ class _BatchedRemoteProcess:
         )
         with self._current_proc_lock:
             self._current_proc = proc
-        self._n_batches = n_batches
+        self._n_batches = total     # the final pass too: the driver lost during it is lost, not stopped
         # From here on there is an allocation of ours to hand back, which is
         # what `_release_driver` acts on. Set only after the launch: an abort
         # before it would otherwise `scancel` a sidecar written by a *previous*
@@ -892,17 +903,25 @@ class _BatchedRemoteProcess:
             for event in list(self._batch_events.values()):
                 event.set()
 
-    def _release_nanowell_batch(self, rc: int | None, batch_zips) -> None:
+    def _release_nanowell_batch(self, rc: int | None, batch_zips, *, final: bool = False) -> None:
         """A nanowell batch that ended: free its wells on the remote (``remote_fetch_nanowells.release_batch``).
 
-        Its re-anchoring has run, so nothing of these wells is read again. Queued behind the wells the batch
-        announced, so each one's download has been attempted first. ``None`` means the driver is gone and the
-        batch's end is unknown, so nothing is released.
+        Queued behind the wells the batch announced, so each one's download has been attempted first. A data
+        batch's wells held for the final re-anchoring pass are kept (*held*); the pass's own release (*final*)
+        frees them. ``None`` means the driver is gone and the batch's end is unknown, so nothing is released.
         """
         if rc is None or not self._fetcher.run.nanowell:
             return
         wells = [canonical_well_label(z.stem) or z.stem.upper() for z in batch_zips]
-        self._fetcher.after_queued(functools.partial(release_batch, wells=wells, log=self._log))
+        # Read now, on this thread, before the next batch or the final pass moves `keep/`: the release runs later,
+        # behind the batch's downloads, and by then `keep/` may be the final pass's input. Unreadable keeps them all.
+        held = () if final else held_wells(self._runner._cache._ssh_run,
+                                           f"{remote_run_dir(self._runner.host, self._run_id)}/{HOLD_DIR}")
+        if held is None:
+            self._log("[remote] could not list the wells held for the end-of-run re-anchoring; keeping this batch's "
+                      "wells on the remote\n")
+            held = wells
+        self._fetcher.after_queued(functools.partial(release_batch, wells=wells, log=self._log, held=held))
 
     def _upload_blanks(self) -> bool:
         """Upload the empty-well blank(s) into ``bg/``, once for the whole run, after the driver is launched.
@@ -1118,6 +1137,7 @@ class _BatchedRemoteProcess:
             if not self._start_driver(n_batches):
                 return
             failed: dict[int, int] = {}
+            final_rc = 0
 
             for batch_idx, batch_zips in enumerate(batches):
                 if self._suspend_before(batch_idx + 1, n_batches):
@@ -1216,6 +1236,11 @@ class _BatchedRemoteProcess:
                     )
                 else:
                     self._log(f"[remote] batch {batch_idx + 1}/{n_batches} complete\n")
+            else:
+                # Every data batch ran (a suspend breaks out above, a Stop returns): a nanowell run's re-anchoring.
+                final_rc = finish_with_final_pass(self, n_batches)
+                if final_rc is None:
+                    return
 
             if failed:
                 names = ", ".join(str(i) for i in sorted(failed))
@@ -1226,7 +1251,7 @@ class _BatchedRemoteProcess:
                 )
                 self._returncode = failed[min(failed)]
             else:
-                self._returncode = 0
+                self._returncode = final_rc
         except BaseException as exc:
             # A crash anywhere in the batch loop (ssh spawn failure, argv
             # build, upload, stdout iteration) must NOT leave ``_returncode``

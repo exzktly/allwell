@@ -10550,7 +10550,13 @@ anchor (`review/features/home/collect.py`; `tests/test_an_unaddressed_nanowell_w
 Validate's scan does not use this rule for nanowell wells — it counts (fov, timepoint) pairs from the
 measurements CSV — so a record Validate rewrites carries no `not_addressed`.
 
-**End of run.** `nanowell_endgame` re-runs each unaddressed (well, timepoint) the rest of the plate can anchor:
+**End of run.** `nanowell_endgame` re-runs each unaddressed (well, timepoint) the rest of the plate can anchor,
+the wells in parallel on the run's worker pool (`pool`, which `process_microscopy` gives as `_well_pool` — the same
+spawned, `_worker_init`-ed pool the wells ran on; `reanchor_plate` → `_each_reanchored` → `_reanchor_well`, a
+module-level function a worker can be handed, which catches a well's failure in the worker; a worker that dies
+fails only the well it held). In a batched remote run it runs once, after the last batch
+(`--nanowell_hold_dir` / `--nanowell_reanchor_only`, below).
+What it does:
 the wells anchored on their own evidence at a reference timepoint and at this one fix the plate's rigid
 motion (`fit_plate_rigid`), and the well's origin at the reference carried through it is handed to
 `resolve_origin` as a prediction, accepted only when its error is under a third of half a pitch. It needs a
@@ -10710,15 +10716,46 @@ are read and never rewritten. A copy that fails is said in the run log and costs
 A nanowell well announces itself with the same `Well X — done.` marker a field-mode well does, which is what the
 Fetcher and Analyze's progress count. The run record knows it is a nanowell run from its argv
 (`_RemoteRun.nanowell`), and three things follow. Nothing of a well is deleted from the remote as it is
-fetched (`well_files_to_delete`), because the re-anchoring at the end of the pipeline invocation re-runs some
-wells from their input archives and earlier output. In a batched run the well is deleted when its batch ends
-instead: that re-anchoring re-runs only the invocation's own wells and reads nothing of the others but their
-grid records under `nanowells/`, so after `_await_batch` returns, `_run_batches` queues
+fetched (`well_files_to_delete`), because the end-of-run re-anchoring re-runs some wells from their input
+archives and earlier output. **In a batched run that pass is one more batch, after the last data batch.** Each
+data batch's pipeline is given `--nanowell_hold_dir <run>/keep` and, instead of re-anchoring, hard-links into it the
+archive of every well `nanowell_task.awaits_final_pass` says the pass could anchor (an unaddressed timepoint with
+stage positions, in a well anchored on its own evidence at another timepoint — the conditions of `plan_reanchor`
+one well's record can answer). The driver is built with `final_pass=True`
+(`remote_commands._batch_driver_snippet`), which adds batch `n + 1`; after the data batches
+`services/remote_final_pass.py` (`finish_with_final_pass` → `run_final_pass`, split out so `_run_batches` stays the
+batch loop) moves `keep/` into `b<n+1>`, uploads beside the held archives the acquisition record (scoped to
+them) and the anchors file — the pipeline reads both from the archives' own folder, and `keep/` holds archives only;
+the upload is `upload_subset` with `acquisition_input`, and rsync finds the archives already there — then flags it
+`BATCH_REANCHOR` (the driver then adds `--nanowell_reanchor_only`,
+under which `process_well_zips(reanchor_only=…)` processes no well, the pass runs over the held archives fitted from
+every grid record in the output folder, and `replaced_wells` names none, so no well's earlier coverage record is
+dropped — `nanowell_task.reanchor_only_run`, `hold_dir_for` and `replaced_wells` keep those decisions out of
+`main`) or `BATCH_SKIP` when nothing was held or the record could not be sent. The driver runs the last batch only
+when `BATCH_REANCHOR` is present, so a flag that failed to arrive skips it rather than running the whole pipeline over
+the held archives. The held wells are released after the pass only when it exited 0; a non-zero exit is not a failed
+batch — every well has its batch's results — and is the run's exit code, with the held wells' remote copies kept.
+`_n_batches` counts the final batch, so a driver lost during it is reported lost, not stopped. Holding is what lets
+the fit see the whole plate: a well's anchors can come from any batch, and a batch's archives are deleted when the
+next is swapped in. The cost is remote disk: a held well's archive and output stay until the pass. A suspend before
+the pass — including one that lands during the last data batch, which `finish_with_final_pass` checks for — runs no
+pass and leaves `keep/` in place; the resumed run, which has its own run directory but writes into the earlier
+attempt's output directory (`remote_batch_resume.reattach_output_dir`), moves the earlier `keep/` into its own
+(`remote_final_pass.adopt_earlier_holds`), so its pass re-anchors those wells too. A fresh output directory (a
+forced run, or nothing to reattach) has none of their outputs and takes nothing over. A Stop or a lost driver before
+the pass leaves the held wells as their batches left them, and says so on Analyze's plate. A data batch's well is otherwise deleted when its batch ends: the pass reads nothing of
+the others but their grid records under `nanowells/`, so after `_await_batch` returns, `_run_batches` queues
 `remote_fetch_nanowells.release_batch` on the Fetcher (`Fetcher.after_queued`, which runs it on the worker behind
 every well the batch announced). It pulls the batch's `nanowells/` tables again, pulls the CSV and
-`<well>_out.zip` of each well the batch re-anchored, and then deletes each landed well's input archive, output
-archive and cell CSVs, recording it in `_RemoteRun.nanowell_released`. A well that never landed, or whose second
-pull came up short, is kept for verification; `nanowells/` is never deleted mid-run, since every later batch's
+`<well>_out.zip` of each well the batch re-anchored (saying so per well, which is what turns the well back to
+downloaded on Analyze's plate), and then deletes each landed well's input archive, output
+archive and cell CSVs, recording it in `_RemoteRun.nanowell_released` — except, for a data batch (`held`), a
+well whose archive is in `keep/`, which the final pass's release frees. Which wells those are is the remote's own
+listing (`held_wells`: the pipeline decided, so the app reads its answer), taken by `_release_nanowell_batch` on the
+batch thread when the batch ends and handed to the queued release: by the time the release runs, behind the batch's
+downloads, `keep/` may already be the final pass's input, and a listing then would find nothing held and delete
+what the pass reads. A listing that fails keeps all of the batch's wells. A well that never landed, or whose second pull came up short,
+is kept for verification; `nanowells/` is never deleted mid-run, since every later batch's
 plate fit reads it. That is what lets the batch size bound a nanowell run's remote disk. At verification the
 whole `nanowells/` directory and every re-anchored well not already released have their CSV and
 `<well>_out.zip` pulled again — the wells of this run (`fetched_wells`; the local folder holds the whole plate's
@@ -12178,7 +12215,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 |--------|------|
 | `pipeline_service.py` | `find_pipeline_script` / `build_pipeline_args` / `spawn_pipeline`. `build_pipeline_args` emits each flag only when present and non-zero (including `--stardist_tile_px` (>0 only) and `--phase_token`); it is decomposed into small table-driven emitters to satisfy the complexity ratchet, behaviour unchanged (`tests/test_pipeline_arg_validation.py`). The StarDist detection thresholds get their own emitter (`_emit_stardist_threshold_flags`) rather than the integer one: they are probabilities, and blank / `auto` / out-of-range emits nothing so the run falls back to the pretrained model's own value. |
 | `frame_preview.py` | The GUI-side StarDist inference behind the Playground's **Segment** button. Holds the session's single loaded model (`_GUI_STARDIST_MODEL`) and the `find_spec` dependency probe, and calls the pipeline's own `pipeline.stardist.segment_nuclei` — so what the Playground shows cannot disagree with what a run produces. **TF and StarDist are imported inside `segment_frame`, never at module scope**: the Playground's controller imports its worker (and through it this module) at GUI start-up, so a module-scope TF import would add tens of seconds and gigabytes to launching the app for everyone who never presses Segment. Qt-free and `review`-free, which is why it sits here rather than beside the feature that uses it. `segment_frame` takes an optional `on_stage(name)` — a plain callable, so the module stays Qt-free — and reports `STAGE_LOADING` then `STAGE_SEGMENTING`, because only the first call of a session pays the model load and a UI that reports both phases identically leaves that one looking like a hang. |
-| `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`) — a completion carries a third element, the word the run journal should record for that well, because the plate's `process` is deliberately lossy about whether anything was computed, per-well FOV sub-progress `("well_fov", (well, done, total))` — from `Well X — N FOV-group(s)` / `FOV k/N done`, or, for a nanowell well (processed a timepoint at a time), `Well X — N step(s)` / `step k/N done`, which `pipeline.nanowell_task._log_steps` prints from `nanowell_run.run_well`'s step count (`_Steps`: every timepoint located, then every measurable one measured, `2 × timepoints`); a step's payload carries a fourth element, `"step"`, so the dashboard's hover text does not call it a FOV. Within a measure step, `("well_sites", (well, timepoint, done, total))` — from `Well X — <timepoint>: k/N nanowells segmented`, which `nanowell_task._log_sites` prints from `measure_timepoint`'s `_SiteCount`, each line after the first with the seconds per nanowell and the time left (`_SITES_STARTED`, this process's clock). `_SiteCount` counts the timepoint's imaged nanowells and is said at 0, at each tenth crossed and at the final count, which stops short of N for a nanowell not segmented; `nanowell_measure.segment_sites(on_site=…)` ticks per crop, a whole-tile segmentation ticks its tile's nanowells at once. The event fills the dial within the step (`RunDashboard.set_well_sites`; the next step's line ends it) and names the count in the well's hover text. Per-well transfer progress `("well_xfer", (well, "up"|"down", fraction))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). Well completion is counted by **identity, not by marker**: the three terminal markers (`Well X — done.`, `Well X — up to date`, `SKIP well X — output already exists`) all feed one set of finished wells, so a well announced terminal twice is counted once and reported as `("well_repeat", well)`. That matters in batched remote mode, where the pipeline is launched once per batch: a well announced terminal by one batch and again by the next drove the headline to "N / N wells (100%)" with wells still outstanding. The batches once shared a remote input directory and relied on the Fetcher having emptied it in time, which is where the repeats came from; the driver's whole-directory swap removes that particular source, and the identity-based count stays because it is the honest way to count a marker that can legitimately repeat. The announced total is a floor, never a ceiling — more distinct wells finishing than the banner promised raises it (a fresh `("well_total", n)`) rather than printing a fraction over 100%. |
+| `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`) — a completion carries a third element, the word the run journal should record for that well, because the plate's `process` is deliberately lossy about whether anything was computed, per-well FOV sub-progress `("well_fov", (well, done, total))` — from `Well X — N FOV-group(s)` / `FOV k/N done`, or, for a nanowell well (processed a timepoint at a time), `Well X — N step(s)` / `step k/N done`, which `pipeline.nanowell_task._log_steps` prints from `nanowell_run.run_well`'s step count (`_Steps`: every timepoint located, then every measurable one measured, `2 × timepoints`); a step's payload carries a fourth element, `"step"`, so the dashboard's hover text does not call it a FOV. Within a measure step, `("well_sites", (well, timepoint, done, total))` — from `Well X — <timepoint>: k/N nanowells segmented`, which `nanowell_task._log_sites` prints from `measure_timepoint`'s `_SiteCount`, each line after the first with the seconds per nanowell and the time left (`_SITES_STARTED`, this process's clock). `_SiteCount` counts the timepoint's imaged nanowells and is said at 0, at each tenth crossed and at the final count, which stops short of N for a nanowell not segmented; `nanowell_measure.segment_sites(on_site=…)` ticks per crop, a whole-tile segmentation ticks its tile's nanowells at once. The event fills the dial within the step (`RunDashboard.set_well_sites`; the next step's line ends it) and names the count in the well's hover text. A finished nanowell well the end-of-run re-anchoring runs again reports `("well_reanchor", (well, what, timepoints))` (`_reanchor_events`): `start` from `Well X — re-anchoring <timepoints> from the plate's other wells`, then one of `done` (`Well X — re-anchored.`), `unchanged` (`Well X — re-anchoring placed none of …`) or `failed` (`Well X — re-anchoring failed`). `nanowell_task.reanchored_line` chooses between the first two from the grid record the re-run wrote: `re-anchored.` only when a timepoint asked for has `origin_method` `plate_rigid`, which is what `remote_fetch_nanowells.reanchored_wells` reads, so a well says it was re-anchored exactly when the Fetcher will pull it again. On a remote run that pull then reports `fetched` (`[remote] X: pulled again after the end-of-run re-anchoring re-ran it.`) or `short` (`[remote] X: the re-anchored output did not all arrive`), from `release_batch` at a batch's end and `pull_nanowell_results` at verification, which now checks `_rsync_optional`'s answer instead of printing success regardless; a short pull at verification is added to `missing`, so the remote copy is kept. `RunDashboard.set_well_reanchor` shows such a well computing again, with its own steps and nanowells on the dial, until `done`, then on the server until `fetched` or a later `download` stage (the end-of-run retry of a well whose first fetch failed brings the re-anchored output); both outrank the stages it had reached, since its tables are being rewritten, and `_count` leaves it out of the rail's Process and Download counts meanwhile. `unchanged`, `failed`, a `short` pull and a run that ends mid-pass (`_on_outcome_changed`) each leave a note in its hover text (`_reanchor_note`). Without the events the well stayed painted downloaded while the log counted its nanowells again. Per-well transfer progress `("well_xfer", (well, "up"|"down", fraction))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). Well completion is counted by **identity, not by marker**: the three terminal markers (`Well X — done.`, `Well X — up to date`, `SKIP well X — output already exists`) all feed one set of finished wells, so a well announced terminal twice is counted once and reported as `("well_repeat", well)`. That matters in batched remote mode, where the pipeline is launched once per batch: a well announced terminal by one batch and again by the next drove the headline to "N / N wells (100%)" with wells still outstanding. The batches once shared a remote input directory and relied on the Fetcher having emptied it in time, which is where the repeats came from; the driver's whole-directory swap removes that particular source, and the identity-based count stays because it is the honest way to count a marker that can legitimately repeat. The announced total is a floor, never a ceiling — more distinct wells finishing than the banner promised raises it (a fresh `("well_total", n)`) rather than printing a fraction over 100%. |
 | `remote_manifest.py` | `_REQUIRED_REMOTE_FILES` — the one list of files a remote run needs on the worker — and `repo_root`, the directory those paths are relative to (the runner syncs from it; the batched process puts it on `sys.path` for the local threshold pass). A data declaration with no behaviour, and it lives apart from `remote_runner` because the two guards over it pulled opposite ways: `tests/test_remote_manifest.py` requires an entry for every new `pipeline/` or `util/` module, while `REMOTE_RUNNER_BUDGET` caps the file it used to sit in — so a required entry could fail the budget, and the budget could only be met by omitting it. Here a new entry costs the runner nothing. Re-exported by `remote_runner`, so `services/remote_bootstrap`, the PyInstaller spec, the manifest tests and the several `util/` and `pipeline/` docstrings that cite it by that path all keep working — with the same re-export caveat as the row below: patching the name on `remote_runner` does not reach a reader that imports it from here. |
 | `remote_transport.py` | How bytes and commands reach a remote host: what this rsync build supports (`_rsync_version` and the capability probes over it), how a path is quoted so the remote shell expands `~` rather than making a directory called it (`_remote_quote` / `_remote_join`), the retry funnel every transfer passes through (`_rsync_with_retry`, `_rsync_run_cancellable`), the non-fatal remote `rm` the Fetcher runs after each well lands (`delete_remote_paths`, which takes paths and knows nothing of wells), and the reader that turns rsync's progress chatter back into lines. Knows nothing about a *run* — no run id, no journal, no well. Callers import these names from here, never through `remote_runner`. Each importer holds its own **binding**, so a patch reaches only the callers that look the name up in the patched module: to steer a caller that lives here (the retry funnel's call to `_rsync_run_cancellable`, say), patch `remote_transport`; to steer the `Fetcher`, patch `remote_fetch`. |
 | `remote_run_id.py` | Where a remote run lives, and whether an earlier one's work may be reused — two questions sharing a module because they are keyed on the same facts, and every reuse defect here came from one being keyed on less than the other. `_compute_run_id` and `pipeline_argv_digest` decide the address; `_choose_remote_output_dir` decides whether a recorded one may be used instead; `remote_run_dir` / `remote_run_paths` are its single spelling. Pure — no ssh, no filesystem — which is what lets the highest-stakes predicate in the remote path be tested directly rather than through a harness. |
@@ -12951,10 +12988,10 @@ just wrote to — suspend is asked about before stop, since a suspend sets both 
 asking the other way round would record every suspend as a cancel.
 
 The **Datasets Job Queue** can suspend too, and carries the result across a
-session. Its Pause button winds the running job down (`suspend_current`, which
-probes the runner for a `suspend` hook and falls back to a plain cancel for the
-Datasets tools, none of which has an equivalent boundary to stop at); a separate
-`Stop job` button is the destructive answer. A wound-down job goes to
+session. Its Pause button winds every running job down (`suspend_current`,
+which probes each runner for a `suspend` hook and falls back to a plain cancel
+for the Datasets tools, none of which has an equivalent boundary to stop at); a
+separate Stop button is the destructive answer. A wound-down job goes to
 `JobState.SUSPENDED` — deliberately not through `mark_finished`, since a suspend
 is not an outcome and treating it as a cancel would cascade its successors to
 BLOCKED as though its output were never coming.
@@ -14634,7 +14671,8 @@ had finished or what it concluded, because the completion line was gated on a
 silently returning: a queued job whose persisted `spec["dataset"]` is empty or
 missing (a hand-edited `job_queue.json`, per §Job Queue's own repair
 discipline) would otherwise never start a worker and never signal completion,
-stalling `QueueBridge._current` forever.
+leaving its kind in `QueueBridge._running` for ever, and the local lane
+with it.
 
 The dataset-folder field carries its own validator (`view.py::_is_dataset`,
 mirroring Concatenate's) — Validate used to be the one dataset-folder
@@ -15518,6 +15556,14 @@ Qt event loop. Four layers:
   says `(no input)` for a run missing its folder — worth preserving, since a
   row reading plain "Analyze" is indistinguishable from a well-formed job.
 
+- **`services/job_lanes.py`** — which jobs may run at the same time, Qt-free:
+  `run_lane(kind, spec)` (`remote` for an Analyze with a remote host, `local`
+  for everything else), `folders(kind, spec)` (the paths a job reads and
+  writes) and `conflicts(a, b)`. `JobQueue.next_to_start` applies them; the
+  bridge entry below says how. `describe_detail` names a remote Analyze's
+  host on its row ("runs on “cluster”"), since the host decides what may run
+  beside it.
+
 - **`datasets/job_queue/controller.py`** — the Qt-touching layer.
   `QueueableController` is the duck-typed protocol every runnable `kind`
   implements: `start_from_queue(spec)`, `show_job(spec)`, `stop()`,
@@ -15533,15 +15579,62 @@ Qt event loop. Four layers:
   has no one to answer); so does `AnalyzeTab`.
 
   `QueueBridge` owns the persisted `JobQueue` and a `kind -> QueueableController`
-  registry, and is the only thing that actually starts a job: strictly
-  serial, tracking the in-flight job as `(job_id, kind)` so a `jobFinished`
-  from a controller that isn't the queue's own current job — e.g. the user
-  pressed that tool's own Run button by hand while a *different* job was
-  running — is dropped rather than misattributed. That tuple can only really
-  distinguish by `kind` (`jobFinished` carries no job id), so the guard's
-  soundness depends on every `start_from_queue` path eventually emitting
-  `jobFinished` exactly once: a launch that silently no-ops on invalid input
-  would leave `_current` stuck forever, which is why
+  registry, and is the only thing that actually starts a job. It runs at
+  most one job per **lane** (`services/job_lanes.py`): `run_lane` puts an
+  Analyze job with a `remote_name` in the `remote` lane and every other job —
+  a local Analyze, every Datasets tool — in the `local` one, so a remote
+  Analyze, whose pipeline runs on the remote host, can run beside one local
+  job, and two local jobs, each of which works this computer hard, never run
+  together. `_advance` asks each free lane for its next job
+  (`JobQueue.next_to_start(lane, unavailable=…)`) and starts the earliest of
+  the answers in the queue first, repeating until neither lane can take one;
+  asking the lanes in a fixed order let a later local Analyze take the one
+  Analyze pane ahead of an earlier remote one. `next_to_start` returns the
+  first runnable job of that lane whose kind is not *unavailable* — its tool
+  busy with another queue job (a remote and a local Analyze share one pane)
+  or a run started by hand, or no tool registered — and that shares no
+  folder with any running job or any unfinished job ahead of it
+  (`job_lanes.folders` / `conflicts`: one writes a folder the other reads or
+  writes, the same folder or one inside the other; reading the same folder is
+  not a conflict). The second half is what keeps the queue's order meaning
+  something once two jobs run at once: a remote Analyze of a folder a
+  conversion above it is still to write — linked or typed — waits for it
+  instead of reading half of it, and a Validate below a remote Analyze of the
+  same dataset waits for the analysis. `folders` counts Validate as writing
+  its dataset, since a repair rewrites its metadata, and Analyze as writing
+  its dataset root (the folder above an `in/` input). In-flight jobs are
+  tracked as `_running: kind -> (job_id, lane)` — a tool runs one job at a
+  time, so the kind names the run.
+
+  **A run started on its tool's own page joins the queue.** Every tool
+  announces a run as it starts: the Datasets controllers through
+  `DatasetToolController._start_worker`, which starts the worker and emits
+  `runStarted(collect_spec())`, and Analyze from `start_run`, which every
+  entry point shares, as `runStarted(spec.to_json())`. `register` connects it
+  to `_on_run_started`, which ignores a kind already in `_running` — the
+  queue's own dispatch records the job before launching — and otherwise
+  takes the run in with `JobQueue.adopt`: a `JobSpec` with `adopted=True`,
+  running, inserted above every unfinished job and below the finished ones,
+  labelled with `describe` and the message "started on its own page", and
+  tracked in `_running` like a queue job. So whatever is queued after it
+  waits for it — the same lane, its folders, or a link to its output — and
+  its `jobFinished` records its outcome on its row, hands its folder to linked
+  jobs or blocks them, and lets the next job start. Before, the queue could
+  only skip the busy tool, and a job added behind a run by hand could start
+  beside it on the folder it was writing. `test_queue_adopts_a_page_run.py`
+  holds the seam: no Datasets controller may call `.start()` on a worker
+  except through `_start_worker`, with the Concatenate undo worker (not a
+  run) exempt by function name. After a restart an adopted job that was
+  running is marked **cancelled**, not interrupted, and its successors
+  blocked: its page owns resuming it — Analyze offers the run back from its
+  own banner, and the queue resuming it too would run one plate twice into
+  one output folder. A `jobFinished` from a kind with no queue job in flight
+  (a tool that announces nothing) is dropped rather than misattributed, then
+  nudges `_advance`, since a job skipped for that busy tool may now start. `jobFinished` carries no job id,
+  so the guard's soundness depends on every `start_from_queue` path
+  eventually emitting `jobFinished` exactly once: a launch that silently
+  no-ops on invalid input would leave its kind in `_running` for ever,
+  which is why
   `MergePlatesController._launch`'s remap-failure branch,
   `ValidateController._run`'s "no dataset path" branch and
   `OmeImportController._launch`'s "no source or destination" branch all emit
@@ -15814,7 +15907,10 @@ Qt event loop. Four layers:
   nothing is conditionally constructed.
 
   The header is `▶ Start queue` (primary, at the left edge, matching every
-  other Datasets page's own run button), `■ Stop job`, `+ Add job` — a menu
+  other Datasets page's own run button), `■ Stop job` (`■ Stop both jobs`
+  while two run — `set_job_running(n)` — since it stops every job in flight
+  via `stop_current`; a running row's ⋯ menu leads with *Stop this job*,
+  `stopClicked` → `QueueBridge.stop_job`, for one), `+ Add job` — a menu
   of all seven kinds, each opening a new-job session on that tool's page —
   and `Clear completed` at the right. Under it sits a one-line state tally
   (states with no jobs are omitted; "0 failed" is not news) and the load-time

@@ -98,8 +98,7 @@ class SubsetController(DestinationToolController):
         worker.succeeded.connect(self._on_succeeded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_finished)
-        self._worker = worker
-        worker.start()
+        self._start_worker(worker)
 
     # ── job queue ────────────────────────────────────────────────────────────
     def collect_spec(self) -> dict:

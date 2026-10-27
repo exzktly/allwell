@@ -984,7 +984,8 @@ def pytest_collection_modifyitems(config, items):
 
     The two rosters mark their files for their own lanes: ``nanowell_e2e``
     (``NANOWELL_E2E_FILES`` below) and ``ui_lane`` (``tests/_lanes.py``, the
-    layout and appearance tests ``scripts/test.sh --ui`` runs).
+    layout and appearance tests the local fast lane runs and CI's leaves out
+    with ``scripts/test.sh --no-ui``).
     """
     slow = pytest.mark.slow
     nanowell = pytest.mark.nanowell_e2e

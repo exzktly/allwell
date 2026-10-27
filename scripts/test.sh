@@ -11,7 +11,8 @@
 #
 #   scripts/test.sh                      # the fast lane
 #   scripts/test.sh --nanowell           # the nanowell end-to-end lane
-#   scripts/test.sh --ui                 # the GUI layout / appearance lane
+#   scripts/test.sh --ui                 # only the GUI layout / appearance tests
+#   scripts/test.sh --no-ui              # the fast lane without them (what CI runs)
 #   scripts/test.sh -k threshold         # a subset of it
 #   scripts/test.sh tests/test_app_smoke.py -m ""   # one full-app file
 #
@@ -67,12 +68,12 @@ fi
 # end-to-end files instead (tests/conftest.py NANOWELL_E2E_FILES: rendered tiles through the real
 # detection, about 1,075 s of work), which CI runs as a job of its own beside the fast lane. That
 # lane distributes by test (`--dist load`) rather than by file: one of its files is 475 s, and kept
-# on one worker it would set the lane's wall time. `--ui` runs the GUI layout and appearance files
-# (tests/_lanes.py UI_LANE_FILES), which only a change to the UI surface can break; preflight and CI
-# run it when `scripts/ui_lane.py needed` says the branch touches that surface, and CI always on main.
+# on one worker it would set the lane's wall time. The GUI layout and appearance files
+# (tests/_lanes.py UI_LANE_FILES) are part of the local fast lane but not of CI's: CI passes
+# `--no-ui` to leave them out, and `--ui` runs them alone.
 # Naming test files on the command line selects
 # them whichever lane they belong to, so `scripts/test.sh tests/test_nanowell_run.py` runs it.
-MARK="not slow and not nanowell_e2e and not ui_lane"
+MARK="not slow and not nanowell_e2e"
 DIST=loadfile
 if [[ "${1:-}" == "--nanowell" ]]; then
     shift
@@ -81,6 +82,9 @@ if [[ "${1:-}" == "--nanowell" ]]; then
 elif [[ "${1:-}" == "--ui" ]]; then
     shift
     MARK="ui_lane and not slow"
+elif [[ "${1:-}" == "--no-ui" ]]; then
+    shift
+    MARK="not slow and not nanowell_e2e and not ui_lane"
 else
     for arg in "$@"; do
         if [[ "$arg" == tests/* || "$arg" == *.py || "$arg" == *.py::* ]]; then

@@ -18227,7 +18227,7 @@ you're in before you type the command.
   `--timeout=90` CI applies and runs the nanowell end-to-end files below as well.
   Re-count rather than trusting the figure when it matters, with the marker
   expression `scripts/test.sh` uses (`MARK` there):
-  `python -m pytest tests -m "not slow and not nanowell_e2e and not ui_lane" -q --collect-only | tail -1`
+  `python -m pytest tests -m "not slow and not nanowell_e2e" -q --collect-only | tail -1`
   prints the split in a few seconds.
 - **Nanowell end-to-end tests** (`tests/conftest.py::NANOWELL_E2E_FILES`, ~250
   tests in eleven Qt-free files). Each renders synthetic tiles and runs the real
@@ -18242,32 +18242,23 @@ you're in before you type the command.
   Naming test files on the command line selects them whichever lane they belong
   to. `tests/test_the_fast_lane_stays_fast.py` holds the roster to real files,
   the hook to marking them, and CI to running the lane.
-- **UI lane** (`tests/_lanes.py::UI_LANE_FILES`, ~620 tests in seventy files).
-  The tests whose subject is how the GUI looks and lays out: widget geometry,
-  wrapping and fit, spacing, colours, tones and painting, the stylesheet and
-  theme tokens, the progress dashboards and their legends, phone layout, and the
-  reusable widgets in `widgets/` that carry no app knowledge. A test that drives
-  a control and asserts what reached a run spec, an argv, a state slice or a file
-  is a behaviour test and stays in the fast lane even though it builds a Qt form;
-  so do the guards that read the whole tree. Each roster entry carries the reason
-  it is a layout test. The collection hook marks them `ui_lane`; the fast lane
-  excludes them and **`scripts/test.sh --ui`** runs them. The lane runs only when
-  a change can affect it: `scripts/ui_lane.py needed [--base REF]` answers that by
-  matching the changed paths against `UI_SURFACE_PATTERNS` (`widgets/`, `ui/`,
-  `assets/`, `allwell.py`, `analyze/` outside `analyze/domain/`, every
-  `*_view.py` / `view.py` / `tab_view.py` / `dashboard.py` / `row.py` / phone
-  adapter, and the harness files) plus every first-party module a roster file
-  imports **directly**, read from the files' syntax trees on each run, so a new
-  UI test extends the trigger by joining the roster. The import closure cannot
-  be the trigger: one `import allwell` reaches the whole application. A logic
-  module two imports away can therefore still move a layout test without
-  triggering the lane, which is why CI's UI job runs the lane unconditionally
-  on a push to `main`, and conditionally on a pull request. An unanswerable
-  diff (unknown base, no git) answers "run it". `scripts/preflight.sh` asks the
-  same question before running the lane. `tests/test_the_fast_lane_stays_fast.py`
-  holds the roster to real, non-full-app files in no other lane, the hook to
-  marking them, CI and preflight to running the lane, and the trigger to seeing
-  both the patterns and the roster's own imports.
+- **UI tests** (`tests/_lanes.py::UI_LANE_FILES`, ~620 tests in seventy files),
+  which run in the local fast lane and are left out of CI's. They are the tests
+  whose subject is how the GUI looks and lays out: widget geometry, wrapping and
+  fit, spacing, colours, tones and painting, the stylesheet and theme tokens, the
+  progress dashboards and their legends, phone layout, and the reusable widgets
+  in `widgets/` that carry no app knowledge. The collection hook marks them
+  `ui_lane`; `scripts/test.sh` runs them with the rest of the fast lane, CI's
+  fast-lane job calls `scripts/test.sh --no-ui` to leave them out, and
+  `scripts/test.sh --ui` runs them alone. The local run before a push — by hand
+  or through `scripts/preflight.sh` — is therefore their only gate. A test that
+  drives a control and asserts what reached a run spec, an argv, a state slice
+  or a file is a behaviour test and stays off the roster even though it builds a
+  Qt form, as do the guards that read the whole tree: those must run in CI. Each
+  roster entry carries the reason it is a layout test.
+  `tests/test_the_fast_lane_stays_fast.py` holds the roster to real,
+  non-full-app files in no other lane, the hook to marking them, the default
+  local lane to running them, and CI to not running them.
 - **Full-app tests** (anything using the `viewer_app` / `loaded_app` /
   `loaded_app_shape` / `image_table_app` fixtures — ~70 files). Each one
   constructs a **real `ReviewApp`** under the offscreen QPA. `conftest.py`'s

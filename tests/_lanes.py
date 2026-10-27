@@ -1,40 +1,34 @@
-"""The UI lane: which test files are in it, and which changes make it worth running.
+"""The UI tests: GUI layout and appearance, run locally and never in CI.
 
 Kept free of every import beyond the standard library so that
-``scripts/ui_lane.py`` — which CI runs before it has decided whether to install
-the test stack's Qt half at all — can read it without importing the application,
-and so that ``tests/conftest.py`` can read the same roster to mark the tests.
+``tests/conftest.py`` can read the roster to mark the tests ``ui_lane`` without
+importing anything else first.
 
-**What the lane holds.** Tests whose subject is how the GUI *looks and lays
+**Where they run.** Locally, ``scripts/test.sh`` — and so ``scripts/preflight.sh``
+— runs them as part of the fast lane. CI's fast-lane job passes ``--no-ui`` and
+leaves them out, so a pull request's billed run does not pay for them; the
+local run before the push is their only gate. ``scripts/test.sh --ui`` runs them
+alone.
+
+**What the roster holds.** Tests whose subject is how the GUI *looks and lays
 out*: widget geometry, sizing, wrapping and fit, spacing, colours, tones and
 painting, stylesheets and theme tokens, phone-layout fitting, dashboards and
 their legends. Reusable widgets from ``widgets/`` that carry no app knowledge
 belong here as well, because only a change to the widget can break them.
 
-**What stays in the fast lane.** A test that drives a control and asserts what
-reached the run spec, the pipeline argv, a state slice or a file on disk is a
-behaviour test, even when it builds a Qt form to get there: a change to the
-controller, the service or the pipeline can break it with no UI file touched.
-So is any guard that reads the whole source tree — those are the guard family
-and run on every push.
-
-**Why a file's own imports are part of the trigger.** The trigger cannot be the
-import closure of these files: one ``import allwell`` reaches the whole
-application, so the closure is everything and the lane would run on every
-change. Instead the trigger is the UI surface below plus every first-party
-module a roster file imports *directly*, computed from the files themselves by
-``scripts/ui_lane.py``. A logic module two imports away can still change a
-layout test's result without triggering the lane; CI therefore runs the lane on
-every push to ``main`` regardless, so such a miss is caught on the merge rather
-than never.
+**What does not.** A test that drives a control and asserts what reached the
+run spec, the pipeline argv, a state slice or a file on disk is a behaviour
+test, even when it builds a Qt form to get there: a change to the controller,
+the service or the pipeline can break it with no UI file touched, so it must
+run in CI. So is any guard that reads the whole source tree.
 
 Adding a file here: give the reason it is a layout test rather than a behaviour
-test. An entry with no reason is indistinguishable from one added to get a slow
-file out of the fast lane.
+test. An entry with no reason is indistinguishable from one added to get a
+file out of CI.
 """
 from __future__ import annotations
 
-#: Test files that run only in the UI lane (``scripts/test.sh --ui``).
+#: Test files run by the local fast lane and left out of CI (``scripts/test.sh --no-ui``).
 UI_LANE_FILES: dict[str, str] = {
     # ── reusable widgets (widgets/), no app knowledge ──────────────────────
     "test_a_plate_keeps_its_size.py": "plate height-for-width beside a growing sibling",
@@ -112,27 +106,3 @@ UI_LANE_FILES: dict[str, str] = {
     "test_home_phone_layout.py": "Home's Overview as one column on a phone",
     "test_analyze_phone_view.py": "Analyze's form-as-page phone layout",
 }
-
-#: Paths whose change makes the UI lane worth running, beside every roster
-#: file's own direct first-party imports (``scripts/ui_lane.py`` adds those).
-#: Regular expressions, matched against repository-relative paths.
-UI_SURFACE_PATTERNS: tuple[str, ...] = (
-    r"^widgets/",
-    r"^ui/",
-    r"^assets/",
-    r"^startup/app_fonts\.py$",
-    r"^allwell\.py$",
-    r"^core/phone_layout\.py$",
-    # Every Qt view, dashboard and phone adapter, wherever it lives.
-    r"(^|/)(\w+_view|view|tab_view|dashboard|row|ui_helpers|_?phone\w*)\.py$",
-    # Analyze outside its Qt-free domain/ half is the form itself.
-    r"^analyze/(?!domain/)",
-    # The lane's own definition and the harness that runs it.
-    r"^tests/_lanes\.py$",
-    r"^tests/conftest\.py$",
-    r"^scripts/test\.sh$",
-    r"^scripts/ui_lane\.py$",
-    r"^pyproject\.toml$",
-    r"^tests/requirements-dev\.txt$",
-    r"^\.github/workflows/ci\.yml$",
-)

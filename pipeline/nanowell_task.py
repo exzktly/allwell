@@ -351,15 +351,19 @@ def cell_records(outcome: nr.WellOutcome, well: str, fluor_tokens, px_by_tp: dic
     """
     cells = outcome.cells
     n = len(cells.get("label", ()))
+    # Each column is looked up once per well, not once per cell: the lookup used to pass ``[None] * n`` as the
+    # default, which Python builds on every call whether or not the column exists, so a well of a million cells
+    # built a million-long list for every cell and channel — hours after "step N/N", before the CSV was opened.
+    means = [(f"{token}_mean_intensity", cells.get(f"mean_{token}")) for token in fluor_tokens]
+    hours = {tp: timepoint_hours(tp) for tp in set(cells.get("timepoint", ()))}
     rows = []
     for k in range(n):
         tp = cells["timepoint"][k]
-        row = {"well": well, "fov": cells["fov"][k], "timepoint": tp, "timepoint_hours": timepoint_hours(tp),
+        row = {"well": well, "fov": cells["fov"][k], "timepoint": tp, "timepoint_hours": hours[tp],
                "nucleus_id": cells["label"][k],
                "area_px": cells["area_um2"][k] / px_by_tp[tp] ** 2}
-        for token in fluor_tokens:
-            value = cells.get(f"mean_{token}", [None] * n)[k]
-            row[f"{token}_mean_intensity"] = value
+        for column, values in means:
+            row[column] = None if values is None else values[k]
         for name in ("nw_q", "nw_r", "nw_ring", "nw_label", "well_x_um", "well_y_um"):
             row[name] = cells[name][k]
         rows.append(row)

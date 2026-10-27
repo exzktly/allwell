@@ -39,8 +39,6 @@ NOT_RESTORED_BY_PINFO = {
                             "_restore_stardist_thresholds, which also translates "
                             "the -1 sentinel to a blank box",
     "stardist_nms_thresh": "as stardist_prob_thresh",
-    "remote_batch_size": "restored by analyze.domain.job_edit._hydrate_opts_without_"
-                         "sidecar_equivalents",
     "auto_threshold_method": "restored by analyze.domain.job_edit; the sidecar re-infers "
                              "it from the recorded control wells",
 
@@ -85,7 +83,6 @@ READ_UNDER_ANOTHER_NAME = {
 RESTORED_BY_ANOTHER_APPLIER = {
     "stardist_prob_thresh": "analyze/seg_params.py",
     "stardist_nms_thresh": "analyze/seg_params.py",
-    "remote_batch_size": "analyze/domain/job_edit.py",
     "auto_threshold_method": "analyze/domain/job_edit.py",
 }
 

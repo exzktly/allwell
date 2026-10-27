@@ -64,6 +64,7 @@ class JobQueuePage(QWidget):
 
     startToggled = Signal()
     stopRequested = Signal()
+    stopJobRequested = Signal(str)
     clearCompletedRequested = Signal()
     addKindRequested = Signal(str)
     removeRequested = Signal(str)
@@ -110,12 +111,14 @@ class JobQueuePage(QWidget):
 
         blurb = QLabel(
             "Line up Analyze runs and Datasets tools to work through "
-            "unattended. Strictly serial — one job runs at a time, in order. "
+            "unattended, in order. One job runs at a time — except that an "
+            "Analyze run on a remote host can run beside one job on this "
+            "computer, when the two share no folder. "
             "A queued run proceeds without the interactive confirmations its "
             "own page would show, since there's no one there to ask. "
             "Pause winds the running job down and keeps what it has finished, "
             "so starting the queue again — even in a new session — carries on "
-            "from there. Stop job discards whatever is in flight.",
+            "from there. Stop discards whatever is in flight.",
             self,
         )
         blurb.setObjectName("Muted")
@@ -331,6 +334,7 @@ class JobQueuePage(QWidget):
             row.moveDownClicked.connect(self.moveDownRequested)
             row.editClicked.connect(self.editRequested)
             row.duplicateClicked.connect(self.duplicateRequested)
+            row.stopClicked.connect(self.stopJobRequested)
             row.retryClicked.connect(self.retryRequested)
             row.chainRequested.connect(self.chainRequested)
             row.linkRequested.connect(self.linkRequested)
@@ -356,6 +360,11 @@ class JobQueuePage(QWidget):
     def set_started(self, started: bool) -> None:
         self._start_btn.setText("⏸  Pause queue" if started else "▶  Start queue")
 
-    def set_job_running(self, running: bool) -> None:
-        """Stop only means something while a job is actually in flight."""
-        self._stop_btn.setEnabled(bool(running))
+    def set_job_running(self, running: int) -> None:
+        """Stop only means something while a job is actually in flight, and
+        says how many it stops: with a remote Analyze beside a local job,
+        one button cancelling both must not read as cancelling one. A row's
+        own ⋯ ▸ Stop this job stops just that one."""
+        n = int(running)
+        self._stop_btn.setEnabled(n > 0)
+        self._stop_btn.setText("■  Stop both jobs" if n > 1 else "■  Stop job")

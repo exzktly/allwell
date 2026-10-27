@@ -292,7 +292,7 @@ def test_a_chained_successor_of_analyze_gets_the_dataset_root(qapp, tmp_path):
     c.bridge.add_job(JobSpec(id="v", kind="validate", label="V",
                              spec={"dataset": "/PLACEHOLDER"}))
     c.bridge.set_chain("v", "a")
-    c.bridge._current = ("a", "analyze")
+    c.bridge._running = {"analyze": ("a", "local")}
     c.bridge.queue.mark_running("a")
     c.bridge._on_job_finished("analyze", True, "", "/data/plateA_processed/out")
 

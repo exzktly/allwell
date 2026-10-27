@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QPushButton, QWidget
 
 from analyze.domain.job_edit import AnalyzeJobEditMixin
@@ -42,6 +43,11 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
     """Splits run-collection (``_collect_run_spec``) from run-starting
     (``start_run``) so a :class:`RunSpec` can be persisted and started later,
     independent of the form state at collection time."""
+
+    #: Emitted as a run starts, with that run's spec. The Job Queue takes in a
+    #: run started from this pane (``QueueBridge._on_run_started``) so jobs
+    #: queued after it wait for it; it ignores the runs it started itself.
+    runStarted = Signal(dict)
 
     def _collect_run_spec(self) -> RunSpec:
         return RunSpec(
@@ -141,6 +147,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
             # concurrently, into one output directory.
             queued=bool(getattr(self, "_starting_from_queue", False)),
         )
+        self.runStarted.emit(spec.to_json())
         return None
 
     # ── job queue (QueueableController hooks) ───────────────────────────────

@@ -12934,10 +12934,10 @@ just wrote to — suspend is asked about before stop, since a suspend sets both 
 asking the other way round would record every suspend as a cancel.
 
 The **Datasets Job Queue** can suspend too, and carries the result across a
-session. Its Pause button winds the running job down (`suspend_current`, which
-probes the runner for a `suspend` hook and falls back to a plain cancel for the
-Datasets tools, none of which has an equivalent boundary to stop at); a separate
-`Stop job` button is the destructive answer. A wound-down job goes to
+session. Its Pause button winds every running job down (`suspend_current`,
+which probes each runner for a `suspend` hook and falls back to a plain cancel
+for the Datasets tools, none of which has an equivalent boundary to stop at); a
+separate Stop button is the destructive answer. A wound-down job goes to
 `JobState.SUSPENDED` — deliberately not through `mark_finished`, since a suspend
 is not an outcome and treating it as a cancel would cascade its successors to
 BLOCKED as though its output were never coming.
@@ -14617,7 +14617,8 @@ had finished or what it concluded, because the completion line was gated on a
 silently returning: a queued job whose persisted `spec["dataset"]` is empty or
 missing (a hand-edited `job_queue.json`, per §Job Queue's own repair
 discipline) would otherwise never start a worker and never signal completion,
-stalling `QueueBridge._current` forever.
+leaving its kind in `QueueBridge._running` for ever, and the local lane
+with it.
 
 The dataset-folder field carries its own validator (`view.py::_is_dataset`,
 mirroring Concatenate's) — Validate used to be the one dataset-folder
@@ -15501,6 +15502,14 @@ Qt event loop. Four layers:
   says `(no input)` for a run missing its folder — worth preserving, since a
   row reading plain "Analyze" is indistinguishable from a well-formed job.
 
+- **`services/job_lanes.py`** — which jobs may run at the same time, Qt-free:
+  `run_lane(kind, spec)` (`remote` for an Analyze with a remote host, `local`
+  for everything else), `folders(kind, spec)` (the paths a job reads and
+  writes) and `conflicts(a, b)`. `JobQueue.next_to_start` applies them; the
+  bridge entry below says how. `describe_detail` names a remote Analyze's
+  host on its row ("runs on “cluster”"), since the host decides what may run
+  beside it.
+
 - **`datasets/job_queue/controller.py`** — the Qt-touching layer.
   `QueueableController` is the duck-typed protocol every runnable `kind`
   implements: `start_from_queue(spec)`, `show_job(spec)`, `stop()`,
@@ -15516,15 +15525,62 @@ Qt event loop. Four layers:
   has no one to answer); so does `AnalyzeTab`.
 
   `QueueBridge` owns the persisted `JobQueue` and a `kind -> QueueableController`
-  registry, and is the only thing that actually starts a job: strictly
-  serial, tracking the in-flight job as `(job_id, kind)` so a `jobFinished`
-  from a controller that isn't the queue's own current job — e.g. the user
-  pressed that tool's own Run button by hand while a *different* job was
-  running — is dropped rather than misattributed. That tuple can only really
-  distinguish by `kind` (`jobFinished` carries no job id), so the guard's
-  soundness depends on every `start_from_queue` path eventually emitting
-  `jobFinished` exactly once: a launch that silently no-ops on invalid input
-  would leave `_current` stuck forever, which is why
+  registry, and is the only thing that actually starts a job. It runs at
+  most one job per **lane** (`services/job_lanes.py`): `run_lane` puts an
+  Analyze job with a `remote_name` in the `remote` lane and every other job —
+  a local Analyze, every Datasets tool — in the `local` one, so a remote
+  Analyze, whose pipeline runs on the remote host, can run beside one local
+  job, and two local jobs, each of which works this computer hard, never run
+  together. `_advance` asks each free lane for its next job
+  (`JobQueue.next_to_start(lane, unavailable=…)`) and starts the earliest of
+  the answers in the queue first, repeating until neither lane can take one;
+  asking the lanes in a fixed order let a later local Analyze take the one
+  Analyze pane ahead of an earlier remote one. `next_to_start` returns the
+  first runnable job of that lane whose kind is not *unavailable* — its tool
+  busy with another queue job (a remote and a local Analyze share one pane)
+  or a run started by hand, or no tool registered — and that shares no
+  folder with any running job or any unfinished job ahead of it
+  (`job_lanes.folders` / `conflicts`: one writes a folder the other reads or
+  writes, the same folder or one inside the other; reading the same folder is
+  not a conflict). The second half is what keeps the queue's order meaning
+  something once two jobs run at once: a remote Analyze of a folder a
+  conversion above it is still to write — linked or typed — waits for it
+  instead of reading half of it, and a Validate below a remote Analyze of the
+  same dataset waits for the analysis. `folders` counts Validate as writing
+  its dataset, since a repair rewrites its metadata, and Analyze as writing
+  its dataset root (the folder above an `in/` input). In-flight jobs are
+  tracked as `_running: kind -> (job_id, lane)` — a tool runs one job at a
+  time, so the kind names the run.
+
+  **A run started on its tool's own page joins the queue.** Every tool
+  announces a run as it starts: the Datasets controllers through
+  `DatasetToolController._start_worker`, which starts the worker and emits
+  `runStarted(collect_spec())`, and Analyze from `start_run`, which every
+  entry point shares, as `runStarted(spec.to_json())`. `register` connects it
+  to `_on_run_started`, which ignores a kind already in `_running` — the
+  queue's own dispatch records the job before launching — and otherwise
+  takes the run in with `JobQueue.adopt`: a `JobSpec` with `adopted=True`,
+  running, inserted above every unfinished job and below the finished ones,
+  labelled with `describe` and the message "started on its own page", and
+  tracked in `_running` like a queue job. So whatever is queued after it
+  waits for it — the same lane, its folders, or a link to its output — and
+  its `jobFinished` records its outcome on its row, hands its folder to linked
+  jobs or blocks them, and lets the next job start. Before, the queue could
+  only skip the busy tool, and a job added behind a run by hand could start
+  beside it on the folder it was writing. `test_queue_adopts_a_page_run.py`
+  holds the seam: no Datasets controller may call `.start()` on a worker
+  except through `_start_worker`, with the Concatenate undo worker (not a
+  run) exempt by function name. After a restart an adopted job that was
+  running is marked **cancelled**, not interrupted, and its successors
+  blocked: its page owns resuming it — Analyze offers the run back from its
+  own banner, and the queue resuming it too would run one plate twice into
+  one output folder. A `jobFinished` from a kind with no queue job in flight
+  (a tool that announces nothing) is dropped rather than misattributed, then
+  nudges `_advance`, since a job skipped for that busy tool may now start. `jobFinished` carries no job id,
+  so the guard's soundness depends on every `start_from_queue` path
+  eventually emitting `jobFinished` exactly once: a launch that silently
+  no-ops on invalid input would leave its kind in `_running` for ever,
+  which is why
   `MergePlatesController._launch`'s remap-failure branch,
   `ValidateController._run`'s "no dataset path" branch and
   `OmeImportController._launch`'s "no source or destination" branch all emit
@@ -15797,7 +15853,10 @@ Qt event loop. Four layers:
   nothing is conditionally constructed.
 
   The header is `▶ Start queue` (primary, at the left edge, matching every
-  other Datasets page's own run button), `■ Stop job`, `+ Add job` — a menu
+  other Datasets page's own run button), `■ Stop job` (`■ Stop both jobs`
+  while two run — `set_job_running(n)` — since it stops every job in flight
+  via `stop_current`; a running row's ⋯ menu leads with *Stop this job*,
+  `stopClicked` → `QueueBridge.stop_job`, for one), `+ Add job` — a menu
   of all seven kinds, each opening a new-job session on that tool's page —
   and `Clear completed` at the right. Under it sits a one-line state tally
   (states with no jobs are omitted; "0 failed" is not news) and the load-time

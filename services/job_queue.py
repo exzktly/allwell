@@ -1,4 +1,5 @@
-"""A Qt-free, strictly-serial job queue for Analyze and Datasets-pane tools.
+"""A Qt-free job queue for Analyze and Datasets-pane tools, running at most
+one job per lane (``services.job_lanes``): a remote Analyze beside one local job.
 
 Persists a list of :class:`JobSpec` records — each one a JSON-shaped spec for
 a specific tool ("analyze", "concatenate", "validate", "subset",
@@ -30,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from services.job_kinds import short_label
+from services.job_lanes import conflicts, folders, run_lane
 from services.remote_config import default_state_dir
 from util.state_dir import adopt_legacy_file, legacy_config_dirs
 
@@ -134,6 +136,11 @@ class JobSpec:
     #: results describe output that no longer exists, and the row says so.
     #: Cleared when this job is run again.
     stale_because: str = ""
+    #: A run the user started on the tool's own page, which the queue took in
+    #: (:meth:`JobQueue.adopt`) so jobs could wait behind it. Persisted: after
+    #: a restart such a job is not resumed by the queue (see
+    #: ``_repair_after_load``).
+    adopted: bool = False
     state: str = JobState.PENDING
     message: str = ""
     output_dir: str | None = None
@@ -188,6 +195,7 @@ class JobSpec:
             "extra_links": [link.to_json() for link in self.extra_links],
             "orphaned_inputs": dict(self.orphaned_inputs),
             "stale_because": self.stale_because,
+            "adopted": self.adopted,
             "state": self.state,
             "message": self.message,
             "output_dir": self.output_dir,
@@ -212,6 +220,7 @@ class JobSpec:
                              (data.get("orphaned_inputs") or {}).items()}
             if isinstance(data.get("orphaned_inputs"), dict) else {},
             stale_because=str(data.get("stale_because") or ""),
+            adopted=bool(data.get("adopted", False)),
             state=data.get("state", JobState.PENDING),
             message=data.get("message", ""),
             output_dir=data.get("output_dir"),
@@ -263,7 +272,8 @@ def lineage(jobs: list[JobSpec], job_id: str) -> set[str]:
 
 
 class JobQueue:
-    """Ordered, dependency-gated, strictly-serial job list. Pure bookkeeping —
+    """Ordered, dependency-gated job list, one job per lane at a time
+    (:meth:`next_to_start`). Pure bookkeeping —
     it decides what's runnable next and records outcomes; it never starts a
     subprocess or a ``QThread`` itself.
     """
@@ -303,6 +313,25 @@ class JobQueue:
         if job.id in self._by_id:
             raise ValueError(f"duplicate job id {job.id!r}")
         self._jobs.append(job)
+        self._by_id[job.id] = job
+
+    def adopt(self, job: JobSpec) -> None:
+        """Take in a run already going, started on its tool's own page.
+
+        It goes in as a running job above every job still waiting — directly
+        below the jobs that already finished — so whatever is queued after it
+        waits for it as it would for a queue job: a job of the same lane, one
+        sharing its folders, or one linked to its output. Nothing it does is
+        decided here; the tool's ``jobFinished`` records its outcome as for
+        any job.
+        """
+        if job.id in self._by_id:
+            raise ValueError(f"duplicate job id {job.id!r}")
+        job.adopted = True
+        job.state = JobState.RUNNING
+        index = next((i for i, j in enumerate(self._jobs) if j.state in self.UNFINISHED),
+                     len(self._jobs))
+        self._jobs.insert(index, job)
         self._by_id[job.id] = job
 
     def remove(self, job_id: str) -> None:
@@ -731,6 +760,49 @@ class JobQueue:
                 return job
         return None
 
+    #: The states of a job that has not finished and will still run — what a
+    #: later job must not overtake while sharing a folder with it. Blocked jobs
+    #: are not here: they run only once retried, and holding the jobs below
+    #: them back until then would stall a queue behind one failure.
+    UNFINISHED = frozenset({JobState.PENDING, JobState.RUNNING}) | JobState.RESUMABLE
+
+    def next_to_start(self, lane: str, *, unavailable: frozenset[str] | set[str] = frozenset()
+                      ) -> JobSpec | None:
+        """The first job that can start now in *lane* (``services.job_lanes``),
+        in queue order, or ``None``.
+
+        Runnable as :meth:`next_runnable` means it, of a kind not in
+        *unavailable* (whose tool is busy, or not registered), and sharing no
+        folder with any running job or any unfinished job ahead of it
+        (``job_lanes.conflicts``). The second rule is what keeps the queue's
+        order meaningful once two jobs run at a time: a remote Analyze of a
+        folder that a conversion queued above it is still writing — linked or
+        not — waits for the conversion instead of reading half of it.
+        """
+        def touched(job: JobSpec) -> tuple[set[str], set[str]]:
+            try:
+                spec = self.materialise(job.id)
+            except ValueError:
+                spec = job.spec
+            return folders(job.kind, spec)
+
+        running = [j for j in self._jobs if j.state == JobState.RUNNING]
+        for index, job in enumerate(self._jobs):
+            if job.state != JobState.PENDING and job.state not in JobState.RESUMABLE:
+                continue
+            if job.kind in unavailable or run_lane(job.kind, job.spec) != lane:
+                continue
+            preds = [self._by_id.get(source) for source in job.sources()]
+            if not all(pred is None or pred.state == JobState.SUCCEEDED for pred in preds):
+                continue
+            mine = touched(job)
+            ahead = [j for j in self._jobs[:index] if j.state in self.UNFINISHED]
+            others = {j.id: j for j in (*ahead, *running) if j.id != job.id}
+            if any(conflicts(mine, touched(other)) for other in others.values()):
+                continue
+            return job
+        return None
+
     def materialise(self, job_id: str) -> dict:
         """Return a deep copy of ``job_id``'s persisted JSON spec with every
         linked input resolved from its source job's produced output.
@@ -899,7 +971,19 @@ class JobQueue:
         from opening the queue page at all."""
         notes: list[str] = []
         for j in self._jobs:
-            if j.state == JobState.RUNNING:
+            if j.state == JobState.RUNNING and j.adopted:
+                # Started on its own page, so its page owns picking it up
+                # again: Analyze offers that run back from its own banner, and
+                # the queue resuming it too would run one plate twice into one
+                # output folder. Cancelled rather than interrupted, so the
+                # queue never starts it on its own; Retry is still there.
+                j.state = JobState.CANCELLED
+                j.message = ("interrupted by an app restart — it was started on its "
+                             "own page, so resume it there (or Retry it here)")
+                self._cascade_block(j.id)
+                notes.append(f"{j.id}: was running at last save, started on its own "
+                             "page — marked cancelled; resume it on that page")
+            elif j.state == JobState.RUNNING:
                 # Not a failure and not a dead end. Whatever the run had
                 # finished is on disk, and INTERRUPTED is resumable, so
                 # starting the queue picks this job up again rather than

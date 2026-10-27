@@ -313,7 +313,7 @@ def test_unlinking_an_input_lets_a_started_queue_run_the_job(queue):
     jq.tools["subset"].start_from_queue = lambda spec: None
     jq.bridge.set_link("v", "dataset", "a")
     jq.bridge.queue.mark_running("a")    # 'a' is busy elsewhere, so v waits
-    jq.bridge._current = None
+    jq.bridge._running = {}
     jq.bridge.queue.start()
     jq.bridge.set_link("v", "dataset", "")
     assert len(started) == 1 and started[0]["dataset"] == "/somewhere"

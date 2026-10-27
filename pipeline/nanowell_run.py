@@ -22,6 +22,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 import math
+import time
 from pathlib import Path
 from types import MappingProxyType
 
@@ -1451,6 +1452,11 @@ def record_digest(record: dict, well: str, timepoint: str) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
+def _tile_count(record: dict, well: str, timepoint: str) -> int:
+    """How many tiles the record holds for this (well, timepoint): what :func:`_images_for` will try to read."""
+    return sum(1 for tile in record["tiles"] if tile["well"] == well and tile["timepoint"] == timepoint)
+
+
 def _images_for(record: dict, well: str, timepoint: str, load_phase) -> dict:
     """Phase image per tile of this (well, timepoint) in the record; a tile that cannot be read is left out."""
     images = {}
@@ -2152,6 +2158,11 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     timepoints = list(timepoints)
     steps = _Steps(progress, len(timepoints), site_progress, note, settings, cellpose=segmenter is None)
     for tp in timepoints:
+        started = time.monotonic()
+        if note is not None:
+            # Reading, placing and registering a timepoint's tiles is the longest quiet stretch of a nanowell well;
+            # without a line before it the run read as stuck (the next line came only when it had finished).
+            note(f"{tp}: reading, placing and registering {_tile_count(record, well, tp)} tile(s)")
         images = _images_for(record, well, tp, load_phase)
         located = locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape,
                                    plate_rigid=(plate_rigid or {}).get(tp), stored=(stored_placements or {}).get(tp),
@@ -2162,6 +2173,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         outcome.timepoints[tp] = dict(located.grid) or {"status": located.status, "reason": located.reason}
         outcome.timepoints[tp]["record_digest"] = record_digest(record, well, tp)
         del images
+        if note is not None:
+            note(f"{tp}: tiles placed and registered in {time.monotonic() - started:.0f} s ({located.status})")
         steps.tick()
     anchored = [tp for tp in timepoints if outcome.located[tp].status == OK]
     unaddressed = [tp for tp in timepoints if outcome.located[tp].status == UNADDRESSED]

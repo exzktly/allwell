@@ -18221,27 +18221,56 @@ you're in before you type the command.
 - **Pure-logic / unit tests** (Qt-free: `pipeline/*`, `domain/*`,
   `spatial_compute`, `multivariate_compute`, layout math, …). Fast, cheap,
   safe to run in bulk. This is the CI "fast lane" — run it with
-  **`scripts/test.sh`** (~12,340 tests of ~13,160 collected, ~4 min on a quiet
-  four-CPU container). CI invokes that same script, so a local run and the CI run cannot
+  **`scripts/test.sh`** (~11,850 tests locally, ~11,230 in CI, which leaves out
+  the UI tests below). CI invokes that same script, so a local run and the CI run cannot
   drift in flags or config; hand-rolling `pytest tests/ -m "not slow"` skips the
-  `--timeout=90` CI applies and runs the nanowell end-to-end files below as well.
+  `--timeout=90` CI applies and runs the gated lanes below as well.
   Re-count rather than trusting the figure when it matters, with the marker
   expression `scripts/test.sh` uses (`MARK` there):
-  `python -m pytest tests -m "not slow and not nanowell_e2e" -q --collect-only | tail -1`
+  `python -m pytest tests -m "not slow and not nanowell_e2e and not nanowell_feature and not remote_lane" -q --collect-only | tail -1`
   prints the split in a few seconds.
-- **Nanowell end-to-end tests** (`tests/conftest.py::NANOWELL_E2E_FILES`, ~250
-  tests in eleven Qt-free files). Each renders synthetic tiles and runs the real
-  lattice and site detection over them, so a test body is seconds to a minute;
-  together about 1,075 s of work, with `test_nanowell_run.py` alone at 475 s. The
-  collection hook marks them `nanowell_e2e`; the fast lane excludes them and
-  **`scripts/test.sh --nanowell`** runs them, distributed by test rather than by
-  file so the 475 s file does not set the wall time. CI runs that lane as a job
-  of its own beside the fast lane, both gated on their JUnit reports
-  (`scripts/junit_gate.py`), and `scripts/preflight.sh` runs it when the branch
-  touches `pipeline/`, nanowell code, `tests/conftest.py` or `scripts/test.sh`.
-  Naming test files on the command line selects them whichever lane they belong
-  to. `tests/test_the_fast_lane_stays_fast.py` holds the roster to real files,
-  the hook to marking them, and CI to running the lane.
+- **Gated lanes** (`tests/_lanes.py`). Three rosters run outside the fast lane,
+  each as a lane of its own, and only when a change can reach them:
+  - **Nanowell end-to-end** (`NANOWELL_E2E_FILES`, ~320 tests in sixteen
+    Qt-free files; `conftest.py` re-exports the roster). Each renders synthetic
+    tiles and runs the real lattice and site detection, so a test body is
+    seconds to a minute; together about 1,075 s of work, with
+    `test_nanowell_run.py` alone at 475 s. Marked `nanowell_e2e`;
+    **`scripts/test.sh --nanowell`** runs them, distributed by test rather than
+    by file so the 475 s file does not set the wall time.
+  - **Nanowell features** (`NANOWELL_FEATURE_FILES`, ~1,020 tests in sixty-one
+    files). Every other nanowell test: the Analyze form's Nanowells section, the
+    Nanowells page and its views, the Playground's array search, Review's
+    nanowell data, tile registration. About 530 s of work — a third of what the
+    fast lane spent before the split. Marked `nanowell_feature`;
+    **`scripts/test.sh --nanowell-features`**, by file.
+  - **Remote / HPC** (`REMOTE_FILES`, ~800 tests in sixty-eight files): ssh,
+    rsync, the remote runner and its batches, Slurm, the bootstrap, the Remotes
+    dialogs; about 100 s. Marked `remote_lane`; **`scripts/test.sh --remote`**.
+
+  `GATES` in the same module names two gates, `nanowell` (both nanowell lanes)
+  and `remote`, each with its rosters and path patterns.
+  `scripts/lane_needed.py <gate> [--base REF]` answers whether a change needs
+  them: a changed path matching the patterns, or a first-party module one of the
+  gate's roster files imports **directly** (read from the files' syntax trees on
+  each run, so a new test extends its trigger by joining the roster), means run
+  it; a diff that cannot be computed means run it. The import closure cannot be
+  the trigger — one `import analyze.tab` reaches most of the application — so a
+  module two imports away can still move a gated test without triggering its
+  lane. CI's `nanowell` job (the end-to-end lane) and `gated` job (the feature
+  and remote lanes, one gate step each) therefore ask the script on a pull
+  request and run unconditionally on a push to `main`; every run is gated on its
+  JUnit report (`scripts/junit_gate.py`). `scripts/preflight.sh` asks the same
+  question before running each lane. Measured over the 52 merges before the
+  split, the nanowell gate would have fired on 46 (that stretch was mostly
+  nanowell work) and the remote gate on 27; even when a gate fires, moving its
+  tests into a parallel job takes about five minutes off CI's fast-lane job.
+  No file is in two rosters and no whole-tree guard is in any. Naming test files
+  on the command line selects them whichever lane they belong to.
+  `tests/test_the_fast_lane_stays_fast.py` holds every roster to real files in
+  one roster, the hook to marking each with its own mark, `scripts/test.sh` to
+  keeping each out of the fast lane, CI and preflight to running each lane behind
+  its gate, and each gate to seeing both its patterns and its tests' imports.
 - **UI tests** (`tests/_lanes.py::UI_LANE_FILES`, ~620 tests in seventy files),
   which run in the local fast lane and are left out of CI's. They are the tests
   whose subject is how the GUI looks and lays out: widget geometry, wrapping and

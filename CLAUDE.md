@@ -40,7 +40,10 @@ python process_microscopy.py --input_dir … --output_dir …   # pipeline only,
 
 ruff check .                                   # lint — CI pins ruff==0.15.8, config in pyproject.toml
 scripts/test.sh                                # THE test command — CI runs this same script
-scripts/test.sh --nanowell                     # the nanowell end-to-end lane (CI's second test job)
+scripts/test.sh --nanowell                     # the nanowell end-to-end lane (gated)
+scripts/test.sh --nanowell-features            # the other nanowell tests (gated)
+scripts/test.sh --remote                       # the remote / HPC tests (gated)
+python scripts/lane_needed.py nanowell|remote  # does this branch need that gate's lanes? (exit 0 = yes)
 scripts/test.sh --ui                           # only the GUI layout / appearance tests
 scripts/test.sh --no-ui                        # the fast lane as CI runs it (UI tests left out)
 scripts/test.sh tests/test_app_smoke.py -m ""  # full-app tests: one or two files at a time
@@ -71,20 +74,32 @@ for a bare `python -m pytest`.
 The suite has three lanes and **running the wrong one hangs the run and OOM-kills
 the container**:
 
-- **Fast lane** (~12,340 tests of ~13,160 collected): `scripts/test.sh`.
+- **Fast lane** (~11,850 tests locally, ~11,230 in CI): `scripts/test.sh`.
   Pure-logic, guardrail, and per-feature tests. CI invokes this same script, so
   local and CI runs cannot drift in flags or config — don't hand-roll a `pytest`
   command.
-- **Nanowell lane** (~250 tests): `scripts/test.sh --nanowell`. The nanowell
-  files that render synthetic tiles and run the real detection end to end
-  (`tests/conftest.py::NANOWELL_E2E_FILES`, each with its cost). About 1,075 s of
-  work: in the fast lane they took it from ~2.5 to ~9.5 min and CI to within
-  three minutes of its cap. CI runs this lane as its own job, in parallel;
-  `scripts/preflight.sh` runs it when the branch touches the pipeline, nanowell
-  code or the lane split. It distributes by test (`--dist load`), not by file,
-  because one of its files is 475 s. Naming files (`scripts/test.sh
-  tests/test_nanowell_run.py`) runs them whichever lane they belong to. A new
-  nanowell test that renders tiles and detects joins the roster.
+- **Gated lanes** — three rosters in `tests/_lanes.py`, each its own lane, each
+  run only when the change can reach it:
+  - **Nanowell end-to-end** (~320 tests, `--nanowell`): the files that render
+    synthetic tiles and run the real detection (`NANOWELL_E2E_FILES`, each with
+    its cost; ~1,075 s of work). Distributed by test (`--dist load`), because
+    one file is 475 s. A new test that renders tiles and detects joins it.
+  - **Nanowell features** (~1,020 tests, `--nanowell-features`): every other
+    nanowell test — form, page, playground search, Review's nanowell data. About
+    530 s of work, a third of what the fast lane used to spend.
+  - **Remote / HPC** (~800 tests, `--remote`): ssh, rsync, the remote runner,
+    batches, Slurm, bootstrap, the Remotes dialogs (~100 s).
+
+  `scripts/lane_needed.py nanowell|remote` decides: a changed path matching the
+  gate's patterns, or a module one of its tests imports *directly*, means run it
+  (as does a diff it cannot compute). `scripts/preflight.sh` and CI both ask;
+  CI also runs every gated lane on each push to `main`, which is where a change
+  two imports away gets caught. **If you skip preflight, ask the script yourself
+  and run the lanes it names before pushing.** Over the 52 merges before the
+  split, the nanowell gate would have fired on 46 (that period was mostly
+  nanowell work) and the remote gate on 27. A new nanowell or remote test joins
+  its roster. Naming files (`scripts/test.sh tests/test_nanowell_run.py`) runs
+  them whichever lane they belong to.
 - **UI tests** (~620 tests, inside the fast lane): GUI layout and appearance —
   widget geometry, fit, colours, theme, dashboards, phone layout, and the bare
   widgets in `widgets/` (`tests/_lanes.py::UI_LANE_FILES`, each with its
@@ -167,9 +182,10 @@ only shows in that sum. When CI is cancelled at its cap, sum the phases before
 theorising, and compare against the base branch on the same machine rather
 than against a different runner's log.
 
-Re-count rather than trusting these when it matters: `python -m pytest tests -m
-"not slow and not nanowell_e2e" -q --collect-only | tail -1` prints the fast
-lane's split in about two seconds (that is the marker `scripts/test.sh` runs).
+Re-count rather than trusting these when it matters: `ALLWELL_TEST_WORKERS=0
+scripts/test.sh [--no-ui|--nanowell|--nanowell-features|--remote] --collect-only -q
+| tail -1` prints a lane's split in about ten seconds, with exactly the marker the
+lane runs.
 
 Rules: never run a bare `pytest tests/` or `-m slow` across everything here. Run
 full-app tests a file or two per process (budget ≲15–20 app constructions per

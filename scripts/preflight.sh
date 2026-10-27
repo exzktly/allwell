@@ -9,7 +9,7 @@
 # you deleted — and scratch output about to be committed by accident, which is
 # how 21 JUnit XMLs once reached main.
 #
-#   scripts/preflight.sh          # lint + fast lane (+ nanowell lane when touched) + tree check
+#   scripts/preflight.sh          # lint + fast lane (+ nanowell / remote lanes when reachable) + tree check
 #   scripts/preflight.sh --quick  # skip the fast lane (lint + tree only, ~2s)
 #
 # Exit status: 0 only when every check passes.
@@ -73,17 +73,23 @@ if (( QUICK == 0 )); then
     step "fast lane (scripts/test.sh, UI tests included)"
     run_lane "fast lane"
 
-    # The nanowell end-to-end lane is CI's second test job (tests/conftest.py NANOWELL_E2E_FILES).
-    # It costs about five minutes, so it runs here only when the branch touches what it tests: the
-    # pipeline, the nanowell code and its tests, or the harness that splits the lanes.
-    step "nanowell lane (scripts/test.sh --nanowell)"
-    touched=$( { git diff --name-only origin/main... 2>/dev/null; git diff --name-only HEAD; } | sort -u)
-    if grep -qE '(^pipeline/|^process_microscopy\.py|nanowell|^tests/conftest\.py|^scripts/test\.sh)' <<<"$touched"; then
+    # The gated lanes (tests/_lanes.py): the nanowell end-to-end and feature tests, and the remote /
+    # HPC tests. Each runs only when scripts/lane_needed.py says this branch can reach it — the same
+    # question CI's jobs ask — because together they cost several minutes.
+    step "nanowell lanes (scripts/test.sh --nanowell, --nanowell-features)"
+    if python scripts/lane_needed.py nanowell | sed 's/^/   /'; then
         run_lane "nanowell lane" --nanowell
+        run_lane "nanowell feature lane" --nanowell-features
     else
-        echo "   skipped (nothing on this branch touches the pipeline or nanowell code)"
+        echo "   skipped"
     fi
 
+    step "remote lane (scripts/test.sh --remote)"
+    if python scripts/lane_needed.py remote | sed 's/^/   /'; then
+        run_lane "remote lane" --remote
+    else
+        echo "   skipped"
+    fi
 else
     step "fast lane"
     echo "   skipped (--quick)"

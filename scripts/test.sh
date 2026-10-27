@@ -11,6 +11,8 @@
 #
 #   scripts/test.sh                      # the fast lane
 #   scripts/test.sh --nanowell           # the nanowell end-to-end lane
+#   scripts/test.sh --nanowell-features  # the rest of the nanowell tests
+#   scripts/test.sh --remote             # the remote / HPC tests
 #   scripts/test.sh --ui                 # only the GUI layout / appearance tests
 #   scripts/test.sh --no-ui              # the fast lane without them (what CI runs)
 #   scripts/test.sh -k threshold         # a subset of it
@@ -65,34 +67,33 @@ fi
 # worker count. Without xdist installed the lane runs serially, as it always did.
 #
 # Two lanes share this script. The default is the fast lane. `--nanowell` runs the nanowell
-# end-to-end files instead (tests/conftest.py NANOWELL_E2E_FILES: rendered tiles through the real
+# end-to-end files instead (tests/_lanes.py NANOWELL_E2E_FILES: rendered tiles through the real
 # detection, about 1,075 s of work), which CI runs as a job of its own beside the fast lane. That
 # lane distributes by test (`--dist load`) rather than by file: one of its files is 475 s, and kept
-# on one worker it would set the lane's wall time. The GUI layout and appearance files
-# (tests/_lanes.py UI_LANE_FILES) are part of the local fast lane but not of CI's: CI passes
+# on one worker it would set the lane's wall time. `--nanowell-features` and `--remote` run the
+# other two gated rosters (tests/_lanes.py); preflight and CI run all three only when
+# `scripts/lane_needed.py` says the change can reach them, and CI always on main. The GUI layout and
+# appearance files (UI_LANE_FILES) are part of the local fast lane but not of CI's: CI passes
 # `--no-ui` to leave them out, and `--ui` runs them alone.
 # Naming test files on the command line selects
 # them whichever lane they belong to, so `scripts/test.sh tests/test_nanowell_run.py` runs it.
-MARK="not slow and not nanowell_e2e"
+FAST="not slow and not nanowell_e2e and not nanowell_feature and not remote_lane"
+MARK="$FAST"
 DIST=loadfile
-if [[ "${1:-}" == "--nanowell" ]]; then
-    shift
-    MARK="nanowell_e2e and not slow"
-    DIST=load
-elif [[ "${1:-}" == "--ui" ]]; then
-    shift
-    MARK="ui_lane and not slow"
-elif [[ "${1:-}" == "--no-ui" ]]; then
-    shift
-    MARK="not slow and not nanowell_e2e and not ui_lane"
-else
-    for arg in "$@"; do
-        if [[ "$arg" == tests/* || "$arg" == *.py || "$arg" == *.py::* ]]; then
-            MARK="not slow"
-            break
-        fi
-    done
-fi
+case "${1:-}" in
+    --nanowell)          shift; MARK="nanowell_e2e and not slow"; DIST=load ;;
+    --nanowell-features) shift; MARK="nanowell_feature and not slow" ;;
+    --remote)            shift; MARK="remote_lane and not slow" ;;
+    --ui)                shift; MARK="ui_lane and not slow" ;;
+    --no-ui)             shift; MARK="$FAST and not ui_lane" ;;
+    *)
+        for arg in "$@"; do
+            if [[ "$arg" == tests/* || "$arg" == *.py || "$arg" == *.py::* ]]; then
+                MARK="not slow"
+                break
+            fi
+        done ;;
+esac
 
 XDIST=()
 workers="${ALLWELL_TEST_WORKERS:-auto}"

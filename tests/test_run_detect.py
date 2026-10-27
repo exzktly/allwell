@@ -345,3 +345,24 @@ def test_a_channel_in_one_well_only_is_still_listed(tmp_path):
     assert not any("_Cy7_" in s for s in sample_stems(raw)), "fixture: sample must miss it"
     _spec_out, layout = resolve_detection(_spec(raw))
     assert layout.fluor_tokens == ["GFP", "RFP", "Cy7"]
+
+
+def test_a_concatenated_plate_s_prefix_is_not_taken_for_the_channel_when_the_sample_is_strided(tmp_path, monkeypatch):
+    """Run-time detection strides a plate larger than its sample (``_INFER_SAMPLE``); the stride can drop every pair
+    of images of one tile, which is what tells a concatenation's two prefixes from its channels."""
+    import zipfile
+
+    import services.run_detect as run_detect
+
+    raw = tmp_path / "plate"
+    (raw / "in").mkdir(parents=True)
+    for well in ("A01", "A02", "B01", "B02"):
+        with zipfile.ZipFile(raw / "in" / f"{well}.zip", "w") as zf:
+            for n, prefix in enumerate(("expA", "expB")):
+                for t in range(4 * n, 4 * n + 4):
+                    for chan in ("PHASE", "GFP", "RFP"):
+                        zf.writestr(f"{prefix}_{chan}_{well}_f1_t{t}.tif", b"")
+    monkeypatch.setattr(run_detect, "_INFER_SAMPLE", 8)
+    layout = run_detect.detect_layout(raw)
+    assert layout.schema == "ignore:channel:well:fov:timepoint"
+    assert {layout.nuclear_token, *layout.fluor_tokens, layout.phase_token} - {""} == {"PHASE", "GFP", "RFP"}

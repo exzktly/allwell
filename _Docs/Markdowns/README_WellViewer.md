@@ -1641,6 +1641,20 @@ node, a GPU node whose Torch is a CPU-only build, or a missing Torch is called
 out with what to change. A node that has to start can take several minutes;
 closing the window cancels the job.
 
+**Reserve the whole node (--exclusive)**, under the scheduler command, is ticked
+by default, including for remotes you set up before it existed. It asks Slurm for
+the node to yourself, so no other job lands on the same machine. Without it two
+runs, for example from two All-Well windows at once, can be placed on one node
+and compete for its memory, because many clusters only count CPUs when packing
+jobs together. The app adds `--exclusive` to the `srun` command when a run is
+sent, and the run log's hand-off line shows the command as sent. The scheduler
+command you typed is not changed, and one that already says `--exclusive` or
+`--oversubscribe` is used as written. Untick it on a cluster where you are
+charged for the whole node and want other jobs to share it. With `--exclusive`
+it is still the scheduler command's `--cpus-per-task` that decides how many of
+the node's CPUs the run uses; the run log warns when Slurm gave it only one or
+two of a bigger node's.
+
 **Fetch** next to *Compute profile* reads the cluster's JupyterHub
 configuration and lists the compute options its web page offers; picking one
 fills in the scheduler command. The command is built the way JupyterHub builds

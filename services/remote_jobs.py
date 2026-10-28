@@ -57,13 +57,11 @@ def close_remote_job(
     ``$SLURM_JOB_ID`` the run wrote to ``<pidfile>.slurm`` on the shared
     filesystem and ``scancel``s it via a fresh ssh.
 
-    ``srun`` already exits when the pipeline finishes *or* fails, so in
-    the common case the job is gone before we get here and this does
-    nothing. Its job is to make sure an *orphaned* allocation — ssh /
-    srun client died, connection dropped, AllWell crashed mid-run —
-    never lingers in the queue waiting on the user. Called from the
-    PipelineRunner's ``finally`` (covers complete / fail / exception)
-    and from :meth:`cancel` (covers user Stop)."""
+    ``srun`` exits with the pipeline, so usually the job is gone already;
+    this makes sure an *orphaned* allocation (ssh / srun client died,
+    connection dropped, AllWell crashed) never lingers. Called from the
+    PipelineRunner (complete / fail / exception) and from :meth:`cancel`
+    (user Stop); ``services.remote_liveness`` then confirms it."""
     if not host.compute_launcher.strip():
         return
     if run is None:
@@ -90,6 +88,9 @@ def close_remote_job(
             f"remote job ({exc}); a SLURM allocation may still be running.\n")
         return
     out = (result.stdout or "")
+    if result.returncode == 255:      # ssh's own failure: nothing ran, so nothing is known
+        log("[remote] WARN scheduler: could not reach the host to cancel the job (ssh exit 255).\n")
+        return
     if "AW_SCANCELLED" in out:
         jid = out.split("AW_SCANCELLED", 1)[1].strip().split()[0:1]
         log(
@@ -107,10 +108,9 @@ def close_remote_job(
             f"running.\n")
     else:
         # The common case: ``srun`` already exited with the pipeline, so
-        # there was no allocation left to cancel. Confirm the clean
-        # teardown so the log has a definite end-of-job marker rather
-        # than silence.
-        log("[remote] scheduler: job already finished — nothing to cancel.\n")
+        # there was nothing left to cancel — which scancel cannot confirm
+        # (its exit status is discarded); the caller asks squeue.
+        log("[remote] scheduler: no job left to cancel.\n")
 
 
 def sweep_orphaned_allocation(

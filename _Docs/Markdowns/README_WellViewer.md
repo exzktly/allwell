@@ -1587,7 +1587,12 @@ folder, so Review cannot tell the difference afterwards.
 **A small server icon in the run panel's status line, at its right end, shows the run's Slurm job** on a host that
 runs through a scheduler. It is green while the job is open — granted a node
 and holding it — and grey while the job is still queued for a node; once the
-job closes, or on a host with no scheduler, there is no icon. Hover over it
+job closes, or on a host with no scheduler, there is no icon. The job is
+called closed only once the host confirms the scheduler no longer lists it.
+When the run has ended and that cannot be confirmed — the host did not answer,
+or the scheduler still lists the job — the icon stays, in amber, the log says
+*job state unknown* and why, and the job may still be running: check `squeue`
+on the host. Hover over it
 for the job number and what the node is: its name and partition, the CPUs the
 job was given out of the node's total, the CPU model, the memory given and the
 node's total, its GPUs, and the job's time limit. A detail the node could not
@@ -1962,7 +1967,30 @@ and by `remote_fetch_report.txt` in the output folder.
   upload it ends the upload and nothing is launched on the host; pressed later,
   the host-side kill runs in the background rather than holding up the window.
   On Windows this includes an All-Well started from a terminal: Stop ends the
-  connection to the host and leaves the app open.
+  connection to the host and leaves the app open. Once the run has ended, the
+  app checks with the host that it really stopped — on a cluster, that the
+  scheduler no longer lists the job. If the host cannot be reached (the network
+  is down, say), the headline says *stopped here, but not confirmed on the host
+  (… did not answer …) — it may still be running*: check the host yourself, with
+  `squeue` on a cluster, before you assume the allocation is gone.
+- **A run nobody stopped says what ended it.** On a cluster the pipeline is
+  sometimes ended from outside — the job reaches its time limit, it is
+  preempted, its node fails, an administrator cancels it, or a batch outlives
+  the time budget the batch driver gives it. The run is then reported as a
+  failure that names the cause (*Remote pipeline was terminated: the scheduler
+  ended job 4242 at its time limit.*), the raw log opens, and the run is
+  offered back as a *Failed run*. It is never shown as your Suspend — that is
+  only ever a Suspend you pressed. The wells that finished are kept; resume to
+  run the rest (for a time limit, with a longer `--time` in the host's
+  launcher, or a smaller batch size). A local run that is sent a termination
+  signal by something other than Stop or Suspend is reported the same way.
+- **A dropped connection is reported as one.** If the connection to the host
+  breaks during a remote run, the headline says *Connection to <host> lost*
+  with ssh's own reason (*Timeout, server … not responding*, *Connection …
+  closed*, *Broken pipe*), the log shows that line in red, and the message says
+  whether the job is still running on the host, no longer running, or — when
+  the host cannot be reached to ask — may still be running. Resume downloads the
+  wells it finished and runs the rest.
 - Either way the wells already finished keep their results, so nothing you have
   waited for is thrown away — Suspend just also keeps the fields in progress and
   saves you re-entering the form.

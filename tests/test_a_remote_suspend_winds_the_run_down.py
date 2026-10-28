@@ -477,7 +477,7 @@ def test_a_previous_run_s_late_thread_cannot_touch_the_next_run(runner):
     assert runner._cleanup_remote == "none"
 
 
-def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag, stop_flag=False):
+def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag, stop_flag=False, asked=False):
     """Run the real `_run_pipeline_remote` with staging and the host stubbed."""
     import types
 
@@ -522,6 +522,9 @@ def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag, stop_flag=F
     holder.append(r)
     if suspend_flag:
         r._suspend_requested.set()
+    # Whether this run asked: a suspend marker counts as the user's only then
+    # (tracker D1 — otherwise it is a termination from somewhere else).
+    r._suspend_asked = bool(suspend_flag or asked)
     opts = {"filename_schema": "a:b", "filename_sep": "_", "fluor_tokens": ["GFP"],
             "nuclear_token": "DAPI"}
     r._run_pipeline_remote(tmp_path / "in", tmp_path / "out", [], opts,
@@ -539,7 +542,7 @@ def test_a_run_that_says_it_saw_the_request_is_suspended_whatever_the_ssh_said(
     The line is the pipeline's own, as `pipeline.suspend` writes it.
     """
     r, kinds, verified, hooks = _drive_remote_run(
-        monkeypatch, tmp_path, suspend_flag=False,
+        monkeypatch, tmp_path, suspend_flag=False, asked=True,
         lines=["Well A01 F001 starting\n",
                "2026 WARNING SUSPEND requested (request file /x) — finishing\n",
                "Well A01 F001 done.\n"])

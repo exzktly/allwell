@@ -1697,7 +1697,10 @@ so the upload is smaller, and the log now names which channel and how many
 frames. If the saving would be trivial — a couple of small frames out of a large
 well — it says so and uploads the archive untouched instead, because copying it
 locally to save that would cost more than it saves. An archive with nothing to
-drop is never copied and never mentioned.
+drop is never copied and never mentioned. A rebuilt archive comes out the same
+every time for the same plate and channels, so retrying a run that failed finds
+it already on the remote and does not send it again; changing an image or the
+channel list sends it afresh.
 
 The rebuilt archives are **copies**, made in a hidden `.allwell-transit` folder
 beside your input and deleted when the run ends; your own files keep every

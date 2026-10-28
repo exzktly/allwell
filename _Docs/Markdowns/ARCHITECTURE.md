@@ -12318,10 +12318,9 @@ This is not an edge case: the Analyze tab always requests selective channels, so
 a run whose channel list happens to cover every image in the plate takes the
 filtered path with a filter that drops nothing — and used to copy the whole plate
 into the OS temp dir to get there. It also makes the upload cache work as
-designed, since `RemoteRunner.cache_key` hashes each archive's `(name, size,
-mtime)`: a freshly-written staging copy has a new mtime every run, so an
-unchanged plate keyed differently every time and re-uploaded; passing the source
-through keeps the key stable and the second run skips the transfer.
+designed, since `RemoteRunner.cache_key` hashes each archive's name, size,
+whole-second mtime and member list (`remote_scratch.fingerprint_archives`), and
+passing the source through keeps all four as they are.
 **MIXED mode** — some wells zipped, others still folders, the signature of a
 run that died mid-compression — stages through the same two passes; it is the
 mode most likely to arise on a slow share, so a full copy there was the worst
@@ -12339,15 +12338,27 @@ byte was uploaded; `tests/test_staging_keeps_every_image.py` holds every layout,
 copy and move mode, to "every image still exists under the input, byte for
 byte, after staging, after a failed run and after a successful one".)
 
-**An archive that *is* rewritten keys differently every run, and the run journal
-is what stops that losing work.** The pass-through above keeps the key stable
-only for archives nothing was dropped from; a channel filter that clears
-`REWRITE_MIN_SAVING`, and every incremental split, write a fresh copy into
-scratch, so the file being hashed was created moments ago and the plate resolves
-to a different `runs/<run_id>/out` on each run. Whatever the previous one
-computed but had not yet fetched then sits somewhere nothing will look again.
-So `spawn` records the address it used into the output directory's journal
-(§6.5) and `_reattach_output_dir` consults it on the next run:
+**An archive that *is* rewritten keys the same on every attempt.** A channel
+filter that clears `REWRITE_MIN_SAVING`, and every incremental split, write a
+copy into the transit directory, and that copy is deterministic:
+`_write_kept_members` streams each kept member under its source `ZipInfo` (so
+the same members of the same source compress to the same bytes) and then stamps
+the copy with its source archive's mtime. A copy carrying the time it was
+written gave every retry of an unchanged plate a new key, a new
+`datasets/<key>/` that started empty, a full re-upload and a different
+`runs/<run_id>/out`, and left each failed attempt's full copy on the remote.
+Because the copy's name, size and mtime are now the same across channel
+selections whose frames happen to be the same size, `fingerprint_archives` also
+hashes each archive's member names, sizes and CRC-32s from its central
+directory — so a different selection, or an image replaced at the same size and
+timestamp, keys anew (`tests/test_staged_archives_key_the_same.py`).
+
+**The run journal is what stops an address change losing work.** A plate whose
+images, settings or channel selection did change resolves to a different
+`runs/<run_id>/out`, and whatever the previous run computed but had not yet
+fetched then sits somewhere nothing will look again. So `spawn` records the
+address it used into the output directory's journal (§6.5) and
+`_reattach_output_dir` consults it on the next run:
 `_choose_remote_output_dir` is a module-level function, given the freshly
 derived address, the recorded one, whether the run is forced, and whether
 `_list_completed_wells_in` found anything still in the recorded directory. The
@@ -13955,7 +13966,7 @@ appended and verified, one line per well (a folder well lists each file), and
 dataset 2's acquisition record, so the user can delete them by hand. An
 analysed dataset 1 gets a `derived_from` provenance line with
 `mode: "in_place"`. The saving is local: the remote dataset cache is keyed on
-each archive's size and modification time (`services/remote_scratch.fingerprint_archives`),
+each archive's size, modification time and members (`services/remote_scratch.fingerprint_archives`),
 so after an append a remote Analyze run uploads to a new cache directory
 (tracker M24).
 

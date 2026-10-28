@@ -26,6 +26,8 @@ there was nothing to pack is named in the log.
 """
 
 from __future__ import annotations
+import copy
+import os
 import shutil
 import subprocess
 import time
@@ -1013,6 +1015,41 @@ def _open_staging_if_needed(
     return _new_transit_dir(near, "allwell-stage-", log_fn=log_fn)
 
 
+#: How much of one member is held in memory at a time while it is copied into
+#: a staged archive.
+_COPY_CHUNK = 1 << 20
+
+
+def _write_kept_members(plan: _StagePlan, dest: Path) -> None:
+    """Write *plan*'s kept members from its source archive into *dest*.
+
+    **Streamed**, a chunk at a time: ``writestr(info, src.read(member))`` held
+    each member whole in memory, and a single image in a stitched or
+    multi-page acquisition is hundreds of megabytes.
+
+    **Deterministic**, so a retry of an unchanged plate produces the same
+    archive: each member keeps its source ``ZipInfo`` (name, timestamp,
+    compression), so the same members of the same source compress to the same
+    bytes, and *dest*'s modification time is then set to the source archive's.
+    The upload cache key (``services.remote_scratch.fingerprint_archives``)
+    and through it the ``run_id`` are derived from each staged archive's name,
+    size, whole-second mtime and member list, so a staged copy stamped with
+    the time it was written gave every attempt a new key, a new remote dataset
+    directory and a full re-upload — and left the previous attempt's copy on
+    the remote. A changed source image changes the source archive, whose
+    mtime and member CRCs then move the key, which is what the key is for.
+    """
+    with atomic_zip(dest) as dst:
+        with zipfile.ZipFile(plan.src, "r") as src:
+            for member in plan.keep or ():
+                info = src.getinfo(member)
+                out = copy.copy(info)
+                with src.open(info) as r, dst.open(out, "w") as w:
+                    shutil.copyfileobj(r, w, _COPY_CHUNK)
+    st = plan.src.stat()
+    os.utime(dest, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
 def _materialize_staging(
     plans: list[_StagePlan],
     staging: Path | None,
@@ -1054,14 +1091,8 @@ def _materialize_staging(
         dest = staging / plan.src.name
         t0 = time.monotonic()
 
-        def _write(_plan=plan, _dest=dest) -> None:
-            with atomic_zip(_dest) as dst:
-                with zipfile.ZipFile(_plan.src, "r") as src:
-                    for member in _plan.keep or ():
-                        dst.writestr(src.getinfo(member), src.read(member))
-
         retry_io(
-            _write,
+            lambda _plan=plan, _dest=dest: _write_kept_members(_plan, _dest),
             what=f"{plan.src.name} into the upload staging dir",
             cleanup=lambda d=dest: d.unlink(missing_ok=True),
             advice=_TRANSFER_ADVICE,

@@ -76,6 +76,9 @@ def _runner(tmp_path, monkeypatch, *, lines, rc, launcher="srun -p gpu", stop=Fa
     def spawn(*a, **k):
         remote._run = _RemoteRun(run_id="r1", cache_key="k", remote_input_dir="~/i", remote_output_dir="~/o",
                                  remote_pidfile=PIDFILE, local_output_dir=out, local_input_mode=LocalInputMode.ZIP)
+        # The real spawn marks the job as this run's once its ssh is launched (review E1); only an owned
+        # job is cancelled at teardown.
+        remote._run.owns_remote_job = True
         for said in spawn_says:              # what the real spawn logs before there is a stream
             k["log_fn"](said)
         if stop:

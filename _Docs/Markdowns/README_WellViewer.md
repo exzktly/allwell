@@ -439,8 +439,19 @@ timepoint to an analysed well gives the same nanowells a run over every timepoin
 rim nanowell the earlier ones did not (or show one empty), the well is analysed again over all its timepoints; the
 run log warns, the grid record says how many nanowells were added and removed, Validate lists the well, and the
 Nanowells page notes that its earlier timepoints' numbers were rewritten. Adding a timepoint that changes nothing
-analyses only that timepoint. A timepoint whose nanowells sit one lattice step from the others' is flagged as a roster
-mismatch, with a note, and does not decide the rim. A dataset analysed with an earlier version keeps the set of
+analyses only that timepoint. Each timepoint finds its own origin, so one that cannot read the central square and
+takes the array's centre instead can land a nanowell or more off, and every address there would then name a
+neighbour — joined over time, each nanowell would be paired with the one beside it. The run compares where each
+timepoint's nanowells sit against the others' and moves a timepoint that is off onto the best-anchored timepoints'
+addresses: an anchor set by hand counts above the central square, the square above the array's centre, and among
+equals the most timepoints win, so a day-0 square is never moved to match later days that all lost it. The grid
+record names the step (`origin_shift`) and the Array view prints a warning line for that timepoint. When two
+timepoints anchored equally well disagree and nothing breaks the tie, both are left unaddressed with the reason, and
+setting an anchor by hand on one of them settles it. Adding a timepoint to an incremental run that disagrees in this way with the
+kept timepoints, and outranks them, analyses the well again over every timepoint, and a dataset whose record holds
+such a disagreement from an earlier version is analysed again rather than added to. A timepoint further off than
+the run can match is still flagged as a roster mismatch, with a note and a warning in the Array view, and does
+not decide the rim. A dataset analysed with an earlier version keeps the set of
 nanowells it was analysed with when timepoints are added to it; Validate, Merge Plates and the Nanowells page name
 wells whose sets two versions decided, since they count the rim differently. Test detection shows the rim one
 timepoint supports and says so. A timepoint that could not

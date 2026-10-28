@@ -641,9 +641,12 @@ def test_an_incremental_run_gives_the_rim_a_run_over_every_timepoint_gives(tmp_p
     assert pick(_rows(out, "A01.csv")) == pick(_rows(full, "A01.csv"))
 
 
-def test_a_timepoint_anchored_a_step_off_neither_widens_the_rim_nor_passes_as_consistent(monkeypatch):
+def test_a_timepoint_anchored_a_step_off_neither_widens_the_rim_nor_keeps_its_neighbours_addresses(monkeypatch):
     """X35a-R2: T1's origin moved one step (as a wrong fiducial would). Taken at face value its detections put 17 rows
-    of floor into every timepoint and every timepoint read consistent, because each was compared on the shared roster."""
+    of floor into every timepoint and every timepoint read consistent, because each was compared on the shared roster.
+    This test then pinned T1 as a ``roster_mismatch`` whose rows kept the wrong addresses, which was itself the defect
+    (each nanowell joined with its neighbour in Review): T1 is now moved back onto T0 and T2's frame, which two
+    timepoints share against its one (``tests/test_nanowell_timepoint_frames.py`` follows the cells)."""
     from pipeline.nanowell_lattice import index_points
 
     a, record = build_well(rotation=7.0, timepoint="T0", cells=5)
@@ -667,9 +670,9 @@ def test_a_timepoint_anchored_a_step_off_neither_widens_the_rim_nor_passes_as_co
     outcome = nr.run_well("A01", record, ["T0", "T1", "T2"], lambda tp, tile: images[tp].get(tile), SETTINGS,
                           segmenter=threshold_segmenter())
     assert sorted(map(tuple, outcome.radius["roster"])) == sorted(a.array.addresses)
-    assert [outcome.timepoints[tp]["consistency"] for tp in ("T0", "T1", "T2")] == [
-        "consistent", "roster_mismatch", "consistent"]
-    assert any("lattice steps from the other timepoints" in n for n in outcome.timepoints["T1"]["notes"])
+    assert [outcome.timepoints[tp]["consistency"] for tp in ("T0", "T1", "T2")] == ["consistent"] * 3
+    assert outcome.timepoints["T1"]["origin_shift"] == [1, 0]
+    assert any("Addresses moved by (1, 0) lattice steps" in n for n in outcome.timepoints["T1"]["notes"])
 
 
 # ── review X35a-R6..R9: re-analysis only when the roster really changes, and said where it is seen ─
@@ -727,7 +730,8 @@ def test_a_timepoint_added_to_a_clipped_rim_well_is_analysed_alone_unless_the_ro
 def test_a_new_timepoint_anchored_a_step_off_is_named_without_re_analysing_the_well(tmp_path, monkeypatch):
     """X35a-R7. Kept T0 and T2; T1 added incrementally with its origin a step off. Judged only among the run's own
     timepoints (one), it was caught only by a full re-analysis whose reason said 17 nanowells had been added. Judged
-    against the kept detections, it is named and its detections decide nothing."""
+    against the kept detections, it was named and its detections decided nothing — but its rows kept addresses a
+    site off. Now it is moved onto the kept frame, which two square-anchored timepoints outrank it with."""
     from pipeline import nanowell_task as nt
     from pipeline.nanowell_lattice import index_points
 
@@ -757,15 +761,17 @@ def test_a_new_timepoint_anchored_a_step_off_is_named_without_re_analysing_the_w
                                         segmenter=threshold_segmenter(), **k)
     first = run(["T0", "T2"])
     nt.write_sites_csv(tmp_path / "sites.csv", first.sites, [])
-    kept = nt._kept_evidence({"grid": {"array_radius": first.radius}, "sites": nt._read_rows(tmp_path / "sites.csv")})
+    kept = nt._kept_evidence({"grid": {"array_radius": first.radius, "timepoints": first.timepoints},
+                              "kept": {"T0", "T2"}, "sites": nt._read_rows(tmp_path / "sites.csv")})
     block = first.timepoints["T0"]
     reference = {"timepoint": "T0", "pitch_um": block["pitch_um"], "angle_deg": block["angle_deg"],
                  "roster_size": block["roster_size"]}
     added = run(["T1"], fixed_radius_um=first.radius["radius_um"], fixed_roster=first.radius["roster"],
                 kept_evidence=kept, reference=reference)
-    assert added.roster_change == ""
-    assert added.timepoints["T1"]["consistency"] == "roster_mismatch"
-    assert any("lattice steps from the other timepoints" in n for n in added.timepoints["T1"]["notes"])
+    assert (added.roster_change, added.frame_change) == ("", "")
+    # Two kept square-anchored timepoints outrank its one: moved onto their frame, with no re-analysis of the well.
+    t1 = added.timepoints["T1"]
+    assert (t1["consistency"], t1["origin_shift"], t1["origin_registered_to"]) == ("consistent", [1, 0], "T0")
 
 
 def test_a_kept_timepoint_flagged_a_roster_mismatch_says_nothing_about_the_rim():
@@ -777,4 +783,4 @@ def test_a_kept_timepoint_flagged_a_roster_mismatch_says_nothing_about_the_rim()
             {"timepoint": "T1", "nw_q": "4", "nw_r": "0", "detected": "True", "imaged_fraction": "1.0",
              "consistency": "roster_mismatch"}]
     kept = nt._kept_evidence({"grid": {"array_radius": {"roster_rule": "evidence"}}, "sites": rows})
-    assert kept == {"detected": {(3, 0)}, "imaged": {(3, 0)}}
+    assert kept == {"detected": {(3, 0)}, "imaged": {(3, 0)}, "origins": {}}

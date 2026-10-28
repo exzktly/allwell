@@ -234,13 +234,37 @@ def record_lines(grid_blocks: dict, timepoint: str) -> list[tuple[str, str]]:
             f"pitch {_num(block.get('pitch_um'), 1)} µm · angle {_num(block.get('angle_deg'), 2)}° · "
             f"overlap {_overlap(block.get('overlap_um'))} · {block.get('n_detected', '?')} detected of "
             f"{block.get('roster_size', '?')}"]
+    flags = frame_lines(block)
     rest = [template_line(block.get("template"))]
     rest += [f"{tp}: {b.get('status', '?')}" + (f" — {b.get('reason')}" if b.get("reason") else "")
              + (" — template suspect" if (b.get("template") or {}).get("suspect") else "")
+             + (f" — {FRAME_WARNING}" if b.get("consistency") == "roster_mismatch" else "")
              for tp, b in grid_blocks.items() if tp != timepoint and isinstance(b, dict)]
-    out = [(text, "head") for text in head]
-    out += [(text, "flag" if "template suspect" in text or "floor moved" in text else "plain") for text in rest if text]
+    out = [(text, "head") for text in head] + [(text, "flag") for text in flags]
+    out += [(text, "flag" if "template suspect" in text or "floor moved" in text or FRAME_WARNING in text
+             else "plain") for text in rest if text]
     return out[:RECORD_LINES]
+
+
+#: What a timepoint whose addresses disagree with its well's other timepoints' is said to be, wherever it is listed.
+FRAME_WARNING = "its addresses may name neighbouring nanowells"
+
+
+def frame_lines(block: dict) -> list[str]:
+    """Warnings about whether *block*'s addresses name the same nanowells as its well's other timepoints': its
+    addresses moved onto another timepoint's frame (said, so that a timepoint whose own origin landed a site off,
+    or an inferred array whose outline was cut short, is not mistaken for one that anchored there itself), or a ``roster_mismatch`` the run could not settle (its rows are then joined with the other
+    timepoints' by an address that may name a neighbour, and Review has nothing else to tell them apart by)."""
+    out = []
+    shift = block.get("origin_shift")
+    if shift and any(shift):
+        out.append(f"addresses moved by ({int(shift[0])}, {int(shift[1])}) lattice steps onto "
+                   f"{block.get('origin_registered_to') or 'another timepoint'}'s, so that they name the same "
+                   "nanowells as its (see the notes for why)")
+    if block.get("consistency") == "roster_mismatch":
+        detail = str(block.get("consistency_detail") or "").strip()
+        out.append(f"roster mismatch — {FRAME_WARNING}" + (f" ({detail})" if detail else ""))
+    return out
 
 
 def template_line(template) -> str:

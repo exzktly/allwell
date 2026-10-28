@@ -325,3 +325,24 @@ def test_a_view_refitted_past_the_zoom_out_limit_is_not_zoomed_in_by_a_wheel_out
     assert st.region is None
     nwc._zoom_to(None, st, nwc.WHEEL_STEP, (500, 500))          # zooming in from there still works
     assert st.region is not None and st.region[2] - st.region[0] < drawn.region[2] - drawn.region[0]
+
+
+def test_the_array_record_says_when_a_timepoint_s_addresses_were_moved_or_may_name_neighbours():
+    """A timepoint anchored a site off was printed ``T2: ok — origin from the array's centre`` like any other: its
+    ``roster_mismatch`` and the step that put it right were in the grid record and nowhere on screen. Now the
+    timepoint drawn says either, as a warning line, and a mismatched timepoint listed beside it says so too."""
+    from review.features.nanowell.array_compute import FRAME_WARNING, frame_lines, record_lines
+
+    blocks = {"T0": {"status": "ok", "origin_method": "fiducial", "consistency": "consistent"},
+              "T1": {"status": "ok", "origin_method": "array_centre", "consistency": "roster_mismatch",
+                     "consistency_detail": "12 addresses differ from T0's"},
+              "T2": {"status": "ok", "origin_method": "array_centre", "consistency": "consistent",
+                     "origin_shift": [1, 0], "origin_registered_to": "T0"}}
+    moved = record_lines(blocks, "T2")
+    assert ("addresses moved by (1, 0) lattice steps onto T0's, so that they name the same nanowells as its "
+            "(see the notes for why)", "flag") in moved
+    assert ("T1: ok — " + FRAME_WARNING, "flag") in moved
+    assert ("T0: ok", "plain") in moved
+    mismatched = record_lines(blocks, "T1")
+    assert (f"roster mismatch — {FRAME_WARNING} (12 addresses differ from T0's)", "flag") in mismatched
+    assert frame_lines(blocks["T0"]) == []                     # a timepoint that anchored where it is says nothing

@@ -355,7 +355,7 @@ class RemoteRunner:
             zipped, pipeline_argv, prep.remote_output, log)
         if reservation is not None and cache_hit:
             reservation.release("every well is already finished on the host")
-        reserved = reservation is not None and reservation.alive()
+        reserved = reservation is not None and reservation.usable()
         overlap, ssh_argv = self._compose_launch(
             prep, zipped, pipeline_argv, output_filter, cache_hit, log, reserved=reserved)
         remote_sentinel = prep.paths.sentinel

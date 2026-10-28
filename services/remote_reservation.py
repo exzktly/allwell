@@ -315,6 +315,19 @@ class Reservation:
         return (not self._released and not self._taken and self._popen is not None
                 and self._popen.poll() is None)
 
+    def usable(self) -> bool:
+        """Whether the job can still take the run; when it cannot, says why and gives it back."""
+        if self.alive():
+            return True
+        if self._taken:
+            return False
+        rc = self._popen.poll() if self._popen is not None else None
+        why = "it was given back" if self._released else f"it ended before the run was ready (exit {rc})"
+        self._log(f"[remote] scheduler: the node asked for early cannot take the run — {why}; asking for one "
+                  "now.\n")
+        self.release("it can no longer take the run")
+        return False
+
     # ── hand-over ────────────────────────────────────────────────────────
     def hand_over(self, body: str, *, run_pidfile: str, run_heartbeat: str) -> ReservedPopen | None:
         """Give the waiting job its run; the ``Popen`` to read it by, or ``None`` when it can no longer take one.
@@ -323,12 +336,7 @@ class Reservation:
         ``_handover_driver_body``). *run_pidfile* and *run_heartbeat* are the run directory's own. ``None`` has
         been logged with its reason and the reservation released; the caller launches the ordinary way.
         """
-        if not self.alive():
-            rc = self._popen.poll() if self._popen is not None else None
-            why = "it was released" if self._released else f"it ended before the run was ready (exit {rc})"
-            self._log(f"[remote] scheduler: the node asked for early cannot take the run — {why}; asking for one "
-                      "now.\n")
-            self.release("it can no longer take the run")
+        if not self.usable():
             return None
         script = _write_command_script(self.paths, body, run_pidfile, run_heartbeat)
         try:

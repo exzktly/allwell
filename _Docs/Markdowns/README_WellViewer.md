@@ -1712,8 +1712,8 @@ starts more than one copy, the run log says how many, and only the first runs.
 **Max queue wait** is how long a run waits for the scheduler to give it a node
 — queued, or granted a node that is still starting up — before it gives up. The
 time counts from the moment the run asks for the node, which on a scheduled host
-is before the plate starts uploading, so the queue wait and the upload run side
-by side: on a cluster that queues the run for longer than the setting, the run
+is before the plate is even planned, so the queue wait, the preparation and the
+upload run side by side: on a cluster that queues the run for longer than the setting, the run
 fails even while the plate is still uploading (a batched run stops its upload; a
 single run finishes sending first), and what reached the cluster is kept for the
 next attempt. When it runs out the job is cancelled and the run stops with
@@ -1993,13 +1993,27 @@ reading it. The log names any it kept over budget for that reason.
   left overnight still leaves a readable trail without burying it.
 - **Waiting for a cluster scheduler.** If your remote host runs the pipeline
   through a scheduler (an `srun …` compute launcher — set up in the remote host
-  dialog), the run does not start the moment the upload finishes: it joins a
-  queue, and on a busy cluster that can be minutes or hours. The headline says
-  so — *Queued on the scheduler — waiting for a node…* — the status line beside
-  it counts up, *Waiting for the scheduler — 4m12s (job 4812345)*, and the log
-  repeats it every couple of minutes together with the exact request that was
-  made. A batched run queues once per batch, and the log names
-  which batch is waiting. **Max queue wait** in the remote host dialog is how
+  dialog), the run joins a queue, and on a busy cluster that can be minutes or
+  hours. So the run asks for its node **as soon as it knows how many wells it
+  holds — before it plans, filters or rewrites a single archive** — and the
+  queue wait runs alongside the preparation and the upload instead of after
+  them. The log says *early: requesting allocation via: …* before *planning N
+  well archive(s)…*; while the plate is still being prepared the headline keeps
+  saying what this computer is doing, and the status line counts the wait,
+  *Waiting for the scheduler — 4m12s (job 4812345)*. A node granted in the
+  meantime waits for the run (*Allocation granted — job 4812345; the node waits
+  while this machine prepares the run…*), and once the run is ready it is handed
+  to that node. If the run is still queued by then, the headline says *Queued on
+  the scheduler — waiting for a node…*, and the log repeats the wait every couple
+  of minutes together with the exact request that was made. A batched run holds
+  one node for every batch, so it queues once. A run that turns out to need no
+  node — everything already finished on the host, nothing left to send, a
+  refusal, or a Stop — gives the queued job back at once; a job that ended
+  before the run was ready (the cluster cancelled it, the connection dropped) is
+  reported in the log and the run asks for a new one. The time a granted node
+  spends waiting for the run counts against its time limit, as the wait for an
+  upload already did; a batched run asks for enough time for every batch the
+  plate could hold. **Max queue wait** in the remote host dialog is how
   long a job may wait in the scheduler queue before the run gives up and
   cancels it (*Wait indefinitely* turns that off); it has nothing to do with how
   quickly a broken connection is noticed, which is fixed at about two minutes.

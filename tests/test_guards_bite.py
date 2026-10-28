@@ -5521,3 +5521,39 @@ def test_well_marker_guard_clears_a_tree_of_known_markers(tmp_path, monkeypatch)
     good = _write(tmp_path, "good_marker.py", _every_roster_template())
     assert _run_scan(monkeypatch, "tests.test_every_well_marker_reaches_the_plate",
                      "test_every_per_well_marker_the_pipeline_prints_has_a_row", [good]) is None
+
+
+# ── remote commands are checked and bounded (review P2, P3) ──────────────────
+
+_RC = "tests.test_remote_commands_are_checked_and_bounded"
+
+
+@pytest.mark.parametrize("shape", [
+    'def f(cache):\n    cache._ssh_run(["rm", "-rf", "/r/x"], check=False)\n',
+    'def f(proc):\n    ssh = proc._runner._cache._ssh_run\n    ssh(["touch", "/r/ready"], check=False)\n',
+    'def f(cache):\n    if True:\n        cache._ssh_script("ls /r", check=False)\n',
+])
+def test_discard_guard_catches_a_thrown_away_remote_result(tmp_path, monkeypatch, shape):
+    path = _write(tmp_path, "services/mod.py", shape)
+    assert _run_scan(monkeypatch, _RC, "test_no_remote_command_result_is_thrown_away", [path]) is not None
+
+
+@pytest.mark.parametrize("shape", [
+    'def f(cache):\n    r = cache._ssh_run(["rm", "-rf", "/r/x"], check=False)\n    return r.returncode == 0\n',
+    'def f(cache):\n    if cache._ssh_run(["test", "-f", "/r"], check=False).returncode:\n        pass\n',
+    'def f(cache):\n    cache._ssh_run(["rm", "-rf", "/r/x"], check=True)\n',
+])
+def test_discard_guard_clears_a_read_result(tmp_path, monkeypatch, shape):
+    path = _write(tmp_path, "services/mod.py", shape)
+    assert _run_scan(monkeypatch, _RC, "test_no_remote_command_result_is_thrown_away", [path]) is None
+
+
+def test_unbounded_guard_catches_a_subprocess_without_a_timeout(tmp_path, monkeypatch):
+    path = _write(tmp_path, "services/mod.py", 'import subprocess\ndef f(a):\n    subprocess.run(a, check=True)\n')
+    assert _run_scan(monkeypatch, _RC, "test_every_services_subprocess_is_bounded", [path]) is not None
+
+
+def test_unbounded_guard_clears_a_bounded_subprocess(tmp_path, monkeypatch):
+    path = _write(tmp_path, "services/mod.py",
+                  'import subprocess\ndef f(a):\n    subprocess.run(a, check=True, timeout=30)\n')
+    assert _run_scan(monkeypatch, _RC, "test_every_services_subprocess_is_bounded", [path]) is None

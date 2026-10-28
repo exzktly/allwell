@@ -63,7 +63,13 @@ def prune_staged(cache: Any, remote_dir: str, zips: list[Path], label: str,
     names = [z.name for z in zips]
     result = cache._ssh_run(prune_argv(remote_dir, names), check=False)
     if result is None or getattr(result, "returncode", 1) != 0:
-        cache._ssh_run(["rm", "-rf", remote_dir], check=False)
+        cleared = cache._ssh_run(["rm", "-rf", remote_dir], check=False)
+        if getattr(cleared, "returncode", 1) != 0:
+            # Neither pruned nor cleared: a stray well in the batch would be run
+            # and reported twice, so the batch must not go ahead (review P2).
+            raise RuntimeError(
+                f"{label}: could not prune or clear the staged directory {remote_dir} on the host "
+                f"({(getattr(cleared, 'stderr', '') or '').strip() or 'no answer'})")
         return
     kept = [line for line in (result.stdout or "").splitlines() if line.strip()]
     if kept:

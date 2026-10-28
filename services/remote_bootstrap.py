@@ -1156,6 +1156,10 @@ def cellpose_cuda_note(probe: HostProbe) -> str:
 # ── bandwidth probe ────────────────────────────────────────────────────────
 
 
+#: Longest the 50 MB bandwidth probe may take before it is called failed.
+BANDWIDTH_PROBE_TIMEOUT_S = 600
+
+
 def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
     """50 MB throwaway-file upload; return Mbps as a float.
 
@@ -1226,6 +1230,9 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
             rsync_argv,
             check=True,
             capture_output=True,
+            # 50 MB at a slow 1 Mbit/s is under seven minutes; past ten the
+            # link is not slow but stuck (review P3).
+            timeout=BANDWIDTH_PROBE_TIMEOUT_S,
             # rsync's messages carry the remote path, which is UTF-8; a
             # bare ``text=True`` decodes it with the client's locale, so on
             # a cp1252 Windows box a CalledProcessError's stderr either
@@ -1485,11 +1492,18 @@ def main(argv: list[str] | None = None) -> int:
         # ("Use when the remote env is suspected corrupt"). Resolve the prefix
         # through conda and remove that too, refusing anything that isn't the
         # env's own directory.
-        _ssh_run(
+        cleaned = _ssh_run(
             ssh_target, ["bash", "-s"],
             input=force_clean_script(), check=False, capture=False,
             ssh_key_path=key_path,
         )
+        if cleaned.returncode != 0:
+            # Installing "fresh" over an env that is still there is how a
+            # corrupt env survives --force; stop and say so (review P2).
+            print(f"\nERROR: --force could not remove the existing env on {ssh_target} "
+                  f"(exit {cleaned.returncode}); nothing was reinstalled. Fix the error above and run "
+                  f"the bootstrap again.\n", file=sys.stderr)
+            return 1
         probe = HostProbe(False, False, False, "", False, False, "")
 
     # 3. Install miniforge if missing.
@@ -1534,6 +1548,11 @@ def main(argv: list[str] | None = None) -> int:
     except FileNotFoundError as exc:
         print(f"\nERROR: {exc}\n", file=sys.stderr)
         return 3
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
+        # The host is set up by now; an unmeasured bandwidth only leaves the
+        # upload estimate without a figure (0.0 is "not measured").
+        say(f"WARNING: the bandwidth probe failed ({type(exc).__name__}); recording it as not measured.")
+        mbps = 0.0
 
     # 8. Write remotes.toml. Uses the SECTION name (args.alias) so a
     # user who set up [remote.j] keeps that section, but

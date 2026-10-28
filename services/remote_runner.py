@@ -730,6 +730,22 @@ class RemoteRunner:
         """The verifier for this runner's current run, with its collaborators."""
         return FetchedOutputVerifier(self.host, self._run, self._cache, self._cancelled)
 
+    def _remove_remote(self, path: str, label: str, log) -> bool:
+        """Remove *path* on the host and say what actually happened.
+
+        The cleanup used to log "removed" over an ``rm`` whose result it never
+        read, so a dropped connection left the remote copy in place under a log
+        line saying it was gone (review A7, P2).
+        """
+        result = self._cache._ssh_run(["rm", "-rf", path], check=False)
+        if result.returncode == 0:
+            log(f"[remote] removed {label}.\n")
+            return True
+        reason = (result.stderr or "").strip().splitlines()[-1:] or [f"exit {result.returncode}"]
+        log(f"[remote] WARN could not remove {label} ({reason[0]}); it is still on the host — "
+            f"remove it by hand or let the next run's cleanup retry.\n")
+        return False
+
     def verify_and_cleanup(
         self,
         ok: bool,
@@ -794,8 +810,7 @@ class RemoteRunner:
                 self._log_would_delete(
                     own_dir, label=f"run dir {run.run_id}", log=log)
             else:
-                self._cache._ssh_run(["rm", "-rf", own_dir], check=False)
-                log(f"[remote] removed this run's own dir {own_dir}.\n")
+                self._remove_remote(own_dir, f"this run's own dir {own_dir}", log)
             log(
                 f"[remote] re-attached to {run.remote_output_dir}, which "
                 f"belongs to an earlier run of this plate — leaving it in "
@@ -807,11 +822,7 @@ class RemoteRunner:
                 self._log_would_delete(
                     run_dir, label=f"run dir {run.run_id}", log=log)
             else:
-                self._cache._ssh_run(
-                    ["rm", "-rf", run_dir],
-                    check=False,
-                )
-                log(f"[remote] removed run dir {run.run_id}.\n")
+                self._remove_remote(run_dir, f"run dir {run.run_id}", log)
         if cleanup_mode == "all":
             cache_dir = self._cache.remote_dataset_dir(run.cache_key)
             if dry_run:
@@ -821,11 +832,7 @@ class RemoteRunner:
                     log=log,
                 )
             else:
-                self._cache._ssh_run(
-                    ["rm", "-rf", cache_dir],
-                    check=False,
-                )
-                log(f"[remote] removed dataset cache {run.cache_key[:8]}.\n")
+                self._remove_remote(cache_dir, f"dataset cache {run.cache_key[:8]}", log)
         if dry_run:
             log(
                 "[remote] [DRY-RUN] no files were actually deleted. "

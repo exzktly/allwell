@@ -19322,7 +19322,7 @@ can reproduce:
 | Deps | `tests/requirements-dev.txt`, pinned to the app's stack (numpy 1.24, pandas 2.2, PySide6 6.7.3) | `requirements.txt` — same pins, plus the ML stack |
 | ML stack | absent — `importorskip("stardist")` / `("tensorflow")` tests **skip** | present, so those tests actually run |
 | OS / Python | ubuntu-latest, 3.11, case-sensitive FS | typically macOS arm64, 3.10.14, case-**in**sensitive FS |
-| Timeout | `--timeout=90` per test | same, via `scripts/test.sh` |
+| Timeout | `--timeout=90` per test, setup included; a test whose real work needs longer carries its own `@pytest.mark.timeout(N)` with the reason beside it (the clipped-rim end-to-end test in `test_nanowell_run.py`, 77 s alone) | same, via `scripts/test.sh` |
 | State | fresh clone — no `~/.allwell/scratch`, no datasets, no `__pycache__` | whatever you have lying around |
 
 So a green CI run has *not* exercised StarDist or TensorFlow, and a green local

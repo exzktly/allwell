@@ -81,6 +81,20 @@ def _without_finished(well_zips: tuple[Path, ...], wells: Iterable[str]) -> tupl
     return tuple(p for p in well_zips if (_canonical_well_label(p.stem) or p.stem) not in skip)
 
 
+def _within_only_wells(well_zips: tuple[Path, ...], only_wells, background_wells) -> tuple[Path, ...]:
+    """*well_zips* narrowed to *only_wells* and the empty-well blanks; all of them when there is no subset.
+
+    A named well the input lacks is not this function's to refuse: it is absent here and absent after, and
+    ``scope_staged_to_only_wells`` refuses the run on it before anything is uploaded.
+    """
+    if not only_wells:
+        return tuple(well_zips)
+    wanted = set(_canonical_force_wells(only_wells))
+    blanks = {_bg_well_key(w) for w in split_background_wells(background_wells or "")}
+    return tuple(p for p in well_zips
+                 if (_canonical_well_label(p.stem) or p.stem) in wanted or _bg_well_key(p.stem) in blanks)
+
+
 @carry_staged_record
 def stage_local_zips(
     input_dir: Path,
@@ -98,6 +112,7 @@ def stage_local_zips(
     force_wells: Iterable[str] | None = None,
     background_wells: Iterable[str] | str | None = None,
     skip_wells: Iterable[str] = (),
+    only_wells: Iterable[str] | None = None,
 ) -> ZippedInput:
     """Return a directory of per-well zips for ``input_dir``.
 
@@ -119,6 +134,18 @@ def stage_local_zips(
     out before anything is planned or rewritten. The caller removes them from
     the other layouts' result (``drop_finished``), which also lists them as up
     to date.
+
+    *only_wells* (a ``--only_wells`` subset) keeps every other well's archive
+    out of planning, so a channel filter or an incremental split reads and
+    rewrites only the named wells and the empty-well blanks
+    (*background_wells*). Without it a forced four-well run rewrote a transit
+    copy of every archive on the plate before the subset was applied. It is an
+    economy, not the subset itself: the caller still applies
+    ``pipeline_runner.scope_staged_to_only_wells`` to whatever comes back,
+    because the layouts that are not planned (an unfiltered ZIP plate, the
+    MIXED resume) return every archive, and the whole-well zip-up of a FOLDER
+    or FLAT plate still covers the plate, since its archives become the user's
+    copy of each well.
     """
     input_dir = input_dir.resolve()
     # Reclaim local scratch leaked by a previously-killed run before we stage a
@@ -146,6 +173,9 @@ def stage_local_zips(
         Planned before anything moves: a member list is a small read of the
         central directory, so only the members to be uploaded are ever read —
         copying whole archives first dragged a NAS plate across the network."""
+        planned = _within_only_wells(well_zips, only_wells, background_wells)
+        outside = tuple(p.stem for p in well_zips if p not in planned)
+        well_zips = planned
         if log_fn is not None:
             log_fn(f"[remote] planning {len(well_zips)} well archive(s)…\n")
         plans, up_to_date_list, zero_match = _plan_staging(
@@ -167,9 +197,11 @@ def stage_local_zips(
             log_fn(f"[remote] planned {len(plans)} well archive(s) to upload, "
                    f"{len(up_to_date_list)} already up to date.\n")
         _raise_on_zero_channel_match(zero_match)
-        return _stage_plans(plans, zip_dir, mode=mode, incremental=incremental,
-                            up_to_date=tuple(up_to_date_list), prior_cleanup=prior_cleanup,
-                            on_success=on_success, log_fn=log_fn)
+        staged = _stage_plans(plans, zip_dir, mode=mode, incremental=incremental,
+                              up_to_date=tuple(up_to_date_list), prior_cleanup=prior_cleanup,
+                              on_success=on_success, log_fn=log_fn)
+        staged.outside_subset_wells = outside
+        return staged
 
     def _then_split(zin: ZippedInput) -> ZippedInput:
         # Grouping and zip-up produce whole-well archives; the split is applied

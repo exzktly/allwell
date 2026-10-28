@@ -74,10 +74,12 @@ def test_the_argv_list_is_rewritten_in_place_of_the_old_one():
 # ── the runner ───────────────────────────────────────────────────────────────
 
 def _run(monkeypatch, tmp_path, zipped, *, only_wells, opts_extra=None):
+    """*zipped* is what staging returns; ``None`` runs the real ``stage_local_zips`` over ``tmp_path / "in"``."""
     import services.pipeline_runner as pr
     from services.pipeline_service import build_pipeline_args
 
-    monkeypatch.setattr(pr, "stage_local_zips", lambda *a, **k: zipped)
+    if zipped is not None:
+        monkeypatch.setattr(pr, "stage_local_zips", lambda *a, **k: zipped)
     spawned: list = []
 
     class _Proc:
@@ -164,6 +166,62 @@ def test_the_blank_rides_along_in_empty_well_mode(monkeypatch, tmp_path):
     assert [p.stem for p in sent.well_zips] == ["B02", "H12"]
     only = argv[argv.index("--only_wells") + 1:]
     assert only[0] == "B02" and (len(only) == 1 or only[1].startswith("--"))
+
+
+# ── staging reads and rewrites only the subset ───────────────────────────────
+
+_PLATE = ["A01", "A02", "A03", "A04", "B01", "B02", "B03", "B04", "H12"]
+
+
+def _zip_plate(tmp_path):
+    """A zipped plate of three channels, of which the run asks for one: every archive needs a rewritten copy."""
+    import zipfile
+
+    src = tmp_path / "in"
+    src.mkdir()
+    for w in _PLATE:
+        with zipfile.ZipFile(src / f"{w}.zip", "w") as z:
+            for ch in ("DAPI", "GFP", "RFP"):
+                z.writestr(f"exp_{ch}_{w}_F001_T001.tif", b"x" * 64)
+
+
+def _rewritten(events):
+    """The wells staging planned a rewritten copy of, from its own per-archive log lines."""
+    import re
+
+    return sorted(m.group(1) for k, p in events if k == "line"
+                  for m in [re.search(r"\] plan \(\d+/\d+\): (\w+) → rewriting", p)] if m)
+
+
+def test_a_forced_subset_rewrites_only_its_own_archives(monkeypatch, tmp_path):
+    """Four wells named and forced on a finished plate: staging rewrote a transit copy of all nine archives first,
+    and the subset was applied only to what it returned. Force is what exposed it — without it the finished wells
+    are skipped before staging (``skip_wells``), so only the unfinished ones were ever rewritten."""
+    _zip_plate(tmp_path)
+    spawned, events = _run(monkeypatch, tmp_path, None, only_wells=["A01", "A02", "A03", "A04"],
+                           opts_extra={"force": True})
+    assert _rewritten(events) == ["A01", "A02", "A03", "A04"]
+    (sent, _argv), = spawned
+    assert sorted(p.stem for p in sent.well_zips) == ["A01", "A02", "A03", "A04"]
+    totals = _totals(events)
+    assert totals["group"] == len(_PLATE), "Group still counts the plate, though only the subset was planned"
+    assert totals["upload"] == 4
+
+
+def test_the_blank_is_staged_with_the_subset(monkeypatch, tmp_path):
+    _zip_plate(tmp_path)
+    spawned, events = _run(monkeypatch, tmp_path, None, only_wells=["B02"],
+                           opts_extra={"force": True, "background": "empty_well", "background_well": "H12"})
+    # The blank goes up whole — the planner never filters a blank's channels — but it is planned with the subset.
+    assert _rewritten(events) == ["B02"]
+    (sent, _argv), = spawned
+    assert sorted(p.stem for p in sent.well_zips) == ["B02", "H12"]
+
+
+def test_without_a_subset_every_archive_is_staged(monkeypatch, tmp_path):
+    _zip_plate(tmp_path)
+    _spawned, events = _run(monkeypatch, tmp_path, None, only_wells=None, opts_extra={"force": True})
+    assert _rewritten(events) == _PLATE
 
 
 # ── the run address ──────────────────────────────────────────────────────────

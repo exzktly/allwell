@@ -139,6 +139,71 @@ class AnalyzeProgressMixin:
         self._run_phase = _PHASE_PREPARE
         self._run_ended = False
         self._render_headline()
+        self._silence_warned_at = None
+        if self._run_remote:
+            self._arm_stream_watch()
+
+    # ── a remote stream gone silent (tracker C1) ────────────────────────────
+    #: How long a remote run may say nothing before the pane says so. Twenty
+    #: minutes, because a healthy run is never quiet that long: a field-by-field
+    #: well prints every FOV-group it finishes, a nanowell well every step and
+    #: every tenth of a timepoint's nanowells, a batched run its driver's
+    #: "still running" tick, and a transfer a line a second. The longest quiet
+    #: stretch in a healthy run is one long step — locating a large nanowell
+    #: timepoint, one heavy FOV-group under a CPU segmenter — which is minutes,
+    #: not tens of them. And the warning says "no output", never "failed", and
+    #: asks the host before suggesting anything, so a run that is merely slow is
+    #: told it is alive. A scheduler queue wait is exempt: it is silent by
+    #: design and already has its own clock.
+    _SILENCE_WARN_S = 20 * 60.0
+    #: How often the check looks.
+    _SILENCE_CHECK_MS = 30_000
+
+    def _arm_stream_watch(self) -> None:
+        timer = getattr(self, "_silence_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setInterval(self._SILENCE_CHECK_MS)
+            timer.timeout.connect(self._check_stream)
+            self._silence_timer = timer
+        if not timer.isActive():
+            timer.start()
+
+    def _check_stream(self) -> None:
+        """Warn, once per silence (and again every threshold after), when a
+        remote run outside a queue wait has said nothing for too long."""
+        runner = self._runner
+        if not getattr(self, "_running", False):
+            timer = getattr(self, "_silence_timer", None)
+            if timer is not None:
+                timer.stop()
+            return
+        age = getattr(runner, "seconds_since_output", None)
+        if age is None or getattr(self, "_sched_since", None) is not None:
+            return
+        if age < self._SILENCE_WARN_S:
+            # Talking again: retract the warning if it is still what is shown.
+            if getattr(self, "_silence_warned_at", None) is not None:
+                self._silence_warned_at = None
+                if getattr(self, "_silence_status", "") == self._dashboard.status_text():
+                    self._dashboard.set_status("")
+            return
+        warned = getattr(self, "_silence_warned_at", None)
+        if warned is not None and age - warned < self._SILENCE_WARN_S:
+            return
+        self._silence_warned_at = age
+        host = getattr(runner, "remote_name", "") or "the remote host"
+        last = getattr(runner, "last_output_line", "") or "(nothing yet)"
+        self._silence_status = f"No output from {host} for {_fmt_secs(age)} — checking it is still running…"
+        self._dashboard.set_status(self._silence_status)
+        self._log_line(
+            f"[warn] No output from {host} for {_fmt_secs(age)}; the last line was: {last}\n"
+            f"[warn] That is not by itself a failure — one long step can be quiet — so the app is "
+            f"asking the host whether the run is still alive. If it has ended there, press Stop, "
+            f"then Resume from the Analyze banner to download the wells it finished and run the "
+            f"rest.\n", "WARNING")
+        with swallow("asking the host whether a silent run is alive"):
+            runner.probe_silence()
 
     def _end_run_phase(self) -> None:
         """The run is over; its terminal state owns the headline from here.

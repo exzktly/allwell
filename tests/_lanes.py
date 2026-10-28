@@ -234,6 +234,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_batched_subset_run_finds_its_wells.py": "A remote run split into batches can be limited to named wells",
     "test_a_lost_batch_handoff_is_noticed.py": "A batch handed to the batch driver either reaches it, or the run says it did not",
     "test_a_remote_run_end_to_end.py": "A remote run, driven end to end against a host that really has a filesystem",
+    "test_a_silent_remote_stream_is_noticed.py": "A remote run quiet for twenty minutes outside a queue wait is said and checked with the host",
     "test_a_remote_run_says_how_it_ended.py": "A remote run says what ended it, and calls its job closed only once the host confirms it",
     "test_a_remote_suspend_winds_the_run_down.py": "A remote Suspend asks the pipeline to wind down; it does not kill the session",
     "test_a_resume_keeps_checkpoints_when_the_blank_moves.py": "A resumed batched run keeps its wells' part-way checkpoints though the blank's path changed",

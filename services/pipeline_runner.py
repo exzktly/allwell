@@ -1012,6 +1012,11 @@ class PipelineRunner:
         self._stop_unconfirmed = ""
         # A Suspend pressed while the job was queued, which cancels the job.
         self._queued_suspend = False
+        # When the run last said anything, and what (``seconds_since_output``),
+        # and the silent-stream probe in flight (``probe_silence``).
+        self._last_output_at: float | None = None
+        self._last_output_line = ""
+        self._silence_probe: threading.Thread | None = None
         # Snapshots of the two events above, taken when a failure is queued —
         # see ``cancel_state_at_failure``.
         self._error_was_stopped = False
@@ -1066,7 +1071,7 @@ class PipelineRunner:
     #: Suspend exits 0 on purpose, and it is neither a completion nor a failure.
     _CONTROL_KINDS = frozenset({"done", "suspended", "error", "finished"})
 
-    def _enqueue(self, event: tuple[str, object]) -> None:
+    def _enqueue(self, event: tuple[str, object], *, activity: bool = True) -> None:
         """Non-blocking enqueue for a log line; drops it on overflow rather
         than blocking the reader thread — unless the run's state depends on it.
 
@@ -1090,6 +1095,13 @@ class PipelineRunner:
         captured in the help-drawer log tab", which they were not: that tab
         mirrors what this view shows (tracker C11).
         """
+        if activity and event[0] in ("line", "remote_xfer"):
+            # The run said something: the silent-stream check's clock
+            # (``seconds_since_output``). Not for the check's own report, which
+            # passes ``activity=False`` — a probe must not prove itself alive.
+            self._last_output_at = time.monotonic()
+            if event[0] == "line" and str(event[1]).strip():
+                self._last_output_line = str(event[1]).strip()
         if event[0] == "line" and not str(event[1]).startswith(JOB_UNKNOWN_PREFIX):
             # Every line the run says, from whichever thread: the stream, and
             # the spawn's own lines before there is one (the allocation request).
@@ -1280,6 +1292,8 @@ class PipelineRunner:
         self._job_liveness = None
         self._stop_unconfirmed = ""
         self._queued_suspend = False
+        self._last_output_at = time.monotonic()
+        self._last_output_line = ""
         self._run_generation += 1
         self._error_was_stopped = False
         self._error_was_suspended = False
@@ -1527,6 +1541,62 @@ class PipelineRunner:
         failure — all three of which otherwise look the same from outside.
         """
         return self._suspend_requested.is_set()
+
+    @property
+    def seconds_since_output(self) -> float | None:
+        """Seconds since the run last said anything — a log line, a transient
+        progress line, a transfer tick — or ``None`` before any run.
+
+        For the silent-stream check (tracker C1). Nothing in the app noticed a
+        remote stream that had gone quiet: the reader blocks until the next
+        line, and an hour after the job had died every surface still read
+        "Processing N/M" and "ETA 0s".
+        """
+        return None if self._last_output_at is None else time.monotonic() - self._last_output_at
+
+    @property
+    def last_output_line(self) -> str:
+        """The last non-empty line the run said, for the silence warning."""
+        return self._last_output_line
+
+    @property
+    def remote_name(self) -> str:
+        """The remote host's name, or ``""`` for a local run."""
+        return str(getattr(self._remote, "name", "") or "")
+
+    def probe_silence(self) -> bool:
+        """Ask the host, on a thread of its own, whether a silent run is alive.
+
+        One bounded probe (``services.remote_liveness.probe``); its answer is a
+        log line, said with ``activity=False`` so it does not reset the silence
+        it reports on. Never stops or cancels anything — the user decides, and
+        the line says what each answer means for them. ``False`` when there is
+        nothing to ask (no remote run launched) or a probe is already out.
+        """
+        remote = self._remote_runner
+        run = getattr(remote, "run", None)
+        host = getattr(remote, "host", None)
+        if run is None or host is None:
+            return False
+        if self._silence_probe is not None and self._silence_probe.is_alive():
+            return False
+        scheduler = bool(str(getattr(host, "compute_launcher", "") or "").strip())
+        advice = {
+            ALIVE: "the run is still going there, so it is only quiet; nothing to do",
+            GONE: "the run is not running there any more — press Stop, then Resume from the "
+                  "Analyze banner to download the wells it finished and run the rest",
+        }
+
+        def _ask() -> None:
+            found = probe(host, run.remote_pidfile, scheduler=scheduler, job_hint=self._evidence.job_id)
+            then = advice.get(found.state, "the state of the run there is not known — if it stays "
+                                           "silent, Stop and Resume")
+            self._enqueue(("line", f"[remote] no-output check: {found.words}; {then}.\n"),
+                          activity=False)
+
+        self._silence_probe = threading.Thread(target=_ask, name="aw-silence-probe", daemon=True)
+        self._silence_probe.start()
+        return True
 
     @property
     def stop_unconfirmed(self) -> str:

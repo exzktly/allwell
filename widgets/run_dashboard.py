@@ -219,6 +219,10 @@ class RunDashboard(PlateProgress):
     def transfer(self) -> float | None:
         return self._transfer
 
+    def status_text(self) -> str:
+        """What the status line says now, for a writer that retracts only its own text."""
+        return self._status.text()
+
     def set_total(self, total: int) -> None:
         self._total = int(total)
         self._refresh_rail()

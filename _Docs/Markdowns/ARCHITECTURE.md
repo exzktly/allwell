@@ -16737,6 +16737,27 @@ was not happening.
 
 **The status line belongs to whatever phase is current.** `remote_xfer` events carry `(direction, fraction)`: the remote run is handed a `pipeline_runner.TransferProgress`, whose call is the upload's rsync fraction and whose `.download` — the callable `Fetcher.__init__` keeps when it is offered one — is the share of the run's wells fetched back, so the label reads `Uploading… 42%` or `Downloading… 42%` rather than an unattributed "Transferring…". `AnalyzeProgressMixin._on_remote_xfer` hands them to `RunDashboard.set_transfer(pct, direction)`; the uploader's own end-of-upload lines (`uploaded … MB in`, `batch N: upload complete` / `interrupted`, `batch N upload failed`, `empty-well reference uploaded once`; `pipeline_runner._RE_UPLOAD_OVER`, which `carries_state` keeps from being dropped) become `("xfer_end", "up")`, which retracts an *upload* label (`end_transfer`) and leaves a download's; and the first compute-phase event (`well_total` / `well_done` / `well_fov`, in `AnalyzeProgressMixin._COMPUTE_PHASE_EVENTS`) hands it `None`. The upload's end has to say so itself: a batch's upload is followed by its hand-off and a scheduler wait in which nothing else writes the status line, and the label sat on the upload's last tick for the whole wait (79 % for an hour, in one report). The dashboard holds the fraction as state and formats the label itself. Two different objects drive this dashboard — `analyze.tab` for the runner's own events, `analyze.progress` for the pipeline's — and the label used to be a string one of them pushed and neither retracted, so it sat on the last transfer tick (`Transferring… 92%`) for the whole compute phase, until the end of the run cleared it. Clearing is keyed off the pipeline's own progress rather than off rsync reporting exactly 100%, which it need not do: the final tick before rsync exits can be any value, and in batched mode it is scaled per batch.
 
+**A remote stream that goes silent is noticed.** `PipelineRunner._enqueue` stamps
+the time of every line and transfer tick the run says (`seconds_since_output`,
+`last_output_line`), and `AnalyzeProgressMixin._check_stream` looks every 30 s
+while a remote run is going. Outside a scheduler queue wait (silent by design,
+with its own clock), twenty minutes with nothing (`_SILENCE_WARN_S`) puts "No
+output from <host> for 21m00s — checking it is still running…" on the status
+line and two `[warn]` lines in the log — the last line received, that a quiet
+stretch is not by itself a failure, and Stop / Resume as what to do if the run has
+ended there — and starts `PipelineRunner.probe_silence`, which runs
+`remote_liveness.probe` on a thread and logs its answer as `[remote] no-output
+check: …` with what that answer means (still going; no longer running, so Stop
+and Resume; not known). The probe's line is enqueued with `activity=False`, so it
+does not reset the silence it reports. The warning repeats once per further
+threshold of silence and is retracted when output resumes. Twenty minutes
+because a healthy run is never that quiet: a field-by-field well prints every
+FOV-group, a nanowell well every step and every tenth of a timepoint's
+nanowells, a batched run its driver's tick, a transfer a line a second; the
+longest quiet stretch is one long step (locating a large timepoint, a heavy
+FOV-group on CPU), which is minutes. Before this the reader simply blocked, and an
+hour after a job had died every surface still read "Processing N/M" and "ETA 0s".
+
 **Transfer progress is live state, so it stays out of the log.** A remote
 transfer used to write a line every eight seconds (bytes so far, time elapsed)
 plus rsync's own percentage stream once a second. A log records what *happened*,

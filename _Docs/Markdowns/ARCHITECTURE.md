@@ -9509,8 +9509,9 @@ them from a described grid, and without one refuse naming it.
 
 ### 6.2c Converting part of a plate
 
-All three packed-file converters take a **well subset**: convert some of the
-plate now, the rest later, into the same dataset folder. The setting is one
+All three packed-file converters take a **well subset** — convert some of the
+plate now, the rest later, into the same dataset folder — and a **timepoint
+subset**, covered at the end of this section. The setting is one
 field (`ConversionParams.well_subset`, empty meaning the whole plate) and the
 whole design rests on one sentence.
 
@@ -9587,6 +9588,42 @@ with everything picked convert the same wells and look completely different,
 and a rim on three of ninety-six cells is visible only once you know to look
 for it. **Invert** is there because "everything except these" is the one thing
 an include-only model cannot say in fewer clicks than there are wells.
+
+**Timepoints are picked the same way on all three pages, and keyed
+differently from wells.** `ConversionParams.timepoint_subset` names source
+tokens (`t0`, `24h`, exactly as `plan.source_timepoint_tokens` lists them;
+empty meaning every timepoint), and `explode_common.timepoint_plan` applies it
+before the stride, so the stride thins *the selection*, counting from its first
+member — `t1, t2, t4` at stride 2 keeps `t1, t4`, where striding the source and
+filtering after would keep `t2, t4`. The plan still returns `(source index,
+token)` pairs, so the index that reads a plane and the token that names it
+cannot drift apart, and a token the source does not hold raises naming it
+rather than converting fewer timepoints than were asked for. The run log's
+`kept_timepoints_note` states the selection beside the stride
+(`(every 2nd of 3 picked of 6: t1, t4)`), and the page readout's
+`timepoint_phrase` already states both counts.
+
+Unlike the well subset, **the timepoint selection is a mapping field**: a
+well's archive holds one image per kept timepoint, so two selections write
+different archives for the same well, and `well_is_complete` tests `issubset`
+— a resume or top-up onto a well filled under a wider selection would leave it
+holding timepoints its neighbours lack. It is in each converter's
+`_MAPPING_FIELDS` and in `tests/test_reuse_is_keyed_completely.py`'s roster for
+the same reason the stride is. `convert_marker.mapping_signature` writes it
+**only when set** (`OMITTED_WHEN_EMPTY`): a marker left before the field
+existed has no such key, and writing the empty default would refuse every
+top-up of such a folder although nothing about its settings differs.
+
+The picker is `datasets/core/timepoint_picker.TimepointPicker`, a
+`widgets.checkable_dropdown.CheckableDropdown` beside each page's stride box.
+It holds the selection as a value (`()` all, `None` nothing ticked — refused by
+`RawFields.problems()` rather than read as "all"), because the list is rebuilt
+from each successful plan and a queued job's restored selection can arrive
+before the scan that lists the tokens. A restored token the source lacks is
+kept and listed as *(not in this source)*, so the plan refuses it by name
+instead of the page converting a different set than the job asked for; the
+menu's **All** resets to the whole timelapse rather than ticking every listed
+row, which is what leads out of that refusal before the real tokens are known.
 
 ### 6.2d Saying the scan is still running
 
@@ -13922,7 +13959,8 @@ deletable:
 | `datasets/core/well_block.py` | `block_shift_well_map` / `WellBlockError` — move a set of wells as one rigid block so its top-left corner lands on a given well, refusing a shift off the 96-well plate. Merge plates' "place dataset 2 starting at well" and the Job Queue's projection of a queued Merge both use it; `merge_plates_compute.block_shift_well_map` wraps it to raise `MergePlatesError`. |
 | `datasets/core/pending_inputs.py` | `apply_pending` / `any_pending` / `RUN_WAITS` — the page side of an input a queued job has still to write (see *Pending inputs* under the Job Queue). |
 | `datasets/core/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count) every tool below uses for its per-well `ThreadPoolExecutor`. It **re-exports** `pipeline.explode_common.pick_workers` rather than defining it: the exploders take it from there, and this module used to hold a second implementation of the same three lines under a comment saying it mirrored the first — which is a heuristic that will be tuned in one place and not the other. |
-| `datasets/core/convert_marker.py` | The resume marker the three **packed-file converters** share (Convert OME-TIFF, Convert CZI, Convert ND2) — `mapping_signature`, the marker read/write/clear trio, `converted_wells`, `ResumeState`, `resume_state` and `destination_problem`. It is a different question from `dataset_paths.make_dataset_api`'s, which the copy tools use: theirs is "did I leave leftovers here?", answerable from the presence of a file and cleared by rebuilding. This one is "may I carry on from what is here?", which is a question about **settings** — two different mappings of one source write *identical* filenames, so nothing on disk distinguishes an `A01.zip` made from scene 0 from one made from scene 7, and only a marker recording the mapping can tell a run that may finish another's work from one that must refuse. Each converter passes its own marker filename (a folder carrying *another* converter's leftovers is not a resume either) and its own list of mapping fields; the signature also carries the source's resolved path, size and mtime, so a file replaced at the same name — a re-export, a restore, the next plate saved over the last — is a different source. `workers` is deliberately not a mapping field: it changes how fast the conversion goes and nothing about what it writes, so refusing a resume over it would refuse one that was safe. |
+| `datasets/core/convert_marker.py` | The resume marker the three **packed-file converters** share (Convert OME-TIFF, Convert CZI, Convert ND2) — `mapping_signature`, the marker read/write/clear trio, `converted_wells`, `ResumeState`, `resume_state` and `destination_problem`. It is a different question from `dataset_paths.make_dataset_api`'s, which the copy tools use: theirs is "did I leave leftovers here?", answerable from the presence of a file and cleared by rebuilding. This one is "may I carry on from what is here?", which is a question about **settings** — two different mappings of one source write *identical* filenames, so nothing on disk distinguishes an `A01.zip` made from scene 0 from one made from scene 7, and only a marker recording the mapping can tell a run that may finish another's work from one that must refuse. Each converter passes its own marker filename (a folder carrying *another* converter's leftovers is not a resume either) and its own list of mapping fields; the signature also carries the source's resolved path, size and mtime, so a file replaced at the same name — a re-export, a restore, the next plate saved over the last — is a different source. `workers` is deliberately not a mapping field: it changes how fast the conversion goes and nothing about what it writes, so refusing a resume over it would refuse one that was safe. A field in `OMITTED_WHEN_EMPTY` (`timepoint_subset`) is written only when set, so markers left before it existed still match a run that leaves it empty (§6.2c). |
+| `datasets/core/timepoint_picker.py` | `TimepointPicker` — the three converters' *Timepoints* dropdown: a `CheckableDropdown` of the source's own timepoint tokens whose `subset()` is `()` with everything ticked, `None` with nothing, and otherwise the ticked tokens; a restored token the source lacks stays listed as missing (§6.2c). |
 
 **Every copy tool refuses a dataset that spells one well two ways.** Subset,
 Merge Plates and Concatenate each call `well_spelling_collisions` from their own

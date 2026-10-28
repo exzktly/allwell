@@ -200,7 +200,7 @@ def test_every_declared_mapping_field_alone_declines_the_resume(
         "well_source": "grid", "grid_rows": 4, "grid_cols": 6,
         "origin": "B03", "direction": "col", "serpentine": False,
         "fovs_per_well": 3, "experiment": "Other", "use_folder": True,
-        "timepoint_stride": 3,
+        "timepoint_stride": 3, "timepoint_subset": ("t0",),
     }[field]
     other = dataclasses.replace(params, **{field: changed})
 

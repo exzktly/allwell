@@ -6853,6 +6853,14 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    *"4 of 12 timepoint(s) (0h, 12h, 24h, 36h)"*, because a dataset converted
    this way otherwise looks exactly like a plate that was only imaged four
    times. The same control, with the same behaviour, is on the Convert CZI page.
+
+   **Timepoints**, beside it, picks which of the file's timepoints to convert
+   — a menu of every timepoint by the name it will be written under, all
+   ticked to begin with. The stride then thins the ticked set. It behaves
+   exactly as it does on the [Convert CZI](#convert-czi) page, including that
+   a top-up into an existing dataset must tick the same timepoints. On a
+   single-image file the list follows the frame order, so it appears once
+   the grid and frame order resolve a split.
 7. **Frame order** — *shown only for a single-image file that packs every
    position into its T axis*. Because an OME image has no position dimension, the
    positions live in the T axis, possibly interleaved with real timepoints. Say
@@ -7287,6 +7295,26 @@ on the plate rather than supplying it.
    otherwise looks exactly like a plate that was only imaged that many times,
    the readout says both numbers — *"4 of 12 timepoint(s) (0h, 12h, 24h,
    36h)"* — and the run log repeats it.
+
+   **Timepoints**, beside it, picks *which* timepoints to convert. Its menu
+   lists every timepoint the file holds, by the name it will be written under
+   (`0h`, `24h`, … or `t0`, `t1`, …), all ticked to begin with; untick the
+   ones to leave out, or use **All** / **None**. The stride then keeps every
+   Nth of the *ticked* ones, counting from the first ticked — so ticking
+   `t1`, `t2` and `t4` with a stride of 2 converts `t1` and `t4`. The kept
+   timepoints keep their own names here too, the readout says *"2 of 5
+   timepoint(s) (t1, t4)"*, and the run log says how many were picked. With
+   nothing ticked, Convert is off and the readout says why. A queued job
+   carries its selection; if the source it is pointed at no longer holds one
+   of the timepoints, the menu lists it as *(not in this source)* and the run
+   is refused naming it — untick it, or press **All**.
+
+   Unlike the wells, the timepoint selection must match when you add to an
+   existing dataset: each well's archive holds one image per converted
+   timepoint, so wells converted under two different selections would make a
+   plate whose wells disagree about which timepoints they have. Converting
+   more wells later into the same folder works as long as the timepoints
+   ticked are the same.
 8. **Worker threads** — how many wells to convert in parallel (blank = auto,
    capped at the number of wells). It changes only how fast the run goes and
    nothing about what comes out, which is also why changing it never blocks a
@@ -7557,6 +7585,11 @@ rather than having the second visit overwrite the first.
    and the readout says both numbers — *"4 of 12 timepoint(s) (0h, 12h, 24h,
    36h)"* — because a dataset converted this way otherwise looks exactly like a
    plate that was only imaged that many times.
+
+   **Timepoints**, beside it, picks which of the file's timepoints to convert,
+   and the stride then thins the ticked set — exactly as on the
+   [Convert CZI](#convert-czi) page, including that a top-up into an existing
+   dataset must tick the same timepoints.
 7. **Worker threads** — how many wells to convert in parallel (blank = auto,
    capped at the number of wells). It changes only how fast the run goes and
    nothing about what comes out, which is also why changing it never blocks a

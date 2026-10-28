@@ -74,6 +74,7 @@ from datasets.ome_import.ome_import_compute import (
 )
 from datasets.core.channel_roles_row import ChannelRolesMixin
 from datasets.core.dataset_fields import promote_open_button
+from datasets.core.timepoint_picker import TimepointPicker
 
 # Widths of the small numeric boxes. Named, not written at the call site, both
 # because ARCHITECTURE §8 asks for it and because a literal passed through a
@@ -384,6 +385,13 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "without re-exporting it. The kept timepoints keep their own "
             "names, so a four-hourly run gives 0h, 12h, 24h.")
         hl2.addWidget(self._stride_edit)
+        hl2.addWidget(QLabel("Timepoints:", row2))
+        # Lists the source's own tokens once a plan resolves; until then it
+        # holds whatever selection was restored, which the plan then checks.
+        self._timepoint_pick = TimepointPicker(row2)
+        self._timepoint_pick.changed.connect(
+            lambda: self.refresh_readout())
+        hl2.addWidget(self._timepoint_pick)
         self._order_label = QLabel("Frame order:", row2)
         hl2.addWidget(self._order_label)
         self._frame_order_cb = QComboBox(row2)
@@ -673,6 +681,8 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             cols=self._cols_edit.text(),
             fovs=self._fovs_edit.text(),
             timepoint_stride=self._stride_edit.text(),
+            timepoint_subset=self._timepoint_pick.subset() or (),
+            timepoints_ticked=self._timepoint_pick.subset() is not None,
             origin=self._origin_edit.text(),
             workers=self._workers_edit.text(),
             direction=str(self._direction_cb.currentData() or "row"),
@@ -703,6 +713,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._stride_edit.setText(
             "" if params.timepoint_stride in (0, 1)
             else str(params.timepoint_stride))
+        self._timepoint_pick.set_subset(params.timepoint_subset)
         if params.well_order:
             self._plate.set_order(list(params.well_order))
         else:
@@ -788,7 +799,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # carries on against the order it actually started with.
         self._plate.setEnabled(not running)
         for w in (self._grid_row, self._fovs_edit, self._stride_edit,
-                  self._frame_order_cb,
+                  self._timepoint_pick, self._frame_order_cb,
                   self._workers_edit, self._seed_btn, self._clear_path_btn,
                   self._suggest_btn, self._mirror_row):
             w.setEnabled(not running)
@@ -873,6 +884,8 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
                 head += "\n" + resume.hint()
             try:
                 plan = plan_conversion(layout, params)
+                self._timepoint_pick.set_source_tokens(
+                    plan.source_timepoint_tokens)
                 # The timing note rides with the summary rather than waiting
                 # for the run log: a plate whose timepoints lost their elapsed
                 # hours is a dataset with no time axis in Review, and the

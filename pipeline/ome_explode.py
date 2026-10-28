@@ -58,7 +58,7 @@ from pipeline.explode_common import (
     pick_workers,
     publishing_total,
     resolve_positions,
-    stride_note,
+    kept_timepoints_note,
     subset_note,
     timepoint_plan,
     well_is_complete,
@@ -1327,6 +1327,7 @@ def explode_ome_tiff(
     experiment: str = "ome",
     fovs_per_well: "int | None" = None,
     timepoint_stride: int = 1,
+    timepoint_subset: "tuple[str, ...]" = (),
     frame_order: str = "single",
     well_order: "list[str] | None" = None,
     workers: int = 0,
@@ -1359,6 +1360,8 @@ def explode_ome_tiff(
     counting from the first and keeping the source's own tokens -- see
     :func:`pipeline.explode_common.timepoint_plan`. The default of 1 converts
     everything.
+    *timepoint_subset* converts only the named source tokens (empty: all of
+    them), with the stride then applied within that selection.
 
     Wells are converted in parallel: *workers* threads (0 = auto), each with its
     own read handle, each owning a disjoint set of wells and writing that well's
@@ -1440,7 +1443,8 @@ def explode_ome_tiff(
     # with ``pos * n_timepoints + t``, so that arithmetic is over the
     # timepoints the file holds, not the ones this run keeps. Rebinding it to
     # the kept count reads the wrong frame for every position after the first.
-    tp_plan = timepoint_plan(source_tokens, timepoint_stride)
+    tp_plan = timepoint_plan(source_tokens, timepoint_stride,
+                             timepoint_subset)
     tp_tokens = [token for _index, token in tp_plan]
     n_kept_t = len(tp_plan)
 
@@ -1454,11 +1458,13 @@ def explode_ome_tiff(
     n_selected = len(selected)
     total = n_selected * fovs * n_kept_t * layout.size_c
     n_workers = pick_workers(workers, n_selected)
+    kept_note = kept_timepoints_note(timepoint_stride, n_timepoints,
+                                     len(timepoint_subset), tp_tokens)
     _log(
         f"[ome] {ome_path.name}: {head} -> "
         f"{subset_note(n_selected, n_wells)} x {fovs} FOV(s) x "
         f"{n_kept_t} timepoint(s)"
-        f"{stride_note(timepoint_stride, n_timepoints, tp_tokens)}"
+        f"{kept_note}"
         f", {layout.size_c} channel(s)"
         f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}"
         f" -- {n_workers} worker(s).\n"

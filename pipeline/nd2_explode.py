@@ -38,7 +38,7 @@ from pipeline.explode_common import (
     pick_workers,
     publishing_total,
     resolve_positions,
-    stride_note,
+    kept_timepoints_note,
     subset_note,
     timepoint_plan,
     well_is_complete,
@@ -156,6 +156,7 @@ def explode_nd2(
     experiment: str = "",
     fovs_per_well: "int | None" = None,
     timepoint_stride: int = 1,
+    timepoint_subset: "tuple[str, ...]" = (),
     workers: int = 0,
     log_fn: "Callable[[str], None] | None" = None,
     progress_fn: "Callable[[int, int], None] | None" = None,
@@ -170,6 +171,8 @@ def explode_nd2(
     counting from the first and keeping the source's own tokens — see
     :func:`pipeline.explode_common.timepoint_plan`. The default of 1 converts
     everything.
+    *timepoint_subset* converts only the named source tokens (empty: all of
+    them), with the stride then applied within that selection.
 
     Wells are converted in parallel across *workers* threads (0 = auto), each
     with its own read handle and its own disjoint set of wells, so no two
@@ -220,7 +223,8 @@ def explode_nd2(
     # Index *and* token together: the index reads the plane and the token names
     # it, so a stride that filtered one list without the other would write the
     # right image under the wrong timepoint's name.
-    tp_plan = timepoint_plan(tokens, timepoint_stride)
+    tp_plan = timepoint_plan(tokens, timepoint_stride,
+                             timepoint_subset)
     tp_tokens = [token for _index, token in tp_plan]
     n_kept_t = len(tp_plan)
     fovs = well_map.fovs_per_well
@@ -237,11 +241,13 @@ def explode_nd2(
     total = n_selected * fovs * n_kept_t * layout.size_c
     n_workers = pick_workers(workers, n_selected)
     source = "the file's position names" if well_map.from_file else "the plate grid"
+    kept_note = kept_timepoints_note(timepoint_stride, layout.size_t,
+                                     len(timepoint_subset), tp_tokens)
     _log(
         f"[nd2] {nd2_path.name}: {layout.n_positions} position(s) -> "
         f"{subset_note(n_selected, n_wells)} x {fovs} FOV(s) x "
         f"{n_kept_t} timepoint(s)"
-        f"{stride_note(timepoint_stride, layout.size_t, tp_tokens)}, "
+        f"{kept_note}, "
         f"{layout.size_c} channel(s)"
         f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}"
         f" -- wells from {source}, {n_workers} worker(s).\n"

@@ -53,6 +53,7 @@ from core.worker_bridge import run_off_thread
 from datasets.core.channel_roles_row import ChannelRolesMixin
 from datasets.core.dataset_fields import promote_open_button
 from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.timepoint_picker import TimepointPicker
 from datasets.nd2_import.dashboard import Nd2ImportDashboard
 from datasets.nd2_import.nd2_import_compute import (
     ConversionParams,
@@ -314,6 +315,12 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "without re-acquiring it. The kept timepoints keep their own "
             "names, so t0, t3, t6 stay three hours apart in Review.")
         options_layout.addWidget(self._stride_edit)
+        options_layout.addWidget(QLabel("Timepoints", options))
+        # Lists the source's own tokens once a plan resolves; until then it
+        # holds whatever selection was restored, which the plan then checks.
+        self._timepoint_pick = TimepointPicker(options)
+        self._timepoint_pick.changed.connect(self._on_readout_input_changed)
+        options_layout.addWidget(self._timepoint_pick)
         options_layout.addWidget(QLabel("Worker threads", options))
         self._workers_edit = self._small("", placeholder="auto")
         options_layout.addWidget(self._workers_edit)
@@ -477,6 +484,8 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             origin=self._origin_edit.text(),
             workers=self._workers_edit.text(),
             timepoint_stride=self._stride_edit.text(),
+            timepoint_subset=self._timepoint_pick.subset() or (),
+            timepoints_ticked=self._timepoint_pick.subset() is not None,
             direction=str(self._direction_cb.currentData() or "row"),
             serpentine=self._serpentine_cb.isChecked(),
             experiment=self._experiment_edit.text(),
@@ -501,6 +510,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._stride_edit.setText(
             "" if params.timepoint_stride in (0, 1)
             else str(params.timepoint_stride))
+        self._timepoint_pick.set_subset(params.timepoint_subset)
         direction = self._direction_cb.findData(params.direction)
         if direction >= 0:
             self._direction_cb.setCurrentIndex(direction)
@@ -554,7 +564,8 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             set_variant(self._run_btn, "primary")
         for widget in (self._well_source_cb, self._grid_host,
                        self._experiment_edit, self._fovs_edit,
-                       self._stride_edit, self._workers_edit):
+                       self._stride_edit, self._timepoint_pick,
+                       self._workers_edit):
             widget.setEnabled(not running)
         # Path fields lock rather than disable: ``setEnabled(False)`` dims the
         # path text too, which is the one piece of context someone watching a
@@ -764,6 +775,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._dashboard.set_wells([])
             self._update_run_gate(False)
             return
+        self._timepoint_pick.set_source_tokens(plan.source_timepoint_tokens)
 
         note = ""
         dest = self.destination_path()

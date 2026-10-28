@@ -190,8 +190,18 @@ def stride_note(stride: int, size_t: int, kept_tokens: list[str]) -> str:
     return f" (every {ordinal} of {size_t}: {shown})"
 
 
-def timepoint_plan(timepoints, stride: int = 1) -> list[tuple[int, str]]:
+def timepoint_plan(timepoints, stride: int = 1,
+                   subset=()) -> list[tuple[int, str]]:
     """The timepoints a conversion keeps, as ``(source index, token)`` pairs.
+
+    *subset*, when given, names the source tokens to convert and the rest are
+    left out; empty converts the whole timelapse. The stride is then applied
+    **within the selection**, counting from its first member, so "t0 to t11,
+    every third" is a selection of twelve and a stride of three. Matching is
+    by the source's own token, exactly as the page lists it; a token the
+    source does not hold raises rather than converting fewer timepoints than
+    were asked for, because a run that quietly drops part of a request looks
+    exactly like one that was asked for less (CLAUDE.md §7).
 
     *stride* of 1 keeps everything, which is the default and the only value
     that produces a complete dataset. A larger one keeps every *stride*-th
@@ -221,7 +231,46 @@ def timepoint_plan(timepoints, stride: int = 1) -> list[tuple[int, str]]:
             f"A timepoint stride must be 1 or more; got {stride}. Use 1 to "
             f"convert every timepoint."
         )
-    return [(index, tokens[index]) for index in range(0, len(tokens), stride)]
+    indices = list(range(len(tokens)))
+    wanted = [str(t).strip() for t in (subset or ()) if str(t).strip()]
+    if wanted:
+        held = set(tokens)
+        missing = [t for t in dict.fromkeys(wanted) if t not in held]
+        if missing:
+            raise ValueError(
+                f"The timepoints to convert include {', '.join(missing)}, "
+                f"which this source does not hold. It has "
+                f"{', '.join(tokens[:8])}{' …' if len(tokens) > 8 else ''}. "
+                f"Clear the selection to convert every timepoint.")
+        chosen = set(wanted)
+        # Source order, not the order the selection was written in: the
+        # archive members carry the tokens either way, but a plan out of
+        # acquisition order would make every "first kept" statement false.
+        indices = [i for i in indices if tokens[i] in chosen]
+    return [(indices[k], tokens[indices[k]])
+            for k in range(0, len(indices), stride)]
+
+
+def kept_timepoints_note(stride: int, size_t: int, n_picked: int,
+                         kept_tokens: list[str]) -> str:
+    """The run log's parenthesis on which timepoints a conversion writes.
+
+    :func:`stride_note` when every timepoint was in play, and otherwise a
+    sentence stating the selection as well — ``" (5 of 12 picked: t0, t2,
+    …)"`` or ``" (every 2nd of 5 picked of 12: t0, t4, t8)"``. Both numbers,
+    always: a run over part of a timelapse writes a complete-looking dataset,
+    and the count alone reads the same as a source that only ever had that
+    many timepoints.
+    """
+    if n_picked <= 0 or n_picked >= size_t:
+        return stride_note(stride, size_t, kept_tokens)
+    shown = ", ".join(kept_tokens[:4])
+    if len(kept_tokens) > 4:
+        shown += f", ... {kept_tokens[-1]}"
+    if stride > 1:
+        ordinal = f"{stride}{_ordinal_suffix(stride)}"
+        return f" (every {ordinal} of {n_picked} picked of {size_t}: {shown})"
+    return f" ({n_picked} of {size_t} picked: {shown})"
 
 
 def expected_members(experiment: str, channels, well: str, fovs: int,

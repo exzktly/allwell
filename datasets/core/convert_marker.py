@@ -38,6 +38,16 @@ from util.aw_safe import swallow
 from util.json_write import write_json_atomic
 
 
+#: Mapping fields added after markers were already being written, recorded only
+#: when set. A marker left by an earlier version has no such key, and writing
+#: the empty default would make every folder converted before the field existed
+#: — an interrupted run, a finished subset waiting to be topped up — refuse a
+#: run whose settings are in fact identical. Omitting an empty value keeps that
+#: comparison exact: a set value is still a key the earlier marker lacks, so a
+#: run that narrows the timepoints declines the resume as it must.
+OMITTED_WHEN_EMPTY = frozenset({"timepoint_subset"})
+
+
 def mapping_signature(src: Path | str, params: object, fields) -> dict:
     """What a resume has to match: the source, and the settings that map it.
 
@@ -50,6 +60,8 @@ def mapping_signature(src: Path | str, params: object, fields) -> dict:
     values: dict = {}
     for name in fields:
         value = getattr(params, name)
+        if name in OMITTED_WHEN_EMPTY and not value:
+            continue
         values[name] = list(value) if isinstance(value, tuple) else value
     source = Path(src)
     values["source"] = str(source.resolve())

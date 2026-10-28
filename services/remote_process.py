@@ -77,6 +77,7 @@ from services.remote_run_id import (
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
+from services.remote_handoff import chase_handoff, hand_off, watch_of
 from services.remote_batch_resume import (
     _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
     reattach_output_dir, stage_leftovers, take_from_remote)
@@ -859,6 +860,7 @@ class _BatchedRemoteProcess:
             assert proc.stdout is not None
             for line in proc.stdout:
                 note_remote_scratch(self, line)
+                watch_of(self).observe(line)
                 m = _BATCH_DONE_RE.search(line)
                 if m:
                     # Consumed, not forwarded: this is the handshake between the
@@ -967,6 +969,9 @@ class _BatchedRemoteProcess:
         while not event.wait(timeout=1.0):
             if self._stop.is_set() or self._stream_ended.is_set():
                 break
+            if not chase_handoff(self, index, n_batches, lambda: self._batch_flag(BATCH_READY, index)):
+                self._returncode = self._returncode or 1    # `remote_handoff` has said why
+                return None
         if index in self._batch_rc:
             return self._batch_rc[index]
         # No code came back. Either the user stopped the run, or the allocation
@@ -1211,11 +1216,11 @@ class _BatchedRemoteProcess:
                 # The pipeline for this batch runs inside the allocation the
                 # driver is already holding — there is no second queue wait and
                 # no second argv to build. Hand it the batch and wait for the
-                # code it reports back.
-                self._runner._cache._ssh_run(
-                    ["touch", self._batch_flag(BATCH_READY, batch_idx + 1)],
-                    check=False,
-                )
+                # code it reports back; one that cannot be made ends the run.
+                if not hand_off(self, batch_idx + 1, n_batches,
+                                self._batch_flag(BATCH_READY, batch_idx + 1)):
+                    self._returncode = 1
+                    return
                 download_adopted(self)      # the job has its first batch: drain the earlier attempt's wells meanwhile
                 rc = self._await_batch(batch_idx + 1, n_batches)
                 self._release_nanowell_batch(rc, batch_zips)

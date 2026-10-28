@@ -232,6 +232,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_batched_restart_reuses_the_remote.py": "A restarted batched run looks at the remote before it uploads or runs anything",
     "test_a_batched_resume_does_not_download_first.py": "A batched resume starts the run at once; wells already here are painted, whatever the …",
     "test_a_batched_subset_run_finds_its_wells.py": "A remote run split into batches can be limited to named wells",
+    "test_a_lost_batch_handoff_is_noticed.py": "A batch handed to the batch driver either reaches it, or the run says it did not",
     "test_a_remote_run_end_to_end.py": "A remote run, driven end to end against a host that really has a filesystem",
     "test_a_remote_suspend_winds_the_run_down.py": "A remote Suspend asks the pipeline to wind down; it does not kill the session",
     "test_a_resume_keeps_checkpoints_when_the_blank_moves.py": "A resumed batched run keeps its wells' part-way checkpoints though the blank's path changed",

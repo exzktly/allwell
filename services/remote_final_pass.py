@@ -21,6 +21,7 @@ import posixpath
 
 from services.remote_commands import BATCH_READY, BATCH_REANCHOR, BATCH_SKIP, HOLD_DIR
 from services.remote_fetch_nanowells import held_wells
+from services.remote_handoff import hand_off, raise_flag
 from services.remote_run_id import remote_run_dir
 from util.well_token import canonical_well_label
 
@@ -74,17 +75,25 @@ def run_final_pass(proc, n_batches: int) -> int | None:
     moved = bool(names) and getattr(ssh(["mv", keep, staged], check=False), "returncode", 1) == 0
     if moved and not _carry_the_record(proc, names, staged):
         names, moved = [], False
-    if moved:
-        ssh(["touch", proc._batch_flag(BATCH_REANCHOR, index)], check=False)
+    if moved and not raise_flag(proc, proc._batch_flag(BATCH_REANCHOR, index)):
+        # Without its flag the driver reports the pass done without running it, and the held wells would be
+        # released as if re-anchored. Moved back to `keep/`, they wait there for a later run's pass.
+        ssh(["mv", staged, keep], check=False)
+        proc._log("[remote] ERROR could not flag the end-of-run re-anchoring; the held wells stay on the remote "
+                  "for a later run's\n")
+        names = []
+    elif moved:
         proc._log(f"[remote] end-of-run re-anchoring: {len(names)} held well(s) — "
                   f"{', '.join(names[:8])}{' …' if len(names) > 8 else ''}\n")
     else:
-        ssh(["touch", proc._batch_flag(BATCH_SKIP, index)], check=False)
+        raise_flag(proc, proc._batch_flag(BATCH_SKIP, index))     # missing, the driver skips the pass all the same
         proc._log("[remote] end-of-run re-anchoring: no well was held for it\n" if not names else
                   "[remote] ERROR could not stage the held wells for the end-of-run re-anchoring; their unaddressed "
                   "timepoints stay unaddressed\n")
         names = []
-    ssh(["touch", proc._batch_flag(BATCH_READY, index)], check=False)
+    if not hand_off(proc, index, index, proc._batch_flag(BATCH_READY, index)):
+        proc._returncode = proc._returncode or 1
+        return None
     rc = proc._await_batch(index, index)
     if rc == 0 and names:
         proc._release_nanowell_batch(rc, [Path(f"{name}.zip") for name in names], final=True)

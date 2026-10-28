@@ -13,7 +13,7 @@ the archives a run uploads, ``services.remote_upload`` gets them onto the host
 once, ``services.remote_process`` presents the run as a process the GUI reads
 and stops, ``services.remote_fetch`` owns bringing output home and proving it
 arrived, ``services.remote_run_state`` the record a run carries,
-``services.remote_jobs`` the scheduler jobs a run holds, and
+``services.remote_jobs`` and ``services.remote_sweep`` its scheduler jobs, and
 ``services.remote_wire`` the lines the stages print and parse:
 
 * **Per-well zip granularity** — ``remote_staging.stage_local_zips`` runs the existing
@@ -83,7 +83,8 @@ from services.remote_process import (
     _run_prepared,
     _scheduler_handoff_lines,
 )
-from services.remote_jobs import close_remote_job, sweep_orphaned_allocation
+from services.remote_jobs import close_remote_job
+from services.remote_sweep import sweep_orphaned_allocation
 from services.remote_fetch import (
     FetchedOutputVerifier,
     Fetcher,
@@ -993,7 +994,7 @@ class RemoteRunner:
         *, log_fn: Callable[[str], None] | None = None,
     ) -> str:
         """Cancel an allocation a crashed earlier run left behind (see
-        :func:`services.remote_jobs.sweep_orphaned_allocation`)."""
+        :func:`services.remote_sweep.sweep_orphaned_allocation`)."""
         return sweep_orphaned_allocation(self.host, remote_pidfile, heartbeat,
                                          log_fn=log_fn)
 

@@ -336,10 +336,17 @@ def test_the_predicate_the_worker_pool_installs_consults_the_settings():
             if kw.arg == "output_exists"
         ]
         assert installed, f"{fn.__name__} installs no output_exists predicate"
-        assert any("well_settings_allow_reuse" in expr for expr in installed), (
+        # The pool's skip is `well_skip.finished_output`, which asks the settings and the completion seal
+        # (tracker B1); read through to its body, so a wrapper that dropped either is still caught.
+        assert any("finished_output(" in expr and "settings_key" in expr for expr in installed), (
             f"{fn.__name__}'s skip predicate does not consult the settings, so "
             f"a re-run with a different segmenter is still answered 'already "
             f"done': {installed}")
+    from pipeline.well_skip import finished_output
+
+    body = inspect.getsource(finished_output)
+    assert "well_settings_allow_reuse(" in body and "finished_on_this_host(" in body, (
+        "the pool's skip no longer asks both the settings and the completion seal")
 
 
 def test_the_incremental_path_consults_the_settings_too():

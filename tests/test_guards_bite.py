@@ -5488,3 +5488,112 @@ def test_run_start_guard_clears_start_worker(tmp_path, monkeypatch):
                   "class C:\n    def _launch(self):\n        self._start_worker(W())\n")
     assert _run_scan(monkeypatch, "tests.test_queue_adopts_a_page_run",
                      "test_every_datasets_run_starts_through_start_worker", [good]) is None
+
+
+# ── one definition of a finished well (tracker P4) ──────────────────────────
+
+#: The shapes "is this well finished" was answered in outside the definition: the pre-flight's remote `ls` glob,
+#: the batched resume's `endswith` on a listed name, verification's `removesuffix("_out")`, a local `Path.glob`, a
+#: regex, and a suffix tuple.
+FINISHED_WELL_VIOLATIONS = {
+    "ssh_glob": "def done(cache, d):\n    return cache._ssh_script(f'ls -1 {d}/*_out.zip', check=False)\n",
+    "endswith": "def done(names):\n    return {n[:-8] for n in names if n.endswith('_out.zip')}\n",
+    "removesuffix": "def done(stem):\n    return stem.removesuffix('_out')\n",
+    "path_glob": "from pathlib import Path\ndef done(d):\n    return list(Path(d).glob('*_out.zip'))\n",
+    "regex": "import re\nPAT = re.compile(r'^(\\w+)_out\\.zip$')\n",
+    "suffix_tuple": "def done(n):\n    return n.endswith(('_out.zip', '.csv'))\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FINISHED_WELL_VIOLATIONS))
+def test_finished_well_guard_catches_a_second_definition(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_finished.py", FINISHED_WELL_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_one_definition_of_a_finished_well",
+                    "test_nothing_outside_the_definition_lists_out_zip_to_decide_completion", [bad])
+    assert exc is not None and "bad_finished.py" in str(exc), f"the {shape} listing went uncaught"
+
+
+def test_finished_well_guard_clears_one_well_s_own_file_and_prose(tmp_path, monkeypatch):
+    """Naming one well's archive is not listing them, and a docstring that mentions the glob lists nothing."""
+    good = _write(tmp_path, "good_finished.py",
+                  'def where(out, well):\n    """Reads ``*_out.zip`` nowhere; see the definition."""\n'
+                  '    return f"{out}/{well}_out.zip"\n')
+    assert _run_scan(monkeypatch, "tests.test_one_definition_of_a_finished_well",
+                     "test_nothing_outside_the_definition_lists_out_zip_to_decide_completion", [good]) is None
+
+
+@pytest.mark.parametrize("reach", ["verifier._list_completed_wells_in(d)", "self._output_verifier()._list_remote_completed_wells()"])
+def test_finished_well_guard_catches_a_reach_into_verification_s_listing(tmp_path, monkeypatch, reach):
+    bad = _write(tmp_path, "bad_reach.py", f"def done(verifier, self, d):\n    return {reach}\n")
+    exc = _run_scan(monkeypatch, "tests.test_one_definition_of_a_finished_well",
+                    "test_only_verification_reads_its_own_backstop_listing", [bad])
+    assert exc is not None and "bad_reach.py" in str(exc)
+
+
+# ── every per-well marker the pipeline prints has a plate row ───────────────
+
+#: The shapes a per-well line takes in the source: a %-format log call, an
+#: f-string put straight on the stream, and a SKIP line a remote client prints.
+WELL_MARKER_VIOLATIONS = {
+    "log_format": ('import logging\nlog = logging.getLogger()\n'
+                   'def f(w):\n    log.warning("Well %s — HALF DONE: %d lost", w, 3)\n'),
+    "f_string": 'def f(q, w):\n    q.put(f"Well {w} — HALF DONE.\\n")\n',
+    "skip_line": 'def f(q, w):\n    q.put(f"SKIP well {w} — HALF DONE, left for later.\\n")\n',
+}
+
+
+def _every_roster_template() -> str:
+    from tests.test_every_well_marker_reaches_the_plate import ROSTER
+
+    return "".join(f"M{i} = {t!r}\n" for i, t in enumerate(ROSTER))
+
+
+@pytest.mark.parametrize("shape", sorted(WELL_MARKER_VIOLATIONS))
+def test_well_marker_guard_catches_an_unclassified_marker(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_marker.py", _every_roster_template() + WELL_MARKER_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_every_well_marker_reaches_the_plate",
+                    "test_every_per_well_marker_the_pipeline_prints_has_a_row", [bad])
+    assert exc is not None, f"the {shape} marker went unclassified"
+    assert "HALF DONE" in str(exc) and "bad_marker.py" in str(exc)
+
+
+def test_well_marker_guard_clears_a_tree_of_known_markers(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_marker.py", _every_roster_template())
+    assert _run_scan(monkeypatch, "tests.test_every_well_marker_reaches_the_plate",
+                     "test_every_per_well_marker_the_pipeline_prints_has_a_row", [good]) is None
+
+
+# ── remote commands are checked and bounded (review P2, P3) ──────────────────
+
+_RC = "tests.test_remote_commands_are_checked_and_bounded"
+
+
+@pytest.mark.parametrize("shape", [
+    'def f(cache):\n    cache._ssh_run(["rm", "-rf", "/r/x"], check=False)\n',
+    'def f(proc):\n    ssh = proc._runner._cache._ssh_run\n    ssh(["touch", "/r/ready"], check=False)\n',
+    'def f(cache):\n    if True:\n        cache._ssh_script("ls /r", check=False)\n',
+])
+def test_discard_guard_catches_a_thrown_away_remote_result(tmp_path, monkeypatch, shape):
+    path = _write(tmp_path, "services/mod.py", shape)
+    assert _run_scan(monkeypatch, _RC, "test_no_remote_command_result_is_thrown_away", [path]) is not None
+
+
+@pytest.mark.parametrize("shape", [
+    'def f(cache):\n    r = cache._ssh_run(["rm", "-rf", "/r/x"], check=False)\n    return r.returncode == 0\n',
+    'def f(cache):\n    if cache._ssh_run(["test", "-f", "/r"], check=False).returncode:\n        pass\n',
+    'def f(cache):\n    cache._ssh_run(["rm", "-rf", "/r/x"], check=True)\n',
+])
+def test_discard_guard_clears_a_read_result(tmp_path, monkeypatch, shape):
+    path = _write(tmp_path, "services/mod.py", shape)
+    assert _run_scan(monkeypatch, _RC, "test_no_remote_command_result_is_thrown_away", [path]) is None
+
+
+def test_unbounded_guard_catches_a_subprocess_without_a_timeout(tmp_path, monkeypatch):
+    path = _write(tmp_path, "services/mod.py", 'import subprocess\ndef f(a):\n    subprocess.run(a, check=True)\n')
+    assert _run_scan(monkeypatch, _RC, "test_every_services_subprocess_is_bounded", [path]) is not None
+
+
+def test_unbounded_guard_clears_a_bounded_subprocess(tmp_path, monkeypatch):
+    path = _write(tmp_path, "services/mod.py",
+                  'import subprocess\ndef f(a):\n    subprocess.run(a, check=True, timeout=30)\n')
+    assert _run_scan(monkeypatch, _RC, "test_every_services_subprocess_is_bounded", [path]) is None

@@ -62,7 +62,9 @@ def _harness(tmp_path, monkeypatch, *, earlier=(), force=False, nanowell=False):
 
     observed: list[str] = []
     queued: list = []
-    p._fetcher.observe = observed.append
+    # What the Fetcher was handed as finished on the remote by an earlier attempt (`remote_done_marker`): the
+    # wells this run computes are announced to it too, by the batches' own `— done.` lines.
+    p._fetcher.observe = lambda line: observed.append(line) if "by an earlier attempt" in line else None
     p._fetcher.after_queued = queued.append
     p._fetcher.run.nanowell = nanowell
     p._journal_keys = dict(argv_digest="d", source_key="s", host_alias="h")
@@ -77,10 +79,12 @@ def _harness(tmp_path, monkeypatch, *, earlier=(), force=False, nanowell=False):
         env_selector=("name", "allwell"),
         _build_remote_argv=lambda *a, **k: ["python", "pm.py"],
         _sweep_orphaned_allocation=lambda *a, **k: None,
+        _claim_run_dirs=lambda *a, **k: "",
         close_remote_job=lambda **kw: None,
     )
     p._pipeline_argv = ["--force"] if force else []
     monkeypatch.setattr(run_journal, "stored_remote_addresses", lambda *a, **k: list(earlier))
+    monkeypatch.setattr(run_journal, "recorded_remote_attempts", lambda *a, **k: list(earlier))
     return p, plate, run_dir, sent, observed, queued
 
 
@@ -90,7 +94,7 @@ def _run(p, monkeypatch):
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in range(1, 5):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()
     worker.join(timeout=30)
     assert not worker.is_alive()
@@ -191,6 +195,33 @@ def test_a_nanowell_run_frees_the_wells_it_adopted(tmp_path, monkeypatch, nanowe
     _run(p, monkeypatch)
     adopted_release = [t for t in queued if t.keywords.get("wells") == ["A02"]]
     assert bool(adopted_release) is nanowell
+
+
+def test_an_adoption_across_builds_is_named(tmp_path, monkeypatch):
+    """Tracker F7: a well another build finished is still adopted — the reuse keys deliberately span builds — but the
+    log says so, from the build its seal records."""
+    from pipeline.run_report import complete_seal_path
+
+    p, plate, run_dir, sent, observed, _ = _harness(tmp_path, monkeypatch)
+    _finished_on(run_dir / "out", "A02")
+    complete_seal_path(run_dir / "out", "A02").write_text('{"well": "A02", "build": "0.0.1"}')
+    _run(p, monkeypatch)
+    assert [line.split()[1] for line in observed] == ["A02"]
+    assert any("finished by another build" in m and "0.0.1" in m and "A02" in m for m in p._logged), p._logged
+
+
+def test_an_adopted_well_held_for_the_re_anchoring_is_not_freed_before_the_pass(tmp_path, monkeypatch):
+    """Tracker F4: the adopted wells' release ran at batch 1's hand-off and deleted the archive and outputs the
+    final pass re-runs a held well from. A well this run took over a hold for is kept until that pass."""
+    from services.remote_batch_resume import download_adopted
+
+    queued: list = []
+    run = types.SimpleNamespace(nanowell=True, nanowell_adopted_holds={"A02"})
+    proc = types.SimpleNamespace(_adopted_pending=["A02", "A03"], _log=lambda m: None,
+                                 _fetcher=types.SimpleNamespace(run=run, observe=lambda line: None,
+                                                                after_queued=queued.append))
+    download_adopted(proc)
+    assert [t.keywords.get("held") for t in queued] == [{"A02"}], "a held well's files were released before its pass"
 
 
 def test_the_earlier_attempt_survives_the_app_s_real_call_order(tmp_path, monkeypatch):
@@ -508,7 +539,7 @@ def test_the_node_is_requested_before_the_empty_well_blank_uploads(tmp_path, mon
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in range(1, 4):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()
     worker.join(timeout=30)
 
@@ -536,7 +567,7 @@ def test_the_driver_is_told_where_earlier_attempts_kept_the_blank(tmp_path, monk
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in range(1, 4):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()
     worker.join(timeout=30)
 
@@ -577,3 +608,110 @@ def test_a_well_the_remote_left_part_way_is_run_again_not_adopted(tmp_path, monk
         f"a well left part way on the remote was adopted as finished: {observed}")
     assert "b1/A02.zip" in sent, f"the part-way well was not sent to be run again: {sent}"
     assert any("A02" in m and "part way" in m for m in p._logged), "nothing says why A02 is run again"
+    # Tracker B1: sending it is half; the host writing into the re-attached directory must not then skip it as
+    # complete. The app leaves the withdrawal note the host's skip reads (`run_report.finished_on_this_host`).
+    from pipeline.run_report import finished_on_this_host, withdrawn_note_path
+
+    note = withdrawn_note_path(old / "out", "A02")
+    assert note.exists() is (where == "re-attached"), (
+        f"{where}: the note is for the directory the host writes into, and only that one")
+    if where == "re-attached":
+        assert not finished_on_this_host(old / "out", "A02"), "the host would still skip the part-way well"
+
+
+# ── the incident: a Resume that forces a well must still find the attempt it resumes (tracker F2) ──────────────
+
+@pytest.mark.parametrize("recorded_by", ["this build", "the build before"])
+def test_a_resume_that_forces_a_well_takes_over_the_attempt_it_resumes(tmp_path, monkeypatch, recorded_by):
+    """Incident 1's shape. The first attempt finished batches 1 and 2 on the remote (A01–A04, sealed, not yet
+    downloaded when the run stopped), uploaded batch 3 (A05, A06) to its ``b3`` and stopped. The Resume names A04
+    in ``--force_wells`` — the user's Force wells, or the runner's own ``nanowell_forced`` for a well with partial
+    tables here. ``--force_wells`` was part of the run's digest, so the Resume could not find the attempt it
+    resumed: every finished well was recomputed and both uploaded archives sent again. Now the force list is left
+    out of the digest, the attempt is found, A01–A03 are taken from it, A04 alone is run again (not adopted), and
+    nothing already on the remote is uploaded."""
+    from services import run_journal as J
+    from services.remote_finished_wells import argv_forcing
+    from services.remote_run_id import legacy_argv_digests, pipeline_argv_digest
+
+    old = tmp_path / "remote" / "runs" / "run-old"
+    p, plate, run_dir, sent, observed, _ = _harness(tmp_path, monkeypatch)
+    monkeypatch.undo()                                  # the real stored_remote_addresses, not the stub
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = p._local_output_dir
+    first = ["python", "process_microscopy.py", "--input_dir", str(plate), "--output_dir", str(out),
+             "--csv_prefix", "measurements", "--nuclear_token", "DAPI"]
+    resume = argv_forcing(first, ["A04"])
+    recorded = (pipeline_argv_digest(first) if recorded_by == "this build"
+                else __import__("services.remote_run_id", fromlist=["x"]).earlier_argv_digest(first))
+    J.open_run(out, spec={}, mode="remote-batched", input_dir=str(plate), argv=first)
+    J.record_remote(out, run_id="run-old", cache_key="k-old", host_alias="h", remote_input_dir=str(old / "in"),
+                    remote_output_dir=str(old / "out"), argv_digest=recorded, source_key="s")
+    J.open_run(out, spec={}, mode="remote-batched", input_dir=str(plate), argv=resume)   # the Resume
+    p._pipeline_argv = resume
+    p._journal_keys = dict(argv_digest=pipeline_argv_digest(resume), source_key="s", host_alias="h")
+    p._legacy_digests = legacy_argv_digests(resume)
+    for well in ("A01", "A02", "A03", "A04"):
+        _finished_on(old / "out", well)
+    _uploaded_copy(plate, old / "in", "A04")            # batch 2's input, swapped in and never cleared
+    for well in ("A05", "A06"):
+        _uploaded_copy(plate, old / "b3", well)
+
+    _run(p, monkeypatch)
+
+    assert p._returncode == 0, p._logged
+    assert sorted(line.split()[1] for line in observed) == ["A01", "A02", "A03"], (
+        f"the Resume did not take the earlier attempt's finished wells, or took the forced one: {observed}")
+    assert sent == [], f"archives the earlier attempt had already uploaded were sent again: {sent}"
+
+
+# ── every attempt is kept, though several wrote into one output directory (tracker F5) ─────────────────────────
+
+def _three_attempts(tmp_path, monkeypatch):
+    """Attempt 1 in ``run-1``; attempts 2 and 3 each in a run directory of their own, re-attached to ``run-1/out``
+    (``reattach_output_dir``): the history a twice-resumed batched run leaves, recorded through the real journal."""
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "local-out"
+    out.mkdir(exist_ok=True)
+    root = tmp_path / "remote" / "runs"
+    for n in (1, 2, 3):
+        J.open_run(out, spec={}, mode="remote-batched", input_dir="/in", argv=["--x"])
+        J.record_remote(out, run_id=f"run-{n}", cache_key=f"k{n}", host_alias="h",
+                        remote_input_dir=str(root / f"run-{n}" / "in"), remote_output_dir=str(root / "run-1" / "out"),
+                        argv_digest="d", source_key="s")
+    return out, root
+
+
+def test_the_journal_keeps_every_attempt_that_shared_an_output_directory(tmp_path, monkeypatch):
+    from services import run_journal as J
+
+    out, root = _three_attempts(tmp_path, monkeypatch)
+    attempts = J.recorded_remote_attempts(out, argv_digests=["d"], source_key="s", host_alias="h")
+    assert [Path(a["remote_input_dir"]).parent.name for a in attempts] == ["run-3", "run-2", "run-1"], (
+        "an attempt that re-attached to the same output directory as a later one was dropped from the journal, so "
+        f"its staged archives, its held wells and its blank's path are lost: {attempts}")
+
+
+def test_a_resume_takes_the_staged_batches_of_an_intermediate_attempt(tmp_path, monkeypatch):
+    """Attempt 2 staged batch 2 in its own ``b2`` and stopped; attempt 3 is this run. Its archives are on the remote,
+    and the journal is the only record of where."""
+    out, root = _three_attempts(tmp_path, monkeypatch)
+    p, plate, run_dir, sent, observed, _ = _harness(tmp_path, monkeypatch)
+    monkeypatch.undo()
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    p._local_output_dir = out
+    p._journal_keys = dict(argv_digest="d", source_key="s", host_alias="h")
+    p._legacy_digests = ()
+    p._runner._run.remote_output_dir = str(root / "run-1" / "out")          # re-attached, as attempts 2 and 3 were
+    for well in ("A03", "A04"):
+        _uploaded_copy(plate, root / "run-2" / "b2", well)
+
+    _run(p, monkeypatch)
+
+    assert p._returncode == 0, p._logged
+    assert not {"b2/A03.zip", "b2/A04.zip"} & set(sent), (
+        f"the intermediate attempt's uploaded batch was sent again: {sent}")

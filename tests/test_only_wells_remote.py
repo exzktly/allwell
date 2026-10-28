@@ -168,10 +168,13 @@ def test_the_blank_rides_along_in_empty_well_mode(monkeypatch, tmp_path):
 
 # ── the run address ──────────────────────────────────────────────────────────
 
-def test_a_different_subset_is_a_different_run_address():
-    """The host's run directory is addressed by a digest of the argv, and a run
-    reattaches to its own earlier directory by it. A subset missing from that
-    digest would let a run over B02 reattach to a run over A01."""
+def test_a_subset_is_the_same_configuration_as_the_whole_plate():
+    """Rewritten around tracker F2. This test first pinned the opposite — a subset hashed into the argv digest, so
+    "a run over B02 cannot re-attach to a run over A01". That rule is what broke resuming: which wells a run covers
+    is not how any one well is computed, and a run whose force list or subset the app had changed could no longer
+    find the attempt it resumed. A different subset still uploads different archives, so its run directory (keyed
+    on the upload too) is its own; what the shared digest allows is re-attaching to an earlier attempt's directory,
+    where every well is judged by its own settings marker and completion seal."""
     from services.remote_run_id import pipeline_argv_digest
 
     base = ["process_microscopy.py", "--input_dir", "/in", "--output_dir", "/out",
@@ -179,4 +182,6 @@ def test_a_different_subset_is_a_different_run_address():
     a = pipeline_argv_digest(base + ["--only_wells", "A01"])
     b = pipeline_argv_digest(base + ["--only_wells", "B02"])
     whole = pipeline_argv_digest(base)
-    assert len({a, b, whole}) == 3
+    assert len({a, b, whole}) == 1
+    assert pipeline_argv_digest(base + ["--only_wells", "A01", "--nuclear_token", "GFP"]) != a, (
+        "a setting written after the subset must still count")

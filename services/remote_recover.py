@@ -35,6 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from pipeline.run_report import cross_build_note
 from services import run_journal
 from services.remote_fetch import (
     _WELL_IN_MESSAGE,
@@ -49,6 +50,7 @@ from services.remote_run_id import (
     legacy_argv_digests,
     pipeline_argv_digest,
 )
+from services.remote_finished_wells import finished_on_remote, list_remote_outputs
 from services.remote_run_state import LocalInputMode, OutputFilter, _RemoteRun
 from services.remote_scratch import source_fingerprint
 from util.aw_safe import swallowed
@@ -156,7 +158,21 @@ def _recover_from(runner, remote_dir: str, local_output_dir: Path,
     )
     verifier = FetchedOutputVerifier(runner.host, run, runner._cache, stop)
     host = runner.host.ssh_alias
-    on_remote = frozenset(verifier._list_remote_completed_wells())
+    # Finished means sealed (`pipeline.run_report.finished_wells`): a well the earlier run left part way, or with
+    # failed groups, wrote an out.zip too, and pulling it here as finished output made the next staging leave it
+    # out of the upload.
+    listing = list_remote_outputs(runner._cache, remote_dir)
+    if listing is None:
+        # Unknown, not empty: staging on "nothing there" would upload and recompute wells that may be finished on
+        # the host, and an incremental run then empties its own remote output directory (tracker row A1).
+        log(f"[remote] resume: could not list {runner.host.ssh_alias}:{remote_dir}; not starting a run that might "
+            f"recompute or overwrite finished wells there — retry once the host answers.\n")
+        return Recovery(ok=False, remote_dir=remote_dir,
+                        still_missing=("the earlier run's remote directory could not be listed",))
+    on_remote = finished_on_remote(listing)
+    if listing.part_way:
+        log(f"[remote] resume: {host}:{remote_dir} also holds {len(listing.part_way)} well(s) left part way "
+            f"({_sample(listing.part_way)}) — not downloaded as finished; they are run again\n")
     if not on_remote:
         return Recovery(remote_dir=remote_dir)
     # Asked silently: these are not failures yet, only the question of whether
@@ -165,7 +181,7 @@ def _recover_from(runner, remote_dir: str, local_output_dir: Path,
     # Read out of the messages with verify's own pattern, so "which well is
     # this about" has the one answer the end-of-run retry already uses.
     missing_wells = frozenset(
-        m.group(1) for m in (_WELL_IN_MESSAGE.search(t) for t in missing) if m)
+        m.group(1) for m in (_WELL_IN_MESSAGE.search(t) for t in missing) if m) & on_remote
     if not missing_wells:
         log(f"[remote] resume: {host}:{remote_dir} holds {len(on_remote)} "
             f"finished well(s), all already here\n")
@@ -173,6 +189,9 @@ def _recover_from(runner, remote_dir: str, local_output_dir: Path,
     log(f"[remote] resume: {host}:{remote_dir} holds {len(missing_wells)} "
         f"finished well(s) never downloaded ({_sample(missing_wells)}) — "
         f"downloading them instead of uploading and recomputing them\n")
+    note = cross_build_note({w: listing.builds.get(w, "") for w in missing_wells})
+    if note:
+        log(f"[remote] resume: {note}\n")
     verdict = verifier.verify(True, log=log)
     return Recovery(ok=verdict.passed, remote_dir=remote_dir,
                     on_remote=on_remote, missing_locally=missing_wells,

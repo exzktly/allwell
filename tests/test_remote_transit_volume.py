@@ -181,7 +181,9 @@ def test_a_completed_fetch_leaves_nothing_behind(host, tmp_path):
         z.writestr("A01_overlay.tif", b"data")
 
     with patch.object(Fetcher, "_rsync", return_value=True), \
-         patch.object(Fetcher, "_rsync_glob", return_value=(1, 1)), \
+         patch.object(Fetcher, "_list_remote_glob",       # the well's one CSV is listed, and lands
+                       lambda self, g: ("test-host", ["/r/out/m_A01.csv.gz"], 10)), \
+         patch.object(Fetcher, "_pull_listed", lambda self, h, files, dest: len(files)), \
          patch.object(Fetcher, "_remote_file_size", lambda self, p: None), \
          patch.object(Fetcher, "_materialize", lambda self, w, z: True), \
          patch.object(Fetcher, "_delete_well_files_on_remote", lambda self, w: None):

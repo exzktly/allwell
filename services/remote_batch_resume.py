@@ -18,7 +18,8 @@ the same host** (``run_journal.stored_remote_addresses`` — the keys that make 
   from the groups it finished, and says "— done." like a whole one. The pipeline seals a well only when its output
   covers every FOV-group its input holds, and withdraws the seal before it rewrites the well. A sealed well is not
   uploaded or run; its output files are brought into this run's output directory on the remote and the Fetcher
-  downloads them like any other well's. Never for a forced run, which asked for the wells to be computed again.
+  downloads them like any other well's. Never under ``--force``, and never for a well named in ``--force_wells``:
+  those were asked to be computed again.
 * **Wells left part way** — an out.zip with no seal. Not adopted: the well is uploaded and run again, and in a
   re-attached output directory the checkpoints its suspended attempt kept (``pipeline.fov_checkpoint.
   release_staging``) carry its finished groups over; its new output replaces the partial one. An output directory
@@ -40,7 +41,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
-from pipeline.run_report import COMPLETE_DIRNAME
+from pipeline.run_report import COMPLETE_DIRNAME, cross_build_note, finished_wells, well_of_out_zip, well_of_seal
 from services.remote_transport import _remote_quote
 from util.well_token import canonical_well_label
 
@@ -62,6 +63,13 @@ class Leftovers:
     finished: dict[str, str] = field(default_factory=dict)
     #: canonical well → an output directory holding its out.zip with no seal: what a well left part way leaves.
     part_way: dict[str, str] = field(default_factory=dict)
+    #: ``(well, output directory)`` → the build that sealed it there (``""``: before builds were recorded).
+    builds: dict[tuple[str, str], str] = field(default_factory=dict)
+
+
+#: How a seal's build travels on its listing line, and the ``sed`` that reads it out of the seal.
+_BUILD_TAG = "@build="
+_BUILD_SED = "'s/.*\"build\": *\"\\([^\"]*\\)\".*/\\1/p'"
 
 
 def run_dir_of(output_dir: str) -> str:
@@ -90,7 +98,13 @@ def _roots(own_run_dir: str, own_output_dir: str, earlier: Iterable[dict]) -> li
             parent = str(PurePosixPath(out).parent)
             if all(r.path != parent for r in roots):
                 roots.append(_Root(parent, True, PurePosixPath(out).name))
-        if inp and not any(inp == r.path or inp.startswith(r.path.rstrip("/") + "/") for r in roots):
+        if inp and PurePosixPath(inp).name == "in":
+            # A batched attempt's input is its run directory's `in/`, and its staged batches and held wells sit
+            # beside it — in its own run directory even when it wrote its output into an earlier attempt's.
+            parent = str(PurePosixPath(inp).parent)
+            if all(r.path != parent for r in roots):
+                roots.append(_Root(parent, True, "out"))
+        elif inp and not any(inp == r.path or inp.startswith(r.path.rstrip("/") + "/") for r in roots):
             roots.append(_Root(inp, False))
     return roots
 
@@ -105,8 +119,10 @@ def find_leftovers(cache, *, own_run_dir: str, own_output_dir: str, earlier: Ite
     """
     roots = _roots(own_run_dir, own_output_dir, earlier)
     # A run directory's root also lists its output directory's completion seals (`./out/.aw_complete/A01.json`).
-    seals = [f"find ./{_remote_quote(f'{r.out_name}/{COMPLETE_DIRNAME}')} -maxdepth 1 -type f -name '*.json' "
-             f"2>/dev/null; " if r.run_dir else "" for r in roots]
+    # Each with the build that sealed it (`pipeline.run_report.this_build`), so an adoption across builds is named.
+    seals = [f"for f in ./{_remote_quote(f'{r.out_name}/{COMPLETE_DIRNAME}')}/*.json; do [ -f \"$f\" ] && "
+             f"echo \"$f {_BUILD_TAG}$(sed -n {_BUILD_SED} \"$f\" | head -n 1)\"; done; " if r.run_dir else ""
+             for r in roots]
     script = "".join(
         f"if cd {_remote_quote(r.path)} 2>/dev/null; then {{ find . -maxdepth 2 -type f -name '*.zip'; {seals[i]}}} "
         f"| sed 's|^|{i}\t|'; fi\n" for i, r in enumerate(roots)) + "true\n"
@@ -114,39 +130,38 @@ def find_leftovers(cache, *, own_run_dir: str, own_output_dir: str, earlier: Ite
     found = Leftovers()
     if result is None or getattr(result, "returncode", 1) != 0:
         return found
-    archives: list[tuple[str, str]] = []           # (well, output directory), in listing order: own first
-    sealed: set[tuple[str, str]] = set()
+    # Per output directory, in listing order (own first): the wells with an out.zip, and those sealed.
+    outputs: dict[str, tuple[set[str], set[str]]] = {}
     for line in (result.stdout or "").splitlines():
         index, _, rel = line.partition("\t")
         if not index.isdigit() or int(index) >= len(roots):
             continue
+        rel, _, build = rel.partition(f" {_BUILD_TAG}")
         root = roots[int(index)]
         parts = PurePosixPath(rel).parts            # `./out/x.zip` → ("out", "x.zip"): the `.` is normalised away
         if not parts:
             continue
         name = parts[-1]
+        where = f"{root.path}/{root.out_name}"
         if root.run_dir and len(parts) == 3 and parts[:2] == (root.out_name, COMPLETE_DIRNAME):
-            well = canonical_well_label(name[: -len(".json")]) if name.endswith(".json") else ""
-            if well:
-                sealed.add((well, f"{root.path}/{root.out_name}"))
+            if well := well_of_seal(name):
+                outputs.setdefault(where, (set(), set()))[1].add(well)
+                found.builds.setdefault((well, where), build.strip())
             continue
         sub = parts[0] if len(parts) == 2 else ""
         if root.run_dir and sub == root.out_name:
-            if name.endswith("_out.zip"):
-                well = canonical_well_label(name[: -len("_out.zip")])
-                if well:
-                    archives.append((well, f"{root.path}/{sub}"))
+            if well := well_of_out_zip(name):
+                outputs.setdefault(where, (set(), set()))[0].add(well)
             continue
         if root.run_dir and not (sub in ("in", "bg") or _BATCH_DIR.fullmatch(sub)):
             continue             # in/, a staged batch, or bg/ (the empty-well reference); nothing else is input
         if not root.run_dir and sub:
             continue
         found.inputs.setdefault(name, []).append(f"{root.path}/{PurePosixPath(*parts)}")
-    for well, where in archives:
-        if (well, where) in sealed:
-            found.finished.setdefault(well, where)
-        else:
-            found.part_way.setdefault(well, where)
+    for where, (with_output, sealed) in outputs.items():
+        finished = finished_wells(with_output, sealed)          # the one definition (pipeline.run_report)
+        for well in sorted(with_output):
+            (found.finished if well in finished else found.part_way).setdefault(well, where)
     for well in found.finished:
         found.part_way.pop(well, None)                # a whole copy anywhere wins over a part-way one
     if found.inputs or found.finished:
@@ -201,7 +216,33 @@ def adopt_finished(cache, wells: Iterable[str], found: Leftovers, *, own_output_
         log(f"[remote] {len(adopted)} well(s) were finished on the remote and not yet downloaded — downloading them "
             f"instead of uploading and running them again: {', '.join(adopted[:12])}"
             + (" …" if len(adopted) > 12 else "") + "\n")
+        note = cross_build_note({w: found.builds.get((w, found.finished[w]), "") for w in adopted})
+        if note:
+            log(f"[remote] {note}.\n")
     return adopted
+
+
+def mark_part_way(cache, found: Leftovers, *, own_output_dir: str, log: Callable[[str], None]) -> None:
+    """Leave the withdrawal note (``pipeline.run_report.withdrawn_note_path``) beside every well left part way in
+    the output directory this run writes into, so the host's own skip runs it again.
+
+    A build that sealed wells but left no note beside a withdrawn seal wrote part-way output the host cannot tell
+    from a well a build before the seal finished; it grandfathers the second (``run_report.finished_on_this_host``),
+    and its record check misses the first once an earlier batch of this run has rewritten the sidecar. The app's
+    listing has already decided these wells are not finished, so it says so where the host will look.
+    Best-effort: a note that cannot be written leaves the host's own evidence to decide.
+    """
+    from pipeline.run_report import WITHDRAWN_SUFFIX
+
+    wells = sorted(w for w, where in found.part_way.items() if where == own_output_dir)
+    if not wells:
+        return
+    seals = f"{own_output_dir}/{COMPLETE_DIRNAME}"
+    notes = " ".join(_remote_quote(f"{seals}/{w}{WITHDRAWN_SUFFIX}") for w in wells)
+    result = cache._ssh_script(f"mkdir -p {_remote_quote(seals)} && touch {notes}\n", check=False)
+    if getattr(result, "returncode", None) != 0:
+        log(f"[remote] WARN could not mark {len(wells)} well(s) left part way in {own_output_dir} "
+            f"({', '.join(wells[:12])}); the host decides from its own records whether they are finished\n")
 
 
 def stage_from_leftovers(cache, batches: list[list], found: Leftovers, *, own_run_dir: str,
@@ -261,7 +302,7 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     *proc* for :func:`stage_leftovers`, which runs once the batches are known.
     """
     from services import run_journal
-    from services.remote_run_id import remote_run_dir
+    from services.remote_run_id import _forced_from_argv, remote_run_dir
 
     proc._leftovers = Leftovers()
     keys = getattr(proc, "_journal_keys", None)
@@ -270,10 +311,11 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     runner, run = proc._runner, proc._runner._run
     own_output = run.remote_output_dir
     try:
-        earlier = [a for a in run_journal.stored_remote_addresses(
+        # Every attempt, not one per output directory: an intermediate attempt that re-attached to the first one's
+        # output directory staged its batches in a run directory of its own (tracker F5). `_roots` drops repeats.
+        earlier = run_journal.recorded_remote_attempts(
             proc._local_output_dir, argv_digests=[keys["argv_digest"], *getattr(proc, "_legacy_digests", ())],
-            source_key=keys["source_key"],
-            host_alias=keys["host_alias"]) if a.get("remote_output_dir") != own_output]
+            source_key=keys["source_key"], host_alias=keys["host_alias"])
     except OSError:
         earlier = []
     found = find_leftovers(runner._cache, own_run_dir=remote_run_dir(runner.host, proc._run_id),
@@ -282,7 +324,12 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     _say_what_the_journal_expected(proc, zips, found)
     if force:
         return list(zips), []
-    wanted = [w for w in (canonical_well_label(z.stem) for z in zips) if w and w in found.finished]
+    mark_part_way(runner._cache, found, own_output_dir=own_output, log=proc._log)
+    # A well named in --force_wells is to be computed again, so its finished output is not taken — per well, rather
+    # than the whole plate declining (tracker F2). Its uploaded archive is still reused: the input is the same.
+    _all, forced = _forced_from_argv(list(getattr(proc, "_pipeline_argv", []) or []))
+    wanted = [w for w in (canonical_well_label(z.stem) for z in zips)
+              if w and w in found.finished and w not in forced]
     adopted = set(adopt_finished(runner._cache, wanted, found, own_output_dir=own_output,
                                  nanowell=bool(proc._fetcher.run.nanowell), log=proc._log))
     remaining = [z for z in zips if canonical_well_label(z.stem) not in adopted]
@@ -375,7 +422,10 @@ def download_adopted(proc) -> None:
     for well in adopted:
         proc._fetcher.observe(remote_done_marker(well))
     if adopted and proc._fetcher.run.nanowell:
-        proc._fetcher.after_queued(functools.partial(release_batch, wells=adopted, log=proc._log))
+        # A well an earlier attempt held for the re-anchoring is kept until this run's final pass has re-run it from
+        # these very files (`remote_final_pass.adopt_earlier_holds`, which runs before batch 1 is handed over).
+        holds = set(getattr(proc._fetcher.run, "nanowell_adopted_holds", ()) or ())
+        proc._fetcher.after_queued(functools.partial(release_batch, wells=adopted, log=proc._log, held=holds))
 
 
 def stage_leftovers(proc, run_dir: str) -> None:
@@ -399,7 +449,8 @@ def reattach_output_dir(runner, local_output_dir, keys: dict, legacy_digests, *,
     staged archives, and so its run id and directory, differ from the attempt it resumes. So the newest address the
     journal recorded under the same settings, source images and host (the current and the earlier builds' digests,
     ``remote_run_id.legacy_argv_digests``) is used when the remote still has it — the same rule the single-shot
-    path re-attaches by. Never for a forced run, which asked for everything to be computed again. Returns *fresh*
+    path re-attaches by. Never under ``--force``, which asked for everything to be computed again (forced wells
+    alone are redone in place). Returns *fresh*
     whenever anything is in doubt: a lookup or a probe that fails costs a recomputed well, never a wrong one.
     """
     from services import run_journal

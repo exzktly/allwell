@@ -226,6 +226,61 @@ REUSE_CONTRACTS = {
             "full object takes that field's default — which is the silent "
             "substitution, not a crash"),
     },
+    # ── the remote run's reuse decisions (tracker F8) ───────────────────────
+    # Each is mutated key by key below (`test_a_remote_reuse_decision_declines_when_one_key_changes`), and where it
+    # lives is held against a scan of the source (`DECISION_SITES`), not against this roster.
+    "remote_finished_wells.finished_here": {
+        "settings": "the well's settings marker against this run's settings key (argv plus the host's flags): a well "
+                    "made under other settings is not this run's result",
+        "per_cell_csv": "the well's measurements, present and not empty: nothing else this check reads is a result",
+        "completeness_record": "the sidecar's record of the well, when there is one, whole: a well wound down part "
+                               "way, or with failed groups, writes a CSV and a settings marker too",
+        "force": "--force asks for every well to be computed again",
+        "force_wells": "a well named in --force_wells is to be computed again",
+        "incremental": "an incremental run decides per field in staging; a whole well is never skipped here",
+        "field_coverage": "every (fov, timepoint) the well's input holds now is in its CSV: an archive that gained a "
+                          "field or a timepoint since is not finished",
+        "nanowell_coverage": "a nanowell well's grid record holds a verdict for every timepoint its archive holds",
+        "nanowell_anchors": "a nanowell well made under other anchors than the ones set now — an anchor set, moved or "
+                            "cleared since — is to be run again: the anchors are not among the settings",
+        "blank": "an empty-well blank is the correction's input, never a well left out",
+    },
+    "remote_batch_resume.take_from_remote": {
+        "argv_digest": "an earlier attempt is taken from only when it was configured the same way",
+        "source_key": "and computed from the same images: a re-exported plate's earlier attempt is not this one's",
+        "host_alias": "and recorded on this host: a path on another machine may resolve here and mean nothing",
+        "completion_seal": "a well is adopted only when its archive and its completion seal are both there: an "
+                           "archive alone is what a well left part way leaves",
+        "force": "--force adopts nothing: everything is to be computed again",
+        "force_wells": "a forced well is not adopted, per well; the rest of the attempt still is",
+    },
+    "remote_recover.recover_finished_outputs": {
+        "argv_digest": "a recorded directory is downloaded from only when configured the same way",
+        "source_key": "and computed from the same images",
+        "host_alias": "and on this host",
+        "force": "--force downloads nothing it is about to recompute",
+        "force_wells": "nor does a run that forces wells (its pull is verification's, which cannot leave one out)",
+        "completion_seal": "only a sealed well is downloaded as finished",
+    },
+    "remote_run_id._pipeline_launch_is_pointless": {
+        "force": "a forced run lands in the same directory as the run it repeats, which looks complete",
+        "force_wells": "the same for named wells",
+        "incremental": "an incremental run's upload is a split an archive's existence says nothing about",
+        "every_uploaded_well_finished": "the pipeline is replaced by `true` only when every uploaded well — not as "
+                                        "many wells — is finished there, sealed",
+    },
+    "pipeline_runner.PipelineRunner._nothing_left_to_upload": {
+        "staging_left_wells_out": "only a run whose staging left wells out (or an incremental one) can be empty",
+        "only_blanks_staged": "a staged well that is not an empty-well blank is work to send",
+        "blank_finished_here": "the blank is skipped only when it is itself finished here (finished_here)",
+    },
+    "well_skip.finished_output": {
+        "output": "the well's CSV and out.zip (or folder) present and not empty",
+        "settings": "made under this run's settings (well_settings_allow_reuse)",
+        "completion_seal": "sealed whole, or — output a build before the seal wrote — not withdrawn: a seal "
+                           "withdrawn and never written again is a well left part way or died mid-rewrite",
+        "completeness_record": "an unsealed well whose last completeness record ended short is run again",
+    },
     "parquet_cache.read_cached": {
         "st_size": (
             "the CSV's byte count. The pipeline rewrites these files — an "
@@ -285,16 +340,94 @@ def out_dir(tmp_path, monkeypatch):
     return d
 
 
+#: Calling one of these makes the caller a site where earlier work is reused (or declined): the journal's recorded
+#: addresses, the one definition of a finished well, the settings check, and the two whole-run predicates.
+REUSE_PRIMITIVES = frozenset({
+    "stored_remote_address", "stored_remote_addresses", "recorded_remote_attempts",
+    "finished_wells", "finished_on_remote", "finished_on_this_host", "finished_here",
+    "_pipeline_launch_is_pointless", "well_settings_allow_reuse",
+})
+
+#: Every site the scan finds in the run's code (``services/``, ``pipeline/``, ``process_microscopy.py``), and the
+#: registered decision it belongs to. Derived from the source by :func:`reuse_sites`, so the check below compares the
+#: roster with the code rather than with itself (tracker F8): a new caller of a reuse primitive fails until it is
+#: either a registered decision's or named in :data:`NOT_A_REUSE_DECISION` with a reason.
+DECISION_SITES = {
+    "pipeline/nanowell_task.py::_prior_state": "settings_record.well_settings_allow_reuse",
+    "process_microscopy.py::process_well_zip_task": "settings_record.well_settings_allow_reuse",
+    "process_microscopy.py::process_well_folder_task": "settings_record.well_settings_allow_reuse",
+    "pipeline/well_skip.py::finished_output": "well_skip.finished_output",
+    "pipeline/run_report.py::finished_on_this_host": "well_skip.finished_output",
+    "services/remote_finished_wells.py::finished_here": "remote_finished_wells.finished_here",
+    "services/pipeline_runner.py::PipelineRunner._finished_here": "remote_finished_wells.finished_here",
+    "services/remote_process.py::_BatchedRemoteProcess._run_batches": "remote_finished_wells.finished_here",
+    "services/pipeline_runner.py::PipelineRunner._only_measured_blanks":
+        "pipeline_runner.PipelineRunner._nothing_left_to_upload",
+    "services/remote_batch_resume.py::take_from_remote": "remote_batch_resume.take_from_remote",
+    "services/remote_batch_resume.py::find_leftovers": "remote_batch_resume.take_from_remote",
+    "services/remote_recover.py::_candidate_dirs": "remote_recover.recover_finished_outputs",
+    "services/remote_recover.py::_recover_from": "remote_recover.recover_finished_outputs",
+    "services/remote_reuse.py::preflight_cache_hit": "remote_run_id._pipeline_launch_is_pointless",
+    "services/remote_reuse.py::reattach_output_dir": "run_journal.stored_remote_address",
+    "services/remote_batch_resume.py::reattach_output_dir": "run_journal.stored_remote_address",
+    "services/run_journal.py::stored_remote_addresses": "run_journal.stored_remote_address",
+}
+
+#: Sites that call a reuse primitive and reuse nothing themselves, each with what it does instead.
+NOT_A_REUSE_DECISION = {
+    "pipeline/run_report.py::wells_left_part_way": "names the wells a run must *resume*; it reuses no output",
+    "services/remote_finished_wells.py::RemoteOutputs.finished": "the definition of a finished well itself; its "
+                                                                 "callers are the decisions",
+    "services/remote_batch_resume.py::background_aliases": "widens which settings digests a checkpoint may carry; "
+                                                           "the checkpoint's reuse is the pipeline's settings check",
+    "services/remote_final_pass.py::_earlier_run_dirs": "where held archives may be; a held well is re-anchored, "
+                                                        "never reused as a result",
+    "services/remote_reuse.py::clean_earlier_attempts": "deletes earlier attempts; reuses nothing",
+    "services/remote_sweep.py::earlier_attempt_dirs": "lists earlier attempts' run directories so their jobs are "
+                                                      "swept before this run writes; reuses nothing",
+}
+
+
+def reuse_sites() -> set[str]:
+    """``path::qualname`` of every function in the run's code that calls a :data:`REUSE_PRIMITIVES` name."""
+    import ast
+
+    from tests._repo_scan import python_sources, rel
+
+    found: set[str] = set()
+
+    def visit(node, scope, path):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            scope = (*scope, node.name)
+        if isinstance(node, ast.Call):
+            f = node.func
+            name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else None
+            if name in REUSE_PRIMITIVES and scope:
+                found.add(f"{path}::{'.'.join(scope)}")
+        for child in ast.iter_child_nodes(node):
+            visit(child, scope, path)
+
+    for path in python_sources():
+        r = rel(path)
+        if r.startswith(("services/", "pipeline/")) or r == "process_microscopy.py":
+            visit(parse_source(path), (), r)
+    return found
+
+
 def test_every_reuse_decision_is_registered():
-    """A decision missing from the roster is one nobody checked the keys of."""
-    assert "run_journal.stored_remote_address" in REUSE_CONTRACTS
-    assert "settings_record.well_settings_allow_reuse" in REUSE_CONTRACTS
-    assert "parquet_cache.read_cached" in REUSE_CONTRACTS
-    assert "ome_import.resume_state" in REUSE_CONTRACTS
-    assert "czi_import.resume_state" in REUSE_CONTRACTS
-    assert "nd2_import.resume_state" in REUSE_CONTRACTS
-    assert "scan_cache.load" in REUSE_CONTRACTS
-    assert "nanowell_run.registration_key" in REUSE_CONTRACTS
+    """A decision missing from the roster is one nobody checked the keys of — compared with the code, not with the
+    roster: this test once asserted that eight hand-written names were in the hand-written roster they came from,
+    and none of the remote run's five reuse decisions was among them."""
+    found = reuse_sites()
+    unregistered = sorted(found - set(DECISION_SITES) - set(NOT_A_REUSE_DECISION))
+    assert not unregistered, (
+        "these reuse earlier work (they call one of REUSE_PRIMITIVES) and belong to no registered decision: add "
+        "each to DECISION_SITES under the decision whose keys it takes, or to NOT_A_REUSE_DECISION with why it "
+        "reuses nothing:\n  " + "\n  ".join(unregistered))
+    stale = sorted((set(DECISION_SITES) | set(NOT_A_REUSE_DECISION)) - found)
+    assert not stale, "rostered sites that no longer call a reuse primitive:\n  " + "\n  ".join(stale)
+    unknown = sorted({d for d in DECISION_SITES.values() if d not in REUSE_CONTRACTS})
+    assert not unknown, f"sites filed under decisions with no keys registered: {unknown}"
 
 
 def test_the_roster_names_every_key_the_decision_actually_takes():
@@ -816,6 +949,27 @@ def test_the_launcher_does_not_reach_the_digest():
         f"{digests}")
 
 
+#: What each definition of the argv digest gives one argv that carries a flag every definition disagrees about —
+#: the current one first, then ``remote_run_id.EARLIER_ARGV_DEFINITIONS`` in order. Pinned per build, as the
+#: settings digest's earlier definitions are (tracker F7): a change to which flags count must append the definition it
+#: replaces to that roster, and its literal here, or every address journalled before it stops matching in silence.
+_PINNED_PER_DEFINITION = ("ed34655eac9f2335", "47a674a74375043b", "0ec0017dc8cc630a")
+
+
+def test_every_earlier_argv_definition_is_pinned_and_searched():
+    from services.remote_run_id import EARLIER_ARGV_DEFINITIONS, _digest, legacy_argv_digests, pipeline_argv_digest
+
+    argv = [*_local_argv(), "--workers", "6", "--force_wells", "A01", "B02", "--no_auto_threshold"]
+    extras = ["--cpu_only"]
+    got = (pipeline_argv_digest(argv, extras=extras),
+           *(_digest(argv, extras, d.skip_with_value, d.skip_flags, d.skip_multi) for d in EARLIER_ARGV_DEFINITIONS))
+    assert got == _PINNED_PER_DEFINITION, (
+        "a definition of the argv digest changed without its predecessor joining EARLIER_ARGV_DEFINITIONS (and its "
+        f"literal joining this pin): {got}")
+    assert set(got[1:]) <= set(legacy_argv_digests(argv, extras=extras)), (
+        "an earlier definition's digest is not searched, so the attempts it recorded are never found")
+
+
 # ── the per-well frame cache ────────────────────────────────────────────────
 #
 # Same discipline as the two above, and for the same reason: an entry in the
@@ -1082,3 +1236,299 @@ def test_a_stored_placement_is_taken_only_under_its_own_key_and_for_the_same_til
     assert taken.positions() == {"F0": (0.0, 0.0), "F1": (90.25, -0.5)}
     assert nr.stored_placement([("/b", block)], "k1", ["F0", "F1", "F2"]) is None   # another grid of tiles
     assert nr.stored_placement([("/old", old)], "k1", ["F0", "F1"]) is None
+
+
+# ── the remote run's reuse decisions, key by key (tracker F8) ───────────────
+#
+# Each decision is built in a state where it reuses (the baseline, asserted first so a decision that always declines
+# cannot pass), then one key is changed and it must decline. The fixtures are real files and, for the remote ones, a
+# real directory under bash standing in for the host; only verification's pull is given.
+
+import json as _json
+import subprocess as _subprocess
+import types as _types
+import zipfile as _zipfile
+from pathlib import Path as _Path
+
+_SCHEMA = "experiment:channel:well:fov:timepoint"
+
+
+def _opts(**extra) -> dict:
+    return {"filename_schema": _SCHEMA, "filename_sep": "_", "fluor_tokens": ["GFP"], "nuclear_token": "DAPI",
+            "csv_prefix": "measurements", **extra}
+
+
+def _field_plate(tmp_path, opts: dict):
+    """A01 measured in full under *opts*: its archive's two fields, its CSV, its settings marker."""
+    from pipeline.cli_args import settings_key_from_argv
+    from pipeline.settings_record import record_well_settings
+    from services.pipeline_service import build_pipeline_args
+
+    inp, out = tmp_path / "in", tmp_path / "out"
+    inp.mkdir()
+    out.mkdir()
+    with _zipfile.ZipFile(inp / "A01.zip", "w") as zf:
+        for fov in (1, 2):
+            for ch in ("DAPI", "GFP"):
+                zf.writestr(f"e_{ch}_A01_{fov}_T01.tif", b"x")
+    (out / "measurements_A01.csv").write_text("well,fov,timepoint\nA01,1,T01\nA01,2,T01\n")
+    argv = build_pipeline_args(_Path("process_microscopy.py"), inp, out, opts)
+    record_well_settings(out, "A01", settings_key_from_argv(argv[2:]))
+    if opts.get("nanowell_format"):
+        (out / "nanowells").mkdir()
+        (out / "nanowells" / "A01_grid.json").write_text(_json.dumps({"timepoints": {"T01": {"status": "ok"}}}))
+    return inp, out, argv
+
+
+def _finished_here_case(tmp_path, key: str) -> tuple[list, list]:
+    """``(baseline, mutated)`` answers of ``finished_here`` for A01."""
+    from services.remote_finished_wells import argv_forcing, finished_here
+
+    nanowell = key.startswith("nanowell_")
+    opts = _opts(**({"nanowell_format": "100um", "phase_token": "DAPI",
+                     "segmentation_method": "cellpose_labelfree"} if nanowell else {}))
+    inp, out, argv = _field_plate(tmp_path, opts)
+    baseline = finished_here(out, argv, ["A01"])
+    keep: tuple = ()
+    if key == "settings":
+        from pipeline.settings_record import record_well_settings
+
+        record_well_settings(out, "A01", "0123456789abcdef")
+    elif key == "per_cell_csv":
+        (out / "measurements_A01.csv").unlink()
+    elif key == "completeness_record":
+        (out / "pipeline_info.json").write_text(_json.dumps({"run_report": {"wells": {
+            "A01": {"groups_total": 2, "groups_covered": 1, "aborted_reason": "suspended"}}}}))
+    elif key == "force":
+        argv = [*argv, "--force"]
+    elif key == "force_wells":
+        argv = argv_forcing(argv, ["A01"])
+    elif key == "incremental":
+        argv = [*argv, "--incremental"]
+    elif key == "field_coverage":
+        with _zipfile.ZipFile(inp / "A01.zip", "a") as zf:
+            for ch in ("DAPI", "GFP"):
+                zf.writestr(f"e_{ch}_A01_3_T01.tif", b"x")
+    elif key == "nanowell_coverage":
+        (out / "nanowells" / "A01_grid.json").write_text(_json.dumps({"timepoints": {}}))
+    elif key == "nanowell_anchors":
+        from util.nanowell_anchors import Anchor, anchors_path, write_anchors
+
+        write_anchors(anchors_path(inp), {("A01", "T01"): Anchor("A01", "T01", 10.0, 20.0)})
+    elif key == "blank":
+        keep = ("A01",)
+    else:
+        raise AssertionError(f"no mutation written for {key!r}: add one beside its reason in REUSE_CONTRACTS")
+    return baseline, finished_here(out, argv, ["A01"], keep=keep)
+
+
+def _bash_cache():
+    from services.remote_transport import _remote_join
+
+    def run(script):
+        done = _subprocess.run(["bash", "-s"], input=script, capture_output=True, text=True, timeout=20)
+        return _subprocess.CompletedProcess(["bash"], done.returncode, done.stdout, done.stderr)
+
+    return _types.SimpleNamespace(_ssh_script=lambda script, *, check: run(script),
+                                  _ssh_run=lambda argv, *, check, **k: run(_remote_join(argv)))
+
+
+def _sealed_on(out_dir: _Path, well: str) -> None:
+    from pipeline.run_report import complete_seal_path
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{well}_out.zip").write_bytes(b"zip")
+    (out_dir / f"measurements_{well}.csv.gz").write_bytes(b"rows")
+    complete_seal_path(out_dir, well).parent.mkdir(exist_ok=True)
+    complete_seal_path(out_dir, well).write_text(_json.dumps({"well": well}))
+
+
+def _journal_keys_case(tmp_path, monkeypatch, key: str, lookup) -> tuple[list, list]:
+    """``(baseline, mutated)`` of a journal lookup *lookup(out, digests, source, host)* with one key changed."""
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "local"
+    out.mkdir()
+    J.open_run(out, spec={}, mode="remote-batched", input_dir="/in", argv=["--x"])
+    keys = _record(out)
+    baseline = lookup(out, [keys["argv_digest"]], keys["source_key"], keys["host_alias"])
+    changed = {**keys, key: f"{keys[key]}-other"}
+    return baseline, lookup(out, [changed["argv_digest"]], changed["source_key"], changed["host_alias"])
+
+
+def _take_from_remote_case(tmp_path, monkeypatch, key: str) -> tuple[list, list]:
+    """The batched resume's adoption from an earlier attempt: ``(baseline, mutated)`` wells adopted."""
+    from services.remote_batch_resume import take_from_remote
+
+    if key in ("argv_digest", "source_key", "host_alias"):
+        return _journal_keys_case(tmp_path, monkeypatch, key, lambda out, d, s, h: J.recorded_remote_attempts(
+            out, argv_digests=d, source_key=s, host_alias=h))
+
+    def adopt(argv, *, seal=True):
+        old = tmp_path / f"remote-{len(list(tmp_path.iterdir()))}" / "runs" / "run-old"
+        _sealed_on(old / "out", "A01")
+        if not seal:
+            (old / "out" / ".aw_complete" / "A01.json").unlink()
+        monkeypatch.setattr(J, "recorded_remote_attempts", lambda *a, **k: [
+            {"remote_output_dir": str(old / "out"), "remote_input_dir": str(old / "in")}])
+        monkeypatch.setattr(J, "previous_well_states", lambda *_a: {})
+        run = _types.SimpleNamespace(remote_output_dir=str(old.parent / "run-new" / "out"))
+        proc = _types.SimpleNamespace(
+            _journal_keys=dict(argv_digest="d", source_key="s", host_alias="h"), _legacy_digests=(),
+            _local_output_dir=tmp_path, _pipeline_argv=argv, _run_id="run-new", _log=lambda m: None,
+            _fetcher=_types.SimpleNamespace(run=_types.SimpleNamespace(nanowell=False)),
+            _runner=_types.SimpleNamespace(_cache=_bash_cache(), _run=run,
+                                           host=_types.SimpleNamespace(remote_staging_dir=str(old.parent.parent))))
+        return take_from_remote(proc, [_Path("A01.zip")], force="--force" in argv)[1]
+
+    baseline = adopt([])
+    if key == "completion_seal":
+        return baseline, adopt([], seal=False)
+    if key == "force":
+        return baseline, adopt(["--force"])
+    if key == "force_wells":
+        return baseline, adopt(["--force_wells", "A01"])
+    raise AssertionError(f"no mutation written for {key!r}: add one beside its reason in REUSE_CONTRACTS")
+
+
+def _recover_case(tmp_path, monkeypatch, key: str):
+    """The pre-staging download: ``(baseline, mutated)`` wells it would bring home."""
+    from services import remote_recover as rr
+    from services.remote_fetch import FetchedOutputVerifier, FetchVerification
+    from services.remote_run_state import OutputFilter
+
+    if key in ("argv_digest", "source_key", "host_alias"):
+        return _journal_keys_case(tmp_path, monkeypatch, key, lambda out, d, s, h: J.stored_remote_addresses(
+            out, argv_digests=d, source_key=s, host_alias=h))
+    monkeypatch.setattr(FetchedOutputVerifier, "verify", lambda self, ok, *, log: FetchVerification(passed=True))
+    local = tmp_path / "local"
+    local.mkdir(exist_ok=True)
+    remote = tmp_path / "remote" / "runs" / "run-old" / "out"
+    _sealed_on(remote, "A01")
+    runner = _types.SimpleNamespace(host=_host(), _cache=_bash_cache(), _host_argv_extras=lambda f: [])
+    argv = ["python", "pm.py", "--input_dir", str(tmp_path / "in"), "--output_dir", str(local)]
+
+    def pulled(argv, *, unseal=False):
+        if unseal:
+            (remote / ".aw_complete" / "A01.json").unlink()
+        if key in ("force", "force_wells") and argv is not None and _forced(argv):
+            monkeypatch.setattr(J, "read_journal", lambda *_a: object())
+            monkeypatch.setattr(rr, "_candidate_dirs", lambda *a, **k: [str(remote)])
+            return sorted(rr.recover_finished_outputs(runner, local, argv, output_filter=OutputFilter.FULL)
+                          .missing_locally)
+        return sorted(rr._recover_from(runner, str(remote), local, argv, OutputFilter.FULL, log=lambda m: None,
+                                       stop=__import__("threading").Event()).missing_locally)
+
+    baseline = pulled(argv)
+    if key == "completion_seal":
+        return baseline, pulled(argv, unseal=True)
+    if key == "force":
+        return baseline, pulled([*argv, "--force"])
+    if key == "force_wells":
+        return baseline, pulled([*argv, "--force_wells", "A01"])
+    raise AssertionError(f"no mutation written for {key!r}: add one beside its reason in REUSE_CONTRACTS")
+
+
+def _forced(argv) -> bool:
+    return "--force" in argv or "--force_wells" in argv
+
+
+def _launch_case(key: str):
+    from services.remote_run_id import _pipeline_launch_is_pointless as pointless
+
+    argv = ["python", "pm.py", "--nuclear_token", "DAPI"]
+    baseline = pointless(argv, 2, {"A01", "B02"}, uploaded={"A01", "B02"})
+    mutated = {
+        "force": lambda: pointless([*argv, "--force"], 2, {"A01", "B02"}, uploaded={"A01", "B02"}),
+        "force_wells": lambda: pointless([*argv, "--force_wells", "B02"], 2, {"A01", "B02"}, uploaded={"A01", "B02"}),
+        "incremental": lambda: pointless(argv, 2, {"A01", "B02"}, uploaded={"A01", "B02"}, incremental=True),
+        # As many finished wells as uploaded, but not the uploaded ones.
+        "every_uploaded_well_finished": lambda: pointless(argv, 2, {"A01", "C03"}, uploaded={"A01", "B02"}),
+    }
+    if key not in mutated:
+        raise AssertionError(f"no mutation written for {key!r}: add one beside its reason in REUSE_CONTRACTS")
+    return baseline, mutated[key]()
+
+
+def _nothing_left_case(tmp_path, key: str):
+    """``(baseline, mutated)`` of ``_nothing_left_to_upload`` for a plate whose only staged well is its blank B02."""
+    import services.pipeline_runner as pr
+
+    opts = _opts(background="empty_well", background_well="B02")
+    inp, out, argv = _field_plate(tmp_path, opts)
+    (out / "measurements_A01.csv").rename(out / "measurements_B02.csv")
+    from pipeline.cli_args import settings_key_from_argv
+    from pipeline.settings_record import record_well_settings
+
+    record_well_settings(out, "B02", settings_key_from_argv(argv[2:]))
+    with _zipfile.ZipFile(inp / "B02.zip", "w") as zf:
+        for fov in (1, 2):
+            for ch in ("DAPI", "GFP"):
+                zf.writestr(f"e_{ch}_B02_{fov}_T01.tif", b"x")
+    r = pr.PipelineRunner()
+    r._remote_runner = _types.SimpleNamespace(_host_argv_extras=lambda f: [])
+
+    def ask(well_zips=(inp / "B02.zip",), up_to_date=("A01",)):
+        zipped = _types.SimpleNamespace(well_zips=tuple(well_zips), up_to_date_wells=tuple(up_to_date),
+                                        incremental=False)
+        return r._nothing_left_to_upload(zipped, opts, out, argv)
+
+    baseline = ask()
+    if key == "staging_left_wells_out":
+        return baseline, ask(up_to_date=())
+    if key == "only_blanks_staged":
+        return baseline, ask(well_zips=(inp / "B02.zip", inp / "A01.zip"))
+    if key == "blank_finished_here":
+        (out / "measurements_B02.csv").unlink()
+        return baseline, ask()
+    raise AssertionError(f"no mutation written for {key!r}: add one beside its reason in REUSE_CONTRACTS")
+
+
+def _finished_output_case(tmp_path, key: str):
+    """``(baseline, mutated)`` of the host's own skip for a well its run sealed."""
+    from pipeline.run_report import seal_well_complete, withdraw_seal, write_well_report
+    from pipeline.settings_record import record_well_settings
+    from pipeline.well_skip import finished_output
+
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "A01_out.zip").write_bytes(b"zip")
+    (out / "measurements_A01.csv").write_text("well,fov\nA01,1\n")
+    record_well_settings(out, "A01", "abcdef0123456789")
+    write_well_report(out, "A01", groups_total=1, groups_covered=1)
+    seal_well_complete(out, "A01")
+    records: dict = {}
+    baseline = finished_output(out, "A01", "measurements", "abcdef0123456789")
+    if key == "output":
+        (out / "A01_out.zip").unlink()
+    elif key == "settings":
+        record_well_settings(out, "A01", "0123456789abcdef")
+    elif key == "completion_seal":
+        withdraw_seal(out, "A01")
+    elif key == "completeness_record":
+        from pipeline.run_report import complete_seal_path
+
+        complete_seal_path(out, "A01").unlink()
+        records = {"A01": {"groups_total": 2, "groups_covered": 1, "aborted_reason": "suspended"}}
+    else:
+        raise AssertionError(f"no mutation written for {key!r}: add one beside its reason in REUSE_CONTRACTS")
+    return baseline, finished_output(out, "A01", "measurements", "abcdef0123456789", records=records)
+
+
+_REMOTE_DECISIONS = {
+    "remote_finished_wells.finished_here": lambda tmp_path, mp, key: _finished_here_case(tmp_path, key),
+    "remote_batch_resume.take_from_remote": _take_from_remote_case,
+    "remote_recover.recover_finished_outputs": _recover_case,
+    "remote_run_id._pipeline_launch_is_pointless": lambda tmp_path, mp, key: _launch_case(key),
+    "pipeline_runner.PipelineRunner._nothing_left_to_upload": lambda tmp_path, mp, key: _nothing_left_case(tmp_path,
+                                                                                                           key),
+    "well_skip.finished_output": lambda tmp_path, mp, key: _finished_output_case(tmp_path, key),
+}
+
+
+@pytest.mark.parametrize("decision, key", [(d, k) for d in _REMOTE_DECISIONS for k in sorted(REUSE_CONTRACTS[d])])
+def test_a_remote_reuse_decision_declines_when_one_key_changes(tmp_path, monkeypatch, decision, key):
+    baseline, mutated = _REMOTE_DECISIONS[decision](tmp_path, monkeypatch, key)
+    assert baseline, f"{decision}: the fixture must be one the decision reuses, or every mutation passes vacuously"
+    assert not mutated, (
+        f"{decision} still reused earlier work with {key!r} changed alone ({mutated!r}). It is keyed because: "
+        f"{REUSE_CONTRACTS[decision][key]}.")

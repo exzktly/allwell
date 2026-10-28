@@ -187,11 +187,10 @@ from util.settings_digest import settings_key_for
 from pipeline.well_skip import (
     _canonical_force_wells, scope_to_only_wells,
     incremental_for_well as _incremental_for_well,
-    output_exists_for_well,
-    output_exists_for_well_folder,
+    finished_output,
 )
 from pipeline.run_report import (
-    clear_run_report,
+    clear_run_report, recorded_completeness,
     finalize_run_report, read_run_report_block,
     record_well_completeness, seal_well_complete, withdraw_seal,
 )
@@ -2754,7 +2753,7 @@ def _run_well_worker_pool(
             log.warning("  %s", name)
     if partial_wells:
         log.warning(
-            "Wells with PARTIAL output (complete on the plate map, but missing "
+            "Wells with PARTIAL output (marked partial on the plate map, missing "
             "the FOV-group(s) below — re-run with --incremental to recover):"
         )
         for name, fovs in partial_wells.items():
@@ -2797,6 +2796,7 @@ def process_well_zips(
     sep: str = DEFAULT_SEP,
     settings_key: str = "",
     reanchor_only: bool = False,
+    prior_records: dict | None = None,
 ) -> list[str]:
     """
     Dispatch one worker process per well zip — none with *reanchor_only*, a batched nanowell run's final pass,
@@ -2841,12 +2841,11 @@ def process_well_zips(
         stale_sweep=lambda out: sweep_run_scratch(out, settings_key,
                                                    extra_extract=True),
         # File existence alone answered "already done" whatever the run was
-        # configured to compute, so changing the segmenter or a threshold
-        # skipped every well and kept the old numbers — while the sidecar was
-        # rewritten to advertise the new configuration.
-        output_exists=lambda well: (
-            output_exists_for_well(output_dir, well, csv_prefix)
-            and well_settings_allow_reuse(output_dir, well, settings_key)),
+        # configured to compute, and whether or not the well had finished: a
+        # changed segmenter kept the old numbers, a well wound down part way
+        # kept its partial ones (`well_skip.finished_output`).
+        output_exists=lambda well: finished_output(output_dir, well, csv_prefix, settings_key,
+                                                   records=prior_records),
         submit_task=_submit,
     )
 
@@ -2869,6 +2868,7 @@ def process_well_folders(
     schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
     settings_key: str = "",
+    prior_records: dict | None = None,
 ) -> list[str]:
     """
     Dispatch one worker process per well folder (uncompressed input).
@@ -2909,9 +2909,8 @@ def process_well_folders(
         # their staging under output_dir, so sweep both when they differ.
         stale_sweep=lambda out: sweep_run_scratch(out, settings_key,
                                                    extra_extract=False),
-        output_exists=lambda well: well_settings_allow_reuse(
-            output_dir, well, settings_key) and output_exists_for_well_folder(
-            output_dir, well, csv_prefix, compressed_output=True),
+        output_exists=lambda well: finished_output(output_dir, well, csv_prefix, settings_key, folder=True,
+                                                   records=prior_records),
         submit_task=_submit,
     )
 
@@ -3210,6 +3209,7 @@ def main() -> None:
         output_dir / PIPELINE_INFO_FILENAME) if carry else None)
     prior_report = (read_run_report_block(output_dir / PIPELINE_INFO_FILENAME)
                     if args.only_wells else None)
+    prior_records = recorded_completeness(output_dir)     # what the skip asks of an unsealed well's output
     try:
         info_path = write_pipeline_info(
             output_dir,
@@ -3464,6 +3464,7 @@ def main() -> None:
             sep=sep,
             settings_key=settings_key,
             reanchor_only=reanchor_only_run(nanowell, args),     # a batched run's final pass processes no well
+            prior_records=prior_records,
         )
         nanowell_endgame(nanowell, output_dir, well_zips, shared_kwargs, args.nuclear_token,
                          fluor_tokens_for_quant, args.csv_prefix, schema, sep, settings_key,
@@ -3493,6 +3494,7 @@ def main() -> None:
             schema=schema,
             sep=sep,
             settings_key=settings_key,
+            prior_records=prior_records,
         )
     else:
         # No grouped input found. Every real entry point (the Analyze tab, the
@@ -3567,8 +3569,8 @@ def main() -> None:
         import sys as _sys
         log.error(
             "%d well(s) failed or produced partial output — exiting non-zero. "
-            "See the per-well breakdown above; partial wells look complete on "
-            "the plate map but are missing FOV-group(s) (recover with "
+            "See the per-well breakdown above; a partial well (marked '!' on "
+            "Analyze's run plate) is missing FOV-group(s) (recover with "
             "--incremental).",
             len(failed_wells),
         )

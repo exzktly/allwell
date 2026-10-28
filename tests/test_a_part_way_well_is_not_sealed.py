@@ -191,3 +191,28 @@ def test_every_well_path_withdraws_the_seal_before_its_first_write(fn_name, writ
     assert src.index("withdraw_seal(output_dir, well_label)") < first_write, (
         f"{fn_name} rewrites the well's output before withdrawing its completion seal, so a run dying part way "
         "leaves the old seal over new, partial output")
+
+
+@pytest.mark.parametrize("statuses, sealed", [
+    ({"T01": "ok", "T02": "unaddressed"}, True),      # reached at every timepoint: whole, for the seal
+    ({"T01": "ok", "T02": "no_lattice"}, True),       # a verdict that wrote no rows is a finding, not owed work
+    ({"T01": "ok", "T02": ""}, False),                # a timepoint with no verdict was never reached
+])
+def test_a_nanowell_well_is_sealed_when_the_run_reached_every_timepoint(tmp_path, statuses, sealed):
+    """Tracker F1: the record counted only ``ok`` timepoints, so a nanowell well with one ``unaddressed`` timepoint
+    was never sealed and never finished, and every remote re-run or resume sent it again alone and forced it. The
+    record now carries the timepoints the run reached; the ``ok``-only count Validate reads is kept beside it."""
+    import json
+
+    from pipeline.nanowell_task import record_nanowell_completeness
+    from pipeline.run_report import recorded_well_report, seal_well_complete
+
+    grid = {"well": "B02", "timepoints": {tp: ({"status": s} if s else {}) for tp, s in statuses.items()}}
+    failed = [tp for tp, s in statuses.items() if s == "no_lattice"]
+    record_nanowell_completeness(tmp_path, "B02", grid, failed)
+    rec = recorded_well_report(tmp_path, "B02")
+    assert rec["groups_covered"] == 1, json.dumps(rec)              # Validate's ok-only count, unchanged
+    assert rec["failed"] == failed
+    seal = seal_well_complete(tmp_path, "B02")
+    assert (seal is not None) is sealed, (
+        f"{statuses}: sealed={seal is not None}, wanted {sealed} — record {json.dumps(rec)}")

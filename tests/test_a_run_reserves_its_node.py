@@ -102,7 +102,7 @@ def test_the_batched_driver_asks_for_the_node_to_itself(tmp_path, monkeypatch):
 
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.finish()
     worker.join(timeout=20)
 

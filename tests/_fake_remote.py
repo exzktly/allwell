@@ -53,6 +53,10 @@ class FakeRemote:
         #: script the login shell runs (``pack_for_login_shell``). Unpacking
         #: raises on a launch that was not packed, so that is checked too.
         self.launched: list[list[str]] = []
+        #: A directory put first on the host's ``PATH``, for stand-in scheduler
+        #: binaries (``squeue``, ``scancel``) a test writes there. ``None``
+        #: leaves the host with the system's binaries only.
+        self.bin_dir: Path | None = None
 
     # ── what the host holds ──────────────────────────────────────────────
     def path(self, remote_path: str) -> Path:
@@ -113,7 +117,8 @@ class FakeRemote:
         proc = self._REAL_POPEN(
             argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env={"HOME": str(self.root), "PATH": "/usr/bin:/bin"},
+            env={"HOME": str(self.root),
+                 "PATH": (f"{self.bin_dir}:" if self.bin_dir else "") + "/usr/bin:/bin"},
             cwd=str(self.root),
         )
         out, err = proc.communicate(stdin)

@@ -39,6 +39,11 @@ def cluster(tmp_path):
         d.mkdir(parents=True)
     (home / "miniforge3/etc/profile.d/conda.sh").write_text("")
     (env / "conda-meta/history").write_text("")
+    # The env guard imports the pipeline's modules with the env's own python
+    # before anything runs in it (services.remote_conda.aw_env_ready); this
+    # one answers that they all import.
+    (env / "bin").mkdir()
+    _exe(env / "bin" / "python", "exit 0\n")
     _exe(bindir / "conda", (
         'case "$1" in\n'
         f'  env) echo "allwell {env}";;\n'

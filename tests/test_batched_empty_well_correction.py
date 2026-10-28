@@ -152,7 +152,7 @@ def test_the_blank_is_held_out_of_the_batches_and_uploaded_once(tmp_path):
         # branch measuring *where* the blank went rather than stalling on a
         # marker that never comes.
         for i in (1, 2, 3, 4):
-            proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+            proc.batch_finished(p, i)
         proc.finish()
         worker.join(timeout=20)
 
@@ -210,7 +210,7 @@ def test_a_re_run_still_uploads_the_blank_it_no_longer_needs_to_process(tmp_path
         worker = threading.Thread(target=p._run_batches, daemon=True)
         worker.start()
         for i in (1, 2):
-            proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+            proc.batch_finished(p, i)
         proc.finish()
         worker.join(timeout=20)
 
@@ -308,38 +308,8 @@ import types  # noqa: E402
 from services.remote_process import _BatchedRemoteProcess
 
 
-class _FakeProc:
-    def __init__(self):
-        self._q: queue.Queue = queue.Queue()
-        self.returncode = 0
-        self._done = False
-        self.pid = 4242
-
-    def say(self, line):
-        self._q.put(line)
-
-    def finish(self):
-        self._done = True
-        self._q.put(None)
-
-    @property
-    def stdout(self):
-        def _iter():
-            while True:
-                item = self._q.get()
-                if item is None:
-                    return
-                yield item
-        return _iter()
-
-    def poll(self):
-        return self.returncode if self._done else None
-
-    def wait(self, timeout=None):
-        return self.returncode
-
-    def terminate(self):
-        pass
+# The batch tests' fake driver: its `batch_finished` says what a real batch does before it reports.
+from tests.test_batch_driver import _FakeProc  # noqa: E402
 
 
 def _batched(tmp_path, wells, batch_size=1):
@@ -389,6 +359,8 @@ def _stub_runner(p, proc, upload_subset):
         _cache=types.SimpleNamespace(
             _ssh_run=lambda argv, *, check, **kw: types.SimpleNamespace(
                 stdout="", returncode=0),
+            # a nanowell run's hold bookkeeping (`remote_final_pass`): nothing held
+            _ssh_script=lambda script, *, check: types.SimpleNamespace(stdout="", returncode=0),
             upload_subset=upload_subset),
         _run=types.SimpleNamespace(
             remote_input_dir="/r/run-test/in",
@@ -400,6 +372,7 @@ def _stub_runner(p, proc, upload_subset):
         env_selector=("name", "allwell"),
         _build_remote_argv=lambda *a, **k: ["python", "pm.py"],
         _sweep_orphaned_allocation=lambda *a, **k: None,
+        _claim_run_dirs=lambda *a, **k: "",
     )
     return proc
 
@@ -515,7 +488,7 @@ def test_a_stop_during_the_reference_upload_is_not_a_fault(tmp_path):
     p = _batched(tmp_path, ["A01", "H12"], batch_size=1)
 
     def stopping_upload(zips, dest, *, stop_event=None, **kw):
-        stop_event.set()                    # the user clicks Stop mid-transfer
+        p._stop.set()                       # the user clicks Stop mid-transfer (the upload watches it)
         return (0, 0.0, 20)
 
     _stub_runner(p, proc, stopping_upload)
@@ -580,7 +553,7 @@ def _drive(tmp_path, wells, *, complete=(), argv=None, batch_size=1):
         worker = threading.Thread(target=p._run_batches, daemon=True)
         worker.start()
         for i in range(1, 7):
-            proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+            proc.batch_finished(p, i)
         proc.finish()
         worker.join(timeout=20)
 

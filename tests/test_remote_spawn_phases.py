@@ -50,6 +50,11 @@ def _spawn(monkeypatch, tmp_path, stop_fetchers, *, already_done: set[str]):
                         lambda self, **kw: None)
     monkeypatch.setattr(FetchedOutputVerifier, "_list_remote_completed_wells",
                         lambda self: set(already_done))
+    # The pre-flight reads the remote through the one listing of finished (sealed) wells.
+    from services import remote_finished_wells
+
+    monkeypatch.setattr(remote_finished_wells, "list_remote_outputs", lambda cache, d: remote_finished_wells.RemoteOutputs(
+        frozenset(already_done), frozenset(already_done)))
 
     def fake_popen(argv, **kw):
         m = MagicMock()

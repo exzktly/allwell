@@ -125,6 +125,12 @@ def _run_remote(monkeypatch, tmp_path, *, launcher: str):
     zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP,
                          well_zips=(tmp_path / "A01.zip",), up_to_date_wells=())
     monkeypatch.setattr(pr, "stage_local_zips", lambda *a, **k: zipped)
+    # The job is called closed only once the host confirms it; that check runs
+    # against stand-in binaries in tests/test_a_remote_run_says_how_it_ended.py,
+    # and here the host simply says so, because this file is about the order.
+    from services.remote_liveness import GONE, Liveness
+
+    monkeypatch.setattr(pr, "probe", lambda *a, **k: Liveness(GONE, "the scheduler no longer lists job 42"))
     order: list[str] = []
 
     class _Proc:
@@ -147,7 +153,7 @@ def _run_remote(monkeypatch, tmp_path, *, launcher: str):
         estimate=lambda z: types.SimpleNamespace(format=lambda: "est"),
         spawn=lambda *a, **k: _Proc(), verify_and_cleanup=lambda ok, **k: True,
         close_remote_job=lambda **k: None, cancel=lambda proc: None,
-        can_request_suspend=False)
+        can_request_suspend=False, run=types.SimpleNamespace(remote_pidfile="~/r/run.pid"))
     r = pr.PipelineRunner()
     r._remote = types.SimpleNamespace(name="h")
     r._remote_runner = remote
@@ -297,3 +303,18 @@ def test_the_icon_sits_in_the_run_dashboard_s_status_line_not_the_form(qapp):
     assert header.indexOf(icon) == header.indexOf(tab._dashboard._toggle) - 1
     assert header.indexOf(icon) > header.indexOf(tab._dashboard._eta)
     assert tab._remote_cb.parentWidget().findChildren(type(icon)) == [], "a second icon is still in the form"
+
+
+def test_a_job_that_could_not_be_confirmed_closed_stays_shown(qtbot):
+    """The run is over and the host could not confirm the job closed (tracker D3): the indicator is not put
+    out — a job that may still be running is the one it must not hide — and its tooltip says so."""
+    from analyze.slurm_job_view import SlurmJobIndicator
+
+    ind = SlurmJobIndicator()
+    qtbot.addWidget(ind)
+    ind.on_sched("granted", "42")
+    ind.on_slurm_job("unknown", {})
+    assert ind.job.state == sj.UNKNOWN and not ind.isHidden()
+    assert ind.toolTip().startswith("Slurm job 42 could not be confirmed closed — it may still be running.")
+    ind.on_slurm_job("closed", {})
+    assert ind.job.state == sj.NONE and ind.isHidden()

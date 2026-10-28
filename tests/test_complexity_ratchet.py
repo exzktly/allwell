@@ -31,7 +31,9 @@ THRESHOLD = 40
 # 985 -> 813: collect_bar_items (95) and its _items_for_tp (77) left it (C3).
 # 813 -> 805: process_microscopy.main's worker / thread / device planning moved
 # to pipeline.parallelism.plan_parallelism.
-TOTAL_ALLOWLISTED_CC_BUDGET = 759
+# 759 -> 697: remote_staging.stage_local_zips left the allowlist; its FOLDER /
+# FLAT zip-up is _zip_up_in_place.
+TOTAL_ALLOWLISTED_CC_BUDGET = 697
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
@@ -135,7 +137,9 @@ ALLOWLIST = {
     # extracted; the function is now CC 28. Removed from the allowlist.
     "review/core/centre_view.py::build_centre._build_plotting",
     "review/features/barplot/collect.py::collect_bar_items_for_group",
-    "services/remote_staging.py::stage_local_zips",
+    # DONE: stage_local_zips's FOLDER / FLAT zip-up moved to _zip_up_in_place
+    # when that path stopped filtering the user's archives in place (remote
+    # review S1). Removed from the allowlist.
     "review/features/heatmap/controller.py::_draw_heatmap",
     "review/features/image_browser/cell_browser/collect.py::collect_cells",
     # DONE: the pipeline's Otsu estimator (was CC 55) moved to

@@ -1,6 +1,6 @@
 """Getting a run's input onto the remote host, once.
 
-:class:`DatasetCache` keys each upload by a stat-based fingerprint of the
+:class:`DatasetCache` keys each upload by a content fingerprint of the
 staged archives, so re-running the same input is a metadata round trip rather
 than a re-upload; it streams rsync's output well by well, so the Upload rail and
 the plate's dials fill as each archive lands, and it keeps the remote cache
@@ -17,7 +17,6 @@ import threading
 import time
 from pathlib import Path
 from collections.abc import Callable
-from services.subprocess_text import TEXT_UTF8
 from services.remote_config import (
     RemoteHost,
     resolve_rsync_binary,
@@ -35,9 +34,11 @@ from services.acquisition_transport import acquisition_cache_key, carry_upload_r
 from services.remote_staging import (
     ZippedInput,
 )
+from services.remote_cache_gc import collect_garbage, in_use_stamp
 from services.remote_transport import (
-    _RSYNC_RETRY_CODES,
     _RSYNC_RETRY_DELAYS,
+    SSH_SCRIPT_TIMEOUT_S,
+    StopWatcher,
     _fmt_secs,
     _iter_rsync_lines,
     _looks_like_rsync_filename,
@@ -45,6 +46,12 @@ from services.remote_transport import (
     _rsync_progress_flags,
     _rsync_ssh_transport,
     _rsync_supports_append_verify,
+    end_transfer,
+    names_ssh_failure,
+    rsync_failure_is_transient,
+    sleep_unless_stopped,
+    spawn_transfer,
+    ssh_control,
 )
 
 
@@ -57,13 +64,14 @@ SSH_CONTROL_TIMEOUT_S = 120.0
 class DatasetCache:
     """Manage the persistent per-well-zip cache on the remote.
 
-    The cache key is a stat-based hash (size + mtime per well zip), which
-    is what rsync itself uses as its quick-skip heuristic — re-running on
-    the same dataset is a metadata roundtrip, not a re-upload.
+    The cache key is a content fingerprint of the staged archives
+    (``remote_scratch.fingerprint_archives``: each archive's member names,
+    sizes and CRCs), so the same plate staged again — staged copies are
+    deterministic — finds the same key, and re-running it is a metadata round
+    trip rather than a re-upload.
 
-    A change to any well's images bumps that well's zip mtime, which
-    bumps the cache key — so the next run re-uploads. That's the correct
-    cache-invalidation granularity: per-well, not per-image.
+    A change to any well's images changes that archive's members, which
+    changes the key — so the next run uploads to a fresh cache entry.
     """
 
     def __init__(self, host: RemoteHost):
@@ -103,36 +111,20 @@ class DatasetCache:
         key = self.cache_key(zipped)
         remote_path = self.remote_dataset_dir(key)
 
-        # Ensure remote target dir exists.
-        self._ssh_run(["mkdir", "-p", remote_path], check=True)
+        # Ensure remote target dir exists, and mark the dataset in use so the
+        # cache GC of this or any other session leaves it alone.
+        stamp = in_use_stamp(self.host.remote_staging_dir, key)
+        self._ssh_run(["mkdir", "-p", remote_path, stamp.rsplit("/", 1)[0]], check=True)
+        if self._ssh_run(["touch", stamp], check=False).returncode != 0 and log_fn:
+            log_fn(f"[remote] warn: could not mark dataset {key[:8]} in use; "
+                   f"a cache GC could evict it during this run\n")
 
         sources = [to_rsync_path(p) for p in (*zipped.well_zips, *getattr(zipped, "extra_upload_files", ()))]
         # The trailing slash on the remote dest is critical for rsync's
         # tree-merge semantics — without it rsync would create
         # `<key>/<key>/` on the second run.
         dest = f"{self.host.ssh_alias}:{remote_path}/"
-        cmd = [
-            resolve_rsync_binary(),
-            *_rsync_ssh_transport(self.host),
-            "-aH",
-            "--partial",
-        ]
-        # v5.2.15: --append-verify needs rsync ≥ 3.0.0. macOS still
-        # ships rsync 2.6.9 by default and rejects it with
-        # "Unrecognized option --append-verify" → exit 1. Without the
-        # flag, --partial alone still gives resume semantics — we just
-        # lose the tail-checksum verification on the resumed bytes.
-        if _rsync_supports_append_verify():
-            cmd.append("--append-verify")
-        # v5.2.10: --info= needs rsync ≥ 3.1.0. Old rsync (macOS's
-        # bundled 2.6.9, some HPC clusters) rejects it with exit 1.
-        # The progress callback degrades to "stats appear at end" on
-        # legacy rsync, but the transfer itself still works.
-        # v5.2.20: add ``name1`` so rsync emits a bare filename per
-        # transferred file. ``_run_rsync_streaming`` forwards those
-        # lines as ``[remote] ↑ <filename>`` so the user can see
-        # which well is in flight.
-        cmd += _rsync_progress_flags()
+        cmd = _upload_rsync_cmd(self.host)
         if log_fn:
             # Log the full flag list so the user can see every gating
             # flag (--append-verify, --info=name1,...) in the log;
@@ -195,6 +187,14 @@ class DatasetCache:
             f"ls -1 {remote_path}/*.zip 2>/dev/null | wc -l",
             check=False,
         )
+        if listing.returncode != 0:
+            # The listing's own failure says nothing about the upload; blaming
+            # rsync for it sent the user after the wrong problem.
+            raise RuntimeError(
+                f"Upload verification could not list {self.host.ssh_alias}:"
+                f"{remote_path}/ (exit {listing.returncode}: "
+                f"{(listing.stderr or '').strip() or 'no reason given'}). The upload "
+                f"itself reported success; re-run to check it again.")
         try:
             actual = int((listing.stdout or "0").strip())
         except (TypeError, ValueError):
@@ -250,15 +250,7 @@ class DatasetCache:
             return 0, 0.0, 0
         sources = [to_rsync_path(p) for p in (*well_zips, *extra_sources)]
         dest = f"{self.host.ssh_alias}:{remote_path}/"
-        cmd = [
-            resolve_rsync_binary(),
-            *_rsync_ssh_transport(self.host),
-            "-aH",
-            "--partial",
-        ]
-        if _rsync_supports_append_verify():
-            cmd.append("--append-verify")
-        cmd += _rsync_progress_flags()
+        cmd = _upload_rsync_cmd(self.host)
         if log_fn:
             log_fn(
                 f"[remote] $ {' '.join(shlex.quote(c) for c in cmd)} … → {dest} "
@@ -293,56 +285,14 @@ class DatasetCache:
                     "eviction of old dataset caches.\n"
                 )
             return
-        # Send the script via stdin so the remote bash parses
-        # ~/.allwell-staging normally. Embedding it in a one-line ssh
-        # arg always loses tilde expansion via outer shell quoting.
-        listing = self._ssh_script(
-            f"cd {self.host.remote_staging_dir}/datasets 2>/dev/null && "
-            "du -sb -- */ 2>/dev/null | sort -nr || true",
-            check=False,
-        )
-        if not listing or not listing.stdout:
-            return
-        entries: list[tuple[int, str]] = []
-        for line in listing.stdout.splitlines():
-            parts = line.strip().split(maxsplit=1)
-            if len(parts) == 2 and parts[0].isdigit():
-                entries.append((int(parts[0]), parts[1].rstrip("/")))
-        total = sum(b for b, _ in entries)
-        if total <= max_bytes:
-            return
-        # Sort by access time ascending (oldest first). We don't have an
-        # easy LRU stamp without a stat round-trip, so approximate via the
-        # current sort: largest-first is wrong, so refetch with atime.
-        atime_cmd = self._ssh_script(
-            f"cd {self.host.remote_staging_dir}/datasets 2>/dev/null && "
-            "stat -c '%X %n' -- */ 2>/dev/null | sort -n || true",
-            check=False,
-        )
-        if not atime_cmd or not atime_cmd.stdout:
-            return
-        ordered: list[str] = []
-        for line in atime_cmd.stdout.splitlines():
-            parts = line.strip().split(maxsplit=1)
-            if len(parts) == 2 and parts[0].isdigit():
-                ordered.append(parts[1].rstrip("/"))
-        size_by_name = {n: b for b, n in entries}
-        for name in ordered:
-            if total <= max_bytes:
-                break
-            b = size_by_name.get(name, 0)
-            self._ssh_run(
-                ["rm", "-rf", f"{self.host.remote_staging_dir}/datasets/{name}"],
-                check=False,
-            )
-            total -= b
-            if log_fn:
-                log_fn(f"[remote] gc: evicted dataset {name} ({b // (1024**2)} MB)\n")
+        # Least recently used first, never one a run is using — see
+        # ``services/remote_cache_gc.py`` for what "in use" means.
+        collect_garbage(self, max_bytes, log_fn or (lambda _m: None))
 
     def _ssh_run(
         self, remote_argv: list[str], *, check: bool,
         timeout_s: float = SSH_CONTROL_TIMEOUT_S,
-    ) -> subprocess.CompletedProcess[str] | None:
+    ) -> subprocess.CompletedProcess[str]:
         """Run one short control command over ssh.
 
         Every caller is a ``mkdir`` / ``touch`` / ``rm -rf`` — seconds of work —
@@ -354,70 +304,51 @@ class DatasetCache:
 
         A timeout is reported as return code 124 (``timeout``'s own
         convention) so a ``check=False`` caller reading ``returncode`` sees a
-        failure rather than a success it never had.
+        failure rather than a success it never had; a dead shared connection
+        behind it is closed and the command retried once
+        (``remote_transport.ssh_control``). ``check=True`` failures raise with
+        ssh's own words in the message.
         """
-        # v5.2.11: use the tilde-aware joiner so ``mkdir -p ~/foo`` reaches
-        # the remote shell as ``mkdir -p "$HOME"/foo`` rather than as
-        # ``mkdir -p '~/foo'`` (which creates a literal ``~`` directory).
-        cmd = self.host.ssh_argv(allocate_tty=False) + [
-            _remote_join(remote_argv),
-        ]
-        try:
-            return subprocess.run(
-                cmd, capture_output=True, check=check,
-                timeout=timeout_s, **TEXT_UTF8,
-            )
-        except subprocess.CalledProcessError as exc:
-            if check:
-                raise
-            return exc  # type: ignore[return-value]
-        except subprocess.TimeoutExpired as exc:
-            if check:
-                raise RuntimeError(
-                    f"the remote did not answer within {timeout_s:g}s: "
-                    f"{' '.join(str(a) for a in remote_argv[:3])}"
-                ) from exc
-            return subprocess.CompletedProcess(cmd, 124, "", "")
+        # The tilde-aware joiner, so ``mkdir -p ~/foo`` reaches the remote
+        # shell as ``mkdir -p "$HOME"/foo``, not as a literal ``~`` directory.
+        return ssh_control(self.host, [_remote_join(remote_argv)], check=check,
+                           timeout_s=timeout_s, what=" ".join(remote_argv[:3]))
 
     def _ssh_script(
-        self, script: str, *, check: bool,
-    ) -> subprocess.CompletedProcess[str] | None:
-        """Pipe ``script`` to the remote bash via stdin.
+        self, script: str, *, check: bool, timeout_s: float = SSH_SCRIPT_TIMEOUT_S,
+    ) -> subprocess.CompletedProcess[str]:
+        """Pipe ``script`` to the remote bash via stdin, bounded by *timeout_s*.
 
-        For multi-line / embedded-glob scripts, this is safer than
-        building a one-line command via ``_ssh_run`` + ``_remote_join``:
-        bash reads the script from stdin and parses it normally, so
-        any ``~`` inside expands without us having to know about it.
-        The price is one extra round-trip (no, the same number — ssh
-        executes immediately) and the requirement that ``bash`` be on
-        PATH on the remote (it is, for every host our framework supports).
+        Safer than ``_ssh_run`` for multi-line / embedded-glob scripts: bash
+        parses the script normally, so any ``~`` inside expands. Bounded with
+        the same 124 convention as :meth:`_ssh_run` — unbounded, a dead link
+        held every pre-launch resume listing and the verify listing for as
+        long as the keepalive allowed, with no process Stop could reach.
         """
-        cmd = self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"]
-        # v5.x.x: pipe the script as bytes, not as a text-mode string.
-        # On Windows, text=True translates ``\n`` → ``\r\n`` when
-        # writing to ssh's stdin pipe; the remote bash then sees ``\r``
-        # at the end of every line and bails with
-        # ``bash: line 1: $'\r': command not found``. Decode the
-        # captured streams on the way back so the CompletedProcess
-        # ``.stdout`` / ``.stderr`` remain ``str``.
-        try:
-            raw = subprocess.run(
-                cmd, input=script.encode("utf-8"),
-                capture_output=True, check=check,
-            )
-        except subprocess.CalledProcessError as exc:
-            if isinstance(exc.stdout, (bytes, bytearray)):
-                exc.stdout = exc.stdout.decode("utf-8", errors="replace")
-            if isinstance(exc.stderr, (bytes, bytearray)):
-                exc.stderr = exc.stderr.decode("utf-8", errors="replace")
-            if check:
-                raise
-            return exc  # type: ignore[return-value]
-        return subprocess.CompletedProcess(
-            raw.args, raw.returncode,
-            raw.stdout.decode("utf-8", errors="replace") if raw.stdout else "",
-            raw.stderr.decode("utf-8", errors="replace") if raw.stderr else "",
-        )
+        return ssh_control(self.host, ["bash", "-s"], stdin=script.encode("utf-8"),
+                           check=check, timeout_s=timeout_s,
+                           what=script.strip().splitlines()[0][:80] if script.strip() else "bash -s")
+
+
+#: rsync's own I/O-idle timeout on an upload, as the fetch side has: a link
+#: that carries nothing for this long ends the attempt (exit 30, retried)
+#: rather than leaving it — and the Slurm node its heartbeat holds — waiting.
+UPLOAD_IDLE_TIMEOUT_S = 120
+
+
+def _upload_rsync_cmd(host: RemoteHost) -> list[str]:
+    """The rsync an upload runs, before its sources and destination.
+
+    ``--partial`` (+ ``--append-verify`` where rsync ≥ 3.0 has it; macOS's
+    2.6.9 rejects it) makes a retried attempt resume rather than restart;
+    :func:`_rsync_progress_flags` makes it narrate each file and its progress,
+    which the Upload rail and the dials are fed from.
+    """
+    cmd = [resolve_rsync_binary(), *_rsync_ssh_transport(host), "-aH", "--partial",
+           f"--timeout={UPLOAD_IDLE_TIMEOUT_S}"]
+    if _rsync_supports_append_verify():
+        cmd.append("--append-verify")
+    return cmd + _rsync_progress_flags()
 
 
 def _well_zip_sizes(well_zips) -> dict[str, int]:
@@ -510,11 +441,17 @@ def _run_rsync_streaming(
     progress_fn: Callable[[float], None] | None,
     stop_event: threading.Event | None,
     well_sizes: dict[str, int] | None = None,
+    diagnostics: list[str] | None = None,
 ) -> tuple[int, int]:
     """Run rsync, stream its stdout, return ``(bytes_sent, returncode)``.
 
-    Honors the stop_event by terminating the rsync subprocess. Parses the
-    ``--info=stats2`` summary line at the end for the byte count.
+    Honors the stop_event by ending rsync and the ssh under it from a watcher
+    thread (``remote_transport.StopWatcher``), so Stop is heard while rsync is
+    silent — a frozen remote prints nothing for the reader to check between.
+    Parses the ``--info=stats2`` summary line at the end for the byte count.
+    Every line that is neither progress nor a file name is appended to
+    *diagnostics*, which is what the retry loop reads to tell a dropped
+    connection from a refused login.
 
     ``well_sizes`` maps ``{archive basename: bytes}`` for the well zips this
     invocation is uploading. When supplied (and ``log_fn`` is set) the stream
@@ -530,7 +467,7 @@ def _run_rsync_streaming(
     ``[remote] $ rsync …`` line and the first per-file ↑ marker
     during the upload of a large well zip.
     """
-    proc = subprocess.Popen(
+    proc = spawn_transfer(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -540,6 +477,7 @@ def _run_rsync_streaming(
         bufsize=0,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
+    watcher = StopWatcher(proc, stop_event)
 
     sent_bytes = 0
     progress_re = re.compile(r"(\d[\d,]*)\s+(\d+)%\s+(\S+)\s+\S+(?:\s+\(.*\))?")
@@ -568,7 +506,7 @@ def _run_rsync_streaming(
         assert proc.stdout is not None
         for line in _iter_rsync_lines(proc.stdout):
             if stop_event and stop_event.is_set():
-                proc.terminate()
+                end_transfer(proc)
                 break
             # Progress lines (--info=progress2) print to a TTY-ish format
             # with carriage returns. We now read \r-delimited and can
@@ -593,8 +531,14 @@ def _run_rsync_streaming(
                 m_bytes = bytes_sent_re.match(line)
                 if m_bytes:
                     sent_bytes = int(m_bytes.group(1).replace(",", ""))
+            is_name = not is_progress and _looks_like_rsync_filename(line)
+            if diagnostics is not None and not is_progress and not is_name:
+                diagnostics.append(line)
             if log_fn:
-                if line.startswith(("sent ", "Total ", "rsync:", "rsync error")):
+                # ssh's own complaint ("Connection closed by …", "Permission
+                # denied") is the reason an upload failed; it was not logged.
+                if line.startswith(("sent ", "Total ", "rsync:", "rsync error", "ssh:")) \
+                        or names_ssh_failure(line):
                     log_fn(f"[remote] {line}\n")
                 elif is_progress:
                     # rsync's own percentage stream is live state, not events:
@@ -606,21 +550,20 @@ def _run_rsync_streaming(
                     if now - last_progress_log >= PROGRESS_LOG_MIN_INTERVAL:
                         log_fn(f"{TRANSIENT_PREFIX}{line}\n")
                         last_progress_log = now
-                elif _looks_like_rsync_filename(line):
+                elif is_name:
                     file_count += 1
                     if wells is not None:
                         wells.note_file(line)
                     log_fn(f"[remote] ↑ ({file_count}) {line}\n")
-        if wells is not None:
-            wells.finish()
         proc.wait()
+        # The last well's dial closes at full only when rsync says it all
+        # arrived: a failed or stopped transfer painted it uploaded.
+        if wells is not None and proc.returncode == 0:
+            wells.finish()
     finally:
+        watcher.close()
         if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            end_transfer(proc)
     return sent_bytes, proc.returncode if proc.returncode is not None else -1
 
 
@@ -683,14 +626,18 @@ def _stream_rsync_with_retry(
                     f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
                     f"in {delay:.0f}s (last exit code {rc})\n"
                 )
-            time.sleep(delay)
+            if not sleep_unless_stopped(delay, stop_event):
+                break
+        said: list[str] = []
         attempt_bytes, rc = _run_rsync_streaming(
             cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
-            well_sizes=well_sizes,
+            well_sizes=well_sizes, diagnostics=said,
         )
         sent_bytes += attempt_bytes  # each resumed attempt sends incremental bytes
         attempts_run += 1
-        if rc == 0 or rc not in _RSYNC_RETRY_CODES:
+        # One rule with the fetch side: a dropped connection (exit 255 saying
+        # so) is retried, a refused login is not (``rsync_failure_is_transient``).
+        if rc == 0 or not rsync_failure_is_transient(rc, "\n".join(said)):
             break
     elapsed = max(time.monotonic() - t0, 1e-6)
     return sent_bytes, elapsed, rc, attempts_run

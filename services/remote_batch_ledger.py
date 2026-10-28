@@ -150,3 +150,21 @@ def failed_batches_line(proc, failed: dict[int, int], batches, n_batches: int) -
         parts.append(f"batch {index} (exit {rc}): {'; '.join(what)}")
     return (f"[remote] ERROR {len(failed)} of {n_batches} batch(es) failed — {' | '.join(parts)}. Every other well "
             f"completed.\n")
+
+
+def checked(proc, argv: list[str], what: str, *, then: str) -> bool:
+    """Run one control command whose result matters; ``False`` (and an ERROR naming *what* failed and *then* what
+    the run does about it) when it did not succeed.
+
+    These are the ``mkdir`` / ``rm -rf`` / ``mv`` calls the batch protocol rests on. ``rm -rf`` and ``mkdir -p`` exit
+    0 whether or not there was anything to do, so any other code — ``rm``'s own failure, ssh's 255, a timeout's 124 —
+    means the remote is not in the state the run is about to assume. Run on regardless, a stale ``ready`` flag that
+    survived its ``rm`` made the driver swap in a half-uploaded batch and report it finished.
+    """
+    result = proc._runner._cache._ssh_run(argv, check=False)
+    rc = getattr(result, "returncode", None)
+    if rc == 0:
+        return True
+    detail = (getattr(result, "stderr", "") or "").strip().splitlines()
+    fail(proc, f"[remote] ERROR could not {what} (ssh exit {rc}{f': {detail[-1]}' if detail else ''}); {then}\n")
+    return False

@@ -12750,6 +12750,25 @@ which are partial, or that every well reported finished — because a batch fail
 a whole when one partial well does, and "the wells of a failed batch are missing"
 claimed far more than was true.
 
+**The control commands the batch protocol rests on are checked, and the run stops
+before launching when one fails.** `_start_driver` clears the previous run's
+handshake files, suspend request and `keep/`, makes the run directory and clears
+`in/` through `remote_batch_ledger.checked`, which reads the code (`rm -rf` and
+`mkdir -p` exit 0 whether or not there was anything to do, so any other code —
+including ssh's 255 or a timeout's 124 — means the remote is not in the state the
+run is about to assume) and ends the run with an ERROR naming the command; run on
+regardless, a `ready` flag that survived its `rm` let the driver swap in a
+half-uploaded batch. `remote_final_pass` checks the same way: `adopt_earlier_holds`
+(the `mkdir` of `keep/`, and the move of an earlier attempt's held wells, asked
+`test -d` first so an attempt that held nothing is not a failure), and
+`run_final_pass` (the `rm -rf` of the pass's directory, the listing of `keep/` —
+`None` is never read as "nothing held" — the `mv` into it and the `mv` back). A
+pass that held wells and could not run is counted non-zero with an ERROR, so it is
+distinguishable from one that ran, and the driver says `batch N skipped` when it
+skips the pass. The single-shot launch's clears of the upload sentinel, the
+suspend request and an incremental run's old outputs (`RemoteRunner.spawn`) are
+`check=True` for the same reason.
+
 **An app that vanishes mid-batch suspends the batch.** The driver's heartbeat
 check otherwise runs only between batches, and an app that crashes or is
 force-quit leaves its ssh child alive as an orphan, so the srun holding the node

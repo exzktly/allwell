@@ -539,7 +539,8 @@ class RemoteRunner:
             )
         reattached = remote_output != own_output
         if zipped.incremental:
-            self._cache._ssh_run(["rm", "-rf", own_output], check=False)
+            # Checked: left in place, its outputs read as this run's and the pipeline skips their wells.
+            self._cache._ssh_run(["rm", "-rf", own_output], check=True)
 
         # **Both** directories, and the second one is not optional. A
         # re-attached run writes its outputs under a *previous* run's id, but
@@ -564,11 +565,12 @@ class RemoteRunner:
         # Two calls rather than one shell line: ``_remote_join`` quotes every
         # token, so an ``&&`` between them would reach the remote as a
         # directory named "&&" instead of as an operator.
-        self._cache._ssh_run(["rm", "-f", remote_sentinel], check=False)
+        # Checked, like the `mkdir` above: a stale sentinel starts the job before this run's upload is done.
+        self._cache._ssh_run(["rm", "-f", remote_sentinel], check=True)
         # A suspend request the last run of this plate left behind would stop
         # this one before it did anything: ``run_id`` is deterministic, so a
         # resume lands in the very directory the suspend was requested in.
-        self._cache._ssh_run(["rm", "-f", own.suspend_request], check=False)
+        self._cache._ssh_run(["rm", "-f", own.suspend_request], check=True)
 
         _force, _forced_wells = _forced_from_argv(pipeline_argv)
         self._run = _RemoteRun(

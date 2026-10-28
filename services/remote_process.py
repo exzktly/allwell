@@ -75,7 +75,7 @@ from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, watch_of
-from services.remote_batch_ledger import fail, failed_batches_line, ledger_of
+from services.remote_batch_ledger import checked, fail, failed_batches_line, ledger_of
 from services.remote_batch_step import Step, run_batch
 from services.remote_batch_resume import (
     _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
@@ -643,20 +643,24 @@ class _BatchedRemoteProcess:
         # data batches hold in `keep/`; a resumed run takes over the earlier attempt's (`adopt_earlier_holds`).
         self._final_pass = bool(getattr(self._fetcher.run, "nanowell", False))
         total = n_batches + (1 if self._final_pass else 0)
-        self._runner._cache._ssh_run(["mkdir", "-p", run_dir], check=False)
-        self._runner._cache._ssh_run(
-            ["rm", "-rf", paths.suspend_request, f"{run_dir}/{HOLD_DIR}"]
-            + [self._batch_flag(t, i)
-               for i in range(1, total + 1)
-               for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP)],
-            check=False,
-        )
+        # Each checked, and the run stops before launching anything when one fails: run on stale flags, the
+        # driver swaps in a half-uploaded batch and reports it finished.
+        before = "stopping before anything is launched"
+        flags = [self._batch_flag(t, i) for i in range(1, total + 1)
+                 for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP)]
+        if not (checked(self, ["mkdir", "-p", run_dir], f"create the run directory {run_dir}", then=before)
+                and checked(self, ["rm", "-rf", paths.suspend_request, f"{run_dir}/{HOLD_DIR}", *flags],
+                            "clear the handshake files a previous run of this dataset left", then=before)):
+            self._returncode = 1
+            return False
         # Whatever input archives the remote already holds — in `in/`, in a staged batch, or in an earlier
         # attempt's directory — go into the batch they now belong to first; then the half-processed `in/` is
         # cleared, its staged batches and `bg/` kept for the retry (`remote_batch_staging`).
         stage_leftovers(self, run_dir)
-        adopt_earlier_holds(self, run_dir)      # and makes `keep/`, which every batch's release lists
-        self._runner._cache._ssh_run(["rm", "-rf", f"{run_dir}/in"], check=False)
+        if not (adopt_earlier_holds(self, run_dir)      # and makes `keep/`, which every batch's release lists
+                and checked(self, ["rm", "-rf", f"{run_dir}/in"], "clear the previous input directory", then=before)):
+            self._returncode = 1
+            return False
 
         # The empty-well blank(s): the driver is told where they will be (`background_dir`) and they are uploaded
         # by `_upload_blanks` once it has been launched, so the node request is not held behind a whole well's

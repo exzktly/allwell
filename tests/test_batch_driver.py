@@ -704,6 +704,33 @@ def test_a_driver_lost_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
     assert not any("upload failed" in m for m in p._logged)
 
 
+def test_handshake_files_that_cannot_be_cleared_stop_the_run_before_it_launches(tmp_path, monkeypatch):
+    """A stale `ready` flag that survives its `rm` lets the driver swap in a half-uploaded batch and report it done;
+    the `rm`'s result used to be discarded."""
+    proc = _FakeProc()
+    ordering: list[str] = []
+    p = _batched(tmp_path, ["A01", "A02"])
+    _stub_runner(p, proc, ordering)
+
+    def ssh_run(argv, *, check, **kw):
+        ordering.append(" ".join(str(a) for a in argv[:2]))
+        rc = 1 if argv[0] == "rm" and any(str(a).endswith("_ready") for a in argv) else 0
+        return types.SimpleNamespace(stdout="", stderr="rm: cannot remove: Permission denied", returncode=rc)
+
+    p._runner._cache._ssh_run = ssh_run
+    spawns = []
+    monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawns.append(argv) or proc)
+
+    p._run_batches()
+
+    assert p._returncode == 1
+    assert not spawns, "a driver was launched over stale handshake files"
+    assert not any(o.startswith("upload") for o in ordering)
+    assert ("[remote] ERROR could not clear the handshake files a previous run of this dataset left (ssh exit 1: "
+            "rm: cannot remove: Permission denied); stopping before anything is launched") in "".join(p._logged)
+    assert p.failure_lines and "could not clear the handshake files" in p.failure_lines[0]
+
+
 def test_a_stop_before_the_first_batch_reaches_nothing_remote(tmp_path):
     """Ordering that is load-bearing twice: no allocation should be left
     behind, and the object is built without a `_runner` in this state."""

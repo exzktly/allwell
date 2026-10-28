@@ -28,6 +28,10 @@ from services.remote_srun_retry import (
 from services.remote_transport import _remote_join, _remote_quote
 from services.remote_wait_snippets import (
     _UPLOAD_WAIT_EXIT,
+    BATCH_BUDGET_GRACE_S,
+    BATCH_OVER_BUDGET,
+    BATCH_STILL_RUNNING,
+    BATCH_TICK_S,
     MID_BATCH_HEARTBEAT_STALE_S,
     MID_BATCH_WATCH_POLL_S,
     UPLOAD_WAIT_POLL_S,
@@ -133,8 +137,19 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
 
     Two things *do* end it, both meaning "the app is gone rather than slow": a
     heartbeat that stopped advancing, and a batch that never arrived inside
-    :data:`UPLOAD_WAIT_TIMEOUT_S`. Both exit :data:`_UPLOAD_WAIT_EXIT` so they
-    read as that rather than as a pipeline crash.
+    :data:`UPLOAD_WAIT_TIMEOUT_S` of polls no fresh heartbeat vouched for — a
+    beating app is still uploading, however long that takes. Both exit
+    :data:`_UPLOAD_WAIT_EXIT` so they read as that rather than as a pipeline
+    crash.
+
+    **A batch past its budget is killed, and says so.** *per_batch_timeout_s*
+    runs the pipeline under ``timeout -k``; ``timeout``'s process group is the
+    batch's, and whatever of it outlives the batch — the real pipeline orphaned
+    by a wrapper that died on the SIGTERM — is killed before the next batch
+    starts (``remote_wait_snippets.BATCH_BUDGET_GRACE_S``). The driver prints
+    ``BATCH_OVER_BUDGET`` before the batch's marker, and the app reports that
+    rather than a bare exit code. While a batch runs the driver prints
+    ``BATCH_STILL_RUNNING`` every ``BATCH_TICK_S``.
 
     **A suspend ends it cleanly.** When *suspend_request* exists the driver
     starts no further batch and exits 0, whether it is between batches or
@@ -162,7 +177,7 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     batch, which is the one that processes it.
     """
     pipeline = _remote_join(argv)
-    waits = int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S)
+    waits = max(1, int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S))
     hb_init, stale = _heartbeat_stale_snippet(
         heartbeat,
         "[remote] ERROR the app stopped responding — giving the node back")
@@ -180,7 +195,16 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     # Without this a single wedged well holds the node for the whole run's
     # scaled walltime, which is strictly worse than the per-batch launches this
     # replaces — there, a hang cost one batch's allocation and no more.
-    budget = f"timeout {int(per_batch_timeout_s)} " if per_batch_timeout_s else ""
+    # `-k`: the pipeline answers SIGTERM as a suspend and a hung well never
+    # reaches the boundary it winds down at, so SIGKILL follows (see
+    # `BATCH_BUDGET_GRACE_S`). It runs in the background so the driver knows
+    # `timeout`'s pid, which is also the batch's process group (`timeout` makes
+    # one of its own): `timeout` returns as soon as its child does, and a
+    # `conda run` wrapper that dies on the SIGTERM leaves the real pipeline in
+    # that group as an orphan, still writing `out/` — so whatever is left of
+    # the group is given the grace and then killed before the next batch.
+    budget_s, grace = int(per_batch_timeout_s or 0), int(BATCH_BUDGET_GRACE_S)
+    over = BATCH_OVER_BUDGET.format(i="$_aw_i")
     # The empty-well blank lives in `bg/` for the whole run so every batch can
     # build the same correction from it without it crossing the wire again. A
     # blank that still needs processing is hard-linked into the final batch to
@@ -216,10 +240,15 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     # The final pass: the same argv with the re-anchoring alone asked for, run only when the app flagged it so —
     # skipped when it flagged nothing was held, and when its flag is missing (a `touch` that failed must not run
     # the whole pipeline over the held wells). `$_aw_x` is unquoted on purpose: empty, it adds no argument at all.
+    # A skipped pass says so, and why, before its marker: "nothing was held" and "the flag never arrived" must not
+    # read the same as a pass that ran.
     final = (
-        f'_aw_x=""; '
-        f'if [ -f {flag(BATCH_SKIP)} ] || {{ [ "$_aw_i" -eq {total} ] && [ ! -f {flag(BATCH_REANCHOR)} ]; }}; '
-        f'then echo "0" > {done}; '
+        f'_aw_x=""; _aw_skip=""; '
+        f'if [ -f {flag(BATCH_SKIP)} ]; then _aw_skip="nothing was held for the end-of-run re-anchoring"; '
+        f'elif [ "$_aw_i" -eq {total} ] && [ ! -f {flag(BATCH_REANCHOR)} ]; then '
+        f'_aw_skip="the end-of-run re-anchoring was not flagged"; fi; '
+        f'if [ -n "$_aw_skip" ]; then echo "[remote] batch-driver: batch $_aw_i skipped — $_aw_skip"; '
+        f'echo "0" > {done}; '
         f'echo "{BATCH_DONE_MARKER.format(i="$_aw_i", rc="0")}"; _aw_i=$((_aw_i+1)); continue; fi; '
         f'[ -f {flag(BATCH_REANCHOR)} ] && _aw_x="--nanowell_reanchor_only"; '
     ) if final_pass else ""
@@ -235,16 +264,37 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         stale_s=MID_BATCH_HEARTBEAT_STALE_S, poll_s=MID_BATCH_WATCH_POLL_S,
         on_stale=f"touch {_remote_quote(suspend_request)}; exit 0",
     ) if suspend_request else ("", "")
-    # A subshell in the background, killed as soon as the batch returns: its
-    # `exit` ends only itself, never the driver. Killing it does not kill the
-    # `sleep` it is waiting on, which then lived out its poll still holding the
-    # driver's stdout — so whoever reads that stream (the app's ssh) saw it end
-    # up to a whole poll after the driver had. The sleep writes nothing, so it
-    # is given no stdout to hold.
-    watch_on = (f'( {watch_init}while sleep {MID_BATCH_WATCH_POLL_S} >/dev/null 2>&1; do '
-                f'{watch}done ) & _aw_wd=$!; ') if watch else ""
-    watch_off = ('kill "$_aw_wd" 2>/dev/null; '
-                 if watch else "")
+    # A subshell in the background beside every batch, killed as soon as the
+    # batch returns: its `exit` ends only itself, never the driver. It is the
+    # watchdog (when there is a heartbeat to watch) and the liveness tick
+    # (`BATCH_STILL_RUNNING`, always). Killing it does not kill the `sleep` it
+    # is waiting on, which then lived out its poll still holding the driver's
+    # stdout — so whoever reads that stream (the app's ssh) saw it end up to a
+    # whole poll after the driver had. The sleep writes nothing, so it is given
+    # no stdout to hold; the subshell keeps its own, for the tick.
+    poll = int(MID_BATCH_WATCH_POLL_S)
+    tick_every = max(1, int(BATCH_TICK_S) // max(1, poll))
+    still = BATCH_STILL_RUNNING.format(i="$_aw_i", m="$(( ($(date +%s) - _aw_t0) / 60 ))")
+    watch_on = (f'_aw_t0=$(date +%s); ( _aw_n=0; {watch_init}while sleep {poll} >/dev/null 2>&1; do '
+                f'{watch}_aw_n=$((_aw_n+1)); '
+                f'if [ $((_aw_n % {tick_every})) -eq 0 ]; then echo "{still}"; fi; '
+                f'done ) & _aw_wd=$!; ')
+    watch_off = 'kill "$_aw_wd" 2>/dev/null; '
+    if budget_s:
+        run = (f'timeout -k {grace} {budget_s} {pipeline}{tail} & _aw_tp=$!; wait "$_aw_tp"; _aw_rc=$?; '
+               f'{watch_off}'
+               # 124 is `timeout`'s own; 137 is its SIGKILL only once the budget has passed (an OOM kill is too).
+               f'if [ "$_aw_rc" -eq 124 ] || {{ [ "$_aw_rc" -eq 137 ] && '
+               f'[ "$(( $(date +%s) - _aw_t0 ))" -ge {budget_s} ]; }}; then '
+               f'echo "{over} ({budget_s}s) — its pipeline was stopped; the wells it had not finished are missing"; '
+               f'fi; '
+               f'_aw_k=0; while kill -0 -- -"$_aw_tp" 2>/dev/null; do '
+               f'if [ "$_aw_k" -eq 0 ]; then echo "[remote] WARN batch $_aw_i: processes of its pipeline outlived it '
+               f'— stopping them before the next batch"; kill -TERM -- -"$_aw_tp" 2>/dev/null; fi; '
+               f'if [ "$_aw_k" -ge {grace} ]; then kill -KILL -- -"$_aw_tp" 2>/dev/null; sleep 1; break; fi; '
+               f'sleep 1; _aw_k=$((_aw_k+1)); done; ')
+    else:
+        run = f'{pipeline}{tail}; _aw_rc=$?; {watch_off}'
     return (
         f'_aw_i=1; '
         f'while [ "$_aw_i" -le {total} ]; do '
@@ -257,13 +307,14 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         f'echo "{marker}"; _aw_i=$((_aw_i+1)); continue; fi; '
         f'echo "[remote] batch-driver: waiting for batch $_aw_i of '
         f'{total}"; '
-        f'_aw_w=0; {hb_init}'
+        f'_aw_w=0; _aw_fresh=0; {hb_init}'
         f'while [ ! -f {ready} ]; do '
         f'{suspended}'
-        f'_aw_w=$((_aw_w+1)); '
         f'{stale}'
+        # Only the polls no fresh heartbeat vouched for count towards the deadline: a beating app is uploading.
+        f'[ "$_aw_fresh" = 1 ] || _aw_w=$((_aw_w+1)); '
         f'if [ "$_aw_w" -gt {waits} ]; then '
-        f'echo "[remote] ERROR batch $_aw_i never arrived"; '
+        f'echo "[remote] ERROR batch $_aw_i never arrived — no heartbeat said the app was still sending it"; '
         f'exit {_UPLOAD_WAIT_EXIT}; fi; '
         f'sleep {UPLOAD_WAIT_POLL_S}; done; '
         f'{final}'
@@ -287,7 +338,7 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         f'_aw_i=$((_aw_i+1)); continue; }}; '
         f'{blank_link}'
         f'echo "[remote] batch-driver: batch $_aw_i starting"; '
-        f'{watch_on}{budget}{pipeline}{tail}; _aw_rc=$?; {watch_off}'
+        f'{watch_on}{run}'
         f'echo "$_aw_rc" > {done}; '
         f'echo "{marker}"; '
         f'_aw_i=$((_aw_i+1)); done; '

@@ -97,8 +97,8 @@ def _attempt(tmp_path, monkeypatch, remote_root, *, node_boots: bool):
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     if node_boots:
-        proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
-        proc.say("[remote] batch-driver: batch 2 finished rc=0\n")
+        proc.batch_finished(p, 1)
+        proc.batch_finished(p, 2)
     else:
         # The upload of batch 1 completes while srun waits on the node; then
         # the boot fails and the driver's stream ends with nothing reported.

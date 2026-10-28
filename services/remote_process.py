@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from services.remote_runner import RemoteRunner
-    from services.remote_upload import DatasetCache
 import functools
 import io
 import os
@@ -48,9 +47,7 @@ from services.remote_fetch import (
     Fetcher,
     _snapshot_local_artifacts,
 )
-from services.remote_wait_snippets import (
-    UPLOAD_HEARTBEAT_S,
-)
+from services.remote_heartbeat import _UploadHeartbeat     # remote_runner and tests import it from here
 from services.remote_suspend import (
     _AnySet,
 )
@@ -79,7 +76,9 @@ from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_srun_retry import queue_wait_seconds
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
-from services.remote_handoff import chase_handoff, hand_off_and_wait, watch_of
+from services.remote_handoff import chase_handoff, watch_of
+from services.remote_batch_ledger import checked, fail, failed_batches_line, ledger_of
+from services.remote_batch_step import Step, run_batch
 from services.remote_batch_resume import (
     _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
     reattach_output_dir, stage_leftovers, take_from_remote)
@@ -153,87 +152,6 @@ def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
         f"[remote] scheduler: waiting for the scheduler to grant a node "
         f"(this can queue)…\n"
     )
-
-
-class _UploadHeartbeat:
-    """Touches the remote heartbeat for as long as this app owns the run.
-
-    A daemon thread rather than a hook inside the transfer: rsync can be busy
-    with one large archive for minutes without returning to any per-file
-    callback, and a heartbeat that only advances between files would read as
-    dead exactly during the slowest part of the upload.
-
-    Stopping is the point. Whatever ends the run — success, failure, the Stop
-    button, the process being killed — takes the beat with it, and a job still
-    waiting for its input frees its node about a minute later instead of
-    holding it for the full deadline.
-
-    It beats for the whole run, not only the upload, because it is also what
-    :meth:`RemoteRunner._sweep_orphaned_allocation` reads to decide whether an
-    allocation still has an owner. ``run_id`` is deterministic in the plate, so
-    two sessions on the same plate meet at the same sidecar; a beat that
-    stopped when the upload finished would make an hour-long compute look
-    abandoned and get itself cancelled by the second session.
-    """
-
-    def __init__(self, cache: "DatasetCache", path: str,
-                 interval_s: float = UPLOAD_HEARTBEAT_S) -> None:
-        self._cache = cache
-        self._path = path
-        self._interval = interval_s
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-
-    def beat(self) -> None:
-        """One touch, now. Called once before the job starts waiting, so the
-        first thing it looks at is a heartbeat that already exists.
-
-        Bounded by the beat interval rather than the default: a touch that has
-        not landed by the time the next one is due is not going to help, and
-        letting them queue up would leave the thread minutes behind while the
-        remote reads the silence as an app that died.
-        """
-        self._cache._ssh_run(["touch", self._path], check=False,
-                             timeout_s=self._interval)
-
-    def start(self) -> None:
-        """Begin beating. Paired with :meth:`stop` — see the class docstring."""
-        if self._thread is not None:
-            return
-        self._thread = threading.Thread(
-            target=self._run, name="aw-upload-heartbeat", daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        """Stop beating, and wait for the thread to notice.
-
-        The whole mechanism is "a beat that stops means the app is gone", so a
-        beat that outlives its run is not a leak of one thread — it tells the
-        remote a dead run is alive, holds the node for the full deadline, and
-        keeps the orphan sweep from ever sweeping.
-        """
-        self._stop.set()
-        thread, self._thread = self._thread, None
-        if thread is not None:
-            thread.join(timeout=2.0)
-
-    def __enter__(self) -> "_UploadHeartbeat":
-        self.beat()
-        self.start()
-        return self
-
-    def _run(self) -> None:
-        while not self._stop.wait(self._interval):
-            try:
-                self.beat()
-            except Exception:
-                # A missed beat is not fatal on its own — the job tolerates
-                # `UPLOAD_HEARTBEAT_STALE_S` of silence — and an ssh blip must
-                # not take down an upload that is otherwise fine.
-                swallowed("upload heartbeat")
-
-    def __exit__(self, *_exc) -> None:
-        self.stop()
 
 
 @lru_cache(maxsize=1)
@@ -607,6 +525,12 @@ class _BatchedRemoteProcess:
     def stdout(self) -> _QueueLineIterator:
         return self._lines
 
+    @property
+    def failure_lines(self) -> tuple[str, ...]:
+        """Why the batch loop ended or failed the run, in its own words (``remote_batch_ledger.fail``). They reach
+        the log directly rather than through :attr:`stdout`, so the runner adds them to its error tail."""
+        return ledger_of(self).reasons
+
     def poll(self) -> int | None:
         if self._worker.is_alive():
             return None
@@ -720,20 +644,24 @@ class _BatchedRemoteProcess:
         # data batches hold in `keep/`; a resumed run takes over the earlier attempt's (`adopt_earlier_holds`).
         self._final_pass = bool(getattr(self._fetcher.run, "nanowell", False))
         total = n_batches + (1 if self._final_pass else 0)
-        self._runner._cache._ssh_run(["mkdir", "-p", run_dir], check=False)
-        self._runner._cache._ssh_run(
-            ["rm", "-rf", paths.suspend_request, f"{run_dir}/{HOLD_DIR}"]
-            + [self._batch_flag(t, i)
-               for i in range(1, total + 1)
-               for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP, BATCH_STAGED)],
-            check=False,
-        )
+        # Each checked, and the run stops before launching anything when one fails: run on stale flags, the
+        # driver swaps in a half-uploaded batch and reports it finished.
+        before = "stopping before anything is launched"
+        flags = [self._batch_flag(t, i) for i in range(1, total + 1)
+                 for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP, BATCH_STAGED)]
+        if not (checked(self, ["mkdir", "-p", run_dir], f"create the run directory {run_dir}", then=before)
+                and checked(self, ["rm", "-rf", paths.suspend_request, f"{run_dir}/{HOLD_DIR}", *flags],
+                            "clear the handshake files a previous run of this dataset left", then=before)):
+            self._returncode = 1
+            return False
         # Whatever input archives the remote already holds — in `in/`, in a staged batch, or in an earlier
         # attempt's directory — go into the batch they now belong to first; then the half-processed `in/` is
         # cleared, its staged batches and `bg/` kept for the retry (`remote_batch_staging`).
         stage_leftovers(self, run_dir)
-        adopt_earlier_holds(self, run_dir)      # and makes `keep/`, which every batch's release lists
-        self._runner._cache._ssh_run(["rm", "-rf", f"{run_dir}/in"], check=False)
+        if not (adopt_earlier_holds(self, run_dir)      # and makes `keep/`, which every batch's release lists
+                and checked(self, ["rm", "-rf", f"{run_dir}/in"], "clear the previous input directory", then=before)):
+            self._returncode = 1
+            return False
 
         # The empty-well blank(s): the driver is told where they will be (`background_dir`) and they are uploaded
         # by `_upload_blanks` once it has been launched, so the node request is not held behind a whole well's
@@ -745,7 +673,7 @@ class _BatchedRemoteProcess:
         # checks it at every batch boundary, so an app that dies between
         # batches gives the node back instead of parking it on a `ready` file
         # nobody will ever write.
-        self._heartbeat = _UploadHeartbeat(self._runner._cache, heartbeat)
+        self._heartbeat = _UploadHeartbeat(self._runner._cache, heartbeat, log_fn=self._log, batched=True)
         self._heartbeat.beat()
         self._heartbeat.start()
 
@@ -862,6 +790,7 @@ class _BatchedRemoteProcess:
             for line in proc.stdout:
                 note_remote_scratch(self, line)
                 watch_of(self).observe(line)
+                ledger_of(self).observe(line)
                 m = _BATCH_DONE_RE.search(line)
                 if m:
                     # Consumed, not forwarded: this is the handshake between the
@@ -881,24 +810,23 @@ class _BatchedRemoteProcess:
             # a Stop killing the ssh — every batch still waiting has to be
             # released or the loop would block for ever.
             self._stream_ended.set()
-            # Batches still unreported means the driver did not finish. This is
-            # the only place that learns of it: a Stop reaches this object as a
-            # kill of the ssh's process group (`signal_subprocess` uses
-            # `proc.pid`, which is the driver's, so `terminate` never runs),
-            # and a walltime expiry or a node failure never touches the app at
-            # all. Without this the worker thread would sit inside the next
-            # batch's rsync — `upload_subset` takes `_stop` and watches it —
-            # pushing wells at a node that no longer exists.
-            # A suspend is the one deliberate early exit the driver has
-            # (`_batch_driver_snippet`), and reading it as a lost node would
-            # cancel the Fetcher mid-way through the batch that just finished —
-            # the wells the suspend was meant to keep.
+            # Batches still unreported, with no Stop pressed, means the driver
+            # went away: a walltime expiry, a node failure, the driver's own
+            # exit 75, a hand-off this side gave up on. This is the only place
+            # that learns of it — none of those touches the app — and without
+            # it the worker would sit inside the next batch's rsync pushing
+            # wells at a node that no longer exists. `_driver_lost` is what the
+            # worker's waits watch (`_AnySet`), never `_stop`: that event is
+            # the caller's (`PipelineRunner._stop_requested`), and setting it
+            # here reported every lost driver as the user's Stop — amber
+            # "Cancelled — stopped", the journal saying `stopped`, the Job
+            # Queue pausing. The Fetcher is left to drain: the finished
+            # batches' wells are still on the remote. A user's Stop sets `_stop`
+            # before it kills the ssh (`PipelineRunner.stop`), and a suspend is
+            # the driver's one deliberate early exit (`_batch_driver_snippet`).
             if (not self._stop.is_set() and not self._suspending.is_set()
                     and len(self._batch_rc) < self._n_batches):
                 self._driver_lost.set()
-                self._stop.set()
-                with swallow("cancelling downloads after the driver went away"):
-                    self._fetcher.cancel()
             # A snapshot: `_await_batch` may be adding an entry from the worker
             # thread at this instant, and iterating the live dict would raise
             # inside a ``finally``. `_stream_ended` is set first, so a batch
@@ -940,13 +868,18 @@ class _BatchedRemoteProcess:
         prune_staged(self._runner._cache, f"{run_dir}/bg", blanks, "empty-well reference", self._log)
         sent, _elapsed, rc = self._runner._cache.upload_subset(
             blanks, f"{run_dir}/bg", log_fn=self._log, acquisition_input=self._zipped,
-            progress_fn=self._progress, stop_event=self._stop)     # a full well: the "Transferring…" label must move
+            progress_fn=self._progress, stop_event=_AnySet(self._stop, self._driver_lost))     # a full well: the "Transferring…" label must move
         if rc != 0:
             if self._stop.is_set():          # a Stop comes back as rsync's code; it is the user's, not a fault
                 self._log("[remote] stopped while uploading the empty-well reference\n")
                 self._returncode = 130
                 return False
-            self._log(
+            if self._driver_lost.is_set():
+                fail(self, "[remote] ERROR the allocation ended while the empty-well reference was uploading — no "
+                           "batch will run\n")
+                self._returncode = 1
+                return False
+            fail(self,
                 f"[remote] ERROR could not upload the empty-well blank(s) "
                 f"(rsync rc={rc}). Every batch would run without the "
                 f"background correction this run asked for, and the output "
@@ -968,21 +901,19 @@ class _BatchedRemoteProcess:
         """This batch's exit code, or ``None`` if the driver went away."""
         event = self._batch_events.setdefault(index, threading.Event())
         while not event.wait(timeout=1.0):
-            if self._stop.is_set() or self._stream_ended.is_set():
+            if self._stop.is_set() or self._stream_ended.is_set() or self._driver_lost.is_set():
                 break
             if not chase_handoff(self, index, n_batches, lambda: self._batch_flag(BATCH_READY, index)):
-                self._returncode = self._returncode or 1    # `remote_handoff` has said why
+                # `remote_handoff` has said why; a Stop that cut a re-raised hand-off short is still a Stop.
+                self._returncode = 130 if self._stop.is_set() else (self._returncode or 1)
                 return None
         if index in self._batch_rc:
             return self._batch_rc[index]
         # No code came back. Either the user stopped the run, or the allocation
         # is gone — a walltime expiry, a node failure, somebody else's scancel.
-        # `_driver_lost` is checked first because the reader sets `_stop` in
-        # that case too, to get the worker out of whatever it is blocked in.
-        if self._driver_lost.is_set():
-            self._log(
-                f"[remote] the allocation ended during batch {index}/"
-                f"{n_batches} — no more batches will run\n")
+        if self._driver_lost.is_set() and not self._stop.is_set():
+            fail(self, f"[remote] ERROR the allocation ended during batch {index}/{n_batches} — no more batches "
+                       f"will run; the finished wells are still being downloaded\n")
             self._returncode = self._returncode or 1
         else:
             self._log(f"[remote] stopped during batch {index}/{n_batches}\n")
@@ -1146,99 +1077,13 @@ class _BatchedRemoteProcess:
             final_rc = 0
 
             for batch_idx, batch_zips in enumerate(batches):
-                if self._suspend_before(batch_idx + 1, n_batches):
+                rc = run_batch(self, batch_idx + 1, n_batches, batch_zips)
+                if rc is Step.SUSPENDED:
                     break
-                if self._stop.is_set():
-                    self._log(f"[remote] stopped before batch {batch_idx + 1}/{n_batches}\n")
-                    self._returncode = 130
-                    return
-
-                self._log(
-                    f"[remote] batch {batch_idx + 1}/{n_batches}: "
-                    f"uploading {len(batch_zips)} well-zip(s)\n"
-                )
-                # v5.4.7: scale per-batch upload progress so the
-                # status label advances smoothly across the WHOLE
-                # run instead of resetting from 0 → 1 once per
-                # batch. Each batch's rsync calls progress_fn with
-                # ``pct`` in [0, 1]; map to
-                # ``(batch_idx + pct) / n_batches`` so batch 1's
-                # uploads animate 0 → 1/n_batches, batch 2's
-                # 1/n_batches → 2/n_batches, etc.
-                _outer_progress = self._progress
-                if _outer_progress is not None:
-                    def _scaled_progress(
-                        pct: float,
-                        _idx: int = batch_idx,
-                        _n: int = n_batches,
-                        _outer=_outer_progress,
-                    ) -> None:
-                        _outer((_idx + pct) / _n)
-                    inner_progress: Callable[[float], None] | None = _scaled_progress
-                else:
-                    inner_progress = None
-                prune_staged(self._runner._cache, self._batch_staging_dir(
-                    batch_idx + 1), batch_zips, f"batch {batch_idx + 1}", self._log)
-                sent_bytes, _elapsed, rc = self._runner._cache.upload_subset(
-                    batch_zips,
-                    self._batch_staging_dir(batch_idx + 1),
-                    log_fn=self._log, acquisition_input=self._zipped,
-                    progress_fn=inner_progress,
-                    # A suspend ends the upload too: a batch sent after the
-                    # user asked for the machine back is thrown away unrun.
-                    stop_event=_AnySet(self._stop, self._suspending),
-                )
+                if rc is Step.ENDED:
+                    return          # nothing further will run; the run's code is set and the log says why
                 if rc != 0:
-                    # `upload_subset` watches `_stop`, so a Stop mid-transfer
-                    # comes back here as a non-zero rsync code. Saying "upload
-                    # failed" for a stop the user asked for reads as a fault.
-                    if self._stop.is_set():
-                        self._log(
-                            f"[remote] batch {batch_idx + 1}/{n_batches}: "
-                            f"upload interrupted\n")
-                        self._returncode = (
-                            1 if self._driver_lost.is_set() else 130)
-                        return
-                    if self._suspend_before(batch_idx + 1, n_batches):
-                        break
-                    self._log(
-                        f"[remote] batch {batch_idx + 1} upload failed "
-                        f"(rsync rc={rc}); aborting remaining batches\n"
-                    )
-                    self._returncode = rc
-                    return
-                if self._suspend_before(batch_idx + 1, n_batches):
-                    break
-                self._log(
-                    f"[remote] batch {batch_idx + 1}: upload complete "
-                    f"({sent_bytes / (1024**2):.1f} MB); handing it to the "
-                    f"driver\n"
-                )
-                # The pipeline for this batch runs inside the allocation the
-                # driver is already holding — there is no second queue wait and
-                # no second argv to build. Hand it the batch and wait for the
-                # code it reports back; one that cannot be made ends the run.
-                rc = hand_off_and_wait(self, batch_idx + 1, n_batches,
-                                       # the job has its first batch: drain the earlier attempt's wells meanwhile
-                                       meanwhile=lambda: download_adopted(self))
-                self._release_nanowell_batch(rc, batch_zips)
-                if rc is None:
-                    # The driver is gone. Nothing further will ever be run, and
-                    # whether that was a Stop or a dead node the outcome is the
-                    # same for the batches left.
-                    return
-                if rc != 0:
-                    # Kept, not fatal: one bad well should not cost the plate
-                    # the node it already holds. The tally after the loop names
-                    # every batch that did this, and the run's own code carries
-                    # the first of them.
                     failed[batch_idx + 1] = rc
-                    self._log(
-                        f"[remote] batch {batch_idx + 1} pipeline exited {rc}; "
-                        f"continuing with the remaining batches\n"
-                    )
-                else:
-                    self._log(f"[remote] batch {batch_idx + 1}/{n_batches} complete\n")
             else:
                 # Every data batch ran (a suspend breaks out above, a Stop returns): a nanowell run's re-anchoring.
                 final_rc = finish_with_final_pass(self, n_batches)
@@ -1246,12 +1091,7 @@ class _BatchedRemoteProcess:
                     return
 
             if failed:
-                names = ", ".join(str(i) for i in sorted(failed))
-                self._log(
-                    f"[remote] {len(failed)} of {n_batches} batch(es) failed "
-                    f"({names}); the rest completed. Wells from a failed batch "
-                    f"are missing from the output.\n"
-                )
+                fail(self, failed_batches_line(self, failed, batches, n_batches))
                 self._returncode = failed[min(failed)]
             else:
                 self._returncode = final_rc

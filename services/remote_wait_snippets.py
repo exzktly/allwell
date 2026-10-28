@@ -33,6 +33,13 @@ UPLOAD_WAIT_TIMEOUT_S = 7200
 UPLOAD_WAIT_POLL_S = 3
 _UPLOAD_WAIT_EXIT = 75
 
+# The deadline counts only the polls at which a fresh heartbeat did *not* vouch for
+# the app. A healthy upload of a large batch can take longer than any fixed wait
+# — six nanowell wells are ~48 GB, which needs > 53 Mbit/s to land in two hours —
+# and while the app is beating, nothing about the wait is wrong. What the deadline
+# still bounds is the wait nothing can vouch for: no heartbeat configured, or a
+# host that cannot report a file's modification time.
+
 # Touched on the remote every ``UPLOAD_HEARTBEAT_S`` for as long as an upload is
 # actually in flight. The deadline above is a backstop against a hung uploader;
 # this is the answer to a *dead* one — the app being killed, the laptop closing,
@@ -40,9 +47,14 @@ _UPLOAD_WAIT_EXIT = 75
 # wrong behaviour. A heartbeat that stops advancing frees the node in about a
 # minute regardless of how long the upload legitimately needed.
 #
-# The file is touched over ssh, so its mtime is the *remote* clock and the job
-# comparing it against its own ``date`` is not measuring clock skew between two
-# machines.
+# The file is touched over ssh from the login node, and the job reading it runs on
+# a compute node. On a shared filesystem the mtime is the *file server's* clock,
+# and the compute node's ``date`` is a third machine's: more than
+# ``UPLOAD_HEARTBEAT_STALE_S`` of skew between them read every beat as stale and
+# gave the node back at every batch boundary. So "now" is read the same way — the
+# mtime of a probe file the job touches beside the heartbeat, which the same
+# server stamps — and ``date`` is only the fallback for a directory the job cannot
+# write to.
 UPLOAD_HEARTBEAT_S = 30
 UPLOAD_HEARTBEAT_STALE_S = 120
 
@@ -55,6 +67,24 @@ UPLOAD_HEARTBEAT_STALE_S = 120
 # the batch ended — hours, on a large batch — with nobody left to fetch it.
 MID_BATCH_HEARTBEAT_STALE_S = 600
 MID_BATCH_WATCH_POLL_S = 30
+
+# While a batch runs, the driver says so this often — ``BATCH_STILL_RUNNING`` —
+# from the same background subshell as the watchdog. A batch is the one stretch
+# of a run with nothing else on the stream for hours, and silence there looked
+# exactly like a stream that had died: the app treats any line as proof of life.
+BATCH_TICK_S = 300
+BATCH_STILL_RUNNING = "[remote] batch-driver: batch {i} still running ({m}m)"
+
+# A batch over its time budget is sent SIGTERM, which the pipeline answers as a
+# cooperative suspend — finishing the FOV-groups in flight — and a hung well
+# never reaches that boundary. So the budget is ``timeout -k``: this long after
+# the SIGTERM, SIGKILL. And because ``timeout`` returns as soon as its own child
+# exits, a ``conda run`` wrapper that dies on the SIGTERM would leave the real
+# pipeline running as an orphan, writing ``out/`` into the next batch; the driver
+# therefore also waits this long for the batch's whole process group to go and
+# kills what is left.
+BATCH_BUDGET_GRACE_S = 300
+BATCH_OVER_BUDGET = "[remote] ERROR batch {i} exceeded its time budget"
 
 
 def _heartbeat_stale_snippet(heartbeat: str, message: str, *,
@@ -85,20 +115,28 @@ def _heartbeat_stale_snippet(heartbeat: str, message: str, *,
 
     *stale_s* and *poll_s* time the check (the loop around it sleeps *poll_s*
     between calls), and *on_stale* is the shell run once the app is judged gone
-    — by default the exit that hands the node back.
+    — by default the exit that hands the node back. Each check leaves
+    ``$_aw_fresh`` at ``1`` when a heartbeat it could read vouched for the app,
+    which is what lets the waits' deadline stand aside for a healthy slow upload.
     """
     if not heartbeat:
         return "", ""
     hb_q = _remote_quote(heartbeat)
     misses = max(1, int(stale_s // poll_s))
     gone = f'echo "{message}"; {on_stale or f"exit {_UPLOAD_WAIT_EXIT}"}; '
-    init = "_aw_miss=0; _aw_warn=0; "
+    probe = hb_q + '".now.${BASHPID:-$$}"'
+    mtime = 'stat -c %Y "$_aw_p" 2>/dev/null || stat -f %m "$_aw_p" 2>/dev/null'
+    init = "_aw_miss=0; _aw_warn=0; _aw_fresh=0; "
     check = (
+        f'_aw_fresh=0; '
         f'if [ -e {hb_q} ]; then '
         f'_aw_miss=0; '
         f'_aw_hb=$(stat -c %Y {hb_q} 2>/dev/null || '
         f'stat -f %m {hb_q} 2>/dev/null || echo ""); '
-        f'_aw_now=$(date +%s); '
+        # "Now" by the clock that stamped the heartbeat: a probe beside it (see UPLOAD_HEARTBEAT_STALE_S).
+        f'_aw_p={probe}; _aw_now=""; '
+        f'if touch "$_aw_p" 2>/dev/null; then _aw_now=$({mtime} || echo ""); rm -f "$_aw_p" 2>/dev/null; fi; '
+        f'[ -n "$_aw_now" ] || _aw_now=$(date +%s); '
         f'if [ -z "$_aw_hb" ]; then '
         f'if [ "$_aw_warn" -eq 0 ]; then _aw_warn=1; '
         f'echo "[remote] WARN this host cannot report a file\'s modification '
@@ -106,7 +144,7 @@ def _heartbeat_stale_snippet(heartbeat: str, message: str, *,
         f'will hold the node until the pipeline runs or the walltime ends"; '
         f'fi; '
         f'elif [ "$((_aw_now - $_aw_hb))" -gt {int(stale_s)} ]; '
-        f'then {gone}fi; '
+        f'then {gone}else _aw_fresh=1; fi; '
         f'else '
         f'_aw_miss=$((_aw_miss+1)); '
         f'if [ "$_aw_miss" -gt {misses} ]; then '
@@ -126,7 +164,7 @@ def _wait_for_upload_snippet(sentinel: str, heartbeat: str = "") -> str:
     this window is expected.
     """
     sentinel_q = _remote_quote(sentinel)
-    waited = int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S)
+    waited = max(1, int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S))
     # A stale heartbeat means the uploader is gone — killed, disconnected,
     # asleep — and nothing will ever write the sentinel. Checked before the
     # deadline because it is the case that actually happens; the deadline is
@@ -140,13 +178,15 @@ def _wait_for_upload_snippet(sentinel: str, heartbeat: str = "") -> str:
         f'if [ ! -f {sentinel_q} ]; then '
         f'echo "[remote] scheduler: node granted; waiting for the upload to '
         f'finish before starting the pipeline…"; fi; '
-        f'_aw_w=0; {init}'
+        f'_aw_w=0; _aw_fresh=0; {init}'
         f'while [ ! -f {sentinel_q} ]; do '
-        f'_aw_w=$((_aw_w+1)); '
         f'{stale}'
+        # Only the polls no fresh heartbeat vouched for count towards the deadline (see UPLOAD_WAIT_TIMEOUT_S).
+        f'[ "$_aw_fresh" = 1 ] || _aw_w=$((_aw_w+1)); '
         f'if [ "$_aw_w" -gt {waited} ]; then '
         f'echo "[remote] ERROR the upload never completed — giving the node '
-        f'back after {UPLOAD_WAIT_TIMEOUT_S}s"; exit {_UPLOAD_WAIT_EXIT}; fi; '
+        f'back after {UPLOAD_WAIT_TIMEOUT_S}s with no heartbeat to say the upload was still going"; '
+        f'exit {_UPLOAD_WAIT_EXIT}; fi; '
         f'sleep {UPLOAD_WAIT_POLL_S}; done; '
         f'echo "[remote] scheduler: input is complete — starting the pipeline"; '
     )

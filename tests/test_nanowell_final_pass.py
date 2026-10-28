@@ -370,11 +370,49 @@ def test_with_nothing_held_the_final_pass_is_skipped(tmp_path, monkeypatch):
     assert released == []
 
 
+def test_held_wells_that_cannot_be_listed_are_not_read_as_none_held(tmp_path, monkeypatch):
+    """A failed listing of keep/ said "no well was held for it" and the run reported success over held wells whose
+    pass never ran — indistinguishable from a pass that did."""
+    for module in ("services.remote_final_pass", "services.remote_process"):
+        monkeypatch.setattr(f"{module}.remote_run_dir", lambda host, run_id: "/r/run")
+    p, asked, released = _final_pass_process(tmp_path, "/r/run/keep/B03.zip\n")
+    real = p._runner._cache._ssh_run
+
+    def listing_fails(argv, **kw):
+        return types.SimpleNamespace(stdout="", returncode=255) if argv[0] == "find" else real(argv, **kw)
+
+    p._runner._cache._ssh_run = listing_fails
+    assert run_final_pass(p, 2) == 1, "a pass that never ran over its held wells was reported as a success"
+    log = "".join(p._logged)
+    assert "no well was held" not in log
+    assert "ERROR could not list the wells held in /r/run/keep" in log
+    assert not any(a[0] == "mv" for a in asked)
+    assert released == []
+
+
+def test_a_pass_directory_that_cannot_be_cleared_is_not_staged_into(tmp_path, monkeypatch):
+    """`mv keep b3` onto a b3 that survived its `rm` moves keep/ inside it, where the pass does not look."""
+    for module in ("services.remote_final_pass", "services.remote_process"):
+        monkeypatch.setattr(f"{module}.remote_run_dir", lambda host, run_id: "/r/run")
+    p, asked, released = _final_pass_process(tmp_path, "/r/run/keep/B03.zip\n")
+    real = p._runner._cache._ssh_run
+
+    def rm_fails(argv, **kw):
+        return types.SimpleNamespace(stdout="", stderr="rm: Permission denied", returncode=1) if argv[0] == "rm" \
+            else real(argv, **kw)
+
+    p._runner._cache._ssh_run = rm_fails
+    assert run_final_pass(p, 2) == 1
+    assert not any(a[0] == "mv" for a in asked)
+    assert "ERROR could not clear /r/run/b3 for the end-of-run re-anchoring (ssh exit 1: rm: Permission denied)" in \
+        "".join(p._logged)
+
+
 def test_a_staging_failure_says_the_held_wells_stay_unaddressed(tmp_path, monkeypatch):
     for module in ("services.remote_final_pass", "services.remote_process"):
         monkeypatch.setattr(f"{module}.remote_run_dir", lambda host, run_id: "/r/run")
     p, asked, released = _final_pass_process(tmp_path, "/r/run/keep/B03.zip\n", mv_rc=1)
-    run_final_pass(p, 2)
+    assert run_final_pass(p, 2) == 1, "held wells whose pass never ran were reported as a success"
     assert [a[1] for a in asked if a[0] == "touch"][0] == "/r/run/.aw_batch_3_skip"
     assert "their unaddressed timepoints stay unaddressed" in "".join(p._logged)
     assert released == [], "nothing to release: the held wells were never re-run"
@@ -501,7 +539,7 @@ def test_the_loop_runs_the_final_pass_after_the_last_data_batch(tmp_path, monkey
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in (1, 2, 3):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()
     worker.join(timeout=20)
     assert not worker.is_alive()
@@ -528,7 +566,7 @@ def test_a_suspend_before_the_end_runs_no_final_pass(tmp_path, monkeypatch):
         time.sleep(0.01)
     p.note_suspend_requested()
     proc._done = True
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.say("[remote] batch-driver: suspended — no further batches\n")
     proc.finish()
     worker.join(timeout=20)
@@ -558,14 +596,14 @@ def test_a_suspend_during_the_last_data_batch_runs_no_final_pass(tmp_path, monke
     p._runner.close_remote_job = lambda **kw: None
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     import time
 
     deadline = time.monotonic() + 10
     while not any("_2_ready" in o for o in ordering) and time.monotonic() < deadline:
         time.sleep(0.01)
     p.note_suspend_requested()
-    proc.say("[remote] batch-driver: batch 2 finished rc=0\n")
+    proc.batch_finished(p, 2)
     proc.say("[remote] batch-driver: suspended — no further batches\n")
     proc.finish()
     worker.join(timeout=20)
@@ -582,7 +620,7 @@ def test_a_driver_lost_during_the_final_pass_is_lost_not_stopped(tmp_path, monke
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in (1, 2):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()                                   # the allocation ends before batch 3 reports
     worker.join(timeout=20)
     assert not worker.is_alive()
@@ -594,16 +632,49 @@ def test_a_resumed_run_takes_over_the_wells_its_earlier_attempt_held(tmp_path):
 
     asked: list = []
     proc = types.SimpleNamespace(
-        _final_pass=True,
+        _final_pass=True, _log=lambda m: None,
         _fetcher=types.SimpleNamespace(run=types.SimpleNamespace(reattached=True,
                                                                  remote_output_dir="/r/runs/run-old/out/")),
         _runner=types.SimpleNamespace(_cache=types.SimpleNamespace(
-            _ssh_run=lambda argv, **k: asked.append(list(argv)))))
-    adopt_earlier_holds(proc, "/r/runs/run-new")
+            _ssh_run=lambda argv, **k: asked.append(list(argv)) or types.SimpleNamespace(returncode=0))))
+    assert adopt_earlier_holds(proc, "/r/runs/run-new")
     assert asked == [["mkdir", "-p", "/r/runs/run-new/keep"],
+                     ["test", "-d", "/r/runs/run-old/keep"],
                      ["find", "/r/runs/run-old/keep", "-maxdepth", "1", "-name", "*.zip",
                       "-exec", "mv", "-t", "/r/runs/run-new/keep", "{}", "+"]]
     asked.clear()
     proc._fetcher.run.reattached = False
-    adopt_earlier_holds(proc, "/r/runs/run-new")
+    assert adopt_earlier_holds(proc, "/r/runs/run-new")
     assert asked == [["mkdir", "-p", "/r/runs/run-new/keep"]], "a fresh run's directory has none of their outputs"
+
+
+def _holding(answer):
+    """A batched process whose remote answers *answer(argv) -> returncode*; returns it and its log."""
+    logged: list = []
+    proc = types.SimpleNamespace(
+        _final_pass=True, _log=logged.append,
+        _fetcher=types.SimpleNamespace(run=types.SimpleNamespace(reattached=True,
+                                                                 remote_output_dir="/r/runs/run-old/out/")),
+        _runner=types.SimpleNamespace(_cache=types.SimpleNamespace(
+            _ssh_run=lambda argv, **k: types.SimpleNamespace(returncode=answer(list(argv)), stderr=""))))
+    return proc, logged
+
+
+def test_an_earlier_attempt_that_held_nothing_is_not_a_failure():
+    from services.remote_final_pass import adopt_earlier_holds
+
+    proc, logged = _holding(lambda argv: 1 if argv[0] in ("test", "find") else 0)
+    assert adopt_earlier_holds(proc, "/r/runs/run-new")
+    assert logged == []
+
+
+def test_held_wells_that_cannot_be_adopted_stop_the_run_before_it_launches():
+    """The move failing used to be discarded, and the earlier attempt's held wells then never got their pass."""
+    from services.remote_final_pass import adopt_earlier_holds
+
+    proc, logged = _holding(lambda argv: 255 if argv[0] == "find" else 0)
+    assert adopt_earlier_holds(proc, "/r/runs/run-new") is False
+    assert "ERROR could not move the wells an earlier attempt held" in "".join(logged)
+    proc, logged = _holding(lambda argv: 1 if argv[0] == "mkdir" else 0)
+    assert adopt_earlier_holds(proc, "/r/runs/run-new") is False
+    assert "ERROR could not create /r/runs/run-new/keep" in "".join(logged)

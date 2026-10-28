@@ -364,3 +364,26 @@ def test_spawn_records_the_address_under_the_digest_it_used(
         source_key=source_fingerprint(plate / "in"),
         host_alias=host.ssh_alias) is None, (
         "a differently configured run matched the record")
+
+
+@pytest.mark.parametrize("leftover", [UPLOAD_SENTINEL, "suspend"])
+def test_a_stale_control_file_that_cannot_be_cleared_stops_the_launch(
+        host, plate, monkeypatch, stop_fetchers, leftover):
+    """`run_id` is deterministic, so a re-run lands where the last one left its "upload finished" sentinel and its
+    suspend request. Their `rm` ran with ``check=False`` and its answer unread: a sentinel that survived let the
+    job start before this run's upload was done, and a request that survived suspended the run before it did
+    anything. A clear that fails now ends the spawn before anything is launched (REMOTE_REVIEW_TRACKER A7)."""
+    real = _FakeRemoteFs.run
+
+    def run(self, argv):
+        if argv[:2] == ["rm", "-f"] and leftover in str(argv[2]):
+            return False
+        return real(self, argv)
+
+    monkeypatch.setattr(_FakeRemoteFs, "run", run)
+    launched: list = []
+    monkeypatch.setattr("services.remote_runner.RemoteRunner._start_ssh",
+                        lambda self, argv: launched.append(argv), raising=False)
+    with pytest.raises(RuntimeError, match="no such directory"):
+        _spawn_with(host, plate, monkeypatch, stop_fetchers, completed_remote_wells=set())
+    assert launched == []

@@ -417,7 +417,10 @@ def test_a_driver_that_stops_without_a_suspend_is_still_a_lost_node():
     b = _batched(3)
     b._read_driver(_driver_output(BATCH_DONE_MARKER.format(i=1, rc=0) + "\n"))
     assert b._driver_lost.is_set()
-    b._fetcher.cancel.assert_called_once_with()
+    # Lost, not stopped: the caller's Stop stays clear and the finished wells' downloads drain
+    # (tests/test_a_lost_batch_driver_is_not_a_stop.py).
+    assert not b._stop.is_set()
+    b._fetcher.cancel.assert_not_called()
 
 
 # ── what the review of the first version found ──────────────────────────────

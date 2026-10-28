@@ -62,7 +62,9 @@ def _harness(tmp_path, monkeypatch, *, earlier=(), force=False, nanowell=False):
 
     observed: list[str] = []
     queued: list = []
-    p._fetcher.observe = observed.append
+    # What the Fetcher was handed as finished on the remote by an earlier attempt (`remote_done_marker`): the
+    # wells this run computes are announced to it too, by the batches' own `— done.` lines.
+    p._fetcher.observe = lambda line: observed.append(line) if "by an earlier attempt" in line else None
     p._fetcher.after_queued = queued.append
     p._fetcher.run.nanowell = nanowell
     p._journal_keys = dict(argv_digest="d", source_key="s", host_alias="h")
@@ -91,7 +93,7 @@ def _run(p, monkeypatch):
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in range(1, 5):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()
     worker.join(timeout=30)
     assert not worker.is_alive()
@@ -509,7 +511,7 @@ def test_the_node_is_requested_before_the_empty_well_blank_uploads(tmp_path, mon
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in range(1, 4):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()
     worker.join(timeout=30)
 
@@ -537,7 +539,7 @@ def test_the_driver_is_told_where_earlier_attempts_kept_the_blank(tmp_path, monk
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in range(1, 4):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()
     worker.join(timeout=30)
 

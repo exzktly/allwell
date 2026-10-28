@@ -722,7 +722,8 @@ def test_rsync_with_retry_no_stop_event_behaves_normally():
 
 
 def _make_spawn_test_runner(
-        host, tmp_path, monkeypatch, stop_fetchers, *, completed_remote_wells):
+        host, tmp_path, monkeypatch, stop_fetchers, *, completed_remote_wells,
+        unsealed_remote_wells=(), listing_fails=False):
     """Plumb a RemoteRunner whose spawn() can run end-to-end without
     real ssh/rsync: mock _ssh_run/_ssh_script, ensure_uploaded, popen,
     and _list_remote_completed_wells return value."""
@@ -751,11 +752,18 @@ def _make_spawn_test_runner(
         lambda self, **kw: None,
     )
     # Stub out the remote-completed-wells lister: the test parametrizes
-    # how many wells "exist" on the remote.
+    # how many wells "exist" on the remote — finished, so sealed, unless the
+    # caller says which are not (``unsealed_remote_wells``).
     monkeypatch.setattr(
         FetchedOutputVerifier, "_list_remote_completed_wells",
-        lambda self: set(completed_remote_wells),
+        lambda self: set(completed_remote_wells) | set(unsealed_remote_wells),
     )
+    from services import remote_finished_wells
+
+    monkeypatch.setattr(remote_finished_wells, "list_remote_outputs", lambda cache, remote_dir: (
+        None if listing_fails else remote_finished_wells.RemoteOutputs(
+            frozenset(completed_remote_wells) | frozenset(unsealed_remote_wells),
+            frozenset(completed_remote_wells))))
     # Capture the ssh argv we'd launch so the test can inspect it.
     captured = {}
 
@@ -870,6 +878,32 @@ def test_spawn_runs_pipeline_when_remote_is_empty(host, tmp_path, monkeypatch, s
     ssh_argv = captured["argv"]
     remote_cmd = unpack_login_shell_command(ssh_argv[-1])
     assert "process_microscopy" in remote_cmd
+
+
+@pytest.mark.parametrize("unsealed, listing_fails", [({"B02"}, False), (set(), True)])
+def test_spawn_runs_pipeline_when_a_well_on_the_remote_is_not_sealed(
+        host, tmp_path, monkeypatch, stop_fetchers, unsealed, listing_fails):
+    """Tracker B2: the pre-flight counted any ``<well>_out.zip``. A run that ended with a PARTIAL well — or one wound
+    down part way — leaves one too, so a plain re-run found "every well" there, replaced the pipeline with ``true``
+    and reported success over the partial output. Finished means sealed; and a listing that fails is not a finding
+    that the remote holds everything (here: nothing at all is known, so nothing is finished)."""
+    z1 = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
+    z2 = _make_well_zip(tmp_path, "B02.zip", ["x.tif"])
+    zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z1, z2))
+    runner, captured = _make_spawn_test_runner(
+        host, tmp_path, monkeypatch, stop_fetchers,
+        completed_remote_wells={"A01"} if unsealed else {"A01", "B02"},
+        unsealed_remote_wells=unsealed, listing_fails=listing_fails)
+    log_lines: list[str] = []
+    runner.spawn(zipped, tmp_path / "out",
+                 pipeline_argv=["/usr/bin/python", "/local/process_microscopy.py",
+                                "--input_dir", "/local/in", "--output_dir", "/local/out"],
+                 output_filter=OutputFilter.FULL, log_fn=log_lines.append)
+    blob = "".join(log_lines)
+    assert "FULL CACHE HIT" not in blob, blob
+    assert "process_microscopy" in unpack_login_shell_command(captured["argv"][-1]), (
+        "the pipeline was replaced by `true` over a remote that does not hold every well finished")
+    assert ("could not list" in blob) if listing_fails else ("no completion seal" in blob and "B02" in blob), blob
 
 
 # ── v5.2.25: deterministic run_id + remote-aware verify backstop ──────────

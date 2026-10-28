@@ -148,6 +148,31 @@ def test_verification_does_not_pull_a_released_well_again(tmp_path):
     assert pulled == ["gpu:/r/out/nanowells/", "gpu:/r/out/B02_out.zip", "gpu:/r/out/*_B02.csv.gz"]
 
 
+def test_a_well_an_earlier_attempt_held_is_this_run_s_to_pull_after_its_pass(tmp_path, monkeypatch):
+    """Tracker F3. A resumed run takes over the wells an earlier attempt held for the re-anchoring
+    (``remote_final_pass.adopt_earlier_holds``). Those wells are finished — no batch of this run runs them, and the
+    Fetcher never fetches them — so the pass's release and verification both skipped them as "not this run's": the
+    re-anchored grid came back with ``nanowells/`` while the cell CSV and archive here predated the re-anchoring,
+    and verification passed."""
+    folder = tmp_path / "nanowells"
+    _grid(folder, "B02", ["fiducial", "plate_rigid"])               # this run's final pass re-anchored it
+    deleted = _capture_deletes(monkeypatch)
+    fetcher = _Fetcher(tmp_path, fetched=(), remote_files={"B02_out.zip", "measurements_B02.csv.gz"})
+    fetcher.run.nanowell_adopted_holds = {"B02"}
+    assert release_batch(fetcher, ["B02"], log=lambda _m: None) == ["B02"], "the pass's release skipped the well"
+    assert "/r/out/B02_out.zip" in fetcher.pulled and "/r/out/measurements_B02.csv.gz" in fetcher.pulled, (
+        f"its re-anchored output was not pulled again: {fetcher.pulled}")
+
+    pulled: list[str] = []
+    verifier = SimpleNamespace(
+        _run=SimpleNamespace(local_output_dir=tmp_path, remote_output_dir="/r/out", nanowell=True,
+                             nanowell_released=set(), fetched_wells=set(), nanowell_adopted_holds={"B02"}),
+        host=SimpleNamespace(ssh_alias="gpu"),
+        _rsync_optional=lambda src, dest, *, log_fn, absent_note="": pulled.append(src) or True)
+    pull_nanowell_results(verifier, log=lambda _m: None)
+    assert "gpu:/r/out/B02_out.zip" in pulled, "verification did not pull the re-anchored well's output either"
+
+
 # ── the Fetcher runs the release behind the wells already queued ─────────────
 
 def test_after_queued_runs_behind_every_well_already_queued():

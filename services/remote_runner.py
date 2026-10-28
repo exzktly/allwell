@@ -100,10 +100,9 @@ from services.remote_commands import _compose_remote_cmd, pack_for_login_shell
 from services.remote_srun_retry import queue_wait_seconds
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
+from services import remote_reuse as _reuse
 from services.remote_run_id import (
     RemoteRunPaths,
-    _pipeline_launch_is_pointless,
-    _choose_remote_output_dir,
     _compute_run_id,
     _forced_from_argv,
     _local_input_dir_from_argv,
@@ -535,66 +534,9 @@ class RemoteRunner:
     def _preflight_cache_hit(self, zipped: ZippedInput, pipeline_argv: list[str],
                              remote_output: str,
                              log: Callable[[str], None]) -> bool:
-        """Whether every well's output is already on the remote, so the
-        pipeline need not be launched at all."""
-        # v5.2.27: pre-flight cache-hit check. Before launching the
-        # pipeline, ssh in and count the ``*_out.zip`` files already
-        # present in the remote output dir. If every well in the
-        # input is already represented there, the previous run
-        # finished its compute phase — skip launching the pipeline
-        # entirely and let the verify-backstop + retry loop pull
-        # whatever the user is missing locally. This handles the
-        # case the user reported in v5.2.26+: pipeline completed,
-        # local fetch was interrupted (network drop or Stop button),
-        # re-run should NOT re-analyze.
-        #
-        # The replacement remote command is ``true`` — a no-op shell
-        # builtin that exits 0 immediately. Downstream flow
-        # (PipelineRunner reading stdout to EOF, then
-        # verify_and_cleanup → backstop → _retry_missing_wells) is
-        # unchanged.
-        expected_well_count = len(zipped.well_zips)
-        cache_hit = False
-        if expected_well_count > 0:
-            # v5.2.28: surface the path + raw listing so when a user
-            # expects a cache hit but doesn't get one, we can see
-            # whether (a) the run_id drifted between runs (different
-            # remote dir than the prior run wrote to), or (b) the
-            # dir exists but is empty / missing the right files.
-            log(
-                f"[remote] pre-flight: checking {self.host.ssh_alias}:"
-                f"{remote_output} for prior outputs\n"
-            )
-            # A failed listing (None) claims no cache hit: the pipeline runs rather than trust an unasked host.
-            completed_remote = self._output_verifier()._list_remote_completed_wells() or set()
-            log(
-                f"[remote] pre-flight: remote output dir has "
-                f"{len(completed_remote)}/{expected_well_count} well "
-                f"output zip(s) "
-                f"(found wells: "
-                f"{sorted(completed_remote)[:5]}"
-                f"{'…' if len(completed_remote) > 5 else ''})\n"
-            )
-            if _pipeline_launch_is_pointless(
-                    pipeline_argv, expected_well_count, completed_remote,
-                    uploaded={wz.stem.upper() for wz in zipped.well_zips},
-                    incremental=zipped.incremental):
-                cache_hit = True
-                log(
-                    "[remote] FULL CACHE HIT — every well has output "
-                    "already; skipping pipeline launch and proceeding "
-                    "straight to verify + fetch.\n"
-                )
-            elif len(completed_remote) >= expected_well_count:
-                # The remote has everything, but the run was told to reprocess.
-                # Say so: the cache-hit line above is the one a user expects
-                # here, and its absence is otherwise unexplained.
-                log(
-                    "[remote] remote output dir is already complete, but this "
-                    "run was asked to reprocess — launching the pipeline "
-                    "anyway (it will overwrite).\n"
-                )
-        return cache_hit
+        """Whether every well is already *finished* on the remote, so the pipeline need not be launched at all
+        (:func:`services.remote_reuse.preflight_cache_hit`: sealed wells only, and an unreadable listing is none)."""
+        return _reuse.preflight_cache_hit(self, zipped, pipeline_argv, remote_output, log)
 
     def _compose_launch(self, prep: _PreparedRun, zipped: ZippedInput,
                         pipeline_argv: list[str], output_filter: OutputFilter,
@@ -786,43 +728,24 @@ class RemoteRunner:
         if cleanup_mode == "none":
             log("[remote] --cleanup-remote=none — leaving everything in place.\n")
             return True
-
-        # A re-attached run wrote its output into a directory named for a
-        # *previous* run (see ``_choose_remote_output_dir``), so the path this
-        # would otherwise derive from ``run_id`` holds nothing this run
-        # produced. Deleting it would report a cleanup that removed the wrong
-        # directory and left the real outputs on the remote for ever — and
-        # would take with it whatever else that other run's directory still
-        # holds. Say so and keep both rather than guess which is safe.
-        if run.reattached:
-            # The borrowed directory is left alone; this run's own is not. It
-            # holds only the pidfile, the sentinel and the heartbeat this run
-            # created, and nothing prunes ``runs/`` — ``DatasetCache.gc``
-            # covers ``datasets/`` — so leaving it would drop two sidecar files
-            # on the host for every re-attaching run, for ever.
-            own_dir = remote_run_dir(self.host, run.run_id)
-            # The fate of this run's own directory is said inside the branch
-            # that decides it. Stating it afterwards told a dry run that the
-            # directory "has been cleaned up" three lines before announcing
-            # that nothing was deleted — in the one mode whose whole purpose is
-            # saying truthfully what *would* happen.
-            if dry_run:
-                self._log_would_delete(
-                    own_dir, label=f"run dir {run.run_id}", log=log)
-            else:
-                self._remove_remote(own_dir, f"this run's own dir {own_dir}", log)
-            log(
-                f"[remote] re-attached to {run.remote_output_dir}, which "
-                f"belongs to an earlier run of this plate — leaving it in "
-                f"place; remove it by hand once you are done with it.\n"
-            )
-        else:
-            run_dir = remote_run_dir(self.host, run.run_id)
-            if dry_run:
-                self._log_would_delete(
-                    run_dir, label=f"run dir {run.run_id}", log=log)
-            else:
-                self._remove_remote(run_dir, f"run dir {run.run_id}", log)
+        own_dir = remote_run_dir(self.host, run.run_id)
+        if not dry_run and run.nanowell and _reuse.holds_pending(self._cache, own_dir):
+            # A nanowell run suspended before its end-of-run re-anchoring (or whose pass failed) holds wells in
+            # `keep/` for the resumed run's pass, which re-runs them from their output here: deleting the run
+            # directory lost both, and the next run said "no well was held for it" (tracker F4).
+            log(f"[remote] kept {own_dir} and its output: it holds wells waiting for the end-of-run re-anchoring, "
+                f"which the resumed run takes over.\n")
+            return True
+        # A re-attached run wrote its output into a directory named for a *previous* run (see
+        # ``_choose_remote_output_dir``); the path derived from ``run_id`` holds only the pidfile, the sentinel and
+        # the heartbeat this run created. Both go — the borrowed one with the other earlier attempts, below, once
+        # nothing in it is still running or not yet brought home (tracker F6). The fate of each directory is said in
+        # the branch that decides it, so a dry run never reads "removed" for what it left in place.
+        if dry_run:
+            self._log_would_delete(own_dir, label=f"run dir {run.run_id}", log=log)
+        elif self._remove_remote(own_dir, f"this run's own dir {own_dir}" if run.reattached
+                                 else f"run dir {run.run_id}", log):
+            _reuse.clean_earlier_attempts(self, log=log)
         if cleanup_mode == "all":
             cache_dir = self._cache.remote_dataset_dir(run.cache_key)
             if dry_run:
@@ -874,54 +797,13 @@ class RemoteRunner:
             f"({files_n} file(s), {mb:.1f} MB)\n"
         )
 
-    def _reattach_output_dir(
-        self,
-        fresh: str,
-        local_output_dir: Path,
-        pipeline_argv: list[str],
-        *,
-        argv_digest: str,
-        source_key: str,
-        host_alias: str,
-        log: Callable[[str], None],
-    ) -> str:
-        """The remote output dir to use, preferring a recorded one that still
-        holds output.
-
-        Everything decidable without the network is decided by
-        :func:`_choose_remote_output_dir`; this method exists to supply it with
-        the two facts only an ssh round-trip can establish, and to keep that
-        round-trip off the path entirely when no stored address exists — which
-        is every first run of a plate, and every run whose upload was not
-        rewritten.
-        """
-        from services import run_journal
-
-        try:
-            stored = run_journal.stored_remote_address(
-                local_output_dir, argv_digest=argv_digest,
-                source_key=source_key, host_alias=host_alias)
-        except OSError:
-            swallowed(f"could not read the run journal in {local_output_dir}")
-            return fresh
-        candidate = str((stored or {}).get("remote_output_dir") or "")
-        if not candidate or candidate == fresh:
-            return fresh
-        forced, forced_wells = _forced_from_argv(pipeline_argv)
-        # The listing is skipped for a forced run: it cannot change the answer,
-        # and an ssh round-trip whose result is discarded is a wait the user
-        # pays for twice — once here, once when the pipeline runs anyway.
-        has_outputs = False
-        if not (forced or forced_wells):
-            has_outputs = bool(self._output_verifier()._list_completed_wells_in(candidate))   # None: unknown, fresh
-        chosen, reason = _choose_remote_output_dir(
-            fresh, candidate,
-            forced=bool(forced or forced_wells),
-            remote_has_outputs=has_outputs,
-        )
-        if reason:
-            log(f"[remote] {reason}\n")
-        return chosen
+    def _reattach_output_dir(self, fresh: str, local_output_dir: Path, pipeline_argv: list[str], *,
+                             argv_digest: str, source_key: str, host_alias: str,
+                             log: Callable[[str], None]) -> str:
+        """The remote output dir to use, preferring a recorded one that still holds output
+        (:func:`services.remote_reuse.reattach_output_dir`)."""
+        return _reuse.reattach_output_dir(self, fresh, local_output_dir, pipeline_argv, argv_digest=argv_digest,
+                                          source_key=source_key, host_alias=host_alias, log=log)
 
     # ── Cancel ──────────────────────────────────────────────────────────
 

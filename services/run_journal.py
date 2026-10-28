@@ -444,9 +444,11 @@ def record_remote(
     previous = payload.get("remote")
     history = [h for h in (payload.get("remote_history") or [])
                if isinstance(h, dict)]
+    # Deduplicated per *attempt*, not per output directory: a resumed batched run re-attaches to the first attempt's
+    # output directory from a run directory of its own, so several attempts share one, and folding them kept only
+    # the newest — an intermediate attempt's staged archives, held wells and blank path were then lost (tracker F5).
     if isinstance(previous, dict) and previous.get("remote_output_dir"):
-        history = [h for h in history if h.get("remote_output_dir")
-                   != previous["remote_output_dir"]] + [previous]
+        history = [h for h in history if _attempt(h) != _attempt(previous)] + [previous]
     payload["remote_history"] = history[-REMOTE_HISTORY_MAX:]
     payload["remote"] = {
         "run_id": str(run_id),
@@ -459,6 +461,11 @@ def record_remote(
         "recorded_at": time.time(),
     }
     return _atomic_write_json(_run_path(output_dir), payload)
+
+
+def _attempt(remote: dict) -> tuple[str, str, str]:
+    """What tells one recorded remote attempt from another: its run id and both of its directories."""
+    return tuple(str(remote.get(k) or "") for k in ("run_id", "remote_input_dir", "remote_output_dir"))
 
 
 def record_remote_scratch(output_dir: Path | str, scratch_dir: str) -> bool:
@@ -729,11 +736,14 @@ def recorded_remote_attempts(
         return []
     entries = [payload.get("remote"), *reversed(payload.get("remote_history") or [])]
     wanted = {str(d) for d in argv_digests if d}
-    return [dict(remote) for remote in entries
-            if isinstance(remote, dict) and remote.get("remote_output_dir")
-            and str(remote.get("argv_digest") or "") in wanted
-            and source_key and remote.get("source_key") == source_key
-            and host_alias and remote.get("host_alias") == host_alias]
+    found: dict[tuple, dict] = {}
+    for remote in entries:
+        if (isinstance(remote, dict) and remote.get("remote_output_dir")
+                and str(remote.get("argv_digest") or "") in wanted
+                and source_key and remote.get("source_key") == source_key
+                and host_alias and remote.get("host_alias") == host_alias):
+            found.setdefault(_attempt(remote), dict(remote))       # the same attempt recorded twice is one
+    return list(found.values())
 
 
 def stored_remote_address(

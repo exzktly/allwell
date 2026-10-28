@@ -454,7 +454,7 @@ class _BatchedRemoteProcess:
         # part-way checkpoints on its output directory, so only there does a half-finished well continue.
         remote_output = reattach_output_dir(
             runner, local_output_dir, self._journal_keys, self._legacy_digests, fresh=own.out,
-            forced=bool(_force or _forced_wells), log=self._log)
+            forced=bool(_force), log=self._log)  # forced wells: per well (F2)
         runner._cache._ssh_run(
             ["mkdir", "-p", remote_input, remote_output],
             check=True,
@@ -645,12 +645,13 @@ class _BatchedRemoteProcess:
         self._final_pass = bool(getattr(self._fetcher.run, "nanowell", False))
         total = n_batches + (1 if self._final_pass else 0)
         # Each checked, and the run stops before launching anything when one fails: run on stale flags, the
-        # driver swaps in a half-uploaded batch and reports it finished.
+        # driver swaps in a half-uploaded batch and reports it finished. Never `keep/`: the wells an earlier attempt
+        # held are sorted by `adopt_earlier_holds` below (tracker F4).
         before = "stopping before anything is launched"
         flags = [self._batch_flag(t, i) for i in range(1, total + 1)
                  for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP, BATCH_STAGED)]
         if not (checked(self, ["mkdir", "-p", run_dir], f"create the run directory {run_dir}", then=before)
-                and checked(self, ["rm", "-rf", paths.suspend_request, f"{run_dir}/{HOLD_DIR}", *flags],
+                and checked(self, ["rm", "-rf", paths.suspend_request, *flags],
                             "clear the handshake files a previous run of this dataset left", then=before)):
             self._returncode = 1
             return False

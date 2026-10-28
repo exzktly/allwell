@@ -1791,8 +1791,13 @@ because none of it applies:
   the field as it is.
 - **Auto-delete remote files when done.** On by default. After a run the app
   verifies succeeded, it deletes both the per-run output directory and the
-  cached input on the remote, so a shared machine does not fill up. It never
-  deletes failed work. Unticking it leaves everything in place.
+  cached input on the remote, so a shared machine does not fill up — and the
+  directories earlier attempts of the same run left there (a stopped run, a
+  resumed one), except one whose job may still be running, or that holds
+  results not yet downloaded here; the log names each one kept and why. It
+  never deletes failed work. A nanowell run suspended before its end-of-run
+  re-anchoring keeps its directory too, so the resumed run can re-anchor the
+  wells it held. Unticking it leaves everything in place.
   Verification is strict about what it could not see. If the host does not
   answer when the app lists what it holds, if this run's `pipeline_info.json`
   or a nanowell run's `nanowells/` tables cannot be brought back, if a well's
@@ -2039,7 +2044,19 @@ reading it. The log names any it kept over budget for that reason.
   but could not address does not make its well count as unfinished: sending
   that well alone could not address it, since locating it from the rest of the
   plate needs the other wells — Force re-runs the plate, which can. A plate with nothing left to do
-  ends without uploading anything. When only part of a plate is sent, the
+  ends without uploading anything.
+  A well counts as finished only when the run that wrote it also sealed it as
+  whole. A well left part way — by Stop, Suspend, a lost connection or a crash —
+  or one that lost some of its fields to errors has output too, but no seal, and
+  any run, on this computer or on the remote host, runs it again rather than
+  keeping it as complete; the log says *has output here, but it was left part
+  way (no completion seal) — running it again*. On a remote re-run the
+  pre-flight check counts only sealed wells, so a host that holds a part-way
+  well never skips the pipeline. Results made by a version of All-Well from
+  before the seal are still reused as they were, unless their own completeness
+  record says they ended short. A finished well is reused across versions of
+  All-Well too, and the log says so — *was finished by build …, not this build*
+  — so you can tick Force when an update changed how wells are computed. When only part of a plate is sent, the
   cell-gating thresholds are computed on this computer afterwards, over every
   well, so they are the plate's rather than the part's.
   A remote run in batches that is restarted — after Stop, Suspend, or a lost
@@ -2059,7 +2076,11 @@ reading it. The log names any it kept over budget for that reason.
   half-downloaded file is never taken for the finished one, and the next run
   fetches it again. An input archive
   that was already uploaded is reused rather than sent again (one that differs
-  from your copy is still re-sent). The log lists both, and names any well the
+  from your copy is still re-sent). Naming wells in **Force wells** for the
+  restart — or the restart forcing a well itself, as it does for a nanowell well
+  with partial results here — redoes those wells only: the earlier attempt is
+  still found, and everything else it finished or uploaded is still used.
+  The log lists both, and names any well the
   earlier attempt's record says was finished, uploaded or downloaded that is
   nonetheless being redone, with the reason. A well the earlier attempt left
   part-way continues from its last finished field rather than starting again —
@@ -2102,7 +2123,7 @@ reading it. The log names any it kept over budget for that reason.
   signal by something other than Stop or Suspend is reported the same way.
 - **A remote run that goes quiet is checked.** If a remote run prints nothing
   for twenty minutes (outside a wait in the scheduler's queue, which is quiet by
-  nature), the status line says *No output from <host> for 21m00s — checking it
+  nature), the status line says *No output from `<host>` for 21m00s — checking it
   is still running…*, the log shows the last line received, and the app asks the
   host whether the run is still there. The answer goes in the log: still
   running (it is only slow — nothing to do), no longer running (press **Stop**,
@@ -2111,7 +2132,7 @@ reading it. The log names any it kept over budget for that reason.
   never that quiet — every field, step or transfer prints something — so the
   warning means something is worth a look, not that the run has failed.
 - **A dropped connection is reported as one.** If the connection to the host
-  breaks during a remote run, the headline says *Connection to <host> lost*
+  breaks during a remote run, the headline says *Connection to `<host>` lost*
   with ssh's own reason (*Timeout, server … not responding*, *Connection …
   closed*, *Broken pipe*), the log shows that line in red, and the message says
   whether the job is still running on the host, no longer running, or — when

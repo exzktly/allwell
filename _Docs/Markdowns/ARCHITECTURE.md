@@ -870,7 +870,9 @@ allwell/
 │   ├── well_skip.py            ← per-well skip decisions for a resumed run,
 │   │                              and where a well's output files live
 │   ├── suspend.py              ← suspend / resume a run in flight
-│   ├── run_report.py           ← the end-of-run summary the log and Review both read
+│   ├── run_report.py           ← the end-of-run summary the log and Review both read,
+│   │                              and the completion seal: the one definition of
+│   │                              "is this well finished" (finished_wells)
 │   ├── field_quality.py        ← per-cell + per-field image-quality metrics (§6.7)
 │   ├── field_quality_record.py ← the per-well record those are collected
 │   │                              through, and the CSV column's name.
@@ -10768,10 +10770,19 @@ batch — every well has its batch's results — and is the run's exit code, wit
 the fit see the whole plate: a well's anchors can come from any batch, and a batch's archives are deleted when the
 next is swapped in. The cost is remote disk: a held well's archive and output stay until the pass. A suspend before
 the pass — including one that lands during the last data batch, which `finish_with_final_pass` checks for — runs no
-pass and leaves `keep/` in place; the resumed run, which has its own run directory but writes into the earlier
-attempt's output directory (`remote_batch_resume.reattach_output_dir`), moves the earlier `keep/` into its own
-(`remote_final_pass.adopt_earlier_holds`), so its pass re-anchors those wells too. A fresh output directory (a
-forced run, or nothing to reattach) has none of their outputs and takes nothing over. A Stop or a lost driver before
+pass and leaves `keep/` in place — `_start_driver` never clears it, and Auto-delete after the suspend's
+verification keeps the whole run directory while `keep/` holds archives (`remote_reuse.holds_pending`), since the
+pass re-runs those wells from their output there. A pass that exits non-zero, or whose driver is lost, puts the
+archives back from its batch directory and `in/` into `keep/` (`remote_final_pass._back_to_keep`). The resumed
+run (`remote_final_pass.adopt_earlier_holds`) looks in the `keep/` of its own run directory and of every attempt the
+journal recorded (`recorded_remote_attempts` — a resume has its own run directory but writes into the earlier
+attempt's output directory, `remote_batch_resume.reattach_output_dir`), and takes a held archive when the well's
+output is in this run's output directory, the thing the pass re-runs it from; one of this run's batches holds its own
+wells again, and a stale archive with no output here is dropped from its own `keep/`. The wells taken are recorded
+in `_RemoteRun.nanowell_adopted_holds`: they are in no batch of this run and often never fetched by it, yet they are
+this run's to release and pull again once its pass re-anchors them (`remote_fetch_nanowells._this_runs`, read by
+`release_batch` and `pull_nanowell_results`), and the early release of adopted wells
+(`remote_batch_resume.download_adopted`) holds them back for the pass. A Stop or a lost driver before
 the pass leaves the held wells as their batches left them, and says so on Analyze's plate. A data batch's well is otherwise deleted when its batch ends: the pass reads nothing of
 the others but their grid records under `nanowells/`, so after `_await_batch` returns, `_run_batches` queues
 `remote_fetch_nanowells.release_batch` on the Fetcher (`Fetcher.after_queued`, which runs it on the worker behind
@@ -10802,7 +10813,8 @@ resume, or a plate with an unfinished run behind it — goes well by well instea
 (`analyze.run_spec._nanowell_remote_resume_by_well` drops the incremental and logs why): the finished-wells step
 skips every well whose tables here cover all its archive's timepoints (each with a verdict in its grid record —
 reached is enough: an `unaddressed` timepoint is the run's verdict on those images, which sending the well again
-cannot change unless its anchors did — and its completeness record, when the sidecar has one, whole), and every other well is sent whole, analysed in
+cannot change unless its anchors did — and its completeness record, when the sidecar has one, whole, which for a
+nanowell record asks the same question: every timepoint reached, `run_report.well_is_whole`), and every other well is sent whole, analysed in
 full, and forced (`remote_finished_wells.nanowell_forced`, merged into the argv by `argv_forcing`) when it has
 output here, so an earlier attempt's partial tables on the host cannot be kept in its place. In
 `datasets/core/nanowell_tables`, `carry_nanowell_tables` copies a dataset's tables through a well map (canonical
@@ -12062,11 +12074,48 @@ parent process supervises the per-well worker pool:
   seal standing over a rewrite that may die part way. `seal_well_complete` — called beside `record_well_settings`
   in all three well paths, after both artefacts are on disk — writes it back only
   when the record just written says the output covers the whole input (no group
-  failed, skipped or missing). Never cleared by a run, it is what a later remote
-  resume reads before it adopts a well left on the host
-  (`services/remote_batch_resume.py`); `tests/test_a_part_way_well_is_not_sealed.py`
-  drives `main` through a whole well, a part-way one, its resume, and a seal that
-  cannot be withdrawn. Without this,
+  failed, skipped or missing). A nanowell well's record counts timepoints
+  (`nanowell_task.record_nanowell_completeness`): `groups_covered` is the
+  `ok`-only count Validate and the INCOMPLETE summary read, and `groups_reached`
+  the timepoints the run gave any verdict, which is what `run_report.well_is_whole`
+  asks of such a record — an `unaddressed` or `no_lattice` timepoint is the run's
+  finding about those images, not work the well still owes, so the well is sealed
+  and finished with it (its `failed` list names the verdicts that wrote no rows,
+  for the end-of-run summary). Never cleared by a run, it is what a later run
+  reads before it takes a well as finished. **"Is this well finished" has one
+  definition, `run_report.finished_wells`: its output is there and its seal is
+  beside it, and a listing that could not be read finishes nothing.** Every
+  consumer asks it: the host's own skip (`well_skip.finished_output`, through
+  `run_report.finished_on_this_host`), the remote pre-flight cache hit and the
+  re-attach probe (`services/remote_reuse.py`), the pre-staging download
+  (`services/remote_recover.py`) and the batched resume's adoption
+  (`services/remote_batch_resume.py`) — the remote ones through one listing,
+  `services.remote_finished_wells.list_remote_outputs`, which returns `None`
+  rather than an empty answer when its ssh fails.
+  `tests/test_one_definition_of_a_finished_well.py` holds that no other module
+  lists `*_out.zip` to decide it (every other listing site is allowlisted by
+  function, with what it does instead) and that only verification reads its own
+  archive listing. The host is the one reader that grandfathers: output with no
+  seal is finished there only when nothing says a sealing build touched it — no
+  **withdrawal note** `<out>/.aw_complete/<WELL>.withdrawn`, which
+  `withdraw_seal` leaves until the well is sealed again — and its last
+  completeness record (`run_report.recorded_completeness`, read by `main` before
+  it rewrites the sidecar) does not say it ended short. That keeps every plate
+  made before the seal reusable, and runs again a well that was wound down part
+  way, failed groups, or died mid-rewrite, which a plain run used to skip as
+  complete and a remote resume then fetched as the result. **The seal records
+  the build that wrote it** (`run_report.this_build`, `version.__version__`,
+  which is therefore in the remote upload manifest). Neither reuse key names the
+  build — keying on it would recompute every plate on every upgrade — so a reuse
+  across builds is allowed and *said*: the host's skip logs it per well
+  (`well_skip.finished_output`), and the remote pre-flight, the pre-staging
+  download and the batched adoption name the wells another build finished
+  (`run_report.cross_build_note`, from the build `list_remote_outputs` and
+  `find_leftovers` read out of each seal).
+  `tests/test_a_part_way_well_is_not_sealed.py` drives `main` through a whole
+  well, a part-way one, its resume, and a seal that cannot be withdrawn;
+  `tests/test_a_part_way_well_is_run_again_by_the_host.py` drives the real
+  worker pool's skip through each clause. Without this,
   per-field statistics
   silently described whatever fields survived and the first visible symptom was
   an absent error bar several layers from the cause. The per-FOV tracebacks in
@@ -12263,7 +12312,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_run_id.py` | Where a remote run lives, and whether an earlier one's work may be reused — two questions sharing a module because they are keyed on the same facts, and every reuse defect here came from one being keyed on less than the other. `_compute_run_id` and `pipeline_argv_digest` decide the address; `_choose_remote_output_dir` decides whether a recorded one may be used instead; `remote_run_dir` / `remote_run_paths` are its single spelling. Pure — no ssh, no filesystem — which is what lets the highest-stakes predicate in the remote path be tested directly rather than through a harness. |
 | `remote_commands.py` | The shell a remote run sends, as strings: `_compose_remote_cmd` (the single-launch line — record the pidfile, optionally exec the scheduler launcher, activate conda, wait for the upload, exec the pipeline), `_compose_driver_cmd` and `_batch_driver_snippet` (the batched driver that holds one allocation and runs a pipeline per batch, stopping early when the run's suspend request appears), `_remote_scratch_export`, the batch handshake names (`BATCH_READY`, `BATCH_DONE`, `BATCH_DONE_MARKER`, `BATCH_STAGED`), the driver being safe to replay — a batch whose `done` file exists is not run again (its marker is re-emitted), and `in/` is emptied only for a batch whose staged `b<i>` is there to replace it, while `BATCH_STAGED` (written after the move) lets a replayed pass find a batch's input already in place instead of deleting it; `_start_driver` clears every one of these files before it launches, which is what makes one found by the driver its own launch's, and `pack_for_login_shell` / `unpack_login_shell_command`. Both launch paths send their command through `pack_for_login_shell` — gzip + base64 into one short line of plain characters that the login shell unpacks and `eval`s, so `$$` and `exec` still act on the login shell and the pidfile and cancel channel are unchanged. The scripts are thousands of characters across seventeen lines with hundreds of quotes, and on a Windows client the one `ssh` argument they travel in is rebuilt by `list2cmdline` and parsed again by Git for Windows' `ssh.exe`; a batched launch past 8,191 characters failed there with `bash: -c: line 17: syntax error: unexpected end of file`. A remote without `base64` or `gzip` fails with exit `UNPACK_FAILED_EXIT` and a line saying so, never with an empty `eval` that would exit 0. Tests read a spawned command through `unpack_login_shell_command`. No ssh and no I/O, so a quoting decision is tested by reading the string and the driver by running it in `bash`. Re-exported by `remote_runner`; imports the transport's quoting and the conda / wait snippets, never the runner. |
 | `remote_suspend.py` | Asking a running remote pipeline to suspend: `request_suspend` (touch the run's request file over ssh, bounded by `SUSPEND_REQUEST_TIMEOUT_S`, telling a batched run's local loop first), and `_AnySet`, the Event-shaped view a batch upload watches so either a Stop or a suspend ends it. `RemoteRunner.request_suspend` is a one-line delegate; `remote_runner` binds `request_suspend` for that and nothing else from here. |
-| `remote_recover.py` | Before any unforced single-shot remote run stages its upload, `recover_finished_outputs` downloads what the previous run of the plate finished on the host and never brought home: it finds that run's directory through the journal's recorded address (`stored_remote_address`, the three re-attach keys) and runs `FetchedOutputVerifier.verify` against it. Matches on the current argv digest, then on `legacy_argv_digests` so plates recorded by an earlier build are found. Returns a `Recovery`; `pulled` makes `PipelineRunner` stage incrementally, `ok=False` means listed wells could not be pulled and the run is ended rather than re-uploading them. Declines for a forced run.  A batched run skips it (`PipelineRunner._recover_remote_outputs`): `remote_batch_resume` adopts the same wells and the Fetcher downloads them while the batches upload and compute, where this would pull every one of them, serially, before anything is staged or a node requested — and before the wells already local are painted, since staging's `up to date` markers come after it. The end-of-run retry reports a rescued well's zip half from `remote_fetch_place.local_output_mb`, which counts a FOLDER-mode extraction and a CSV-only well as downloaded; reporting only a local `<well>_out.zip` left those uncoloured. |
+| `remote_recover.py` | Before any unforced single-shot remote run stages its upload, `recover_finished_outputs` downloads what the previous run of the plate finished on the host and never brought home: it finds that run's directory through the journal's recorded address (`stored_remote_address`, the three re-attach keys) and runs `FetchedOutputVerifier.verify` against it — only when that directory holds a *finished* well (archive and seal, `remote_finished_wells.list_remote_outputs`) the local folder lacks; a well left part way there is named in the log and sent again. Matches on the current argv digest, then on `legacy_argv_digests` so plates recorded by an earlier build are found. Returns a `Recovery`; `pulled` makes `PipelineRunner` stage incrementally, `ok=False` means listed wells could not be pulled and the run is ended rather than re-uploading them. Declines for a forced run.  A batched run skips it (`PipelineRunner._recover_remote_outputs`): `remote_batch_resume` adopts the same wells and the Fetcher downloads them while the batches upload and compute, where this would pull every one of them, serially, before anything is staged or a node requested — and before the wells already local are painted, since staging's `up to date` markers come after it. The end-of-run retry reports a rescued well's zip half from `remote_fetch_place.local_output_mb`, which counts a FOLDER-mode extraction and a CSV-only well as downloaded; reporting only a local `<well>_out.zip` left those uncoloured. |
 | `remote_scratch.py` | The leaves of the remote staging work, stdlib + `util` only: where transient bytes go while a transfer is in flight (`_scratch_dir`, `_transit_dir`, `TRANSIT_SUBDIR`), how a stale one is swept (`sweep_stale_scratch`), whether an archive arrived whole (`_zip_is_complete`), and what the user's own input archives hash to (`fingerprint_archives`, `source_fingerprint` — the discriminator the remote re-attach is keyed on). Nine functions whose only tie to `remote_runner` was one constant; every caller, the runner's own `source_fingerprint` read included, imports them from here. |
 | `remote_upload.py` | Getting a run's input onto the remote host, once. `DatasetCache` keys each upload by a content fingerprint of the staged archives (member names, sizes and CRCs), so re-running the same input is a metadata round trip rather than a re-upload; streams rsync's output well by well (`_run_rsync_streaming`, `_UploadWellProgress`) so the Upload rail and each well's dial fill as its archive lands — the last well's dial closes at full only when rsync exits 0, so a failed or stopped transfer leaves it part-filled; and keeps the remote cache inside the host's budget (`remote_cache_gc`). The upload rsync (`_upload_rsync_cmd`) carries an I/O-idle `--timeout=UPLOAD_IDLE_TIMEOUT_S` (120 s, as the fetch has) and the fixed keepalive, and its streaming retry applies `rsync_failure_is_transient` to the lines rsync printed (`_run_rsync_streaming(diagnostics=…)`), logs ssh's own failure lines, and ends on Stop from a `StopWatcher`. `DatasetCache._ssh_run` / `_ssh_script` go through `remote_transport.ssh_control`, bounded by `SSH_CONTROL_TIMEOUT_S` (120 s) and `SSH_SCRIPT_TIMEOUT_S` (300 s) with the 124 convention; the post-upload count's own failure is reported as a failed listing, never as "rsync reported success but some files did not reach the remote". `ensure_uploaded` stamps its dataset in use (`remote_cache_gc.in_use_stamp`). Line-budgeted (`REMOTE_UPLOAD_BUDGET`). |
 | `remote_cache_gc.py` | Which cached datasets (`<staging>/datasets/<key>/`) `DatasetCache.gc` may evict when `auto_gc` is on and the cache is over `cache_budget_gb`. Least recently *used* first — "used" being the stamp `datasets/.aw_last_used/<key>` that `ensure_uploaded` touches as each run starts — and never a dataset stamped within `IN_USE_WINDOW_S` (seven days, longer than any walltime a scheduler grants), since another window's or another person's run may be reading it. The stamp sits beside the datasets, not inside one, so a pipeline listing its input never sees it. One listing script, timed by the remote's own clock; a listing that fails evicts nothing; a dataset kept over budget is named in the log. `plan_eviction` is the pure decision. |
@@ -12277,7 +12326,8 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_handoff.py` | Handing a batch to the batch driver and proving it arrived: `raise_flag` (a `touch` whose code is read, with 124 / 255 treated as unknown and settled by the driver's own word), `hand_off_and_wait`, and `chase_handoff` for a waiting driver that never started its batch. `HandoffWatch` follows the driver's `waiting for` / `starting` lines. |
 | `remote_batch_step.py` | One data batch of a batched run, split out of `_run_batches`: upload it, hand it over, wait for its code. Returns the code the batch counts for or a `Step` (`SUSPENDED`, `ENDED`). |
 | `remote_batch_ledger.py` | What a batched run's driver stream said about each well (`done`, `SKIP`, `PARTIAL`), and the batch loop's own failure lines (`fail`), which `_BatchedRemoteProcess.failure_lines` hands to the runner's headline. |
-| `remote_finished_wells.py` | Which wells a remote run need not send: `finished_here` answers, before staging, with the pipeline's own rule — the per-well CSV present, recorded under the key `pipeline.cli_args.settings_key_from_argv` gives this run's argv plus the host's flags, not forced, its completeness record whole, never an empty-well blank, and for a nanowell well every timepoint of its archive reached, with a verdict in its grid record, and its anchors those its last run used (`util.nanowell_anchors.wells_with_unused_anchors`) — and `drop_finished` removes them from a staged `ZippedInput` into its `up_to_date_wells`; `nanowell_forced` and `argv_forcing` force a nanowell well sent again over partial output here, and `pull_settings_marker` writes `UNKNOWN_SETTINGS` when a well's marker cannot be fetched. Called by `PipelineRunner._finished_here` and by batched mode's local-completion filter (see *What is finished here is not sent again*). |
+| `remote_finished_wells.py` | Which wells a remote run need not send: `finished_here` answers, before staging, with the pipeline's own rule — the per-well CSV present, recorded under the key `pipeline.cli_args.settings_key_from_argv` gives this run's argv plus the host's flags, not forced, its completeness record whole, never an empty-well blank, and for a nanowell well every timepoint of its archive reached, with a verdict in its grid record, and its anchors those its last run used (`util.nanowell_anchors.wells_with_unused_anchors`) — and `drop_finished` removes them from a staged `ZippedInput` into its `up_to_date_wells`; `nanowell_forced` and `argv_forcing` force a nanowell well sent again over partial output here, and `pull_settings_marker` writes `UNKNOWN_SETTINGS` when a well's marker cannot be fetched. Called by `PipelineRunner._finished_here` and by batched mode's local-completion filter (see *What is finished here is not sent again*). It also holds the one listing of a *remote* output directory: `list_remote_outputs` returns a `RemoteOutputs` (the wells with an archive, the wells with a seal, and `finished` / `part_way` from `pipeline.run_report.finished_wells`), or `None` when its ssh failed or its reply was cut short — "unknown", which `finished_on_remote` reads as nothing finished. |
+| `remote_reuse.py` | What a single-shot remote run takes from an earlier one, against what the remote holds now: `preflight_cache_hit` (every uploaded well finished there, so the pipeline is replaced by `true`) and `reattach_output_dir` (use the journal's recorded address when it still holds any output). `RemoteRunner._preflight_cache_hit` and `_reattach_output_dir` delegate here, so both read the remote through `remote_finished_wells.list_remote_outputs` and the one definition of a finished well. Also what Auto-delete does beyond the run's own directory: `holds_pending` (a nanowell run's `keep/` still holds wells for a re-anchoring, so its run directory stays) and `clean_earlier_attempts` (earlier attempts' run directories, kept while a job there may live, its heartbeat is fresh, it holds wells, or its output holds wells not brought home). |
 | `remote_plate_grids.py` | `seed_plate_grids`: before a remote nanowell run's pipeline starts, copies the local output's grid records of every well not in the run into the remote `nanowells/`, so the end-of-run re-anchoring can fit the plate's motion as a local run does. Called by `RemoteRunner._prepare_run` and `_BatchedRemoteProcess.__init__` (see *The host is given the rest of the plate*). |
 | `remote_fetch.py` | Bringing a remote run's output home, and proving it arrived. `Fetcher` pulls each well's output the moment the pipeline announces it done (overlapping download with later wells' compute), merges an incremental run's partial zip and CSV into the local ones rather than overwriting them, keeps the mid-run `pipeline_info.json` current, and removes a well's remote files only once its local artefact is in place. `FetchedOutputVerifier` runs after the pipeline exits: it pulls the top-level artefacts, merges the fetched sidecar's run-report, field-quality and user blocks with the local ones, writes the client-side completeness record, checks every expected well's CSV and non-empty `<well>_out.zip` are present (and, for a well the run undertook to rewrite, replaced — `remote_fetch_verify`), re-pulls what is missing — and, when it re-pulled anything, writes the completeness record again, since the first was taken while those wells were still missing and calls each of them partial — and returns a `FetchVerification`. A well is marked fetched, given its settings marker and deleted from the remote only when its archive **and every CSV the remote listed for it** have landed and, on an incremental run, merged. Verification fails — and the remote is kept — when the remote's listing failed, when this run's `pipeline_info.json` could not be pulled, when a nanowell run's `nanowells/` pull failed, and when the completeness record calls a well it covers partial (unless the run was suspended). It never deletes the run's remote directory — `RemoteRunner.verify_and_cleanup` does that, on a passing verdict only. Its collaborators (host, run record, the dataset cache whose ssh it borrows, the stop flag) are passed in, never read off the runner. Line-budgeted (`REMOTE_FETCH_BUDGET`). |
 | `remote_listing.py` | Asking the host what files it holds, with three answers rather than two: a list of paths, an empty list, or `None` when the listing itself failed (ssh exited non-zero, timed out, or could not start). `list_remote_glob` (the Fetcher's `_list_remote_glob`, the retry's `remote_csv.list_remote_csvs`) and `list_completed_wells` (the verifier's `_list_completed_wells_in`) expand the glob in remote bash and test each match with `[ -e ]`, so a genuinely empty directory exits 0 and the exit status carries only the transport's verdict. Every caller treats `None` as "keep everything and fail visibly" (see *A failed listing is unknown, never empty*). |
@@ -12399,11 +12449,16 @@ address it used into the output directory's journal (§6.5) and
 `_reattach_output_dir` consults it on the next run:
 `_choose_remote_output_dir` is a module-level function, given the freshly
 derived address, the recorded one, whether the run is forced, and whether
-`_list_completed_wells_in` found anything still in the recorded directory. The
-journal proposes and the remote listing decides — a recorded address is a
-statement about where work was *sent*, not that it is still there — and a forced
-run never re-attaches, since landing in a directory already full of the previous
-run's output is exactly how a forced re-run gets skipped. **Neither does an
+`remote_finished_wells.list_remote_outputs` found any output still in the
+recorded directory (`services.remote_reuse.reattach_output_dir`) — any, sealed
+or not, because re-attaching is what lets a well left part way continue from its
+checkpoints, and the host runs every unsealed well again; a listing that fails
+holds nothing. The journal proposes and the remote listing decides — a recorded address is a
+statement about where work was *sent*, not that it is still there — and a run
+under `--force` never re-attaches, since landing in a directory already full of the previous
+run's output is exactly how a forced re-run gets skipped. A run that forces only
+named wells does re-attach: the host redoes those wells where they lie, and the
+pre-flight and verification already treat them as owed. **Neither does an
 incremental run**, and its own output directory is emptied before it launches:
 its upload is a split holding only the groups still missing, so a previous
 run's outputs in the directory can only mislead it — the remote pipeline runs
@@ -12412,10 +12467,16 @@ run of a resumed run otherwise re-attached to the first resume's directory and
 was declared complete over a partial well. For the same reason the pre-flight's
 full-cache-hit check (`remote_run_id._pipeline_launch_is_pointless`) never fires
 for an incremental run, and otherwise asks whether every *uploaded* well is
-present, not whether the directory holds as many out.zips as were uploaded.
+finished there — archive and completion seal (`services.remote_reuse.
+preflight_cache_hit`) — not whether the directory holds as many out.zips as were
+uploaded. An archive alone made a run that had ended with PARTIAL wells
+"completed successfully" on a plain re-run, with Auto-delete then cleaning the
+remote; the pre-flight log names the unsealed wells it found, and a listing that
+fails launches the pipeline.
 
 **What is finished here is not sent again.** A run on this computer skips a
-well whose output exists and was made under its settings unless the force list
+well whose output exists, was made under its settings and is finished (sealed,
+`pipeline.well_skip.finished_output`) unless the force list
 names it (`process_microscopy._run_well_worker_pool`); a remote run asks the same
 question before staging, through `services/remote_finished_wells.finished_here`,
 which `PipelineRunner._finished_here` calls for every unforced, non-incremental
@@ -12508,7 +12569,15 @@ on a host is found. The history exists because every run records its own
 address before it uploads a byte: a run stopped during its upload used to
 overwrite the only record of where the previous run's finished output was, and
 the next run looked in the stopped run's empty directory and uploaded the
-plate again. **The address the name implies**: a run's directory is
+plate again. It keeps one entry per **attempt** — run id, input and output
+directory together — not one per output directory: a resumed batched run writes
+into the first attempt's output directory from a run directory of its own, and
+folding those kept only the newest, so an intermediate attempt's staged batches,
+held wells and blank path were lost. `recorded_remote_attempts` returns every
+attempt; `stored_remote_addresses` still folds them by output directory, which
+is what finding *output* wants, and the batched resume reads the first (a
+batched attempt's run directory is its input directory's parent, and its `b<i>/`
+and `keep/` are listed there). **The address the name implies**: a run's directory is
 `runs/run-<upload key>-<argv digest>` (`_run_id_body`, the one spelling), and
 for a plate that is one zip per well uploaded as it is, the upload key *is*
 `source_fingerprint` of the user's own archives — so an earlier whole-plate
@@ -12563,11 +12632,17 @@ derived a third spelling again. `remote_run_paths` returns the run's paths
 (output, pidfile, upload sentinel, heartbeat and suspend request) together so they cannot disagree about their parent, and
 `tests/test_one_definition_of_the_run_dir.py` fails on a tenth literal,
 matched on the static text so the spelling of the run-id expression cannot
-dodge it. Cleanup mirrors that split: the borrowed
-directory is left in place and named in the log, while the run's own is removed
-like any other, because nothing prunes `runs/` (`DatasetCache.gc` covers
-`datasets/`) and it holds only the pidfile, sentinel and heartbeat this run
-wrote.
+dodge it. Cleanup (Auto-delete, after verification passed) removes the run's
+own directory — for a re-attached run it holds only the pidfile, sentinel and
+heartbeat this run wrote — and then every earlier attempt's run directory the
+journal recorded under the run's keys, the borrowed one included
+(`remote_reuse.clean_earlier_attempts`): nothing else prunes `runs/`
+(`DatasetCache.gc` covers `datasets/`), and each resume to a new address
+otherwise orphaned a whole attempt until the quota filled. An earlier directory
+is kept, and the log says why, when a scheduler job recorded in it may still run
+(`squeue` lists it, or cannot be asked), its heartbeat is fresh, its `keep/`
+holds wells for a re-anchoring, or its output holds a well that is not here or
+cannot be listed.
 
 Which flags count as "the same configuration" is `pipeline_argv_digest`,
 extracted from `_compute_run_id` and recorded in the journal, so the address and
@@ -12580,6 +12655,27 @@ threshold overridden per host, address the directory another configuration had
 already filled, be found complete by the pre-flight check, and have that
 configuration's numbers fetched back as its own. One definition feeds both the
 launched command and the digest.
+
+It leaves out what names wells rather than configures them: `--force_wells`
+and `--only_wells`, each with every value up to the next flag
+(`_DIGEST_SKIP_MULTI`), and `--no_auto_threshold`, which switches only the
+plate-level gating pass. A Resume adds `--force_wells` itself
+(`remote_finished_wells.nanowell_forced`) and a run that sends part of a plate
+adds `--no_auto_threshold`, so with them hashed the Resume could not find the
+attempt it resumed: its uploaded batches were sent again, its finished wells
+recomputed, its held wells never re-anchored. Forcing is honoured per well
+where reuse is decided instead — a forced well is never adopted
+(`remote_batch_resume.take_from_remote`), the pre-flight never calls a forced
+run a cache hit, verification requires its archive be replaced — and re-attach
+declines only for `--force`, so one forced well no longer costs the rest of
+the plate its earlier directory. Every earlier definition of the digest is a row
+of `remote_run_id.EARLIER_ARGV_DEFINITIONS`, the counterpart of the settings
+digest's `_EARLIER_DEFINITIONS`, and `legacy_argv_digests` asks each of them of
+the argv as it is, without `--incremental`, and without the force list, the
+subset and `--no_auto_threshold`, so an attempt journalled by an earlier build
+is still found. Each definition's digest of one argv they disagree on is pinned
+(`tests/test_reuse_is_keyed_completely.py::test_every_earlier_argv_definition_is_pinned_and_searched`),
+so a definition cannot change without its predecessor joining the roster.
 
 It is computed over the *flags*, never the launcher — `sys.executable` and
 either the local path to `process_microscopy.py` or the frozen bundle's
@@ -12623,7 +12719,19 @@ carries the written reason for each: the argv digest, `source_fingerprint` (the
 user's own input archives, which separates "staging rewrote" from "the images
 changed" — the two reasons the upload key churns), and the host alias, because
 the recorded address is a path on one machine and two hosts that share a
-filesystem will happily resolve each other's.
+filesystem will happily resolve each other's. The remote run's other reuse
+decisions are registered there too — `finished_here`, the batched resume's
+adoption (`take_from_remote`), the pre-staging download
+(`recover_finished_outputs`), the pre-flight's `_pipeline_launch_is_pointless`,
+`_nothing_left_to_upload` and the host's own `well_skip.finished_output` — each
+with its keys, each key mutated alone against real files (a real directory under
+bash for the remote ones) and required to decline. Which functions count as
+reuse decisions is derived, not listed: `reuse_sites` scans `services/`,
+`pipeline/` and `process_microscopy.py` for callers of the reuse primitives
+(the journal's address lookups, the definition of a finished well, the settings
+check, the whole-run predicates), and each one found must be filed under a
+registered decision (`DECISION_SITES`) or named, with a reason, as reusing
+nothing (`NOT_A_REUSE_DECISION`).
 
 `cache_key` hashes `int(st_mtime)`, so two staged copies written inside one
 wall-clock second key identically. That is why this drift is invisible in a
@@ -14670,8 +14778,11 @@ before uploading; it is never set on a single-process run, local or remote, and
 it is under `NOT_KEYED_ON` like `--only_wells` itself. It is added after
 `pipeline_argv_digest` is taken, so it does not change the run address. Pinned
 by `tests/test_a_batched_subset_run_finds_its_wells.py`, which reads the flag
-out of the launched driver script. The subset rides in `pipeline_argv_digest`, so a different subset is a
-different run address and never reattaches to another run's directory. The
+out of the launched driver script. The subset is **not** in `pipeline_argv_digest` (`_DIGEST_SKIP_MULTI`): which
+wells a run covers is not how any one well is computed. A different subset still uploads different archives, so
+its run directory — keyed on the upload too — is its own; what the shared digest allows is re-attaching to, and
+taking leftovers from, an earlier attempt of the same plate and settings, where each well is judged by its own
+settings marker and seal. The
 fetch's `merge_fetched_run_report` / `merge_fetched_field_quality` keep every
 local record the fetched block does not name — which also means a subset well
 that dies on the host without writing any record keeps its earlier local one;
@@ -14843,7 +14954,7 @@ demanded.
 **The pre-flight cache hit has a force term.** `_compute_run_id` deliberately
 excludes `--force` from its hash so a forced re-run lands in the *same* remote
 output dir and overwrites it. That makes the dir complete precisely when a
-forced run starts, so counting `*_out.zip` files there is not on its own a
+forced run starts, so finding every well finished there is not on its own a
 reason to skip the pipeline: `_pipeline_launch_is_pointless` answers yes only
 when the remote is complete **and** nothing was asked to be reprocessed. When
 the remote is complete but the run is forced, the log says so explicitly — the

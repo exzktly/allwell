@@ -165,6 +165,21 @@ def _grid(out: Path, well: str, *timepoints: str) -> None:
         json.dumps({"timepoints": {tp: {"status": "ok"} for tp in timepoints}}))
 
 
+def _pipeline_records(out: Path, *wells: str) -> None:
+    """The completeness records a nanowell run writes for *wells* from their grid records, folded into the sidecar
+    the way the end of the run (and a remote fetch) leaves them — the real writer, not a hand-made record."""
+    from pipeline.io import _safe_atomic_text_write
+    from pipeline.nanowell_task import record_nanowell_completeness
+    from pipeline.run_report import finalize_run_report
+
+    for well in wells:
+        grid = json.loads((out / "nanowells" / f"{well}_grid.json").read_text())
+        failed = [tp for tp, b in grid["timepoints"].items() if b.get("status") not in ("ok", "unaddressed")]
+        record_nanowell_completeness(out, well, grid, failed)
+    finalize_run_report(out, out / "pipeline_info.json", atomic_writer=_safe_atomic_text_write,
+                        log=__import__("logging").getLogger("test"))
+
+
 def _forced(argv: list[str]) -> list[str]:
     if "--force_wells" not in argv:
         return []
@@ -386,8 +401,15 @@ def test_a_nanowell_timepoint_the_run_reached_without_an_address_is_not_sent_alo
         _record(out, well, opts)
         _grid(out, well, "T01")
     (out / "nanowells" / "B02_grid.json").write_text(json.dumps({"timepoints": {"T01": {"status": "unaddressed"}}}))
-    sent, _lines = _run(inp, out, opts)
-    assert sent is None                                                   # nothing a resend alone could improve
+    # The completeness record the pipeline writes beside those grids, folded into the sidecar as a fetch leaves
+    # it. This test first passed without one, which hid that the record then said "1 timepoint, 0 covered" and
+    # made the well unfinished whatever the coverage check above it decided (tracker F1).
+    _pipeline_records(out, "A01", "B02")
+    argv: list = []
+    sent, _lines = _run(inp, out, opts, argv_sent=argv)
+    assert sent is None, (                                                # nothing a resend alone could improve
+        f"B02, reached at every timepoint with one left unaddressed, was sent again (forced: "
+        f"{_forced(argv[-1]) if argv else []}): its completeness record does not count it whole")
     (out / "nanowells" / "B02_grid.json").write_text(json.dumps({"timepoints": {}}))
     sent, _lines = _run(inp, out, opts)
     assert sent == ["B02"]                                                # never reached: sent

@@ -177,12 +177,13 @@ def _spawn_with(host, plate, monkeypatch, stop_fetchers, *,
         return MagicMock(stdout="", returncode=0 if ok else 1)
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", _ssh_run)
-    monkeypatch.setattr(
-        DatasetCache, "_ssh_script",
-        lambda self, script, *, check: MagicMock(
-            stdout="".join(f"{w}_out.zip\n" for w in completed_remote_wells),
-            returncode=0),
-    )
+    def _ssh_script(self, script, *, check):
+        if "AW_LISTED" in script:          # `remote_finished_wells.list_remote_outputs`: each well finished, sealed
+            return MagicMock(returncode=0, stdout="".join(
+                f"O {w}_out.zip\nS {w}.json\n" for w in completed_remote_wells) + "AW_LISTED\n")
+        return MagicMock(stdout="".join(f"{w}_out.zip\n" for w in completed_remote_wells), returncode=0)
+
+    monkeypatch.setattr(DatasetCache, "_ssh_script", _ssh_script)
     _KEY = "cachekey" + "0" * 24
     monkeypatch.setattr(DatasetCache, "cache_key", lambda self, zipped: _KEY)
     monkeypatch.setattr(DatasetCache, "ensure_uploaded",

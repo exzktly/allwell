@@ -178,7 +178,8 @@ def test_a_prune_that_fails_falls_back_to_clearing_the_directory(tmp_path):
 
     def ssh_run(argv, *, check, **kw):
         calls.append(list(argv))
-        return types.SimpleNamespace(stdout="", returncode=124)
+        # The listing times out; the fallback clear succeeds (both failing stops the batch instead).
+        return types.SimpleNamespace(stdout="", returncode=0 if argv[:2] == ["rm", "-rf"] else 124)
 
     logged: list[str] = []
     prune_staged(types.SimpleNamespace(_ssh_run=ssh_run), "/r/runs/run-test/b1",

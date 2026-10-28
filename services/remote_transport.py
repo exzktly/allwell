@@ -39,6 +39,7 @@ from services.remote_config import (
     unattended_options,
 )
 from util.aw_safe import swallow, swallowed
+from services.subprocess_kill import own_process_group_kwargs
 from services.subprocess_text import TEXT_UTF8
 
 #: The real ``Popen`` class, captured at import. :func:`spawn_transfer` signals
@@ -402,8 +403,11 @@ def spawn_transfer(cmd: list[str], **popen_kw) -> subprocess.Popen:
     the ssh — blocked on a frozen remote — holding the pipe open, so the
     reader waiting for end-of-file waited until ssh's keepalive gave up.
     """
-    if os.name != "nt":
-        popen_kw.setdefault("start_new_session", True)
+    # The shared spelling: a new session on POSIX, and on Windows a process
+    # group of its own, so a Stop's CTRL_BREAK_EVENT reaches this transfer and
+    # not every process on the app's console.
+    for key, value in own_process_group_kwargs().items():
+        popen_kw.setdefault(key, value)
     proc = subprocess.Popen(cmd, **popen_kw)
     # Marked only when the group is provably the one just made: a stand-in
     # Popen's pid names nobody's group, and must never be signalled as one.

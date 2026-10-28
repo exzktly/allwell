@@ -296,7 +296,12 @@ def _final_pass_process(tmp_path, listing, *, mv_rc=0, upload_rc=0, pass_rc=0):
         uploaded.append(([z.stem for z in zips], dest, kw.get("acquisition_input")))
         return 0, 0.0, upload_rc
 
-    p._runner = types.SimpleNamespace(_cache=types.SimpleNamespace(_ssh_run=ssh_run, upload_subset=upload_subset),
+    def ssh_script(script, *, check):
+        asked.append(["script", script])
+        return types.SimpleNamespace(stdout="", returncode=0)
+
+    p._runner = types.SimpleNamespace(_cache=types.SimpleNamespace(_ssh_run=ssh_run, _ssh_script=ssh_script,
+                                                                   upload_subset=upload_subset),
                                       host=types.SimpleNamespace(remote_staging_dir="/r"))
     p._uploaded = uploaded
     p._await_batch = lambda index, n: pass_rc
@@ -332,9 +337,11 @@ def test_a_record_that_cannot_be_sent_runs_no_pass(tmp_path, monkeypatch):
 def test_a_pass_that_fails_keeps_its_wells_on_the_remote(tmp_path, monkeypatch):
     for module in ("services.remote_final_pass", "services.remote_process"):
         monkeypatch.setattr(f"{module}.remote_run_dir", lambda host, run_id: "/r/run")
-    p, _asked, released = _final_pass_process(tmp_path, "/r/run/keep/B03.zip\n", pass_rc=1)
+    p, asked, released = _final_pass_process(tmp_path, "/r/run/keep/B03.zip\n", pass_rc=1)
     assert run_final_pass(p, 2) == 1
     assert released == [], "a failed pass's wells were released (deleted from the remote)"
+    # Tracker F4: and their archives go back to keep/, where a later run's pass looks (driven for real below).
+    assert any(a[0] == "script" and "/r/run/b3" in a[1] and "/r/run/keep" in a[1] for a in asked), asked
 
 
 def test_the_staged_record_is_the_one_the_pipeline_reads(tmp_path, monkeypatch):
@@ -627,54 +634,108 @@ def test_a_driver_lost_during_the_final_pass_is_lost_not_stopped(tmp_path, monke
     assert p._driver_lost.is_set(), "the final batch is counted among the batches the driver owes"
 
 
-def test_a_resumed_run_takes_over_the_wells_its_earlier_attempt_held(tmp_path):
+def _bash_cache():
+    """A dataset cache whose remote is this machine's ``bash``: the scripts run for real against *tmp_path*."""
+    from services.remote_transport import _remote_join
+
+    def run(script):
+        done = subprocess.run(["bash", "-s"], input=script, capture_output=True, text=True, timeout=20)
+        return subprocess.CompletedProcess(["bash"], done.returncode, done.stdout, done.stderr)
+
+    return types.SimpleNamespace(_ssh_script=lambda script, *, check: run(script),
+                                 _ssh_run=lambda argv, *, check, **k: run(_remote_join(argv)))
+
+
+def _held(root: Path, run: str, *wells: str) -> None:
+    keep = root / run / "keep"
+    keep.mkdir(parents=True, exist_ok=True)
+    for well in wells:
+        (keep / f"{well}.zip").write_bytes(f"archive of {well}".encode())
+
+
+def test_a_resumed_run_takes_over_the_wells_every_earlier_attempt_held(tmp_path, monkeypatch):
+    """Tracker F4. Adoption looked only at the re-attached output's run directory, so a well held by an intermediate
+    attempt (``run-2``, re-attached to ``run-1/out`` from a directory of its own) was never re-anchored; and the
+    resume's own ``keep/`` was emptied before adoption ran. Now every recorded attempt is looked in, a well is taken
+    when its output is in this run's output directory — what the pass re-runs it from — and the wells taken are the
+    run's to release and pull again (``nanowell_adopted_holds``, tracker F3)."""
+    from services import run_journal as J
     from services.remote_final_pass import adopt_earlier_holds
 
-    asked: list = []
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    root, local = tmp_path / "remote" / "runs", tmp_path / "local"
+    local.mkdir()
+    out = root / "run-1" / "out"
+    out.mkdir(parents=True)
+    for well in ("A02", "B03", "E06", "F07"):
+        (out / f"{well}_out.zip").write_bytes(b"output")
+    _held(root, "run-1", "A02", "F07")             # F07 is in one of this run's batches: its batch holds it again
+    _held(root, "run-2", "B03")                    # the intermediate attempt's
+    _held(root, "run-x", "C04")                    # its output is not in this run's output directory: left there
+    _held(root, "run-new", "D05", "E06")           # this run's own, from an attempt with the same run id
+    for n, run_id in enumerate(("run-1", "run-2", "run-x")):
+        J.open_run(local, spec={}, mode="remote-batched", input_dir="/in", argv=["--x"])
+        J.record_remote(local, run_id=run_id, cache_key=f"k{n}", host_alias="h",
+                        remote_input_dir=str(root / run_id / "in"),
+                        remote_output_dir=str(out if run_id != "run-x" else root / "run-x" / "out"),
+                        argv_digest="d", source_key="s")
+    run = types.SimpleNamespace(remote_output_dir=str(out), nanowell_adopted_holds=set())
+    logged: list[str] = []
     proc = types.SimpleNamespace(
-        _final_pass=True, _log=lambda m: None,
-        _fetcher=types.SimpleNamespace(run=types.SimpleNamespace(reattached=True,
-                                                                 remote_output_dir="/r/runs/run-old/out/")),
-        _runner=types.SimpleNamespace(_cache=types.SimpleNamespace(
-            _ssh_run=lambda argv, **k: asked.append(list(argv)) or types.SimpleNamespace(returncode=0))))
-    assert adopt_earlier_holds(proc, "/r/runs/run-new")
-    assert asked == [["mkdir", "-p", "/r/runs/run-new/keep"],
-                     ["test", "-d", "/r/runs/run-old/keep"],
-                     ["find", "/r/runs/run-old/keep", "-maxdepth", "1", "-name", "*.zip",
-                      "-exec", "mv", "-t", "/r/runs/run-new/keep", "{}", "+"]]
-    asked.clear()
-    proc._fetcher.run.reattached = False
-    assert adopt_earlier_holds(proc, "/r/runs/run-new")
-    assert asked == [["mkdir", "-p", "/r/runs/run-new/keep"]], "a fresh run's directory has none of their outputs"
+        _final_pass=True, _fetcher=types.SimpleNamespace(run=run), _local_output_dir=local,
+        _journal_keys=dict(argv_digest="d", source_key="s", host_alias="h"), _legacy_digests=(),
+        _batches=[[Path("F07.zip")]], _log=logged.append,
+        _runner=types.SimpleNamespace(_cache=_bash_cache(), _run=run))
+
+    assert adopt_earlier_holds(proc, str(root / "run-new"))
+
+    assert sorted(p.name for p in (root / "run-new" / "keep").iterdir()) == ["A02.zip", "B03.zip", "E06.zip"], (
+        "the wells the earlier attempts held were not all taken into this run's keep/")
+    assert run.nanowell_adopted_holds == {"A02", "B03", "E06"}
+    assert (root / "run-x" / "keep" / "C04.zip").exists(), "a held well whose output is elsewhere was taken"
+    assert (root / "run-1" / "keep" / "F07.zip").exists(), "a well this run's own batch runs was taken from it"
+    assert "3 well(s) held by an earlier attempt" in "".join(logged)
 
 
-def _holding(answer):
-    """A batched process whose remote answers *answer(argv) -> returncode*; returns it and its log."""
+def test_a_pass_that_does_not_finish_puts_its_wells_back_in_keep(tmp_path):
+    """Tracker F4: the pass moved ``keep/`` into its batch directory and the driver swapped that into ``in/``; one
+    that failed, or whose driver was lost, left the archives in either, where no later run looked."""
+    from services.remote_final_pass import _back_to_keep
+
+    run = tmp_path / "run"
+    for sub, well in (("b3", "B03"), ("in", "C05")):
+        (run / sub).mkdir(parents=True)
+        (run / sub / f"{well}.zip").write_bytes(b"held")
+    logged: list[str] = []
+    proc = types.SimpleNamespace(_runner=types.SimpleNamespace(_cache=_bash_cache()), _log=logged.append)
+    _back_to_keep(proc, str(run / "keep"), str(run / "b3"))
+    assert sorted(p.name for p in (run / "keep").iterdir()) == ["B03.zip", "C05.zip"], logged
+
+
+def _holding(tmp_path, cache):
+    """A batched nanowell process re-attached to ``run-old/out``, whose remote is *cache*; returns it and its log."""
     logged: list = []
-    proc = types.SimpleNamespace(
-        _final_pass=True, _log=logged.append,
-        _fetcher=types.SimpleNamespace(run=types.SimpleNamespace(reattached=True,
-                                                                 remote_output_dir="/r/runs/run-old/out/")),
-        _runner=types.SimpleNamespace(_cache=types.SimpleNamespace(
-            _ssh_run=lambda argv, **k: types.SimpleNamespace(returncode=answer(list(argv)), stderr=""))))
+    run = types.SimpleNamespace(remote_output_dir=str(tmp_path / "runs" / "run-old" / "out"),
+                                nanowell_adopted_holds=set())
+    proc = types.SimpleNamespace(_final_pass=True, _log=logged.append, _fetcher=types.SimpleNamespace(run=run),
+                                 _runner=types.SimpleNamespace(_cache=cache, _run=run))
     return proc, logged
 
 
-def test_an_earlier_attempt_that_held_nothing_is_not_a_failure():
+def test_an_earlier_attempt_that_held_nothing_is_not_a_failure(tmp_path):
     from services.remote_final_pass import adopt_earlier_holds
 
-    proc, logged = _holding(lambda argv: 1 if argv[0] in ("test", "find") else 0)
-    assert adopt_earlier_holds(proc, "/r/runs/run-new")
-    assert logged == []
+    proc, logged = _holding(tmp_path, _bash_cache())
+    assert adopt_earlier_holds(proc, str(tmp_path / "runs" / "run-new"))
+    assert logged == [] and proc._fetcher.run.nanowell_adopted_holds == set()
 
 
-def test_held_wells_that_cannot_be_adopted_stop_the_run_before_it_launches():
+def test_held_wells_that_cannot_be_adopted_stop_the_run_before_it_launches(tmp_path):
     """The move failing used to be discarded, and the earlier attempt's held wells then never got their pass."""
     from services.remote_final_pass import adopt_earlier_holds
 
-    proc, logged = _holding(lambda argv: 255 if argv[0] == "find" else 0)
-    assert adopt_earlier_holds(proc, "/r/runs/run-new") is False
-    assert "ERROR could not move the wells an earlier attempt held" in "".join(logged)
-    proc, logged = _holding(lambda argv: 1 if argv[0] == "mkdir" else 0)
-    assert adopt_earlier_holds(proc, "/r/runs/run-new") is False
-    assert "ERROR could not create /r/runs/run-new/keep" in "".join(logged)
+    cache = _bash_cache()
+    cache._ssh_script = lambda script, *, check: subprocess.CompletedProcess(["ssh"], 255, "", "connection reset")
+    proc, logged = _holding(tmp_path, cache)
+    assert adopt_earlier_holds(proc, str(tmp_path / "runs" / "run-new")) is False
+    assert "ERROR could not take over the wells an earlier attempt held" in "".join(logged)

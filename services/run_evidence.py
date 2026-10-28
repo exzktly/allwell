@@ -67,7 +67,7 @@ _RE_JOB_ID = re.compile(
 # and batched) or Slurm's "queued", then the grant, the node's own line, or a
 # well starting — anything that means the pipeline is running.
 _RE_NODE_REQUESTED = re.compile(
-    r"\[remote\] scheduler: (?:batch \d+: )?requesting allocation via|srun: job \d+ queued and waiting",
+    r"\[remote\] scheduler: (?:batch \d+: |early: )?requesting allocation via|srun: job \d+ queued and waiting",
     re.IGNORECASE)
 _RE_NODE_GRANTED = re.compile(
     r"\[remote\] scheduler: allocation granted|srun: job \d+ has been allocated"

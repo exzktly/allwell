@@ -96,7 +96,8 @@ from services.remote_transport import (
 )
 from services.remote_suspend import request_suspend as _request_suspend
 from services.remote_code_sync import sync_pipeline_code
-from services.remote_commands import _compose_remote_cmd, pack_for_login_shell
+from services.remote_commands import _compose_remote_cmd, _handover_job_body, pack_for_login_shell
+from services.remote_reservation import Reservation
 from services.remote_srun_retry import queue_wait_seconds
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
@@ -262,6 +263,17 @@ class RemoteRunner:
 
     # ── Spawn ───────────────────────────────────────────────────────────
 
+    def reserve_allocation(self, *, n_wells: int, batch_size: int, nanowell: bool,
+                           log_fn: Callable[[str], None],
+                           stop_event: threading.Event | None = None) -> Reservation | None:
+        """Queue this host's scheduler job for a run of up to *n_wells* wells, before the run is staged.
+
+        ``None`` on a host with no launcher, or when the job could not be queued (logged); the run then asks for
+        its node at launch, as it always did. Hand the result to :meth:`spawn`. See
+        :mod:`services.remote_reservation`."""
+        return Reservation.request(self._cache, self.host, n_wells=n_wells, batch_size=batch_size,
+                                   nanowell=nanowell, log_fn=log_fn, stop_event=stop_event)
+
     def spawn(
         self,
         zipped: ZippedInput,
@@ -273,6 +285,7 @@ class RemoteRunner:
         progress_fn: Callable[[float], None] | None = None,
         stop_event: threading.Event | None = None,
         batch_size: int = 0,
+        reservation: Reservation | None = None,
     ):
         """Stage inputs, build the remote command, launch ssh.
 
@@ -299,6 +312,12 @@ class RemoteRunner:
           remote's free disk; the smaller it is, the more loads and the
           lower the peak.
 
+        *reservation* is a job the caller queued before staging
+        (:mod:`services.remote_reservation`). The run is handed to it instead of
+        a new job being asked for; when it can no longer take the run, the run
+        asks for one the ordinary way, and when the run needs no node at all (a
+        cache hit) it is given back.
+
         Returns a Popen-compatible handle the GUI's stdout reader can
         consume unchanged.
         """
@@ -321,6 +340,7 @@ class RemoteRunner:
                 log_fn=log_fn,
                 progress_fn=progress_fn,
                 stop_event=stop_event,
+                reservation=reservation,
             )
 
         # Single-shot path. Cache budget enforcement before each run.
@@ -333,8 +353,11 @@ class RemoteRunner:
                                  output_filter, log)
         cache_hit = self._preflight_cache_hit(
             zipped, pipeline_argv, prep.remote_output, log)
+        if reservation is not None and cache_hit:
+            reservation.release("every well is already finished on the host")
+        reserved = reservation is not None and reservation.alive()
         overlap, ssh_argv = self._compose_launch(
-            prep, zipped, pipeline_argv, output_filter, cache_hit, log)
+            prep, zipped, pipeline_argv, output_filter, cache_hit, log, reserved=reserved)
         remote_sentinel = prep.paths.sentinel
         remote_heartbeat = prep.paths.heartbeat
 
@@ -348,7 +371,12 @@ class RemoteRunner:
             # One beat before the job can look, so the first thing it sees is a
             # heartbeat that exists rather than one that is missing.
             heartbeat.beat()
-            popen = self._start_ssh(ssh_argv)
+            popen = (self._hand_over(reservation, prep, zipped, pipeline_argv, output_filter)
+                     if reserved else None)
+            if popen is None:
+                if reserved:
+                    log(_scheduler_handoff_lines(self.host.launch_command))
+                popen = self._start_ssh(ssh_argv)
             self._run.owns_remote_job = True     # from here the job is ours to cancel
             try:
                 heartbeat.start()
@@ -541,9 +569,12 @@ class RemoteRunner:
     def _compose_launch(self, prep: _PreparedRun, zipped: ZippedInput,
                         pipeline_argv: list[str], output_filter: OutputFilter,
                         cache_hit: bool,
-                        log: Callable[[str], None]) -> tuple[bool, list[str]]:
+                        log: Callable[[str], None], *,
+                        reserved: bool = False) -> tuple[bool, list[str]]:
         """What the remote is sent, and whether to ask for the node before
-        the upload. Returns ``(overlap, ssh_argv)``."""
+        the upload. Returns ``(overlap, ssh_argv)``. *reserved*: a job queued
+        before staging will take the run (:meth:`_hand_over`), so no request
+        is announced here."""
         run_id, key = prep.run_id, prep.key
         remote_input, remote_output = prep.remote_input, prep.remote_output
         own = prep.paths
@@ -616,11 +647,26 @@ class RemoteRunner:
         # Surface the scheduler hand-off so a queue wait reads as "waiting",
         # not a hang. The ``[remote] scheduler: allocation granted …`` line
         # (emitted from inside the srun step) follows once a node is granted.
-        if not cache_hit:
+        if not cache_hit and not reserved:
             # A cache hit short-circuits to a ``true`` no-op and consumes no
             # allocation, so it is not waiting for one.
             log(_scheduler_handoff_lines(self.host.launch_command))
         return overlap, ssh_argv
+
+    def _hand_over(self, reservation: Reservation, prep: _PreparedRun, zipped: ZippedInput,
+                   pipeline_argv: list[str], output_filter: OutputFilter):
+        """Give a single-shot run to the job queued before staging; its ``Popen``, or ``None`` to launch anew.
+
+        The job sources what :func:`_compose_remote_cmd` would have run inside a fresh allocation: conda, the
+        environment check, the wait for the upload's sentinel, the pipeline."""
+        own = prep.paths
+        remote_argv = self._build_remote_argv(
+            pipeline_argv, prep.remote_input, prep.remote_output, output_filter, zipped.mode,
+        ) + ["--suspend_file", own.suspend_request]
+        body = _handover_job_body(remote_argv, env_selector=self.env_selector,
+                                  upload_sentinel=own.sentinel, upload_heartbeat=own.heartbeat,
+                                  scratch_dir=self.host.remote_scratch_dir)
+        return reservation.hand_over(body, run_pidfile=own.pidfile, run_heartbeat=own.heartbeat)
 
     def _start_ssh(self, ssh_argv: list[str]) -> subprocess.Popen:
         return subprocess.Popen(

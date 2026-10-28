@@ -220,7 +220,7 @@ def test_a_data_batch_keeps_the_wells_it_held(tmp_path, monkeypatch):
                                   local_output_dir=tmp_path, remote_output_dir="/r/out", remote_input_dir="/r/in"),
         host=types.SimpleNamespace(ssh_alias="gpu"),
         _rsync_glob=lambda *a: (0, 0))
-    monkeypatch.setattr(rfn, "fetch_nanowell_tables", lambda f, w: None)
+    monkeypatch.setattr(rfn, "fetch_nanowell_tables", lambda f, w: 0)        # pulled, nothing new: None would mean the pull failed
     lines: list = []
     released = rfn.release_batch(fetcher, ["A01", "B03"], log=lines.append, held={"B03"})
     assert released == ["A01"]

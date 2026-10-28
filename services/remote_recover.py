@@ -156,7 +156,15 @@ def _recover_from(runner, remote_dir: str, local_output_dir: Path,
     )
     verifier = FetchedOutputVerifier(runner.host, run, runner._cache, stop)
     host = runner.host.ssh_alias
-    on_remote = frozenset(verifier._list_remote_completed_wells())
+    listed = verifier._list_remote_completed_wells()
+    if listed is None:
+        # Unknown, not empty: staging on "nothing there" would upload and recompute wells that may be finished on
+        # the host, and an incremental run then empties its own remote output directory (tracker row A1).
+        log(f"[remote] resume: could not list {runner.host.ssh_alias}:{remote_dir}; not starting a run that might "
+            f"recompute or overwrite finished wells there — retry once the host answers.\n")
+        return Recovery(ok=False, remote_dir=remote_dir,
+                        still_missing=("the earlier run's remote directory could not be listed",))
+    on_remote = frozenset(listed)
     if not on_remote:
         return Recovery(remote_dir=remote_dir)
     # Asked silently: these are not failures yet, only the question of whether

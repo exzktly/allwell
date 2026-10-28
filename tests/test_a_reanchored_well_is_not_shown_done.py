@@ -221,7 +221,7 @@ def test_verification_keeps_the_remote_copy_of_a_short_second_pull(tmp_path, mon
     from services import remote_fetch
 
     run = SimpleNamespace(local_output_dir=tmp_path, remote_output_dir="/r/out", local_input_dir=tmp_path,
-                          incremental=False, nanowell=True)
+                          incremental=False, nanowell=True, expected_wells=set(), force_wells=frozenset())
     verifier = remote_fetch.FetchedOutputVerifier(SimpleNamespace(ssh_alias="gpu"), run, None, threading.Event())
     monkeypatch.setattr(verifier, "_rsync_optional", lambda *a, **k: True)
     monkeypatch.setattr(verifier, "_verify_local_manifest", lambda *, log: [])

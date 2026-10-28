@@ -93,8 +93,9 @@ def test_verification_retries_a_missing_well_and_passes_once_it_lands(
         DatasetCache, "_ssh_run",
         lambda self, argv, *, check: (rm_calls.append(list(argv)),
                                       MagicMock(stdout="", returncode=0))[1])
+    # The top-level pulls succeed: a failed pipeline_info.json pull fails verification on its own (row A8).
     monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
-                        lambda self, src, dest, log_fn, **kw: None)
+                        lambda self, src, dest, log_fn, **kw: True)
     monkeypatch.setattr(FetchedOutputVerifier, "_list_remote_completed_wells", lambda self: [])
 
     retried: list[list[str]] = []

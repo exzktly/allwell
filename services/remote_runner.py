@@ -563,7 +563,8 @@ class RemoteRunner:
                 f"[remote] pre-flight: checking {self.host.ssh_alias}:"
                 f"{remote_output} for prior outputs\n"
             )
-            completed_remote = self._output_verifier()._list_remote_completed_wells()
+            # A failed listing (None) claims no cache hit: the pipeline runs rather than trust an unasked host.
+            completed_remote = self._output_verifier()._list_remote_completed_wells() or set()
             log(
                 f"[remote] pre-flight: remote output dir has "
                 f"{len(completed_remote)}/{expected_well_count} well "
@@ -733,7 +734,7 @@ class RemoteRunner:
         *,
         cleanup_mode: str = "none",
         dry_run: bool = False,
-        log_fn: Callable[[str], None] | None = None,
+        log_fn: Callable[[str], None] | None = None, suspended: bool = False,
     ) -> bool:
         """Pull top-level artefacts, then verify and clean up.
 
@@ -757,7 +758,7 @@ class RemoteRunner:
         # merges, the completeness record, the manifest check and its retry —
         # belongs to the fetched-output verifier. What to delete on the remote
         # is decided here, from its verdict and nothing else.
-        verdict = self._output_verifier().verify(ok, log=log)
+        verdict = self._output_verifier().verify(ok, log=log, suspended=suspended)
         if not verdict.passed:
             return False
 
@@ -903,7 +904,7 @@ class RemoteRunner:
         # pays for twice — once here, once when the pipeline runs anyway.
         has_outputs = False
         if not (forced or forced_wells):
-            has_outputs = bool(self._output_verifier()._list_completed_wells_in(candidate))
+            has_outputs = bool(self._output_verifier()._list_completed_wells_in(candidate))   # None: unknown, fresh
         chosen, reason = _choose_remote_output_dir(
             fresh, candidate,
             forced=bool(forced or forced_wells),

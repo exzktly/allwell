@@ -172,10 +172,12 @@ def test_a_forced_run_that_replaced_nothing_fails_verify(tmp_path):
     zip_path = _stale_well(tmp_path, "C08")
     run = _run(tmp_path, force=True,
                pre_run_artifacts=remote_fetch._snapshot_local_artifacts(tmp_path))
-    # The remote holds output for the well; the local file was never replaced.
+    # The remote holds output for the well; neither local file was replaced. The CSV is named too (row A2):
+    # a forced well whose archive arrived and whose CSV did not kept yesterday's rows under today's marker.
     missing, _lines = _verify(run, {"C08"})
     assert missing == [
-        "C08_out.zip was not replaced (same size and timestamp as before the run)"
+        "the CSV for C08 was not replaced (same size and timestamp as before the run)",
+        "C08_out.zip was not replaced (same size and timestamp as before the run)",
     ]
     assert zip_path.exists()          # the old file is left alone, not deleted
 
@@ -185,9 +187,10 @@ def test_a_forced_run_that_did_replace_the_output_passes(tmp_path):
     _stale_well(tmp_path, "C08")
     run = _run(tmp_path, force=True,
                pre_run_artifacts=remote_fetch._snapshot_local_artifacts(tmp_path))
-    # The fetch lands new bytes.
+    # The fetch lands new bytes — both halves of the well, as a real forced run does.
     with zipfile.ZipFile(tmp_path / "C08_out.zip", "w") as zf:
         zf.writestr("C08_f0_t0.tif", b"today's very different bytes")
+    (tmp_path / "measurements_C08.csv").write_text("well,cell,area\nC08,1,250\nC08,2,90\n")
     missing, lines = _verify(run, {"C08"})
     assert missing == []
     assert any("all 1 wells present locally" in line for line in lines)
@@ -207,7 +210,9 @@ def test_a_missing_artifact_still_reports_as_missing(tmp_path):
     run = _run(tmp_path, force=True,
                pre_run_artifacts=remote_fetch._snapshot_local_artifacts(tmp_path))
     missing, _ = _verify(run, {"A01"})
-    assert missing == ["missing A01_out.zip locally"]
+    assert missing == [
+        "the CSV for A01 was not replaced (same size and timestamp as before the run)",
+        "missing A01_out.zip locally"]
 
 
 def test_a_run_with_no_snapshot_does_not_fail_everything(tmp_path):
@@ -232,6 +237,10 @@ def _retry_pulls(monkeypatch, tmp_path, run, well="C08") -> list[str]:
     # The retry also brings each well's settings marker home, through the
     # small-file seam rather than this one.
     monkeypatch.setattr(remote_fetch, "pull_small_file", lambda *a, **k: False)
+    # A CSV the run was meant to replace is listed again before it is pulled; this host has none — unless the
+    # test has already said what it lists.
+    if getattr(remote_fetch.list_remote_csvs, "__module__", "") == "services.remote_csv":
+        monkeypatch.setattr(remote_fetch, "list_remote_csvs", lambda *a, **k: [])
 
     host = remote_config.RemoteHost(
         name="t", ssh_alias="test-host", remote_project_dir="~/allwell",

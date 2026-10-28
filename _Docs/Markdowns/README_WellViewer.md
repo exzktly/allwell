@@ -1786,6 +1786,17 @@ because none of it applies:
   verifies succeeded, it deletes both the per-run output directory and the
   cached input on the remote, so a shared machine does not fill up. It never
   deletes failed work. Unticking it leaves everything in place.
+  Verification is strict about what it could not see. If the host does not
+  answer when the app lists what it holds, if this run's `pipeline_info.json`
+  or a nanowell run's `nanowells/` tables cannot be brought back, if a well's
+  CSV did not arrive (or, for a well this run recomputed, is still the old
+  one), or if the completeness check reports a well covering fewer fields than
+  its input (`INCOMPLETE:` in the log, shown as a warning), the run ends with
+  *Remote pipeline finished but local verification failed; remote files
+  preserved for retry*, the log says which, and nothing is deleted — run it
+  again once the host is reachable to bring the rest home. A well whose CSV did
+  not arrive is not given the new settings record either, so the next run
+  recomputes it rather than taking the old numbers as current.
 - **Dry-run cleanup.** Only selectable while auto-delete is on. Logs the path,
   file count and total bytes of every remote directory that *would* be removed
   at end of run, and removes nothing — worth one run on a shared host before

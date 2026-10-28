@@ -3514,6 +3514,9 @@ def _runner_with_run(compute_launcher: str):
         local_input_mode=LocalInputMode.ZIP,
         output_filter=OutputFilter.FULL,
         incremental=False,
+        # A run that launched its allocation; one that did not has nothing to
+        # close (tests/test_an_allocation_belongs_to_the_run_that_made_it.py).
+        owns_remote_job=True,
     )
     return r
 

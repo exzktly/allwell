@@ -246,6 +246,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_subset_run_resumes_only_its_wells.py": "A run limited to named wells resumes only those wells, so an unrelated unfinished run does …",
     "test_a_vanished_app_suspends_the_batch_in_flight.py": "An app that disappears while a batch is running hands the node back",
     "test_acquisition_remote_transport.py": "Metadata reaches scoped uploads and changes cache identity without pixel edits",
+    "test_an_allocation_belongs_to_the_run_that_made_it.py": "A scheduler job is cancelled only by the run that asked for it; a resume checks earlier attempts",
     "test_analyze_background_remote_ui.py": "Analyze-tab UI grouping regressions (runs headless / offscreen Qt)",
     "test_analyze_run_target_is_the_users_choice.py": "Audit U2 — \"Run on:\" keeps the target the user picked",
     "test_batch_driver.py": "One Slurm allocation for every batch, instead of one per batch",

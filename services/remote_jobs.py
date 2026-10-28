@@ -11,6 +11,7 @@ as dead.
 
 from __future__ import annotations
 
+import logging
 import posixpath
 import subprocess
 from collections.abc import Callable
@@ -45,6 +46,31 @@ def _only_my_job(jid_var: str, marker: str) -> str:
     )
 
 
+def kill_remote_pipeline(host: RemoteHost, run: _RemoteRun) -> None:
+    """``kill -TERM`` the PID the run recorded in its pidfile, over a fresh ssh.
+
+    The second channel :meth:`RemoteRunner.cancel` adds to the local
+    process-group kill, which is the primary one. The caller checks that the
+    run launched (``run.owns_remote_job``): until then the pidfile holds what
+    the last run of this plate wrote, which may be another session's ``srun``.
+    """
+    pidfile_q = _remote_quote(run.remote_pidfile)
+    try:
+        subprocess.run(
+            host.ssh_argv(allocate_tty=False) + [
+                f"kill -TERM $(cat {pidfile_q} 2>/dev/null) 2>/dev/null || true"
+            ],
+            capture_output=True, timeout=10,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        # Best-effort (the local process-group kill is primary), but don't
+        # swallow it silently — record that this teardown channel failed
+        # (audit E13); close_remote_job() is the scheduler backstop.
+        logging.getLogger(__name__).warning(
+            "remote cancel: ssh kill failed (%s); relying on the local "
+            "process-group kill + scancel backstop", exc)
+
+
 def close_remote_job(
     host: RemoteHost, run: _RemoteRun | None,
     *, log_fn: Callable[[str], None] | None = None,
@@ -53,8 +79,9 @@ def close_remote_job(
     launched is closed.
 
     Idempotent and best-effort — a no-op on direct-execution hosts (no
-    ``compute_launcher``), when no run has started, or when the job has
-    already exited (``scancel`` on a finished id is harmless). Reads the
+    ``compute_launcher``), when no run has started, when this run never
+    launched an allocation of its own (``run.owns_remote_job``), or when the
+    job has already exited (``scancel`` on a finished id is harmless). Reads the
     ``$SLURM_JOB_ID`` the run wrote to ``<pidfile>.slurm`` on the shared
     filesystem and ``scancel``s it via a fresh ssh.
 
@@ -68,6 +95,12 @@ def close_remote_job(
     if not host.compute_launcher.strip():
         return
     if run is None:
+        return
+    if not getattr(run, "owns_remote_job", False):
+        # Refused, or failed, before it launched: the sidecar it would read is
+        # whatever the last run of this plate left — and when the refusal was
+        # "another session is running this dataset", it is that session's live
+        # job. A run that asked for nothing has nothing to hand back.
         return
     log = log_fn or (lambda _m: None)
     slurm_sidecar_q = _remote_quote(f"{run.remote_pidfile}.slurm")

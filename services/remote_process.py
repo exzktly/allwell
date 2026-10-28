@@ -702,13 +702,12 @@ class _BatchedRemoteProcess:
         # plate and the arguments, so a second session on the same plate lands
         # on the same path — its `rm -rf` would take the first session's staged
         # batches and input directory out from under a running pipeline.
-        if self._runner._sweep_orphaned_allocation(
-                run.remote_pidfile, heartbeat, log_fn=self._log) == "owned":
-            self._log(
-                "[remote] ERROR another session is already running this exact "
-                "dataset and configuration on this host. Both would use the "
-                "same remote run directory, so this run stops here rather "
-                "than corrupting the one already going.\n")
+        # Every earlier attempt of the plate is asked too: a resume writes into the one it resumes.
+        refusal = self._runner._claim_run_dirs(
+            run.remote_pidfile, heartbeat, local_output_dir=self._local_output_dir,
+            pipeline_argv=self._pipeline_argv, output_filter=self._output_filter, log_fn=self._log)
+        if refusal:
+            self._log(f"[remote] ERROR {refusal}\n")
             self._returncode = 1
             return False
 
@@ -801,7 +800,7 @@ class _BatchedRemoteProcess:
         # what `_release_driver` acts on. Set only after the launch: an abort
         # before it would otherwise `scancel` a sidecar written by a *previous*
         # run of this same dataset, or by the other session that made us stop.
-        self._owns_allocation = True
+        self._owns_allocation = run.owns_remote_job = True
         self._reader = threading.Thread(
             target=self._read_driver, args=(proc,), daemon=True,
             name="aw-batch-driver-reader")

@@ -20,8 +20,17 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable, Iterable
 
+from services import run_journal
 from services.remote_config import RemoteHost
 from services.remote_jobs import _only_my_job
+from services.remote_run_id import (
+    UPLOAD_HEARTBEAT,
+    _local_input_dir_from_argv,
+    legacy_argv_digests,
+    pipeline_argv_digest,
+    remote_run_dir,
+)
+from services.remote_scratch import source_fingerprint
 from services.remote_transport import _remote_quote
 from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
 from services.subprocess_text import TEXT_UTF8
@@ -138,10 +147,16 @@ def sweep_allocations(
     """:func:`sweep_orphaned_allocation` over several run directories in one
     ssh. *targets* holds ``(pidfile, heartbeat, where)``, *where* naming the
     directory in the log. Returns one verdict per target, in order."""
-    targets = list(targets)
     log = log_fn or (lambda _m: None)
+    return [_verdict(found, where, log) for found, where in _sweep(host, targets, log)]
+
+
+def _sweep(host: RemoteHost, targets, log: Callable[[str], None]) -> list[tuple[list[str], str]]:
+    """Run the sweep of every target in one ssh; ``(what it printed, where)`` per
+    target, the first being ``[verdict, job id, detail…]`` or empty."""
+    targets = list(targets)
     if not host.compute_launcher.strip() or not targets:
-        return ["none"] * len(targets)
+        return [([], where) for _p, _h, where in targets]
     script = "; ".join(_target_script(i, pidfile, hb)
                        for i, (pidfile, hb, _where) in enumerate(targets))
     try:
@@ -152,14 +167,13 @@ def sweep_allocations(
     except (subprocess.TimeoutExpired, OSError) as exc:
         log(f"[remote] WARN scheduler: could not check for a leftover "
             f"allocation ({exc}).\n")
-        return ["unknown"] * len(targets)
+        return [(["unknown", "?", "ssh"], where) for _p, _h, where in targets]
     found: dict[int, list[str]] = {}
     for line in (result.stdout or "").splitlines():
         words = line.split()
         if len(words) >= 3 and words[0].startswith("AW_") and words[1].isdigit():
             found.setdefault(int(words[1]), [words[0][3:].lower(), *words[2:]])
-    return [_verdict(found.get(i), where, log)
-            for i, (_pidfile, _hb, where) in enumerate(targets)]
+    return [(found.get(i, []), where) for i, (_p, _h, where) in enumerate(targets)]
 
 
 def _verdict(found: list[str] | None, where: str, log: Callable[[str], None]) -> str:
@@ -187,8 +201,101 @@ def _verdict(found: list[str] | None, where: str, log: Callable[[str], None]) ->
     if rest[:1] == ["squeue"]:
         log(f"[remote] WARN scheduler: squeue could not say whether job {jid} in {where} "
             f"is still running, so it is left alone.\n")
-    else:
+    elif rest[:1] == ["stat"]:
         log(f"[remote] WARN scheduler: this host cannot report a file's modification "
             f"time, so there is no way to tell whether job {jid} in {where} is still in "
             f"use. Leaving it running.\n")
     return "unknown"
+
+
+# ── claiming the directories a run is about to use (review E1, E2) ──────────
+
+#: What the sweep of a directory may find that refuses the run: a job that may
+#: still be writing there, and that this app may not, or cannot, stop.
+_REFUSING = ("owned", "dying", "notmine", "unknown")
+
+
+def earlier_attempt_dirs(host: RemoteHost, local_output_dir, pipeline_argv,
+                         *, extras=(), own_run_dir: str) -> list[str]:
+    """The run directory of every earlier attempt of this plate the journal
+    recorded under these settings, source images and host — other than
+    *own_run_dir*.
+
+    A resume never shares its run directory with the attempt it resumes (its
+    staged archives, and so its ``run_id``, differ), but it writes into that
+    attempt's output directory and takes its archives, so a job still alive
+    there is a second pipeline writing the same output. Both the recorded
+    ``run_id``'s directory and the one holding the recorded output are listed,
+    since a re-attached attempt wrote its output under an attempt before it.
+    Empty on a host with no scheduler, and on a journal that cannot be read.
+    """
+    if not host.compute_launcher.strip() or local_output_dir is None:
+        return []
+    argv = list(pipeline_argv)
+    try:
+        attempts = run_journal.recorded_remote_attempts(
+            local_output_dir,
+            argv_digests=[pipeline_argv_digest(argv, extras=extras),
+                          *legacy_argv_digests(argv, extras=extras)],
+            source_key=source_fingerprint(_local_input_dir_from_argv(argv)),
+            host_alias=host.ssh_alias)
+    except OSError:
+        return []
+    dirs: list[str] = []
+    for attempt in attempts:
+        out = str(attempt.get("remote_output_dir") or "")
+        rid = str(attempt.get("run_id") or "")
+        for d in (remote_run_dir(host, rid) if rid else "",
+                  out[:-len("/out")] if out.endswith("/out") else ""):
+            if d and d != own_run_dir and d not in dirs:
+                dirs.append(d)
+    return dirs
+
+
+def claim_run_dirs(host: RemoteHost, own_pidfile: str, own_heartbeat: str,
+                   earlier: Iterable[str] = (), *,
+                   log_fn: Callable[[str], None] | None = None) -> str:
+    """Sweep this run's own directory and every *earlier* attempt's; return
+    ``""`` when the run may go ahead, or the sentence refusing it.
+
+    An earlier attempt's job that no app is feeding any more is the same
+    user's own abandoned attempt at this plate: it is cancelled, and the log
+    names the directory it was found in (:func:`sweep_orphaned_allocation`).
+    One that is still being fed, one that belongs to someone else, one still
+    shutting down after its cancel, or one whose state cannot be learned
+    refuses the run instead: cancelling a fed job is cancelling another
+    window's run, and letting both go on would have two pipelines write one
+    output.
+    """
+    log = log_fn or (lambda _m: None)
+    targets = [(own_pidfile, own_heartbeat, "this dataset's run directory")] + [
+        (f"{d}/run.pid", f"{d}/{UPLOAD_HEARTBEAT}", f"an earlier attempt's run directory, {d}")
+        for d in earlier]
+    for found, where in _sweep(host, targets, log):
+        _verdict(found, where, log)
+        if found[:1] and found[0] in _REFUSING:
+            return _refusal(found[0], found[1:], where)
+    return ""
+
+
+def _refusal(kind: str, found: list[str], where: str) -> str:
+    """Why a run stops before touching a directory a job may still be writing."""
+    jid = found[0] if found else "?"
+    yourself = (f"If no other All-Well window is running this plate, cancel it yourself "
+                f"(scancel {jid}) and start the run again.")
+    if kind == "owned":
+        return (f"another session is already running this exact dataset and configuration "
+                f"on this host (job {jid}, in {where}, whose app is still beating its "
+                f"heartbeat). Both would write the same remote output, so this run stops "
+                f"here rather than corrupting the one already going. A run stopped in the "
+                f"last {UPLOAD_HEARTBEAT_STALE_S // 60} minutes whose cancel did not reach the "
+                f"cluster looks the same: wait that long and start again. " + yourself)
+    if kind == "dying":
+        return (f"job {jid}, in {where}, was cancelled and is still shutting down; this run "
+                f"would write where it writes, so it stops here. Start it again in a minute.")
+    if kind == "notmine":
+        owner = found[1] if len(found) > 1 else "another user"
+        return (f"job {jid}, in {where}, belongs to {owner} and is still running there; this "
+                f"run would write where it writes, so it stops here. Ask {owner} to stop it.")
+    return (f"could not tell whether job {jid}, in {where}, is still running, so this run "
+            f"stops rather than risk two pipelines writing one output. " + yourself)

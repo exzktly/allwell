@@ -349,6 +349,7 @@ def test_neither_cancel_path_will_touch_another_user_s_job(monkeypatch):
         run_id="run-x", cache_key="k", remote_input_dir="/r/in",
         remote_output_dir="/r/out", remote_pidfile="/r/run.pid",
         local_output_dir=None, local_input_mode=LocalInputMode.ZIP,
+        owns_remote_job=True,     # launched; a run that did not closes nothing
     )
     runner.close_remote_job()
 
@@ -562,7 +563,8 @@ def test_resume_right_after_stop_is_not_refused(monkeypatch, tmp_path):
     runner._run = _RemoteRun(
         run_id="run-x", cache_key="k", remote_input_dir=str(tmp_path / "in"),
         remote_output_dir=str(tmp_path / "out"), remote_pidfile=pidfile,
-        local_output_dir=None, local_input_mode=LocalInputMode.ZIP)
+        local_output_dir=None, local_input_mode=LocalInputMode.ZIP,
+        owns_remote_job=True)
     said: list[str] = []
     runner.close_remote_job(log_fn=said.append)
     assert "cancelled lingering job 991234" in "".join(said), said

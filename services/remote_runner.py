@@ -100,6 +100,7 @@ from services.remote_transport import (
 )
 from services.remote_suspend import request_suspend as _request_suspend
 from services.remote_commands import _compose_remote_cmd, pack_for_login_shell
+from services.remote_srun_retry import queue_wait_seconds
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
 from services.remote_run_id import (
@@ -724,7 +725,7 @@ class RemoteRunner:
             env_selector=self.env_selector,
             upload_sentinel=remote_sentinel if overlap else "",
             upload_heartbeat=remote_heartbeat if overlap else "",
-            scratch_dir=self.host.remote_scratch_dir,
+            scratch_dir=self.host.remote_scratch_dir, queue_wait_s=queue_wait_seconds(self.host),
         )
         ssh_argv = self.host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(remote_cmd)]
 

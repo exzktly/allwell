@@ -60,6 +60,7 @@ from services.remote_commands import (
     BATCH_READY,
     BATCH_REANCHOR,
     BATCH_SKIP,
+    BATCH_STAGED,
     HOLD_DIR,
     _batch_driver_snippet,
     _compose_driver_cmd, batch_pipeline_argv, pack_for_login_shell,
@@ -75,6 +76,7 @@ from services.remote_run_id import (
     remote_run_paths,
 )
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
+from services.remote_srun_retry import queue_wait_seconds
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, hand_off_and_wait, watch_of
@@ -723,7 +725,7 @@ class _BatchedRemoteProcess:
             ["rm", "-rf", paths.suspend_request, f"{run_dir}/{HOLD_DIR}"]
             + [self._batch_flag(t, i)
                for i in range(1, total + 1)
-               for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP)],
+               for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP, BATCH_STAGED)],
             check=False,
         )
         # Whatever input archives the remote already holds — in `in/`, in a staged batch, or in an earlier
@@ -778,7 +780,7 @@ class _BatchedRemoteProcess:
         ssh_argv = host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(
             _compose_driver_cmd(launcher, run.remote_pidfile, driver,
                                 env_selector=self._runner.env_selector,
-                                scratch_dir=host.remote_scratch_dir))
+                                scratch_dir=host.remote_scratch_dir, queue_wait_s=queue_wait_seconds(host)))
         ]
         proc = subprocess.Popen(
             ssh_argv,

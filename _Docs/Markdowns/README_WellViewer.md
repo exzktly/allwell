@@ -1655,12 +1655,32 @@ it is still the scheduler command's `--cpus-per-task` that decides how many of
 the node's CPUs the run uses; the run log warns when Slurm gave it only one or
 two of a bigger node's.
 
+**Max queue wait** is how long a run waits for the scheduler to give it a node
+— queued, or granted a node that is still starting up — before it gives up. The
+time counts from the moment the run asks for the node, which on a scheduled host
+is before the plate starts uploading, so the queue wait and the upload run side
+by side: on a cluster that queues the run for longer than the setting, the run
+fails even while the plate is still uploading (a batched run stops its upload; a
+single run finishes sending first), and what reached the cluster is kept for the
+next attempt. When it runs out the job is cancelled and the run stops with
+`no node was granted within 30 min, this host's Max queue wait — cancelled job
+…`; raise the setting for a busy cluster, or set it to **Wait indefinitely**
+(0), which never gives up. A run that has started on its node is never cut
+short by it, however long it runs. It applies when the scheduler command is an
+`srun` command.
+
 **A scheduler command that sends the run's output elsewhere is refused**, when
 you save the host and when a run starts: `-o` / `--output`, `-e` / `--error`
 and `--pty` would put everything the run prints — its progress, its results,
 its errors — in a file on the cluster or on a terminal of its own, and
 All-Well, which reads the run as it goes, would see nothing and the run would
 look hung. Leave them out; the run's own log keeps all of it.
+
+**A node that fails while the run is going is not asked for again.** A node
+that fails to start is replaced automatically (see *A node that fails to boot is
+retried* below), but once the run has started on a node, asking again would
+start it from the beginning. The run stops and the log says which node failed;
+**Resume** continues from where it stopped.
 
 **Fetch** next to *Compute profile* reads the cluster's JupyterHub
 configuration and lists the compute options its web page offers; picking one

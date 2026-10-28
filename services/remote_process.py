@@ -672,7 +672,7 @@ class _BatchedRemoteProcess:
         # checks it at every batch boundary, so an app that dies between
         # batches gives the node back instead of parking it on a `ready` file
         # nobody will ever write.
-        self._heartbeat = _UploadHeartbeat(self._runner._cache, heartbeat)
+        self._heartbeat = _UploadHeartbeat(self._runner._cache, heartbeat, log_fn=self._log, batched=True)
         self._heartbeat.beat()
         self._heartbeat.start()
 

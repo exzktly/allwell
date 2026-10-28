@@ -600,7 +600,8 @@ class RemoteRunner:
             upload_heartbeat=remote_heartbeat if overlap else "",
             scratch_dir=self.host.remote_scratch_dir, queue_wait_s=queue_wait_seconds(self.host),
         )
-        ssh_argv = self.host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(remote_cmd)]
+        # Its own connection, not the shared master the heartbeat and control commands use (`RemoteHost.ssh_argv`).
+        ssh_argv = self.host.ssh_argv(allocate_tty=True, share_connection=False) + [pack_for_login_shell(remote_cmd)]
 
         # Name the environment before the run starts. When it turns out not to
         # exist, the guard's error names the same thing, so the two lines read

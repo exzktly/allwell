@@ -10547,7 +10547,8 @@ whose origin landed a site off — an array centre the fitted circle left loose 
 pitch, a square misread — would name every nanowell after its neighbour, and fold change and trajectories would pair
 each nanowell with its neighbour from that timepoint on. So before the rim is decided, `_settle_steps` puts the
 anchored timepoints in one frame. It groups them by the lattice step (within ±3, `STEP_REACH`) at which each one's
-detected sites best overlay the sites of the timepoint that detected most (`_best_step`), keeps the frame holding
+detected sites best overlay the sites of the timepoint that detected most (`pipeline/nanowell_frames.py`:
+`best_step`, `settle_frames`, `choose_frame` — the one rule, shared with Datasets → Validate's relabel), keeps the frame holding
 the best-ranked origin (`ORIGIN_RANK`: a hand-set anchor, then the central square, then the array centre, then a
 plate-rigid prediction), then the most timepoints, and moves every other timepoint's addresses onto it
 (`_shift_origin`: `origin_shift`, `origin_registered_to` and a note in its grid block, the step in its checkpoint
@@ -14661,8 +14662,8 @@ and `cell_overrides.json` entries whose `seg_fp` no longer matches the
 current out-zip mtime (silently dropped on load regardless — see
 `review/persistence/cell_overrides.py`).
 
-`apply.py::apply_repairs` is metadata-only — it never rewrites a measurement
-CSV or a well archive. It read-modify-writes the already-loaded sidecar dict
+`apply.py::apply_repairs` never rewrites a well archive or a measured value.
+Apart from the nanowell relabel below, it touches no measurement CSV. It read-modify-writes the already-loaded sidecar dict
 (replacing only `available_timepoints`/`available_fovs` with what's actually
 on disk), prunes stale `cell_overrides.json` entries, and sweeps leftover
 `__aw_tmp_*` staging files. `services.remote_fetch.refresh_pipeline_info_available_from_outputs`
@@ -14678,6 +14679,45 @@ and `collect_available_schema_values([], ...)` returns `[]` unconditionally
 for a schema that doesn't have `field_name` — silently wiping a real, correct
 `available_timepoints`/`available_fovs` list to empty on a dataset
 `build_report` had just diffed correctly.
+
+**Nanowell timepoints addressed a lattice step apart** are the one repair that
+rewrites measurement tables, and only their address columns.
+`datasets/validate/nanowell_relabel.py` (Qt-free) plans it from a dataset's
+tables alone: `plan_dataset(out_dir)` reads each circular well's grid record
+and sites table and, for each `ok` timepoint, `_step_against_roster` finds the
+step whose predicted nanowells (`a` such that `a + s` is in the recorded
+roster) best match which wholly imaged roster sites the timepoint detected.
+Every timepoint is measured on one roster, so detected addresses alone cannot
+show a step in the tables; the rim can, because a timepoint anchored a site
+off measured the roster disk while its array sat a step away, leaving a
+crescent of imaged, empty roster sites on one side. A step counts only when it
+beats `(0, 0)` by `MIN_CRESCENT` sites and by half the crescent it predicts.
+The steps then go through `pipeline/nanowell_frames.choose_frame` — the run's
+own ranking (hand-set anchor, central square, array centre, plate-rigid; then
+most timepoints; then earliest), shared with `nanowell_run._settle_steps` so
+the run and the repair cannot disagree. A plan is `shift` (repairable:
+`nanowell_misaddressed`), `tie` (`nanowell_frames_ambiguous`: set an anchor by
+hand and re-run), or `unexplained` (a `roster_mismatch` no step within reach
+explains, or a disk-rule well with no kept roster: re-run). `build_report`
+lists each as a warning and puts the repairable wells in
+`DatasetReport.misaddressed_nanowell_wells`, which makes the report
+`repairable`. `apply_repairs` plans again from disk, so a repeat is a no-op,
+and `relabel_dataset` copies each well's grid record, sites table and cell
+tables to `out/nanowells/relabel_backup/<time>/`, then renames addresses
+`(q, r) -> (q + dq, r + dr)` with `nw_ring`/`nw_label` recomputed. Measured
+values and `well_x_um`/`well_y_um` (physical positions) are kept as they are.
+When the winning frame is not the one the roster was decided in, the roster
+moves too (`roster_offset`). A row that lands outside the roster is dropped. A
+roster nanowell the timepoint never measured gets a `clipped` row with every
+measurement blank. A cell whose nanowell left the roster keeps its row with
+its address blank. The grid block records `origin_shift`,
+`origin_registered_to`, an `origin_stage_um` moved by the measured offset
+between the old and new origin nanowells (`None` when either is missing), and
+`relabelled` (by, at, `dropped_rows`, `unmeasured_sites`, `cells_unplaced`),
+which Review's Array view prints as a warning line
+(`array_compute.frame_lines`). Interior values match a run of the fixed
+pipeline on the same images (`tests/test_nanowell_relabel.py`); the rim does
+not, and the record says by how much.
 
 The page's **Complete this run** button hands the dataset off to Analyze
 through the existing `on_open_in_analyze` seam — the same one `Convert

@@ -7958,6 +7958,26 @@ say — the raw log says so and the findings are unaffected.
    preserved untouched. If it's greyed out despite findings being listed,
    hover it — the tooltip explains when a finding genuinely can't be
    auto-repaired.
+   **Nanowell wells whose timepoints disagree on addresses.** In a dataset
+   analysed before the run checked this, a timepoint that could not read the
+   central square may have been addressed a nanowell off the others. Each
+   nanowell is then paired with its neighbour over time, which corrupts fold
+   change and trajectories. Validate lists such a well ("timepoint(s)
+   addressed a lattice step off …"), and **Apply repairs** relabels it from
+   the tables, with no re-run and no images needed. The timepoint with the
+   most trusted origin (an anchor set by hand, then the central square, then
+   the array's centre) keeps its addresses, and the others are renamed onto
+   it. Every measured value inside the array is kept as it was. At the rim,
+   the misaddressed timepoint measured a crescent of floor beyond the array
+   and missed the matching crescent inside it: the first is dropped, and the
+   second is written as `clipped` with no values. The Array view then shows,
+   for that timepoint, that it was relabelled and how many rim nanowells it
+   has no values for. The original tables are copied to
+   `out/nanowells/relabel_backup/` first. Two kinds of well are listed and
+   left alone. In one, two timepoints anchored equally well disagree, and
+   nothing in the tables says which is right: set an anchor by hand on the
+   central square at one of them, then re-run the well. In the other, no
+   small step explains the disagreement: re-run the well.
 3. If a well is genuinely missing FOV/timepoint work, **Complete this run in
    Analyze** opens the dataset there set up to finish it: the Analyze form is
    filled in from the dataset's own recorded settings (schema, separator,

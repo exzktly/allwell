@@ -80,7 +80,9 @@ def test_validate_finds_and_relabels_a_timepoint_whose_array_centre_landed_a_sit
     assert not _follows(_sites(plate), hours), "the fixture must hold the defect it repairs"
 
     report = build_report(plate)
-    [finding] = [f for f in report.findings if f.code == "nanowell_misaddressed"]
+    found = [f for f in report.findings if f.code == "nanowell_misaddressed"]
+    assert len(found) == 1, [f.code for f in report.findings]
+    finding = found[0]
     assert finding.well == "A01" and "48h by (1, 0)" in finding.message and "0h's" in finding.message
     assert report.misaddressed_nanowell_wells == ("A01",) and report.repairable
 

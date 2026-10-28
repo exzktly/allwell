@@ -2753,7 +2753,7 @@ def _run_well_worker_pool(
             log.warning("  %s", name)
     if partial_wells:
         log.warning(
-            "Wells with PARTIAL output (complete on the plate map, but missing "
+            "Wells with PARTIAL output (marked partial on the plate map, missing "
             "the FOV-group(s) below — re-run with --incremental to recover):"
         )
         for name, fovs in partial_wells.items():
@@ -3569,8 +3569,8 @@ def main() -> None:
         import sys as _sys
         log.error(
             "%d well(s) failed or produced partial output — exiting non-zero. "
-            "See the per-well breakdown above; partial wells look complete on "
-            "the plate map but are missing FOV-group(s) (recover with "
+            "See the per-well breakdown above; a partial well (marked '!' on "
+            "Analyze's run plate) is missing FOV-group(s) (recover with "
             "--incremental).",
             len(failed_wells),
         )

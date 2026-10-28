@@ -143,7 +143,7 @@ def test_verification_does_not_pull_a_released_well_again(tmp_path):
         _run=SimpleNamespace(local_output_dir=tmp_path, remote_output_dir="/r/out", nanowell=True,
                              nanowell_released={"A01"}, fetched_wells={"A01", "B02"}),
         host=SimpleNamespace(ssh_alias="gpu"),
-        _rsync_optional=lambda src, dest, *, log_fn, absent_note="": pulled.append(src))
+        _rsync_optional=lambda src, dest, *, log_fn, absent_note="": pulled.append(src) or True)
     pull_nanowell_results(verifier, log=lambda _m: None)
     assert pulled == ["gpu:/r/out/nanowells/", "gpu:/r/out/B02_out.zip", "gpu:/r/out/*_B02.csv.gz"]
 
@@ -214,7 +214,7 @@ def _drive_batches(tmp_path, wells, *, nanowell, batch_size):
         worker = threading.Thread(target=p._run_batches, daemon=True)
         worker.start()
         for i in range(1, 7):
-            proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+            proc.batch_finished(p, i)
         proc.finish()
         worker.join(timeout=20)
     return p, queued

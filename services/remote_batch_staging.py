@@ -11,8 +11,8 @@ uploaded and never touched.
 
 A retry used to delete every staged directory first and send those wells again.
 They are kept now, because the reuse is keyed completely: ``run_id`` — and so
-the run directory — is derived from the name, size and whole-second mtime of
-every staged archive (``services.remote_scratch.fingerprint_archives``) plus the
+the run directory — is derived from the name, size, whole-second mtime and
+member list of every staged archive (``services.remote_scratch.fingerprint_archives``) plus the
 pipeline arguments. A file of a given name in that directory is therefore a
 whole or partial copy of the archive this run would send under that name; a
 changed archive changes the fingerprint and lands the run in a different
@@ -63,7 +63,13 @@ def prune_staged(cache: Any, remote_dir: str, zips: list[Path], label: str,
     names = [z.name for z in zips]
     result = cache._ssh_run(prune_argv(remote_dir, names), check=False)
     if result is None or getattr(result, "returncode", 1) != 0:
-        cache._ssh_run(["rm", "-rf", remote_dir], check=False)
+        cleared = cache._ssh_run(["rm", "-rf", remote_dir], check=False)
+        if getattr(cleared, "returncode", 1) != 0:
+            # Neither pruned nor cleared: a stray well in the batch would be run
+            # and reported twice, so the batch must not go ahead (review P2).
+            raise RuntimeError(
+                f"{label}: could not prune or clear the staged directory {remote_dir} on the host "
+                f"({(getattr(cleared, 'stderr', '') or '').strip() or 'no answer'})")
         return
     kept = [line for line in (result.stdout or "").splitlines() if line.strip()]
     if kept:

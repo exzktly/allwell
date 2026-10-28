@@ -35,7 +35,6 @@ from services.remote_transport import _rsync_ssh_transport
 from services.remote_upload import DatasetCache
 from services.remote_staging import (
     _detect_local_input_mode,
-    _filter_channels_in_staging,
     _member_matches,
     _required_tokens,
 )
@@ -357,65 +356,6 @@ def test_member_matches_simple():
     assert _member_matches("subfolder/Exp_NIR_A01.tif", {"NIR"}) is True
 
 
-def test_filter_channels_drops_unused(tmp_path):
-    z = _make_well_zip(
-        tmp_path,
-        "A01.zip",
-        [
-            "Exp_NIR_A01_F001.tif",
-            "Exp_GFP_A01_F001.tif",
-            "Exp_mCherry_A01_F001.tif",
-            "Exp_DAPI_A01_F001.tif",
-        ],
-    )
-    zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z,))
-    _filter_channels_in_staging(
-        tmp_path, (z,), LocalInputMode.ZIP,
-        keep_tokens={"NIR", "GFP"},
-        log_fn=None,
-    )
-    with zipfile.ZipFile(z, "r") as zf:
-        remaining = zf.namelist()
-    assert any("NIR" in m for m in remaining)
-    assert any("GFP" in m for m in remaining)
-    assert not any("mCherry" in m for m in remaining)
-    assert not any("DAPI" in m for m in remaining)
-
-
-def test_filter_channels_noop_when_all_kept(tmp_path):
-    members = ["Exp_NIR_A01.tif", "Exp_GFP_A01.tif"]
-    z = _make_well_zip(tmp_path, "A01.zip", members)
-    size_before = z.stat().st_size
-    _filter_channels_in_staging(
-        tmp_path, (z,), LocalInputMode.ZIP,
-        keep_tokens={"NIR", "GFP"},
-        log_fn=None,
-    )
-    # No rewrite needed.
-    assert z.stat().st_size == size_before
-    with zipfile.ZipFile(z, "r") as zf:
-        assert sorted(zf.namelist()) == sorted(members)
-
-
-def test_filter_channels_raises_when_typo_drops_everything(tmp_path):
-    """v5.2.18: if a typo'd channel name matches zero members in a
-    well, refuse to ship an empty zip. The pipeline downstream would
-    crash with a confusing 'no images found' message far from the
-    real cause."""
-    z = _make_well_zip(
-        tmp_path,
-        "A01.zip",
-        ["Exp_NIR_A01_F001.tif", "Exp_GFP_A01_F001.tif"],
-    )
-    # User typoed "GP" instead of "GFP" — neither token matches.
-    with pytest.raises(RuntimeError, match=r"matched zero images.*A01.*typo"):
-        _filter_channels_in_staging(
-            tmp_path, (z,), LocalInputMode.ZIP,
-            keep_tokens={"NUR", "GP"},  # both typoed
-            log_fn=None,
-        )
-
-
 def test_stage_local_zips_with_fluor_filter_preserves_user_input(tmp_path):
     """v5.2.18: stage_local_zips MUST NOT modify the user's original
     input zips. Pre-v5.2.18 it rewrote them in place — a typo'd
@@ -663,39 +603,6 @@ def test_stage_local_zips_typoed_channel_does_not_corrupt_user_input(tmp_path):
     assert z.read_bytes() == original_bytes
     with zipfile.ZipFile(z, "r") as zf:
         assert sorted(zf.namelist()) == sorted(members)
-
-
-def test_filter_channels_logs_per_well_progress(tmp_path):
-    """v5.2.20: pre-v5.2.20 the channel filter only emitted ONE
-    summary line at the end of the whole plate. For a 96-well filter
-    that meant total silence for tens of seconds. Now each well
-    contributes a progress line so the user can see the filter
-    chewing through the plate."""
-    # A01 — all kept (no-op). B02 — partial (rewrite). C03 — all kept.
-    a01 = _make_well_zip(tmp_path, "A01.zip", ["NIR_F001.tif", "GFP_F001.tif"])
-    b02 = _make_well_zip(
-        tmp_path, "B02.zip",
-        ["NIR_F001.tif", "GFP_F001.tif", "DAPI_F001.tif"],
-    )
-    c03 = _make_well_zip(tmp_path, "C03.zip", ["NIR_F001.tif", "GFP_F001.tif"])
-
-    lines: list[str] = []
-    _filter_channels_in_staging(
-        tmp_path, (a01, b02, c03), LocalInputMode.ZIP,
-        keep_tokens={"NIR", "GFP"},
-        log_fn=lambda s: lines.append(s),
-    )
-    blob = "".join(lines)
-    # Per-well status with position-of-total prefix.
-    assert "(1/3): A01" in blob
-    assert "(2/3): B02" in blob
-    assert "(3/3): C03" in blob
-    # No-op wells say "all N kept".
-    assert "A01" in blob and "no-op" in blob
-    # The rewrite well reports its before→after size.
-    assert "B02" in blob and "kept 2/3" in blob
-    # End-of-plate summary still fires.
-    assert "summary" in blob and "rewrote 1" in blob
 
 
 # ── DatasetCache: cache-key stability ───────────────────────────────────────
@@ -1082,14 +989,18 @@ def test_list_remote_completed_wells_handles_empty_dir(runner_with_run, monkeypa
     assert runner_with_run._output_verifier()._list_remote_completed_wells() == set()
 
 
-def test_list_remote_completed_wells_degrades_on_ssh_error(runner_with_run, monkeypatch):
-    """Network blip / missing ssh binary → return empty set, NOT
-    raise. The verify pass falls back to ``expected_wells``-only
-    (same behavior as pre-v5.2.25)."""
+def test_list_remote_completed_wells_is_unknown_on_ssh_error(runner_with_run, monkeypatch):
+    """Network blip / missing ssh binary → ``None`` (unknown), never raise and never an empty set.
+
+    This test used to pin the empty set, which is the defect of tracker row A1: an empty answer is what "the remote
+    holds no output" looks like, and verify then passed over zero wells and cleanup removed the run directory."""
     def fail(self, script, *, check):
         raise OSError("ssh: no such file")
     monkeypatch.setattr(DatasetCache, "_ssh_script", fail)
-    assert runner_with_run._output_verifier()._list_remote_completed_wells() == set()
+    assert runner_with_run._output_verifier()._list_remote_completed_wells() is None
+    monkeypatch.setattr(DatasetCache, "_ssh_script", lambda self, script, *, check: subprocess.CompletedProcess(
+        ["ssh"], 255, "", "ssh: connect to host gpu port 22: Connection timed out"))
+    assert runner_with_run._output_verifier()._list_remote_completed_wells() is None
 
 
 def test_verify_manifest_uses_remote_listing_as_backstop(runner_with_run, monkeypatch, tmp_path):
@@ -1631,7 +1542,9 @@ def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
         z.writestr("A01_overlay.tif", b"data")
     try:
         with patch.object(Fetcher, "_rsync", return_value=False), \
-             patch.object(Fetcher, "_rsync_glob", return_value=(1, 1)), \
+             patch.object(Fetcher, "_list_remote_glob",       # the well's one CSV is listed, and lands
+                           lambda self, g: ("test-host", ["/r/out/m_A01.csv.gz"], 10)), \
+             patch.object(Fetcher, "_pull_listed", lambda self, h, files, dest: len(files)), \
              patch.object(Fetcher, "_remote_file_size", lambda self, p: None), \
              patch.object(Fetcher, "_materialize", lambda self, w, z: True), \
              patch.object(Fetcher, "_delete_well_files_on_remote", lambda self, w: None):
@@ -1878,7 +1791,10 @@ def test_verify_passes_when_all_csvs_and_zips_present(host, tmp_path):
     (tmp_path / "B02_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
-    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
+    # The host answers the listing with nothing beyond the announced wells. An unreachable one
+    # (``offline_transport``) now fails verification on its own (row A3).
+    with patch.object(FetchedOutputVerifier, "_list_remote_completed_wells", lambda self: set()):
+        missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == []
     assert any("all 2 wells" in m for m in logs)
 
@@ -1940,7 +1856,10 @@ def test_verify_skips_zip_check_when_csv_only_filter(host, tmp_path):
     # No A01_out.zip — but CSV_ONLY user doesn't want it.
 
     logs: list[str] = []
-    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
+    # The host answers the listing with nothing beyond the announced wells. An unreachable one
+    # (``offline_transport``) now fails verification on its own (row A3).
+    with patch.object(FetchedOutputVerifier, "_list_remote_completed_wells", lambda self: set()):
+        missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == []
 
 
@@ -2019,7 +1938,10 @@ def test_verify_reports_empty_csv(host, tmp_path):
 
     (tmp_path / "measurements_A01.csv").write_text("")  # empty
     logs: list[str] = []
-    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
+    # The host answers the listing with nothing beyond the announced wells. An unreachable one
+    # (``offline_transport``) now fails verification on its own (row A3).
+    with patch.object(FetchedOutputVerifier, "_list_remote_completed_wells", lambda self: set()):
+        missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == ["empty CSV for A01"]
 
 
@@ -2287,8 +2209,12 @@ def test_sync_required_files_rsync_argv_shape(host, monkeypatch):
     rsync = captured["rsync_cmd"]
     assert rsync[0] == "rsync"
     assert "-aR" in rsync
-    # Last element is the destination — verify it targets remote_project_dir.
-    assert rsync[-1] == f"{host.ssh_alias}:{host.remote_project_dir}/"
+    # Last element is the destination: this code's own version directory
+    # under remote_project_dir (services/remote_code_sync.py), never the shared
+    # directory itself, which another sync could rewrite under a running run.
+    from services.remote_code_sync import code_digest
+    digest = code_digest(repo_root(), _REQUIRED_REMOTE_FILES)
+    assert rsync[-1] == f"{host.ssh_alias}:{host.remote_project_dir}/code/{digest}/"
     # Every required file should appear as a bare relative path.
     for required in _REQUIRED_REMOTE_FILES:
         assert required in rsync, \
@@ -2413,6 +2339,9 @@ def test_sync_required_files_uses_bare_relative_sources_with_cwd(host, monkeypat
     monkeypatch.setattr(Path, "is_file", fake_is_file)
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+    # The files under ``fake_root`` exist only to ``is_file``; the version
+    # directory's name hashes their bytes, which this test does not have.
+    monkeypatch.setattr("services.remote_code_sync.code_digest", lambda root, files: "0" * 16)
 
     runner.sync_required_files()
 
@@ -2437,8 +2366,14 @@ def test_sync_required_files_uses_bare_relative_sources_with_cwd(host, monkeypat
 
 
 @pytest.fixture
-def runner_with_run(host, tmp_path):
+def runner_with_run(host, tmp_path, monkeypatch):
     from services.remote_run_state import _RemoteRun
+
+    # A host that answers the verify listing: A01's archive is there. Under ``offline_transport`` the listing fails,
+    # and a failed listing fails verification (row A3) — which is not what these tests are about. A test that
+    # patches ``_ssh_script`` itself overrides this.
+    monkeypatch.setattr(DatasetCache, "_ssh_script", lambda self, script, *, check: subprocess.CompletedProcess(
+        ["ssh"], 0, "/r/out/A01_out.zip\n", ""))
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -2472,7 +2407,7 @@ def test_verify_and_cleanup_run_mode_removes_run_dir_only(runner_with_run, monke
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     ok = runner.verify_and_cleanup(ok=True, cleanup_mode="run", log_fn=lambda _m: None)
     assert ok
@@ -2493,7 +2428,7 @@ def test_verify_and_cleanup_all_mode_removes_both(runner_with_run, monkeypatch):
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     runner.verify_and_cleanup(ok=True, cleanup_mode="all", log_fn=lambda _m: None)
     rm_calls = [c for c in calls if c and c[0] == "rm"]
@@ -2513,7 +2448,7 @@ def test_verify_and_cleanup_none_mode_removes_nothing(runner_with_run, monkeypat
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     runner.verify_and_cleanup(ok=True, cleanup_mode="none", log_fn=lambda _m: None)
     rm_calls = [c for c in calls if c and c[0] == "rm"]
@@ -2541,7 +2476,7 @@ def test_verify_and_cleanup_dry_run_does_not_rm(runner_with_run, monkeypatch):
     monkeypatch.setattr(DatasetCache, "_ssh_script", fake_ssh_script)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     log_lines: list[str] = []
     ok = runner.verify_and_cleanup(
@@ -2587,7 +2522,7 @@ def test_verify_and_cleanup_dry_run_handles_missing_remote_path(runner_with_run,
     )
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     log_lines: list[str] = []
     runner.verify_and_cleanup(
@@ -2619,7 +2554,7 @@ def test_verify_and_cleanup_dry_run_with_none_mode_is_a_noop(runner_with_run, mo
     )
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     log_lines: list[str] = []
     runner.verify_and_cleanup(
@@ -2645,7 +2580,7 @@ def test_verify_and_cleanup_skips_when_failure(runner_with_run, monkeypatch):
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     ok = runner.verify_and_cleanup(ok=False, cleanup_mode="all", log_fn=lambda _m: None)
     assert not ok
@@ -2668,7 +2603,7 @@ def test_verify_and_cleanup_skips_when_local_missing(runner_with_run, monkeypatc
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     # `_retry_missing_wells` runs against a host that does not exist: it lists
     # the well's CSVs over ssh and re-pulls what verify found missing, which is
@@ -3267,7 +3202,7 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     # `_retry_missing_wells` runs against a host that does not exist: it lists
     # the well's CSVs over ssh and re-pulls what verify found missing, which is
@@ -3548,6 +3483,9 @@ def _runner_with_run(compute_launcher: str):
         local_input_mode=LocalInputMode.ZIP,
         output_filter=OutputFilter.FULL,
         incremental=False,
+        # A run that launched its allocation; one that did not has nothing to
+        # close (tests/test_an_allocation_belongs_to_the_run_that_made_it.py).
+        owns_remote_job=True,
     )
     return r
 
@@ -3579,7 +3517,8 @@ def test_close_remote_job_scancels_scheduled_host():
 
 def test_close_remote_job_logs_clean_finish_when_nothing_to_cancel():
     """The common case: srun already exited, so scancel finds nothing — we
-    still emit a definite end-of-job marker instead of silence."""
+    still say so instead of silence. Not "already finished": scancel's answer
+    is discarded, so the runner confirms the close with squeue (D3)."""
     r = _runner_with_run("srun --partition=gpu")
     logs: list[str] = []
     with patch("subprocess.run") as run:
@@ -3587,7 +3526,7 @@ def test_close_remote_job_logs_clean_finish_when_nothing_to_cancel():
             args=[], returncode=0, stdout="", stderr="",
         )
         r.close_remote_job(log_fn=logs.append)
-    assert any("already finished" in m for m in logs)
+    assert any("no job left to cancel" in m for m in logs)
 
 
 def test_close_remote_job_noop_before_run_starts():

@@ -33,7 +33,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from services.remote_config import known_hosts_options, resolve_ssh_binary
+from services.remote_config import keepalive_options, known_hosts_options, resolve_ssh_binary
 from services.subprocess_text import TEXT_UTF8
 
 
@@ -229,6 +229,7 @@ def probe_ssh_connection(
         "-o", "BatchMode=yes",
         "-o", "ConnectTimeout=10",
         "-o", "StrictHostKeyChecking=accept-new",
+        *keepalive_options(),
     ]
     if ssh_key_path:
         key = Path(ssh_key_path).expanduser()

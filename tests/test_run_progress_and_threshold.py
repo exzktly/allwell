@@ -230,7 +230,7 @@ def test_a_compute_event_ends_the_transfer_label(qapp, event, payload):
     d = host._dashboard
 
     d.set_transfer(0.92)
-    assert d._status.text() == "Transferring… 92%"
+    assert d._status.text() == "Uploading… 92%"
 
     host._apply_progress_event(event, payload)
     assert d._status.text() == ""
@@ -490,14 +490,18 @@ def test_a_completion_is_one_event_so_nothing_downstream_can_split_it(
         assert bearing[0][2] == expected, bearing
 
 
-def test_a_dropped_line_takes_both_facts_with_it(tmp_path, monkeypatch):
+def test_a_full_queue_waits_for_a_well_s_terminal_line_rather_than_dropping_it(tmp_path, monkeypatch):
     """The real drop unit, driven the way ``_poll_log`` drives it.
 
-    A full queue drops the pipeline's stdout line. The plate then never hears
-    the well finished *and* the journal never hears it was skipped — degraded,
-    but not wrong, which is the distinction that matters (CLAUDE.md §7). The
+    This test used to assert the defect: with no slot free, the well's
+    "up to date" line was dropped, and the record said nothing about the well
+    — the plate never heard it finished either, and it stayed "processing"
+    for the rest of the run (tracker C11). A line the run's state is derived
+    from now waits for room instead, so with the queue full the writer blocks
+    until the reader drains, and the record says ``skipped`` either way. The
     assertion is on the record on disk (§7.4 #1).
     """
+    import threading
     import analyze.progress
     from services import run_journal as J
     from services.pipeline_runner import (PipelineRunner, ProgressTracker,
@@ -534,21 +538,27 @@ def test_a_dropped_line_takes_both_facts_with_it(tmp_path, monkeypatch):
                     m._apply_progress_event(ev_kind, ev_payload)
 
     line = ("line", "Well B02 — up to date (no new FOVs).\n")
-    for free, expected in ((0, None), (1, "skipped")):
+    for free, expected in ((0, "skipped"), (1, "skipped")):
         out = tmp_path / f"out{free}"
         out.mkdir()
         token = J.open_run(out, input_dir="/in", mode="local", spec={})
 
-        runner = PipelineRunner.__new__(PipelineRunner)
+        runner = PipelineRunner()
         runner.log_q = RunEventQueue(maxsize=2)
-        runner._log_overflow_warned = False
         for i in range(runner.log_q.maxsize - free):
             runner.log_q.put_nowait(("line", f"filler {i}\n"))
-        runner._enqueue(line)
+        writer = threading.Thread(target=runner._enqueue, args=(line,), daemon=True)
+        writer.start()
+        writer.join(0.3)
+        assert writer.is_alive() == (free == 0), "a full queue must make the writer wait, not drop the line"
 
         survivors = []
-        while not runner.log_q.empty():
-            survivors.append(runner.log_q.get_nowait())
+        while writer.is_alive() or not runner.log_q.empty():
+            try:
+                survivors.append(runner.log_q.get(timeout=1.0))
+            except Exception:
+                break
+        writer.join(1.0)
         _drain_and_apply(out, token, survivors)
 
         state = J.read_journal(out).wells.get("B02")

@@ -88,7 +88,7 @@ def test_the_batched_launch_tells_every_batch_to_skip_the_others_wells(tmp_path,
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in (1, 2):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()
     worker.join(timeout=20)
     assert not worker.is_alive() and len(spawns) == 1

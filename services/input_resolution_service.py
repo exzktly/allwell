@@ -1487,8 +1487,8 @@ def _file_crc(path: Path) -> int:
     return crc
 
 
-def _grouped_member_index(grouped: Path) -> dict[str, tuple[int, int | None]]:
-    """Every image already grouped under *grouped*, as ``name -> (size, crc)``.
+def _grouped_member_index(grouped: Path) -> dict[str, tuple[int, int | None, Path | None]]:
+    """Every image already grouped under *grouped*, as ``name -> (size, crc, path)``.
 
     A resolved input dir holds ``<WELL>/`` folders, ``<WELL>.zip`` archives, or
     — mid-resume — both. Reading only one of them is what made every loose TIF
@@ -1506,11 +1506,14 @@ def _grouped_member_index(grouped: Path) -> dict[str, tuple[int, int | None]]:
     case a cheaper comparison cannot decide.
 
     A folder child's CRC is ``None`` because computing it means reading the
-    file; :func:`_is_already_grouped` reads it then, and only then.
+    file; :func:`_is_already_grouped` reads it then, and only then, from the
+    *path* recorded here. (It used to search for the sibling with
+    ``grouped.rglob(name)``, one walk of the whole tree per loose file.) A zip
+    member's path is ``None``: its CRC is the comparison.
     """
     from util.image_exts import is_group_image
 
-    index: dict[str, tuple[int, int | None]] = {}
+    index: dict[str, tuple[int, int | None, Path | None]] = {}
     with swallow(f"listing already-grouped members under {grouped.name}"):
         files, subdirs = files_and_subdirs(grouped)
         # Folders and archives in one sorted sequence. On the rare basename
@@ -1527,7 +1530,7 @@ def _grouped_member_index(grouped: Path) -> dict[str, tuple[int, int | None]]:
                 for child in files_in(entry):
                     if is_group_image(child.name):
                         with swallow(f"sizing {child.name}"):
-                            index[child.name] = (child.stat().st_size, None)
+                            index[child.name] = (child.stat().st_size, None, child)
                 continue
             if entry.suffix.lower() != ".zip":
                 continue
@@ -1537,12 +1540,12 @@ def _grouped_member_index(grouped: Path) -> dict[str, tuple[int, int | None]]:
                     base = info.filename.rsplit("/", 1)[-1]
                     if base and not base.startswith(".") \
                             and is_group_image(base):
-                        index[base] = (info.file_size, info.CRC)
+                        index[base] = (info.file_size, info.CRC, None)
     return index
 
 
 def _is_already_grouped(tif: Path, grouped: Path,
-                        index: dict[str, tuple[int, int | None]]) -> bool:
+                        index: dict[str, tuple[int, int | None, Path | None]]) -> bool:
     """Whether *tif*'s bytes are already inside *grouped*.
 
     False for a name that is not there at all, for one that is there at a
@@ -1553,12 +1556,13 @@ def _is_already_grouped(tif: Path, grouped: Path,
 
     A read that fails answers False. Being unable to tell whether a copy exists
     is not evidence that one does, and this answer decides whether the user's
-    original is deleted.
+    original is deleted. So is the loose file *being* the grouped one: a path
+    the index recorded for *tif* itself is no second copy.
     """
     entry = index.get(tif.name)
     if entry is None:
         return False
-    size, crc = entry
+    size, crc, sibling = entry
     same = False
     with swallow(f"comparing {tif.name} against its grouped copy"):
         if tif.stat().st_size == size:
@@ -1566,9 +1570,9 @@ def _is_already_grouped(tif: Path, grouped: Path,
                 # A folder child: its CRC was not computed up front, because
                 # doing so for a whole plate costs a read of every file that
                 # a size mismatch would have settled for free.
-                sibling = next(
-                    (q for q in grouped.rglob(tif.name) if q.is_file()), None)
-                same = sibling is not None and _file_crc(tif) == _file_crc(sibling)
+                same = (sibling is not None and sibling.is_file()
+                        and not sibling.samefile(tif)
+                        and _file_crc(tif) == _file_crc(sibling))
             else:
                 same = _file_crc(tif) == crc
     return same
@@ -1608,20 +1612,35 @@ def _wells_claimed_by(paths, *, filename_schema: str,
 
 
 def _delete_sources_that_landed(source_tifs, grouped_dir: Path, *,
-                                filename_schema: str, filename_sep: str) -> None:
-    """Unlink only the loose TIFs whose well actually got grouped.
+                                filename_schema: str, filename_sep: str) -> list[Path]:
+    """Unlink the loose images that are provably inside *grouped_dir*; return the rest.
 
-    Keyed on the well token rather than on a file appearing inside a well
-    folder, because the pipeline may compress those folders into ``<WELL>.zip``
-    during the run. A file whose well never appeared is kept.
+    Two conditions, both required. The image's own filename must claim a well
+    that actually got grouped — a name that does not decompose under the schema
+    is never deleted, because a schema mismatch has to cost the user a failed
+    run, not their images. And its **bytes** must be in *grouped_dir* — the
+    same name, size and CRC-32 as a member of one of its archives, or of a file
+    in one of its well folders (:func:`_is_already_grouped`; the pipeline may
+    have compressed those folders into ``<WELL>.zip`` during the run, and both
+    are read).
+
+    The well check alone was not proof. A file of a grouped well that the
+    grouping did not take — one ``well_plate_zipper`` left behind on a name
+    collision, or one it took a different copy of — was deleted with no copy
+    anywhere. Being unable to tell whether a copy exists keeps the file.
     """
     grouped_wells = set(iter_well_tokens(grouped_dir))
+    index = _grouped_member_index(grouped_dir)
+    kept: list[Path] = []
     for tif, tok in _wells_claimed_by(
             source_tifs, filename_schema=filename_schema,
             filename_sep=filename_sep).items():
-        if tok and tok in grouped_wells:
+        if tok and tok in grouped_wells and _is_already_grouped(tif, grouped_dir, index):
             with swallow(f"removing the consumed source {tif.name}"):
                 tif.unlink()
+        else:
+            kept.append(tif)
+    return kept
 
 
 def _group_loose_tifs_in_place(
@@ -1890,12 +1909,17 @@ def resolve_input_output(
             return grouped, out_dir, None
 
         def _on_success() -> None:
-            """Delete loose TIFs from raw/ once the pipeline completes
-            cleanly. raw/in/{well}.zip already has the data; the
-            loose copies in raw/ are now redundant."""
-            for tif in source_tifs:
-                with swallow(f"removing {tif.name}, already archived into in/"):
-                    tif.unlink()
+            """Delete loose images from raw/ once the pipeline completes
+            cleanly — each only once its bytes are proven to be under raw/in/.
+
+            This used to unlink every image snapshotted from raw/ before the
+            zipper ran, grouped or not: a ``flatfield_reference_DAPI.tif`` or
+            a ``plate_overview.tif`` beside the plate's images, which the
+            zipper places in no well, was deleted after a successful run with
+            no copy anywhere."""
+            _delete_sources_that_landed(
+                source_tifs, grouped,
+                filename_schema=filename_schema, filename_sep=filename_sep)
 
         return grouped, out_dir, _on_success
 

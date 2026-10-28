@@ -383,6 +383,8 @@ NOT_A_REUSE_DECISION = {
     "services/remote_final_pass.py::_earlier_run_dirs": "where held archives may be; a held well is re-anchored, "
                                                         "never reused as a result",
     "services/remote_reuse.py::clean_earlier_attempts": "deletes earlier attempts; reuses nothing",
+    "services/remote_sweep.py::earlier_attempt_dirs": "lists earlier attempts' run directories so their jobs are "
+                                                      "swept before this run writes; reuses nothing",
 }
 
 

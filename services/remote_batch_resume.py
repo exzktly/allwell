@@ -222,7 +222,7 @@ def adopt_finished(cache, wells: Iterable[str], found: Leftovers, *, own_output_
     return adopted
 
 
-def mark_part_way(cache, found: Leftovers, *, own_output_dir: str) -> None:
+def mark_part_way(cache, found: Leftovers, *, own_output_dir: str, log: Callable[[str], None]) -> None:
     """Leave the withdrawal note (``pipeline.run_report.withdrawn_note_path``) beside every well left part way in
     the output directory this run writes into, so the host's own skip runs it again.
 
@@ -239,7 +239,10 @@ def mark_part_way(cache, found: Leftovers, *, own_output_dir: str) -> None:
         return
     seals = f"{own_output_dir}/{COMPLETE_DIRNAME}"
     notes = " ".join(_remote_quote(f"{seals}/{w}{WITHDRAWN_SUFFIX}") for w in wells)
-    cache._ssh_script(f"mkdir -p {_remote_quote(seals)} && touch {notes}\n", check=False)
+    result = cache._ssh_script(f"mkdir -p {_remote_quote(seals)} && touch {notes}\n", check=False)
+    if getattr(result, "returncode", None) != 0:
+        log(f"[remote] WARN could not mark {len(wells)} well(s) left part way in {own_output_dir} "
+            f"({', '.join(wells[:12])}); the host decides from its own records whether they are finished\n")
 
 
 def stage_from_leftovers(cache, batches: list[list], found: Leftovers, *, own_run_dir: str,
@@ -321,7 +324,7 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     _say_what_the_journal_expected(proc, zips, found)
     if force:
         return list(zips), []
-    mark_part_way(runner._cache, found, own_output_dir=own_output)
+    mark_part_way(runner._cache, found, own_output_dir=own_output, log=proc._log)
     # A well named in --force_wells is to be computed again, so its finished output is not taken — per well, rather
     # than the whole plate declining (tracker F2). Its uploaded archive is still reused: the input is the same.
     _all, forced = _forced_from_argv(list(getattr(proc, "_pipeline_argv", []) or []))

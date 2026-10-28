@@ -74,6 +74,7 @@ def _remote(p, proc, remote_root: Path, sent: list[str]):
         env_selector=("name", "allwell"),
         _build_remote_argv=lambda *a, **k: ["python", "pm.py"],
         _sweep_orphaned_allocation=lambda *a, **k: None,
+        _claim_run_dirs=lambda *a, **k: "",
         close_remote_job=lambda **kw: None,
     )
     return run_dir
@@ -96,8 +97,8 @@ def _attempt(tmp_path, monkeypatch, remote_root, *, node_boots: bool):
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     if node_boots:
-        proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
-        proc.say("[remote] batch-driver: batch 2 finished rc=0\n")
+        proc.batch_finished(p, 1)
+        proc.batch_finished(p, 2)
     else:
         # The upload of batch 1 completes while srun waits on the node; then
         # the boot fails and the driver's stream ends with nothing reported.
@@ -177,7 +178,8 @@ def test_a_prune_that_fails_falls_back_to_clearing_the_directory(tmp_path):
 
     def ssh_run(argv, *, check, **kw):
         calls.append(list(argv))
-        return types.SimpleNamespace(stdout="", returncode=124)
+        # The listing times out; the fallback clear succeeds (both failing stops the batch instead).
+        return types.SimpleNamespace(stdout="", returncode=0 if argv[:2] == ["rm", "-rf"] else 124)
 
     logged: list[str] = []
     prune_staged(types.SimpleNamespace(_ssh_run=ssh_run), "/r/runs/run-test/b1",

@@ -13,7 +13,7 @@ the archives a run uploads, ``services.remote_upload`` gets them onto the host
 once, ``services.remote_process`` presents the run as a process the GUI reads
 and stops, ``services.remote_fetch`` owns bringing output home and proving it
 arrived, ``services.remote_run_state`` the record a run carries,
-``services.remote_jobs`` the scheduler jobs a run holds, and
+``services.remote_jobs`` and ``services.remote_sweep`` its scheduler jobs, and
 ``services.remote_wire`` the lines the stages print and parse:
 
 * **Per-well zip granularity** — ``remote_staging.stage_local_zips`` runs the existing
@@ -38,6 +38,7 @@ arrived, ``services.remote_run_state`` the record a run carries,
 from __future__ import annotations
 
 import os
+import posixpath
 import re
 import subprocess
 import threading
@@ -49,7 +50,6 @@ from services.subprocess_kill import own_process_group_kwargs
 from services.subprocess_text import TEXT_UTF8
 from services.remote_config import (
     RemoteHost,
-    resolve_rsync_binary,
 )
 from services.remote_conda import _conda_env_selector, _conda_run_prefix_for, cellpose_env_selector, describe_env
 from services import run_journal
@@ -83,7 +83,8 @@ from services.remote_process import (
     _run_prepared,
     _scheduler_handoff_lines,
 )
-from services.remote_jobs import close_remote_job, sweep_orphaned_allocation
+from services.remote_jobs import close_remote_job, kill_remote_pipeline
+from services.remote_sweep import claim_run_dirs, earlier_attempt_dirs, sweep_orphaned_allocation
 from services.remote_fetch import (
     FetchedOutputVerifier,
     Fetcher,
@@ -92,13 +93,11 @@ from services.remote_fetch import (
 from services.remote_transport import (
     _fmt_secs,
     _remote_join,
-    _remote_quote,
-    _rsync_ssh_transport,
-    _rsync_supports_info_flag,
-    _rsync_with_retry,
 )
 from services.remote_suspend import request_suspend as _request_suspend
+from services.remote_code_sync import sync_pipeline_code
 from services.remote_commands import _compose_remote_cmd, pack_for_login_shell
+from services.remote_srun_retry import queue_wait_seconds
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
 from services import remote_reuse as _reuse
@@ -216,6 +215,8 @@ class RemoteRunner:
         # per-well rsync was in flight / retry-looping.
         self._fetcher: Fetcher | None = None
         self._cancelled: threading.Event = threading.Event()
+        # The version directory the last sync filled (remote_code_sync).
+        self._code_dir = ""
 
     @property
     def run(self) -> _RemoteRun | None:
@@ -227,87 +228,16 @@ class RemoteRunner:
         self,
         *,
         log_fn: Callable[[str], None] | None = None,
+        versioned: bool = True,
     ) -> None:
-        """Push the minimal set of files the pipeline needs to the remote.
-
-        Idempotent and cheap: rsync's mtime+size skip-pass means a no-op
-        run is a single round-trip with no bytes transferred. Called
-        automatically by :meth:`spawn` before every run so the user
-        never accidentally runs against stale remote code.
-
-        Files synced: see :data:`_REQUIRED_REMOTE_FILES`. The relative
-        layout is preserved on the remote (so ``requirements.txt``
-        lands at ``{remote_project_dir}/requirements.txt``).
-        """
-        log = log_fn or (lambda _m: None)
-        root = repo_root()
-        missing_local = [f for f in _REQUIRED_REMOTE_FILES if not (root / f).is_file()]
-        if missing_local:
-            raise FileNotFoundError(
-                "Required pipeline files missing locally: "
-                + ", ".join(missing_local)
-                + f"  (looked under {root})"
-            )
-
-        # Make sure subdirectories exist on the remote — rsync with
-        # individual file sources doesn't create intermediate dirs on
-        # the target. One mkdir -p covers everything.
-        remote_subdirs = sorted({
-            str(Path(f).parent) for f in _REQUIRED_REMOTE_FILES
-            if str(Path(f).parent) not in (".", "")
-        })
-        mk_target = f"{self.host.remote_project_dir}"
-        mkdirs = [f"{mk_target}/{d}" for d in remote_subdirs]
-        self._cache._ssh_run(
-            ["mkdir", "-p", mk_target, *mkdirs],
-            check=True,
-        )
-
-        # v5.2.12: use bare relative source paths with cwd=root so
-        # rsync's -R preserves only the path BELOW the repo root.
-        #
-        # Previously we used the absolute-path-with-`/./`-pivot trick:
-        #   sources = ["/Users/me/allwell/./process_microscopy.py", ...]
-        # which is supposed to make rsync use everything after /./ as
-        # the relative path. Older rsync (macOS bundles 2.6.9) doesn't
-        # honor that pivot reliably and mirrors the WHOLE local path
-        # on the remote, so the user saw:
-        #   ~/allwell/Users/me/allwell/requirements-remote.txt
-        # instead of the expected:
-        #   ~/allwell/requirements-remote.txt
-        #
-        # Using cwd + bare relative sources works on every rsync
-        # version we've seen. rsync's -R then preserves just the
-        # relative path from cwd (`requirements-remote.txt`)
-        # rather than the absolute prefix.
-        sources = list(_REQUIRED_REMOTE_FILES)
-        dest = f"{self.host.ssh_alias}:{self.host.remote_project_dir}/"
-        cmd = [
-            resolve_rsync_binary(),
-            *_rsync_ssh_transport(self.host),
-            "-aR",
-        ]
-        # v5.2.10: --info=stats0 (suppresses summary footer) needs
-        # rsync ≥ 3.1.0. Old rsync (macOS 2.6.9, older HPC images)
-        # rejects with exit 1. Omitting it is purely cosmetic — rsync
-        # just prints its stats summary to stdout, which we don't
-        # parse or display anyway.
-        if _rsync_supports_info_flag():
-            cmd.append("--info=stats0")
-        cmd += [*sources, dest]
-        result = _rsync_with_retry(
-            cmd, log_fn=log_fn, timeout=60, cwd=str(root),
-        )
-        if result.returncode != 0:
-            err = (result.stderr or "").strip() or f"rsync exited {result.returncode}"
-            raise RuntimeError(
-                f"Failed to sync pipeline files to remote "
-                f"({self.host.ssh_alias}): {err}"
-            )
-        log(
-            f"[remote] code sync: {len(_REQUIRED_REMOTE_FILES)} file(s) "
-            f"verified on {self.host.ssh_alias}:{self.host.remote_project_dir}\n"
-        )
+        """Push the files the pipeline needs (:data:`_REQUIRED_REMOTE_FILES`)
+        to the remote, before every run, into a directory of their own version
+        (``remote_code_sync``) that this run's pipeline is then launched from,
+        so another sync cannot change a run's code under it. ``versioned=False``
+        (the bootstrap) syncs into ``remote_project_dir`` itself."""
+        self._code_dir = sync_pipeline_code(
+            self.host, self._cache, repo_root(), _REQUIRED_REMOTE_FILES,
+            log_fn=log_fn, versioned=versioned)
 
     # ── Estimation ──────────────────────────────────────────────────────
 
@@ -405,7 +335,6 @@ class RemoteRunner:
             zipped, pipeline_argv, prep.remote_output, log)
         overlap, ssh_argv = self._compose_launch(
             prep, zipped, pipeline_argv, output_filter, cache_hit, log)
-        remote_pidfile = prep.paths.pidfile
         remote_sentinel = prep.paths.sentinel
         remote_heartbeat = prep.paths.heartbeat
 
@@ -415,15 +344,12 @@ class RemoteRunner:
 
         heartbeat: _UploadHeartbeat | None = None
         if overlap:
-            # Before adding an allocation of our own, hand back one a crashed
-            # run of this same dataset may have left holding a node.
-            self._sweep_orphaned_allocation(
-                remote_pidfile, remote_heartbeat, log_fn=log)
-            heartbeat = _UploadHeartbeat(self._cache, remote_heartbeat)
+            heartbeat = _UploadHeartbeat(self._cache, remote_heartbeat, log_fn=log)
             # One beat before the job can look, so the first thing it sees is a
             # heartbeat that exists rather than one that is missing.
             heartbeat.beat()
             popen = self._start_ssh(ssh_argv)
+            self._run.owns_remote_job = True     # from here the job is ours to cancel
             try:
                 heartbeat.start()
                 upload()
@@ -459,6 +385,7 @@ class RemoteRunner:
             if not cache_hit:  # the remote already holds every well's output
                 upload()
             popen = self._start_ssh(ssh_argv)
+            self._run.owns_remote_job = True
 
         fetcher = Fetcher(
             self.host,
@@ -523,6 +450,13 @@ class RemoteRunner:
         # ``source_fingerprint``: the upload key churns for two different
         # reasons and only one of them is a reason to re-attach.
         source_key = source_fingerprint(_local_input_dir_from_argv(pipeline_argv))
+        # Before anything below empties, borrows or writes a directory: no job
+        # of another session, or of an earlier attempt still being fed, may be
+        # writing in this run's directory or in the one a resume re-attaches to.
+        refusal = self._claim_run_dirs(own.pidfile, own.heartbeat, local_output_dir=local_output_dir,
+                                       pipeline_argv=pipeline_argv, output_filter=output_filter, log_fn=log)
+        if refusal:
+            raise RuntimeError(refusal)
         own_output = remote_output
         # An incremental run uploads a split — only the groups still missing —
         # so any earlier directory's outputs can only mislead it: the pre-flight
@@ -538,7 +472,8 @@ class RemoteRunner:
             )
         reattached = remote_output != own_output
         if zipped.incremental:
-            self._cache._ssh_run(["rm", "-rf", own_output], check=False)
+            # Checked: left in place, its outputs read as this run's and the pipeline skips their wells.
+            self._cache._ssh_run(["rm", "-rf", own_output], check=True)
 
         # **Both** directories, and the second one is not optional. A
         # re-attached run writes its outputs under a *previous* run's id, but
@@ -563,11 +498,12 @@ class RemoteRunner:
         # Two calls rather than one shell line: ``_remote_join`` quotes every
         # token, so an ``&&`` between them would reach the remote as a
         # directory named "&&" instead of as an operator.
-        self._cache._ssh_run(["rm", "-f", remote_sentinel], check=False)
+        # Checked, like the `mkdir` above: a stale sentinel starts the job before this run's upload is done.
+        self._cache._ssh_run(["rm", "-f", remote_sentinel], check=True)
         # A suspend request the last run of this plate left behind would stop
         # this one before it did anything: ``run_id`` is deterministic, so a
         # resume lands in the very directory the suspend was requested in.
-        self._cache._ssh_run(["rm", "-f", own.suspend_request], check=False)
+        self._cache._ssh_run(["rm", "-f", own.suspend_request], check=True)
 
         _force, _forced_wells = _forced_from_argv(pipeline_argv)
         self._run = _RemoteRun(
@@ -662,7 +598,7 @@ class RemoteRunner:
             env_selector=self.env_selector,
             upload_sentinel=remote_sentinel if overlap else "",
             upload_heartbeat=remote_heartbeat if overlap else "",
-            scratch_dir=self.host.remote_scratch_dir,
+            scratch_dir=self.host.remote_scratch_dir, queue_wait_s=queue_wait_seconds(self.host),
         )
         ssh_argv = self.host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(remote_cmd)]
 
@@ -736,13 +672,29 @@ class RemoteRunner:
         """The verifier for this runner's current run, with its collaborators."""
         return FetchedOutputVerifier(self.host, self._run, self._cache, self._cancelled)
 
+    def _remove_remote(self, path: str, label: str, log) -> bool:
+        """Remove *path* on the host and say what actually happened.
+
+        The cleanup used to log "removed" over an ``rm`` whose result it never
+        read, so a dropped connection left the remote copy in place under a log
+        line saying it was gone (review A7, P2).
+        """
+        result = self._cache._ssh_run(["rm", "-rf", path], check=False)
+        if result.returncode == 0:
+            log(f"[remote] removed {label}.\n")
+            return True
+        reason = (result.stderr or "").strip().splitlines()[-1:] or [f"exit {result.returncode}"]
+        log(f"[remote] WARN could not remove {label} ({reason[0]}); it is still on the host — "
+            f"remove it by hand or let the next run's cleanup retry.\n")
+        return False
+
     def verify_and_cleanup(
         self,
         ok: bool,
         *,
         cleanup_mode: str = "none",
         dry_run: bool = False,
-        log_fn: Callable[[str], None] | None = None,
+        log_fn: Callable[[str], None] | None = None, suspended: bool = False,
     ) -> bool:
         """Pull top-level artefacts, then verify and clean up.
 
@@ -766,7 +718,7 @@ class RemoteRunner:
         # merges, the completeness record, the manifest check and its retry —
         # belongs to the fetched-output verifier. What to delete on the remote
         # is decided here, from its verdict and nothing else.
-        verdict = self._output_verifier().verify(ok, log=log)
+        verdict = self._output_verifier().verify(ok, log=log, suspended=suspended)
         if not verdict.passed:
             return False
 
@@ -791,10 +743,8 @@ class RemoteRunner:
         # the branch that decides it, so a dry run never reads "removed" for what it left in place.
         if dry_run:
             self._log_would_delete(own_dir, label=f"run dir {run.run_id}", log=log)
-        else:
-            self._cache._ssh_run(["rm", "-rf", own_dir], check=False)
-            log(f"[remote] removed this run's own dir {own_dir}.\n" if run.reattached
-                else f"[remote] removed run dir {run.run_id}.\n")
+        elif self._remove_remote(own_dir, f"this run's own dir {own_dir}" if run.reattached
+                                 else f"run dir {run.run_id}", log):
             _reuse.clean_earlier_attempts(self, log=log)
         if cleanup_mode == "all":
             cache_dir = self._cache.remote_dataset_dir(run.cache_key)
@@ -805,11 +755,7 @@ class RemoteRunner:
                     log=log,
                 )
             else:
-                self._cache._ssh_run(
-                    ["rm", "-rf", cache_dir],
-                    check=False,
-                )
-                log(f"[remote] removed dataset cache {run.cache_key[:8]}.\n")
+                self._remove_remote(cache_dir, f"dataset cache {run.cache_key[:8]}", log)
         if dry_run:
             log(
                 "[remote] [DRY-RUN] no files were actually deleted. "
@@ -873,9 +819,17 @@ class RemoteRunner:
         *, log_fn: Callable[[str], None] | None = None,
     ) -> str:
         """Cancel an allocation a crashed earlier run left behind (see
-        :func:`services.remote_jobs.sweep_orphaned_allocation`)."""
-        return sweep_orphaned_allocation(self.host, remote_pidfile, heartbeat,
-                                         log_fn=log_fn)
+        :func:`services.remote_sweep.sweep_orphaned_allocation`)."""
+        return sweep_orphaned_allocation(self.host, remote_pidfile, heartbeat, log_fn=log_fn)
+
+    def _claim_run_dirs(self, pidfile: str, heartbeat: str, *, local_output_dir, pipeline_argv,
+                        output_filter, log_fn: Callable[[str], None] | None = None) -> str:
+        """``""`` when this run may use its run directory, else why not: its own and every earlier attempt
+        of the plate the journal recorded are swept (:func:`services.remote_sweep.claim_run_dirs`)."""
+        earlier = earlier_attempt_dirs(self.host, local_output_dir, pipeline_argv,
+                                       extras=self._host_argv_extras(output_filter),
+                                       own_run_dir=posixpath.dirname(pidfile))
+        return claim_run_dirs(self.host, pidfile, heartbeat, earlier, log_fn=log_fn)
 
     @property
     def can_request_suspend(self) -> bool:
@@ -911,25 +865,9 @@ class RemoteRunner:
                 self._fetcher.cancel()
             except Exception:  # best-effort
                 swallowed()  # was: pass (silent except)
-        if self._run is None:
-            return
-        run = self._run
-        pidfile_q = _remote_quote(run.remote_pidfile)
-        try:
-            subprocess.run(
-                self.host.ssh_argv(allocate_tty=False) + [
-                    f"kill -TERM $(cat {pidfile_q} 2>/dev/null) 2>/dev/null || true"
-                ],
-                capture_output=True, timeout=10,
-            )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            # Best-effort (the local process-group kill is primary), but don't
-            # swallow it silently — record that this teardown channel failed
-            # (audit E13); close_remote_job() below is the scheduler backstop.
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "remote cancel: ssh kill failed (%s); relying on the local "
-                "process-group kill + scancel backstop", exc)
+        if self._run is None or not self._run.owns_remote_job:
+            return      # nothing launched: the pidfile is the last run's, maybe another session's srun
+        kill_remote_pipeline(self.host, self._run)
         # Belt-and-braces: also cancel the scheduler job (no-op on
         # direct-execution hosts / when no job id was recorded).
         self.close_remote_job()
@@ -959,7 +897,7 @@ class RemoteRunner:
         # ``conda run --no-capture-output -n allwell python`` — the
         # surrounding shell prefix in ``spawn`` sources conda.sh first.
         self.env_selector = cellpose_env_selector(_conda_env_selector(self.host.remote_python)[0], local_argv)
-        remote_script = f"{self.host.remote_project_dir}/process_microscopy.py"
+        remote_script = f"{getattr(self, '_code_dir', '') or self.host.remote_project_dir}/process_microscopy.py"
         out = [*_conda_run_prefix_for(self.env_selector), "python", remote_script]
         i = 2  # skip the interpreter + script slots
         # Suppress the remote completeness check unconditionally; the client

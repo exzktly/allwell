@@ -25,11 +25,18 @@ class LogFnLogger:
         text = (msg % args) if args else str(msg)
         self._log(f"{prefix}{text}\n")
 
+    # The level travels in the line, as the ``[warn]`` / ``[error]`` tag ``pipeline_runner.classify_log_line``
+    # believes before any keyword guess. Emitting every level as a bare ``[remote] `` line made the completeness
+    # verdict — "INCOMPLETE: 3 well(s) cover fewer FOV-groups…" — an INFO line in the log drawer, scrolled past on
+    # the one run it was written for (tracker row B4).
     def info(self, msg, *args):
         self._emit("[remote] ", msg, args)
 
     def warning(self, msg, *args):
-        self._emit("[remote] ", msg, args)
+        self._emit("[remote] [warn] ", msg, args)
 
     def error(self, msg, *args):
-        self._emit("[remote] ", msg, args)
+        self._emit("[remote] [error] ", msg, args)
+
+    def exception(self, msg, *args):
+        self._emit("[remote] [error] ", msg, args)

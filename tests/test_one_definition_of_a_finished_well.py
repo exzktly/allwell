@@ -125,7 +125,7 @@ DEFINITION = {
 #: Sites that list ``<well>_out.zip`` for something other than deciding whether a well is finished. Each names what
 #: it does instead; an entry that stops matching anything fails :func:`test_every_allowlisted_site_still_lists`.
 NOT_A_COMPLETION_DECISION = {
-    "services/remote_fetch.py::FetchedOutputVerifier._list_completed_wells_in": (
+    "services/remote_listing.py::list_completed_wells": (
         "verify's backstop: every well the remote holds an archive for is one verification must find here — sealed "
         "or not, since an unsealed archive is still output this run may have produced. It decides what to check "
         "locally, not what is finished (fetch slice, A1/A3)"),
@@ -220,13 +220,15 @@ def test_nothing_outside_the_definition_lists_out_zip_to_decide_completion():
 #: Verify's backstop listing counts every archive, sealed or not — right for "what must verification find here",
 #: wrong for "what is finished". The pre-flight, the re-attach probe and the pre-staging download all reached it
 #: for the second question (tracker B2); only the verifier itself may call it.
-_BACKSTOP = frozenset({"_list_completed_wells_in", "_list_remote_completed_wells"})
+#: ``remote_listing.list_completed_wells`` is the listing itself, which the verifier's methods wrap.
+_BACKSTOP = frozenset({"_list_completed_wells_in", "_list_remote_completed_wells", "list_completed_wells"})
 _BACKSTOP_OWNER = "services/remote_fetch.py"
 
 
 def backstop_callers(tree: ast.Module) -> list[int]:
     return sorted(node.lineno for node in ast.walk(tree)
-                  if isinstance(node, ast.Attribute) and node.attr in _BACKSTOP)
+                  if (isinstance(node, ast.Attribute) and node.attr in _BACKSTOP)
+                  or (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _BACKSTOP))
 
 
 def test_only_verification_reads_its_own_backstop_listing():

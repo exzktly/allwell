@@ -53,7 +53,7 @@ def _remote(tmp_path, monkeypatch, *, squeue_lists: str | None = None):
 
     monkeypatch.setattr(DatasetCache, "_ssh_script", lambda self, script, *, check: run(script))
     monkeypatch.setattr(DatasetCache, "_ssh_run", lambda self, argv, *, check, **k: run(_remote_join(argv)))
-    monkeypatch.setattr(FetchedOutputVerifier, "verify", lambda self, ok, *, log: FetchVerification(passed=True))
+    monkeypatch.setattr(FetchedOutputVerifier, "verify", lambda self, ok, *, log, **k: FetchVerification(passed=True))
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
 
 

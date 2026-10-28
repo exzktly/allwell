@@ -160,11 +160,17 @@ def _recover_from(runner, remote_dir: str, local_output_dir: Path,
     host = runner.host.ssh_alias
     # Finished means sealed (`pipeline.run_report.finished_wells`): a well the earlier run left part way, or with
     # failed groups, wrote an out.zip too, and pulling it here as finished output made the next staging leave it
-    # out of the upload. A listing that fails finds nothing — the wells are then sent and recomputed, never
-    # stale ones taken for finished.
+    # out of the upload.
     listing = list_remote_outputs(runner._cache, remote_dir)
+    if listing is None:
+        # Unknown, not empty: staging on "nothing there" would upload and recompute wells that may be finished on
+        # the host, and an incremental run then empties its own remote output directory (tracker row A1).
+        log(f"[remote] resume: could not list {runner.host.ssh_alias}:{remote_dir}; not starting a run that might "
+            f"recompute or overwrite finished wells there — retry once the host answers.\n")
+        return Recovery(ok=False, remote_dir=remote_dir,
+                        still_missing=("the earlier run's remote directory could not be listed",))
     on_remote = finished_on_remote(listing)
-    if listing is not None and listing.part_way:
+    if listing.part_way:
         log(f"[remote] resume: {host}:{remote_dir} also holds {len(listing.part_way)} well(s) left part way "
             f"({_sample(listing.part_way)}) — not downloaded as finished; they are run again\n")
     if not on_remote:

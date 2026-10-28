@@ -81,13 +81,17 @@ from services.remote_run_state import (
     LocalInputMode,
     OutputFilter,
     _RemoteRun,
-    _canonical_well_from_path,
 )
 from services.remote_log_adapter import LogFnLogger as _LogFnLogger
 from services.remote_staging import input_well_containers
-from services.remote_fetch_place import Placer, local_output_mb, merge_fetched_csv_dir, place_whole
+from services.remote_fetch_place import (
+    Placer, discard_transit_dir, local_output_mb, merge_fetched_csv_dir, place_whole, set_aside_unreadable_zip)
+from services.remote_fetch_verify import (  # noqa: F401 — the snapshot is re-exported: runner, resume and batch use it
+    artifact_changed as _artifact_changed, partial_wells, snapshot_local_artifacts as _snapshot_local_artifacts,
+    well_shortfall, wells_to_replace)
+from services.remote_listing import list_completed_wells, list_remote_glob
 from services.remote_fetch_nanowells import (
-    fetch_nanowell_tables, missing_nanowell_tables, pull_nanowell_results, well_files_to_delete)
+    fetch_nanowell_tables, pull_nanowell_results, well_files_to_delete)
 from services.remote_wire import (
     TRANSIENT_PREFIX,
     _BREADCRUMB_INTERVAL_S,
@@ -177,49 +181,6 @@ def _classify_fetched_wells(
 
 
 
-def _snapshot_local_artifacts(local_output_dir: Path) -> dict:
-    """Fingerprint the output artefacts already on disk, before the run.
-
-    ``(size, mtime_ns)`` per path. Cheap — one ``stat`` per file, no reads — and
-    it is the only way verify can tell "this well's output was replaced" from
-    "this well's output is still the one from yesterday", which are otherwise
-    the same observation: a file that exists and is non-empty.
-    """
-    out: dict = {}
-    try:
-        entries = list(local_output_dir.glob("*"))
-    except OSError:
-        return out
-    for path in entries:
-        try:
-            if path.is_file():
-                st = path.stat()
-                out[path.name] = (st.st_size, st.st_mtime_ns)
-        except OSError:
-            continue
-    return out
-
-
-
-def _artifact_changed(run, path: Path) -> bool:
-    """Whether *path* differs from its pre-run fingerprint.
-
-    A file absent from the snapshot is new, so it changed. Anything that cannot
-    be stat'd now is reported as changed rather than failing the run on an
-    unreadable file — this check exists to catch output that was silently *not*
-    written, not to invent new ways for a good run to fail.
-    """
-    before = (run.pre_run_artifacts or {}).get(path.name)
-    if before is None:
-        return True
-    try:
-        st = path.stat()
-    except OSError:
-        return True
-    return (st.st_size, st.st_mtime_ns) != before
-
-
-
 def _scan_output_fov_tps(
     output_dir: Path, *, schema: str, sep: str,
 ) -> tuple[set[str], set[str]]:
@@ -283,7 +244,7 @@ def _tp_sort_key(tok: str):
 
 def run_client_side_completeness_check(
     local_input_dir: Path | None, local_output_dir: Path, *,
-    log_fn: Callable[[str], None] | None = None,
+    log_fn: Callable[[str], None] | None = None, suspended: bool = False,
 ) -> dict:
     """Record completeness for a remote run, on the client, after the fetch.
 
@@ -307,8 +268,11 @@ def run_client_side_completeness_check(
     outcomes here are an honest record or no record at all — and no record
     reads as "not checked", which is what actually happened.
 
-    Best-effort throughout: a remote run's output is already on disk and
-    verified, and failing to describe it must not fail it.
+    Best-effort throughout: failing to describe a run must not fail it. What it
+    *finds* is another matter — verification fails a run whose record calls a
+    well it covers partial (``FetchedOutputVerifier.verify``, row B4), and the
+    verdict reaches the log at warning level (``LogFnLogger``). *suspended*
+    records a Suspend's wind-down as one rather than as a broken plate.
     """
     log = log_fn or (lambda _m: None)
     out_dir = Path(local_output_dir)
@@ -344,6 +308,7 @@ def run_client_side_completeness_check(
             csv_prefix=csv_prefix,
             started_at=None,
             mode="remote",
+            suspended=suspended,
             atomic_writer=_safe_atomic_text_write,
             log=_LogFnLogger(log),
         )
@@ -456,7 +421,7 @@ class Fetcher:
         self.run = run
         self.output_filter = output_filter
         self._log = log_fn or (lambda _msg: None)
-        self._progress = progress_fn
+        self._progress = getattr(progress_fn, "download", progress_fn)  # its own direction (TransferProgress)
         self._delete_after_download = delete_after_download
         self._stop = threading.Event()
         self._pending: queue.Queue = queue.Queue()  # well labels, after_queued tasks, None
@@ -917,6 +882,8 @@ class Fetcher:
         # so this costs no extra round trip. Either size being unknown drops the
         # combined total to None and the dial simply does not run — an unknown
         # denominator must not become an invented one.
+        # ``csv_files`` is ``None`` when the listing itself failed: what the remote holds is then unknown, which
+        # is never the same answer as "no CSV" (``services.remote_listing``).
         csv_host, csv_files, csv_bytes = self._list_remote_glob(csv_glob_src)
         combined_bytes = (expected_bytes + csv_bytes
                           if expected_bytes and csv_bytes else expected_bytes)
@@ -973,7 +940,7 @@ class Fetcher:
         # the per-well CSV is the most important file and any retry can
         # re-pull it.
         t1 = time.monotonic()
-        csv_listed = len(csv_files)
+        csv_listed = len(csv_files or ())
         self._set_activity(well, "downloading its CSV file(s)")
 
         def _csv_bytes_landed(dest_dir: Path) -> int:
@@ -1012,13 +979,13 @@ class Fetcher:
             # so a long merge does not hold the next well's download (`remote_fetch_place`).
             pending_csvs = _new_transit_dir(self.run.local_output_dir, f"allwell-csv-{well}-", log_fn=self._log)
             with _csv_dir_heartbeat(pending_csvs):
-                csv_count = self._pull_listed(csv_host, csv_files, pending_csvs)
+                csv_count = self._pull_listed(csv_host, csv_files or [], pending_csvs)
             csv_dest = pending_csvs.parent
         else:
             csv_dest = self.run.local_output_dir
             with _csv_dir_heartbeat(csv_dest):
-                csv_count = self._pull_listed(csv_host, csv_files, csv_dest)
-            retire_superseded_csvs(csv_files, csv_dest)
+                csv_count = self._pull_listed(csv_host, csv_files or [], csv_dest)
+            retire_superseded_csvs(csv_files or [], csv_dest)
         csv_elapsed = time.monotonic() - t1
         fetch_nanowell_tables(self, well)
         # Held back until the zip is in place: this line is the half that
@@ -1028,38 +995,69 @@ class Fetcher:
             f"{_fmt_secs(csv_elapsed)}\n"
             if csv_count > 0 else None
         )
-        if csv_count == 0 and csv_listed:
+        # The CSV half is complete only when the remote could be asked, had at least one CSV for the well, and
+        # every one of them landed. Anything less leaves the well unfetched: no settings marker, no deletion of the
+        # remote copy (tracker row A2) — the verify step's retry pulls it again.
+        csv_short: str | None = None
+        if csv_files is None:
+            csv_short = "its CSV file(s) could not be listed on the remote"
+            self._log(f"[remote] ↓ {well}: WARN could not list its CSV file(s) on {self.host.ssh_alias}; keeping "
+                      f"the remote copy — the verify step will retry.\n")
+        elif csv_count == 0 and csv_listed:
             # The remote HAS the CSVs; every pull of them failed. That is a
             # local-side fault (a full or unwritable destination, or a network
             # mount that dropped its session), and saying "no CSV files found"
             # here would point the user at the wrong machine entirely.
+            csv_short = f"none of its {csv_listed} CSV file(s) could be written to {csv_dest}"
             self._log(
                 f"[remote] ↓ {well}: WARN the remote has {csv_listed} CSV "
                 f"file(s) but none could be written to {csv_dest} — check that "
                 f"volume; the verify step will retry.\n"
             )
         elif csv_count == 0:
+            csv_short = f"the remote has no CSV for it at {self.run.remote_output_dir}"
             self._log(
                 f"[remote] ↓ {well}: WARN no CSV files found at "
                 f"{self.run.remote_output_dir}/*_{well}.csv\n"
             )
+        elif csv_count < csv_listed:
+            csv_short = f"only {csv_count} of its {csv_listed} CSV file(s) arrived"
+            self._log(f"[remote] ↓ {well}: WARN {csv_short}; keeping the remote copy — the verify step will retry.\n")
 
-        finish = functools.partial(self._place, well, tmp_zip, pending_csvs, csv_line, csv_count, t0, total)
+        finish = functools.partial(self._place, well, tmp_zip, pending_csvs, csv_line, csv_count, t0, total,
+                                   csv_short=csv_short)
         self._placer.submit(finish) if self.run.incremental else finish()
 
     def _place(self, well: str, tmp_zip: Path, pending_csvs: Path | None, csv_line: str | None, csv_count: int,
-               t0: float, total: int) -> None:
-        """Put a downloaded well into the output, mark it fetched, free its remote copy."""
-        if pending_csvs is not None:
-            merge_fetched_csv_dir(self, pending_csvs)
+               t0: float, total: int, *, csv_short: str | None = None) -> None:
+        """Put a downloaded well into the output, mark it fetched, free its remote copy.
+
+        Only a well whose CSVs all arrived (*csv_short* is ``None``) and merged is marked fetched, given its
+        settings marker and deleted from the remote. An incremental well short of either keeps its old local
+        archive too: merging the new fields' images beside a CSV without their rows would list them as done.
+        """
+        if csv_short is None and pending_csvs is not None:
+            failed = merge_fetched_csv_dir(self, pending_csvs)
+            if failed:
+                csv_short = (f"the merge of {', '.join(failed)} into the local CSV failed; the fetched rows are "
+                             f"kept in {pending_csvs}")
+        elif pending_csvs is not None:
+            discard_transit_dir(pending_csvs)     # a short well's partial CSVs: the remote copy is kept whole
+        if csv_short is not None:
+            self.run.fetch_shortfalls[well] = csv_short
         # Now materialize the well's output in the user's output_dir
         # according to local input mode.
         self._set_activity(well, f"placing the output in {self.run.local_output_dir}")
-        materialized = self._materialize(well, tmp_zip)
+        materialized = (csv_short is None or not self.run.incremental) and self._materialize(well, tmp_zip)
         try:
             tmp_zip.unlink()
         except OSError:
             pass
+        if csv_short is not None:
+            self._log(f"[remote] ↓ {well}: WARN not counted as fetched — {csv_short}. Keeping the remote copy and "
+                      f"leaving the well for the end-of-run retry.\n")
+            self._journal_well(well, "not-fetched", reason=csv_short)
+            return
         if not materialized:
             # The local artifact isn't safely in place — do NOT mark the well
             # fetched or delete the remote copy (audit X2); leave it for the
@@ -1108,18 +1106,20 @@ class Fetcher:
         if paths:
             delete_remote_paths(self.host, paths, what=f"per-well files of {well}", log_fn=self._log)
 
-    def _merge_fetched_csvs(self, tmp_csv_dir: Path) -> None:
+    def _merge_fetched_csvs(self, tmp_csv_dir: Path) -> list[str]:
         """Merge each partial per-well CSV pulled into *tmp_csv_dir* into the
         matching full CSV under ``local_output_dir`` (incremental remote runs).
 
         The loop itself lives beside `merge_records_into_csv` in `pipeline.io`,
         because deciding what to do when one of these merges fails is a
-        property of the merge, not of the remote runner.
+        property of the merge, not of the remote runner. Returns the names of
+        the partials that did not merge, so the caller can keep the well.
         """
         from pipeline.io import merge_fetched_csvs
 
-        merge_fetched_csvs(tmp_csv_dir, self.run.local_output_dir,
-                           log_fn=self._log)
+        failed: list[str] = []
+        merge_fetched_csvs(tmp_csv_dir, self.run.local_output_dir, log_fn=self._log, failed=failed)
+        return failed
 
 
     def _materialize(self, well: str, well_zip: Path) -> bool:
@@ -1204,6 +1204,10 @@ class Fetcher:
         from pipeline.io import merge_images_into_zip
 
         if not _zip_is_complete(target := dest / f"{well}_out.zip"):   # nothing (whole) to merge into: place it
+            if target.exists():          # unreadable, not absent: its earlier fields' images go with it (row B6)
+                self.run.fetch_shortfalls[well] = set_aside_unreadable_zip(target, well, log=self._log)
+                if target.exists():
+                    return False             # could not be set aside: never placed over, the remote copy is kept
             return place_whole(well_zip, target) or True
         # Beside the destination, like the transit zip: one well's extracted output on its way into `dest`.
         tmp_dir = _new_transit_dir(dest, f"allwell-merge-{well}-",
@@ -1370,83 +1374,45 @@ class Fetcher:
         )
         return result.returncode == 0
 
-    def _list_remote_glob(self, src_glob: str) -> tuple[str, list[str], int | None]:
-        """``(host, remote paths, total bytes)`` for a remote glob, in one ssh.
+    def _list_remote_glob(self, src_glob: str) -> tuple[str, list[str] | None, int | None]:
+        """``(host, remote paths or None, total bytes)`` for a remote glob, in one ssh.
 
-        Split out of :meth:`_rsync_glob` so a caller can know what it is about
-        to pull *before* it pulls it — the CSV half of a well's fetch needs its
-        byte total up front, or the well's dial has no denominator for that half
-        and has to stop moving at the end of the zip.
-
-        The size is a second command in the *same* script, so this costs no
-        extra round trip. It is deliberately separate from the path listing:
-        ``ls -1`` gives one clean path per line and is what the pull has always
-        parsed, while summing sizes needs ``ls -ln``'s columns, which vary
-        between GNU and BSD and break on a filename with a space. If the sum is
-        missing or unparseable the paths are still returned and the total is
-        ``None`` — an unknown denominator means no dial, never an invented one.
+        Split out of :meth:`_rsync_glob` so a caller can know what it is about to pull *before* it pulls it — the
+        CSV half of a well's fetch needs its byte total up front, or the well's dial has no denominator for that
+        half. The paths are ``None`` when the listing itself failed — the remote's contents are then unknown, and
+        every caller keeps what it would otherwise have deleted (``services.remote_listing``, tracker row A1).
         """
-        host, path_glob = src_glob.split(":", 1)
-        script = (
-            f"ls -1 {path_glob} 2>/dev/null || true\n"
-            f"echo '---allwell-bytes---'\n"
-            f"ls -ln {path_glob} 2>/dev/null | awk '{{s+=$5}} END {{print s+0}}'\n"
-        )
-        try:
-            listing = subprocess.run(
-                self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-                input=script.encode("utf-8"),
-                capture_output=True,
-                timeout=60,
-            )
-        except (subprocess.TimeoutExpired, OSError):
-            return host, [], None
-        out = (listing.stdout.decode("utf-8", errors="replace")
-               if listing.stdout else "")
-        head, _, tail = out.partition("---allwell-bytes---")
-        files = [ln for ln in head.splitlines() if ln.strip()]
-        total: int | None = None
-        for token in tail.split():
-            if token.isdigit():
-                total = int(token) or None
-                break
-        return host, files, total
+        return list_remote_glob(
+            self.host, src_glob,
+            on_failure=lambda why: self._log(f"[remote] ↓ WARN could not list {src_glob} ({why}).\n"))
 
     def _pull_listed(self, host: str, files: list[str], dest_dir: Path) -> int:
         """Pull already-listed remote paths into *dest_dir*; return how many
         landed. The transfer half of :meth:`_rsync_glob`, split so the listing
-        can happen earlier (see :meth:`_list_remote_glob`)."""
+        can happen earlier (see :meth:`_list_remote_glob`). ``--timeout=120`` is
+        rsync's I/O-idle bound, so a half-open connection mid-pull ends in two
+        minutes instead of holding the drain for TCP keepalive's hours (row C7)."""
         pulled = 0
         dest_str = to_rsync_path(dest_dir).rstrip("/") + "/"
         for f in files:
             if self._rsync(
                 [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
-                 "-a", f"{host}:{f}", dest_str]
+                 "-a", "--timeout=120", f"{host}:{f}", dest_str]
             ):
                 pulled += 1
         return pulled
 
-    def _rsync_glob(self, src_glob: str, dest_dir: Path) -> tuple[int, int]:
-        """Pull files matching a glob. Wraps the source in a quoted-glob
-        rsync so the remote side expands ``*``, not the local shell.
+    def _rsync_glob(self, src_glob: str, dest_dir: Path) -> tuple[int | None, int]:
+        """Pull files matching a remote glob; return ``(listed, pulled)``.
 
-        Returns ``(listed, pulled)`` — how many files the remote's glob matched,
-        and how many of them landed locally. The caller needs both to tell the
-        two failures apart: the remote produced no CSVs for this well, or it
-        produced them and the *local* write failed. Reporting only the pulled
-        count made a dropped session on a network-mounted output dir read as
-        "no CSV files found" on the remote, which sent every diagnosis in the
-        wrong direction.
+        ``listed`` is how many files the remote's glob matched, or ``None`` when the listing failed and that is
+        unknown — never ``0``, which is the answer for "the remote has none" and lets a caller release what it
+        holds. ``pulled`` is how many landed. The caller needs both to tell "the remote produced nothing" from "it
+        did and the local write failed" from "the remote could not be asked".
         """
-        # We list over ssh first; rsync's own glob support requires the source
-        # to be quoted in a way that's awkward to spell cross-shell. The listing
-        # and the per-file rsync both go through the runner's ssh policy (key,
-        # accept-new, batchmode), and the script is piped via stdin so the
-        # remote bash expands any ``~`` in the glob normally — shlex.quote here
-        # would lose that and the listing would silently return nothing — as
-        # bytes, so Windows text mode cannot translate ``\n`` → ``\r\n`` and
-        # trip the remote bash with ``$'\r': command not found``.
         host, files, _total = self._list_remote_glob(src_glob)
+        if files is None:
+            return None, 0
         if not files:
             return 0, 0
         return len(files), self._pull_listed(host, files, dest_dir)
@@ -1485,13 +1451,17 @@ class FetchedOutputVerifier:
         self._cache = cache
         self._cancelled = cancelled
 
-    def verify(self, ok: bool, *, log: Callable[[str], None]) -> FetchVerification:
+    def verify(self, ok: bool, *, log: Callable[[str], None], suspended: bool = False) -> FetchVerification:
         """Pull top-level artefacts, then check every well arrived.
 
         *ok* is the pipeline's own verdict. The sidecar, the error tracebacks
         and the client-side completeness record are brought home either way —
         a run that failed is exactly the one whose records are worth having —
-        but a failed pipeline never passes.
+        but a failed pipeline never passes. Nor does a run whose sidecar could
+        not be pulled (the local one then describes a different run, and cleanup
+        would delete the only correct copy — row A8), nor one the completeness
+        record calls partial in any well it covers (row B4) unless *suspended*,
+        where partial wells are what the user asked for.
         """
         run = self._run
         assert run is not None
@@ -1523,12 +1493,8 @@ class FetchedOutputVerifier:
         # scorer proceeds.
         prior_field_quality = read_field_quality_block(info_path)
         prior_user_blocks = read_user_blocks(info_path)
-        for top in ("pipeline_info.json",):
-            self._rsync_optional(
-                f"{self.host.ssh_alias}:{run.remote_output_dir}/{top}",
-                run.local_output_dir / top,
-                log_fn=log,
-            )
+        sidecar_ok = self._rsync_optional(
+            f"{self.host.ssh_alias}:{run.remote_output_dir}/pipeline_info.json", info_path, log_fn=log)
         if merge_fetched_run_report(info_path, prior_run_report):
             log("[remote] merged this run's completeness records into the "
                 "existing pipeline_info run_report.\n")
@@ -1572,8 +1538,8 @@ class FetchedOutputVerifier:
         # fields the very next line repairs. Runs before the `ok` gate too — a
         # run that came back short is exactly the one whose record is worth
         # having, and the shortfall is what the record is for.
-        run_client_side_completeness_check(
-            run.local_input_dir, run.local_output_dir, log_fn=log)
+        completeness = run_client_side_completeness_check(
+            run.local_input_dir, run.local_output_dir, log_fn=log, suspended=suspended)
 
         if not ok:
             log("[remote] pipeline returned non-zero — skipping cleanup, leaving remote state.\n")
@@ -1593,6 +1559,15 @@ class FetchedOutputVerifier:
             # has one answer rather than two that can disagree.
             self._journal_retry_outcomes(attempted, missing)
         missing = [*missing, *short_reanchored]      # the remote holds their only re-anchored copy
+        if not sidecar_ok:
+            missing.append("this run's pipeline_info.json could not be pulled, so the local one describes another "
+                           "run — the remote copy is kept")
+        scope = set(run.expected_wells) | set(run.force_wells) | set(getattr(self, "_listed", None) or ())
+        partial = [] if suspended else partial_wells(completeness, scope)
+        missing += [f"{w} covers fewer FOV-groups than its input holds (completeness check: partial)"
+                    for w in partial]
+        for m in missing[len(missing) - (len(partial) + (not sidecar_ok)):]:
+            log(f"[remote] verify: {m}\n")
 
         # Written *after* the retry, because the retry is what turns a failed
         # pull into a fetched well and the report has to describe the outcome
@@ -1606,7 +1581,7 @@ class FetchedOutputVerifier:
         if missing:
             log(
                 f"[remote] keeping remote files for retry — verification failed: "
-                f"{len(missing)} file(s) missing.\n"
+                f"{len(missing)} problem(s), listed above.\n"
             )
             return FetchVerification(False, reason="incomplete", missing=tuple(missing))
         return FetchVerification(True)
@@ -1624,12 +1599,16 @@ class FetchedOutputVerifier:
         verdict on the run: a non-zero rc means the pull did not happen, which
         covers both "there was nothing there" and "there was, and it could not
         be fetched", and this cannot tell those apart.
+
+        Bounded by rsync's own ``--timeout=120`` (I/O-idle) and by Stop, never by a wall clock: a re-anchored
+        nanowell archive takes minutes to come home, and the 60 s cap this had killed it four times and failed
+        verification on every run (row C5).
         """
         dest.parent.mkdir(parents=True, exist_ok=True)
         result = _rsync_with_retry(
             [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
-             "-a", src, to_rsync_path(dest)],
-            log_fn=log_fn, timeout=60,
+             "-a", "--partial-dir=.allwell-partial", "--timeout=120", src, to_rsync_path(dest)],
+            log_fn=log_fn, timeout=None, stop_event=self._cancelled,
         )
         if result.returncode != 0:
             tail = f" {absent_note}" if absent_note else ""
@@ -1688,14 +1667,15 @@ class FetchedOutputVerifier:
                 LocalInputMode.MIXED, LocalInputMode.FOLDER)
         )
 
-        def _pull(remote_src: str) -> None:
-            _rsync_with_retry(
+        def _pull(remote_src: str) -> bool:
+            result = _rsync_with_retry(
                 [resolve_rsync_binary(), *_rsync_ssh_transport(host),
                  "-a", "--partial-dir=.allwell-partial", "--timeout=120",     # never a half file under its name
                  f"{host.ssh_alias}:{remote_src}",
                  to_rsync_path(run.local_output_dir).rstrip("/") + "/"],
                 log_fn=log, timeout=None, stop_event=self._cancelled,
             )
+            return getattr(result, "returncode", 1) == 0
 
         # This backstop reports in the SAME per-well lines the in-stream fetch
         # uses, rather than a form of its own. Those two lines are what the
@@ -1725,59 +1705,77 @@ class FetchedOutputVerifier:
                 log(f"[remote] ↓ {well}: {len(found)} CSV file(s) in "
                     f"{_fmt_secs(elapsed)} (end-of-run retry)\n")
 
+        replace_set = wells_to_replace(run, wells)
         for well in sorted(wells):
-            well_t0 = time.monotonic()
             if self._cancelled.is_set():
                 log("[remote] end-of-run retry cancelled by Stop.\n")
                 return wells
-            # Re-pull the per-well CSV(s) only if they're actually missing or
-            # empty locally — a present CSV needs no refetch.
-            local_csvs = _glob_csvs(run.local_output_dir, f"*_{well}")
-            csv_ok = bool(local_csvs) and all(p.stat().st_size > 0 and csv_is_whole(p) for p in local_csvs)
-            if not csv_ok:
-                files = list_remote_csvs(host, run.remote_output_dir, well, log,
-                                         compress=well not in run.fetched_wells)
-                if files is None:
-                    continue
-                for f in files:
-                    _pull(f)
-                retire_superseded_csvs(files, run.local_output_dir)
-            _report_csvs(well, time.monotonic() - well_t0)
-            if run.output_filter is OutputFilter.CSV_ONLY: _report_zip(well, 0.0)     # its zip half: nothing to pull
-            # Re-pull {well}_out.zip ONLY when the user's output mode wants it
-            # AND it isn't already present locally. Pulling a multi-hundred-MB
-            # zip just because a CSV was missing is what dragged this backstop
-            # into the wall-clock retry loop in the first place.
-            if want_zip:
-                zip_t0 = time.monotonic()
-                out_zip = run.local_output_dir / f"{well}_out.zip"
-                # A well the run undertook to reprocess is the exception to
-                # "present means nothing to pull": the file sitting there is
-                # the one the new output was supposed to replace, so its mere
-                # presence is the symptom rather than the all-clear. Re-pull it
-                # when it still carries the pre-run size and timestamp — that
-                # is the difference between reporting the loss and repairing it.
-                stale = (
-                    (run.force or well in run.force_wells)
-                    and out_zip.exists()
-                    and not _artifact_changed(run, out_zip)
-                )
-                # Not "exists and non-empty": rsync's --partial leaves a Stop's half-pulled zip under its real
-                # name, and that file is neither the well's output nor a reason to skip pulling it.
-                if not _zip_is_complete(out_zip) or stale:
-                    _pull(f"{run.remote_output_dir}/{well}_out.zip")
-                _report_zip(well, time.monotonic() - zip_t0)
-            # The record of which settings produced it, as the in-stream fetch
-            # brings (`Fetcher._pull_settings_marker`): without it a well
-            # recovered here reads as grandfathered, and a later run with
-            # different settings would keep its numbers as though they matched.
-            pull_settings_marker(
-                pull_small_file, host, f"{run.remote_output_dir}/{SETTINGS_DIRNAME}/{well}.json",
-                run.local_output_dir / SETTINGS_DIRNAME / f"{well}.json",
-                stop_event=self._cancelled, what=f"the settings marker for {well}")
+            self._retry_one_well(well, replace=well in replace_set, want_zip=want_zip, pull=_pull, log=log,
+                                 report=(_report_csvs, _report_zip))
         # Whether any of this actually recovered a well is not decided here —
         # see ``_journal_retry_outcomes``, which reads verify's answer.
         return wells
+
+
+    def _retry_one_well(self, well: str, *, replace: bool, want_zip: bool, pull, log, report) -> bool:
+        """Re-pull what *well* is missing, then credit it only if verification's own check now passes.
+
+        A present, whole file is pulled again only when it is the one this run was meant to replace: a well this
+        run reprocessed or announced that still carries its pre-run size and timestamp, or one whose in-stream
+        fetch recorded a shortfall. An incremental run never pulls over a present file — its remote output holds
+        only the new fields, so that would discard every earlier one — and a recorded shortfall on it stays failed.
+
+        The settings marker, the "downloaded" lines the plate is painted from, and ``fetched_wells`` follow only a
+        well :func:`services.remote_fetch_verify.well_shortfall` now passes. Pulling the marker over output that was
+        not replaced told the next run the old numbers were computed under the new settings (rows A5, B5).
+        """
+        run = self._run
+        assert run is not None
+        t0 = time.monotonic()
+        report_csvs, report_zip = report
+        shortfall = run.fetch_shortfalls.get(well)
+        if run.incremental and shortfall:
+            log(f"[remote] end-of-run retry: {well} cannot be repaired here ({shortfall}); the remote copy is "
+                f"kept.\n")
+            return False
+        local_csvs = _glob_csvs(run.local_output_dir, f"*_{well}")
+        csv_ok = bool(local_csvs) and all(p.stat().st_size > 0 and csv_is_whole(p) for p in local_csvs)
+        stale_csv = replace and not run.incremental and not any(_artifact_changed(run, p) for p in local_csvs)
+        pulled_all = True
+        if not csv_ok or stale_csv or shortfall:
+            files = list_remote_csvs(self.host, run.remote_output_dir, well, log,
+                                     compress=well not in run.fetched_wells)
+            if files is None:
+                log(f"[remote] end-of-run retry: {well}'s CSV(s) could not be listed; the remote copy is kept.\n")
+                return False
+            pulled_all = bool(files) and all([pull(f) for f in files])
+            retire_superseded_csvs(files, run.local_output_dir)
+        if want_zip:
+            out_zip = run.local_output_dir / f"{well}_out.zip"
+            # Not "exists and non-empty": rsync's --partial leaves a Stop's half-pulled zip under its real name, and
+            # that file is neither the well's output nor a reason to skip pulling it. A present zip is the symptom,
+            # not the all-clear, when it is the one this run was meant to replace.
+            forced = run.force or well in run.force_wells
+            stale = (replace and (forced or not run.incremental) and out_zip.exists()
+                     and not _artifact_changed(run, out_zip))
+            if not _zip_is_complete(out_zip) or stale or (shortfall and not run.incremental):
+                pulled_all = pull(f"{run.remote_output_dir}/{well}_out.zip") and pulled_all
+        if shortfall and pulled_all:
+            run.fetch_shortfalls.pop(well, None)         # everything it was short of has been pulled again whole
+        still = well_shortfall(run, well, replace=replace)
+        if still:
+            log(f"[remote] end-of-run retry: {well} is still not complete ({still[0]}); the remote copy is kept.\n")
+            return False
+        report_csvs(well, time.monotonic() - t0)
+        report_zip(well, time.monotonic() - t0)
+        # The record of which settings produced it, as the in-stream fetch brings (`Fetcher._pull_settings_marker`):
+        # without it a well recovered here reads as grandfathered.
+        pull_settings_marker(
+            pull_small_file, self.host, f"{run.remote_output_dir}/{SETTINGS_DIRNAME}/{well}.json",
+            run.local_output_dir / SETTINGS_DIRNAME / f"{well}.json",
+            stop_event=self._cancelled, what=f"the settings marker for {well}")
+        run.fetched_wells.add(well)
+        return True
 
 
     def _journal_retry_outcomes(
@@ -1835,13 +1833,15 @@ class FetchedOutputVerifier:
         run = self._run
         if run is None:
             return ""
-        remote_wells = sorted(self._list_remote_completed_wells())
+        listed = self._list_remote_completed_wells()
+        remote_wells = sorted(listed or ())
+        on_remote = "unknown — the listing failed" if listed is None else str(len(remote_wells))
         lines = [
             f"run_id: {run.run_id}",
             f"force: {run.force}",
             f"force_wells: {', '.join(sorted(run.force_wells)) or '(none)'}",
             f"incremental: {run.incremental}",
-            f"wells with output on the remote: {len(remote_wells)}",
+            f"wells with output on the remote: {on_remote}",
             "",
         ]
         counts, well_lines = _classify_fetched_wells(
@@ -1875,7 +1875,7 @@ class FetchedOutputVerifier:
         summary = (
             f"[remote] fetch reconciliation: "
             f"{', '.join(parts) if parts else 'no wells'}"
-            f" (of {len(remote_wells)} with output on the remote).\n"
+            f" (of {on_remote} with output on the remote).\n"
         )
         log(summary)
         report = run.local_output_dir / "remote_fetch_report.txt"
@@ -1893,81 +1893,32 @@ class FetchedOutputVerifier:
         self, *, log: Callable[[str], None]
     ) -> list[str]:
         """Check that every well with output on the remote has its
-        full local artifact set.
+        full local artifact set. Returns the list of missing paths (empty list = all good).
 
-        Returns the list of missing paths (empty list = all good).
-
-        v5.2.25: also discovers wells from the remote output dir's
-        ``*_out.zip`` listing — not just the ``Well X — done.`` stdout
-        markers. This catches the cache-hit case where the pipeline
-        skipped already-complete wells (no ``done`` marker emitted)
-        but their outputs still need to land locally.
-
-        v5.2.29: verify the OUT_ZIP / extracted folder too, not just
-        the CSV. Pre-v5.2.29 a resumed run that had pulled the CSV
-        but failed mid-zip-rsync would silently leave the well
-        flagged "complete" — the user would have the measurements
-        but never the QC zip the GUI's Review tab needs.
-
-        The expected local artifacts depend on the user's output
-        filter and input mode:
-        - Always: ``{csv_prefix}_{well}.csv``
-        - FULL filter + ZIP/FLAT mode: also ``{well}_out.zip``
-        - FULL filter + FOLDER mode: also ``{well}/`` directory
-        - CSV_ONLY filter: just the CSV (zip explicitly discarded)
+        The wells are those that announced completion plus those the remote's ``*_out.zip`` listing names — the
+        second catches the cache-hit case, where the pipeline skipped already-complete wells (no ``done`` marker
+        fires) but their output still has to land locally. **A listing that failed fails verification**: the
+        wells the remote holds are then unknown, and passing over them is what let cleanup ``rm -rf`` a run
+        directory whose wells had never arrived (tracker row A3). Each well is judged by
+        :func:`services.remote_fetch_verify.well_shortfall` — present, non-empty, and for a well this run undertook
+        to rewrite, replaced: CSV always, ``{well}_out.zip`` under the FULL filter, its nanowell tables on a nanowell
+        run, and no recorded fetch shortfall.
         """
         run = self._run
         assert run is not None
-        all_wells = set(run.expected_wells)
-        # Backstop: ask the remote what wells it has ``{well}_out.zip``
-        # for. Pipeline-skipped wells aren't in expected_wells (no
-        # stdout marker fires for them) but their outputs are still
-        # what the user wants locally.
-        for w in self._list_remote_completed_wells():
-            all_wells.add(w)
+        listed = self._list_remote_completed_wells()
+        self._listed = listed
+        all_wells = set(run.expected_wells) | set(listed or ())
         missing: list[str] = []
-        # Output is always materialised as <well>_out.zip now (compression is
-        # mandatory and the Fetcher keeps the zip for every input mode), so the
-        # FULL filter expects that zip regardless of input mode. (Pre-always-zip
-        # this branched on FOLDER mode and expected a <well>/ dir, which no
-        # longer exists — that mismatch failed verify and skipped cleanup.)
-        want_zip_artifact = run.output_filter is OutputFilter.FULL
-        # Wells this run undertook to rewrite. A forced run promised all of
-        # them; otherwise only the wells that announced completion produced
-        # anything new, and a well legitimately left alone must not be failed.
-        must_be_replaced = (
-            set(all_wells) if run.force
-            else (set(run.force_wells) | set(run.expected_wells))
-        )
+        if listed is None:
+            # No path in the message: a run directory's hash can spell a well token, and the retry reads well
+            # names out of these messages (`_WELL_IN_MESSAGE`).
+            log(f"[remote] verify: could not list {run.remote_output_dir} on {self.host.ssh_alias}.\n")
+            missing.append("the remote output directory could not be listed, so which wells it holds is unknown "
+                           "— nothing there is deleted")
+        must_be_replaced = wells_to_replace(run, all_wells)
         for well in sorted(all_wells):
-            csvs = _glob_csvs(run.local_output_dir, f"*_{well}")
-            if not csvs:
-                missing.append(f"missing CSV for {well}")
-                continue
-            if any(p.stat().st_size == 0 for p in csvs):
-                missing.append(f"empty CSV for {well}")
-                continue
-            # v5.2.29: also verify the QC artifact for the user's
-            # output mode. A previous run could have pulled the CSV
-            # but failed mid-zip-rsync; without this check the well
-            # is silently flagged complete and the zip stays remote.
-            if want_zip_artifact:
-                out_zip = run.local_output_dir / f"{well}_out.zip"
-                if not out_zip.exists() or out_zip.stat().st_size == 0:
-                    missing.append(f"missing {well}_out.zip locally")
-                elif well in must_be_replaced and not _artifact_changed(
-                        run, out_zip):
-                    # Existence is not the question for a well the run was told
-                    # to reprocess: the file that is present may be the one the
-                    # new output was supposed to replace. Byte-size and mtime
-                    # both unchanged means nothing was written here, and a run
-                    # that reports success over that is the failure mode this
-                    # check exists for — hours of remote compute discarded with
-                    # nothing on screen saying so.
-                    missing.append(
-                        f"{well}_out.zip was not replaced (same size and "
-                        f"timestamp as before the run)")
-            missing.extend(missing_nanowell_tables(run, well))
+            missing.extend(well_shortfall(run, well, replace=well in must_be_replaced))
         if missing:
             for m in missing[:10]:
                 log(f"[remote] verify: {m}\n")
@@ -1981,25 +1932,21 @@ class FetchedOutputVerifier:
         return missing
 
 
-    def _list_remote_completed_wells(self) -> set[str]:
-        """ssh into the remote and list every ``{well}_out.zip`` in
-        the run's output dir; return the set of well labels. Used by
-        ``_verify_local_manifest`` to discover wells the pipeline
-        skipped (no ``Well X — done.`` marker fires when the
-        ``output_exists_for_well`` early-exit kicks in).
+    def _list_remote_completed_wells(self) -> set[str] | None:
+        """The wells with a ``{well}_out.zip`` in the run's remote output dir, or ``None`` when the listing failed.
 
-        Uses ``_ssh_script`` so ``~/.allwell-staging`` expands
-        properly on the remote (the v5.2.16 lesson). Any error
-        (ssh missing, network drop, transient timeout) degrades
-        gracefully to an empty set — verify then falls back to the
-        ``expected_wells``-only check just like pre-v5.2.25."""
+        Used by ``_verify_local_manifest`` to discover wells the pipeline skipped (no ``Well X — done.`` marker
+        fires when the ``output_exists_for_well`` early-exit kicks in). Goes through ``_ssh_script`` so
+        ``~/.allwell-staging`` expands on the remote. A failed ssh is ``None``, never an empty set: "the remote has
+        no output" is an answer a caller may act on by deleting, and "the remote could not be asked" is not.
+        """
         run = self._run
         if run is None:
             return set()
         return self._list_completed_wells_in(run.remote_output_dir)
 
 
-    def _list_completed_wells_in(self, remote_dir: str) -> set[str]:
+    def _list_completed_wells_in(self, remote_dir: str) -> set[str] | None:
         """The same listing, for any remote directory rather than this run's.
 
         Split out so the address the run journal recorded can be *checked*
@@ -2008,21 +1955,4 @@ class FetchedOutputVerifier:
         re-attaching to it is safe. One implementation, so "what counts as a
         completed well" cannot come to mean two things a few lines apart.
         """
-        try:
-            listing = self._cache._ssh_script(
-                f"ls -1 {remote_dir}/*_out.zip 2>/dev/null || true",
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return set()
-        wells: set[str] = set()
-        if listing is None or not listing.stdout:
-            return wells
-        for line in listing.stdout.splitlines():
-            stem = Path(line.strip()).name.removesuffix(".zip")
-            if stem.endswith("_out"):
-                well = stem[:-len("_out")]
-                label = _canonical_well_from_path(well)
-                if label is not None:
-                    wells.add(label)
-        return wells
+        return list_completed_wells(self._cache._ssh_script, remote_dir)

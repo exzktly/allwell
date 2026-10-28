@@ -1587,7 +1587,12 @@ folder, so Review cannot tell the difference afterwards.
 **A small server icon in the run panel's status line, at its right end, shows the run's Slurm job** on a host that
 runs through a scheduler. It is green while the job is open — granted a node
 and holding it — and grey while the job is still queued for a node; once the
-job closes, or on a host with no scheduler, there is no icon. Hover over it
+job closes, or on a host with no scheduler, there is no icon. The job is
+called closed only once the host confirms the scheduler no longer lists it.
+When the run has ended and that cannot be confirmed — the host did not answer,
+or the scheduler still lists the job — the icon stays, in amber, the log says
+*job state unknown* and why, and the job may still be running: check `squeue`
+on the host. Hover over it
 for the job number and what the node is: its name and partition, the CPUs the
 job was given out of the node's total, the CPU model, the memory given and the
 node's total, its GPUs, and the job's time limit. A detail the node could not
@@ -1615,7 +1620,19 @@ GPU that supports it (an A10G or L4, not a T4). A host bootstrapped before this
 keeps working — its Cellpose runs use the first environment, in full precision,
 and the run log says so — until you press Bootstrap again. If the bootstrap warns
 that the new environment's Torch cannot see the GPU, the host's NVIDIA driver is
-too old for it (525 or later is needed). A malformed `remotes.toml` never blocks the app —
+too old for it (525 or later is needed). A package that is installed but no
+longer imports counts as missing, and a bootstrap whose last install failed
+runs it again rather than reporting the host ready.
+
+Before a remote run starts the pipeline it checks the environment can run it:
+not only that it exists, but that the last Bootstrap's install into it did not
+fail and is not still running, and that its Python can import what the pipeline
+needs. If not, the run stops at once with `[remote] ERROR: … is not ready to run
+the pipeline:` and the reason — for a module that will not import, the module
+and its error. Press Bootstrap; if it then says everything is installed and the
+same error comes back, remove the environment on the host (`conda env remove -n
+allwell`) and Bootstrap again, since the installer leaves a package that is at
+the right version alone even when it is broken. A malformed `remotes.toml` never blocks the app —
 the run log carries a warning and the dropdown stays on `Local`. Inside the
 dialog, a file that cannot be read or parsed is reported in a message naming the
 error rather than leaving Edit…, Test and the list silently doing nothing.
@@ -1654,6 +1671,35 @@ charged for the whole node and want other jobs to share it. With `--exclusive`
 it is still the scheduler command's `--cpus-per-task` that decides how many of
 the node's CPUs the run uses; the run log warns when Slurm gave it only one or
 two of a bigger node's.
+
+**Max queue wait** is how long a run waits for the scheduler to give it a node
+— queued, or granted a node that is still starting up — before it gives up. The
+time counts from the moment the run asks for the node, which on a scheduled host
+is before the plate starts uploading, so the queue wait and the upload run side
+by side: on a cluster that queues the run for longer than the setting, the run
+fails even while the plate is still uploading (a batched run stops its upload; a
+single run finishes sending first), and what reached the cluster is kept for the
+next attempt. When it runs out the job is cancelled and the run stops with
+`no node was granted within 30 min, this host's Max queue wait — cancelled job
+…`; raise the setting for a busy cluster, or set it to **Wait indefinitely**
+(0), which never gives up. A run that has started on its node is never cut
+short by it, however long it runs. It applies when the scheduler command is an
+`srun` command.
+
+**A scheduler command that sends the run's output elsewhere is refused**, when
+you save the host and when a run starts: `-o` / `--output`, `-e` / `--error`
+and `--pty` would put everything the run prints — its progress, its results,
+its errors — in a file on the cluster or on a terminal of its own, and
+All-Well, which reads the run as it goes, would see nothing and the run would
+look hung. Leave them out; the run's own log keeps all of it.
+
+**A remote run keeps the Mac awake.** All-Well drives a remote run from your computer for its whole length — it tells the cluster it is still there, hands over each batch and downloads every well — so a Mac that goes to sleep stops the run on the cluster. While a remote run is going the Mac is kept from sleeping (it may still dim the screen), and it is let sleep again when the run ends. Closing the lid of a Mac on battery still sleeps it; keep it on power, or open, for a long run.
+
+**A node that fails while the run is going is not asked for again.** A node
+that fails to start is replaced automatically (see *A node that fails to boot is
+retried* below), but once the run has started on a node, asking again would
+start it from the beginning. The run stops and the log says which node failed;
+**Resume** continues from where it stopped.
 
 **Fetch** next to *Compute profile* reads the cluster's JupyterHub
 configuration and lists the compute options its web page offers; picking one
@@ -1697,7 +1743,23 @@ so the upload is smaller, and the log now names which channel and how many
 frames. If the saving would be trivial — a couple of small frames out of a large
 well — it says so and uploads the archive untouched instead, because copying it
 locally to save that would cost more than it saves. An archive with nothing to
-drop is never copied and never mentioned.
+drop is never copied and never mentioned. A rebuilt archive comes out the same
+every time for the same plate and channels, so retrying a run that failed finds
+it already on the remote and does not send it again; changing an image or the
+channel list sends it afresh.
+
+The rebuilt archives are **copies**, made in a hidden `.allwell-transit` folder
+beside your input and deleted when the run ends; your own files keep every
+channel. That holds for every input layout, including a plate of loose images
+or well folders, which a remote run first packs into one `<well>.zip` per well
+inside your input folder — each of those holds every image the well had, and
+the next run uses them directly. After a successful run, the loose images that
+were packed are removed; an image is removed only once its name, size and
+checksum match a file inside one of those archives, so a flat-field reference,
+a plate overview or anything else that is in no well stays where it is. A well
+folder with no images in it is left untouched, and the log names it as a well
+that was not uploaded — as it does any image whose name does not parse to a
+well under your filename schema.
 
 Your own machine's home volume is not used by a remote run either. Wells arrive
 into a hidden `.allwell-transit` folder inside your chosen output folder and
@@ -1734,6 +1796,17 @@ because none of it applies:
   never deletes failed work. A nanowell run suspended before its end-of-run
   re-anchoring keeps its directory too, so the resumed run can re-anchor the
   wells it held. Unticking it leaves everything in place.
+  Verification is strict about what it could not see. If the host does not
+  answer when the app lists what it holds, if this run's `pipeline_info.json`
+  or a nanowell run's `nanowells/` tables cannot be brought back, if a well's
+  CSV did not arrive (or, for a well this run recomputed, is still the old
+  one), or if the completeness check reports a well covering fewer fields than
+  its input (`INCOMPLETE:` in the log, shown as a warning), the run ends with
+  *Remote pipeline finished but local verification failed; remote files
+  preserved for retry*, the log says which, and nothing is deleted — run it
+  again once the host is reachable to bring the rest home. A well whose CSV did
+  not arrive is not given the new settings record either, so the next run
+  recomputes it rather than taking the old numbers as current.
 - **Dry-run cleanup.** Only selectable while auto-delete is on. Logs the path,
   file count and total bytes of every remote directory that *would* be removed
   at end of run, and removes nothing — worth one run on a shared host before
@@ -1748,6 +1821,42 @@ you turned off is not turned back on, by a glance at `Local`.
 What a remote run does before it uploads (which archives it rebuilds, which it
 sends untouched) and what it reports on the way back are covered by the run log
 and by `remote_fetch_report.txt` in the output folder.
+
+**When the connection to the host fails.** Every connection All-Well opens to a
+remote host gives up on a dead link — a laptop that slept, a network change, a
+login node that went away — after about two minutes of silence from the
+connection itself, and never asks for a password: a key that does not work
+fails at once with ssh's own message ("Permission denied (publickey)", "Host
+key verification failed") in the error, rather than a bare exit code. A command
+that is merely quiet — a job waiting in the queue, a well between log lines —
+is never cut off by this.
+
+- A transfer whose connection dropped part way (*Broken pipe*, *Connection
+  closed by …*, a busy login node refusing new connections) is retried a few
+  times and resumes where it stopped; a refused login is not retried. An upload
+  that stops moving for two minutes is retried the same way.
+- **Stop** ends an upload at once, even one that has gone silent, and a well
+  whose upload did not finish keeps its partly filled dial instead of showing
+  as uploaded.
+- All-Well shares one connection per host between its short commands. If that
+  connection stops answering while a fresh one works, it is closed and the
+  command is run again on a new one.
+- If the run cannot list what it uploaded, it says so and names the reason; it
+  no longer reports that "rsync reported success but some files did not reach
+  the remote" for a listing that never ran.
+
+**The pipeline's code on the host is versioned.** Each run copies the code it
+needs into `<remote project dir>/code/<version>/` and runs it from there, so a
+second All-Well window of another version — or a newer build started while a
+batched run is between batches — can never change the code a run is in the
+middle of. Version folders nobody has used for 30 days are removed when a run
+starts. Bootstrap still installs into `<remote project dir>` itself.
+
+**Automatic cache clean-up never removes a dataset a run is using.** With
+`auto_gc = true` in `remotes.toml`, the least recently *used* cached inputs are
+deleted when the cache is over `cache_budget_gb`, but never one a run has used
+in the last seven days — another window's, or another person's, run may be
+reading it. The log names any it kept over budget for that reason.
 
 ### 11. Run / Suspend / Stop / Log
 
@@ -1795,13 +1904,32 @@ and by `remote_fetch_report.txt` in the output folder.
   wells being processed and leaves the fetching to the Download row on the stage
   rail and to the status line.
 - The line under the headline reports the plate-wide transfer while one is
-  running (`Transferring… 42%`), and clears itself the moment the pipeline
-  starts computing rather than lingering on whatever percentage the transfer
-  last reported.
+  running, and says which: `Uploading… 42%` for the images going up,
+  `Downloading… 42%` for the share of the run's wells fetched back. The upload
+  figure clears itself as soon as the upload is over — before a batch is handed
+  to the cluster and while it waits for a node — and any figure clears the
+  moment the pipeline starts computing, rather than lingering on whatever
+  percentage the transfer last reported.
 - Hover a well for its exact numbers — the stage it is in plus its field count
   (`FOV 7/12`) or transfer percentage. On a remote run an uploaded well waiting
   its turn has its own colour, distinct from one being computed — see the
   **Wells** legend beside the plate.
+- **A well that finished short is marked, not painted complete.** A well whose
+  FOV-groups partly failed, whose remaining groups were not attempted after a
+  storage failure, that produced no records, in which no image groups were found,
+  that a suspend reached part way, or — in a nanowell run — some of whose
+  timepoints came out without rows, still writes its CSV and `out.zip` from what
+  it had, and says `— done.`. On the plate it takes the **partial / unfinished**
+  colour and carries a `!`; hovering it names each shortfall in the pipeline's
+  own words (`A01: partial — 9 of 12 FOV-group(s) failed; the CSV and out.zip
+  cover the rest`). On a remote run the hover also says whether its output is
+  fetched locally or still on the server. A well that was still being computed
+  when the run ended — it crashed, was stopped, or lost its connection — is
+  marked the same way as **unfinished**, with its dial left where it got to,
+  instead of staying amber "processing" on a run that is over. The completion
+  headline counts them (`Complete — 40 well(s) processed; 3 partial or
+  unfinished (marked ! on the plate)`). Re-run with **incremental** to recover
+  the missing FOV-groups.
 - The **headline and progress bar** count wells, and count each well once. A
   well already finished by an earlier run is counted too — it is part of the
   plate you asked for, so a run that only has ten wells left to compute still
@@ -1834,7 +1962,10 @@ and by `remote_fetch_report.txt` in the output folder.
   it counts up, *Waiting for the scheduler — 4m12s (job 4812345)*, and the log
   repeats it every couple of minutes together with the exact request that was
   made. A batched run queues once per batch, and the log names
-  which batch is waiting.
+  which batch is waiting. **Max queue wait** in the remote host dialog is how
+  long a job may wait in the scheduler queue before the run gives up and
+  cancels it (*Wait indefinitely* turns that off); it has nothing to do with how
+  quickly a broken connection is noticed, which is fixed at about two minutes.
   - **Use the job number.** It is the one you would pass to `squeue -j 4812345`
     on the cluster to see why the job is pending. `Priority` or `Resources`
     usually means simply wait; anything naming a limit or a partition usually
@@ -1874,7 +2005,11 @@ and by `remote_fetch_report.txt` in the output folder.
   finishes the fields in flight and the wells it finished keep downloading, so
   the run can take a little longer to end than a local one. Pressed while the
   plate is still uploading, there is nothing running on the host yet, so it
-  stops the run instead. A batched remote run finishes the batch it is on and
+  stops the run instead. Pressed while the job is still queued for a node,
+  nothing has run either: the queued job is cancelled (rather than left to wait
+  out the queue only to stop the moment it starts), the run is shown as
+  suspended — *suspended before it started* — and Resume queues it again. Stop
+  pressed during a queue wait cancels the queued job too. A batched remote run finishes the batch it is on and
   stops any upload of the next one. If the host cannot be reached, the log says
   so and the run keeps going — press Suspend again, or Stop; if the request did
   reach the host after all, the run still ends as suspended. Once everything
@@ -1967,7 +2102,40 @@ and by `remote_fetch_report.txt` in the output folder.
   upload it ends the upload and nothing is launched on the host; pressed later,
   the host-side kill runs in the background rather than holding up the window.
   On Windows this includes an All-Well started from a terminal: Stop ends the
-  connection to the host and leaves the app open.
+  connection to the host and leaves the app open. Once the run has ended, the
+  app checks with the host that it really stopped — on a cluster, that the
+  scheduler no longer lists the job. If the host cannot be reached (the network
+  is down, say), the headline says *stopped here, but not confirmed on the host
+  (… did not answer …) — it may still be running*: check the host yourself, with
+  `squeue` on a cluster, before you assume the allocation is gone.
+- **A run nobody stopped says what ended it.** On a cluster the pipeline is
+  sometimes ended from outside — the job reaches its time limit, it is
+  preempted, its node fails, an administrator cancels it, or a batch outlives
+  the time budget the batch driver gives it. The run is then reported as a
+  failure that names the cause (*Remote pipeline was terminated: the scheduler
+  ended job 4242 at its time limit.*), the raw log opens, and the run is
+  offered back as a *Failed run*. It is never shown as your Suspend — that is
+  only ever a Suspend you pressed. The wells that finished are kept; resume to
+  run the rest (for a time limit, with a longer `--time` in the host's
+  launcher, or a smaller batch size). A local run that is sent a termination
+  signal by something other than Stop or Suspend is reported the same way.
+- **A remote run that goes quiet is checked.** If a remote run prints nothing
+  for twenty minutes (outside a wait in the scheduler's queue, which is quiet by
+  nature), the status line says *No output from `<host>` for 21m00s — checking it
+  is still running…*, the log shows the last line received, and the app asks the
+  host whether the run is still there. The answer goes in the log: still
+  running (it is only slow — nothing to do), no longer running (press **Stop**,
+  then **Resume** to download the wells it finished and run the rest), or not
+  known (the host did not answer). Nothing is stopped for you. A healthy run is
+  never that quiet — every field, step or transfer prints something — so the
+  warning means something is worth a look, not that the run has failed.
+- **A dropped connection is reported as one.** If the connection to the host
+  breaks during a remote run, the headline says *Connection to `<host>` lost*
+  with ssh's own reason (*Timeout, server … not responding*, *Connection …
+  closed*, *Broken pipe*), the log shows that line in red, and the message says
+  whether the job is still running on the host, no longer running, or — when
+  the host cannot be reached to ask — may still be running. Resume downloads the
+  wells it finished and runs the rest.
 - Either way the wells already finished keep their results, so nothing you have
   waited for is thrown away — Suspend just also keeps the fields in progress and
   saves you re-entering the form.
@@ -6843,9 +7011,9 @@ records the unit of its coordinates the converter recovers from that by itself;
 when it does not, enter the grid and FOVs per well and the plate map follows what
 you typed.
 
-**A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, plus one batch's worth again for the transfers that happen while the node is held, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those. **A node that fails to boot is retried automatically.** On a cluster that powers idle nodes down, Slurm can give a run a sleeping node; if that node does not start within the cluster's own limit, `srun` reports `srun: error: Nodes … are still not ready` and then `Something is wrong with the boot of the nodes`. All-Well then asks for another node with the failed one excluded, up to 3 more times, and says so in the log (`node(s) n01 failed to boot — requesting another node (retry 1 of 3)`); after the third it names every node that failed, which is the list to send your cluster's admins. Before each attempt it also checks which nodes are powered on (`idle`, `mix`, or busy but running) and steers the job away from the ones that are asleep, booting or out of service; when none of the powered-on nodes can take the request — they are a different instance type from the one the command asks for, say — it finds that out first, without queuing anything, says `no powered-on node matches this request — Slurm will start one`, and lets Slurm boot one. Starting a node can take several minutes. It also stops avoiding them when every powered-on node is already running a job: the log then says `no free powered-on node in … — Slurm will boot one`, and Slurm starts a powered-down node instead of keeping the job queued behind other people's jobs. On a cluster that does not power nodes down there is nothing to start, and the log says so instead: `every powered-on node in … is busy and none is powered down to boot — the job waits in the queue for one to free`. A run that does end before its node starts keeps the wells it had already uploaded, so retrying the same plate with the same settings does not send them again. This applies when the host's launcher is an `srun` command. **A word left on its own in that command is refused**, both when you save the host and when a run starts: `srun` would take it for the program to run and the job would fail with `execve(): … No such file or directory` only after a node had started. An instance or node type belongs in a constraint, for example `--constraint=g4dn.12xlarge`.
+**A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, plus one batch's worth again for the transfers that happen while the node is held, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those. **If the node itself goes away part way** — the walltime runs out, the node fails, the cluster cancels the job — the run is reported as failed with that reason (`the allocation ended during batch 3/5 — no more batches will run`), not as stopped: the wells already finished keep downloading, a Job Queue goes on to its next job rather than pausing, and Resume continues from the finished wells. Each batch is handed to the node by one small file; if the host stops answering at that moment the log says it could not confirm the hand-off, and the run goes by what the node itself reports — a batch the node says it started is not given up on. **A batch that runs past its time** — the `--time` your launcher gives one batch — is stopped and the log says `batch N exceeded its time budget`; its finished wells are kept and the remaining batches still run. While a batch is running the log says `batch N still running (Xm)` every five minutes, so a long batch is never mistaken for a connection that has gone quiet. The node waits for each batch's upload for as long as All-Well keeps signalling that it is still there; it gives the node back after two minutes without that signal, or after two hours when the host cannot see it at all. If that signal itself stops reaching the host — the connection is failing — the log warns after two missed beats and, after three, says at what time the host will give the node back (and, mid-batch, suspend the batch) unless it recovers. **A node that fails to boot is retried automatically.** On a cluster that powers idle nodes down, Slurm can give a run a sleeping node; if that node does not start within the cluster's own limit, `srun` reports `srun: error: Nodes … are still not ready` and then `Something is wrong with the boot of the nodes`. All-Well then asks for another node with the failed one excluded, up to 3 more times, and says so in the log (`node(s) n01 failed to boot — requesting another node (retry 1 of 3)`); after the third it names every node that failed, which is the list to send your cluster's admins. Before each attempt it also checks which nodes are powered on (`idle`, `mix`, or busy but running) and steers the job away from the ones that are asleep, booting or out of service; when none of the powered-on nodes can take the request — they are a different instance type from the one the command asks for, say — it finds that out first, without queuing anything, says `no powered-on node matches this request — Slurm will start one`, and lets Slurm boot one. Starting a node can take several minutes. It also stops avoiding them when every powered-on node is already running a job: the log then says `no free powered-on node in … — Slurm will boot one`, and Slurm starts a powered-down node instead of keeping the job queued behind other people's jobs. On a cluster that does not power nodes down there is nothing to start, and the log says so instead: `every powered-on node in … is busy and none is powered down to boot — the job waits in the queue for one to free`. A run that does end before its node starts keeps the wells it had already uploaded, so retrying the same plate with the same settings does not send them again. This applies when the host's launcher is an `srun` command. **A word left on its own in that command is refused**, both when you save the host and when a run starts: `srun` would take it for the program to run and the job would fail with `execve(): … No such file or directory` only after a node had started. An instance or node type belongs in a constraint, for example `--constraint=g4dn.12xlarge`.
 
-If you start the same plate with the same settings from a second window while the first is still running, the second one stops and says so rather than starting: both would use the same folder on the cluster, and the second would clear the first's input out from under it. Wait for the first to finish, or change something about the run.
+If you start the same plate with the same settings from a second window while the first is still running, the second one stops and says so rather than starting (`another session is already running this exact dataset and configuration on this host (job …, in …)`): both would use the same folder on the cluster, and the second would clear the first's input out from under it. The first run is left exactly as it was — the refused one cancels nothing. Wait for the first to finish, or change something about the run. A **Resume** is checked the same way against every earlier attempt of the plate the output folder's journal remembers, because it writes into the attempt it resumes: if that attempt's job is still running on the cluster and an app is still feeding it, the resume stops with the same message; if no app has fed it for a few minutes — the window that ran it was closed or crashed — it is your own abandoned attempt, and it is cancelled (`cancelled a job left over from an earlier run of this dataset (…, in an earlier attempt's run directory, …)`) before the resume starts. Only a job the scheduler still lists as running counts: **Resume straight after Stop works**, because a stopped run's job has ended. If a Stop could not reach the cluster (the network was down), the job may still be running; the message then tells you to wait two minutes or cancel it yourself with `scancel <job>`.
 
 **The stage path is drawn under the plate**, at the same scale, whenever the
 file carries coordinates. **Scroll on it to zoom, drag to move around, and

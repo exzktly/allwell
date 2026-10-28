@@ -8,6 +8,7 @@ write — verified explicitly below.
 
 from __future__ import annotations
 
+import contextlib
 
 import pytest
 
@@ -316,3 +317,34 @@ def test_write_then_get_remote_round_trip(tmp_path):
     host = get_remote("rt", path=cfg)
     assert host is not None
     assert host.remote_project_dir == "~/custom"
+
+
+# ── every writer replaces the file atomically (tracker S10) ────────────────
+
+@pytest.mark.parametrize("write", [
+    lambda p: update_bandwidth("bigbox", 123.4, path=p),
+    lambda p: write_remote(_make_host("bigbox", cache_budget_gb=7), path=p),
+    lambda p: delete_remote("bigbox", path=p),
+], ids=["update_bandwidth", "write_remote", "delete_remote"])
+def test_a_write_cut_short_leaves_the_file_whole(tmp_path, monkeypatch, write):
+    """``update_bandwidth`` rewrote ``remotes.toml`` in place after every
+    upload; a write cut short (a full disk, the app quitting) left a truncated
+    file and every configured host gone. Each writer now stages a copy and
+    replaces the file with it, so a failure at that last step leaves the old
+    file byte for byte."""
+    import os
+
+    cfg = tmp_path / "remotes.toml"
+    write_remote(_make_host("bigbox"), path=cfg)
+    write_remote(_make_host("other"), path=cfg)
+    before = cfg.read_bytes()
+
+    def no_space(*_a, **_k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "replace", no_space)
+    # write_remote / delete_remote raise it; update_bandwidth logs it.
+    with contextlib.suppress(OSError):
+        write(cfg)
+    assert cfg.read_bytes() == before
+    assert not [p.name for p in tmp_path.iterdir() if p.name != "remotes.toml"]

@@ -15,6 +15,7 @@ from __future__ import annotations
 import queue
 import threading
 import types
+from pathlib import Path
 
 import pytest
 
@@ -31,7 +32,7 @@ from services.remote_commands import (
     _batch_driver_snippet,
     _compose_driver_cmd,
 )
-from services.remote_process import _BatchedRemoteProcess
+from services.remote_process import _BatchedRemoteProcess, _QueueLineIterator
 
 _ARGV = ["python", "process_microscopy.py", "--input_dir", "/r/run-x/in"]
 
@@ -75,10 +76,217 @@ def test_one_batch_may_not_outlive_the_budget_meant_for_one_batch():
     """Without this a single wedged well holds the node for the whole run's
     scaled walltime — strictly worse than the per-batch launches this replaces,
     where a hang cost one batch's allocation and no more."""
+    from services.remote_wait_snippets import BATCH_BUDGET_GRACE_S
+
     script = _batch_driver_snippet("/r/run-x", 2, _ARGV, "", 3600)
-    assert "timeout 3600 python process_microscopy.py" in script
+    assert f"timeout -k {BATCH_BUDGET_GRACE_S} 3600 python process_microscopy.py" in script
     # A launcher with no time limit gives no budget to enforce.
     assert "timeout" not in _batch_driver_snippet("/r/run-x", 2, _ARGV)
+
+
+# ── the driver, run in bash ──────────────────────────────────────────────────
+
+
+def _driver_dir(tmp_path, *, ready=(1,)):
+    """A run directory with batch 1 staged and the given batches flagged ready."""
+    run_dir = tmp_path / "run"
+    (run_dir / "b1").mkdir(parents=True)
+    for i in ready:
+        (run_dir / BATCH_READY.format(i=i)).touch()
+    return run_dir
+
+
+def _alive(pid: int, *, within_s: float = 2.0) -> bool:
+    """Whether *pid* is still running *within_s* from now. A killed orphan is a zombie until whatever adopted it
+    reaps it, and a zombie runs nothing."""
+    import time
+
+    deadline = time.monotonic() + within_s
+    while True:
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        except (FileNotFoundError, ProcessLookupError, IndexError):
+            return False
+        if state == "Z":
+            return False
+        if time.monotonic() > deadline:
+            return True
+        time.sleep(0.1)
+
+
+def _hung_pipeline(tmp_path, *, behind_a_wrapper: bool):
+    """A pipeline that treats SIGTERM as a suspend and never reaches the boundary it would stop at — a hung well.
+
+    *behind_a_wrapper* puts it behind a `conda run`-like wrapper that itself dies on SIGTERM, which is what left the
+    real pipeline running as an orphan in the review. Returns the argv and the file the hung process writes its pid to.
+    """
+    pid_file = tmp_path / "hung.pid"
+    hung = tmp_path / "hung.sh"
+    hung.write_text(f'trap "" TERM; echo $$ > {pid_file}; while :; do sleep 0.2; done\n')
+    if not behind_a_wrapper:
+        return ["bash", str(hung)], pid_file
+    wrapper = tmp_path / "wrapper.sh"
+    wrapper.write_text(f'bash {hung} &\nwait\n')
+    return ["bash", str(wrapper)], pid_file
+
+
+@pytest.mark.parametrize("behind_a_wrapper", [False, True], ids=["the pipeline", "a wrapper's orphan"])
+def test_a_batch_over_its_time_budget_is_killed_and_says_so(tmp_path, monkeypatch, behind_a_wrapper):
+    """`timeout N` sent SIGTERM and no more: the pipeline took it for a suspend and went on, and when a wrapper died
+    on it instead the pipeline was orphaned and kept writing `out/` into the next batch. Measured in the review: a
+    3 s budget still running at 15 s, the orphan with ppid 1."""
+    import os
+    import signal
+    import subprocess
+    import time
+
+    import services.remote_commands as rc
+
+    monkeypatch.setattr(rc, "BATCH_BUDGET_GRACE_S", 2)
+    run_dir = _driver_dir(tmp_path)
+    argv, pid_file = _hung_pipeline(tmp_path, behind_a_wrapper=behind_a_wrapper)
+    script = rc._batch_driver_snippet(str(run_dir), 1, argv, "", 2)
+    t0 = time.monotonic()
+    try:
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+        elapsed = time.monotonic() - t0
+        pid = int(pid_file.read_text())
+        assert not _alive(pid), "the hung pipeline outlived its batch"
+    finally:
+        if pid_file.exists():
+            try:
+                os.kill(int(pid_file.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    assert "[remote] ERROR batch 1 exceeded its time budget (2s)" in out.stdout, out.stdout + out.stderr
+    assert "all 1 batch(es) done" in out.stdout
+    assert elapsed < 15, f"the batch held the node {elapsed:.0f} s past a 2 s budget"
+    assert ("batch 1 finished rc=124" in out.stdout) is behind_a_wrapper or "finished rc=137" in out.stdout
+
+
+def test_a_pipeline_that_ends_in_time_is_not_over_budget(tmp_path):
+    import subprocess
+
+    run_dir = _driver_dir(tmp_path)
+    script = _batch_driver_snippet(str(run_dir), 1, ["true"], "", 30)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert "batch 1 finished rc=0" in out.stdout
+    assert "exceeded" not in out.stdout and "outlived" not in out.stdout
+
+
+def test_a_running_batch_says_it_is_still_running(tmp_path, monkeypatch):
+    """Hours of silence mid-batch looked exactly like a dead stream; the driver ticks while a batch runs."""
+    import re
+    import subprocess
+
+    import services.remote_commands as rc
+
+    monkeypatch.setattr(rc, "MID_BATCH_WATCH_POLL_S", 1)
+    monkeypatch.setattr(rc, "BATCH_TICK_S", 1)
+    run_dir = _driver_dir(tmp_path)
+    script = rc._batch_driver_snippet(str(run_dir), 1, ["sleep", "3.5"], "", 0)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    ticks = re.findall(r"\[remote\] batch-driver: batch 1 still running \((\d+)m\)", out.stdout)
+    assert len(ticks) >= 2, out.stdout
+    assert ticks[0] == "0"
+    assert out.stdout.index("still running") < out.stdout.index("batch 1 finished rc=0")
+
+
+def _fresh(path, ahead_s=120):
+    import os
+    import time
+
+    path.touch()
+    t = time.time() + ahead_s
+    os.utime(path, (t, t))
+
+
+def test_a_beating_app_s_slow_upload_is_waited_for(tmp_path, monkeypatch):
+    """The upload deadline used to end a healthy run: six nanowell wells (~48 GB) need > 53 Mbit/s to arrive in
+    two hours. Scaled: a 6 s deadline, a fresh heartbeat, nothing arrived — the driver must still be waiting."""
+    import subprocess
+
+    import services.remote_commands as rc
+
+    monkeypatch.setattr(rc, "UPLOAD_WAIT_TIMEOUT_S", 6)
+    run_dir = _driver_dir(tmp_path, ready=())
+    heartbeat = run_dir / ".hb"
+    _fresh(heartbeat)
+    script = rc._batch_driver_snippet(str(run_dir), 1, ["true"], str(heartbeat), 0)
+    with pytest.raises(subprocess.TimeoutExpired) as exc:
+        subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=12)
+    text = exc.value.stdout.decode() if isinstance(exc.value.stdout, bytes) else (exc.value.stdout or "")
+    assert "never arrived" not in text
+
+
+def test_with_no_heartbeat_to_vouch_for_the_app_the_deadline_still_stands(tmp_path, monkeypatch):
+    """The control, and the backstop C6 keeps: nothing says the uploader is alive, so the node is given back."""
+    import subprocess
+
+    import services.remote_commands as rc
+
+    monkeypatch.setattr(rc, "UPLOAD_WAIT_TIMEOUT_S", 6)
+    run_dir = _driver_dir(tmp_path, ready=())
+    script = rc._batch_driver_snippet(str(run_dir), 1, ["true"], "", 0)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 75
+    assert "[remote] ERROR batch 1 never arrived" in out.stdout
+
+
+def test_the_single_shot_upload_wait_waits_for_a_beating_app_too(tmp_path, monkeypatch):
+    """The sibling: the single-shot job's wait for its upload sentinel had the same fixed deadline."""
+    import subprocess
+
+    import services.remote_wait_snippets as ws
+
+    monkeypatch.setattr(ws, "UPLOAD_WAIT_TIMEOUT_S", 6)
+    heartbeat = tmp_path / ".hb"
+    _fresh(heartbeat)
+    script = ws._wait_for_upload_snippet(str(tmp_path / "sentinel"), str(heartbeat)) + "echo started"
+    with pytest.raises(subprocess.TimeoutExpired) as exc:
+        subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=12)
+    text = exc.value.stdout.decode() if isinstance(exc.value.stdout, bytes) else (exc.value.stdout or "")
+    assert "never completed" not in text
+    out = subprocess.run(["bash", "-c", ws._wait_for_upload_snippet(str(tmp_path / "sentinel"))],
+                         capture_output=True, text=True, timeout=30)
+    assert out.returncode == 75 and "never completed" in out.stdout
+
+
+def test_heartbeat_staleness_is_judged_by_the_clock_that_stamped_it(tmp_path):
+    """The heartbeat's mtime is the file server's clock and `date` is the compute node's: an hour of skew between
+    them read a fresh heartbeat as stale and gave the node back at every batch boundary."""
+    import os
+    import subprocess
+
+    shims = tmp_path / "bin"
+    shims.mkdir()
+    real_date = subprocess.run(["bash", "-c", "command -v date"], capture_output=True, text=True).stdout.strip()
+    (shims / "date").write_text(f'#!/bin/sh\necho $(( $({real_date} +%s) + 3600 ))\n')    # an hour ahead
+    (shims / "date").chmod(0o755)
+    run_dir = _driver_dir(tmp_path, ready=())
+    heartbeat = run_dir / ".hb"
+    heartbeat.touch()                                   # beating, by the filesystem's clock
+    script = _batch_driver_snippet(str(run_dir), 1, ["true"], str(heartbeat), 0)
+    env = {**os.environ, "PATH": f"{shims}:{os.environ['PATH']}"}
+    with pytest.raises(subprocess.TimeoutExpired) as exc:
+        subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=8, env=env)
+    text = exc.value.stdout.decode() if isinstance(exc.value.stdout, bytes) else (exc.value.stdout or "")
+    assert "stopped responding" not in text, "a fresh heartbeat was read as stale through clock skew"
+
+
+@pytest.mark.parametrize("flag,why", [
+    (".aw_batch_2_skip", "nothing was held for the end-of-run re-anchoring"),
+    (None, "the end-of-run re-anchoring was not flagged")])
+def test_a_skipped_final_pass_says_it_was_skipped(tmp_path, flag, why):
+    import subprocess
+
+    run_dir = _driver_dir(tmp_path, ready=(1, 2))
+    if flag:
+        (run_dir / flag).touch()
+    script = _batch_driver_snippet(str(run_dir), 1, ["true"], "", 0, final_pass=True)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert f"[remote] batch-driver: batch 2 skipped — {why}" in out.stdout, out.stdout
+    assert "batch 2 starting" not in out.stdout
 
 
 def test_the_driver_gives_the_node_back_when_the_app_goes_away():
@@ -197,6 +405,21 @@ class _FakeProc:
     def say(self, line):
         self._q.put(line)
 
+    def batch_finished(self, owner, i, rc=0):
+        """What the driver's stream holds when batch *i* of *owner* (the batched process) ends.
+
+        A real batch that exits 0 has first printed ``Well <W> — done.`` for every
+        well it was sent, and the batch loop now checks that it did
+        (``remote_batch_ledger.unreported_after_success``). Written out when the
+        reader gets to it, because a test queues this before the loop has sliced
+        the plate into batches.
+        """
+        def lines():
+            batches = getattr(owner, "_batches", None) or ()
+            wells = [z.stem for z in batches[i - 1]] if rc == 0 and i <= len(batches) else []
+            return [f"Well {w} — done.\n" for w in wells] + [f"[remote] batch-driver: batch {i} finished rc={rc}\n"]
+        self._q.put(lines)
+
     def finish(self):
         self._done = True
         self._q.put(None)
@@ -208,6 +431,9 @@ class _FakeProc:
                 item = self._q.get()
                 if item is None:
                     return
+                if callable(item):
+                    yield from item()
+                    continue
                 yield item
         return _iter()
 
@@ -218,7 +444,20 @@ class _FakeProc:
         return self.returncode
 
     def terminate(self):
+        """What a real ssh does when it is signalled: it exits, and its stdout ends.
+
+        Recording the call and leaving the stream open made every test of a run
+        the app ended itself — a hand-off it gave up on, a driver it released —
+        stop one step short of what follows: the reader seeing the stream end
+        with batches unreported, which is where a lost driver used to be taken
+        for the user's Stop.
+        """
         self.terminated = True
+        if not self._done:
+            self.finish()
+
+    def kill(self):
+        self.terminate()
 
 
 def _batched(tmp_path, wells, batch_size=1):
@@ -235,6 +474,7 @@ def _batched(tmp_path, wells, batch_size=1):
     p._pipeline_argv = ["--csv_prefix", "measurements"]
     p._batch_size = batch_size
     p._line_q = queue.Queue()
+    p._lines = _QueueLineIterator(p._line_q)       # `stdout`, as the runner reads it
     p._log = lambda m: p._logged.append(m)
     p._logged = []
     p._returncode = None
@@ -291,6 +531,7 @@ def _stub_runner(p, proc, ordering):
         env_selector=("name", "allwell"),
         _build_remote_argv=lambda *a, **k: ["python", "pm.py"],
         _sweep_orphaned_allocation=lambda *a, **k: None,
+        _claim_run_dirs=lambda *a, **k: "",
     )
     return proc
 
@@ -309,7 +550,7 @@ def test_one_allocation_serves_every_batch(tmp_path, monkeypatch):
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in (1, 2, 3):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()
     worker.join(timeout=20)
 
@@ -321,26 +562,106 @@ def test_one_allocation_serves_every_batch(tmp_path, monkeypatch):
         "upload:b1", "upload:b2", "upload:b3"]
 
 
-def test_a_failed_batch_is_tallied_and_the_run_continues(tmp_path, monkeypatch):
+def _drive(tmp_path, monkeypatch, wells, batch_size, script):
+    """Run the batch loop over *wells*; *script(proc, p)* plays the driver. Returns the process once it ends."""
     proc = _FakeProc()
-    p = _batched(tmp_path, ["A01", "A02", "A03"])
+    p = _batched(tmp_path, wells, batch_size=batch_size)
     _stub_runner(p, proc, [])
     monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
-
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
-    proc.say("[remote] batch-driver: batch 2 finished rc=4\n")
-    proc.say("[remote] batch-driver: batch 3 finished rc=0\n")
+    script(proc, p)
     proc.finish()
     worker.join(timeout=20)
-
     assert not worker.is_alive()
+    return p
+
+
+def test_a_failed_batch_is_tallied_with_what_it_really_lost(tmp_path, monkeypatch):
+    """Batch 2 fails because one of its two wells came out partial: the tally says that, not that both are missing.
+
+    The tally used to say "Wells from a failed batch are missing from the output" whatever the batch had done — here
+    A03 finished whole, and A04 has its output less some FOV-groups."""
+    def driver(proc, p):
+        proc.batch_finished(p, 1)
+        proc.say("Well A03 — done.\n")
+        proc.say("2026-10-28 10:00:00  WARNING   Well A04 — PARTIAL: 2 of 9 FOV-group(s) FAILED (F003, F007).\n")
+        proc.say("Well A04 — done.\n")
+        proc.say("[remote] batch-driver: batch 2 finished rc=4\n")
+        proc.batch_finished(p, 3)
+
+    p = _drive(tmp_path, monkeypatch, ["A01", "A02", "A03", "A04", "A05", "A06"], 2, driver)
+
     assert p._returncode == 4, "a failed batch has to reach the run's own code"
-    tally = "".join(p._logged)
-    assert "1 of 3 batch(es) failed" in tally
-    assert "continuing with the remaining batches" in tally
+    tally = [m for m in p._logged if "batch(es) failed" in m]
+    assert tally == ["[remote] ERROR 1 of 3 batch(es) failed — batch 2 (exit 4): A04 partial. Every other well "
+                     "completed.\n"], p._logged
+    assert "continuing with the remaining batches" in "".join(p._logged)
+    assert p.failure_lines == (tally[0].strip(),), "the run's headline does not carry the tally"
+
+
+def test_a_failed_batch_names_the_wells_that_never_finished(tmp_path, monkeypatch):
+    def driver(proc, p):
+        proc.batch_finished(p, 1)
+        proc.say("2026-10-28 10:00:00  ERROR     FAILED well A03: out of memory.\n")
+        proc.say("Well A04 — done.\n")
+        proc.say("[remote] batch-driver: batch 2 finished rc=1\n")
+
+    p = _drive(tmp_path, monkeypatch, ["A01", "A02", "A03", "A04"], 2, driver)
+
+    assert p._returncode == 1
+    assert ("[remote] ERROR 1 of 2 batch(es) failed — batch 2 (exit 1): A03 not finished. Every other well "
+            "completed.\n") in p._logged, p._logged
+
+
+def test_a_batch_stopped_for_its_time_budget_is_reported_as_that(tmp_path, monkeypatch):
+    """Not as "pipeline exited 124", and not as a suspend: the driver says the budget ran out, and the tally names it."""
+    def driver(proc, p):
+        proc.batch_finished(p, 1)
+        proc.say("Well A03 — done.\n")
+        proc.say("[remote] ERROR batch 2 exceeded its time budget (3600s) — its pipeline was stopped; the wells it "
+                 "had not finished are missing\n")
+        proc.say("[remote] batch-driver: batch 2 finished rc=124\n")
+
+    p = _drive(tmp_path, monkeypatch, ["A01", "A02", "A03", "A04"], 2, driver)
+
+    assert p._returncode == 124
+    log = "".join(p._logged)
+    assert "[remote] batch 2 exceeded its time budget and was stopped; continuing with the remaining batches" in log
+    assert ("[remote] ERROR 1 of 2 batch(es) failed — batch 2 (exit 124): exceeded its time budget; A04 not "
+            "finished. Every other well completed.") in log
+
+
+def test_a_batch_that_exits_0_without_its_wells_is_not_counted_complete(tmp_path, monkeypatch):
+    """A batch the driver swapped in before its upload finished (a stale `ready` flag) runs what had arrived and
+    exits 0. Two of its three wells never said a word, and the run used to report success over them."""
+    def driver(proc, p):
+        proc.say("Well A01 — done.\n")
+        proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+        proc.batch_finished(p, 2)
+
+    p = _drive(tmp_path, monkeypatch, ["A01", "A02", "A03", "A04"], 3, driver)
+
+    assert p._returncode == 1, "a batch whose wells never reported was counted complete"
+    log = "".join(p._logged)
+    assert ("[remote] ERROR batch 1 exited 0, but 2 of its 3 well(s) never reported finished — A02, A03; their "
+            "output is missing") in log
+    assert "batch 1 (exit 0): A02, A03 not finished" in log
+    assert "batch 2" not in log.split("batch(es) failed")[1], "batch 2 reported every well and is not a failure"
+
+
+def test_a_well_the_pipeline_skipped_is_accounted_for(tmp_path, monkeypatch):
+    """The host's own skip (its output already exists there) says so, and is not a missing well."""
+    def driver(proc, p):
+        proc.say("Well A01 — done.\n")
+        proc.say("2026-10-28 10:00:00  INFO      SKIP well A02 — output already exists. Use --force to reprocess.\n")
+        proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+
+    p = _drive(tmp_path, monkeypatch, ["A01", "A02"], 2, driver)
+
+    assert p._returncode == 0, p._logged
+    assert "ERROR" not in "".join(p._logged)
 
 
 def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
@@ -373,7 +694,7 @@ def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
     # The driver has exited by the time its last lines are read — set before
     # they are said, so the release never sees it still running by accident.
     proc._done = True
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.say("[remote] batch-driver: suspended — no further batches\n")
     proc.finish()
     worker.join(timeout=20)
@@ -416,7 +737,7 @@ def test_a_suspend_during_a_batch_upload_ends_the_upload(tmp_path, monkeypatch):
                         lambda argv, **kw: proc)
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     worker.join(timeout=5)
     interrupted = not worker.is_alive()
     proc.finish()
@@ -479,7 +800,7 @@ def test_a_suspended_plate_gets_no_thresholds_from_its_fraction(tmp_path, monkey
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     p.note_suspend_requested()
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.finish()
     worker.join(timeout=20)
     assert p._returncode == 0
@@ -498,7 +819,7 @@ def test_the_markers_never_reach_the_log(tmp_path, monkeypatch):
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     proc.say("Well A01 — done.\n")
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.finish()
     worker.join(timeout=20)
 
@@ -511,10 +832,14 @@ def test_the_markers_never_reach_the_log(tmp_path, monkeypatch):
     assert not any("batch-driver" in ln for ln in lines)
 
 
-def test_a_dead_driver_stops_the_run_and_the_downloads(tmp_path, monkeypatch):
-    """A Stop arrives as a process-group kill, which sets none of this object's
-    state — so the stream ending is the only signal, and without acting on it
-    the run would carry on downloading as though nothing had happened."""
+def test_a_dead_driver_ends_the_run_as_a_failure_and_lets_the_downloads_drain(tmp_path, monkeypatch):
+    """The stream ending with batches unreported, and no Stop pressed, is the allocation going away.
+
+    It used to set the stop event — which is the runner's own `_stop_requested`,
+    so it was reported as the user's Stop — and cancel the Fetcher, leaving the
+    finished batch's wells on the remote. Now it is a failure that says so, the
+    caller's Stop is untouched, and the downloads finish.
+    """
     proc = _FakeProc()
     ordering: list[str] = []
     p = _batched(tmp_path, ["A01", "A02", "A03"])
@@ -524,36 +849,22 @@ def test_a_dead_driver_stops_the_run_and_the_downloads(tmp_path, monkeypatch):
 
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.say("Well A01 — done.\n")
+    proc.batch_finished(p, 1)
     proc.finish()                       # the allocation is gone
     worker.join(timeout=20)
 
     assert not worker.is_alive()
-    assert p._returncode not in (0, None)
-    assert p._cancelled, "the Fetcher kept downloading after the driver died"
+    assert p._returncode == 1
+    assert p._driver_lost.is_set()
+    assert not p._stop.is_set(), "a lost driver set the caller's Stop"
+    assert p._cancelled == [], "the Fetcher was cancelled with finished wells still on the remote"
     assert "upload:b3" not in ordering, "kept sending batches to a dead driver"
+    assert any(m.startswith("[remote] ERROR the allocation ended") for m in p._logged), p._logged
 
 
-def test_a_stop_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
-    """The regression the single long-lived driver introduced.
-
-    Stop reaches this object through ``signal_subprocess``, which reads
-    ``proc.pid``. In batched mode that used to be ``-1`` between batches, so the
-    kill fell back to ``terminate()`` — which sets ``_stop``. With one driver
-    held for the whole run there is always a real pid, the process group is
-    killed instead, and ``terminate()`` never runs. Nothing but the stream
-    ending says the run is over, and the worker is inside an rsync at the time:
-    ``upload_subset`` watches ``_stop``, so the beat has to be set from the
-    reader or the app keeps pushing wells at a node that is already gone.
-    """
-    proc = _FakeProc()
-    ordering: list[str] = []
-    p = _batched(tmp_path, ["A01", "A02", "A03"])
-    _stub_runner(p, proc, ordering)
-
-    uploading = threading.Event()
-
-    def blocking_upload(zips, dest, *, stop_event=None, **kw):
+def _blocking_upload(p, ordering, uploading):
+    def upload(zips, dest, *, stop_event=None, **kw):
         ordering.append(f"upload:{dest.rsplit('/', 1)[-1]}")
         uploading.set()
         # What the real rsync wrapper does: transfer until told to stop, then
@@ -561,25 +872,93 @@ def test_a_stop_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
         assert stop_event is not None, "the upload cannot see the Stop at all"
         stop_event.wait(timeout=20)
         return (0, 0.0, 0 if not stop_event.is_set() else 20)
+    p._runner._cache.upload_subset = upload
 
-    p._runner._cache.upload_subset = blocking_upload
+
+def test_a_stop_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
+    """Stop arrives as the event (`PipelineRunner.stop` sets it first) and then the ssh's death.
+
+    The worker is inside an rsync at the time; ``upload_subset`` watches the
+    event, so the transfer ends rather than pushing wells at a node the Stop
+    just released, and it reads as the user's Stop rather than as a fault.
+    """
+    proc = _FakeProc()
+    ordering: list[str] = []
+    p = _batched(tmp_path, ["A01", "A02", "A03"])
+    _stub_runner(p, proc, ordering)
+    uploading = threading.Event()
+    _blocking_upload(p, ordering, uploading)
     monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
 
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     assert uploading.wait(timeout=20), "batch 1 never started uploading"
+    p._stop.set()
     proc.finish()                       # the process-group kill, seen as EOF
 
     worker.join(timeout=20)
-    assert not worker.is_alive(), "the upload outlived the allocation"
-    assert p._stop.is_set()
-    assert p._cancelled, "downloads carried on after the run was killed"
+    assert not worker.is_alive(), "the upload outlived the Stop"
     assert [o for o in ordering if o.startswith("upload:")] == ["upload:b1"]
-    assert p._returncode not in (0, None)
+    assert p._returncode == 130
+    assert not p._driver_lost.is_set()
     assert not any("upload failed" in m for m in p._logged), (
         "an interrupted upload is not a fault to report as one")
     assert any("upload interrupted" in m for m in p._logged)
+
+
+def test_a_driver_lost_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
+    """The allocation ends while a batch is uploading: the transfer stops, as a failure, without the caller's Stop."""
+    proc = _FakeProc()
+    ordering: list[str] = []
+    p = _batched(tmp_path, ["A01", "A02", "A03"])
+    _stub_runner(p, proc, ordering)
+    uploading = threading.Event()
+    _blocking_upload(p, ordering, uploading)
+    monkeypatch.setattr("subprocess.Popen",
+                        lambda argv, **kw: proc)
+
+    worker = threading.Thread(target=p._run_batches, daemon=True)
+    worker.start()
+    assert uploading.wait(timeout=20), "batch 1 never started uploading"
+    proc.finish()                       # the node went away
+
+    worker.join(timeout=20)
+    assert not worker.is_alive(), "the upload outlived the allocation"
+    assert p._returncode == 1
+    assert not p._stop.is_set()
+    assert p._cancelled == []
+    assert [o for o in ordering if o.startswith("upload:")] == ["upload:b1"]
+    assert any(m.startswith("[remote] ERROR the allocation ended while batch 1/3 was uploading")
+               for m in p._logged), p._logged
+    assert not any("upload failed" in m for m in p._logged)
+
+
+def test_handshake_files_that_cannot_be_cleared_stop_the_run_before_it_launches(tmp_path, monkeypatch):
+    """A stale `ready` flag that survives its `rm` lets the driver swap in a half-uploaded batch and report it done;
+    the `rm`'s result used to be discarded."""
+    proc = _FakeProc()
+    ordering: list[str] = []
+    p = _batched(tmp_path, ["A01", "A02"])
+    _stub_runner(p, proc, ordering)
+
+    def ssh_run(argv, *, check, **kw):
+        ordering.append(" ".join(str(a) for a in argv[:2]))
+        rc = 1 if argv[0] == "rm" and any(str(a).endswith("_ready") for a in argv) else 0
+        return types.SimpleNamespace(stdout="", stderr="rm: cannot remove: Permission denied", returncode=rc)
+
+    p._runner._cache._ssh_run = ssh_run
+    spawns = []
+    monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawns.append(argv) or proc)
+
+    p._run_batches()
+
+    assert p._returncode == 1
+    assert not spawns, "a driver was launched over stale handshake files"
+    assert not any(o.startswith("upload") for o in ordering)
+    assert ("[remote] ERROR could not clear the handshake files a previous run of this dataset left (ssh exit 1: "
+            "rm: cannot remove: Permission denied); stopping before anything is launched") in "".join(p._logged)
+    assert p.failure_lines and "could not clear the handshake files" in p.failure_lines[0]
 
 
 def test_a_stop_before_the_first_batch_reaches_nothing_remote(tmp_path):
@@ -601,7 +980,9 @@ def test_a_second_session_on_the_same_plate_does_not_clear_the_first_s_input(
     ordering: list[str] = []
     p = _batched(tmp_path, ["A01", "A02"])
     _stub_runner(p, proc, ordering)
-    p._runner._sweep_orphaned_allocation = lambda *a, **k: "owned"
+    from services.remote_sweep import _refusal
+    p._runner._claim_run_dirs = lambda *a, **k: _refusal(
+        "owned", ["4242"], "this dataset's run directory")
 
     spawns = []
     monkeypatch.setattr("subprocess.Popen",

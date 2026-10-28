@@ -11,10 +11,12 @@ as dead.
 
 from __future__ import annotations
 
+import posixpath
 import subprocess
 from collections.abc import Callable
 
 from services.remote_config import RemoteHost
+from services.remote_run_id import UPLOAD_HEARTBEAT
 from services.remote_run_state import _RemoteRun
 from services.remote_transport import _remote_quote
 from services.subprocess_text import TEXT_UTF8
@@ -69,13 +71,17 @@ def close_remote_job(
         return
     log = log_fn or (lambda _m: None)
     slurm_sidecar_q = _remote_quote(f"{run.remote_pidfile}.slurm")
+    # Once cancelled, the run's own last heartbeat would read as a live owner
+    # for two more minutes and refuse the Resume pressed right after Stop. The
+    # sidecar stays: the next run's sweep asks squeue whether the job is gone.
+    heartbeat_q = _remote_quote(f"{posixpath.dirname(run.remote_pidfile)}/{UPLOAD_HEARTBEAT}")
     cmd = (
         f"_jid=$(cat {slurm_sidecar_q} 2>/dev/null); "
         '[ -z "$_jid" ] && exit 0; '
         + _only_my_job("_jid", "AW_NOTMINE") +
         'command -v scancel >/dev/null 2>&1 '
         '&& scancel -u "$_aw_me" "$_jid" 2>/dev/null '
-        '&& echo "AW_SCANCELLED $_jid" || true'
+        f'&& {{ rm -f {heartbeat_q}; echo "AW_SCANCELLED $_jid"; }} || true'
     )
     try:
         result = subprocess.run(

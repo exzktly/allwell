@@ -370,7 +370,7 @@ def test_a_job_owned_by_someone_else_is_reported_not_cancelled(monkeypatch):
     monkeypatch.setattr(
         "subprocess.run",
         lambda argv, **kw: subprocess.CompletedProcess(
-            argv, 0, stdout="AW_NOTMINE 4242 alice\n", stderr=""),
+            argv, 0, stdout="AW_NOTMINE 0 4242 alice\n", stderr=""),
     )
     runner._sweep_orphaned_allocation("/r/run.pid", "/r/.hb",
                                       log_fn=said.append)
@@ -409,9 +409,24 @@ _BSD_STAT = ('#!/bin/bash\n'
 _NO_STAT = '#!/bin/bash\nexit 1\n'
 
 
-def _sweep_under_bash(monkeypatch, tmp_path, stat_shim, *, heartbeat_age,
-                      sidecar_age, heartbeat_exists=True, owner=None):
+def _sweep_under_bash(monkeypatch, tmp_path, stat_shim, *, log=None, **host_kw):
     """Run the real sweep script through bash against a fabricated remote."""
+    runner, pidfile, hb = _bash_host(monkeypatch, tmp_path, stat_shim, **host_kw)
+    return runner._sweep_orphaned_allocation(
+        pidfile, hb, log_fn=(log.append if log is not None else lambda _m: None))
+
+
+def _bash_host(monkeypatch, tmp_path, stat_shim, *, heartbeat_age,
+               sidecar_age, heartbeat_exists=True, owner=None,
+               job_state="RUNNING", scancel_ends_it=True):
+    """A runner whose ssh runs under local bash, against a fabricated remote.
+
+    The stand-in ``squeue`` answers from a one-job table: *job_state* while the
+    job is alive; ``None`` for a job that has ended and been purged, which real
+    ``squeue -j`` answers with "Invalid job id" and exit 1; ``"DOWN"`` for a
+    controller that cannot be reached. ``scancel`` ends the job and records its
+    arguments in ``scancelled``.
+    """
     me = subprocess.run(["id", "-un"], capture_output=True,
                         text=True).stdout.strip()
     pidfile = str(tmp_path / "run.pid")
@@ -424,9 +439,21 @@ def _sweep_under_bash(monkeypatch, tmp_path, stat_shim, *, heartbeat_age,
 
     bindir = tmp_path / "bin"
     bindir.mkdir()
+    table = tmp_path / "job_state"
+    if job_state is not None:
+        table.write_text(job_state)
     _bin(str(bindir), "stat", stat_shim)
-    _bin(str(bindir), "scancel", "#!/bin/bash\nexit 0\n")
-    _bin(str(bindir), "squeue", f'#!/bin/bash\necho "{owner or me}"\n')
+    _bin(str(bindir), "scancel",
+         f'#!/bin/bash\necho "$*" >> {tmp_path}/scancelled\n'
+         + (f'rm -f {table}\n' if scancel_ends_it else ""))
+    _bin(str(bindir), "squeue", (
+        '#!/bin/bash\n'
+        'fmt=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && fmt=$2; shift; done\n'
+        f'[ -f {table} ] || {{ echo "slurm_load_jobs error: Invalid job id specified" >&2; exit 1; }}\n'
+        f'st=$(cat {table})\n'
+        'if [ "$st" = DOWN ]; then\n'
+        '  echo "slurm_load_jobs error: Unable to contact slurm controller" >&2; exit 1; fi\n'
+        f'if [ "$fmt" = "%u" ]; then echo "{owner or me}"; else echo "$st"; fi\n'))
 
     real_run = subprocess.run
 
@@ -439,8 +466,7 @@ def _sweep_under_bash(monkeypatch, tmp_path, stat_shim, *, heartbeat_age,
         })
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    runner = RemoteRunner(_host("srun --time=1:00:00"))
-    return runner._sweep_orphaned_allocation(pidfile, hb, log_fn=lambda _m: None)
+    return RemoteRunner(_host("srun --time=1:00:00")), pidfile, hb
 
 
 @pytest.mark.parametrize("shim,hb_age,sc_age,hb_exists,owner,expected", [
@@ -465,6 +491,86 @@ def test_the_sweep_only_cancels_what_it_can_prove_is_dead(
                             heartbeat_age=hb_age, sidecar_age=sc_age,
                             heartbeat_exists=hb_exists, owner=owner)
     assert got == expected
+
+
+# ── a job is somebody's only while the scheduler still runs it (review E4) ───
+#
+# A fresh heartbeat, or a fresh sidecar, used to be enough to call a directory
+# "owned" — so Resume pressed right after Stop, or a retry right after a failed
+# run, was refused with "another session is already running this exact
+# dataset", naming a session that did not exist: the stopped run's last beat was
+# under two minutes old, and its job had ended.
+
+@pytest.mark.parametrize("job_state", [None, "COMPLETED", "CANCELLED by 1000", "FAILED"],
+                         ids=["purged", "completed", "cancelled", "failed"])
+@pytest.mark.parametrize("hb_age,sc_age,hb_exists", [(0, 9999, True), (0, 10, False)],
+                         ids=["fresh-heartbeat", "fresh-sidecar"])
+def test_a_job_that_has_ended_is_nobody_s_however_fresh_its_files(
+        monkeypatch, tmp_path, job_state, hb_age, sc_age, hb_exists):
+    said: list[str] = []
+    got = _sweep_under_bash(monkeypatch, tmp_path, _GNU_STAT, heartbeat_age=hb_age,
+                            sidecar_age=sc_age, heartbeat_exists=hb_exists,
+                            job_state=job_state, log=said)
+    assert got == "none", said
+    assert "another session" not in "".join(said)
+    assert not (tmp_path / "scancelled").exists(), "an ended job was cancelled"
+    assert not (tmp_path / "run.pid.slurm").exists(), (
+        "the record of a job that has ended was kept, so every later run asks about it again")
+
+
+def test_a_scheduler_that_cannot_be_asked_proves_nothing(monkeypatch, tmp_path):
+    said: list[str] = []
+    got = _sweep_under_bash(monkeypatch, tmp_path, _GNU_STAT, heartbeat_age=600,
+                            sidecar_age=9999, job_state="DOWN", log=said)
+    assert got == "unknown", said
+    assert not (tmp_path / "scancelled").exists()
+    assert (tmp_path / "run.pid.slurm").read_text().strip() == "991234"
+    assert "squeue could not say whether job 991234" in "".join(said)
+
+
+def test_a_swept_job_is_forgotten_once_the_scheduler_lets_it_go(monkeypatch, tmp_path):
+    me = subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()
+    got = _sweep_under_bash(monkeypatch, tmp_path, _GNU_STAT, heartbeat_age=600,
+                            sidecar_age=9999)
+    assert got == "swept"
+    assert (tmp_path / "scancelled").read_text().split("\n")[0] == f"-u {me} 991234"
+    assert not (tmp_path / "run.pid.slurm").exists()
+    assert not (tmp_path / ".aw_upload_alive").exists()
+
+
+def test_a_cancelled_job_still_shutting_down_still_holds_the_directory(monkeypatch, tmp_path):
+    """The caller is about to write where the cancelled pipeline wrote, and a
+    pipeline answers SIGTERM by winding down — for up to Slurm's KillWait."""
+    from services import remote_sweep
+
+    monkeypatch.setattr(remote_sweep, "CANCEL_SETTLE_S", 2)
+    said: list[str] = []
+    got = _sweep_under_bash(monkeypatch, tmp_path, _GNU_STAT, heartbeat_age=600,
+                            sidecar_age=9999, scancel_ends_it=False, log=said)
+    assert got == "owned", said
+    assert "still shutting down 2 s later" in "".join(said)
+    assert (tmp_path / "run.pid.slurm").exists()
+
+
+def test_resume_right_after_stop_is_not_refused(monkeypatch, tmp_path):
+    """The app's own order: Stop's teardown cancels the run's job, then Resume
+    sweeps the same directory seconds later — its heartbeat under a minute old."""
+    from services.remote_run_state import _RemoteRun
+
+    runner, pidfile, hb = _bash_host(monkeypatch, tmp_path, _GNU_STAT,
+                                     heartbeat_age=5, sidecar_age=9999)
+    runner._run = _RemoteRun(
+        run_id="run-x", cache_key="k", remote_input_dir=str(tmp_path / "in"),
+        remote_output_dir=str(tmp_path / "out"), remote_pidfile=pidfile,
+        local_output_dir=None, local_input_mode=LocalInputMode.ZIP)
+    said: list[str] = []
+    runner.close_remote_job(log_fn=said.append)
+    assert "cancelled lingering job 991234" in "".join(said), said
+
+    resume = RemoteRunner(runner.host)
+    got = resume._sweep_orphaned_allocation(pidfile, hb, log_fn=said.append)
+    assert got == "none", "".join(said)
+    assert "another session" not in "".join(said)
 
 
 @pytest.mark.parametrize("exclusive, expected", [

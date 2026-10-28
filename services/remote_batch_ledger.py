@@ -26,11 +26,13 @@ from __future__ import annotations
 import re
 import threading
 
+from services.remote_wait_snippets import BATCH_OVER_BUDGET
 from services.remote_wire import _RE_WELL_DONE
 from util.well_token import canonical_well_label
 
 _RE_SKIPPED = re.compile(r"\bSKIP well (?P<well>[A-Ha-h]\d{1,2})\b")
 _RE_PARTIAL = re.compile(r"\bWell (?P<well>[A-Ha-h]\d{1,2})\s+\S+\s+PARTIAL\b")
+_RE_OVER_BUDGET = re.compile(re.escape(BATCH_OVER_BUDGET).replace(re.escape("{i}"), r"(\d+)"))
 
 _CREATE_LOCK = threading.Lock()
 
@@ -52,9 +54,16 @@ class BatchLedger:
         self._skipped: set[str] = set()
         self._partial: set[str] = set()
         self._reasons: list[str] = []
+        self._over_budget: set[int] = set()
 
     def observe(self, line: str) -> None:
-        """Note a well the pipeline reported finished, skipped or partial."""
+        """Note a well the pipeline reported finished, skipped or partial, and a batch the driver stopped for
+        running past its time budget (``remote_wait_snippets.BATCH_OVER_BUDGET``)."""
+        m = _RE_OVER_BUDGET.search(line)
+        if m:
+            with self._lock:
+                self._over_budget.add(int(m.group(1)))
+            return
         for regex, into in ((_RE_WELL_DONE, self._done), (_RE_SKIPPED, self._skipped),
                             (_RE_PARTIAL, self._partial)):
             m = regex.search(line)
@@ -73,6 +82,11 @@ class BatchLedger:
         with self._lock:
             partial = set(self._partial)
         return [w for w in (_label(str(w)) for w in wells) if w in partial]
+
+    def over_budget(self, index: int) -> bool:
+        """Whether the driver said batch *index* ran past its time budget and was stopped."""
+        with self._lock:
+            return index in self._over_budget
 
     def note_reason(self, line: str) -> None:
         with self._lock:
@@ -142,7 +156,7 @@ def failed_batches_line(proc, failed: dict[int, int], batches, n_batches: int) -
             what.append(f"{', '.join(unfinished)} not finished")
         if partial:
             what.append(f"{', '.join(partial)} partial")
-        if index in getattr(proc, "_over_budget", ()):
+        if ledger.over_budget(index):
             what.insert(0, "exceeded its time budget")
         if not what:
             what.append("every well reported finished")

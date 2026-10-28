@@ -12788,6 +12788,36 @@ output open for up to a poll after the driver ended. `tests/test_a_vanished_app_
 end-of-run auto-threshold pass, which is for a finished plate; the resumed run
 that finishes it writes the thresholds.
 
+**The driver's own clocks.** Its wait for each batch gives the node back on a
+heartbeat older than `UPLOAD_HEARTBEAT_STALE_S` (120 s), and otherwise on
+`UPLOAD_WAIT_TIMEOUT_S` (2 h) — counted only over the polls at which no fresh
+heartbeat vouched for the app (`$_aw_fresh`, set by `_heartbeat_stale_snippet`).
+A beating app is uploading, and a large batch can legitimately take longer than
+any fixed wait; what the deadline still bounds is the wait nothing can vouch for
+(no heartbeat configured, or a host that cannot report a file's mtime). The
+single-shot job's wait for its upload sentinel counts the same way. Staleness is
+judged by the clock that stamped the heartbeat: the file is touched from the login
+node and read on a compute node, so "now" is the mtime of a probe file the check
+touches beside it (the same file server stamps both), with `date` only as the
+fallback where the job cannot write there; comparing the server's mtime with the
+compute node's `date` read clock skew as a dead app. A batch with a time budget
+(the launcher's `--time`, as it sized one batch) runs under `timeout -k
+BATCH_BUDGET_GRACE_S N`, in the background so the driver holds `timeout`'s pid —
+which is also the batch's process group, since `timeout` makes one. The pipeline
+answers SIGTERM as a suspend and a hung well never reaches the boundary it winds
+down at, so SIGKILL follows; and because `timeout` returns as soon as its own
+child does, a `conda run` wrapper that dies on the SIGTERM would leave the real
+pipeline orphaned in that group, still writing `out/` — so after every budgeted
+batch the driver waits up to the grace for the group to empty and kills what is
+left. A batch stopped this way prints `BATCH_OVER_BUDGET` (`[remote] ERROR batch N
+exceeded its time budget (Ns)`) before its marker; `BatchLedger` reads it and the
+batch loop and the tally say "exceeded its time budget" instead of "pipeline exited
+124". While a batch runs, the background subshell beside it — the mid-batch
+watchdog, when there is a heartbeat — also prints `[remote] batch-driver: batch N
+still running (Xm)` every `BATCH_TICK_S` (300 s), so a batch hours long is never
+silence on the stream. A skipped final pass says `batch N skipped — <why>` before
+its marker.
+
 **A suspended run exits 0, and the runner says so rather than calling it done.**
 Leaving through the normal end-of-well path means the pipeline's exit code is the
 same as a finished plate's, so `PipelineRunner` asks `_suspend_requested` before

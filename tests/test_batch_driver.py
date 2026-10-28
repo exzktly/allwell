@@ -15,6 +15,7 @@ from __future__ import annotations
 import queue
 import threading
 import types
+from pathlib import Path
 
 import pytest
 
@@ -75,10 +76,217 @@ def test_one_batch_may_not_outlive_the_budget_meant_for_one_batch():
     """Without this a single wedged well holds the node for the whole run's
     scaled walltime — strictly worse than the per-batch launches this replaces,
     where a hang cost one batch's allocation and no more."""
+    from services.remote_wait_snippets import BATCH_BUDGET_GRACE_S
+
     script = _batch_driver_snippet("/r/run-x", 2, _ARGV, "", 3600)
-    assert "timeout 3600 python process_microscopy.py" in script
+    assert f"timeout -k {BATCH_BUDGET_GRACE_S} 3600 python process_microscopy.py" in script
     # A launcher with no time limit gives no budget to enforce.
     assert "timeout" not in _batch_driver_snippet("/r/run-x", 2, _ARGV)
+
+
+# ── the driver, run in bash ──────────────────────────────────────────────────
+
+
+def _driver_dir(tmp_path, *, ready=(1,)):
+    """A run directory with batch 1 staged and the given batches flagged ready."""
+    run_dir = tmp_path / "run"
+    (run_dir / "b1").mkdir(parents=True)
+    for i in ready:
+        (run_dir / BATCH_READY.format(i=i)).touch()
+    return run_dir
+
+
+def _alive(pid: int, *, within_s: float = 2.0) -> bool:
+    """Whether *pid* is still running *within_s* from now. A killed orphan is a zombie until whatever adopted it
+    reaps it, and a zombie runs nothing."""
+    import time
+
+    deadline = time.monotonic() + within_s
+    while True:
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        except (FileNotFoundError, ProcessLookupError, IndexError):
+            return False
+        if state == "Z":
+            return False
+        if time.monotonic() > deadline:
+            return True
+        time.sleep(0.1)
+
+
+def _hung_pipeline(tmp_path, *, behind_a_wrapper: bool):
+    """A pipeline that treats SIGTERM as a suspend and never reaches the boundary it would stop at — a hung well.
+
+    *behind_a_wrapper* puts it behind a `conda run`-like wrapper that itself dies on SIGTERM, which is what left the
+    real pipeline running as an orphan in the review. Returns the argv and the file the hung process writes its pid to.
+    """
+    pid_file = tmp_path / "hung.pid"
+    hung = tmp_path / "hung.sh"
+    hung.write_text(f'trap "" TERM; echo $$ > {pid_file}; while :; do sleep 0.2; done\n')
+    if not behind_a_wrapper:
+        return ["bash", str(hung)], pid_file
+    wrapper = tmp_path / "wrapper.sh"
+    wrapper.write_text(f'bash {hung} &\nwait\n')
+    return ["bash", str(wrapper)], pid_file
+
+
+@pytest.mark.parametrize("behind_a_wrapper", [False, True], ids=["the pipeline", "a wrapper's orphan"])
+def test_a_batch_over_its_time_budget_is_killed_and_says_so(tmp_path, monkeypatch, behind_a_wrapper):
+    """`timeout N` sent SIGTERM and no more: the pipeline took it for a suspend and went on, and when a wrapper died
+    on it instead the pipeline was orphaned and kept writing `out/` into the next batch. Measured in the review: a
+    3 s budget still running at 15 s, the orphan with ppid 1."""
+    import os
+    import signal
+    import subprocess
+    import time
+
+    import services.remote_commands as rc
+
+    monkeypatch.setattr(rc, "BATCH_BUDGET_GRACE_S", 2)
+    run_dir = _driver_dir(tmp_path)
+    argv, pid_file = _hung_pipeline(tmp_path, behind_a_wrapper=behind_a_wrapper)
+    script = rc._batch_driver_snippet(str(run_dir), 1, argv, "", 2)
+    t0 = time.monotonic()
+    try:
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+        elapsed = time.monotonic() - t0
+        pid = int(pid_file.read_text())
+        assert not _alive(pid), "the hung pipeline outlived its batch"
+    finally:
+        if pid_file.exists():
+            try:
+                os.kill(int(pid_file.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    assert "[remote] ERROR batch 1 exceeded its time budget (2s)" in out.stdout, out.stdout + out.stderr
+    assert "all 1 batch(es) done" in out.stdout
+    assert elapsed < 15, f"the batch held the node {elapsed:.0f} s past a 2 s budget"
+    assert ("batch 1 finished rc=124" in out.stdout) is behind_a_wrapper or "finished rc=137" in out.stdout
+
+
+def test_a_pipeline_that_ends_in_time_is_not_over_budget(tmp_path):
+    import subprocess
+
+    run_dir = _driver_dir(tmp_path)
+    script = _batch_driver_snippet(str(run_dir), 1, ["true"], "", 30)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert "batch 1 finished rc=0" in out.stdout
+    assert "exceeded" not in out.stdout and "outlived" not in out.stdout
+
+
+def test_a_running_batch_says_it_is_still_running(tmp_path, monkeypatch):
+    """Hours of silence mid-batch looked exactly like a dead stream; the driver ticks while a batch runs."""
+    import re
+    import subprocess
+
+    import services.remote_commands as rc
+
+    monkeypatch.setattr(rc, "MID_BATCH_WATCH_POLL_S", 1)
+    monkeypatch.setattr(rc, "BATCH_TICK_S", 1)
+    run_dir = _driver_dir(tmp_path)
+    script = rc._batch_driver_snippet(str(run_dir), 1, ["sleep", "3.5"], "", 0)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    ticks = re.findall(r"\[remote\] batch-driver: batch 1 still running \((\d+)m\)", out.stdout)
+    assert len(ticks) >= 2, out.stdout
+    assert ticks[0] == "0"
+    assert out.stdout.index("still running") < out.stdout.index("batch 1 finished rc=0")
+
+
+def _fresh(path, ahead_s=120):
+    import os
+    import time
+
+    path.touch()
+    t = time.time() + ahead_s
+    os.utime(path, (t, t))
+
+
+def test_a_beating_app_s_slow_upload_is_waited_for(tmp_path, monkeypatch):
+    """The upload deadline used to end a healthy run: six nanowell wells (~48 GB) need > 53 Mbit/s to arrive in
+    two hours. Scaled: a 6 s deadline, a fresh heartbeat, nothing arrived — the driver must still be waiting."""
+    import subprocess
+
+    import services.remote_commands as rc
+
+    monkeypatch.setattr(rc, "UPLOAD_WAIT_TIMEOUT_S", 6)
+    run_dir = _driver_dir(tmp_path, ready=())
+    heartbeat = run_dir / ".hb"
+    _fresh(heartbeat)
+    script = rc._batch_driver_snippet(str(run_dir), 1, ["true"], str(heartbeat), 0)
+    with pytest.raises(subprocess.TimeoutExpired) as exc:
+        subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=12)
+    text = exc.value.stdout.decode() if isinstance(exc.value.stdout, bytes) else (exc.value.stdout or "")
+    assert "never arrived" not in text
+
+
+def test_with_no_heartbeat_to_vouch_for_the_app_the_deadline_still_stands(tmp_path, monkeypatch):
+    """The control, and the backstop C6 keeps: nothing says the uploader is alive, so the node is given back."""
+    import subprocess
+
+    import services.remote_commands as rc
+
+    monkeypatch.setattr(rc, "UPLOAD_WAIT_TIMEOUT_S", 6)
+    run_dir = _driver_dir(tmp_path, ready=())
+    script = rc._batch_driver_snippet(str(run_dir), 1, ["true"], "", 0)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 75
+    assert "[remote] ERROR batch 1 never arrived" in out.stdout
+
+
+def test_the_single_shot_upload_wait_waits_for_a_beating_app_too(tmp_path, monkeypatch):
+    """The sibling: the single-shot job's wait for its upload sentinel had the same fixed deadline."""
+    import subprocess
+
+    import services.remote_wait_snippets as ws
+
+    monkeypatch.setattr(ws, "UPLOAD_WAIT_TIMEOUT_S", 6)
+    heartbeat = tmp_path / ".hb"
+    _fresh(heartbeat)
+    script = ws._wait_for_upload_snippet(str(tmp_path / "sentinel"), str(heartbeat)) + "echo started"
+    with pytest.raises(subprocess.TimeoutExpired) as exc:
+        subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=12)
+    text = exc.value.stdout.decode() if isinstance(exc.value.stdout, bytes) else (exc.value.stdout or "")
+    assert "never completed" not in text
+    out = subprocess.run(["bash", "-c", ws._wait_for_upload_snippet(str(tmp_path / "sentinel"))],
+                         capture_output=True, text=True, timeout=30)
+    assert out.returncode == 75 and "never completed" in out.stdout
+
+
+def test_heartbeat_staleness_is_judged_by_the_clock_that_stamped_it(tmp_path):
+    """The heartbeat's mtime is the file server's clock and `date` is the compute node's: an hour of skew between
+    them read a fresh heartbeat as stale and gave the node back at every batch boundary."""
+    import os
+    import subprocess
+
+    shims = tmp_path / "bin"
+    shims.mkdir()
+    real_date = subprocess.run(["bash", "-c", "command -v date"], capture_output=True, text=True).stdout.strip()
+    (shims / "date").write_text(f'#!/bin/sh\necho $(( $({real_date} +%s) + 3600 ))\n')    # an hour ahead
+    (shims / "date").chmod(0o755)
+    run_dir = _driver_dir(tmp_path, ready=())
+    heartbeat = run_dir / ".hb"
+    heartbeat.touch()                                   # beating, by the filesystem's clock
+    script = _batch_driver_snippet(str(run_dir), 1, ["true"], str(heartbeat), 0)
+    env = {**os.environ, "PATH": f"{shims}:{os.environ['PATH']}"}
+    with pytest.raises(subprocess.TimeoutExpired) as exc:
+        subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=8, env=env)
+    text = exc.value.stdout.decode() if isinstance(exc.value.stdout, bytes) else (exc.value.stdout or "")
+    assert "stopped responding" not in text, "a fresh heartbeat was read as stale through clock skew"
+
+
+@pytest.mark.parametrize("flag,why", [
+    (".aw_batch_2_skip", "nothing was held for the end-of-run re-anchoring"),
+    (None, "the end-of-run re-anchoring was not flagged")])
+def test_a_skipped_final_pass_says_it_was_skipped(tmp_path, flag, why):
+    import subprocess
+
+    run_dir = _driver_dir(tmp_path, ready=(1, 2))
+    if flag:
+        (run_dir / flag).touch()
+    script = _batch_driver_snippet(str(run_dir), 1, ["true"], "", 0, final_pass=True)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert f"[remote] batch-driver: batch 2 skipped — {why}" in out.stdout, out.stdout
+    assert "batch 2 starting" not in out.stdout
 
 
 def test_the_driver_gives_the_node_back_when_the_app_goes_away():
@@ -401,6 +609,24 @@ def test_a_failed_batch_names_the_wells_that_never_finished(tmp_path, monkeypatc
     assert p._returncode == 1
     assert ("[remote] ERROR 1 of 2 batch(es) failed — batch 2 (exit 1): A03 not finished. Every other well "
             "completed.\n") in p._logged, p._logged
+
+
+def test_a_batch_stopped_for_its_time_budget_is_reported_as_that(tmp_path, monkeypatch):
+    """Not as "pipeline exited 124", and not as a suspend: the driver says the budget ran out, and the tally names it."""
+    def driver(proc, p):
+        proc.batch_finished(p, 1)
+        proc.say("Well A03 — done.\n")
+        proc.say("[remote] ERROR batch 2 exceeded its time budget (3600s) — its pipeline was stopped; the wells it "
+                 "had not finished are missing\n")
+        proc.say("[remote] batch-driver: batch 2 finished rc=124\n")
+
+    p = _drive(tmp_path, monkeypatch, ["A01", "A02", "A03", "A04"], 2, driver)
+
+    assert p._returncode == 124
+    log = "".join(p._logged)
+    assert "[remote] batch 2 exceeded its time budget and was stopped; continuing with the remaining batches" in log
+    assert ("[remote] ERROR 1 of 2 batch(es) failed — batch 2 (exit 124): exceeded its time budget; A04 not "
+            "finished. Every other well completed.") in log
 
 
 def test_a_batch_that_exits_0_without_its_wells_is_not_counted_complete(tmp_path, monkeypatch):

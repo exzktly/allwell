@@ -15,7 +15,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Callable
 
-from services.remote_batch_ledger import fail, unreported_after_success
+from services.remote_batch_ledger import fail, ledger_of, unreported_after_success
 from services.remote_batch_resume import download_adopted
 from services.remote_batch_staging import prune_staged
 from services.remote_handoff import hand_off_and_wait
@@ -101,7 +101,9 @@ def run_batch(proc, index: int, n_batches: int, batch_zips) -> int | Step:
     if rc != 0:
         # Kept, not fatal: one bad well should not cost the plate the node it holds. The tally after the loop
         # names every batch that did this, and the run's own code carries the first of them.
-        proc._log(f"[remote] batch {index} pipeline exited {rc}; continuing with the remaining batches\n")
+        why = ("exceeded its time budget and was stopped" if ledger_of(proc).over_budget(index)
+               else f"pipeline exited {rc}")
+        proc._log(f"[remote] batch {index} {why}; continuing with the remaining batches\n")
         return rc
     if unreported_after_success(proc, index, batch_zips):
         return 1

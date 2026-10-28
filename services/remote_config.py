@@ -168,16 +168,21 @@ class RemoteHost:
     behaviour. The string is tokenised with ``shlex.split`` at use time,
     so it stays human-readable on disk.
     """
-    exclusive_node: bool = True
+    exclusive_node: bool = False
     """Whether an ``srun`` :attr:`compute_launcher` asks for the node to
     itself (``--exclusive``), so no other job — another app instance's run
     included — is placed on the same machine.
 
-    On by default, which every config saved before the field existed gets
-    too: :attr:`launch_command` adds the word at launch time, and
+    Off by default, and so for every config that does not say otherwise.
+    Reserving the whole node means a run can never share a node that is
+    already up: on a cluster that powers idle nodes down, every launch then
+    boots a fresh node, and when that instance type cannot boot (a cloud
+    cluster out of capacity for it, say) every run fails to start — retrying
+    with the failed node excluded only picks the next node of the same type.
+    When on, :attr:`launch_command` adds the word at launch time, and
     :attr:`compute_launcher` stays exactly what the user wrote. A launcher
     that already says ``--exclusive`` or ``--oversubscribe`` is left as it is.
-    Written to ``remotes.toml`` only when switched off.
+    Written to ``remotes.toml`` only when switched on.
     """
     jupyterhub_config_path: str = ""
     """Optional path to the cluster's ``jupyterhub_config.py`` on the remote.
@@ -726,9 +731,9 @@ def _format_block(host: RemoteHost) -> str:
         f"compute_launcher = {_toml_string(host.compute_launcher)}\n"
         if host.compute_launcher else ""
     )
-    # exclusive_node is only emitted when switched off: on is the default,
-    # and loaders default the field to true when absent.
-    exclusive_line = "" if host.exclusive_node else "exclusive_node = false\n"
+    # exclusive_node is only emitted when switched on: off is the default,
+    # and loaders default the field to false when absent.
+    exclusive_line = "exclusive_node = true\n" if host.exclusive_node else ""
     jhub_line = (
         f"jupyterhub_config_path = {_toml_string(host.jupyterhub_config_path)}\n"
         if host.jupyterhub_config_path else ""

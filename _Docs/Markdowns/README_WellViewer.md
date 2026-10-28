@@ -1655,6 +1655,13 @@ it is still the scheduler command's `--cpus-per-task` that decides how many of
 the node's CPUs the run uses; the run log warns when Slurm gave it only one or
 two of a bigger node's.
 
+**A scheduler command that sends the run's output elsewhere is refused**, when
+you save the host and when a run starts: `-o` / `--output`, `-e` / `--error`
+and `--pty` would put everything the run prints — its progress, its results,
+its errors — in a file on the cluster or on a terminal of its own, and
+All-Well, which reads the run as it goes, would see nothing and the run would
+look hung. Leave them out; the run's own log keeps all of it.
+
 **Fetch** next to *Compute profile* reads the cluster's JupyterHub
 configuration and lists the compute options its web page offers; picking one
 fills in the scheduler command. The command is built the way JupyterHub builds

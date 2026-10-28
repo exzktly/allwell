@@ -210,6 +210,49 @@ def stray_words_message(launcher: str) -> str | None:
         f"e.g. --constraint={stray[0]} — or remove it.")
 
 
+#: ``srun`` options that take the job's output away from the app: ``--output`` /
+#: ``--error`` send it to a file on the cluster, and ``--pty`` puts it on a
+#: pseudo-terminal of its own. The app reads the run — every well's progress,
+#: the batch driver's hand-offs, the scheduler's own lines — off ``srun``'s
+#: stdout, so with any of these it hears nothing and the run looks hung.
+_REDIRECT_LONG = ("--output", "--error", "--pty")
+_REDIRECT_SHORT = ("-o", "-e")
+
+
+def redirect_launcher_words(launcher: str) -> list[str]:
+    """The words in an ``srun`` launcher that redirect the job's output.
+
+    Both spellings of each option are found — ``--output=f``, ``--output f``,
+    ``-o f``, ``-of`` — and ``--pty``. Returns ``[]`` for anything that is not
+    an ``srun`` launcher, or cannot be tokenised.
+    """
+    if not is_srun(launcher):
+        return []
+    found: list[str] = []
+    for tok in shlex.split(launcher)[1:]:
+        if tok == "--":
+            break
+        long = tok.split("=", 1)[0]
+        if long in _REDIRECT_LONG or (
+                not tok.startswith("--") and tok[:2] in _REDIRECT_SHORT):
+            found.append(tok)
+    return found
+
+
+def redirect_words_message(launcher: str) -> str | None:
+    """The sentence to show for :func:`redirect_launcher_words`, or ``None``."""
+    words = redirect_launcher_words(launcher)
+    if not words:
+        return None
+    listed = ", ".join(f"“{w}”" for w in words)
+    return (
+        f"The scheduler command has {listed}, which sends the run's output to a "
+        f"file or a terminal of its own instead of back to All-Well: the run's "
+        f"progress, its per-well results and its errors would never arrive, and "
+        f"it would look hung. Remove it: All-Well reads the job's output itself "
+        f"and keeps it in the run's log.")
+
+
 def _split_launcher(tokens: list[str]) -> tuple[list[str], list[str], str]:
     """``(tokens without --exclude, the user's exclusions, the partition)``."""
     kept: list[str] = []
@@ -249,7 +292,13 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
     *remote_pidfile_q* and *err_file_q* are already shell-quoted paths.
     *start_slack_s* and *pending_fallback_s* are :data:`START_SLACK_S` and
     :data:`PENDING_FALLBACK_S`; the tests shorten them.
+
+    Raises ``ValueError`` for a launcher that would send the job's output
+    anywhere but back to the app (:func:`redirect_words_message`).
     """
+    redirect = redirect_words_message(launcher)
+    if redirect:
+        raise ValueError(redirect)
     tokens, user_excl, partition = _split_launcher(shlex.split(launcher))
     launcher_str = shlex.join(tokens)
     awake = "|".join(AWAKE_STATES)

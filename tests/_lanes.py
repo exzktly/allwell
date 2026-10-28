@@ -298,6 +298,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_stream_rsync_retry.py": "Audit A11 — the shared streaming-rsync retry loop",
     "test_the_launch_command_survives_the_command_line.py": "The launch command reaches the remote intact from a Windows client",
     "test_the_slurm_job_indicator.py": "The Analyze pane's Slurm-job indicator: lit only while a job is open",
+    "test_the_srun_wrapper_keeps_a_started_run.py": "The srun wrapper never replays a started run, enforces Max queue wait, refuses output redirection",
     "test_transient_progress_lines.py": "Transfer progress is live state, so it does not go in the log",
     "test_upload_rail_counts_wells.py": "The Upload rail counts wells that are on the remote, not rsync's chatter",
 }

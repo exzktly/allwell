@@ -26,7 +26,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from util.aw_safe import swallowed
+from util.aw_safe import swallow, swallowed
 from util.json_write import write_json_atomic
 
 _log = logging.getLogger(__name__)
@@ -63,6 +63,106 @@ def complete_seal_path(output_dir: Path | str, well_label: str) -> Path:
     return Path(output_dir) / COMPLETE_DIRNAME / f"{well_label}.json"
 
 
+#: Beside a seal, never a ``.json``: what :func:`withdraw_seal` leaves until the well is sealed again.
+WITHDRAWN_SUFFIX = ".withdrawn"
+
+
+def withdrawn_note_path(output_dir: Path | str, well_label: str) -> Path:
+    """The note :func:`withdraw_seal` leaves while *well_label*'s output is being rewritten, or was left part way."""
+    return Path(output_dir) / COMPLETE_DIRNAME / f"{well_label}{WITHDRAWN_SUFFIX}"
+
+
+# ── "Is this well finished?" — the one definition ──────────────────────────
+#
+# Every consumer that decides a well need not be run, sent or adopted again asks it here: the host's own skip
+# (`pipeline.well_skip.finished_output`), the remote pre-flight and the batched resume's adoption
+# (`services.remote_finished_wells.RemoteOutputs`), the pre-staging download (`services.remote_recover`).
+# `tests/test_one_definition_of_a_finished_well.py` holds that no other module lists `*_out.zip` to decide it.
+
+def well_of_out_zip(name: str) -> str | None:
+    """The canonical well a ``<well>_out.zip`` file name belongs to, or ``None`` for any other name."""
+    from util.well_token import canonical_well_label
+
+    name = str(name).rsplit("/", 1)[-1]
+    if not name.endswith("_out.zip"):
+        return None
+    return canonical_well_label(name[: -len("_out.zip")])
+
+
+def well_of_seal(name: str) -> str | None:
+    """The canonical well a completion seal's file name (``<well>.json``) belongs to, or ``None``."""
+    from util.well_token import canonical_well_label
+
+    name = str(name).rsplit("/", 1)[-1]
+    return canonical_well_label(name[: -len(".json")]) if name.endswith(".json") else None
+
+
+def finished_wells(with_output, sealed) -> frozenset[str]:
+    """**The** answer to "is this well finished": its output is there *and* its completion seal is beside it.
+
+    *with_output* are the wells an output directory holds a ``<well>_out.zip`` for, *sealed* the wells it holds a
+    seal for, both as canonical labels. An archive alone proves nothing — a well that failed some groups, was wound
+    down part way, or died mid-rewrite writes one too — and a seal alone has nothing to vouch for. Either listing
+    ``None`` means it could not be read, and then **nothing** is finished: the cost of a wrong "no" is a recomputed
+    well, the cost of a wrong "yes" is a stale one reported as current.
+    """
+    if with_output is None or sealed is None:
+        return frozenset()
+    return frozenset(w for w in with_output if w and w in set(sealed))
+
+
+def sealed_wells(output_dir: Path | str) -> frozenset[str] | None:
+    """The wells *output_dir* holds a completion seal for, canonical; ``None`` when the folder cannot be read."""
+    folder = Path(output_dir) / COMPLETE_DIRNAME
+    try:
+        if not folder.is_dir():
+            return frozenset()
+        return frozenset(w for p in folder.iterdir() if (w := well_of_seal(p.name)))
+    except OSError:
+        return None
+
+
+def recorded_completeness(output_dir: Path | str) -> dict:
+    """``{well: record}`` — every completeness record *output_dir* holds from earlier runs: the sidecar's
+    ``run_report`` block, overlaid with any per-well file a run that died before folding them in left behind.
+
+    Read by ``process_microscopy.main`` **before** it rewrites the sidecar and clears the per-well files, for
+    :func:`finished_on_this_host`. Unreadable parts read as no record.
+    """
+    block = read_run_report_block(Path(output_dir) / "pipeline_info.json") or {}
+    records = dict(block.get("wells") or {}) if isinstance(block.get("wells"), dict) else {}
+    records.update(collect_run_report(output_dir)["wells"])
+    return records
+
+
+def finished_on_this_host(output_dir: Path | str, well_label: str, *, records: dict | None = None) -> bool:
+    """Whether a well whose output exists in *output_dir* is finished, for the pipeline's own skip.
+
+    :func:`finished_wells` first: sealed is finished. An unsealed well is finished only when nothing says a build
+    that seals ever touched it and nothing says it ended short — the output of a build from before the seal,
+    which every plate made before it holds, and which the run re-used before there was a seal to ask:
+
+    * a withdrawal note (:func:`withdraw_seal`) means a sealing build began rewriting the well and never sealed it:
+      it was wound down part way, failed groups, or died mid-rewrite — **not finished**;
+    * a completeness record in *records* (:func:`recorded_completeness`) that is not whole means the same, for the
+      builds that wrote records but left no note — **not finished**;
+    * neither: a well an earlier build finished. Finished, as it always was.
+
+    Only the host has those two pieces of evidence beside the output, which is why only this caller grandfathers;
+    the app's readers of a remote directory (:func:`finished_wells` alone) treat every unsealed well as unfinished.
+    """
+    from util.well_token import canonical_well_label
+
+    label = canonical_well_label(str(well_label)) or str(well_label)
+    sealed = sealed_wells(output_dir)
+    if label in finished_wells({label}, sealed):
+        return True
+    if sealed is None or any(withdrawn_note_path(output_dir, w).exists() for w in {str(well_label), label}):
+        return False
+    record = (records or {}).get(str(well_label)) or (records or {}).get(label)
+    return record is None or well_is_whole(record)
+
+
 class SealNotWithdrawnError(RuntimeError):
     """A well's completion seal could not be removed, so its output must not be rewritten.
 
@@ -86,8 +186,22 @@ def withdraw_seal(output_dir: Path | str, well_label: str) -> None:
     that. So the failure is logged and raised as :class:`SealNotWithdrawnError`;
     the well fails before touching anything, and its earlier output stays as it
     was, still sealed and still whole.
+
+    It also leaves a **withdrawal note** (:func:`withdrawn_note_path`) until the
+    well is sealed again, so the output it leaves behind is marked as written by
+    a build that seals: the host's own skip (:func:`finished_on_this_host`) can
+    then tell a part-way well from one a build before the seal finished, which
+    otherwise look the same — output, no seal. A note that cannot be written is
+    logged and the rewrite goes on; the well's completeness record still says
+    whether it ended whole.
     """
     path = complete_seal_path(output_dir, well_label)
+    note = withdrawn_note_path(output_dir, well_label)
+    try:
+        note.parent.mkdir(parents=True, exist_ok=True)
+        note.touch()
+    except OSError:
+        swallowed(f"Well {well_label}: could not leave the note that its completion seal is withdrawn ({note})")
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:
@@ -125,8 +239,10 @@ def wells_left_part_way(output_dir: Path | str, wells) -> list[str]:
 
     wanted = {canonical_well_label(str(w)) or str(w) for w in wells}
     root = Path(output_dir)
+    sealed = sealed_wells(root)
+    if sealed is None:
+        return sorted(wanted)
     try:
-        sealed = {canonical_well_label(p.stem) for p in (root / COMPLETE_DIRNAME).glob("*.json")}
         written = set()
         for sub, pattern in _WELL_OUTPUT_PATTERNS:
             folder = root / sub
@@ -138,7 +254,8 @@ def wells_left_part_way(output_dir: Path | str, wells) -> list[str]:
                     written.add(canonical_well_label(found.group("well")))
     except OSError:
         return sorted(wanted)
-    return sorted(w for w in wanted if w in written and w not in sealed)
+    finished = finished_wells(written, sealed)
+    return sorted(w for w in wanted if w in written and w not in finished)
 
 
 def recorded_well_report(output_dir: Path | str, well_label: str) -> dict | None:
@@ -203,6 +320,11 @@ def seal_well_complete(output_dir: Path | str, well_label: str) -> Path | None:
         write_json_atomic(path, {"well": str(well_label)})
     except OSError:
         return None
+    from util.well_token import canonical_well_label
+
+    with swallow(f"Well {well_label}: clearing the note that its completion seal was withdrawn"):
+        for spelling in {str(well_label), canonical_well_label(str(well_label)) or str(well_label)}:
+            withdrawn_note_path(output_dir, spelling).unlink(missing_ok=True)
     return path
 
 

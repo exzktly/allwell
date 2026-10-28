@@ -40,7 +40,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
-from pipeline.run_report import COMPLETE_DIRNAME
+from pipeline.run_report import COMPLETE_DIRNAME, finished_wells, well_of_out_zip, well_of_seal
 from services.remote_transport import _remote_quote
 from util.well_token import canonical_well_label
 
@@ -114,8 +114,8 @@ def find_leftovers(cache, *, own_run_dir: str, own_output_dir: str, earlier: Ite
     found = Leftovers()
     if result is None or getattr(result, "returncode", 1) != 0:
         return found
-    archives: list[tuple[str, str]] = []           # (well, output directory), in listing order: own first
-    sealed: set[tuple[str, str]] = set()
+    # Per output directory, in listing order (own first): the wells with an out.zip, and those sealed.
+    outputs: dict[str, tuple[set[str], set[str]]] = {}
     for line in (result.stdout or "").splitlines():
         index, _, rel = line.partition("\t")
         if not index.isdigit() or int(index) >= len(roots):
@@ -125,28 +125,25 @@ def find_leftovers(cache, *, own_run_dir: str, own_output_dir: str, earlier: Ite
         if not parts:
             continue
         name = parts[-1]
+        where = f"{root.path}/{root.out_name}"
         if root.run_dir and len(parts) == 3 and parts[:2] == (root.out_name, COMPLETE_DIRNAME):
-            well = canonical_well_label(name[: -len(".json")]) if name.endswith(".json") else ""
-            if well:
-                sealed.add((well, f"{root.path}/{root.out_name}"))
+            if well := well_of_seal(name):
+                outputs.setdefault(where, (set(), set()))[1].add(well)
             continue
         sub = parts[0] if len(parts) == 2 else ""
         if root.run_dir and sub == root.out_name:
-            if name.endswith("_out.zip"):
-                well = canonical_well_label(name[: -len("_out.zip")])
-                if well:
-                    archives.append((well, f"{root.path}/{sub}"))
+            if well := well_of_out_zip(name):
+                outputs.setdefault(where, (set(), set()))[0].add(well)
             continue
         if root.run_dir and not (sub in ("in", "bg") or _BATCH_DIR.fullmatch(sub)):
             continue             # in/, a staged batch, or bg/ (the empty-well reference); nothing else is input
         if not root.run_dir and sub:
             continue
         found.inputs.setdefault(name, []).append(f"{root.path}/{PurePosixPath(*parts)}")
-    for well, where in archives:
-        if (well, where) in sealed:
-            found.finished.setdefault(well, where)
-        else:
-            found.part_way.setdefault(well, where)
+    for where, (with_output, sealed) in outputs.items():
+        finished = finished_wells(with_output, sealed)          # the one definition (pipeline.run_report)
+        for well in sorted(with_output):
+            (found.finished if well in finished else found.part_way).setdefault(well, where)
     for well in found.finished:
         found.part_way.pop(well, None)                # a whole copy anywhere wins over a part-way one
     if found.inputs or found.finished:
@@ -202,6 +199,26 @@ def adopt_finished(cache, wells: Iterable[str], found: Leftovers, *, own_output_
             f"instead of uploading and running them again: {', '.join(adopted[:12])}"
             + (" …" if len(adopted) > 12 else "") + "\n")
     return adopted
+
+
+def mark_part_way(cache, found: Leftovers, *, own_output_dir: str) -> None:
+    """Leave the withdrawal note (``pipeline.run_report.withdrawn_note_path``) beside every well left part way in
+    the output directory this run writes into, so the host's own skip runs it again.
+
+    A build that sealed wells but left no note beside a withdrawn seal wrote part-way output the host cannot tell
+    from a well a build before the seal finished; it grandfathers the second (``run_report.finished_on_this_host``),
+    and its record check misses the first once an earlier batch of this run has rewritten the sidecar. The app's
+    listing has already decided these wells are not finished, so it says so where the host will look.
+    Best-effort: a note that cannot be written leaves the host's own evidence to decide.
+    """
+    from pipeline.run_report import WITHDRAWN_SUFFIX
+
+    wells = sorted(w for w, where in found.part_way.items() if where == own_output_dir)
+    if not wells:
+        return
+    seals = f"{own_output_dir}/{COMPLETE_DIRNAME}"
+    notes = " ".join(_remote_quote(f"{seals}/{w}{WITHDRAWN_SUFFIX}") for w in wells)
+    cache._ssh_script(f"mkdir -p {_remote_quote(seals)} && touch {notes}\n", check=False)
 
 
 def stage_from_leftovers(cache, batches: list[list], found: Leftovers, *, own_run_dir: str,
@@ -282,6 +299,7 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     _say_what_the_journal_expected(proc, zips, found)
     if force:
         return list(zips), []
+    mark_part_way(runner._cache, found, own_output_dir=own_output)
     wanted = [w for w in (canonical_well_label(z.stem) for z in zips) if w and w in found.finished]
     adopted = set(adopt_finished(runner._cache, wanted, found, own_output_dir=own_output,
                                  nanowell=bool(proc._fetcher.run.nanowell), log=proc._log))

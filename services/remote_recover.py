@@ -49,6 +49,7 @@ from services.remote_run_id import (
     legacy_argv_digests,
     pipeline_argv_digest,
 )
+from services.remote_finished_wells import finished_on_remote, list_remote_outputs
 from services.remote_run_state import LocalInputMode, OutputFilter, _RemoteRun
 from services.remote_scratch import source_fingerprint
 from util.aw_safe import swallowed
@@ -156,7 +157,15 @@ def _recover_from(runner, remote_dir: str, local_output_dir: Path,
     )
     verifier = FetchedOutputVerifier(runner.host, run, runner._cache, stop)
     host = runner.host.ssh_alias
-    on_remote = frozenset(verifier._list_remote_completed_wells())
+    # Finished means sealed (`pipeline.run_report.finished_wells`): a well the earlier run left part way, or with
+    # failed groups, wrote an out.zip too, and pulling it here as finished output made the next staging leave it
+    # out of the upload. A listing that fails finds nothing — the wells are then sent and recomputed, never
+    # stale ones taken for finished.
+    listing = list_remote_outputs(runner._cache, remote_dir)
+    on_remote = finished_on_remote(listing)
+    if listing is not None and listing.part_way:
+        log(f"[remote] resume: {host}:{remote_dir} also holds {len(listing.part_way)} well(s) left part way "
+            f"({_sample(listing.part_way)}) — not downloaded as finished; they are run again\n")
     if not on_remote:
         return Recovery(remote_dir=remote_dir)
     # Asked silently: these are not failures yet, only the question of whether
@@ -165,7 +174,7 @@ def _recover_from(runner, remote_dir: str, local_output_dir: Path,
     # Read out of the messages with verify's own pattern, so "which well is
     # this about" has the one answer the end-of-run retry already uses.
     missing_wells = frozenset(
-        m.group(1) for m in (_WELL_IN_MESSAGE.search(t) for t in missing) if m)
+        m.group(1) for m in (_WELL_IN_MESSAGE.search(t) for t in missing) if m) & on_remote
     if not missing_wells:
         log(f"[remote] resume: {host}:{remote_dir} holds {len(on_remote)} "
             f"finished well(s), all already here\n")

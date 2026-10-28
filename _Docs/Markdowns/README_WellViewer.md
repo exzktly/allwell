@@ -1902,7 +1902,17 @@ and by `remote_fetch_report.txt` in the output folder.
   but could not address does not make its well count as unfinished: sending
   that well alone could not address it, since locating it from the rest of the
   plate needs the other wells — Force re-runs the plate, which can. A plate with nothing left to do
-  ends without uploading anything. When only part of a plate is sent, the
+  ends without uploading anything.
+  A well counts as finished only when the run that wrote it also sealed it as
+  whole. A well left part way — by Stop, Suspend, a lost connection or a crash —
+  or one that lost some of its fields to errors has output too, but no seal, and
+  any run, on this computer or on the remote host, runs it again rather than
+  keeping it as complete; the log says *has output here, but it was left part
+  way (no completion seal) — running it again*. On a remote re-run the
+  pre-flight check counts only sealed wells, so a host that holds a part-way
+  well never skips the pipeline. Results made by a version of All-Well from
+  before the seal are still reused as they were, unless their own completeness
+  record says they ended short. When only part of a plate is sent, the
   cell-gating thresholds are computed on this computer afterwards, over every
   well, so they are the plate's rather than the part's.
   A remote run in batches that is restarted — after Stop, Suspend, or a lost

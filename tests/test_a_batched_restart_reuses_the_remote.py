@@ -577,3 +577,12 @@ def test_a_well_the_remote_left_part_way_is_run_again_not_adopted(tmp_path, monk
         f"a well left part way on the remote was adopted as finished: {observed}")
     assert "b1/A02.zip" in sent, f"the part-way well was not sent to be run again: {sent}"
     assert any("A02" in m and "part way" in m for m in p._logged), "nothing says why A02 is run again"
+    # Tracker B1: sending it is half; the host writing into the re-attached directory must not then skip it as
+    # complete. The app leaves the withdrawal note the host's skip reads (`run_report.finished_on_this_host`).
+    from pipeline.run_report import finished_on_this_host, withdrawn_note_path
+
+    note = withdrawn_note_path(old / "out", "A02")
+    assert note.exists() is (where == "re-attached"), (
+        f"{where}: the note is for the directory the host writes into, and only that one")
+    if where == "re-attached":
+        assert not finished_on_this_host(old / "out", "A02"), "the host would still skip the part-way well"

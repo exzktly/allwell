@@ -141,6 +141,9 @@ def _run_one_finished_on_the_server(plate, host, remote, stop_fetchers, *,
 
     digest = primary_settings_key(settings_key_from_argv(args[2:]))
     seeded.mkdir(parents=True, exist_ok=True)
+    # The pipeline writes its sidecar before any image work, so a finished run's directory always holds one, and
+    # verification fails a run whose sidecar it could not pull (tracker row A8).
+    (seeded / "pipeline_info.json").write_text("{}")
     for well in WELLS:
         with zipfile.ZipFile(seeded / f"{well}_out.zip", "w") as zf:
             for fov in (1, 2):

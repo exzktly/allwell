@@ -82,6 +82,18 @@ def write_json_atomic(path: Path | str, data: Any, *, indent: int = 2,
     the replace, so the destination is untouched. Callers decide whether to
     catch; a caller whose contract is that bookkeeping never fails a run should.
     """
+    _replace_atomically(path, lambda fh: json.dump(data, fh, indent=indent), durable=durable)
+
+
+def write_text_atomic(path: Path | str, text: str, *, durable: bool = True) -> None:
+    """Replace *path* with *text* (UTF-8), atomically — :func:`write_json_atomic`'s
+    rule for a file that is not JSON, such as ``remotes.toml``: a reader sees
+    the old file or the new one, never a truncated one."""
+    _replace_atomically(path, lambda fh: fh.write(text), durable=durable)
+
+
+def _replace_atomically(path: Path | str, fill, *, durable: bool) -> None:
+    """Stage via *fill(fh)* beside *path*, then ``os.replace`` it into place."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_name = ""
@@ -89,7 +101,7 @@ def write_json_atomic(path: Path | str, data: Any, *, indent: int = 2,
         fd, tmp_name = tempfile.mkstemp(
             dir=str(path.parent), prefix=f"__aw_tmp_{path.name}.", suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=indent)
+            fill(fh)
             fh.flush()
             if durable:
                 try:

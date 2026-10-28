@@ -80,19 +80,13 @@ def list_remote_csvs(host, remote_output_dir: str, well: str,
                      log: Callable[[str], None], *, compress: bool) -> list[str] | None:
     """The end-of-run retry's listing of a well's remote CSVs, compressing the
     plain ones first when *compress* (the well was never transferred). ``None``
-    when the listing itself failed."""
+    when the listing itself failed — an ssh that exited non-zero or timed out —
+    which is never the same answer as "the well has no CSV" (row A10)."""
+    from services.remote_listing import list_remote_glob
+
     if compress:
         compress_remote_csvs(host, remote_output_dir, well, log)
-    try:
-        listing = subprocess.run(
-            host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-            # Bytes input: text mode would turn \n into \r\n on Windows and
-            # trip the remote bash.
-            input=f"ls -1 {remote_csv_globs(remote_output_dir, well)} 2>/dev/null || true".encode("utf-8"),
-            capture_output=True, timeout=30,
-        )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        log(f"[remote] retry: listing {well} failed: {exc}\n")
-        return None
-    out = listing.stdout.decode("utf-8", errors="replace") if listing.stdout else ""
-    return [ln for ln in out.splitlines() if ln.strip()]
+    _alias, files, _bytes = list_remote_glob(
+        host, f"{host.ssh_alias}:{remote_csv_globs(remote_output_dir, well)}", timeout=30,
+        on_failure=lambda why: log(f"[remote] retry: listing {well} failed: {why}\n"))
+    return files

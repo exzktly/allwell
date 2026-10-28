@@ -43,6 +43,8 @@ class SlurmJobIndicator(QLabel):
             self._set(sj.on_specs(self._job, specs))
         elif what == "closed":
             self._set(sj.on_closed(self._job))
+        elif what == "unknown":
+            self._set(sj.on_unknown(self._job))
 
     def reset(self) -> None:
         self._set(sj.SlurmJob())
@@ -56,6 +58,7 @@ class SlurmJobIndicator(QLabel):
         state = self._job.state
         self.setVisible(state != sj.NONE)
         color = (theme.Colors.success if state == sj.OPEN
+                 else theme.Colors.warn if state == sj.UNKNOWN
                  else theme.Colors.text_muted)
         dpr = self.devicePixelRatioF() if self.isVisible() else 1.0
         self.setPixmap(make_pixmap("server", color, _ICON_PX, dpr))

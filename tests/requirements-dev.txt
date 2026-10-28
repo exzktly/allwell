@@ -24,9 +24,7 @@
 # See .github/workflows/ci.yml and scripts/test.sh.
 
 # ── Test harness ─────────────────────────────────────────────────────────────
-# Below 9.2: 9.2 refuses pytest.approx over nested sequences, which tests still use, and CI resolved it
-# unasked the day it shipped (tests/test_nanowell_cell_dots.py went red on an unrelated PR).
-pytest>=7.0,<9.2
+pytest>=7.0
 pytest-qt>=4.2
 pytest-mock>=3.10
 pytest-timeout>=2.1

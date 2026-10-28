@@ -19,10 +19,10 @@ def _patch_stream(monkeypatch, results):
     calls = {"n": 0}
 
     # ``well_sizes`` carries the per-well upload denominators through to the
-    # streaming reader; the retry loop only forwards it, so this fake accepts
-    # and ignores it.
+    # streaming reader, and ``diagnostics`` collects what rsync said for the
+    # retry rule; this fake accepts and ignores both.
     def _fake(cmd, *, log_fn=None, progress_fn=None, stop_event=None,
-              well_sizes=None):
+              well_sizes=None, diagnostics=None):
         calls["n"] += 1
         return next(seq)
 

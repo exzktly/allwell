@@ -300,6 +300,75 @@ def _flags(pipeline_argv: Sequence[str]) -> list[str]:
     return flags
 
 
+# ── finished on the remote ──────────────────────────────────────────────────
+
+@dataclasses.dataclass(frozen=True)
+class RemoteOutputs:
+    """What one remote output directory holds, per well, as the one listing every remote reader asks.
+
+    *with_output* are the wells with a ``<well>_out.zip``, *sealed* those with a completion seal
+    (``pipeline.run_report.COMPLETE_DIRNAME``). Whether a well is **finished** is
+    ``pipeline.run_report.finished_wells`` of the two — the definition the host's own skip uses too.
+    """
+
+    with_output: frozenset[str] = frozenset()
+    sealed: frozenset[str] = frozenset()
+    #: ``{well: build}`` from each seal (``pipeline.run_report.this_build``; ``""`` for a seal from before builds were
+    #: recorded), so a reuse across builds can be named (``run_report.cross_build_note``).
+    builds: dict = dataclasses.field(default_factory=dict, compare=False)
+
+    @property
+    def finished(self) -> frozenset[str]:
+        from pipeline.run_report import finished_wells
+
+        return finished_wells(self.with_output, self.sealed)
+
+    @property
+    def part_way(self) -> frozenset[str]:
+        """Wells with output and no seal: left part way, failed some groups, or written by a build before seals."""
+        return self.with_output - self.finished
+
+
+#: The last line of a listing that ran to its end; without it the listing is unknown, not empty.
+_LISTED = "AW_LISTED"
+
+
+def list_remote_outputs(cache, remote_dir: str) -> RemoteOutputs | None:
+    """List *remote_dir*'s ``<well>_out.zip`` files and completion seals in one ssh; ``None`` when that failed.
+
+    ``None`` is "unknown" and every caller reads it as "nothing finished" (:func:`finished_on_remote`). A listing
+    that failed used to come back as an empty set, the same answer as "the remote holds nothing" — fine for a
+    question whose wrong "no" costs a recompute, wrong for every caller that acts on the answer. A directory that
+    does not exist is a real, known answer: nothing.
+    """
+    from pipeline.run_report import COMPLETE_DIRNAME, well_of_out_zip, well_of_seal
+    from services.remote_transport import _remote_quote
+
+    where = _remote_quote(remote_dir)
+    script = (f"if [ ! -d {where} ]; then echo {_LISTED}; exit 0; fi\n"
+              f"cd {where} || exit 3\n"
+              "for f in ./*_out.zip; do [ -f \"$f\" ] && echo \"O ${f#./}\"; done\n"
+              f"for f in ./{COMPLETE_DIRNAME}/*.json; do [ -f \"$f\" ] && echo \"S ${{f##*/}} "
+              "$(sed -n 's/.*\"build\": *\"\\([^\"]*\\)\".*/\\1/p' \"$f\" | head -n 1)\"; done\n"
+              f"echo {_LISTED}\n")
+    try:
+        result = cache._ssh_script(script, check=False)
+    except OSError:
+        return None
+    lines = (getattr(result, "stdout", "") or "").splitlines() if result is not None else []
+    if result is None or getattr(result, "returncode", 1) != 0 or not lines or lines[-1].strip() != _LISTED:
+        return None
+    with_output = {w for ln in lines if ln.startswith("O ") and (w := well_of_out_zip(ln[2:].strip()))}
+    builds = {w: build.strip() for ln in lines if ln.startswith("S ")
+              for name, _, build in [ln[2:].strip().partition(" ")] if (w := well_of_seal(name))}
+    return RemoteOutputs(frozenset(with_output), frozenset(builds), builds)
+
+
+def finished_on_remote(listing: RemoteOutputs | None) -> frozenset[str]:
+    """The wells a remote listing says are finished; none when the listing is unknown."""
+    return listing.finished if listing is not None else frozenset()
+
+
 #: What a well's settings marker says when the one its fetched output came with could not be brought back: a digest
 #: no settings key contains, so the well is never reused on the strength of a marker from an earlier computation.
 UNKNOWN_SETTINGS = "unknown-fetch-failed"

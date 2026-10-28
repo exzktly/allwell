@@ -27,6 +27,7 @@ the work still being there.
 from __future__ import annotations
 
 import os
+import subprocess
 import zipfile
 
 import pytest
@@ -355,7 +356,7 @@ def _cleanup_deletions(tmp_path, monkeypatch, *, reattached: bool) -> list[str]:
     def _ssh_run(self, argv, *, check=False, **kw):
         if list(argv[:2]) == ["rm", "-rf"]:
             removed.extend(argv[2:])
-        return None
+        return subprocess.CompletedProcess(list(argv), 0, "", "")
 
     monkeypatch.setattr(remote_upload.DatasetCache, "_ssh_run", _ssh_run)
 
@@ -372,7 +373,7 @@ def _cleanup_deletions(tmp_path, monkeypatch, *, reattached: bool) -> list[str]:
     # Real rsync attempts, with the retry ladder behind them — a minute of
     # timeouts for artefacts this test does not look at.
     monkeypatch.setattr(remote_fetch.FetchedOutputVerifier, "_rsync_optional",
-                        lambda self, *a, **kw: None)
+                        lambda self, *a, **kw: True)
     rr.RemoteRunner.verify_and_cleanup(
         runner, True, cleanup_mode="run", log_fn=lambda _m: None)
     return removed

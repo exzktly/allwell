@@ -109,6 +109,7 @@ def test_run_dashboard_legend_is_local_by_default(qapp):
         (C.warn, "processing"),
         (C.accent, "processed"),
         (C.success, "complete"),
+        (C.stale, "partial / unfinished"),
         (C.danger, "failed"),
     ])
 
@@ -128,8 +129,21 @@ def test_run_dashboard_legend_names_the_transfer_stages_when_remote(qapp):
         (C.warn, "processing"),
         (C.accent, "on server"),
         (C.success, "downloaded"),
+        (C.stale, "partial / unfinished"),
         (C.danger, "failed"),
     ])
+
+
+def test_the_run_plate_paints_no_two_states_alike(qapp):
+    """The partial colour is one no other run-plate state paints: a partial well
+    drawn in a finished well's colour is the defect it exists to end (tracker B3)."""
+    from widgets.run_dashboard import RunDashboard
+
+    for remote in (False, True):
+        dash = RunDashboard()
+        dash.reset(remote=remote)
+        colours = [colour for colour, _label in _legend(dash)[1]]
+        assert len(set(colours)) == len(colours), colours
 
 
 def test_a_rebuild_does_not_stack_a_second_copy(qapp):

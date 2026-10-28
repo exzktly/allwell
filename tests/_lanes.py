@@ -152,6 +152,7 @@ NANOWELL_E2E_FILES = {
     "test_nanowell_real_plate.py": "tracker section F: the real plate's geometry on rendered tiles; 20 s",
     "test_nanowell_manual_anchor_run.py": "an anchor set by hand addresses a well end to end; 40 s",
     "test_nanowell_segmenter_input_sheet.py": "a run writes the sample of what its segmenter was given; 8 s",
+    "test_a_remote_nanowell_run_on_a_standin_cluster.py": "a batched remote nanowell run through its final re-anchoring pass on the stand-in cluster (tracker P1); 27 s",
 }
 
 
@@ -160,6 +161,7 @@ NANOWELL_E2E_FILES = {
 #: above. ``scripts/test.sh --nanowell-features``. The description is each file's
 #: own docstring; membership is by subject, so no further reason is owed.
 NANOWELL_FEATURE_FILES: dict[str, str] = {
+    "test_a_nanowell_release_keeps_what_it_cannot_see.py": "A nanowell batch releases a well from the remote only on answers the host actually gave (row A4)",
     "test_an_unaddressed_nanowell_timepoint_offers_its_anchor.py": "A nanowell timepoint the run left unaddressed is named as such, and opens straight onto …",
     "test_an_unaddressed_nanowell_well_is_not_staged_and_never_processed.py": "A nanowell well whose timepoints ran and could not be addressed is partial on Home, not …",
     "test_batch_export_nanowell_mode.py": "Batch Export's Nanowells mode (tracker I4): per export group, the chosen view per metric …",
@@ -233,7 +235,18 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_batched_restart_reuses_the_remote.py": "A restarted batched run looks at the remote before it uploads or runs anything",
     "test_a_batched_resume_does_not_download_first.py": "A batched resume starts the run at once; wells already here are painted, whatever the …",
     "test_a_batched_subset_run_finds_its_wells.py": "A remote run split into batches can be limited to named wells",
+    "test_a_failed_remote_listing_keeps_the_data.py": "A remote command that failed is never read as nothing there: the fetch keeps the well, verify fails closed",
+    "test_a_failing_heartbeat_is_reported.py": "A heartbeat that is not reaching the host says so, before the host acts on the silence",
+    "test_a_forced_well_keeps_the_plate_s_reuse.py": "Forcing one well redoes it; the run's address and re-attach stay the plate's",
+    "test_a_lost_batch_driver_is_not_a_stop.py": "A batch driver that went away is a failure with a reason, not the user's Stop",
+    "test_a_lost_batch_handoff_is_noticed.py": "A batch handed to the batch driver either reaches it, or the run says it did not",
+    "test_a_remote_cleanup_says_what_it_removed.py": "A remote cleanup says what it removed; a batch that cannot be pruned does not run",
     "test_a_remote_run_end_to_end.py": "A remote run, driven end to end against a host that really has a filesystem",
+    "test_a_remote_run_keeps_the_mac_awake.py": "A remote run holds caffeinate from its start to its end, on macOS only",
+    "test_a_remote_run_on_a_standin_cluster.py": "The app's remote path and the real remote side as a pair — srun, driver, conda guard, the pipeline — with faults on cue (tracker P1)",
+    "test_a_remote_run_over_a_failing_link.py": "The same pair over a link whose nth ssh fails or one call hangs: correct or visibly failed (tracker P1)",
+    "test_a_remote_run_says_how_it_ended.py": "A remote run says what ended it, and calls its job closed only once the host confirms it",
+    "test_a_silent_remote_stream_is_noticed.py": "A remote run quiet for twenty minutes outside a queue wait is said and checked with the host",
     "test_a_remote_suspend_winds_the_run_down.py": "A remote Suspend asks the pipeline to wind down; it does not kill the session",
     "test_a_resume_keeps_checkpoints_when_the_blank_moves.py": "A resumed batched run keeps its wells' part-way checkpoints though the blank's path changed",
     "test_a_resumed_remote_run_downloads_before_uploading.py": "Resuming a remote run downloads what the server finished; it never re-uploads it",
@@ -245,7 +258,9 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_stop_mid_download_leaves_nothing_broken.py": "A Stop part-way through a download leaves a truncated zip; the next attempt replaces it, …",
     "test_a_subset_run_resumes_only_its_wells.py": "A run limited to named wells resumes only those wells, so an unrelated unfinished run does …",
     "test_a_vanished_app_suspends_the_batch_in_flight.py": "An app that disappears while a batch is running hands the node back",
+    "test_a_verified_run_cleans_its_earlier_attempts.py": "Auto-delete after a verified run removes earlier attempts, never a live job's or held wells",
     "test_acquisition_remote_transport.py": "Metadata reaches scoped uploads and changes cache identity without pixel edits",
+    "test_an_allocation_belongs_to_the_run_that_made_it.py": "A scheduler job is cancelled only by the run that asked for it; a resume checks earlier attempts",
     "test_analyze_background_remote_ui.py": "Analyze-tab UI grouping regressions (runs headless / offscreen Qt)",
     "test_analyze_run_target_is_the_users_choice.py": "Audit U2 — \"Run on:\" keeps the target the user picked",
     "test_batch_driver.py": "One Slurm allocation for every batch, instead of one per batch",
@@ -276,6 +291,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_remote_config_writer.py": "Tests for services.remote_config.write_remote / delete_remote",
     "test_remote_dialog.py": "Smoke tests for analyze.remote_dialog (v5.1.0)",
     "test_remote_dialog_defects.py": "Audit U4, U5, U9, U10, U11, U14, U15, U16 — the Manage Remotes dialogs",
+    "test_remote_env_readiness.py": "A remote env is ready when the bootstrap's install did not fail and the pipeline's modules import",
     "test_remote_fetch_freshness.py": "A remote run has to prove it replaced the output it was told to replace",
     "test_remote_fetch_verification.py": "What a remote run's fetched output must prove before the remote copy goes",
     "test_remote_incremental.py": "Client-side incremental split for remote runs",
@@ -292,13 +308,18 @@ REMOTE_FILES: dict[str, str] = {
     "test_scheduler_probe.py": "The Remotes dialog's scheduler test runs through the real launch path",
     "test_srun_boot_retry.py": "The ``srun`` wrapper prefers awake nodes and retries a node that fails to boot",
     "test_ssh_key_setup.py": "Tests for services.ssh_key_setup (v5.2.1)",
+    "test_staged_archives_key_the_same.py": "A retry of an unchanged plate keys its staged upload the same; a changed image or channel list keys it anew",
+    "test_staging_keeps_every_image.py": "Remote staging never deletes an image the user had; the channel filter changes only the upload",
     "test_staging_rewrite_reasons.py": "Why an upload rewrites a well archive, and when it should not bother",
     "test_stop_never_waits_on_a_remote_upload.py": "Stop, pressed while a remote run is still uploading, answers at once",
     "test_stream_rsync_retry.py": "Audit A11 — the shared streaming-rsync retry loop",
     "test_the_launch_command_survives_the_command_line.py": "The launch command reaches the remote intact from a Windows client",
+    "test_the_remote_link_fails_fast.py": "A bad link to the remote is noticed, retried or reported — never waited on",
     "test_the_slurm_job_indicator.py": "The Analyze pane's Slurm-job indicator: lit only while a job is open",
+    "test_the_srun_wrapper_keeps_a_started_run.py": "The srun wrapper never replays a started run, enforces Max queue wait, refuses output redirection",
     "test_transient_progress_lines.py": "Transfer progress is live state, so it does not go in the log",
     "test_upload_rail_counts_wells.py": "The Upload rail counts wells that are on the remote, not rsync's chatter",
+    "test_what_a_run_uses_on_the_remote_stays_put.py": "What a run is using on the remote is not changed or deleted under it",
 }
 
 

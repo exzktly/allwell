@@ -108,6 +108,11 @@ class AnalyzeProgressMixin:
     #: on an entry nothing could reach (CLAUDE.md §7.5 #10).
     _JOURNAL_STAGES = {"error": "failed"}
 
+    #: The reason recorded beside a completion whose journal word is not
+    #: ``analysed``: a skip names why nothing was computed, and the one
+    #: completion recorded as failed is a well with no image groups.
+    _JOURNAL_REASONS = {"skipped": "already up to date", "failed": "no image groups found"}
+
     # ── the headline: one phase, one writer ─────────────────────────────────
     # The headline had several writers and none of them owned it. Each wrote a
     # string when its own phase started, and that string stayed on screen until
@@ -134,6 +139,71 @@ class AnalyzeProgressMixin:
         self._run_phase = _PHASE_PREPARE
         self._run_ended = False
         self._render_headline()
+        self._silence_warned_at = None
+        if self._run_remote:
+            self._arm_stream_watch()
+
+    # ── a remote stream gone silent (tracker C1) ────────────────────────────
+    #: How long a remote run may say nothing before the pane says so. Twenty
+    #: minutes, because a healthy run is never quiet that long: a field-by-field
+    #: well prints every FOV-group it finishes, a nanowell well every step and
+    #: every tenth of a timepoint's nanowells, a batched run its driver's
+    #: "still running" tick, and a transfer a line a second. The longest quiet
+    #: stretch in a healthy run is one long step — locating a large nanowell
+    #: timepoint, one heavy FOV-group under a CPU segmenter — which is minutes,
+    #: not tens of them. And the warning says "no output", never "failed", and
+    #: asks the host before suggesting anything, so a run that is merely slow is
+    #: told it is alive. A scheduler queue wait is exempt: it is silent by
+    #: design and already has its own clock.
+    _SILENCE_WARN_S = 20 * 60.0
+    #: How often the check looks.
+    _SILENCE_CHECK_MS = 30_000
+
+    def _arm_stream_watch(self) -> None:
+        timer = getattr(self, "_silence_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setInterval(self._SILENCE_CHECK_MS)
+            timer.timeout.connect(self._check_stream)
+            self._silence_timer = timer
+        if not timer.isActive():
+            timer.start()
+
+    def _check_stream(self) -> None:
+        """Warn, once per silence (and again every threshold after), when a
+        remote run outside a queue wait has said nothing for too long."""
+        runner = self._runner
+        if not getattr(self, "_running", False):
+            timer = getattr(self, "_silence_timer", None)
+            if timer is not None:
+                timer.stop()
+            return
+        age = getattr(runner, "seconds_since_output", None)
+        if age is None or getattr(self, "_sched_since", None) is not None:
+            return
+        if age < self._SILENCE_WARN_S:
+            # Talking again: retract the warning if it is still what is shown.
+            if getattr(self, "_silence_warned_at", None) is not None:
+                self._silence_warned_at = None
+                if getattr(self, "_silence_status", "") == self._dashboard.status_text():
+                    self._dashboard.set_status("")
+            return
+        warned = getattr(self, "_silence_warned_at", None)
+        if warned is not None and age - warned < self._SILENCE_WARN_S:
+            return
+        self._silence_warned_at = age
+        host = getattr(runner, "remote_name", "") or "the remote host"
+        last = getattr(runner, "last_output_line", "") or "(nothing yet)"
+        self._silence_status = f"No output from {host} for {_fmt_secs(age)} — checking it is still running…"
+        self._dashboard.set_status(self._silence_status)
+        self._log_line(
+            f"[warn] No output from {host} for {_fmt_secs(age)}; the last line was: {last}\n"
+            f"[warn] That is not by itself a failure — one long step can be quiet — so the app is "
+            f"asking the host whether the run is still alive. If it has ended there, press Stop, "
+            f"then Resume from the Analyze banner to download the wells it finished and run the "
+            f"rest.\n", "WARNING")
+        with swallow("asking the host whether a silent run is alive"):
+            runner.probe_silence()
 
     def _end_run_phase(self) -> None:
         """The run is over; its terminal state owns the headline from here.
@@ -219,6 +289,14 @@ class AnalyzeProgressMixin:
         if phase == _PHASE_FINALIZE:
             return f"Processed {int(self._well_done)} well(s) — finalizing…"
         return ""
+
+    def _partial_note(self) -> str:
+        """``"; 3 partial (marked ! on the plate)"`` for a run's completion
+        headline, or ``""``. A run whose wells all said "— done." can still
+        have left some of them short; the headline is the one line a user reads
+        to decide whether the plate is finished, so it says so."""
+        n = self._dashboard.partial_count()
+        return f"; {n} partial or unfinished (marked ! on the plate)" if n else ""
 
     def _journal_well_stage(self, well: str, stage: str) -> None:
         """Record a terminal well stage in the output directory's run journal.
@@ -478,6 +556,20 @@ class AnalyzeProgressMixin:
     #: number was for the whole compute phase.
     _COMPUTE_PHASE_EVENTS = ("well_total", "well_done", "well_fov", "well_sites")
 
+    def _on_remote_xfer(self, payload: object) -> None:
+        """The plate-wide transfer moved: ``("up"|"down", fraction)``.
+
+        The dashboard owns the label, so the phase that follows can retract it,
+        and says which transfer it is. A payload that cannot be read moves
+        nothing rather than writing a guessed figure.
+        """
+        try:
+            direction, pct = payload  # type: ignore[misc]
+            pct = float(pct)
+        except (TypeError, ValueError):
+            return
+        self._dashboard.set_transfer(pct, str(direction))
+
     def _apply_progress_event(self, kind: str, payload: object) -> None:
         """Render a progress event from :class:`ProgressTracker` to the UI."""
         if kind in self._COMPUTE_PHASE_EVENTS:
@@ -572,10 +664,17 @@ class AnalyzeProgressMixin:
                 # never wrote it.
                 state = str(record[0])
                 self._journal_well(
-                    str(well), state,
-                    reason="already up to date" if state == "skipped" else "")
+                    str(well), state, reason=self._JOURNAL_REASONS.get(state, ""))
             else:
                 self._journal_well_stage(str(well), str(stage))
+        elif kind == "well_partial":
+            # The well's output is short of its input; the pipeline's marker
+            # says how. It arrives before the well's "— done.", which on its own
+            # paints the well like a whole one.
+            well, why = payload  # type: ignore[misc]
+            self._dashboard.set_well_partial(str(well), str(why))
+        elif kind == "well_not_started":
+            self._dashboard.set_well_not_started(str(payload))
         elif kind == "well_fov":
             well, done, total, *unit = payload  # type: ignore[misc]
             self._dashboard.set_well_fov(str(well), int(done), int(total), unit=(unit or ["FOV"])[0])
@@ -593,6 +692,12 @@ class AnalyzeProgressMixin:
         elif kind == "well_xfer":
             well, direction, frac = payload  # type: ignore[misc]
             self._dashboard.set_well_transfer(str(well), str(direction), float(frac))
+        elif kind == "xfer_end":
+            # The uploader said its upload is over. What follows — the
+            # hand-off, a scheduler queue, the compute — writes nothing to the
+            # status line until it starts, and the last rsync tick sat there
+            # for the whole wait (incident 1: 79 % for an hour).
+            self._dashboard.end_transfer(str(payload))
         elif kind == "status":
             # Descriptive finalize-phase status (auto-threshold / remote drain
             # / cleanup) so the post-well work doesn't read as a hang.

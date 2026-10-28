@@ -104,8 +104,22 @@ def pipeline_argv_digest(
     (``services.remote_recover``). ``--allow_low_disk`` is the one "Load
     previous run" does not restore, so hashing it broke the match for anyone
     who had ticked it.
+
+    **Which wells run, and which are redone, are not configuration either**
+    (:data:`_DIGEST_SKIP_MULTI`): ``--force_wells`` and ``--only_wells`` name
+    wells, and ``--no_auto_threshold`` switches only the plate-level gating
+    pass, which no well's output depends on (the app recomputes the plate's
+    gating itself when the host is told to skip it). A Resume adds
+    ``--force_wells`` itself (``remote_finished_wells.nanowell_forced``), and a
+    re-run that sends part of a plate adds ``--no_auto_threshold``; hashing
+    them made the Resume a differently-configured run than the attempt it
+    resumed, so it found nothing of it — its finished wells recomputed, its
+    uploaded batches sent again, its held wells never re-anchored (tracker F2).
+    Per-well forcing is honoured where reuse is decided instead: a forced well
+    is never adopted (``remote_batch_resume.take_from_remote``) and its archive
+    must be replaced (``FetchedOutputVerifier``).
     """
-    return _digest(pipeline_argv, extras, _DIGEST_SKIP_VALUE, _DIGEST_SKIP_FLAG)
+    return _digest(pipeline_argv, extras, _DIGEST_SKIP_VALUE, _DIGEST_SKIP_FLAG, _DIGEST_SKIP_MULTI)
 
 
 #: Flags followed by a value that :func:`pipeline_argv_digest` leaves out. Paths
@@ -121,41 +135,75 @@ _DIGEST_SKIP_VALUE = frozenset({
 #: Bare flags :func:`pipeline_argv_digest` leaves out: re-processing knobs and
 #: pre-flight / audit switches that compute nothing.
 _DIGEST_SKIP_FLAG = frozenset({
-    "--force", "--incremental", "--allow_low_disk", "--no_run_check",
+    "--force", "--incremental", "--allow_low_disk", "--no_run_check", "--no_auto_threshold",
 })
+#: Flags followed by any number of values (up to the next flag) that :func:`pipeline_argv_digest` leaves out: the
+#: wells a run is limited to or told to redo.
+_DIGEST_SKIP_MULTI = frozenset({"--force_wells", "--only_wells"})
+
+
+@dataclass(frozen=True)
+class _ArgvDefinition:
+    """One way a build computed :func:`pipeline_argv_digest`: what it left out, and what changed after it."""
+
+    changed: str
+    skip_with_value: frozenset[str]
+    skip_flags: frozenset[str]
+    skip_multi: frozenset[str] = frozenset()
+
+
+#: Every earlier definition of :func:`pipeline_argv_digest`, newest first — the argv digest's counterpart of
+#: ``util.settings_digest._EARLIER_DEFINITIONS``. A change to which flags count must add its predecessor here, or
+#: every address a user's journal holds stops matching and every resume starts again from nothing; each entry's
+#: digest of a fixed argv is pinned in ``tests/test_reuse_is_keyed_completely.py``
+#: (``test_every_earlier_argv_definition_is_pinned_and_searched``), so a definition cannot change unrecorded.
+EARLIER_ARGV_DEFINITIONS: tuple[_ArgvDefinition, ...] = (
+    _ArgvDefinition("the force list, the subset and --no_auto_threshold were hashed (tracker F2)",
+                    _DIGEST_SKIP_VALUE, _DIGEST_SKIP_FLAG - {"--no_auto_threshold"}),
+    _ArgvDefinition("the execution knobs (--workers, --incremental…) were hashed",
+                    frozenset({"--input_dir", "--output_dir"}), frozenset({"--force"})),
+)
+
+
+def earlier_argv_digest(pipeline_argv: list[str], *, extras: Sequence[str] = ()) -> str:
+    """What the build before :data:`_DIGEST_SKIP_MULTI` recorded for *pipeline_argv*: the force list, the subset and
+    ``--no_auto_threshold`` all hashed. For finding an attempt it recorded, never for addressing a new run."""
+    d = EARLIER_ARGV_DEFINITIONS[0]
+    return _digest(pipeline_argv, extras, d.skip_with_value, d.skip_flags, d.skip_multi)
 
 
 def legacy_argv_digests(pipeline_argv: list[str], *,
                         extras: Sequence[str] = ()) -> tuple[str, ...]:
     """The digests an earlier build would have recorded for this configuration.
 
-    Only for *finding* work: a plate whose finished remote output was recorded
-    before :func:`pipeline_argv_digest` stopped hashing the execution knobs
-    carries a digest the current one cannot produce, and without these the
-    download-before-staging step would miss exactly the plates that are stuck
-    on the server today. Never used to address a new run. Two shapes, because
-    the recording run may or may not itself have been incremental.
+    Only for *finding* work: a plate whose finished remote output was recorded under an earlier definition
+    (:data:`EARLIER_ARGV_DEFINITIONS`) carries a digest the current one cannot produce, and without these the
+    download-before-staging step and the batched resume would miss exactly the plates that are stuck on the server.
+    Never used to address a new run. Each definition is asked of three shapes of the argv, because the recording run
+    may differ from this one in what is not configuration: as it is; without ``--incremental`` (the recording run
+    may not have been incremental); and without the force list, the subset and ``--no_auto_threshold`` (the attempt a
+    Resume resumes usually had none — the Resume added its force list itself).
     """
-    old_values = frozenset({"--input_dir", "--output_dir"})
-    old_flags = frozenset({"--force"})
-    stripped = _strip(_without_launcher(pipeline_argv),
-                      frozenset({"--incremental_prior_dir"}),
-                      frozenset({"--incremental"}))
-    return tuple(dict.fromkeys((
-        _digest(pipeline_argv, extras, old_values, old_flags),
-        _digest(stripped, extras, old_values, old_flags),
-    )))
+    argv = _without_launcher(pipeline_argv)
+    shapes = (argv,
+              _strip(argv, frozenset({"--incremental_prior_dir"}), frozenset({"--incremental"})),
+              _strip(argv, frozenset(), frozenset({"--no_auto_threshold"}), _DIGEST_SKIP_MULTI))
+    current = pipeline_argv_digest(pipeline_argv, extras=extras)
+    found = (_digest(shape, extras, d.skip_with_value, d.skip_flags, d.skip_multi)
+             for d in EARLIER_ARGV_DEFINITIONS for shape in shapes)
+    return tuple(d for d in dict.fromkeys(found) if d != current)
 
 
-def _digest(pipeline_argv, extras, skip_with_value, skip_flags) -> str:
+def _digest(pipeline_argv, extras, skip_with_value, skip_flags, skip_multi=frozenset()) -> str:
     """Hash *pipeline_argv*, launcher and skipped flags removed, plus *extras*."""
-    filtered = _strip(_without_launcher(pipeline_argv), skip_with_value, skip_flags)
+    filtered = _strip(_without_launcher(pipeline_argv), skip_with_value, skip_flags, skip_multi)
     filtered.extend(str(e) for e in extras)
     return hashlib.blake2b("|".join(filtered).encode(), digest_size=8).hexdigest()
 
 
-def _strip(pipeline_argv, skip_with_value, skip_flags) -> list[str]:
-    """*pipeline_argv* without the named flags (and the values that follow them)."""
+def _strip(pipeline_argv, skip_with_value, skip_flags, skip_multi=frozenset()) -> list[str]:
+    """*pipeline_argv* without the named flags (and the values that follow them: one for *skip_with_value*, every
+    one up to the next flag for *skip_multi*)."""
     filtered: list[str] = []
     i = 0
     while i < len(pipeline_argv):
@@ -165,6 +213,11 @@ def _strip(pipeline_argv, skip_with_value, skip_flags) -> list[str]:
             continue
         if a in skip_flags:
             i += 1
+            continue
+        if a in skip_multi:
+            i += 1
+            while i < len(pipeline_argv) and not str(pipeline_argv[i]).startswith("--"):
+                i += 1
             continue
         filtered.append(a)
         i += 1
@@ -186,14 +239,15 @@ def _choose_remote_output_dir(
     behaviour.
 
     ``fresh`` is the address derived the usual way, from the staged archives'
-    ``(name, size, mtime)`` and the pipeline argv. ``stored`` is the one a
-    previous run of this same configuration recorded in the output directory's
-    journal, or ``""``. They differ when the previous run's upload was
-    *rewritten* into scratch — a channel filter that cleared
-    ``REWRITE_MIN_SAVING``, or an incremental split — because a fresh staging
-    copy carries a new mtime every run and so keys differently every run. The
-    work that run computed is then sitting in a directory nothing will look in
-    again.
+    fingerprint (``remote_scratch.fingerprint_archives``: member names, sizes
+    and CRCs, so a staged rewrite of an unchanged plate keys the same on every
+    attempt) and the pipeline argv. ``stored`` is the one a previous run of
+    this same configuration recorded in the output directory's journal, or
+    ``""``. They still differ when what was *staged* differs while the images
+    and settings do not — an incremental split, which uploads only the groups
+    still missing — and when the address was recorded by a build whose digest or fingerprint
+    was defined differently. The work that run computed is then sitting in a
+    directory the fresh address does not name.
 
     Returns ``(chosen, reason)``. The stored address wins only when it exists,
     differs, is not overridden by a forced run, **and** the caller has confirmed

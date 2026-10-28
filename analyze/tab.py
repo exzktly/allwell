@@ -428,7 +428,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
             self._dashboard.set_overall(self._well_done)
             self._dashboard.set_headline(
                 f"Complete — {self._well_done} of {self._well_total} "
-                f"well(s) processed; {missing} never reported completion")
+                f"well(s) processed; {missing} never reported completion{self._partial_note()}")
             self._log_line(
                 f"[warn] Run finished with {missing} of "
                 f"{self._well_total} well(s) never reporting "
@@ -439,7 +439,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
             )
         else:
             self._dashboard.set_overall(self._dashboard.overall_maximum() or 100)
-            self._dashboard.set_headline(f"Complete — {n} well(s) processed")
+            self._dashboard.set_headline(f"Complete — {n} well(s) processed{self._partial_note()}")
         self._dashboard.set_status("")
         self._dashboard.set_eta("")
         self._log_line(payload, "DONE")
@@ -482,10 +482,8 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
                 kind, payload = self._log_q.get_nowait()
                 if kind == "line":
                     for ev_kind, ev_payload in self._progress_tracker.parse(payload):
-                        if ev_kind == "line":
-                            self._log_q.put((ev_kind, ev_payload))
-                        elif ev_kind == "workers":
-                            self._log_q.put((ev_kind, ev_payload))
+                        if ev_kind == "workers":   # inline: a blocking put from the queue's only reader can deadlock
+                            pending.append((f"[info] Workers: {ev_payload} parallel well(s).\n", "INFO"))
                         else:
                             self._apply_progress_event(ev_kind, ev_payload)
                     if not is_transient_progress(payload):
@@ -496,14 +494,8 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
                 elif kind == "workers":
                     pending.append(
                         (f"[info] Workers: {payload} parallel well(s).\n", "INFO"))
-                elif kind == "remote_xfer":
-                    # Remote upload/download progress in [0,1]. The dashboard
-                    # owns the label so the compute phase can retract it.
-                    try:
-                        pct = float(payload)
-                    except (TypeError, ValueError):
-                        pct = 0.0
-                    self._dashboard.set_transfer(pct)
+                elif kind == "remote_xfer":       # ("up"|"down", fraction): see _on_remote_xfer
+                    self._on_remote_xfer(payload)
                 elif kind in ("done", "suspended"):      # the two clean endings
                     (self._on_run_done if kind == "done" else self._on_run_suspended)(payload, pending)
                     pending = []
@@ -523,8 +515,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
                     self._running = False
                     self._show_run_buttons(running=False)
                     self._on_run_settled()
-                    self._dashboard.set_status("")
-                    self._dashboard.set_eta("")
+                    self._dashboard.finish_run()  # wells still in flight are unfinished; status/ETA cleared
                     self._stop_eta_timer()
                     # C4: show the just-finished run — but only when there IS
                     # one. The card's only test is that pipeline_info.json

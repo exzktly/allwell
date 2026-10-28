@@ -35,29 +35,35 @@ from pathlib import Path
 NANOWELL_DIR = "nanowells"
 
 
-def fetch_nanowell_tables(fetcher, well: str) -> int:
+def fetch_nanowell_tables(fetcher, well: str) -> int | None:
     """Pull ``nanowells/<well>.csv``, ``<well>_grid.json``, ``<well>_template.npz`` and ``<well>_segmenter_input.png``
     (``pipeline.nanowell_inspect``) beside the well's other
-    output; return how many landed.
+    output; return how many landed, or ``None`` when a listing failed or a listed file did not land.
 
     Exact names, never a glob on the well label (``A01*`` would also match ``A010``). A file the
     remote does not have is simply not listed; the run's completeness check is what notices a timepoint
     missing from the grid, so a table that failed to arrive is a finding there, not a silent absence.
+    ``None`` is the other case: the local grid record may then predate the re-anchoring, and
+    :func:`release_batch` must not read it as "not re-anchored" (tracker row A4).
     A no-op for a run that is not in nanowell mode.
     """
     run = fetcher.run
     if not run.nanowell:
         return 0
     dest = Path(run.local_output_dir) / NANOWELL_DIR
-    pulled = 0
+    pulled, whole = 0, True
     # The template is what a later incremental run falls back to for a crowded timepoint (tracker C16).
     for name in (f"{well}.csv", f"{well}_grid.json", f"{well}_template.npz", f"{well}_segmenter_input.png"):
         host, files, _bytes = fetcher._list_remote_glob(
             f"{fetcher.host.ssh_alias}:{run.remote_output_dir}/{NANOWELL_DIR}/{name}")
-        if files:
+        if files is None:
+            whole = False
+        elif files:
             dest.mkdir(parents=True, exist_ok=True)
-            pulled += fetcher._pull_listed(host, files, dest)
-    return pulled
+            landed = fetcher._pull_listed(host, files, dest)
+            pulled += landed
+            whole = whole and landed == len(files)
+    return pulled if whole else None
 
 
 def well_files_to_delete(run, well: str) -> list[str]:
@@ -105,11 +111,16 @@ def pull_nanowell_results(verifier, *, log) -> list[str]:
         return []
     short: list[str] = []
     remote, local = f"{verifier.host.ssh_alias}:{run.remote_output_dir}", Path(run.local_output_dir)
-    verifier._rsync_optional(f"{remote}/{NANOWELL_DIR}/", local / NANOWELL_DIR, log_fn=log)
+    if not verifier._rsync_optional(f"{remote}/{NANOWELL_DIR}/", local / NANOWELL_DIR, log_fn=log):
+        # The grid records here may then predate the end-of-run re-anchoring, so which wells it re-ran — and
+        # whether this plate's tables are its own — is unknown: verification fails and the remote is kept (A4).
+        log(f"[remote] the {NANOWELL_DIR}/ tables could not be pulled; keeping the run on the remote.\n")
+        return [f"this run's {NANOWELL_DIR}/ tables (the pull failed, so the copy here may predate the "
+                f"re-anchoring)"]
     for well in reanchored_wells(local / NANOWELL_DIR):
         if well in run.nanowell_released:          # pulled again and deleted when its batch ended
             continue
-        if well not in run.fetched_wells:
+        if not _this_runs(run, well):
             # Not a well of this run: the local folder holds the whole plate's grid records (and the run was sent
             # the others', ``services.remote_plate_grids``), and the re-anchoring re-runs only this run's wells.
             continue
@@ -122,6 +133,14 @@ def pull_nanowell_results(verifier, *, log) -> list[str]:
         retire_superseded_csvs([str(p) for p in local.glob(f"*_{well}.csv.gz")], local)
         log(f"[remote] {well}: pulled again after the end-of-run re-anchoring re-ran it.\n")
     return short
+
+
+def _this_runs(run, well: str) -> bool:
+    """Whether *well*'s remote output is this run's to pull again and release: fetched by it, or held by an earlier
+    attempt for the re-anchoring this run's final pass ran (``_RemoteRun.nanowell_adopted_holds``) — a well that
+    run never fetched, whose rewritten cell CSV and archive were otherwise never pulled, leaving a re-anchored grid
+    beside pre-re-anchoring cells here (tracker F3)."""
+    return well in run.fetched_wells or well in getattr(run, "nanowell_adopted_holds", ())
 
 
 def missing_nanowell_tables(run, well: str) -> list[str]:
@@ -166,14 +185,21 @@ def release_batch(fetcher, wells, *, log, held=()) -> list[str]:
     run = fetcher.run
     if not run.nanowell:
         return []
-    landed = [w for w in wells if w in run.fetched_wells and w not in run.nanowell_released]
+    landed = [w for w in wells if _this_runs(run, w) and w not in run.nanowell_released]
     held = {w.upper() for w in held}
     for well in [w for w in landed if w.upper() in held]:
         log(f"[remote] {well}: kept on the remote for the end-of-run re-anchoring.\n")
     landed = [w for w in landed if w.upper() not in held]
     local = Path(run.local_output_dir)
+    unknown = set()
     for well in landed:
-        fetch_nanowell_tables(fetcher, well)              # the re-anchoring rewrote the grid and sites of the re-run
+        # The re-anchoring rewrote the grid and sites of the re-run. A pull that failed leaves the grid from before
+        # it, which reads as "not re-anchored": such a well is kept, never released on that stale answer (A4).
+        if fetch_nanowell_tables(fetcher, well) is None:
+            unknown.add(well)
+            log(f"[remote] {well}: its {NANOWELL_DIR}/ tables could not be pulled again, so whether the "
+                f"re-anchoring re-ran it is unknown; keeping it on the remote for verification.\n")
+    landed = [w for w in landed if w not in unknown]
     remote = f"{fetcher.host.ssh_alias}:{run.remote_output_dir}"
     rerun = set(reanchored_wells(local / NANOWELL_DIR)) & set(landed)
     released = []
@@ -181,7 +207,9 @@ def release_batch(fetcher, wells, *, log, held=()) -> list[str]:
         if well in rerun:
             zip_listed, zip_pulled = fetcher._rsync_glob(f"{remote}/{well}_out.zip", local)
             csv_listed, csv_pulled = fetcher._rsync_glob(f"{remote}/*_{well}.csv.gz", local)
-            if zip_pulled < zip_listed or csv_pulled < csv_listed:
+            # A listing that failed is ``None`` and one that found nothing is 0: either way the re-anchored output
+            # is not here, and "0 of 0 arrived" must not read as "all of it arrived".
+            if not (zip_listed and csv_listed and zip_pulled == zip_listed and csv_pulled == csv_listed):
                 log(f"[remote] {well}: the re-anchored output did not all arrive; keeping it on the remote for "
                     f"verification to pull.\n")
                 continue

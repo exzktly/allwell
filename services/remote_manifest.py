@@ -44,6 +44,9 @@ def repo_root() -> Path:
 # stat-pass when nothing changed.
 _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "process_microscopy.py",
+    # The app's version, which the pipeline writes into each well's completion seal
+    # (`pipeline.run_report.seal_well_complete`) so a reuse across builds is named in the log.
+    "version.py",
     # General Qt-free utilities (well-token parsing, logged-swallow) imported by
     # process_microscopy at module top level, so the remote needs the package.
     "util/__init__.py",

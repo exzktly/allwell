@@ -75,7 +75,7 @@ def test_the_heartbeat_is_swept_and_a_stopped_one_is_not_a_leak():
 
 #: The remote client's modules: the orchestrator and the owners extracted from
 #: it. A thread-starting class moved into a new one is found only if it is here.
-_REMOTE_CLIENT_MODULES = ("remote_runner", "remote_fetch", "remote_process", "remote_upload")
+_REMOTE_CLIENT_MODULES = ("remote_runner", "remote_fetch", "remote_process", "remote_upload", "remote_heartbeat")
 
 
 def _threaded_worker_classes() -> set[str]:

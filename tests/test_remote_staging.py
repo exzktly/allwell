@@ -162,3 +162,40 @@ def test_a_typoed_channel_on_a_mixed_plate_fails_before_staging(tmp_path):
             nuclear_token="w9", fluor_tokens=["w8"])
     leftover = sorted(_tree(tmp_path) - before)
     assert not [p for p in leftover if "allwell-stage" in p], leftover
+
+
+def test_a_staged_member_is_copied_a_chunk_at_a_time(tmp_path, monkeypatch):
+    """A rewritten archive is written by streaming each kept member, never by
+    reading one whole into memory (remote review S10): a single image
+    of a stitched or multi-page acquisition is hundreds of megabytes, and
+    ``writestr(info, src.read(member))`` held it all at once. Any read of a
+    member larger than one copy chunk fails here — which also catches reading
+    it whole through ``ZipExtFile.read()`` rather than ``ZipFile.read``."""
+    import os
+
+    chunk = getattr(remote_staging, "_COPY_CHUNK", 1 << 20)
+    plate = tmp_path / "plate"
+    plate.mkdir()
+    big = os.urandom(chunk * 3 + 17)
+    with zipfile.ZipFile(plate / "A01.zip", "w") as zf:
+        zf.writestr("e_w1_A01_1_T01.tif", big)
+        zf.writestr("e_w2_A01_1_T01.tif", os.urandom(chunk * 3))
+    real_read = zipfile.ZipExtFile.read
+
+    def bounded_read(self, n=-1):
+        assert n is not None and 0 <= n <= chunk, f"read({n}) of a whole member"
+        return real_read(self, n)
+
+    monkeypatch.setattr(zipfile.ZipExtFile, "read", bounded_read)
+    zipped = remote_runner.stage_local_zips(
+        plate, filename_schema=SCHEMA, filename_sep=SEP,
+        fluor_tokens=["w1"], nuclear_token=None)
+    monkeypatch.setattr(zipfile.ZipExtFile, "read", real_read)
+    try:
+        (staged,) = zipped.well_zips
+        assert staged.parent != plate
+        with zipfile.ZipFile(staged) as zf:
+            assert zf.namelist() == ["e_w1_A01_1_T01.tif"]
+            assert zf.read("e_w1_A01_1_T01.tif") == big
+    finally:
+        zipped.cleanup()

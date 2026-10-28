@@ -185,7 +185,8 @@ PROCESS_MICROSCOPY_BUDGET = 3592
 # consumer imported from the owning module.
 REMOTE_RUNNER_BUDGET = 1183
 # Set at extraction: closing a run's scheduler job and sweeping a crashed one's.
-REMOTE_JOBS_BUDGET = 215
+# 215 -> 151: the orphan sweep moved to `services/remote_sweep.py` (and the claim on a run's directories with it).
+REMOTE_JOBS_BUDGET = 151
 # Set at extraction: the process wrappers and the batch driver's loop.
 REMOTE_PROCESS_BUDGET = 1400
 # Set at extraction: the upload cache and its rsync streaming.

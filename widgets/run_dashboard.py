@@ -80,6 +80,20 @@ _REANCHOR_LEFT_AS_IT_WAS = {
     "unfinished": "the run ended before its re-anchoring did; its unaddressed timepoints stay unaddressed",
 }
 
+#: A well that finished with less output than it had input — FOV-groups failed
+#: or never attempted, timepoints without rows, nothing measured at all — and a
+#: well the run ended under. Its own hue, because the plate's contract is that
+#: no two states share a colour and every other one is taken here: ``warn``
+#: says it is still computing, ``success`` / ``accent`` that it finished whole.
+#: ``stale`` is the anomaly hue no other state of this plate paints, and on
+#: Review's Home plate it already means "output here, but not whole".
+_PARTIAL_COLOR_TOKEN = "stale"
+#: The glyph a partial or unfinished well carries, beside the failed ✕.
+_PARTIAL_GLYPH = "!"
+_FAILED_GLYPH = "✕"
+#: What a well's hover text says when the run ended while it was still going.
+_UNFINISHED_NOTE = "the run ended before this well finished; it has no complete output"
+
 
 class RunDashboard(PlateProgress):
     """At-a-glance per-well run view. Driven entirely by the host."""
@@ -121,6 +135,10 @@ class RunDashboard(PlateProgress):
         self._reanchor_note: dict[str, str] = {}
         # Wells a batch left to the run's final re-anchoring pass, not yet re-run.
         self._held: set = set()
+        # well -> what its output is missing, in the pipeline's own words
+        # (``set_well_partial``); and wells the run ended under, unfinished.
+        self._partial: dict[str, list[str]] = {}
+        self._unfinished: set = set()
         self._active_stage = ""
         # Plate-wide transfer, as a fraction, while one is in flight — None
         # when there is not one. State rather than a formatted string because
@@ -129,6 +147,7 @@ class RunDashboard(PlateProgress):
         # that one of them writes and neither retracts is exactly how it came
         # to sit on "Transferring… 92%" for the whole compute phase.
         self._transfer: float | None = None
+        self._transfer_direction = _XFER_UP
         self._rail: dict[str, tuple] = {}        # stage -> (dot,name,bar,count)
         super().__init__("Run Progress", parent)
         self.setObjectName("RunDashboard")
@@ -153,8 +172,11 @@ class RunDashboard(PlateProgress):
         self._refetch = set()
         self._reanchor_note = {}
         self._held = set()
+        self._partial = {}
+        self._unfinished = set()
         self._active_stage = ""
         self._transfer = None
+        self._transfer_direction = _XFER_UP
         self._bar.setRange(0, 100); self._bar.setValue(0)
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
@@ -164,12 +186,19 @@ class RunDashboard(PlateProgress):
         self._headline.setText("Preparing…")
         self._eta.setText(""); self._status.setText("")
 
-    def set_transfer(self, pct: float | None) -> None:
+    def set_transfer(self, pct: float | None, direction: str = _XFER_UP) -> None:
         """Show (or clear) the plate-wide transfer percentage on the status line.
 
         ``None`` ends the transfer. Callers do not have to know whether rsync's
         last tick happened to be 100% — whoever observes the run moving on says
         so, and the label goes with it.
+
+        *direction* says which transfer it is, and the label says it in words:
+        ``Uploading… 42%`` is the upload's bytes, ``Downloading… 42%`` the share
+        of the run's wells fetched back. Both used to read "Transferring…", fed
+        by the uploader and the Fetcher alike, so the figure on screen could be
+        either and a reader could not tell a stalled upload from a slow fetch
+        (tracker D5).
         """
         if pct is None:
             if self._transfer is None:
@@ -178,10 +207,21 @@ class RunDashboard(PlateProgress):
             self.set_status("")
             return
         self._transfer = max(0.0, min(1.0, float(pct)))
-        self.set_status(f"Transferring… {int(self._transfer * 100)}%")
+        self._transfer_direction = direction
+        verb = "Downloading" if direction == _XFER_DOWN else "Uploading"
+        self.set_status(f"{verb}… {int(self._transfer * 100)}%")
+
+    def end_transfer(self, direction: str) -> None:
+        """A transfer in *direction* is over: retract its label, and only its."""
+        if self._transfer is not None and self._transfer_direction == direction:
+            self.set_transfer(None)
 
     def transfer(self) -> float | None:
         return self._transfer
+
+    def status_text(self) -> str:
+        """What the status line says now, for a writer that retracts only its own text."""
+        return self._status.text()
 
     def set_total(self, total: int) -> None:
         self._total = int(total)
@@ -223,6 +263,7 @@ class RunDashboard(PlateProgress):
         elif stage == "active":
             if w not in self._errored:
                 self._active.add(w)
+                self._unfinished.discard(w)
         else:
             if stage == "download" and w not in self._reanchoring:
                 # A fetch after the re-run ended — the end-of-run retry of a
@@ -237,13 +278,93 @@ class RunDashboard(PlateProgress):
                 # transfer once this stage is set; dropping it keeps the dict
                 # from carrying an entry that can no longer be read.
                 self._xfer.pop(w, None)
+        # Only the error and partial marks survive. A computing well used to
+        # carry a ⚙, which sat in the middle of what is now its dial — the fill
+        # and the colour already say it is working, and the glyph only hid them.
+        self._repaint(w)
+        self._refresh_rail()
+
+    def set_well_partial(self, well_id: str, why: str) -> None:
+        """Record that *well_id*'s output is short of its input, and why.
+
+        Driven by the pipeline's own per-well markers (``PARTIAL``, ``NOT
+        ATTEMPTED``, a storage failure, "no records produced", "no image groups
+        found", a nanowell well's "N without rows"), every one of which arrives
+        *before* the well's "— done.". That line still fires, because the well
+        wrote a CSV and an out.zip from what it had, and on its own it painted
+        the well exactly like a whole one. From here the well carries the
+        partial glyph, and once it has computed it takes the partial colour in
+        place of the finished one; its hover text names each shortfall.
+        """
+        w = canon_well(well_id)
+        if not w:
+            return
+        reasons = self._partial.setdefault(w, [])
+        if why and why not in reasons:
+            reasons.append(why)
+        self._repaint(w)
+
+    def set_well_not_started(self, well_id: str) -> None:
+        """A suspend reached *well_id* before it did any work: it is not
+        computing, and it has nothing to show, so it goes back to waiting."""
+        w = canon_well(well_id)
+        if not w:
+            return
+        self._active.discard(w)
+        self._fov.pop(w, None)
+        self._sites.pop(w, None)
+        self._repaint(w)
+        self._refresh_rail()
+
+    def finish_run(self) -> None:
+        """The run is over, however it ended: settle every well still in flight.
+
+        A well still "processing" when the run ends never finished — the run
+        crashed, was stopped, lost its connection or was killed under it — and
+        leaving it amber said it was still being worked on, on a plate whose
+        run had ended. It becomes *unfinished*: the partial colour and glyph,
+        its dial left where it got to, and hover text saying the run ended
+        before it did. A transfer still recorded as in flight is dropped for
+        the same reason, so the well is described by the stages it reached.
+        Also clears the status and ETA, which describe a run in progress.
+        """
+        for w in list(self._active):
+            self._active.discard(w)
+            self._unfinished.add(w)
+            self._repaint(w)
+        for w in list(self._xfer):
+            self._xfer.pop(w, None)
+            self._repaint(w)
+        self._on_outcome_changed()
+        self.set_transfer(None)
+        self.set_status("")
+        self.set_eta("")
+
+    def partial_count(self) -> int:
+        """Wells that finished with less output than input, or never finished."""
+        return len((set(self._partial) | self._unfinished) - self._errored)
+
+    def _repaint(self, w: str) -> None:
+        """Push one well's colour, dial and glyph to the plate — all three,
+        every time, so no state change can update one and leave the others."""
         self._plate.setWellColor(w, self._well_color(w))
         self.set_well_fraction(w, self._well_fraction(w))
-        # Only the error mark survives. A computing well used to carry a ⚙,
-        # which sat in the middle of what is now its dial — the fill and the
-        # colour already say it is working, and the glyph only hid them.
-        self._plate.setWellMarker(w, "✕" if w in self._errored else None)
-        self._refresh_rail()
+        self._plate.setWellMarker(w, self._glyph(w))
+
+    def _glyph(self, w: str) -> str | None:
+        if w in self._errored:
+            return _FAILED_GLYPH
+        if w in self._partial or w in self._unfinished:
+            return _PARTIAL_GLYPH
+        return None
+
+    def _is_partial(self, w: str) -> bool:
+        """Whether the well is to be *painted* partial: short of its input and
+        finished computing (a partial well still computing is computing), or
+        left unfinished by the end of the run."""
+        if w in self._unfinished:
+            return True
+        return w in self._partial and any(self._has(s, w) for s in _COMPUTED_STAGES)
 
     def set_well_fov(self, well_id: str, done: int, total: int, *, unit: str = "FOV") -> None:
         """Per-well sub-progress for the well(s) currently computing: FOV·timepoint
@@ -320,8 +441,7 @@ class RunDashboard(PlateProgress):
                                       "the re-anchoring, and the remote keeps the new one")
         else:
             return
-        self._plate.setWellColor(w, self._well_color(w))
-        self.set_well_fraction(w, self._well_fraction(w))
+        self._repaint(w)
 
     def set_well_transfer(self, well_id: str, direction: str,
                           fraction: float) -> None:
@@ -367,8 +487,7 @@ class RunDashboard(PlateProgress):
             # else: a finished download holds its last measured fraction.
         else:
             self._xfer[w] = (direction, frac)
-        self._plate.setWellColor(w, self._well_color(w))
-        self.set_well_fraction(w, self._well_fraction(w))
+        self._repaint(w)
 
     def _well_fraction(self, well: str) -> float | None:
         """How far through its current stage this well is, for the plate's dial.
@@ -476,6 +595,11 @@ class RunDashboard(PlateProgress):
             return theme.Colors.warn                       # computing again
         if w in self._refetch:
             return theme.Colors.accent                     # re-anchored on the server, not pulled again yet
+        if self._is_partial(w) and not (self._remote and w in self._xfer):
+            # Finished short of its input, or left unfinished — painted so,
+            # never in the colour a whole well takes. A download in flight
+            # still shows the download, which is what the well is doing.
+            return getattr(theme.Colors, _PARTIAL_COLOR_TOKEN)
         if self._remote:
             # A transfer in flight is painted in the colour of the state it is
             # travelling TOWARD, not the one the well is leaving. The dial fills
@@ -543,8 +667,7 @@ class RunDashboard(PlateProgress):
             self._reanchoring.pop(w, None)
             self._held.discard(w)
             self._reanchor_note[w] = _REANCHOR_LEFT_AS_IT_WAS["unfinished"]
-            self._plate.setWellColor(w, self._well_color(w))
-            self.set_well_fraction(w, self._well_fraction(w))
+            self._repaint(w)
         self._refresh_rail()
 
     def _build_rail(self) -> None:
@@ -607,6 +730,7 @@ class RunDashboard(PlateProgress):
         items.append((theme.Colors.warn, "processing"))
         items.append((theme.Colors.accent, "on server" if self._remote else "processed"))
         items.append((theme.Colors.success, "downloaded" if self._remote else "complete"))
+        items.append((getattr(theme.Colors, _PARTIAL_COLOR_TOKEN), "partial / unfinished"))
         items.append((theme.Colors.danger, "failed"))
         return "Wells", items
 
@@ -664,4 +788,16 @@ class RunDashboard(PlateProgress):
             state = "grouped"
         else:
             state = "pending"
-        return f"{w or well_id}: {state}{'' if w in self._errored else self._detail(w)}"
+        if w in self._errored:
+            return f"{w or well_id}: {state}"
+        if w in self._unfinished:
+            done, total = self._fov.get(w, (0, 0))
+            got = f" ({self._fov_unit.get(w, 'FOV')} {done}/{total} reached)" if total else ""
+            return f"{w}: unfinished — {_UNFINISHED_NOTE}{got}"
+        if self._is_partial(w):
+            # Where the well is, then what its output is missing — every
+            # shortfall the pipeline named, in its own words.
+            where = "" if not self._remote else (", fetched locally" if self._has("download", w) else ", on server")
+            return f"{w}: partial{where} — {'; '.join(self._partial[w])}"
+        missing = f" — {'; '.join(self._partial[w])}" if w in self._partial else ""
+        return f"{w or well_id}: {state}{self._detail(w)}{missing}"

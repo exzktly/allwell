@@ -273,29 +273,11 @@ def test_ssh_argv_no_tty():
     assert "alias" in argv
 
 
-def test_ssh_argv_server_alive_count_max_from_queue_wait():
-    """The keepalive tolerance (ServerAliveCountMax) is derived from the
-    editable queue-wait timeout: 2 counts/min at the 30s interval, floored
-    at 3, with 0 meaning effectively unlimited."""
-    def count_max(argv):
-        for a in argv:
-            if a.startswith("ServerAliveCountMax="):
-                return int(a.split("=", 1)[1])
-        raise AssertionError("ServerAliveCountMax not in argv")
-
-    # Default 30 min → 60; the stock OpenSSH default of 3 (≈90s) is replaced.
-    assert count_max(RemoteHost(name="x", ssh_alias="a").ssh_argv()) == 60
-    assert count_max(
-        RemoteHost(name="x", ssh_alias="a", queue_wait_timeout_min=5).ssh_argv()
-    ) == 10
-    # Sub-minute waits still floor at 3 so a transient blip doesn't drop us.
-    assert count_max(
-        RemoteHost(name="x", ssh_alias="a", queue_wait_timeout_min=1).ssh_argv()
-    ) == 3
-    # 0 = wait indefinitely.
-    assert count_max(
-        RemoteHost(name="x", ssh_alias="a", queue_wait_timeout_min=0).ssh_argv()
-    ) >= 1_000_000
+# The keepalive is no longer derived from the queue wait — that derivation was
+# the defect (tracker C3: a dead link took 2 × queue_wait keepalives, 30 min at
+# the default, never at 0, to notice, and bounded no queue wait at all). The
+# test that pinned the derivation is replaced by
+# tests/test_the_remote_link_fails_fast.py::test_every_ssh_carries_the_same_short_keepalive.
 
 
 # ── Windows-host helpers ────────────────────────────────────────────────────
@@ -589,19 +571,22 @@ def test_controlpath_template_windows_avoids_colon(monkeypatch):
     valid; the per-(user, host, port) uniqueness is preserved."""
     _force_windows(monkeypatch)
     tpl = _controlpath_template()
-    # The expansion vars stay intact …
-    assert "%r" in tpl and "%h" in tpl and "%p" in tpl
-    # … but the host/port separator is ``_``, not ``:``, after the
-    # drive-letter (if any) prefix.
+    # ``%C`` (ssh's hash of user, host and port) keeps the per-(user, host,
+    # port) uniqueness with no separator at all, so nothing after the
+    # drive-letter prefix (if any) is a ``:``.
+    assert tpl.endswith("allwell-cm-%C")
     drive, rest = os.path.splitdrive(tpl)
     assert ":" not in rest, (
         f"Windows ControlPath must not contain ':' after the drive prefix; "
         f"got {tpl!r}"
     )
-    assert "%h_%p" in tpl
 
 
-def test_controlpath_template_posix_unchanged(monkeypatch):
+def test_controlpath_template_posix_is_the_fixed_length_hash(monkeypatch):
+    """``%r@%h:%p`` overran the 104-byte socket limit for a long user or host
+    name ("ControlPath too long", tracker S9); ``%C`` is always 40 characters.
+    The length bound itself is
+    ``tests/test_the_remote_link_fails_fast.py::test_the_control_socket_fits_the_platform_limit``."""
     _force_posix(monkeypatch)
     tpl = _controlpath_template()
-    assert tpl.endswith("allwell-cm-%r@%h:%p")
+    assert tpl.endswith("allwell-cm-%C")

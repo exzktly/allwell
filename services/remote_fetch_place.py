@@ -83,17 +83,31 @@ class Placer:
                 self._log(f"[remote] ↓ placing a fetched well failed: {exc}; continuing\n")
 
 
-def merge_fetched_csv_dir(fetcher, tmp_csv_dir: Path) -> None:
-    """Merge the partial CSVs pulled into *tmp_csv_dir* into the local output, then remove the directory.
+def merge_fetched_csv_dir(fetcher, tmp_csv_dir: Path) -> list[str]:
+    """Merge the partial CSVs pulled into *tmp_csv_dir* into the local output; return the names that did not merge.
 
-    The directory is the one ``_new_transit_dir`` made for this one well's CSVs and holds nothing of the user's.
+    The directory is removed once every partial in it has merged. When one has not — the local CSV would not read
+    or write, an EIO on the output volume — it is **kept**, and the caller must not mark the well fetched or delete
+    its remote copy: the partial and the remote copy are then the only places this run's new rows exist (tracker
+    row A6). The directory is the one ``_new_transit_dir`` made for this one well's CSVs and holds nothing of the
+    user's.
     """
+    failed: list[str] = []
     try:
         if any(Path(tmp_csv_dir).iterdir()):
             fetcher._set_activity(tmp_csv_dir.name, "merging its CSV into the local one")
-            fetcher._merge_fetched_csvs(tmp_csv_dir)
-    finally:
+            failed = list(fetcher._merge_fetched_csvs(tmp_csv_dir) or ())
+    except OSError as exc:
+        failed = [f"{tmp_csv_dir.name} ({exc})"]
+    if not failed:
         shutil.rmtree(tmp_csv_dir, ignore_errors=True)
+    return failed
+
+
+def discard_transit_dir(tmp_csv_dir: Path) -> None:
+    """Remove the directory ``_new_transit_dir`` made for one well's partial CSVs, unmerged. Only for a well whose
+    CSVs did not all arrive, whose remote copy is therefore kept whole; it holds nothing of the user's."""
+    shutil.rmtree(tmp_csv_dir, ignore_errors=True)
 
 
 def place_whole(src: Path, target: Path) -> None:
@@ -134,3 +148,32 @@ def local_output_mb(run, well: str) -> float | None:
     if getattr(run, "output_filter", None) == OutputFilter.CSV_ONLY:
         return 0.0
     return None
+
+
+def set_aside_unreadable_zip(target: Path, well: str, *, log: Callable[[str], None]) -> str:
+    """Move an unreadable local ``<well>_out.zip`` aside before an incremental download takes its place; return
+    the shortfall that verification then reports for the well.
+
+    An incremental fetch brings only the new fields' images, so placing it over the local archive drops every
+    earlier field's — and because the well's CSV still lists those fields as done (``pipeline.incremental_keys``),
+    no incremental run will ever produce them again. The archive is kept as ``.<name>.unreadable`` (never deleted),
+    the loss is written to ``errors/`` beside the run's own failure records as well as logged, and verification
+    fails the run rather than report a plate that has lost images as finished (tracker row B6). The CSV twin of
+    this is ``pipeline.io._merge_onto_cut_csv``.
+    """
+    aside = target.with_name(f".{target.name}.unreadable")
+    message = (f"the local {target.name} could not be read, so this incremental download (the new fields only) "
+               f"replaced it and the earlier fields' images are no longer in it; the unreadable archive is kept as "
+               f"{aside.name}. Re-run well {well} with --force (Force in Analyze) to restore them.")
+    try:
+        os.replace(target, aside)
+    except OSError as exc:
+        message += f" (Setting it aside failed: {exc}.)"
+    try:
+        errors = target.parent / "errors"
+        errors.mkdir(parents=True, exist_ok=True)
+        (errors / f"{well}_local_zip_unreadable.txt").write_text(f"Well: {well}\n\n{message}\n", encoding="utf-8")
+    except OSError as exc:
+        log(f"[remote] WARNING {well}: could not record the loss in errors/ ({exc})\n")
+    log(f"[remote] WARNING {well}: {message}\n")
+    return message

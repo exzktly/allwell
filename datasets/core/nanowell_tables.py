@@ -6,9 +6,9 @@ timepoint). A tool that rewrites a dataset's wells, timepoints or fields and doe
 would write a destination whose cells have no nanowells behind them: the tables silently dropped, the
 rest looking whole. So each tool either carries them or refuses: Subset carries the tables of the wells
 and timepoints it keeps (:func:`carry_nanowell_tables`) and refuses a field-level selection, which the
-tables are not keyed on; Merge Plates carries them with the wells remapped; Concatenate refuses, because
-two analyses' addresses cannot be joined without re-anchoring — the supported route is to concatenate the
-raw input and analyse once (tracker P10b-d). Validate checks the tables against the archives.
+tables are not keyed on; Merge Plates carries them with the wells remapped; Concatenate keeps dataset 1's (analysed + raw) or joins
+dataset 2's onto them where the two analyses agree (analysed + analysed,
+``datasets.concatenate.nanowell_link``). Validate checks the tables against the archives.
 
 Qt-free. The refusal takes the calling tool's own error class, so each keeps its user-facing voice.
 """
@@ -39,16 +39,21 @@ def has_nanowell_tables(paths) -> bool:
     return folder.is_dir() and any(folder.glob("*_grid.json"))
 
 
-def refuse_nanowell_tables(paths, label: str, error_cls, action: str) -> None:
-    """Raise *error_cls* when *paths* carries nanowell tables *action* cannot carry: Concatenate of two analysed
-    datasets, whose two analyses each addressed their own nanowells."""
-    if has_nanowell_tables(paths):
+def refuse_unjoinable_nanowell_tables(first, second, info1: dict, info2: dict, error_cls) -> None:
+    """Raise *error_cls* when two analysed datasets' nanowell results cannot be joined by Concatenate: only one of
+    them holds any (the other was analysed without nanowell mode, so its cells have no nanowells to join), or the two
+    were computed under different schemes, measurement versions or settings (:func:`nanowell_block_conflict`)."""
+    one, two = has_nanowell_tables(first), has_nanowell_tables(second)
+    if one != two:
+        which, holder, other = ("Dataset 1", first, "dataset 2") if one else ("Dataset 2", second, "dataset 1")
         raise error_cls(
-            f"{label} holds nanowell results ({nanowell_dir(paths.out_dir)}), and {action} cannot carry them "
-            "when both datasets are analysed: each analysis addressed its own nanowells, and two analyses' "
-            "addresses are not joined. Concatenate the analysed dataset with dataset 2's raw images instead "
-            "(its results are kept, and an incremental Analyze adds the new timepoints onto the same nanowells), "
-            "or concatenate the raw input of both and analyse once.")
+            f"{which} holds nanowell results ({nanowell_dir(holder.out_dir)}) and {other} holds none: {other} was "
+            "analysed without nanowell mode, so its cells have no nanowells to join. Analyse it in nanowell mode "
+            "first, or concatenate the analysed dataset with the other's raw images.")
+    conflict = nanowell_block_conflict(info1, info2) if one else None
+    if conflict:
+        raise error_cls(f"The nanowell results cannot be joined: {conflict}. Analyse both datasets under the same "
+                        "nanowell settings, or concatenate the analysed dataset with the other's raw images.")
 
 
 def sites_table(folder: Path, well: str) -> Path | None:

@@ -58,8 +58,9 @@ from datasets.core.dataset_paths import (
 )
 from datasets.core.member_names import rewrite_member_field
 from datasets.core.nanowell_tables import (
-    carried_nanowell_block, has_nanowell_tables, refuse_nanowell_tables, refuse_unusable_tables,
+    carried_nanowell_block, has_nanowell_tables, refuse_unjoinable_nanowell_tables, refuse_unusable_tables,
 )
+from datasets.concatenate.nanowell_link import NanowellLink, plan_link
 from datasets.concatenate.raw_compute import (
     check_raw_compatible, is_raw_dataset, raw_info, raw_paths, unusable_reason,
 )
@@ -432,15 +433,18 @@ def parse_gap_hours(text: str) -> float:
     return hours
 
 
-def _refuse_dropping_the_nanowell_record(ds1: DatasetPaths, ds2: DatasetPaths) -> None:
-    """Refuse an analysed + raw merge that would leave dataset 1's nanowell tables without their record.
+def _refuse_dropping_the_nanowell_record(ds1: DatasetPaths, ds2: DatasetPaths, *, both_analysed: bool = False) -> None:
+    """Refuse a merge that would leave nanowell tables without the acquisition record they were addressed from.
 
     The merge writes an acquisition record only when both datasets have one. Dataset 1's nanowell tables were
     addressed from its record, and the incremental Analyze that adds dataset 2's timepoints places them from the
     destination's — so a destination without one keeps tables nothing can extend, under a sidecar describing
     a record that is gone (roll-up review X13). A dataset 1 placed from a described grid has no record to lose.
+    With *both_analysed* the same holds the other way round: dataset 2's joined tables were addressed from its
+    record, and the timepoints set aside for Analyze are placed from the destination's.
     """
-    if not has_nanowell_tables(ds1):
+    holders = [ds for ds in ((ds1, ds2) if both_analysed else (ds1,)) if has_nanowell_tables(ds)]
+    if not holders:
         return
     try:
         first, second = read_record(ds1.root), read_record(ds2.root)
@@ -452,6 +456,11 @@ def _refuse_dropping_the_nanowell_record(ds1: DatasetPaths, ds2: DatasetPaths) -
             "acquisition record, so the merged dataset would have none and dataset 2's timepoints could not be "
             "added to those nanowells. Convert dataset 2 with the CZI, ND2 or OME import so it carries a "
             "record, then concatenate again.")
+    if both_analysed and first is None and second is not None:
+        raise ConcatError(
+            "Dataset 2 has nanowell tables addressed from its acquisition record, and dataset 1 has no "
+            "acquisition record, so the merged dataset would have none. Convert dataset 1 with the CZI, ND2 or "
+            "OME import so it carries a record, then concatenate again.")
 
 
 def _recorded_start(ds: DatasetPaths, token: str) -> tuple[datetime | None, str]:
@@ -870,6 +879,9 @@ class MergePlan:
     #: copied with dataset 1 into a new folder: ``dest`` *is* dataset 1. See
     #: :mod:`datasets.concatenate.in_place`.
     in_place: bool = False
+    #: Both datasets analysed in nanowell mode: which of dataset 2's timepoints join dataset 1's nanowells as
+    #: they are, and which are left out for an incremental Analyze (:mod:`datasets.concatenate.nanowell_link`).
+    nanowell_link: NanowellLink | None = None
 
 
 def refuse_same_folder(ds1: DatasetPaths, ds2: DatasetPaths) -> None:
@@ -945,8 +957,12 @@ def plan_pair(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict, info2: dict, ki
     _refuse_well_collisions(ds2, "Dataset 2")
     _refuse_mixed_spelling(ds1, ds2)
     if kind == KIND_ANALYSED:
-        refuse_nanowell_tables(ds1, "Dataset 1", ConcatError, "Concatenate")
-        refuse_nanowell_tables(ds2, "Dataset 2", ConcatError, "Concatenate")
+        # Both analysed: dataset 2's nanowell timepoints are joined onto dataset 1's nanowells where the two
+        # analyses agree, and the rest left for an incremental Analyze (``nanowell_link``).
+        refuse_unusable_tables(ds1, "Dataset 1", ConcatError)
+        refuse_unusable_tables(ds2, "Dataset 2", ConcatError)
+        refuse_unjoinable_nanowell_tables(ds1, ds2, info1, info2, ConcatError)
+        _refuse_dropping_the_nanowell_record(ds1, ds2, both_analysed=True)
     elif ds2_raw:
         # Dataset 1's results are kept as they are, nanowell tables included, and an incremental Analyze adds
         # dataset 2's timepoints onto the same nanowells: the successive-imaging workflow (tracker P10d).
@@ -973,6 +989,15 @@ def plan_pair(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict, info2: dict, ki
                    else merge_info(info1, info2, offset_hours=offset, tp_format=tp_format))
     if "nanowell" in merged_info:
         merged_info["nanowell"] = carried_nanowell_block(merged_info["nanowell"])
+    nanowell_link = None
+    if kind == KIND_ANALYSED and has_nanowell_tables(ds1):
+        def relabel(token: str) -> str:
+            return remap_timepoint_label(token, offset, tp_format)
+
+        nanowell_link = plan_link(ds1.out_dir, ds2.out_dir, relabel)
+        # Each timepoint's pixel and tile size (the run's ``acquisition`` block), dataset 2's under their new names.
+        merged_info["acquisition"] = {**(info1.get("acquisition") or {}),
+                                      **{relabel(tp): v for tp, v in (info2.get("acquisition") or {}).items()}}
     ds2_blocks_dropped = () if (raw or ds2_raw) else tuple(
         name for name in ("sample_definitions", "notes", "ratios", "cell_gating")
         if (info2 or {}).get(name)
@@ -1009,4 +1034,5 @@ def plan_pair(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict, info2: dict, ki
         format_warning=format_warning,
         column_warnings=() if (raw or ds2_raw) else column_warnings(ds1, ds2, wells_both),
         in_place=in_place,
+        nanowell_link=nanowell_link,
     )

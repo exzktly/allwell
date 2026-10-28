@@ -29,6 +29,7 @@ from review.features.nanowell.display_range_view import (
     build_display_range_button,
     refresh_display_range_buttons,
 )
+from review.features.nanowell.series_compute import baseline_at, baseline_timepoint
 from review.features.nanowell.subset_view import build_subset_control
 from review.features.nanowell.state import EXTREMES_MAX_N
 from widgets.control_band import ControlBand
@@ -97,7 +98,8 @@ _AXIS_TIP = ("Time: one panel per well (or replicate set), timepoints along x, t
              "interval over wells — wells are the replicate unit, nanowells are not.")
 _BASELINE_TIP = ("The timepoint a fold change and the occupancy class are measured from.\n"
                  "Earliest: the well's first timepoint; a nanowell unmeasurable there has no fold change.\n"
-                 "First measurable: each nanowell's first timepoint at which the measurement exists.")
+                 "First measurable: each nanowell's first timepoint at which the measurement exists.\n"
+                 "A timepoint: that timepoint for every nanowell — a well without it has no fold change.")
 _EXTREMES_TPS_TIP = ("The timepoints the montage shows as columns. Fewer columns give larger crops; the ranking "
                      "timepoint is always shown.")
 #: How long the page's canvas must hold one size before the Array view is re-fitted to it, in milliseconds.
@@ -352,7 +354,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             axis_seg.setSegmentEnabled(0, not per_nanowell)
             axis_seg.setToolTip(_AXIS_TIP + ("\n\n(Time is greyed: this metric has one value per nanowell.)"
                                              if per_nanowell else ""))
-            _select(baseline_cb, st.baseline)
+            _fill_baselines(baseline_cb, st.data, st.baseline)
             # Extremes ranks every metric by its fold change, so the baseline always matters there.
             baseline_cb.setEnabled((st.metric in BASELINE_METRICS or view in RANKED_WELL_VIEWS)
                                    and _metric_reaches_figure(st, view))
@@ -430,6 +432,24 @@ def _fill_timepoints(combo, tps, times_h: dict) -> None:
         combo.addItem(timepoint_text(tp, times_h), tp)
         combo.setItemData(combo.count() - 1, f"Timepoint {tp}", Qt.ToolTipRole)
     combo.setEnabled(len(tps) > 1)
+
+
+def _fill_baselines(combo, data, baseline: str) -> None:
+    """The *Baseline* control: the two rules, then every timepoint of the dataset in time order, named as the
+    timepoint control names them; *baseline* is selected. A named timepoint the dataset does not have (a restore
+    onto another dataset) is listed too, marked, so the control shows what the figure is measured from."""
+    combo.clear()
+    for key, label in _BASELINES:
+        combo.addItem(label, key)
+    tps = list(data.timepoints()) if data is not None else []
+    times_h = data.times_h if data is not None else {}
+    for tp in tps:
+        combo.addItem(timepoint_text(tp, times_h), baseline_at(tp))
+        combo.setItemData(combo.count() - 1, f"Every fold change measured from timepoint {tp}", Qt.ToolTipRole)
+    chosen = baseline_timepoint(baseline)
+    if chosen is not None and chosen not in {str(tp) for tp in tps}:
+        combo.addItem(f"{chosen} (not in this dataset)", baseline)
+    _select(combo, baseline)
 
 
 def _fill_channels(combo, data, channel) -> None:

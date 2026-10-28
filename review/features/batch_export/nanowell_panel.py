@@ -64,6 +64,7 @@ _format_cut = _lazy("review.features.nanowell.distribution_compute", "format_cut
 _parse_threshold = _lazy("review.features.nanowell.controller", "parse_threshold")
 _load_nanowell_data = _lazy("review.features.nanowell.collect", "load_nanowell_data")
 _site_metrics = _lazy("review.features.nanowell.series_compute", "site_metrics")
+_baseline_at = _lazy("review.features.nanowell.series_compute", "baseline_at")
 _render_message = _lazy("review.features.nanowell.renderer", "render_message")
 _apply_subset = _lazy("review.features.nanowell.subset_compute", "apply")
 _subset_note = _lazy("review.features.nanowell.subset_compute", "note")
@@ -119,8 +120,9 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                         "Distribution only: timepoints along the axis, or wells at one timepoint.")
         self._baseline_cb = self._combo_row(
             layout, "Baseline:", BASELINES,
-            "What a fold change is measured from: the well's earliest timepoint, or each nanowell's first "
-            "measurable one.")
+            "What a fold change is measured from: the well's earliest timepoint, each nanowell's first "
+            "measurable one, or one timepoint of the dataset for every nanowell (a well without it has no fold "
+            "change).")
         self._tp_cb = self._combo_row(
             layout, "Timepoint:", (),
             "Position, Along x: Wells and the Array map draw one timepoint. Latest and Earliest are each well's.")
@@ -250,17 +252,25 @@ class NanowellBatchExportPanel(BatchExportPanel):
         self._tp_cb.setEnabled(view in ("distribution", "array", "position"))
 
     def _refresh_timepoints(self) -> None:
-        """Latest and Earliest, then the dataset's own timepoints when the Nanowells page has read them."""
+        """Latest and Earliest, then the dataset's own timepoints when the Nanowells page has read them — for the
+        Timepoint control and, after its two rules, for the Baseline control."""
         previous = self._tp_cb.currentData()
+        previous_baseline = self._baseline_cb.currentData()
         self._tp_cb.clear()
         self._tp_cb.addItem("Latest", LATEST)
         self._tp_cb.addItem("Earliest", EARLIEST)
+        self._baseline_cb.clear()
+        for key, text in BASELINES:
+            self._baseline_cb.addItem(text, key)
         st = self._ctx.state.feature_slice("nanowell")
         data = getattr(st, "data", None)
         for tp in (data.timepoints() if data is not None else []):
             self._tp_cb.addItem(str(tp), str(tp))
+            self._baseline_cb.addItem(f"Timepoint {tp}", _baseline_at(tp))
         index = self._tp_cb.findData(previous) if previous else -1
         self._tp_cb.setCurrentIndex(max(index, 0))
+        index = self._baseline_cb.findData(previous_baseline) if previous_baseline else -1
+        self._baseline_cb.setCurrentIndex(max(index, 0))
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)

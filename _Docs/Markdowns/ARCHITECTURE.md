@@ -14759,7 +14759,18 @@ plate, which is what the local zipper groups.
 
 Remotely, `services.pipeline_runner.scope_staged_to_only_wells` narrows whatever
 `stage_local_zips` returns — applied once to its result rather than inside it,
-because it returns from several branches. The empty-well blanks are uploaded
+because it returns from several branches. Staging is also told the subset
+(`stage_local_zips(only_wells=…)`), and every layout that plans its archives
+(a channel filter, an incremental split) plans only the named wells and the
+blanks, so a subset on a finished plate reads and rewrites the transit copies
+of those wells alone rather than of the whole plate; the scope afterwards is
+still what decides the upload, for the layouts that return every archive
+unplanned. A FOLDER or FLAT plate's whole-well zip-up still covers the plate,
+since those archives become the user's copy of each well. The wells left
+unplanned are listed on the result (`ZippedInput.outside_subset_wells`) so the
+remote Group stage still counts the whole plate. Pinned by
+`tests/test_only_wells_remote.py::test_a_forced_subset_rewrites_only_its_own_archives`.
+The empty-well blanks are uploaded
 whatever the subset says (the host builds its correction from them); the journal
 then tallies such a blank "uploaded only", which is what happened. A named well
 missing locally fails before anything is sent. Incremental staging can keep a

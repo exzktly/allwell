@@ -94,6 +94,7 @@ def test_every_ssh_carries_the_same_short_keepalive(queue_wait, monkeypatch):
     host = _host(queue_wait_timeout_min=queue_wait)
     argvs = {"ssh_argv": host.ssh_argv(allocate_tty=False),
              "ssh_argv -tt": host.ssh_argv(allocate_tty=True),
+             "run stream": host.ssh_argv(allocate_tty=True, share_connection=False),
              "rsync -e": remote_transport._rsync_ssh_transport(host)[1].split()}
 
     seen: list[list[str]] = []

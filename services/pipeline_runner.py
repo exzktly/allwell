@@ -2022,6 +2022,10 @@ class PipelineRunner:
         assert self._remote is not None
         zipped = None
         regate_argv = None
+        # This machine drives the run for its whole length; one that sleeps
+        # stops it on the cluster (services.sleep_guard). Released in `finally`.
+        awake = SleepGuard(log_fn=lambda m: self._enqueue(("line", m)))
+        awake.start()
         try:
             self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
             incremental = self._recover_remote_outputs(output_dir, args, opts)

@@ -1314,6 +1314,17 @@ class Fetcher:
                 return
             self._sidecar_done.wait(SIDECAR_POLL_S)
 
+    def pull_sidecar_now(self) -> bool:
+        """One attempt at the mid-run sidecar pull, now; ``True`` once the local sidecar exists.
+
+        For a caller about to write into the local sidecar: a batched run's local auto-threshold pass saves its
+        thresholds there, and on a run that finished before the poller's first attempt — a small plate, a fast
+        node — there was no file to save them into, so they were computed and dropped (row B7).
+        """
+        return self._pull_sidecar_once(
+            f"{self.host.ssh_alias}:{self.run.remote_output_dir}/pipeline_info.json",
+            self.run.local_output_dir / "pipeline_info.json")
+
     def _pull_sidecar_once(self, src: str, dest: Path) -> bool:
         """One quiet attempt. True once the local sidecar exists.
 
@@ -1558,6 +1569,12 @@ class FetchedOutputVerifier:
             # Journalled from verify's own verdict, so "did this well arrive"
             # has one answer rather than two that can disagree.
             self._journal_retry_outcomes(attempted, missing)
+            if attempted:
+                # The completeness record above was taken while these wells were still missing here, so it calls
+                # each of them partial; taken again, it describes what the retry brought home. Without this a
+                # well the retry recovered whole failed verification anyway (row B8).
+                completeness = run_client_side_completeness_check(
+                    run.local_input_dir, run.local_output_dir, log_fn=log, suspended=suspended)
         missing = [*missing, *short_reanchored]      # the remote holds their only re-anchored copy
         if not sidecar_ok:
             missing.append("this run's pipeline_info.json could not be pulled, so the local one describes another "

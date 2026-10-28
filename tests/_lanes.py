@@ -152,6 +152,7 @@ NANOWELL_E2E_FILES = {
     "test_nanowell_real_plate.py": "tracker section F: the real plate's geometry on rendered tiles; 20 s",
     "test_nanowell_manual_anchor_run.py": "an anchor set by hand addresses a well end to end; 40 s",
     "test_nanowell_segmenter_input_sheet.py": "a run writes the sample of what its segmenter was given; 8 s",
+    "test_a_remote_nanowell_run_on_a_standin_cluster.py": "a batched remote nanowell run through its final re-anchoring pass on the stand-in cluster (tracker P1); 27 s",
 }
 
 
@@ -240,6 +241,8 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_remote_cleanup_says_what_it_removed.py": "A remote cleanup says what it removed; a batch that cannot be pruned does not run",
     "test_a_remote_run_end_to_end.py": "A remote run, driven end to end against a host that really has a filesystem",
     "test_a_remote_run_keeps_the_mac_awake.py": "A remote run holds caffeinate from its start to its end, on macOS only",
+    "test_a_remote_run_on_a_standin_cluster.py": "The app's remote path and the real remote side as a pair — srun, driver, conda guard, the pipeline — with faults on cue (tracker P1)",
+    "test_a_remote_run_over_a_failing_link.py": "The same pair over a link whose nth ssh fails or one call hangs: correct or visibly failed (tracker P1)",
     "test_a_remote_run_says_how_it_ended.py": "A remote run says what ended it, and calls its job closed only once the host confirms it",
     "test_a_silent_remote_stream_is_noticed.py": "A remote run quiet for twenty minutes outside a queue wait is said and checked with the host",
     "test_a_remote_suspend_winds_the_run_down.py": "A remote Suspend asks the pipeline to wind down; it does not kill the session",

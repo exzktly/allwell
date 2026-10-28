@@ -36,6 +36,7 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from pipeline.nanowell_frames import SHIFT, STEP_REACH, TIE, choose_frame
 
@@ -173,11 +174,13 @@ def plan_well(well: str, grid: dict, site_rows: list[dict]) -> WellPlan | None:
     return WellPlan(well, "unexplained", unexplained=flagged) if flagged else None
 
 
-def plan_dataset(out_dir) -> dict[str, WellPlan]:
-    """``well -> plan`` for every well of the dataset whose nanowell timepoints need attention."""
+def plan_dataset(out_dir, progress: Callable[[str], None] | None = None) -> dict[str, WellPlan]:
+    """``well -> plan`` for every well of the dataset whose nanowell timepoints need attention. *progress*, when
+    given, is told each well as it is read (``"  A01 (3/96): …"``), since a plate's sites tables take a while."""
     folder = Path(out_dir) / NANOWELL_DIRNAME
     plans: dict[str, WellPlan] = {}
-    for grid_path in sorted(folder.glob("*_grid.json")) if folder.is_dir() else []:
+    grids = sorted(folder.glob("*_grid.json")) if folder.is_dir() else []
+    for k, grid_path in enumerate(grids, start=1):
         well = grid_path.name[: -len("_grid.json")]
         sites_path = folder / f"{well}.csv"
         try:
@@ -188,6 +191,11 @@ def plan_dataset(out_dir) -> dict[str, WellPlan]:
         plan = plan_well(well, grid, rows)
         if plan is not None:
             plans[well] = plan
+        if progress is not None:
+            verdict = ("timepoints share one frame" if plan is None else
+                       "to relabel: " + ", ".join(f"{tp} by {st}" for tp, st in plan.shifts.items())
+                       if plan.repairable else f"left alone ({plan.verdict})")
+            progress(f"  {well} ({k}/{len(grids)}): {verdict}")
     return plans
 
 
@@ -253,23 +261,42 @@ def _relabel_sites(rows, shifts: dict, roster: set, kinds: dict, columns: list[s
     return out, {tp: tuple(counts.get(tp, (0, 0))) for tp in shifts}
 
 
-def _relabel_cells(rows, shifts: dict, roster: set, kinds: dict) -> tuple[list, dict]:
-    """The cell table with each shifted timepoint's nanowell addresses renamed; a cell whose nanowell left the
-    roster keeps its row with the address blank. Returns the rows and per timepoint how many were unplaced."""
+#: How often, in rows, relabelling a cell table says how far it has got: a plate's table can hold millions of cells.
+PROGRESS_EVERY_ROWS = 250_000
+
+
+def _relabel_cells_file(path: Path, shifts: dict, roster: set, kinds: dict,
+                        progress: Callable[[str], None] | None = None) -> tuple[dict, int]:
+    """Rewrite one cell table with each shifted timepoint's nanowell addresses renamed, streaming row by row (a
+    plate's table can hold millions of cells, so it is never held whole). A cell whose nanowell left the roster keeps
+    its row with the address blank. Returns per timepoint how many were unplaced, and the rows read."""
     unplaced: dict = {}
-    for row in rows:
-        tp = row.get("timepoint")
-        address = _address(row)
-        if tp not in shifts or address is None:
-            continue
-        dq, dr = shifts[tp]
-        q, r = address[0] + dq, address[1] + dr
-        if (q, r) in roster:
-            row.update(nw_q=q, nw_r=r, nw_ring=_ring(q, r, kinds.get(tp)), nw_label=f"{q}_{r}")
-        else:
-            row.update({c: "" for c in _ADDRESS_COLUMNS})
-            unplaced[tp] = unplaced.get(tp, 0) + 1
-    return rows, unplaced
+    tmp = path.with_name(path.name + ".part")
+    gz = path.suffix == ".gz"
+    source = gzip.open(path, "rt", newline="", encoding="utf-8") if gz else path.open(newline="", encoding="utf-8")
+    target = gzip.open(tmp, "wt", newline="", encoding="utf-8") if gz else tmp.open("w", newline="", encoding="utf-8")
+    n = 0
+    with source as fh_in, target as fh_out:
+        reader = csv.DictReader(fh_in)
+        writer = csv.DictWriter(fh_out, fieldnames=list(reader.fieldnames or []), extrasaction="ignore")
+        writer.writeheader()
+        for row in reader:
+            n += 1
+            tp = row.get("timepoint")
+            address = _address(row) if tp in shifts else None
+            if address is not None:
+                dq, dr = shifts[tp]
+                q, r = address[0] + dq, address[1] + dr
+                if (q, r) in roster:
+                    row.update(nw_q=q, nw_r=r, nw_ring=_ring(q, r, kinds.get(tp)), nw_label=f"{q}_{r}")
+                else:
+                    row.update({c: "" for c in _ADDRESS_COLUMNS})
+                    unplaced[tp] = unplaced.get(tp, 0) + 1
+            writer.writerow(row)
+            if progress is not None and n % PROGRESS_EVERY_ROWS == 0:
+                progress(f"    {path.name}: {n:,} cells so far…")
+    tmp.replace(path)
+    return unplaced, n
 
 
 def _moved_origin(block: dict, rows, tp: str, shift) -> list | None:
@@ -290,9 +317,11 @@ def _moved_origin(block: dict, rows, tp: str, shift) -> list | None:
     return [float(old[0]) + new[0] - zero[0], float(old[1]) + new[1] - zero[1]]
 
 
-def relabel_well(out_dir, plan: WellPlan, csv_prefixes, backup_root: Path) -> str:
+def relabel_well(out_dir, plan: WellPlan, csv_prefixes, backup_root: Path,
+                 progress: Callable[[str], None] | None = None) -> str:
     """Apply *plan* to one well's grid record, sites table and cell tables; return one line saying what changed.
-    The originals are copied under *backup_root* first."""
+    The originals are copied under *backup_root* first. *progress*, when given, is told each step as it ends."""
+    say = progress or (lambda _text: None)
     from util.nanowell_anchors import origin_phrase
 
     out_dir = Path(out_dir)
@@ -302,6 +331,7 @@ def relabel_well(out_dir, plan: WellPlan, csv_prefixes, backup_root: Path) -> st
     backup_root.mkdir(parents=True, exist_ok=True)
     for path in [grid_path, sites_path, *cells_paths]:
         shutil.copy2(path, backup_root / path.name)
+    say(f"    backed up {2 + len(cells_paths)} file(s) to {backup_root}")
 
     grid = json.loads(grid_path.read_text(encoding="utf-8"))
     columns, rows = _read_rows(sites_path)
@@ -313,12 +343,13 @@ def relabel_well(out_dir, plan: WellPlan, csv_prefixes, backup_root: Path) -> st
     rows, counts = _relabel_sites(rows, plan.moves, roster, kinds, columns)
     unplaced: dict = {}
     for path in cells_paths:
-        cell_columns, cells = _read_rows(path)
-        cells, these = _relabel_cells(cells, plan.moves, roster, kinds)
+        these, n_cells = _relabel_cells_file(path, plan.moves, roster, kinds, progress)
         for tp, n in these.items():
             unplaced[tp] = unplaced.get(tp, 0) + n
-        _write_rows(path, cell_columns, cells)
+        say(f"    {path.name}: {n_cells:,} cell(s) read, {sum(these.values()):,} left without a nanowell address")
     _write_rows(sites_path, columns, rows)
+    say(f"    {sites_path.name}: {len(rows):,} site row(s) written — "
+        + "; ".join(f"{tp}: {d} beyond the rim dropped, {u} never measured" for tp, (d, u) in counts.items()))
 
     stamp = datetime.now().isoformat(timespec="seconds")
     for tp, block in blocks.items():
@@ -353,11 +384,18 @@ def relabel_well(out_dir, plan: WellPlan, csv_prefixes, backup_root: Path) -> st
     return f"{plan.well}: relabelled {moved} onto {plan.reference}'s nanowells"
 
 
-def relabel_dataset(out_dir, plans: dict, csv_prefixes) -> list[str]:
-    """Relabel every repairable well of *plans*; one line per well. The originals go under one backup folder."""
+def relabel_dataset(out_dir, plans: dict, csv_prefixes, progress: Callable[[str], None] | None = None) -> list[str]:
+    """Relabel every repairable well of *plans*; one line per well. The originals go under one backup folder.
+    *progress*, when given, is told each well and each table as it is done, for the Validate log."""
     repairable = [p for p in plans.values() if p.repairable]
     if not repairable:
         return []
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = Path(out_dir) / NANOWELL_DIRNAME / BACKUP_DIRNAME / stamp
-    return [relabel_well(out_dir, plan, csv_prefixes, backup) for plan in repairable]
+    done = []
+    for k, plan in enumerate(repairable, start=1):
+        if progress is not None:
+            moved = ", ".join(f"{tp} by {step}" for tp, step in plan.shifts.items())
+            progress(f"  Relabelling {plan.well} ({k}/{len(repairable)}): {moved} onto {plan.reference}'s nanowells")
+        done.append(relabel_well(out_dir, plan, csv_prefixes, backup, progress))
+    return done

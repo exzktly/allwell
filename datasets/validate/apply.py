@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Callable
 from pathlib import Path
 
 from util.timepoint import parse_hours, sort_key as tp_sort_key
@@ -106,12 +107,17 @@ def _prune_stale_overrides(paths) -> int:
     return dropped
 
 
-def apply_repairs(root: Path | str, report: DatasetReport) -> RepairResult:
-    """Apply the metadata-only repairs *report* flagged as available.
+def apply_repairs(root: Path | str, report: DatasetReport,
+                  progress: Callable[[str], None] | None = None) -> RepairResult:
+    """Apply the repairs *report* flagged as available.
 
     Idempotent: re-running on an already-repaired dataset is a no-op that
-    reports nothing changed.
+    reports nothing changed. *progress*, when given, is told each step as it
+    starts and ends (the Validate log): relabelling a plate of nanowell wells
+    rewrites tables of millions of rows, and a log that says only "Applying
+    repairs…" for minutes cannot be told from a hung one.
     """
+    say = progress or (lambda _text: None)
     paths = resolve_dataset(root, label="dataset")
     info_path = paths.out_dir / "pipeline_info.json"
     info = json.loads(info_path.read_text())
@@ -143,13 +149,22 @@ def apply_repairs(root: Path | str, report: DatasetReport) -> RepairResult:
         rebuilt = True
     if rebuilt:
         write_json_atomic(info_path, info)
+        say("Rebuilt available_timepoints / available_fovs from the files on disk.")
 
     pruned = _prune_stale_overrides(paths)
+    if pruned:
+        say(f"Pruned {pruned} stale cell override(s).")
     swept = _sweep_staging_files(paths)
-    # Planned again from disk rather than taken from the report: a well relabelled since the scan agrees now and is
-    # left alone, which keeps the repair idempotent.
-    plans = plan_relabels(paths.out_dir)
-    relabelled = relabel_dataset(paths.out_dir, plans, report.csv_prefixes) if plans else []
+    if swept:
+        say(f"Swept {swept} leftover staging file(s).")
+    relabelled: list[str] = []
+    if report.misaddressed_nanowell_wells:
+        # Planned again from disk rather than taken from the report: a well relabelled since the scan agrees now and
+        # is left alone, which keeps the repair idempotent.
+        say("Nanowell addresses: reading each well's grid record and sites table again…")
+        plans = plan_relabels(paths.out_dir, progress)
+        relabelled = relabel_dataset(paths.out_dir, plans, report.csv_prefixes, progress) if plans else []
+        say(f"Nanowell addresses: {len(relabelled)} well(s) relabelled.")
 
     parts = []
     if rebuilt:

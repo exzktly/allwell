@@ -221,7 +221,11 @@ def _kept_evidence(prior: dict | None) -> dict | None:
         fraction = str(row.get("imaged_fraction") or "").strip()      # blank: nothing recorded about imaging
         if fraction and float(fraction) >= 0.999:
             imaged.add(address)
-    return {"detected": detected, "imaged": imaged}
+    # How each kept timepoint was anchored: a new timepoint a lattice step off them is moved onto their frame only
+    # when they outrank it (nanowell_run._settle_steps), so a new square never yields to a kept array centre.
+    blocks = prior["grid"].get("timepoints", {})
+    origins = {tp: blocks.get(tp, {}).get("origin_method") for tp in sorted(prior.get("kept", ()), key=_tp_rank)}
+    return {"detected": detected, "imaged": imaged, "origins": origins}
 
 
 def timepoint_order(record: dict, well: str) -> list[str]:
@@ -465,6 +469,8 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
     if grid.get("measure_version") != nm.MEASURE_VERSION:
         # Measured another way: kept beside this run's timepoints, the two would not be comparable numbers.
         return None
+    if _has_a_step_off_timepoint(grid):
+        return None
     kept = {tp for tp in timepoints
             if grid.get("timepoints", {}).get(tp, {}).get("status") == nr.OK
             and grid["timepoints"][tp].get("record_digest") == nr.record_digest(record, well_label, tp)
@@ -480,6 +486,21 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
     cells = [with_timepoint_hours(r) for r in _read_rows(cells_path) if r["timepoint"] in kept]
     return {"grid": grid, "kept": kept, "sites": sites, "cells": cells,
             "order": {tp: k for k, tp in enumerate(timepoints)}}
+
+
+def _has_a_step_off_timepoint(grid: dict) -> bool:
+    """Whether a circular well's record holds a timepoint whose addresses disagree with its other timepoints'
+    (``roster_mismatch``). Every timepoint of such a well is measured on one roster, so the mismatch means one
+    timepoint's origin sat a lattice step off its others' — and the run cannot tell from the record alone whether the
+    flagged timepoint is the wrong one or the right one outvoted (review: a square-anchored baseline was blamed when
+    two later timepoints shared one wrong array centre). Reusing any of it would carry rows under neighbouring
+    nanowells' addresses into every later run, so the well is analysed again over every timepoint, where
+    ``nanowell_run._settle_steps`` decides the frame by source. An inferred well (no radius) is left alone: its
+    timepoints each see their own array, and a mismatch there is what one of them saw."""
+    if grid.get("array_radius", {}).get("radius_um") is None:
+        return False
+    return any(isinstance(block, dict) and block.get("consistency") == "roster_mismatch"
+               for block in grid.get("timepoints", {}).values())
 
 
 def _anchor_list(position) -> list | None:
@@ -716,14 +737,16 @@ def _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, rec
                  prior, todo, run, staging_dir, write_csv, template_path):
     """:func:`process_well_zip`'s run and its writing, while the well's archive is open to read tiles from."""
     outcome, fixed, fixed_roster, saved = run(prior, todo)
-    if prior is not None and outcome.roster_change:
+    if prior is not None and (outcome.roster_change or outcome.frame_change):
         # An incremental run must give the roster a run over every timepoint would (tracker X35a-R1): a rim nanowell
-        # hidden at the kept timepoints and seen at a new one belongs to all of them. So the well is analysed again
-        # from the start, and its grid record says why.
-        kept_radius = prior["grid"]["array_radius"]
+        # hidden at the kept timepoints and seen at a new one belongs to all of them. Likewise a new timepoint whose
+        # nanowells sit a lattice step from the kept ones': which frame is right is decided with every timepoint in
+        # view (nanowell_run._settle_steps). So the well is analysed again from the start, and its grid record says why.
+        kept_radius, frame_change = prior["grid"]["array_radius"], outcome.frame_change
         prior, todo = None, list(timepoints)
         outcome, fixed, fixed_roster, saved = run(prior, todo)
-        reason = _reanalysis_reason(kept_radius, outcome.radius)
+        reason = (f"{frame_change}, so every timepoint was analysed again and the earlier timepoints' rows rewritten"
+                  if frame_change else _reanalysis_reason(kept_radius, outcome.radius))
         outcome.radius["reanalysed_because"] = reason
         log.warning("Well %s — %s.", well_label, reason)
     _log_reused_registration(well_label, outcome, todo)

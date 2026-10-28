@@ -1389,6 +1389,7 @@ class WellOutcome:
     notes: list = field(default_factory=list)
     earliest_template: tuple | None = None               # (timepoint, Template): the first own template in time
     roster_change: str = ""                              # a kept roster the new evidence changes (X35a-R1): why
+    frame_change: str = ""                               # a new timepoint off the kept timepoints' frame: which, how far
     diameter_source: str | None = None                   # where the well's one diameter came from (_settle_diameter)
     #: (timepoint, {site index: crop as the segmenter saw it}) for the first timepoint measured (pipeline.nanowell_inspect)
     inspection: tuple | None = None
@@ -1545,8 +1546,13 @@ def _refuse_other_kinds(outcome, candidates, kept_kind: str | None = None) -> li
     return refused
 
 
-def _shift_origin(located: Located, shift, onto: str) -> None:
-    """Move *located*'s addresses by *shift* lattice steps: the same sites, each named ``(q + dq, r + dr)``."""
+#: Why an inferred array's addresses were moved onto another timepoint's (:func:`_settle_inferred`).
+_INFERRED_SHIFT_WHY = "its own middle site was not the array's (a bubble or the image's edge cut its outline short)"
+
+
+def _shift_origin(located: Located, shift, onto: str, why: str = _INFERRED_SHIFT_WHY) -> None:
+    """Move *located*'s addresses by *shift* lattice steps: the same sites, each named ``(q + dq, r + dr)``, and say
+    so in its notes, *why* being the reason the move was needed."""
     from pipeline.nanowell_lattice import index_points
 
     basis = np.column_stack((located.fit.a1, located.fit.a2))
@@ -1556,8 +1562,17 @@ def _shift_origin(located: Located, shift, onto: str) -> None:
     located.grid["origin_stage_um"] = _lattice_block(located, OK, "")["origin_stage_um"]
     located.grid.update(origin_shift=[int(shift[0]), int(shift[1])], origin_registered_to=onto)
     located.notes.append(f"Addresses moved by ({int(shift[0])}, {int(shift[1])}) lattice steps to overlay this "
-                         f"timepoint's array on {onto}'s: its own middle site was not the array's (a bubble or the "
-                         "image's edge cut its outline short)")
+                         f"timepoint's array on {onto}'s: {why}")
+
+
+def _unaddress(outcome, tp: str, reason: str) -> None:
+    """Leave *tp* measured on the nanowells it saw with no address, saying why: its origin cannot be trusted. The
+    end-of-run pass can still anchor it from the rest of the plate (``nanowell_task.plan_reanchor``)."""
+    located = outcome.located[tp]
+    located.status, located.reason, located.origin_montage, located.indexed = UNADDRESSED, reason, None, ()
+    located.origin_method = located.origin_agreement = None
+    outcome.timepoints[tp].update(status=UNADDRESSED, reason=reason, origin_method=None, origin_agreement=None,
+                                  origin_stage_um=None)
 
 
 def _lit(located: Located) -> frozenset:
@@ -1803,11 +1818,7 @@ def _settle_inferred(outcome, timepoints, anchored, unaddressed, fixed_roster, r
     unaddressed = [tp for tp in unaddressed if tp not in refused]
     reference_tp, shifts, ambiguous = _register_to_reference(outcome.located, anchored, fixed_roster)
     for tp, reason in ambiguous.items():                   # measured on the sites seen, with no address
-        located = outcome.located[tp]
-        located.status, located.reason, located.origin_montage, located.indexed = UNADDRESSED, reason, None, ()
-        located.origin_method = located.origin_agreement = None
-        outcome.timepoints[tp].update(status=UNADDRESSED, reason=reason, origin_method=None, origin_agreement=None,
-                                      origin_stage_um=None)
+        _unaddress(outcome, tp, reason)
     for tp in shifts:                                       # the grid block was written before the move
         outcome.timepoints[tp].update({k: outcome.located[tp].grid[k]
                                        for k in ("origin_stage_um", "origin_shift", "origin_registered_to")})
@@ -1830,22 +1841,83 @@ class CircleEvidence:
 
 
 def misanchored(detected: dict, kept=()) -> dict:
-    """``timepoint -> step`` for each timepoint whose detected sites match the other timepoints' better moved by one
+    """``timepoint -> step`` for each timepoint whose detected sites match the other timepoints' better moved by a
     lattice step than where they are: its origin is a step off (review X35a-R2). A timepoint whose sites the others
     do not overlap better anywhere is not listed. With two timepoints a step apart, both are listed: which of them
-    is wrong cannot be told. *kept* are the sites an earlier run's kept timepoints detected: the timepoints of an
-    incremental run are judged against them too, and they are never listed themselves (review X35a-R7)."""
-    steps = [(dq, dr) for dq in (-1, 0, 1) for dr in (-1, 0, 1)]
+    is wrong cannot be told from the sites alone. *kept* are the sites an earlier run's kept timepoints detected:
+    the timepoints of an incremental run are judged against them too, and they are never listed themselves (review
+    X35a-R7). A run settles such steps before deciding the rim (:func:`_settle_steps`), so here a timepoint is listed
+    only when that could not: one further off than ``nanowell_frames.STEP_REACH``, or against an earlier run's
+    sites."""
+    from pipeline.nanowell_frames import best_step
+
     out = {}
     for tp, mine in detected.items():
         others = set(kept).union(*(d for t, d in detected.items() if t != tp))
         if not others:
             continue
-        overlap = {s: len({(q + s[0], r + s[1]) for q, r in mine} & others) for s in steps}
-        best = max(steps, key=lambda s: (overlap[s], s == (0, 0)))
-        if best != (0, 0) and overlap[best] > overlap[(0, 0)]:
-            out[tp] = best
+        step = best_step(mine, others)
+        if step != (0, 0):
+            out[tp] = step
     return out
+
+
+def _detected_addresses(located: Located) -> set:
+    """The addresses of the nanowells *located* detected that sit on a lattice site."""
+    return {(e.q, e.r) for e in located.indexed if e.q is not None}
+
+
+def _settle_steps(outcome, anchored, kept: dict | None = None) -> tuple[list, list, dict]:
+    """Put a default well's anchored timepoints in one frame before its rim is decided: ``(anchored, unaddressed
+    timepoints this made, steps applied)``.
+
+    Every timepoint is anchored on its own evidence, so one whose origin landed a site off (an array centre a fitted
+    circle left loose, a square misread) names every nanowell after its neighbour, and Review's join by address then
+    pairs each nanowell with its neighbour from that timepoint on. The timepoints are grouped by the lattice step
+    their detected nanowells sit at against one another's (``nanowell_frames.settle_frames``, measured against the
+    timepoint that detected most); the frame kept is the one holding the best-ranked origin (``ORIGIN_RANK``), then the most
+    timepoints, so a square-anchored baseline is never moved onto later timepoints that all share one wrong array
+    centre. Every other timepoint's addresses are moved onto it, and its grid block says by how much. When two frames
+    tie on both, nothing tells which is right: the timepoints of every frame are left unaddressed, measured with no
+    address, rather than one of them being guessed and written as ``ok``.
+
+    *kept* is an earlier run's evidence (incremental: ``detected`` sites and the kept timepoints' ``origins``,
+    ``nanowell_task._kept_evidence``). Its timepoints are a frame of their own, measured against directly. When it
+    wins, a new timepoint off it is moved onto it, with no re-analysis; when a new frame outranks it or ties with it,
+    nothing is moved: ``outcome.frame_change`` says which timepoints sit how far off, and the caller analyses the
+    well again over every timepoint, so that the frame is chosen with all of them in view."""
+    from pipeline.nanowell_frames import KEPT_OUTRANKED, SHIFT, TIE, settle_frames
+    from util.nanowell_anchors import origin_phrase
+
+    kept = kept or {}
+    found = {tp: _detected_addresses(outcome.located[tp]) for tp in anchored}
+    methods = {tp: outcome.located[tp].origin_method for tp in anchored}
+    decision = settle_frames(found, methods, kept.get("detected"), kept.get("origins"))
+    if decision.verdict == KEPT_OUTRANKED:
+        outcome.frame_change = "; ".join(f"{tp}'s nanowells sit {decision.onto[tp]} lattice steps from the earlier "
+                                         "run's" for tp in anchored if decision.onto[tp] != (0, 0))
+        return list(anchored), [], {}
+    if decision.verdict == TIE:
+        names = ", ".join("/".join(frame) for frame in decision.frames)
+        for tp in anchored:
+            _unaddress(outcome, tp, f"Its nanowells sit a lattice step from those of another timepoint anchored as "
+                                    f"well ({names}), so which origin is right cannot be told: measured with no "
+                                    "address rather than under its neighbours' addresses. An anchor set by hand on "
+                                    "the central square at one of them settles it")
+        return [], list(anchored), {}
+    if decision.verdict != SHIFT:
+        return list(anchored), [], {}
+    reference = decision.reference
+    reference_method = methods.get(reference) or (kept.get("origins") or {}).get(reference)
+    for tp, shift in decision.shifts.items():
+        located = outcome.located[tp]
+        _shift_origin(located, shift, reference,
+                      f"its own origin ({origin_phrase(located.origin_method)}) landed a site off, and "
+                      f"{reference}'s ({origin_phrase(reference_method)}) ranks above it or is shared by more "
+                      "timepoints")
+        outcome.timepoints[tp].update({k: located.grid[k]
+                                       for k in ("origin_stage_um", "origin_shift", "origin_registered_to")})
+    return list(anchored), [], dict(decision.shifts)
 
 
 def _evidence_roster(located: dict, anchored, radius_um: float, settings: NanowellSettings,
@@ -1967,6 +2039,8 @@ def _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts) -
         key.update(roster=outcome.radius["roster"], origin_shift=list(shifts.get(tp, (0, 0))))
     elif roster is not None:
         key.update(roster=outcome.radius["roster"], roster_rule=ROSTER_RULE_EVIDENCE)
+    if not settings.infer and tp in shifts:              # the same origin moved onto another timepoint's frame
+        key["origin_shift"] = list(shifts[tp])
     return key
 
 
@@ -2213,6 +2287,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
                                                                        "no roster radius could be shared")
             steps.finish()
             return outcome
+        anchored, stepped_off, shifts = _settle_steps(outcome, anchored, kept_evidence)
+        unaddressed += stepped_off
         roster, own, circle_reference = _circle_roster(outcome, anchored, radius_um,
                                                        replace(settings, diameter_override_um=used), fixed_roster,
                                                        fixed_radius_um, kept_evidence)

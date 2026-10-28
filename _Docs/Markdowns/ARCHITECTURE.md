@@ -10540,20 +10540,40 @@ rendered plates — the 100 µm fixture at three rotations, cut by the image's e
 and the 100 µm, 50 µm and two custom geometries at 1.3 and 2.0 µm per pixel — the roster is the drawn sites
 exactly (`tests/test_nanowell_run.py::test_a_circular_array_s_roster_is_every_drawn_site_and_no_other`). What it
 gives up: a rim nanowell a bubble hides at every timepoint, wholly imaged, is left out (2 sites under a rendered
-rim bubble on a one-timepoint well; detected at any other timepoint, it stays). A timepoint whose detections sit
-a lattice step from the other timepoints' (`misanchored`: its detected sites overlap theirs better moved by one
-step than where they are) is anchored a step off: its detections do not widen the rim — taken at face value one such
-timepoint put 17 rows of floor into every timepoint — it is compared on its own evidence and so is a
-`roster_mismatch`, and its note says why; with two timepoints a step apart both are, since which is wrong cannot be
-told. Otherwise every timepoint is compared on the roster, as a rim nanowell a bubble hides at one timepoint is still
-that timepoint's. The grid record keeps the roster as `array_radius.roster` with `roster_rule: "evidence"`, and an
+rim bubble on a one-timepoint well; detected at any other timepoint, it stays).
+
+Each timepoint is anchored on its own evidence, and Review joins a well's timepoints by address, so a timepoint
+whose origin landed a site off — an array centre the fitted circle left loose by more than three quarters of a
+pitch, a square misread — would name every nanowell after its neighbour, and fold change and trajectories would pair
+each nanowell with its neighbour from that timepoint on. So before the rim is decided, `_settle_steps` puts the
+anchored timepoints in one frame. It groups them by the lattice step (within ±3, `STEP_REACH`) at which each one's
+detected sites best overlay the sites of the timepoint that detected most (`pipeline/nanowell_frames.py`:
+`best_step`, `settle_frames`, `choose_frame` — the one rule, shared with Datasets → Validate's relabel), keeps the frame holding
+the best-ranked origin (`ORIGIN_RANK`: a hand-set anchor, then the central square, then the array centre, then a
+plate-rigid prediction), then the most timepoints, and moves every other timepoint's addresses onto it
+(`_shift_origin`: `origin_shift`, `origin_registered_to` and a note in its grid block, the step in its checkpoint
+key). Ranking by source rather than by vote is what keeps a square-anchored baseline from being moved onto later
+timepoints that lost the square and share one wrong array centre. When two frames tie on both, nothing tells
+which is right, and every timepoint in them is `unaddressed` with the reason and the remedy (an anchor set by hand)
+rather than guessed. `misanchored` still runs inside the rim decision, for whatever `_settle_steps` could not
+settle (a timepoint further off than `STEP_REACH`): such a timepoint's detections do not widen the rim — taken at
+face value one put 17 rows of floor into every timepoint — it is compared on its own evidence and so is a
+`roster_mismatch`, and its note says why. Otherwise every timepoint is compared on the roster, as a rim nanowell a
+bubble hides at one timepoint is still that timepoint's. Review's Array view prints a warning line for a timepoint
+whose addresses were moved and for one left a `roster_mismatch` (`array_compute.frame_lines`). The grid record keeps the roster as `array_radius.roster` with `roster_rule: "evidence"`, and an
 incremental or re-anchoring run keeps it — unless its new timepoints change it: the kept rows' evidence (sites
 detected, sites whose whole disk was imaged; `nanowell_task._kept_evidence`, which skips a kept timepoint flagged a
 roster mismatch, since its rows may name its neighbours' sites) and the new timepoints' decide the roster a run over
 every timepoint would. A band site absent from the kept roster counts as seen whole and empty, because under this
 rule that is the only reason one is left out, and the kept rows exist only for roster sites: without that, a well
-whose rim the image cuts was put back together and re-analysed to the same roster on every incremental run. A new
-timepoint is judged a step off against the kept detections too, and is then named without moving anything. When the
+whose rim the image cuts was put back together and re-analysed to the same roster on every incremental run. In an
+incremental run the kept timepoints are a frame of their own, ranked by how they were anchored (`_kept_evidence`
+carries their `origins`): a new timepoint a step off a frame that outranks it is moved onto it with no re-analysis,
+and one that outranks the kept frame or ties with it sets `outcome.frame_change`, on which the task analyses the
+well again over every timepoint, with the step as its `reanalysed_because`. An earlier record holding a
+`roster_mismatch` timepoint in a circular well is never reused (`nanowell_task._has_a_step_off_timepoint`): it may
+be the wrong timepoint or the right one outvoted, and either way its rows would carry neighbours' addresses
+forward. When the
 roster really differs (a rim nanowell hidden at the kept timepoints and seen at a new one, a band site a new timepoint
 shows empty) the task analyses the well again over every timepoint, records what the re-analysis changed (sites
 added and removed, measured on its result) as `array_radius.reanalysed_because`, and logs it as a warning; Validate
@@ -14669,8 +14689,8 @@ and `cell_overrides.json` entries whose `seg_fp` no longer matches the
 current out-zip mtime (silently dropped on load regardless — see
 `review/persistence/cell_overrides.py`).
 
-`apply.py::apply_repairs` is metadata-only — it never rewrites a measurement
-CSV or a well archive. It read-modify-writes the already-loaded sidecar dict
+`apply.py::apply_repairs` never rewrites a well archive or a measured value.
+Apart from the nanowell relabel below, it touches no measurement CSV. It read-modify-writes the already-loaded sidecar dict
 (replacing only `available_timepoints`/`available_fovs` with what's actually
 on disk), prunes stale `cell_overrides.json` entries, and sweeps leftover
 `__aw_tmp_*` staging files. `services.remote_fetch.refresh_pipeline_info_available_from_outputs`
@@ -14686,6 +14706,45 @@ and `collect_available_schema_values([], ...)` returns `[]` unconditionally
 for a schema that doesn't have `field_name` — silently wiping a real, correct
 `available_timepoints`/`available_fovs` list to empty on a dataset
 `build_report` had just diffed correctly.
+
+**Nanowell timepoints addressed a lattice step apart** are the one repair that
+rewrites measurement tables, and only their address columns.
+`datasets/validate/nanowell_relabel.py` (Qt-free) plans it from a dataset's
+tables alone: `plan_dataset(out_dir)` reads each circular well's grid record
+and sites table and, for each `ok` timepoint, `_step_against_roster` finds the
+step whose predicted nanowells (`a` such that `a + s` is in the recorded
+roster) best match which wholly imaged roster sites the timepoint detected.
+Every timepoint is measured on one roster, so detected addresses alone cannot
+show a step in the tables; the rim can, because a timepoint anchored a site
+off measured the roster disk while its array sat a step away, leaving a
+crescent of imaged, empty roster sites on one side. A step counts only when it
+beats `(0, 0)` by `MIN_CRESCENT` sites and by half the crescent it predicts.
+The steps then go through `pipeline/nanowell_frames.choose_frame` — the run's
+own ranking (hand-set anchor, central square, array centre, plate-rigid; then
+most timepoints; then earliest), shared with `nanowell_run._settle_steps` so
+the run and the repair cannot disagree. A plan is `shift` (repairable:
+`nanowell_misaddressed`), `tie` (`nanowell_frames_ambiguous`: set an anchor by
+hand and re-run), or `unexplained` (a `roster_mismatch` no step within reach
+explains, or a disk-rule well with no kept roster: re-run). `build_report`
+lists each as a warning and puts the repairable wells in
+`DatasetReport.misaddressed_nanowell_wells`, which makes the report
+`repairable`. `apply_repairs` plans again from disk, so a repeat is a no-op,
+and `relabel_dataset` copies each well's grid record, sites table and cell
+tables to `out/nanowells/relabel_backup/<time>/`, then renames addresses
+`(q, r) -> (q + dq, r + dr)` with `nw_ring`/`nw_label` recomputed. Measured
+values and `well_x_um`/`well_y_um` (physical positions) are kept as they are.
+When the winning frame is not the one the roster was decided in, the roster
+moves too (`roster_offset`). A row that lands outside the roster is dropped. A
+roster nanowell the timepoint never measured gets a `clipped` row with every
+measurement blank. A cell whose nanowell left the roster keeps its row with
+its address blank. The grid block records `origin_shift`,
+`origin_registered_to`, an `origin_stage_um` moved by the measured offset
+between the old and new origin nanowells (`None` when either is missing), and
+`relabelled` (by, at, `dropped_rows`, `unmeasured_sites`, `cells_unplaced`),
+which Review's Array view prints as a warning line
+(`array_compute.frame_lines`). Interior values match a run of the fixed
+pipeline on the same images (`tests/test_nanowell_relabel.py`); the rim does
+not, and the record says by how much.
 
 The page's **Complete this run** button hands the dataset off to Analyze
 through the existing `on_open_in_analyze` seam — the same one `Convert

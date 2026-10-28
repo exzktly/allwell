@@ -12495,7 +12495,15 @@ on a host is found. The history exists because every run records its own
 address before it uploads a byte: a run stopped during its upload used to
 overwrite the only record of where the previous run's finished output was, and
 the next run looked in the stopped run's empty directory and uploaded the
-plate again. **The address the name implies**: a run's directory is
+plate again. It keeps one entry per **attempt** — run id, input and output
+directory together — not one per output directory: a resumed batched run writes
+into the first attempt's output directory from a run directory of its own, and
+folding those kept only the newest, so an intermediate attempt's staged batches,
+held wells and blank path were lost. `recorded_remote_attempts` returns every
+attempt; `stored_remote_addresses` still folds them by output directory, which
+is what finding *output* wants, and the batched resume reads the first (a
+batched attempt's run directory is its input directory's parent, and its `b<i>/`
+and `keep/` are listed there). **The address the name implies**: a run's directory is
 `runs/run-<upload key>-<argv digest>` (`_run_id_body`, the one spelling), and
 for a plate that is one zip per well uploaded as it is, the upload key *is*
 `source_fingerprint` of the user's own archives — so an earlier whole-plate

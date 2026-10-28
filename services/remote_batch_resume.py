@@ -91,7 +91,13 @@ def _roots(own_run_dir: str, own_output_dir: str, earlier: Iterable[dict]) -> li
             parent = str(PurePosixPath(out).parent)
             if all(r.path != parent for r in roots):
                 roots.append(_Root(parent, True, PurePosixPath(out).name))
-        if inp and not any(inp == r.path or inp.startswith(r.path.rstrip("/") + "/") for r in roots):
+        if inp and PurePosixPath(inp).name == "in":
+            # A batched attempt's input is its run directory's `in/`, and its staged batches and held wells sit
+            # beside it — in its own run directory even when it wrote its output into an earlier attempt's.
+            parent = str(PurePosixPath(inp).parent)
+            if all(r.path != parent for r in roots):
+                roots.append(_Root(parent, True, "out"))
+        elif inp and not any(inp == r.path or inp.startswith(r.path.rstrip("/") + "/") for r in roots):
             roots.append(_Root(inp, False))
     return roots
 
@@ -288,10 +294,11 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     runner, run = proc._runner, proc._runner._run
     own_output = run.remote_output_dir
     try:
-        earlier = [a for a in run_journal.stored_remote_addresses(
+        # Every attempt, not one per output directory: an intermediate attempt that re-attached to the first one's
+        # output directory staged its batches in a run directory of its own (tracker F5). `_roots` drops repeats.
+        earlier = run_journal.recorded_remote_attempts(
             proc._local_output_dir, argv_digests=[keys["argv_digest"], *getattr(proc, "_legacy_digests", ())],
-            source_key=keys["source_key"],
-            host_alias=keys["host_alias"]) if a.get("remote_output_dir") != own_output]
+            source_key=keys["source_key"], host_alias=keys["host_alias"])
     except OSError:
         earlier = []
     found = find_leftovers(runner._cache, own_run_dir=remote_run_dir(runner.host, proc._run_id),

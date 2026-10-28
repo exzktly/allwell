@@ -81,6 +81,7 @@ def _harness(tmp_path, monkeypatch, *, earlier=(), force=False, nanowell=False):
     )
     p._pipeline_argv = ["--force"] if force else []
     monkeypatch.setattr(run_journal, "stored_remote_addresses", lambda *a, **k: list(earlier))
+    monkeypatch.setattr(run_journal, "recorded_remote_attempts", lambda *a, **k: list(earlier))
     return p, plate, run_dir, sent, observed, queued
 
 
@@ -632,3 +633,55 @@ def test_a_resume_that_forces_a_well_takes_over_the_attempt_it_resumes(tmp_path,
     assert sorted(line.split()[1] for line in observed) == ["A01", "A02", "A03"], (
         f"the Resume did not take the earlier attempt's finished wells, or took the forced one: {observed}")
     assert sent == [], f"archives the earlier attempt had already uploaded were sent again: {sent}"
+
+
+# ── every attempt is kept, though several wrote into one output directory (tracker F5) ─────────────────────────
+
+def _three_attempts(tmp_path, monkeypatch):
+    """Attempt 1 in ``run-1``; attempts 2 and 3 each in a run directory of their own, re-attached to ``run-1/out``
+    (``reattach_output_dir``): the history a twice-resumed batched run leaves, recorded through the real journal."""
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = tmp_path / "local-out"
+    out.mkdir(exist_ok=True)
+    root = tmp_path / "remote" / "runs"
+    for n in (1, 2, 3):
+        J.open_run(out, spec={}, mode="remote-batched", input_dir="/in", argv=["--x"])
+        J.record_remote(out, run_id=f"run-{n}", cache_key=f"k{n}", host_alias="h",
+                        remote_input_dir=str(root / f"run-{n}" / "in"), remote_output_dir=str(root / "run-1" / "out"),
+                        argv_digest="d", source_key="s")
+    return out, root
+
+
+def test_the_journal_keeps_every_attempt_that_shared_an_output_directory(tmp_path, monkeypatch):
+    from services import run_journal as J
+
+    out, root = _three_attempts(tmp_path, monkeypatch)
+    attempts = J.recorded_remote_attempts(out, argv_digests=["d"], source_key="s", host_alias="h")
+    assert [Path(a["remote_input_dir"]).parent.name for a in attempts] == ["run-3", "run-2", "run-1"], (
+        "an attempt that re-attached to the same output directory as a later one was dropped from the journal, so "
+        f"its staged archives, its held wells and its blank's path are lost: {attempts}")
+
+
+def test_a_resume_takes_the_staged_batches_of_an_intermediate_attempt(tmp_path, monkeypatch):
+    """Attempt 2 staged batch 2 in its own ``b2`` and stopped; attempt 3 is this run. Its archives are on the remote,
+    and the journal is the only record of where."""
+    out, root = _three_attempts(tmp_path, monkeypatch)
+    p, plate, run_dir, sent, observed, _ = _harness(tmp_path, monkeypatch)
+    monkeypatch.undo()
+    from services import run_journal as J
+
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    p._local_output_dir = out
+    p._journal_keys = dict(argv_digest="d", source_key="s", host_alias="h")
+    p._legacy_digests = ()
+    p._runner._run.remote_output_dir = str(root / "run-1" / "out")          # re-attached, as attempts 2 and 3 were
+    for well in ("A03", "A04"):
+        _uploaded_copy(plate, root / "run-2" / "b2", well)
+
+    _run(p, monkeypatch)
+
+    assert p._returncode == 0, p._logged
+    assert not {"b2/A03.zip", "b2/A04.zip"} & set(sent), (
+        f"the intermediate attempt's uploaded batch was sent again: {sent}")

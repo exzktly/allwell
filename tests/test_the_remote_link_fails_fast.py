@@ -46,7 +46,8 @@ from services.remote_upload import DatasetCache
 _RESOLVERS = {
     "ssh": ["services.remote_config.resolve_ssh_binary"],
     "rsync": ["services.remote_upload.resolve_rsync_binary",
-              "services.remote_transport.resolve_rsync_binary"],
+              "services.remote_transport.resolve_rsync_binary",
+              "services.remote_code_sync.resolve_rsync_binary"],
 }
 
 

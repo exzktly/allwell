@@ -300,6 +300,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_the_slurm_job_indicator.py": "The Analyze pane's Slurm-job indicator: lit only while a job is open",
     "test_transient_progress_lines.py": "Transfer progress is live state, so it does not go in the log",
     "test_upload_rail_counts_wells.py": "The Upload rail counts wells that are on the remote, not rsync's chatter",
+    "test_what_a_run_uses_on_the_remote_stays_put.py": "What a run is using on the remote is not changed or deleted under it",
 }
 
 

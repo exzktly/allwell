@@ -973,7 +973,9 @@ def sync_required_files(alias: str, *, ssh_key_path: str = "") -> None:
     host = RemoteHost(
         name=alias, ssh_alias=alias, ssh_key_path=ssh_key_path,
     )
-    RemoteRunner(host).sync_required_files(log_fn=lambda m: sys.stdout.write(m))
+    # Into ``~/allwell`` itself, not a run's version directory: the env install
+    # below reads ``requirements-remote.txt`` from there.
+    RemoteRunner(host).sync_required_files(log_fn=lambda m: sys.stdout.write(m), versioned=False)
 
 
 def pip_install_script(env_name: str = ENV_NAME, requirements: str = "requirements-remote.txt",

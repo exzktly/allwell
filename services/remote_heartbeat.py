@@ -32,6 +32,14 @@ WARN_AFTER_FAILURES = 2
 ERROR_AFTER_FAILURES = 3
 
 
+def _reason(stderr) -> str:
+    """The last non-blank line of a failed beat's ``stderr``, trimmed for one log line."""
+    if isinstance(stderr, (bytes, bytearray)):
+        stderr = stderr.decode("utf-8", errors="replace")
+    lines = [ln.strip() for ln in (stderr or "").splitlines() if ln.strip()]
+    return lines[-1][:200] if lines else ""
+
+
 class _UploadHeartbeat:
     """Touches the remote heartbeat for as long as this app owns the run.
 
@@ -91,23 +99,29 @@ class _UploadHeartbeat:
                 self._log(f"[remote] the heartbeat is reaching the host again after {self._failures} missed beat(s)\n")
             self._failures, self._last_ok = 0, self._clock()
         else:
-            self._missed(rc)
+            self._missed(rc, _reason(getattr(result, "stderr", "")))
 
-    def _missed(self, rc: int | None) -> None:
-        """Count a beat that did not land, and say so at the 2nd and 3rd in a row."""
+    def _missed(self, rc: int | None, why: str = "") -> None:
+        """Count a beat that did not land, and say so at the 2nd and 3rd in a row.
+
+        *why* is what ssh (or ``ssh_control``, for a timeout) said, so the log
+        names the failure — "Connection reset", "did not answer within 30s" —
+        and not only its exit code.
+        """
         self._failures += 1
         if self._failures not in (WARN_AFTER_FAILURES, ERROR_AFTER_FAILURES):
             return
         since = self._last_ok if self._last_ok is not None else self._clock()
         at = lambda s: time.strftime("%H:%M:%S", time.localtime(since + s))     # noqa: E731
+        code = f"ssh exit {rc}: {why}" if why else f"ssh exit {rc}"
         if self._failures == WARN_AFTER_FAILURES:
             self._log(f"[remote] WARNING the run's heartbeat did not reach the host {self._failures} times in a row "
-                      f"(ssh exit {rc}) — still trying\n")
+                      f"({code}) — still trying\n")
             return
         mid = (f"; a batch already running is suspended at about {at(MID_BATCH_HEARTBEAT_STALE_S)} "
                f"({MID_BATCH_HEARTBEAT_STALE_S // 60} min)") if self._batched else ""
         self._log(f"[remote] ERROR the run's heartbeat has not reached the host {self._failures} times in a row "
-                  f"(ssh exit {rc}). If it does not recover, the host takes the app for gone: a node waiting for "
+                  f"({code}). If it does not recover, the host takes the app for gone: a node waiting for "
                   f"{'a batch' if self._batched else 'the upload'} is given back at about "
                   f"{at(UPLOAD_HEARTBEAT_STALE_S)} ({UPLOAD_HEARTBEAT_STALE_S} s after the last beat that landed)"
                   f"{mid}\n")

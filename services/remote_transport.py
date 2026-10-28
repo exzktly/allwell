@@ -758,7 +758,10 @@ def recover_dead_master(host: "RemoteHost") -> bool:
     closed only on that evidence: a master that answers its probe means the
     command was merely slow, and a fresh connection that fails too means the
     network is down and the master may yet recover; closing it then would end
-    the driver stream multiplexed through it for nothing.
+    every control command multiplexed through it for nothing. A run's output
+    stream is never among them — it has a connection of its own
+    (``RemoteHost.ssh_argv(share_connection=False)``) — so closing the master
+    never ends a running batch.
     """
     base = host.ssh_argv(allocate_tty=False)
     if not any(a.startswith("ControlMaster=") for a in base):

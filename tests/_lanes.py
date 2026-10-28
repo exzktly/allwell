@@ -246,6 +246,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_stop_mid_download_leaves_nothing_broken.py": "A Stop part-way through a download leaves a truncated zip; the next attempt replaces it, …",
     "test_a_subset_run_resumes_only_its_wells.py": "A run limited to named wells resumes only those wells, so an unrelated unfinished run does …",
     "test_a_vanished_app_suspends_the_batch_in_flight.py": "An app that disappears while a batch is running hands the node back",
+    "test_a_verified_run_cleans_its_earlier_attempts.py": "Auto-delete after a verified run removes earlier attempts, never a live job's or held wells",
     "test_acquisition_remote_transport.py": "Metadata reaches scoped uploads and changes cache identity without pixel edits",
     "test_analyze_background_remote_ui.py": "Analyze-tab UI grouping regressions (runs headless / offscreen Qt)",
     "test_analyze_run_target_is_the_users_choice.py": "Audit U2 — \"Run on:\" keeps the target the user picked",

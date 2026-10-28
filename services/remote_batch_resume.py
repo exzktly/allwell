@@ -405,7 +405,10 @@ def download_adopted(proc) -> None:
     for well in adopted:
         proc._fetcher.observe(remote_done_marker(well))
     if adopted and proc._fetcher.run.nanowell:
-        proc._fetcher.after_queued(functools.partial(release_batch, wells=adopted, log=proc._log))
+        # A well an earlier attempt held for the re-anchoring is kept until this run's final pass has re-run it from
+        # these very files (`remote_final_pass.adopt_earlier_holds`, which runs before batch 1 is handed over).
+        holds = set(getattr(proc._fetcher.run, "nanowell_adopted_holds", ()) or ())
+        proc._fetcher.after_queued(functools.partial(release_batch, wells=adopted, log=proc._log, held=holds))
 
 
 def stage_leftovers(proc, run_dir: str) -> None:

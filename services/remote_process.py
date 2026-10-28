@@ -721,7 +721,7 @@ class _BatchedRemoteProcess:
         total = n_batches + (1 if self._final_pass else 0)
         self._runner._cache._ssh_run(["mkdir", "-p", run_dir], check=False)
         self._runner._cache._ssh_run(
-            ["rm", "-rf", paths.suspend_request, f"{run_dir}/{HOLD_DIR}"]
+            ["rm", "-rf", paths.suspend_request]   # never keep/: adopt_earlier_holds sorts it (F4)
             + [self._batch_flag(t, i)
                for i in range(1, total + 1)
                for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP)],

@@ -776,48 +776,26 @@ class RemoteRunner:
         if cleanup_mode == "none":
             log("[remote] --cleanup-remote=none — leaving everything in place.\n")
             return True
-
-        # A re-attached run wrote its output into a directory named for a
-        # *previous* run (see ``_choose_remote_output_dir``), so the path this
-        # would otherwise derive from ``run_id`` holds nothing this run
-        # produced. Deleting it would report a cleanup that removed the wrong
-        # directory and left the real outputs on the remote for ever — and
-        # would take with it whatever else that other run's directory still
-        # holds. Say so and keep both rather than guess which is safe.
-        if run.reattached:
-            # The borrowed directory is left alone; this run's own is not. It
-            # holds only the pidfile, the sentinel and the heartbeat this run
-            # created, and nothing prunes ``runs/`` — ``DatasetCache.gc``
-            # covers ``datasets/`` — so leaving it would drop two sidecar files
-            # on the host for every re-attaching run, for ever.
-            own_dir = remote_run_dir(self.host, run.run_id)
-            # The fate of this run's own directory is said inside the branch
-            # that decides it. Stating it afterwards told a dry run that the
-            # directory "has been cleaned up" three lines before announcing
-            # that nothing was deleted — in the one mode whose whole purpose is
-            # saying truthfully what *would* happen.
-            if dry_run:
-                self._log_would_delete(
-                    own_dir, label=f"run dir {run.run_id}", log=log)
-            else:
-                self._cache._ssh_run(["rm", "-rf", own_dir], check=False)
-                log(f"[remote] removed this run's own dir {own_dir}.\n")
-            log(
-                f"[remote] re-attached to {run.remote_output_dir}, which "
-                f"belongs to an earlier run of this plate — leaving it in "
-                f"place; remove it by hand once you are done with it.\n"
-            )
+        own_dir = remote_run_dir(self.host, run.run_id)
+        if not dry_run and run.nanowell and _reuse.holds_pending(self._cache, own_dir):
+            # A nanowell run suspended before its end-of-run re-anchoring (or whose pass failed) holds wells in
+            # `keep/` for the resumed run's pass, which re-runs them from their output here: deleting the run
+            # directory lost both, and the next run said "no well was held for it" (tracker F4).
+            log(f"[remote] kept {own_dir} and its output: it holds wells waiting for the end-of-run re-anchoring, "
+                f"which the resumed run takes over.\n")
+            return True
+        # A re-attached run wrote its output into a directory named for a *previous* run (see
+        # ``_choose_remote_output_dir``); the path derived from ``run_id`` holds only the pidfile, the sentinel and
+        # the heartbeat this run created. Both go — the borrowed one with the other earlier attempts, below, once
+        # nothing in it is still running or not yet brought home (tracker F6). The fate of each directory is said in
+        # the branch that decides it, so a dry run never reads "removed" for what it left in place.
+        if dry_run:
+            self._log_would_delete(own_dir, label=f"run dir {run.run_id}", log=log)
         else:
-            run_dir = remote_run_dir(self.host, run.run_id)
-            if dry_run:
-                self._log_would_delete(
-                    run_dir, label=f"run dir {run.run_id}", log=log)
-            else:
-                self._cache._ssh_run(
-                    ["rm", "-rf", run_dir],
-                    check=False,
-                )
-                log(f"[remote] removed run dir {run.run_id}.\n")
+            self._cache._ssh_run(["rm", "-rf", own_dir], check=False)
+            log(f"[remote] removed this run's own dir {own_dir}.\n" if run.reattached
+                else f"[remote] removed run dir {run.run_id}.\n")
+            _reuse.clean_earlier_attempts(self, log=log)
         if cleanup_mode == "all":
             cache_dir = self._cache.remote_dataset_dir(run.cache_key)
             if dry_run:

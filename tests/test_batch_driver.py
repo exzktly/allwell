@@ -277,6 +277,9 @@ def _stub_runner(p, proc, ordering):
 
     p._runner = types.SimpleNamespace(
         _cache=types.SimpleNamespace(_ssh_run=ssh_run,
+                                     # a nanowell run's hold bookkeeping (`remote_final_pass`): nothing held
+                                     _ssh_script=lambda script, *, check: types.SimpleNamespace(stdout="",
+                                                                                                returncode=0),
                                      upload_subset=upload_subset),
         _run=types.SimpleNamespace(
             remote_input_dir="/r/run-test/in",

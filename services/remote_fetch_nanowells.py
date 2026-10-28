@@ -109,7 +109,7 @@ def pull_nanowell_results(verifier, *, log) -> list[str]:
     for well in reanchored_wells(local / NANOWELL_DIR):
         if well in run.nanowell_released:          # pulled again and deleted when its batch ended
             continue
-        if well not in run.fetched_wells:
+        if not _this_runs(run, well):
             # Not a well of this run: the local folder holds the whole plate's grid records (and the run was sent
             # the others', ``services.remote_plate_grids``), and the re-anchoring re-runs only this run's wells.
             continue
@@ -122,6 +122,14 @@ def pull_nanowell_results(verifier, *, log) -> list[str]:
         retire_superseded_csvs([str(p) for p in local.glob(f"*_{well}.csv.gz")], local)
         log(f"[remote] {well}: pulled again after the end-of-run re-anchoring re-ran it.\n")
     return short
+
+
+def _this_runs(run, well: str) -> bool:
+    """Whether *well*'s remote output is this run's to pull again and release: fetched by it, or held by an earlier
+    attempt for the re-anchoring this run's final pass ran (``_RemoteRun.nanowell_adopted_holds``) — a well that
+    run never fetched, whose rewritten cell CSV and archive were otherwise never pulled, leaving a re-anchored grid
+    beside pre-re-anchoring cells here (tracker F3)."""
+    return well in run.fetched_wells or well in getattr(run, "nanowell_adopted_holds", ())
 
 
 def missing_nanowell_tables(run, well: str) -> list[str]:
@@ -166,7 +174,7 @@ def release_batch(fetcher, wells, *, log, held=()) -> list[str]:
     run = fetcher.run
     if not run.nanowell:
         return []
-    landed = [w for w in wells if w in run.fetched_wells and w not in run.nanowell_released]
+    landed = [w for w in wells if _this_runs(run, w) and w not in run.nanowell_released]
     held = {w.upper() for w in held}
     for well in [w for w in landed if w.upper() in held]:
         log(f"[remote] {well}: kept on the remote for the end-of-run re-anchoring.\n")

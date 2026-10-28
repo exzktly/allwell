@@ -130,6 +130,10 @@ class _RemoteRun:
     nanowell: bool = False
     #: The nanowell wells whose remote files ``release_batch`` has already pulled again and deleted.
     nanowell_released: set[str] = field(default_factory=set)
+    #: Wells an earlier attempt held for an end-of-run re-anchoring it never ran, taken into this run's ``keep/``
+    #: (``remote_final_pass.adopt_earlier_holds``). In none of this run's batches and often never fetched by it,
+    #: they are still this run's to release and pull again once its final pass re-anchors them.
+    nanowell_adopted_holds: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         # A remote incremental run uploads only the new fields and analyses them alone, without the earlier

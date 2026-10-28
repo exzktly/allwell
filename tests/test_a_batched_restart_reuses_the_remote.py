@@ -194,6 +194,20 @@ def test_a_nanowell_run_frees_the_wells_it_adopted(tmp_path, monkeypatch, nanowe
     assert bool(adopted_release) is nanowell
 
 
+def test_an_adopted_well_held_for_the_re_anchoring_is_not_freed_before_the_pass(tmp_path, monkeypatch):
+    """Tracker F4: the adopted wells' release ran at batch 1's hand-off and deleted the archive and outputs the
+    final pass re-runs a held well from. A well this run took over a hold for is kept until that pass."""
+    from services.remote_batch_resume import download_adopted
+
+    queued: list = []
+    run = types.SimpleNamespace(nanowell=True, nanowell_adopted_holds={"A02"})
+    proc = types.SimpleNamespace(_adopted_pending=["A02", "A03"], _log=lambda m: None,
+                                 _fetcher=types.SimpleNamespace(run=run, observe=lambda line: None,
+                                                                after_queued=queued.append))
+    download_adopted(proc)
+    assert [t.keywords.get("held") for t in queued] == [{"A02"}], "a held well's files were released before its pass"
+
+
 def test_the_earlier_attempt_survives_the_app_s_real_call_order(tmp_path, monkeypatch):
     """The batched run records its own address in ``__init__``, before ``_run_batches`` asks for earlier ones.
 

@@ -1727,8 +1727,13 @@ because none of it applies:
   the field as it is.
 - **Auto-delete remote files when done.** On by default. After a run the app
   verifies succeeded, it deletes both the per-run output directory and the
-  cached input on the remote, so a shared machine does not fill up. It never
-  deletes failed work. Unticking it leaves everything in place.
+  cached input on the remote, so a shared machine does not fill up — and the
+  directories earlier attempts of the same run left there (a stopped run, a
+  resumed one), except one whose job may still be running, or that holds
+  results not yet downloaded here; the log names each one kept and why. It
+  never deletes failed work. A nanowell run suspended before its end-of-run
+  re-anchoring keeps its directory too, so the resumed run can re-anchor the
+  wells it held. Unticking it leaves everything in place.
 - **Dry-run cleanup.** Only selectable while auto-delete is on. Logs the path,
   file count and total bytes of every remote directory that *would* be removed
   at end of run, and removes nothing — worth one run on a shared host before

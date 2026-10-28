@@ -771,7 +771,7 @@ def test_a_new_timepoint_anchored_a_step_off_is_named_without_re_analysing_the_w
     assert (added.roster_change, added.frame_change) == ("", "")
     # Two kept square-anchored timepoints outrank its one: moved onto their frame, with no re-analysis of the well.
     t1 = added.timepoints["T1"]
-    assert (t1["consistency"], t1["origin_shift"], t1["origin_registered_to"]) == ("consistent", [1, 0], "T0")
+    assert (t1["consistency"], t1.get("origin_shift"), t1.get("origin_registered_to")) == ("consistent", [1, 0], "T0")
 
 
 def test_a_kept_timepoint_flagged_a_roster_mismatch_says_nothing_about_the_rim():

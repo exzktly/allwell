@@ -61,7 +61,8 @@ IN_PROGRESS_MARKER = ".aw_czi_in_progress"
 #: conversion goes and nothing about what it writes.
 _MAPPING_FIELDS = ("well_source", "use_folder", "grid_rows", "grid_cols",
                    "origin", "direction", "serpentine", "fovs_per_well",
-                   "experiment", "timepoint_stride")
+                   "experiment", "timepoint_stride",
+                   "timepoint_subset")
 
 
 class CziImportError(Exception):
@@ -94,6 +95,19 @@ class ConversionParams:
     #: them, and ``well_is_complete`` tests a *subset*, so nothing downstream
     #: would notice the plate had gone ragged.
     timepoint_stride: int = 1
+    #: Convert only these timepoints, named by the source's own tokens as the
+    #: page lists them (``t0``, ``24h``); empty converts every one. The stride
+    #: above then thins *the selection*, counting from its first member.
+    #:
+    #: **Part of the resume signature, unlike the well subset.** A well's
+    #: archive holds one image per kept timepoint, so two selections write
+    #: different archives for the same well — and ``well_is_complete`` tests a
+    #: *subset*, so a resume onto a well filled under a wider selection would
+    #: leave it holding more timepoints than the wells converted beside it.
+    #: Written into the marker only when set (``convert_marker``), so a folder
+    #: converted before the field existed still matches a run that leaves it
+    #: empty.
+    timepoint_subset: tuple[str, ...] = ()
     experiment: str = ""                  # blank = derive from the filename
     #: Convert only these wells, leaving the rest of the plate alone; empty
     #: converts all of them. Canonical labels (``A01``), matched case- and
@@ -133,6 +147,9 @@ class ConversionPlan:
     #: hours (``0h``, ``4h``, …) when the CZI's acquisition stamps supported
     #: them, positional (``t0``, ``t1``, …) otherwise.
     timepoint_tokens: list[str] = field(default_factory=list)
+    #: Every timepoint the source holds, by its own token, whether or not this
+    #: run keeps it — what the page's timepoint picker lists.
+    source_timepoint_tokens: list[str] = field(default_factory=list)
     #: Why those tokens are positional, where something readable was expected.
     #: Surfaced so a plate that lost its elapsed times says so before the run
     #: rather than only in the log afterwards.
@@ -294,6 +311,13 @@ class RawFields:
     origin: str = ""
     workers: str = ""
     timepoint_stride: str = ""
+    #: Source tokens ticked in the page's timepoint picker; empty converts every
+    #: timepoint. Validated against the source by ``plan_conversion``, which
+    #: is where the source's real tokens are known.
+    timepoint_subset: tuple[str, ...] = ()
+    #: False when the picker has every timepoint unticked — refused here rather
+    #: than read as "all", which an empty subset otherwise means.
+    timepoints_ticked: bool = True
     direction: str = "row"
     serpentine: bool = True
     experiment: str = ""
@@ -324,6 +348,8 @@ class RawFields:
         if not parse_count(self.timepoint_stride)[1]:
             out.append("Keep every Nth timepoint must be a positive whole "
                        "number, or blank to convert every timepoint.")
+        if not self.timepoints_ticked:
+            out.append("Tick at least one timepoint to convert.")
         return out
 
     def to_params(self) -> ConversionParams:
@@ -344,6 +370,7 @@ class RawFields:
             fovs_per_well=fovs,
             experiment=self.experiment.strip(),
             well_subset=tuple(self.well_subset),
+            timepoint_subset=tuple(self.timepoint_subset),
             timepoint_stride=stride or 1,
             workers=workers or 0,
         )
@@ -466,7 +493,8 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
                        else [well_map.wells[i] for i in chosen])
     try:
         kept = timepoint_plan(source.timepoint_tokens,
-                              params.timepoint_stride)
+                              params.timepoint_stride,
+                              params.timepoint_subset)
     except ValueError as exc:
         raise CziImportError(str(exc)) from exc
     return ConversionPlan(
@@ -475,6 +503,7 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
         n_timepoints=len(kept),
         n_source_timepoints=source.layout.size_t,
         timepoint_tokens=[token for _index, token in kept],
+        source_timepoint_tokens=list(source.timepoint_tokens),
         timepoint_note=source.timepoint_note,
         shortfall_note=source.shortfall_note,
         fovs_per_well=well_map.fovs_per_well,

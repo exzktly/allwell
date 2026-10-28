@@ -113,6 +113,14 @@ REUSE_CONTRACTS = {
             "left alone while every freshly-converted well beside it held a "
             "third as many timepoints. The plate would go ragged with nothing "
             "raising"),
+        "timepoint_subset": (
+            "which of the timelapse's timepoints are written — the stride's "
+            "danger again, by hand: a run over t0..t5 has a member set that is "
+            "a strict SUBSET of a whole-timelapse run's, so without this key a "
+            "well filled by the wider run would pass ``well_is_complete`` and "
+            "be left holding timepoints its neighbours do not. Recorded only "
+            "when set, so a marker written before the field existed still "
+            "matches a run that leaves it empty"),
     },
     "czi_import.resume_state": {
         "well_source": "whether the wells came from the file's scene names or "
@@ -143,6 +151,14 @@ REUSE_CONTRACTS = {
             "left alone while every freshly-converted well beside it held a "
             "third as many timepoints. The plate would go ragged with nothing "
             "raising"),
+        "timepoint_subset": (
+            "which of the timelapse's timepoints are written — the stride's "
+            "danger again, by hand: a run over t0..t5 has a member set that is "
+            "a strict SUBSET of a whole-timelapse run's, so without this key a "
+            "well filled by the wider run would pass ``well_is_complete`` and "
+            "be left holding timepoints its neighbours do not. Recorded only "
+            "when set, so a marker written before the field existed still "
+            "matches a run that leaves it empty"),
     },
     "nd2_import.resume_state": {
         "well_source": "whether the wells came from the positions' own names "
@@ -168,6 +184,14 @@ REUSE_CONTRACTS = {
             "left alone while every freshly-converted well beside it held a "
             "third as many timepoints. The plate would go ragged with nothing "
             "raising"),
+        "timepoint_subset": (
+            "which of the timelapse's timepoints are written — the stride's "
+            "danger again, by hand: a run over t0..t5 has a member set that is "
+            "a strict SUBSET of a whole-timelapse run's, so without this key a "
+            "well filled by the wider run would pass ``well_is_complete`` and "
+            "be left holding timepoints its neighbours do not. Recorded only "
+            "when set, so a marker written before the field existed still "
+            "matches a run that leaves it empty"),
     },
     # A nanowell run's tile registration, reused from an earlier run's grid
     # record (``--nanowell_registration_from``, or the output folder's own).

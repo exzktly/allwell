@@ -49,7 +49,8 @@ IN_PROGRESS_MARKER = ".aw_nd2_in_progress"
 #: fast the conversion goes and nothing about what it writes.
 _MAPPING_FIELDS = ("well_source", "grid_rows", "grid_cols", "origin",
                    "direction", "serpentine", "fovs_per_well", "experiment",
-                   "timepoint_stride")
+                   "timepoint_stride",
+                   "timepoint_subset")
 
 
 class Nd2ImportError(Exception):
@@ -87,6 +88,19 @@ class ConversionParams:
     #: them, and ``well_is_complete`` tests a *subset*, so nothing downstream
     #: would notice the plate had gone ragged.
     timepoint_stride: int = 1
+    #: Convert only these timepoints, named by the source's own tokens as the
+    #: page lists them (``t0``, ``24h``); empty converts every one. The stride
+    #: above then thins *the selection*, counting from its first member.
+    #:
+    #: **Part of the resume signature, unlike the well subset.** A well's
+    #: archive holds one image per kept timepoint, so two selections write
+    #: different archives for the same well — and ``well_is_complete`` tests a
+    #: *subset*, so a resume onto a well filled under a wider selection would
+    #: leave it holding more timepoints than the wells converted beside it.
+    #: Written into the marker only when set (``convert_marker``), so a folder
+    #: converted before the field existed still matches a run that leaves it
+    #: empty.
+    timepoint_subset: tuple[str, ...] = ()
     experiment: str = ""                  # blank = derive from the filename
     #: Convert only these wells, leaving the rest of the plate alone; empty
     #: converts all of them. Canonical labels (``A01``), matched case- and
@@ -116,6 +130,9 @@ class ConversionPlan:
     n_source_timepoints: int = 0
     #: The kept timepoints' own tokens, in order — never renumbered.
     timepoint_tokens: list[str] = field(default_factory=list)
+    #: Every timepoint the source holds, by its own token, whether or not this
+    #: run keeps it — what the page's timepoint picker lists.
+    source_timepoint_tokens: list[str] = field(default_factory=list)
     #: What the user should be told about the timepoint names — a whole
     #: sentence, or ``""``.
     timepoint_note: str = ""
@@ -231,6 +248,13 @@ class RawFields:
     origin: str = ""
     workers: str = ""
     timepoint_stride: str = ""
+    #: Source tokens ticked in the page's timepoint picker; empty converts every
+    #: timepoint. Validated against the source by ``plan_conversion``, which
+    #: is where the source's real tokens are known.
+    timepoint_subset: tuple[str, ...] = ()
+    #: False when the picker has every timepoint unticked — refused here rather
+    #: than read as "all", which an empty subset otherwise means.
+    timepoints_ticked: bool = True
     direction: str = "row"
     serpentine: bool = True
     experiment: str = ""
@@ -261,6 +285,8 @@ class RawFields:
         if not parse_count(self.timepoint_stride)[1]:
             out.append("Keep every Nth timepoint must be a positive whole "
                        "number, or blank to convert every timepoint.")
+        if not self.timepoints_ticked:
+            out.append("Tick at least one timepoint to convert.")
         return out
 
     def to_params(self) -> ConversionParams:
@@ -281,6 +307,7 @@ class RawFields:
             timepoint_stride=stride or 1,
             experiment=self.experiment.strip(),
             well_subset=tuple(self.well_subset),
+            timepoint_subset=tuple(self.timepoint_subset),
             workers=workers or 0,
         )
 
@@ -365,7 +392,8 @@ def plan_conversion(source: Nd2Layout, params: ConversionParams) -> ConversionPl
                        else [well_map.wells[i] for i in chosen])
     tokens, note = timepoint_tokens(source)
     try:
-        kept = timepoint_plan(tokens, params.timepoint_stride)
+        kept = timepoint_plan(tokens, params.timepoint_stride,
+                              params.timepoint_subset)
     except ValueError as exc:
         raise Nd2ImportError(str(exc)) from exc
     return ConversionPlan(
@@ -373,6 +401,7 @@ def plan_conversion(source: Nd2Layout, params: ConversionParams) -> ConversionPl
         n_timepoints=len(kept),
         n_source_timepoints=source.size_t,
         timepoint_tokens=[token for _index, token in kept],
+        source_timepoint_tokens=list(tokens),
         timepoint_note=note,
         fovs_per_well=well_map.fovs_per_well,
         well_labels=list(well_map.wells),

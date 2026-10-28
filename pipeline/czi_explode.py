@@ -53,7 +53,7 @@ from pipeline.explode_common import (
     publishing_total,
     resolve_positions,
     shortfall_summary,
-    stride_note,
+    kept_timepoints_note,
     uneven_fields_note,
     subset_note,
     timepoint_plan,
@@ -290,6 +290,7 @@ def explode_czi(
     experiment: str = "",
     fovs_per_well: "int | None" = None,
     timepoint_stride: int = 1,
+    timepoint_subset: "tuple[str, ...]" = (),
     files: "list[Path] | None" = None,
     workers: int = 0,
     log_fn: "Callable[[str], None] | None" = None,
@@ -312,6 +313,8 @@ def explode_czi(
     counting from the first and keeping the source's own tokens — see
     :func:`pipeline.explode_common.timepoint_plan`. The default of 1 converts
     everything.
+    *timepoint_subset* converts only the named source tokens (empty: all of
+    them), with the stride then applied within that selection.
 
     For every (scene, tile, kept timepoint, channel) the Z stack is max-projected to
     a 2-D plane and stored as a member named
@@ -385,7 +388,8 @@ def explode_czi(
     # acquisition stamps supported them, positional otherwise. These sampled
     # tokens identify legacy archives and the provisional preview. Publication
     # names images from starts reduced across the whole source acquisition.
-    tp_plan = timepoint_plan(czi_set.timepoint_tokens, timepoint_stride)
+    tp_plan = timepoint_plan(czi_set.timepoint_tokens, timepoint_stride,
+                             timepoint_subset)
     tp_tokens = [token for _index, token in tp_plan]
     n_kept_t = len(tp_plan)
     fovs = well_map.fovs_per_well
@@ -411,11 +415,13 @@ def explode_czi(
     source = "the file's scene names" if well_map.from_file else "the plate grid"
     held_in = (f"{czi_set.n_files} file(s)" if czi_set.n_files > 1
                else czi_path.name)
+    kept_note = kept_timepoints_note(timepoint_stride, layout.size_t,
+                                     len(timepoint_subset), tp_tokens)
     _log(
         f"[czi] {held_in}: {czi_set.n_scenes} scene(s) -> "
         f"{subset_note(n_selected, n_wells)} x {fovs} FOV(s) x "
         f"{n_kept_t} timepoint(s)"
-        f"{stride_note(timepoint_stride, layout.size_t, tp_tokens)}, "
+        f"{kept_note}, "
         f"{layout.size_c} channel(s)"
         f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}"
         f" -- wells from {source}, {n_workers} worker(s).\n"

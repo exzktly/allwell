@@ -79,6 +79,19 @@ class ConversionParams:
     #: them, and ``well_is_complete`` tests a *subset*, so nothing downstream
     #: would notice the plate had gone ragged.
     timepoint_stride: int = 1
+    #: Convert only these timepoints, named by the source's own tokens as the
+    #: page lists them (``t0``, ``24h``); empty converts every one. The stride
+    #: above then thins *the selection*, counting from its first member.
+    #:
+    #: **Part of the resume signature, unlike the well subset.** A well's
+    #: archive holds one image per kept timepoint, so two selections write
+    #: different archives for the same well — and ``well_is_complete`` tests a
+    #: *subset*, so a resume onto a well filled under a wider selection would
+    #: leave it holding more timepoints than the wells converted beside it.
+    #: Written into the marker only when set (``convert_marker``), so a folder
+    #: converted before the field existed still matches a run that leaves it
+    #: empty.
+    timepoint_subset: tuple[str, ...] = ()
     frame_order: str = "single"           # single-image files only
     experiment: str = ""                  # blank = derive from the filename
     #: Convert only these wells, leaving the rest of the plate alone; empty
@@ -114,6 +127,9 @@ class ConversionPlan:
     n_source_timepoints: int = 0
     #: The kept timepoints' own tokens, in order — never renumbered.
     timepoint_tokens: list[str] = field(default_factory=list)
+    #: Every timepoint the source holds, by its own token, whether or not this
+    #: run keeps it — what the page's timepoint picker lists.
+    source_timepoint_tokens: list[str] = field(default_factory=list)
     #: What the user should be told about the timepoint names — a whole
     #: sentence, or ``""``. Never empty when they are positional *because*
     #: something was unreadable.
@@ -219,6 +235,13 @@ class RawFields:
     origin: str = ""
     workers: str = ""
     timepoint_stride: str = ""
+    #: Source tokens ticked in the page's timepoint picker; empty converts every
+    #: timepoint. Validated against the source by ``plan_conversion``, which
+    #: is where the source's real tokens are known.
+    timepoint_subset: tuple[str, ...] = ()
+    #: False when the picker has every timepoint unticked — refused here rather
+    #: than read as "all", which an empty subset otherwise means.
+    timepoints_ticked: bool = True
     direction: str = "row"
     serpentine: bool = True
     frame_order: str = "single"
@@ -263,6 +286,8 @@ class RawFields:
         if not ok or (stride is not None and stride <= 0):
             out.append("Keep every Nth timepoint must be a positive whole "
                        "number, or blank to convert every timepoint.")
+        if not self.timepoints_ticked:
+            out.append("Tick at least one timepoint to convert.")
         return out
 
     def to_params(self) -> ConversionParams:
@@ -290,6 +315,7 @@ class RawFields:
             workers=max(0, workers or 0),
             well_order=tuple(self.well_order),
             well_subset=tuple(self.well_subset),
+            timepoint_subset=tuple(self.timepoint_subset),
         )
 
 
@@ -613,7 +639,8 @@ IN_PROGRESS_MARKER = ".aw_ome_in_progress"
 # rather than trusting the names on disk.
 _MAPPING_FIELDS = ("grid_rows", "grid_cols", "origin", "direction", "serpentine",
                    "fovs_per_well", "frame_order", "experiment", "well_order",
-                   "timepoint_stride")
+                   "timepoint_stride",
+                   "timepoint_subset")
 
 
 def _mapping_signature(src: Path | str, params: ConversionParams) -> dict:
@@ -749,7 +776,8 @@ def plan_conversion(layout: OmeLayout, params: ConversionParams) -> ConversionPl
     source_tokens = (list(layout.timepoint_tokens) if not layout.single_image
                      else [f"t{t}" for t in range(n_timepoints)])
     try:
-        kept = timepoint_plan(source_tokens, params.timepoint_stride)
+        kept = timepoint_plan(source_tokens, params.timepoint_stride,
+                              params.timepoint_subset)
     except ValueError as exc:
         raise OmeImportError(str(exc)) from exc
     return ConversionPlan(
@@ -758,6 +786,7 @@ def plan_conversion(layout: OmeLayout, params: ConversionParams) -> ConversionPl
         n_timepoints=len(kept),
         n_source_timepoints=n_timepoints,
         timepoint_tokens=[token for _index, token in kept],
+        source_timepoint_tokens=list(source_tokens),
         timepoint_note=layout.timepoint_note,
         fovs_per_well=fovs,
         well_labels=well_labels,

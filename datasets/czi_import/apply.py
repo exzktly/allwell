@@ -123,6 +123,7 @@ def convert(
         experiment=experiment,
         fovs_per_well=params.fovs_per_well,
         timepoint_stride=params.timepoint_stride,
+        timepoint_subset=params.timepoint_subset,
         well_subset=params.well_subset,
         workers=params.workers,
         log_fn=log,

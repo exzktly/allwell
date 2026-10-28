@@ -174,31 +174,84 @@ def has_ssh_copy_id() -> bool:
     return shutil.which("ssh-copy-id") is not None
 
 
+# The user's terminal on Windows is cmd.exe or PowerShell, not a POSIX shell.
+_WINDOWS = os.name == "nt"
+
+
+def _shell_word(text: str) -> str:
+    """Quote *text* as one argument for whichever shell the user pastes into.
+
+    ``shlex.quote`` writes POSIX single quotes, which cmd.exe does not treat
+    as quotes at all. On Windows the user's terminal is usually cmd.exe or
+    PowerShell, and both honour double quotes, so a Windows key path (which
+    contains no ``"``) is wrapped in those instead. Anything made only of
+    characters no shell reads specially is left bare.
+    """
+    if text and all(c.isalnum() or c in "_-.@/:+=" for c in text):
+        return text
+    if _WINDOWS:
+        return f'"{text}"'
+    return shlex.quote(text)
+
+
+def _public_key_material(pub_path: Path) -> str | None:
+    """Return ``"<type> <base64>"`` from a ``.pub`` file, or None.
+
+    The comment field is dropped on purpose: it is free text (``user@host``,
+    or anything a reused key carries) and could hold a ``$`` or a quote that
+    one of the shells would interpret. The type and the base64 blob are made
+    only of ``[A-Za-z0-9+/=-]``, which every shell passes through untouched.
+    """
+    try:
+        fields = pub_path.read_text(encoding="utf-8", errors="replace").split()
+    except OSError:
+        return None
+    if len(fields) < 2:
+        return None
+    material = f"{fields[0]} {fields[1]}"
+    if not all(c.isalnum() or c in "+/=- " for c in material):
+        return None
+    return material
+
+
 def build_copy_command(ssh_alias: str, key_path: Path) -> str:
     """Return the exact shell command the user should run to install
     the public key on the remote.
 
-    Prefers ``ssh-copy-id`` when available; falls back to a manual
-    ``cat | ssh`` pipeline that works wherever bare ssh works.
+    Prefers ``ssh-copy-id`` when available. Otherwise it returns a single
+    ``ssh`` call with the public key written into the remote command itself,
+    double-quoted, so the same text works when pasted into cmd.exe,
+    PowerShell, Git Bash, or a macOS/Linux terminal. An earlier
+    ``cat '<pub>' | ssh <alias> '<remote command>'`` form relied on POSIX
+    single quotes; cmd.exe does not honour those, so it split the line at
+    each ``&&`` and the remote shell received ``'mkdir -p ~/.ssh`` with an
+    unmatched quote ("unexpected EOF while looking for matching `''"). The
+    pipe form is kept only as a last resort, when the ``.pub`` file cannot
+    be read here.
 
-    The returned string is shell-escape-safe (paths and alias are
-    quoted) and intended to be copy-pasted into the user's own
-    terminal. We never execute it ourselves so the user's password
-    stays out of AllWell's process.
+    The remote half appends the key only when it is not already present, so
+    running the command twice leaves one entry, as ``ssh-copy-id`` would.
+    We never execute the command ourselves, so the user's password stays out
+    of AllWell's process.
     """
     key_path = key_path.expanduser()
     pub_path = key_path.with_suffix(key_path.suffix + ".pub")
-    quoted_alias = shlex.quote(ssh_alias)
-    quoted_pub = shlex.quote(str(pub_path))
+    alias = _shell_word(ssh_alias)
     if has_ssh_copy_id():
-        return f"ssh-copy-id -i {quoted_pub} {quoted_alias}"
-    # Manual fallback. Use cat | ssh because that's portable across
-    # ssh implementations and shells. mkdir -p && chmod set the right
-    # perms on a freshly-created ~/.ssh on the remote.
+        return f"ssh-copy-id -i {_shell_word(str(pub_path))} {alias}"
+    material = _public_key_material(pub_path)
+    prepare = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys"
+    finish = "chmod 600 ~/.ssh/authorized_keys"
+    if material is not None:
+        return (
+            f'ssh {alias} "{prepare} && '
+            f"(grep -qF '{material}' ~/.ssh/authorized_keys || "
+            f"echo '{material}' >> ~/.ssh/authorized_keys) && "
+            f'{finish}"'
+        )
     return (
-        f"cat {quoted_pub} | ssh {quoted_alias} "
-        f"'mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
-        f"cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'"
+        f"cat {_shell_word(str(pub_path))} | ssh {alias} "
+        f'"{prepare} && cat >> ~/.ssh/authorized_keys && {finish}"'
     )
 
 

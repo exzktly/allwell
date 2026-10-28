@@ -1644,6 +1644,14 @@ background: an unreachable host takes up to fifteen seconds to time out and the
 rest of the app — including a running plate's log — keeps working meanwhile.
 The same is true of **Verify** in the SSH-key wizard.
 
+The SSH-key wizard's **Step 2** command is the one line you paste into your own
+terminal to install the key on the remote, typing the remote password once. When
+`ssh-copy-id` is installed it is a plain `ssh-copy-id` call. When it is not — the
+usual case on Windows — the command is a single `ssh` call with the public key
+written into it, inside double quotes, so the same line works in Command Prompt,
+PowerShell, Git Bash and a macOS or Linux terminal. Running it twice does not add
+the key twice.
+
 **On a node it schedules** requires a scheduler command. Saving that choice with
 the command box empty would mean *run on the SSH host itself*, which on an HPC
 login node is the one thing the setting exists to avoid, so the form refuses it

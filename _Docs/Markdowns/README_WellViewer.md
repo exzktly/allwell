@@ -1772,6 +1772,42 @@ What a remote run does before it uploads (which archives it rebuilds, which it
 sends untouched) and what it reports on the way back are covered by the run log
 and by `remote_fetch_report.txt` in the output folder.
 
+**When the connection to the host fails.** Every connection All-Well opens to a
+remote host gives up on a dead link — a laptop that slept, a network change, a
+login node that went away — after about two minutes of silence from the
+connection itself, and never asks for a password: a key that does not work
+fails at once with ssh's own message ("Permission denied (publickey)", "Host
+key verification failed") in the error, rather than a bare exit code. A command
+that is merely quiet — a job waiting in the queue, a well between log lines —
+is never cut off by this.
+
+- A transfer whose connection dropped part way (*Broken pipe*, *Connection
+  closed by …*, a busy login node refusing new connections) is retried a few
+  times and resumes where it stopped; a refused login is not retried. An upload
+  that stops moving for two minutes is retried the same way.
+- **Stop** ends an upload at once, even one that has gone silent, and a well
+  whose upload did not finish keeps its partly filled dial instead of showing
+  as uploaded.
+- All-Well shares one connection per host between its short commands. If that
+  connection stops answering while a fresh one works, it is closed and the
+  command is run again on a new one.
+- If the run cannot list what it uploaded, it says so and names the reason; it
+  no longer reports that "rsync reported success but some files did not reach
+  the remote" for a listing that never ran.
+
+**The pipeline's code on the host is versioned.** Each run copies the code it
+needs into `<remote project dir>/code/<version>/` and runs it from there, so a
+second All-Well window of another version — or a newer build started while a
+batched run is between batches — can never change the code a run is in the
+middle of. Version folders nobody has used for 30 days are removed when a run
+starts. Bootstrap still installs into `<remote project dir>` itself.
+
+**Automatic cache clean-up never removes a dataset a run is using.** With
+`auto_gc = true` in `remotes.toml`, the least recently *used* cached inputs are
+deleted when the cache is over `cache_budget_gb`, but never one a run has used
+in the last seven days — another window's, or another person's, run may be
+reading it. The log names any it kept over budget for that reason.
+
 ### 11. Run / Suspend / Stop / Log
 
 - Click **Run** (in the footer under the form). While the run is going,
@@ -1857,7 +1893,10 @@ and by `remote_fetch_report.txt` in the output folder.
   it counts up, *Waiting for the scheduler — 4m12s (job 4812345)*, and the log
   repeats it every couple of minutes together with the exact request that was
   made. A batched run queues once per batch, and the log names
-  which batch is waiting.
+  which batch is waiting. **Max queue wait** in the remote host dialog is how
+  long a job may wait in the scheduler queue before the run gives up and
+  cancels it (*Wait indefinitely* turns that off); it has nothing to do with how
+  quickly a broken connection is noticed, which is fixed at about two minutes.
   - **Use the job number.** It is the one you would pass to `squeue -j 4812345`
     on the cluster to see why the job is pending. `Priority` or `Resources`
     usually means simply wait; anything naming a limit or a partition usually

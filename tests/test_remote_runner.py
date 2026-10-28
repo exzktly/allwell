@@ -2160,8 +2160,12 @@ def test_sync_required_files_rsync_argv_shape(host, monkeypatch):
     rsync = captured["rsync_cmd"]
     assert rsync[0] == "rsync"
     assert "-aR" in rsync
-    # Last element is the destination — verify it targets remote_project_dir.
-    assert rsync[-1] == f"{host.ssh_alias}:{host.remote_project_dir}/"
+    # Last element is the destination: this code's own version directory
+    # under remote_project_dir (services/remote_code_sync.py), never the shared
+    # directory itself, which another sync could rewrite under a running run.
+    from services.remote_code_sync import code_digest
+    digest = code_digest(repo_root(), _REQUIRED_REMOTE_FILES)
+    assert rsync[-1] == f"{host.ssh_alias}:{host.remote_project_dir}/code/{digest}/"
     # Every required file should appear as a bare relative path.
     for required in _REQUIRED_REMOTE_FILES:
         assert required in rsync, \
@@ -2286,6 +2290,9 @@ def test_sync_required_files_uses_bare_relative_sources_with_cwd(host, monkeypat
     monkeypatch.setattr(Path, "is_file", fake_is_file)
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+    # The files under ``fake_root`` exist only to ``is_file``; the version
+    # directory's name hashes their bytes, which this test does not have.
+    monkeypatch.setattr("services.remote_code_sync.code_digest", lambda root, files: "0" * 16)
 
     runner.sync_required_files()
 

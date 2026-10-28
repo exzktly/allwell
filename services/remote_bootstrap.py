@@ -414,7 +414,7 @@ def _ssh_run(
     handles that one-shot interaction.
     """
     sys.path.insert(0, str(REPO_ROOT))
-    from services.remote_config import known_hosts_options
+    from services.remote_config import keepalive_options, known_hosts_options
     cmd = [_ssh_binary(), *known_hosts_options()]
     if ssh_key_path:
         cmd += ["-i", str(Path(ssh_key_path).expanduser())]
@@ -422,6 +422,7 @@ def _ssh_run(
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "ConnectTimeout=15",
         "-o", "BatchMode=yes",
+        *keepalive_options(),   # a dead link mid-install is noticed in ~2 min
         alias, *remote_argv,
     ]
     # v5.2.11: tee subprocess output into the bootstrap log. For
@@ -986,7 +987,9 @@ def sync_required_files(alias: str, *, ssh_key_path: str = "") -> None:
     host = RemoteHost(
         name=alias, ssh_alias=alias, ssh_key_path=ssh_key_path,
     )
-    RemoteRunner(host).sync_required_files(log_fn=lambda m: sys.stdout.write(m))
+    # Into ``~/allwell`` itself, not a run's version directory: the env install
+    # below reads ``requirements-remote.txt`` from there.
+    RemoteRunner(host).sync_required_files(log_fn=lambda m: sys.stdout.write(m), versioned=False)
 
 
 def pip_install_script(env_name: str = ENV_NAME, requirements: str = "requirements-remote.txt",
@@ -1185,7 +1188,7 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
     # MSYS2's rsync) and ``dup() in/out/err failed`` kills the fork
     # → rsync exit 12 / ``connection unexpectedly closed``.
     sys.path.insert(0, str(REPO_ROOT))
-    from services.remote_config import known_hosts_options, resolve_ssh_for_rsync
+    from services.remote_config import keepalive_options, known_hosts_options, resolve_ssh_for_rsync
     rsync_argv = [_rsync_binary(), "-a"]
     ssh_inner = [
         resolve_ssh_for_rsync(),
@@ -1198,6 +1201,7 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
         # with "Permission denied" instead of dropping the user into
         # an unsatisfiable password prompt mid-bandwidth-probe.
         "-o", "BatchMode=yes",
+        *keepalive_options(),
     ]
     if ssh_key_path:
         # rsync uses an external ssh command set via -e. Shell-quote

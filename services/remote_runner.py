@@ -49,7 +49,6 @@ from services.subprocess_kill import own_process_group_kwargs
 from services.subprocess_text import TEXT_UTF8
 from services.remote_config import (
     RemoteHost,
-    resolve_rsync_binary,
 )
 from services.remote_conda import _conda_env_selector, _conda_run_prefix_for, cellpose_env_selector, describe_env
 from services import run_journal
@@ -93,11 +92,9 @@ from services.remote_transport import (
     _fmt_secs,
     _remote_join,
     _remote_quote,
-    _rsync_ssh_transport,
-    _rsync_supports_info_flag,
-    _rsync_with_retry,
 )
 from services.remote_suspend import request_suspend as _request_suspend
+from services.remote_code_sync import sync_pipeline_code
 from services.remote_commands import _compose_remote_cmd, pack_for_login_shell
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
@@ -217,6 +214,8 @@ class RemoteRunner:
         # per-well rsync was in flight / retry-looping.
         self._fetcher: Fetcher | None = None
         self._cancelled: threading.Event = threading.Event()
+        # The version directory the last sync filled (remote_code_sync).
+        self._code_dir = ""
 
     @property
     def run(self) -> _RemoteRun | None:
@@ -228,87 +227,16 @@ class RemoteRunner:
         self,
         *,
         log_fn: Callable[[str], None] | None = None,
+        versioned: bool = True,
     ) -> None:
-        """Push the minimal set of files the pipeline needs to the remote.
-
-        Idempotent and cheap: rsync's mtime+size skip-pass means a no-op
-        run is a single round-trip with no bytes transferred. Called
-        automatically by :meth:`spawn` before every run so the user
-        never accidentally runs against stale remote code.
-
-        Files synced: see :data:`_REQUIRED_REMOTE_FILES`. The relative
-        layout is preserved on the remote (so ``requirements.txt``
-        lands at ``{remote_project_dir}/requirements.txt``).
-        """
-        log = log_fn or (lambda _m: None)
-        root = repo_root()
-        missing_local = [f for f in _REQUIRED_REMOTE_FILES if not (root / f).is_file()]
-        if missing_local:
-            raise FileNotFoundError(
-                "Required pipeline files missing locally: "
-                + ", ".join(missing_local)
-                + f"  (looked under {root})"
-            )
-
-        # Make sure subdirectories exist on the remote — rsync with
-        # individual file sources doesn't create intermediate dirs on
-        # the target. One mkdir -p covers everything.
-        remote_subdirs = sorted({
-            str(Path(f).parent) for f in _REQUIRED_REMOTE_FILES
-            if str(Path(f).parent) not in (".", "")
-        })
-        mk_target = f"{self.host.remote_project_dir}"
-        mkdirs = [f"{mk_target}/{d}" for d in remote_subdirs]
-        self._cache._ssh_run(
-            ["mkdir", "-p", mk_target, *mkdirs],
-            check=True,
-        )
-
-        # v5.2.12: use bare relative source paths with cwd=root so
-        # rsync's -R preserves only the path BELOW the repo root.
-        #
-        # Previously we used the absolute-path-with-`/./`-pivot trick:
-        #   sources = ["/Users/me/allwell/./process_microscopy.py", ...]
-        # which is supposed to make rsync use everything after /./ as
-        # the relative path. Older rsync (macOS bundles 2.6.9) doesn't
-        # honor that pivot reliably and mirrors the WHOLE local path
-        # on the remote, so the user saw:
-        #   ~/allwell/Users/me/allwell/requirements-remote.txt
-        # instead of the expected:
-        #   ~/allwell/requirements-remote.txt
-        #
-        # Using cwd + bare relative sources works on every rsync
-        # version we've seen. rsync's -R then preserves just the
-        # relative path from cwd (`requirements-remote.txt`)
-        # rather than the absolute prefix.
-        sources = list(_REQUIRED_REMOTE_FILES)
-        dest = f"{self.host.ssh_alias}:{self.host.remote_project_dir}/"
-        cmd = [
-            resolve_rsync_binary(),
-            *_rsync_ssh_transport(self.host),
-            "-aR",
-        ]
-        # v5.2.10: --info=stats0 (suppresses summary footer) needs
-        # rsync ≥ 3.1.0. Old rsync (macOS 2.6.9, older HPC images)
-        # rejects with exit 1. Omitting it is purely cosmetic — rsync
-        # just prints its stats summary to stdout, which we don't
-        # parse or display anyway.
-        if _rsync_supports_info_flag():
-            cmd.append("--info=stats0")
-        cmd += [*sources, dest]
-        result = _rsync_with_retry(
-            cmd, log_fn=log_fn, timeout=60, cwd=str(root),
-        )
-        if result.returncode != 0:
-            err = (result.stderr or "").strip() or f"rsync exited {result.returncode}"
-            raise RuntimeError(
-                f"Failed to sync pipeline files to remote "
-                f"({self.host.ssh_alias}): {err}"
-            )
-        log(
-            f"[remote] code sync: {len(_REQUIRED_REMOTE_FILES)} file(s) "
-            f"verified on {self.host.ssh_alias}:{self.host.remote_project_dir}\n"
-        )
+        """Push the files the pipeline needs (:data:`_REQUIRED_REMOTE_FILES`)
+        to the remote, before every run, into a directory of their own version
+        (``remote_code_sync``) that this run's pipeline is then launched from,
+        so another sync cannot change a run's code under it. ``versioned=False``
+        (the bootstrap) syncs into ``remote_project_dir`` itself."""
+        self._code_dir = sync_pipeline_code(
+            self.host, self._cache, repo_root(), _REQUIRED_REMOTE_FILES,
+            log_fn=log_fn, versioned=versioned)
 
     # ── Estimation ──────────────────────────────────────────────────────
 
@@ -1079,7 +1007,7 @@ class RemoteRunner:
         # ``conda run --no-capture-output -n allwell python`` — the
         # surrounding shell prefix in ``spawn`` sources conda.sh first.
         self.env_selector = cellpose_env_selector(_conda_env_selector(self.host.remote_python)[0], local_argv)
-        remote_script = f"{self.host.remote_project_dir}/process_microscopy.py"
+        remote_script = f"{getattr(self, '_code_dir', '') or self.host.remote_project_dir}/process_microscopy.py"
         out = [*_conda_run_prefix_for(self.env_selector), "python", remote_script]
         i = 2  # skip the interpreter + script slots
         # Suppress the remote completeness check unconditionally; the client

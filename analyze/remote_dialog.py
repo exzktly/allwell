@@ -393,10 +393,9 @@ class RemoteFormDialog(QDialog):
         jhub_row.addWidget(self._jhub_path_edit, 1)
         sched_layout.addLayout(jhub_row)
 
-        # How long to wait for the scheduler to grant a node before giving up.
-        # A queued / spinning-up node emits nothing, so this drives the ssh
-        # keepalive tolerance (ServerAliveCountMax); the stock ~90s default is
-        # far too short for a node that has to be provisioned.
+        # How long a job may wait in the scheduler queue before the run gives
+        # up and cancels it (RemoteHost.queue_wait_timeout_min). It does not
+        # touch ssh's keepalive, which is fixed (remote_config.keepalive_options).
         wait_row = QHBoxLayout()
         wait_row.setSpacing(6)
         wait_row.addWidget(QLabel("Max queue wait", self._scheduled_box))
@@ -406,9 +405,9 @@ class RemoteFormDialog(QDialog):
         self._queue_wait_spin.setSpecialValueText("Wait indefinitely")
         self._queue_wait_spin.setValue(host.queue_wait_timeout_min)
         self._queue_wait_spin.setToolTip(
-            "How long to wait for the scheduler to allocate (or spin up) a "
-            "compute node before giving up. Raise this if your cluster queues "
-            "or provisions nodes on demand. 0 = wait indefinitely."
+            "How long a job may wait in the scheduler queue before the run "
+            "gives up and cancels it. Raise this if your cluster queues or "
+            "provisions nodes on demand. 0 = wait indefinitely."
         )
         wait_row.addWidget(self._queue_wait_spin)
         wait_row.addStretch(1)

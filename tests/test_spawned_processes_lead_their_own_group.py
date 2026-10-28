@@ -67,13 +67,14 @@ def test_a_new_session_comes_with_a_new_windows_group():
 
 
 def test_the_two_ssh_spawns_take_their_group_from_the_helper():
-    """The sites that shipped the bug, named, so the helper cannot be bypassed
+    """The sites that shipped the bug, and the early request's ssh beside them, named, so the helper cannot be bypassed
     there by a later edit that happens to satisfy the general rule another way."""
     from pathlib import Path
 
     repo = Path(__file__).resolve().parents[1]
-    for module, function in (("services/remote_process.py", "_start_driver"),
-                             ("services/remote_runner.py", "_start_ssh")):
+    for module, function in (("services/remote_process.py", "_launch_driver"),
+                             ("services/remote_runner.py", "_start_ssh"),
+                             ("services/remote_reservation.py", "_start")):
         tree = parse_source(repo / module)
         fns = [n for n in ast.walk(tree)
                if isinstance(n, ast.FunctionDef) and n.name == function]

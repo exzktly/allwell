@@ -56,6 +56,7 @@ from services.remote_config import RemoteHost, scale_launcher_time
 from services.remote_heartbeat import _UploadHeartbeat
 from services.remote_srun_retry import queue_wait_seconds
 from services.remote_transport import _remote_quote
+from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
 from services.subprocess_kill import own_process_group_kwargs, signal_subprocess
 from services.subprocess_text import TEXT_UTF8
 from util.aw_safe import swallow
@@ -256,7 +257,11 @@ class Reservation:
 
     def _start(self, note: str) -> None:
         root = posixpath.dirname(self.paths.dir)
-        self._cache._ssh_run(["sh", "-c", _stale_reservations_script(root)], check=False)
+        swept = self._cache._ssh_run(["sh", "-c", _stale_reservations_script(root)], check=False)
+        if swept.returncode != 0:
+            # Only housekeeping: what is left is a few small files under the staging directory.
+            self._log(f"[remote] scheduler: could not clear old early requests under {root} "
+                      f"(exit {swept.returncode}); continuing.\n")
         self._cache._ssh_run(["mkdir", "-p", self.paths.dir], check=True)
         self._heartbeat = _UploadHeartbeat(self._cache, self.paths.heartbeat, log_fn=self._log)
         # One beat before the job can look, so the first thing it sees is a heartbeat that exists.
@@ -368,4 +373,9 @@ class Reservation:
         if self._popen is not None:
             signal_subprocess(self._popen, escalate=True)
         with swallow("releasing an early allocation request"):
-            self._cache._ssh_run(["sh", "-c", _release_script(self.paths)], check=False)
+            result = self._cache._ssh_run(["sh", "-c", _release_script(self.paths)], check=False)
+            if result.returncode != 0:
+                # The job still gives its node back on its own once it sees no heartbeat (UPLOAD_HEARTBEAT_STALE_S).
+                self._log(f"[remote] scheduler: WARN could not cancel the node asked for early (exit "
+                          f"{result.returncode}); it gives the node back by itself within "
+                          f"{UPLOAD_HEARTBEAT_STALE_S}s of being granted.\n")

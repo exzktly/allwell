@@ -2139,6 +2139,7 @@ class PipelineRunner:
                 cleanup_mode=cleanup_mode,
                 dry_run=self._dry_run_cleanup,
                 log_fn=lambda m: self._enqueue(("line", m)),
+                suspended=self._suspend_requested.is_set(),
             )
             # After the fetch above, which replaced the local sidecar.
             record_remote_batch_size(output_dir, opts)

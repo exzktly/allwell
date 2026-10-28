@@ -160,6 +160,7 @@ NANOWELL_E2E_FILES = {
 #: above. ``scripts/test.sh --nanowell-features``. The description is each file's
 #: own docstring; membership is by subject, so no further reason is owed.
 NANOWELL_FEATURE_FILES: dict[str, str] = {
+    "test_a_nanowell_release_keeps_what_it_cannot_see.py": "A nanowell batch releases a well from the remote only on answers the host actually gave (row A4)",
     "test_an_unaddressed_nanowell_timepoint_offers_its_anchor.py": "A nanowell timepoint the run left unaddressed is named as such, and opens straight onto …",
     "test_an_unaddressed_nanowell_well_is_not_staged_and_never_processed.py": "A nanowell well whose timepoints ran and could not be addressed is partial on Home, not …",
     "test_batch_export_nanowell_mode.py": "Batch Export's Nanowells mode (tracker I4): per export group, the chosen view per metric …",
@@ -232,6 +233,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_batched_restart_reuses_the_remote.py": "A restarted batched run looks at the remote before it uploads or runs anything",
     "test_a_batched_resume_does_not_download_first.py": "A batched resume starts the run at once; wells already here are painted, whatever the …",
     "test_a_batched_subset_run_finds_its_wells.py": "A remote run split into batches can be limited to named wells",
+    "test_a_failed_remote_listing_keeps_the_data.py": "A remote command that failed is never read as nothing there: the fetch keeps the well, verify fails closed",
     "test_a_lost_batch_handoff_is_noticed.py": "A batch handed to the batch driver either reaches it, or the run says it did not",
     "test_a_remote_run_end_to_end.py": "A remote run, driven end to end against a host that really has a filesystem",
     "test_a_remote_suspend_winds_the_run_down.py": "A remote Suspend asks the pipeline to wind down; it does not kill the session",

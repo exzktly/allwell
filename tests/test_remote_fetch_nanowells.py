@@ -139,6 +139,7 @@ class _Verifier:
 
     def _rsync_optional(self, src, dest, *, log_fn, absent_note=""):
         self.pulled.append((src, str(dest)))
+        return True                       # the pull succeeded: a ``None`` here reads as a failed pull
 
 
 def _grid(folder, well, methods):

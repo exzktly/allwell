@@ -834,11 +834,12 @@ def offline_transport(monkeypatch):
     monkeypatch.setattr(remote_upload.DatasetCache, "_ssh_script",
                         unreachable_script)
     # The Fetcher's CSV listing runs its own ssh rather than going through
-    # `DatasetCache`, so patching the one above does not cover it. A `None`
-    # total is the documented "the size is unknown, so draw no dial" answer —
-    # the same thing a failed listing produces.
+    # `DatasetCache`, so patching the one above does not cover it. ``None``
+    # paths are what a failed listing produces (`services.remote_listing`):
+    # the remote's contents are unknown, which is not the same answer as an
+    # empty list — and a `None` total is "the size is unknown, draw no dial".
     monkeypatch.setattr(remote_fetch.Fetcher, "_list_remote_glob",
-                        lambda self, src_glob: (src_glob.split(":", 1)[0], [], None))
+                        lambda self, src_glob: (src_glob.split(":", 1)[0], None, None))
     # Compressing a well's plain CSVs before they move is its own ssh; an
     # unreachable host leaves them as they are, which is what a failed script
     # does in production too (the CSV is then fetched uncompressed).

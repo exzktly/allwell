@@ -181,7 +181,7 @@ def test_cleanup_removes_the_run_dir_and_leaves_the_dataset_cache(
     monkeypatch.setattr(FetchedOutputVerifier, "_reconcile_fetch",
                         lambda self, *, log: "")
     monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
-                        lambda self, *a, **k: None)
+                        lambda self, *a, **k: True)
     runner.verify_and_cleanup(True, cleanup_mode="run", log_fn=lambda _m: None)
 
     assert not remote.exists(own), (
@@ -199,7 +199,7 @@ def test_a_dry_run_cleanup_removes_nothing(host, plate, remote, monkeypatch, spa
     monkeypatch.setattr(FetchedOutputVerifier, "_reconcile_fetch",
                         lambda self, *, log: "")
     monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
-                        lambda self, *a, **k: None)
+                        lambda self, *a, **k: True)
     runner.verify_and_cleanup(True, cleanup_mode="run", dry_run=True,
                               log_fn=lambda _m: None)
 
@@ -289,7 +289,7 @@ def test_a_re_attached_run_leaves_the_borrowed_directory_alone(
     monkeypatch.setattr(FetchedOutputVerifier, "_reconcile_fetch",
                         lambda self, *, log: "")
     monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
-                        lambda self, *a, **k: None)
+                        lambda self, *a, **k: True)
     runner.verify_and_cleanup(True, cleanup_mode="run", log_fn=lambda _m: None)
 
     assert remote.exists(STORED_OUT), (
@@ -525,7 +525,7 @@ def test_a_job_finished_on_the_server_but_never_downloaded_is_recovered(
     assert not list(local_out.iterdir())
 
     monkeypatch.setattr(FetchedOutputVerifier, "_rsync_optional",
-                        lambda self, *a, **k: None)
+                        lambda self, *a, **k: True)
     logs: list[str] = []
     ok = runner.verify_and_cleanup(True, cleanup_mode="none", log_fn=logs.append)
     text = "".join(logs)

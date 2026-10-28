@@ -1109,7 +1109,7 @@ def merge_records_into_csv(
 
 
 def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
-                       log_fn=None) -> int:
+                       log_fn=None, failed: list[str] | None = None) -> int:
     """Merge every partial per-well CSV in *tmp_csv_dir* into *target_dir*.
 
     Used by an incremental remote run, whose fetch brings back each well's rows
@@ -1131,7 +1131,13 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
     untouched, which is the recoverable state: the well's rows are still on the
     remote and still inside its ``_out.zip``.
 
-    Returns how many rows were added across every file.
+    Returns how many rows were added across every file. A caller that must not
+    treat the well as fetched when one of its files did not merge passes
+    *failed*, a list this appends the name of every partial that was not merged
+    or placed to. The return value alone cannot say it: "0 rows added" is also
+    the answer for a partial that held no new rows, and the incremental fetch
+    used to read the log line "the new rows were not added" and then mark the
+    well fetched and delete its remote copy anyway (tracker row A6).
     """
     import csv as _csv
 
@@ -1147,7 +1153,12 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
         if existing_csv(target) is None:
             # Nothing local to merge with — a well new to this run. The download *is* the well's CSV: moved into
             # place as it arrived (gzipped), not parsed and rewritten.
-            total += _place_fetched_csv(partial, target_dir, log_fn=log_fn)
+            placed = _place_fetched_csv(partial, target_dir, log_fn=log_fn)
+            if placed is None:
+                if failed is not None:
+                    failed.append(partial.name)
+                continue
+            total += placed
             continue
         try:
             with open_csv_text(partial) as fh:
@@ -1156,6 +1167,8 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
             if log_fn:
                 log_fn(f"[remote] warn: reading fetched CSV {partial.name} "
                        f"failed: {exc}\n")
+            if failed is not None:
+                failed.append(partial.name)
             continue
         if not rows:
             continue
@@ -1174,6 +1187,8 @@ def merge_fetched_csvs(tmp_csv_dir: Path | str, target_dir: Path | str, *,
                 log_fn(f"[remote] warn: merging into {partial.name} failed "
                        f"({exc}); the existing CSV is unchanged and this "
                        f"well's new rows were not added\n")
+            if failed is not None:
+                failed.append(partial.name)
             continue
         total += added
         if log_fn:
@@ -1247,9 +1262,9 @@ def _merge_onto_cut_csv(target: Path, fetched: list[dict], exc: BaseException, *
     return max(0, added)
 
 
-def _place_fetched_csv(partial: Path, target_dir: Path, *, log_fn=None) -> int:
+def _place_fetched_csv(partial: Path, target_dir: Path, *, log_fn=None) -> int | None:
     """Move a fetched CSV with no local counterpart into *target_dir* as it is (gzipping a plain one); return its
-    row count, for the merge tally."""
+    row count, for the merge tally, or ``None`` when it could not be placed — which is not "a CSV of no rows"."""
     from util.csv_gz import GZ_READ_ERRORS, gzip_csv, is_gz_csv_name, open_csv_text
 
     try:
@@ -1267,7 +1282,7 @@ def _place_fetched_csv(partial: Path, target_dir: Path, *, log_fn=None) -> int:
     except (OSError, *GZ_READ_ERRORS, UnicodeDecodeError) as exc:
         if log_fn:
             log_fn(f"[remote] warn: placing fetched CSV {partial.name} failed: {exc}\n")
-        return 0
+        return None
     if log_fn:
         log_fn(f"[remote] {partial.name}: no local CSV to merge with — placed as downloaded\n")
     return rows

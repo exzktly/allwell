@@ -155,3 +155,9 @@ class _RemoteRun:
     # stdout as it streamed, which is no help once the log window is closed;
     # this is what the end-of-run reconciliation reads.
     skipped_wells: dict = field(default_factory=dict)
+    #: ``well -> why`` for each well whose fetch fell short in a way the files on disk cannot show: an incremental
+    #: merge that failed (the local CSV and zip are then the old ones, which also look whole), a CSV of several
+    #: that did not arrive beside ones that did, a local archive that could not be read and was set aside.
+    #: Verification fails every well named here until the end-of-run retry replaces it whole
+    #: (``services.remote_fetch_verify``); the remote copy is kept meanwhile.
+    fetch_shortfalls: dict = field(default_factory=dict)

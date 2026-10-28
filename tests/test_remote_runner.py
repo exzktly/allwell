@@ -1048,14 +1048,18 @@ def test_list_remote_completed_wells_handles_empty_dir(runner_with_run, monkeypa
     assert runner_with_run._output_verifier()._list_remote_completed_wells() == set()
 
 
-def test_list_remote_completed_wells_degrades_on_ssh_error(runner_with_run, monkeypatch):
-    """Network blip / missing ssh binary → return empty set, NOT
-    raise. The verify pass falls back to ``expected_wells``-only
-    (same behavior as pre-v5.2.25)."""
+def test_list_remote_completed_wells_is_unknown_on_ssh_error(runner_with_run, monkeypatch):
+    """Network blip / missing ssh binary → ``None`` (unknown), never raise and never an empty set.
+
+    This test used to pin the empty set, which is the defect of tracker row A1: an empty answer is what "the remote
+    holds no output" looks like, and verify then passed over zero wells and cleanup removed the run directory."""
     def fail(self, script, *, check):
         raise OSError("ssh: no such file")
     monkeypatch.setattr(DatasetCache, "_ssh_script", fail)
-    assert runner_with_run._output_verifier()._list_remote_completed_wells() == set()
+    assert runner_with_run._output_verifier()._list_remote_completed_wells() is None
+    monkeypatch.setattr(DatasetCache, "_ssh_script", lambda self, script, *, check: subprocess.CompletedProcess(
+        ["ssh"], 255, "", "ssh: connect to host gpu port 22: Connection timed out"))
+    assert runner_with_run._output_verifier()._list_remote_completed_wells() is None
 
 
 def test_verify_manifest_uses_remote_listing_as_backstop(runner_with_run, monkeypatch, tmp_path):
@@ -1597,7 +1601,9 @@ def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
         z.writestr("A01_overlay.tif", b"data")
     try:
         with patch.object(Fetcher, "_rsync", return_value=False), \
-             patch.object(Fetcher, "_rsync_glob", return_value=(1, 1)), \
+             patch.object(Fetcher, "_list_remote_glob",       # the well's one CSV is listed, and lands
+                           lambda self, g: ("test-host", ["/r/out/m_A01.csv.gz"], 10)), \
+             patch.object(Fetcher, "_pull_listed", lambda self, h, files, dest: len(files)), \
              patch.object(Fetcher, "_remote_file_size", lambda self, p: None), \
              patch.object(Fetcher, "_materialize", lambda self, w, z: True), \
              patch.object(Fetcher, "_delete_well_files_on_remote", lambda self, w: None):
@@ -1844,7 +1850,10 @@ def test_verify_passes_when_all_csvs_and_zips_present(host, tmp_path):
     (tmp_path / "B02_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
-    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
+    # The host answers the listing with nothing beyond the announced wells. An unreachable one
+    # (``offline_transport``) now fails verification on its own (row A3).
+    with patch.object(FetchedOutputVerifier, "_list_remote_completed_wells", lambda self: set()):
+        missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == []
     assert any("all 2 wells" in m for m in logs)
 
@@ -1906,7 +1915,10 @@ def test_verify_skips_zip_check_when_csv_only_filter(host, tmp_path):
     # No A01_out.zip — but CSV_ONLY user doesn't want it.
 
     logs: list[str] = []
-    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
+    # The host answers the listing with nothing beyond the announced wells. An unreachable one
+    # (``offline_transport``) now fails verification on its own (row A3).
+    with patch.object(FetchedOutputVerifier, "_list_remote_completed_wells", lambda self: set()):
+        missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == []
 
 
@@ -1985,7 +1997,10 @@ def test_verify_reports_empty_csv(host, tmp_path):
 
     (tmp_path / "measurements_A01.csv").write_text("")  # empty
     logs: list[str] = []
-    missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
+    # The host answers the listing with nothing beyond the announced wells. An unreachable one
+    # (``offline_transport``) now fails verification on its own (row A3).
+    with patch.object(FetchedOutputVerifier, "_list_remote_completed_wells", lambda self: set()):
+        missing = runner._output_verifier()._verify_local_manifest(log=logs.append)
     assert missing == ["empty CSV for A01"]
 
 
@@ -2403,8 +2418,14 @@ def test_sync_required_files_uses_bare_relative_sources_with_cwd(host, monkeypat
 
 
 @pytest.fixture
-def runner_with_run(host, tmp_path):
+def runner_with_run(host, tmp_path, monkeypatch):
     from services.remote_run_state import _RemoteRun
+
+    # A host that answers the verify listing: A01's archive is there. Under ``offline_transport`` the listing fails,
+    # and a failed listing fails verification (row A3) — which is not what these tests are about. A test that
+    # patches ``_ssh_script`` itself overrides this.
+    monkeypatch.setattr(DatasetCache, "_ssh_script", lambda self, script, *, check: subprocess.CompletedProcess(
+        ["ssh"], 0, "/r/out/A01_out.zip\n", ""))
 
     runner = RemoteRunner(host)
     run = _RemoteRun(
@@ -2438,7 +2459,7 @@ def test_verify_and_cleanup_run_mode_removes_run_dir_only(runner_with_run, monke
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     ok = runner.verify_and_cleanup(ok=True, cleanup_mode="run", log_fn=lambda _m: None)
     assert ok
@@ -2459,7 +2480,7 @@ def test_verify_and_cleanup_all_mode_removes_both(runner_with_run, monkeypatch):
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     runner.verify_and_cleanup(ok=True, cleanup_mode="all", log_fn=lambda _m: None)
     rm_calls = [c for c in calls if c and c[0] == "rm"]
@@ -2479,7 +2500,7 @@ def test_verify_and_cleanup_none_mode_removes_nothing(runner_with_run, monkeypat
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     runner.verify_and_cleanup(ok=True, cleanup_mode="none", log_fn=lambda _m: None)
     rm_calls = [c for c in calls if c and c[0] == "rm"]
@@ -2507,7 +2528,7 @@ def test_verify_and_cleanup_dry_run_does_not_rm(runner_with_run, monkeypatch):
     monkeypatch.setattr(DatasetCache, "_ssh_script", fake_ssh_script)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     log_lines: list[str] = []
     ok = runner.verify_and_cleanup(
@@ -2553,7 +2574,7 @@ def test_verify_and_cleanup_dry_run_handles_missing_remote_path(runner_with_run,
     )
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     log_lines: list[str] = []
     runner.verify_and_cleanup(
@@ -2585,7 +2606,7 @@ def test_verify_and_cleanup_dry_run_with_none_mode_is_a_noop(runner_with_run, mo
     )
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     log_lines: list[str] = []
     runner.verify_and_cleanup(
@@ -2611,7 +2632,7 @@ def test_verify_and_cleanup_skips_when_failure(runner_with_run, monkeypatch):
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     ok = runner.verify_and_cleanup(ok=False, cleanup_mode="all", log_fn=lambda _m: None)
     assert not ok
@@ -2634,7 +2655,7 @@ def test_verify_and_cleanup_skips_when_local_missing(runner_with_run, monkeypatc
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     # `_retry_missing_wells` runs against a host that does not exist: it lists
     # the well's CSVs over ssh and re-pulls what verify found missing, which is
@@ -3233,7 +3254,7 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
-        lambda self, src, dest, log_fn, **kw: None,
+        lambda self, src, dest, log_fn, **kw: True,
     )
     # `_retry_missing_wells` runs against a host that does not exist: it lists
     # the well's CSVs over ssh and re-pulls what verify found missing, which is

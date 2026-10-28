@@ -1958,6 +1958,9 @@ def test_required_files_list_is_what_we_promised():
     """
     assert _REQUIRED_REMOTE_FILES == (
         "process_microscopy.py",
+        # The app's version, which each well's completion seal records so a
+        # reuse across builds is named in the log (review F7).
+        "version.py",
         # General Qt-free utilities (well-token parsing, filename-schema
         # parsing, timepoint parsing, logged-swallow).
         "util/__init__.py",

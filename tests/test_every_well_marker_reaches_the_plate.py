@@ -139,6 +139,15 @@ ROSTER: dict[str, list[tuple]] = {
     "and seal are left as they were.": [((W, "s", "OSError", "x"), "E", "note", "")],
     "Well {}: could not withdraw its completion seal {} ({}: {}); the well was not rewritten":
         [((W, "s", "OSError", "x"), "-", "note", "")],
+    # the host's own skip (review B1, F7): a reuse across builds is named before the SKIP line that marks the
+    # well; a part-way well is named before its "starting" line. Neither changes the well by itself.
+    "Well %s was finished by %s, not this build (%s); its output is reused as it is — use --force to recompute "
+    "it with this build.": [((W, "build 9.1.0", "9.2.0"), "I", "note", "")],
+    "Well %s has output here, but it was left part way (no completion seal) — running it again.":
+        [((W,), "I", "note", "")],
+    # the withdrawn-seal note's own bookkeeping, logged suppressed; the well's outcome comes from its own lines
+    "Well {}: could not leave the note that its completion seal is withdrawn ({})": [((W, "n"), "-", "note", "")],
+    "Well {}: clearing the note that its completion seal was withdrawn": [((W,), "-", "note", "")],
     # nanowell context: registration, anchors, the acquisition record, a reanalysis, a timepoint's own status
     # (a timepoint without rows is counted on the well's own "done." line, above)
     "Well %s timepoint %s: %s (%s)": [((W, "0h", "unaddressed", "no anchor"), "W", "note", "")],

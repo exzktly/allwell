@@ -49,7 +49,7 @@ def test_a_scheduled_job_waits_for_the_upload_before_it_starts():
         "srun -N1 -t 2:00:00", _PIDFILE, _ARGV,
         cache_hit=False, upload_sentinel=_SENTINEL,
     )
-    assert "srun -N1" in cmd
+    assert "srun -t 2:00:00 --nodes=1 --ntasks=1" in cmd, "one task on one node (`remote_srun_retry.one_task`)"
     # It blocks on the sentinel...
     assert UPLOAD_SENTINEL in cmd
     assert "while [ ! -f" in cmd
@@ -98,7 +98,7 @@ def test_no_sentinel_means_no_wait_at_all():
     assert "while [ ! -f" not in without
     assert len(without) < len(with_wait)
     # Everything else about the two is the same shape.
-    for fragment in ("echo $$ >", "srun -N1", "SLURM_JOB_ID",
+    for fragment in ("echo $$ >", "srun --nodes=1 --ntasks=1", "SLURM_JOB_ID",
                      "process_microscopy.py"):
         assert fragment in without, fragment
 

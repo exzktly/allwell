@@ -1676,6 +1676,8 @@ its errors — in a file on the cluster or on a terminal of its own, and
 All-Well, which reads the run as it goes, would see nothing and the run would
 look hung. Leave them out; the run's own log keeps all of it.
 
+**A remote run keeps the Mac awake.** All-Well drives a remote run from your computer for its whole length — it tells the cluster it is still there, hands over each batch and downloads every well — so a Mac that goes to sleep stops the run on the cluster. While a remote run is going the Mac is kept from sleeping (it may still dim the screen), and it is let sleep again when the run ends. Closing the lid of a Mac on battery still sleeps it; keep it on power, or open, for a long run.
+
 **A node that fails while the run is going is not asked for again.** A node
 that fails to start is replaced automatically (see *A node that fails to boot is
 retried* below), but once the run has started on a node, asking again would

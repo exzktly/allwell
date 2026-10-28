@@ -29,6 +29,7 @@ from services.remote_transport import _remote_join, _remote_quote
 from services.remote_wait_snippets import (
     _UPLOAD_WAIT_EXIT,
     BATCH_BUDGET_GRACE_S,
+    BATCH_EXIT_SETTLE_S,
     BATCH_OVER_BUDGET,
     BATCH_STILL_RUNNING,
     BATCH_TICK_S,
@@ -204,6 +205,7 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     # that group as an orphan, still writing `out/` — so whatever is left of
     # the group is given the grace and then killed before the next batch.
     budget_s, grace = int(per_batch_timeout_s or 0), int(BATCH_BUDGET_GRACE_S)
+    settle_polls = max(1, int(BATCH_EXIT_SETTLE_S * 10))
     over = BATCH_OVER_BUDGET.format(i="$_aw_i")
     # The empty-well blank lives in `bg/` for the whole run so every batch can
     # build the same correction from it without it crossing the wire again. A
@@ -288,6 +290,10 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
                f'[ "$(( $(date +%s) - _aw_t0 ))" -ge {budget_s} ]; }}; then '
                f'echo "{over} ({budget_s}s) — its pipeline was stopped; the wells it had not finished are missing"; '
                f'fi; '
+               # The group is given a moment to empty by itself first (`BATCH_EXIT_SETTLE_S`): a pool's resource
+               # tracker outlives its pipeline by milliseconds on every clean batch.
+               f'_aw_q=0; while [ "$_aw_q" -lt {settle_polls} ] && kill -0 -- -"$_aw_tp" 2>/dev/null; do '
+               f'sleep 0.1; _aw_q=$((_aw_q+1)); done; '
                f'_aw_k=0; while kill -0 -- -"$_aw_tp" 2>/dev/null; do '
                f'if [ "$_aw_k" -eq 0 ]; then echo "[remote] WARN batch $_aw_i: processes of its pipeline outlived it '
                f'— stopping them before the next batch"; kill -TERM -- -"$_aw_tp" 2>/dev/null; fi; '

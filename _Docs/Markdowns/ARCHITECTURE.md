@@ -12892,7 +12892,11 @@ down at, so SIGKILL follows; and because `timeout` returns as soon as its own
 child does, a `conda run` wrapper that dies on the SIGTERM would leave the real
 pipeline orphaned in that group, still writing `out/` — so after every budgeted
 batch the driver waits up to the grace for the group to empty and kills what is
-left. A batch stopped this way prints `BATCH_OVER_BUDGET` (`[remote] ERROR batch N
+left. It first gives the group `BATCH_EXIT_SETTLE_S` (2 s, polled every 0.1 s) to
+empty by itself, and only what is still there afterwards is reported as having
+outlived the batch: a `spawn` process pool's resource tracker outlives the
+pipeline by milliseconds on every clean batch, and checking at once printed that
+WARN — and waited a second — on all of them. A batch stopped this way prints `BATCH_OVER_BUDGET` (`[remote] ERROR batch N
 exceeded its time budget (Ns)`) before its marker; `BatchLedger` reads it and the
 batch loop and the tally say "exceeded its time budget" instead of "pipeline exited
 124". While a batch runs, the background subshell beside it — the mid-batch

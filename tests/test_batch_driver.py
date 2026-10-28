@@ -174,6 +174,53 @@ def test_a_pipeline_that_ends_in_time_is_not_over_budget(tmp_path):
     assert "exceeded" not in out.stdout and "outlived" not in out.stdout
 
 
+#: A pipeline the shape of the real one at exit: a `spawn` process pool, whose `multiprocessing` resource tracker
+#: outlives the main process by a few milliseconds, by design.
+_SPAWN_POOL_PIPELINE = (
+    "import multiprocessing as mp\n"
+    "from concurrent.futures import ProcessPoolExecutor\n"
+    "if __name__ == '__main__':\n"
+    "    with ProcessPoolExecutor(1, mp_context=mp.get_context('spawn')) as ex:\n"
+    "        print(ex.submit(abs, -3).result())\n")
+
+
+def test_a_pool_s_resource_tracker_is_not_a_pipeline_that_outlived_its_batch(tmp_path):
+    """Review D7, found by the localhost harness (``tests/test_a_remote_run_on_a_standin_cluster.py``): every clean
+    batch of a real run printed "processes of its pipeline outlived it" and waited a second, because the driver's
+    first ``kill -0`` of the batch's group landed while the pool's resource tracker was still exiting. A warning that
+    fires on every batch hides the batch it is true of."""
+    import subprocess
+    import sys
+
+    run_dir = _driver_dir(tmp_path)
+    script = tmp_path / "pipeline.py"
+    script.write_text(_SPAWN_POOL_PIPELINE)
+    out = subprocess.run(["bash", "-c", _batch_driver_snippet(str(run_dir), 1, [sys.executable, str(script)], "", 600)],
+                         capture_output=True, text=True, timeout=60)
+    assert "batch 1 finished rc=0" in out.stdout, out.stdout + out.stderr
+    assert "outlived" not in out.stdout, out.stdout
+
+
+def test_a_process_that_really_outlives_its_batch_is_still_stopped_and_said(tmp_path, monkeypatch):
+    """The other half of D7: the settle window only waits for a group that is emptying, it does not excuse one that
+    is not."""
+    import subprocess
+    import time
+
+    import services.remote_commands as rc
+
+    monkeypatch.setattr(rc, "BATCH_BUDGET_GRACE_S", 2)
+    run_dir = _driver_dir(tmp_path)
+    pid_file = tmp_path / "left.pid"
+    argv = ["bash", "-c", f"sleep 30 & echo $! > {pid_file}; exit 0"]
+    t0 = time.monotonic()
+    out = subprocess.run(["bash", "-c", rc._batch_driver_snippet(str(run_dir), 1, argv, "", 600)],
+                         capture_output=True, text=True, timeout=60)
+    assert "[remote] WARN batch 1: processes of its pipeline outlived it" in out.stdout, out.stdout
+    assert not _alive(int(pid_file.read_text())), "the process left behind was not stopped"
+    assert time.monotonic() - t0 < 15
+
+
 def test_a_running_batch_says_it_is_still_running(tmp_path, monkeypatch):
     """Hours of silence mid-batch looked exactly like a dead stream; the driver ticks while a batch runs."""
     import re

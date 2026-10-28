@@ -86,6 +86,16 @@ BATCH_STILL_RUNNING = "[remote] batch-driver: batch {i} still running ({m}m)"
 BATCH_BUDGET_GRACE_S = 300
 BATCH_OVER_BUDGET = "[remote] ERROR batch {i} exceeded its time budget"
 
+# How long a batch's process group is given to empty by itself, once its
+# pipeline has returned, before anything left in it counts as having outlived
+# the batch. A pipeline that ran a ``spawn`` process pool leaves its
+# ``multiprocessing`` resource tracker behind it for a few milliseconds, by
+# design — it exits when its parent's pipe closes — and the driver's first
+# ``kill -0`` used to land inside that window on every batch: a WARN that
+# "processes of its pipeline outlived it" and a second's wait, on a clean run.
+# A warning that fires on every batch is one nobody reads when it is true.
+BATCH_EXIT_SETTLE_S = 2
+
 
 def _heartbeat_stale_snippet(heartbeat: str, message: str, *,
                              stale_s: int = UPLOAD_HEARTBEAT_STALE_S,

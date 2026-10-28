@@ -69,7 +69,7 @@ from pipeline.slurm_node import parse_node_specs
 from util.aw_safe import swallow, swallowed
 from util.json_write import try_write_json_atomic
 from util.zip_append import recover_paths as recover_appends
-from services.remote_liveness import ALIVE, GONE, Liveness, probe
+from services.remote_liveness import ALIVE, GONE, Liveness, cancel_pending, probe
 from services.run_evidence import RunEvidence, is_ssh_reason
 
 _LOG = logging.getLogger("allwell.pipeline_runner")
@@ -1010,6 +1010,8 @@ class PipelineRunner:
         self._job_settled = False
         self._job_liveness: Liveness | None = None
         self._stop_unconfirmed = ""
+        # A Suspend pressed while the job was queued, which cancels the job.
+        self._queued_suspend = False
         # Snapshots of the two events above, taken when a failure is queued —
         # see ``cancel_state_at_failure``.
         self._error_was_stopped = False
@@ -1088,6 +1090,11 @@ class PipelineRunner:
         captured in the help-drawer log tab", which they were not: that tab
         mirrors what this view shows (tracker C11).
         """
+        if event[0] == "line" and not str(event[1]).startswith(JOB_UNKNOWN_PREFIX):
+            # Every line the run says, from whichever thread: the stream, and
+            # the spawn's own lines before there is one (the allocation request).
+            # Not the runner's own report of a probe, which quotes ssh too.
+            self._evidence.note(str(event[1]))
         must_keep = event[0] in self._CONTROL_KINDS or (
             event[0] == "line" and carries_state(str(event[1])))
         if must_keep:
@@ -1272,6 +1279,7 @@ class PipelineRunner:
         self._job_settled = False
         self._job_liveness = None
         self._stop_unconfirmed = ""
+        self._queued_suspend = False
         self._run_generation += 1
         self._error_was_stopped = False
         self._error_was_suspended = False
@@ -1362,6 +1370,17 @@ class PipelineRunner:
         self._suspend_requested.set()
         self._suspend_asked = True
         remote = self._remote_runner
+        if remote is not None and self._evidence.waiting_for_node:
+            # Still queued for a node: nothing has run, so there is nothing to
+            # wind down. The request file would only be read once the job
+            # started — so the job waited out the queue, took a node, and
+            # suspended at once (tracker D6). Cancelling it is the suspend.
+            self._queued_suspend = True
+            self._enqueue(("line", "[Suspending] The job is still queued for a node, so nothing "
+                                   "has run yet: cancelling the queued job rather than letting "
+                                   "it start only to wind down. Resume queues it again.\n"))
+            self.stop(escalate=False)
+            return
         if remote is not None and remote.can_request_suspend:
             # A remote run is asked through its request file and nothing else
             # (``RemoteRunner.request_suspend``): signalling the local ssh, as
@@ -1448,6 +1467,10 @@ class PipelineRunner:
             return
         found = probe(host, run.remote_pidfile, scheduler=scheduler,
                       job_hint=self._evidence.job_id)
+        if stopping and found.state == ALIVE and found.job_state == "PENDING" and found.job_id:
+            # Still queued: no sidecar, so the backstop had no id to cancel.
+            if cancel_pending(host, found.job_id):
+                found = probe(host, run.remote_pidfile, scheduler=scheduler, job_hint=found.job_id)
         self._job_liveness = found
         if scheduler:
             self._enqueue(("line", JOB_CLOSED_LINE if found.state == GONE else
@@ -1540,6 +1563,23 @@ class PipelineRunner:
         self._error_was_stopped = self._stop_requested.is_set()
         self._error_was_suspended = self._suspend_requested.is_set()
         self._had_error = True
+
+    def _enqueue_queued_suspend(self, *, where: str) -> None:
+        """Report a Suspend that cancelled a job still queued for a node.
+
+        Through the ``suspended`` event, as any suspend: the plate is not
+        finished and is offered back. Said apart because nothing was in flight
+        to finish — and, when the host could not confirm the job gone, said so.
+        """
+        unconfirmed = (f" The host could not confirm the job was cancelled "
+                       f"({self._stop_unconfirmed}); it may still be queued — check "
+                       f"squeue.") if self._stop_unconfirmed else ""
+        self._enqueue((
+            "suspended",
+            f"{where} suspended before it started: its job was still queued for a "
+            f"node, so the queued job was cancelled.{unconfirmed} Resume from the "
+            "Analyze banner to queue it again.\n",
+        ))
 
     def _enqueue_suspended(self, *, where: str = "Pipeline") -> None:
         """Report a run that wound down after Suspend and exited cleanly.
@@ -1979,7 +2019,6 @@ class PipelineRunner:
             try:
                 for line in proc.stdout:
                     self._enqueue(("line", line))
-                    self._evidence.note(line)
                     if line.strip():
                         tail.append(line.rstrip("\n"))
             except Exception as exc:
@@ -2384,7 +2423,6 @@ class PipelineRunner:
             try:
                 for line in proc.stdout:
                     self._enqueue(("line", line))
-                    self._evidence.note(line)
                     if line.strip():
                         tail.append(line.rstrip("\n"))
             except Exception as exc:
@@ -2410,7 +2448,9 @@ class PipelineRunner:
             )
             # After the fetch above, which replaced the local sidecar.
             record_remote_batch_size(output_dir, opts)
-            if rc == 0 and ok and self._suspend_requested.is_set():
+            if self._queued_suspend:
+                self._enqueue_queued_suspend(where="Remote pipeline")
+            elif rc == 0 and ok and self._suspend_requested.is_set():
                 self._enqueue_suspended(where="Remote pipeline")
             elif self._stop_requested.is_set() and (rc == 0 or self._stop_unconfirmed):
                 self._enqueue_stopped(where="Remote pipeline")

@@ -63,6 +63,16 @@ _RE_SSH_REASON = re.compile(
 _RE_JOB_ID = re.compile(
     r"(?:srun: job (\d+) (?:queued|has been allocated)|allocation granted — job (\d+))", re.IGNORECASE)
 
+# The two ends of a wait for a node: the app's own request line (single-shot
+# and batched) or Slurm's "queued", then the grant, the node's own line, or a
+# well starting — anything that means the pipeline is running.
+_RE_NODE_REQUESTED = re.compile(
+    r"\[remote\] scheduler: (?:batch \d+: )?requesting allocation via|srun: job \d+ queued and waiting",
+    re.IGNORECASE)
+_RE_NODE_GRANTED = re.compile(
+    r"\[remote\] scheduler: allocation granted|srun: job \d+ has been allocated"
+    r"|Well \S+\s+\S+\s+starting", re.IGNORECASE)
+
 #: What each slurmstepd cause means, said for the person reading the headline.
 _CAUSE_WORDS = {
     "TIME LIMIT": "the scheduler ended job {job} at its time limit",
@@ -85,6 +95,8 @@ class RunEvidence:
         self.budget_line = ""
         self.ssh_reason = ""
         self.job_id = ""
+        #: True between a request for a node and its grant: nothing has run.
+        self.waiting_for_node = False
 
     def note(self, line: str) -> None:
         """Read one line of the run's output."""
@@ -96,13 +108,17 @@ class RunEvidence:
         if not self.budget_line and _RE_TIME_BUDGET.search(line):
             self.budget_line = line.strip()
         reason = _RE_SSH_REASON.search(line)
-        if reason:
-            # The last one: an ssh that times out and then gives up says the
-            # second, more final thing last.
+        if reason and not self.ssh_reason:
+            # The first one: it is the break itself; what follows is fallout —
+            # including the app's own later probes of a host that is gone.
             self.ssh_reason = reason.group(0).strip().rstrip(".")
         job = _RE_JOB_ID.search(line)
         if job:
             self.job_id = job.group(1) or job.group(2)
+        if _RE_NODE_GRANTED.search(line):
+            self.waiting_for_node = False
+        elif _RE_NODE_REQUESTED.search(line):
+            self.waiting_for_node = True
 
     def termination(self, where: str = "Remote pipeline") -> str | None:
         """The failure text for a run something other than the user ended, or

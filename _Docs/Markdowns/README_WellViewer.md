@@ -1893,7 +1893,11 @@ and by `remote_fetch_report.txt` in the output folder.
   finishes the fields in flight and the wells it finished keep downloading, so
   the run can take a little longer to end than a local one. Pressed while the
   plate is still uploading, there is nothing running on the host yet, so it
-  stops the run instead. A batched remote run finishes the batch it is on and
+  stops the run instead. Pressed while the job is still queued for a node,
+  nothing has run either: the queued job is cancelled (rather than left to wait
+  out the queue only to stop the moment it starts), the run is shown as
+  suspended — *suspended before it started* — and Resume queues it again. Stop
+  pressed during a queue wait cancels the queued job too. A batched remote run finishes the batch it is on and
   stops any upload of the next one. If the host cannot be reached, the log says
   so and the run keeps going — press Suspend again, or Stop; if the request did
   reach the host after all, the run still ends as suspended. Once everything

@@ -12716,7 +12716,17 @@ only the newest request of the current run may clear anything.
 Suspend pressed while a remote run is still staging or uploading has no request
 to make (`can_request_suspend` is false) and stops the run as before — rather
 than waiting out the upload, and a node, for a pipeline that would then do
-nothing.
+nothing. The same holds once the job is *queued*: the request file is read only
+by a running pipeline, so a Suspend pressed while `RunEvidence.waiting_for_node`
+(between the allocation request — the spawn's own line, which is why the
+evidence reads every line at `_enqueue` rather than only the stream — and the
+grant or a well starting) is `_queued_suspend`: it stops the run and reports it
+through the `suspended` event as "suspended before it started: its job was
+still queued for a node, so the queued job was cancelled". A queued job has no
+`.slurm` sidecar for the backstop to cancel, so after a Stop or such a Suspend
+`_settle_remote_job` cancels a job the probe still finds PENDING by the id the
+stream named (`remote_liveness.cancel_pending`, owner-checked like every cancel
+here) and probes again.
 
 A batched run needs more pieces. The driver (`_batch_driver_snippet`) checks
 the request at the top of each batch and inside its wait for the next one, and

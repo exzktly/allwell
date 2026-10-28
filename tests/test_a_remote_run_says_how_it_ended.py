@@ -55,7 +55,8 @@ class _Proc:
         return self.returncode
 
 
-def _runner(tmp_path, monkeypatch, *, lines, rc, launcher="srun -p gpu", stop=False):
+def _runner(tmp_path, monkeypatch, *, lines, rc, launcher="srun -p gpu", stop=False, spawn_says=(),
+            press=None):
     import services.pipeline_runner as pr
     from services import run_journal
     from services.remote_config import RemoteHost
@@ -75,8 +76,12 @@ def _runner(tmp_path, monkeypatch, *, lines, rc, launcher="srun -p gpu", stop=Fa
     def spawn(*a, **k):
         remote._run = _RemoteRun(run_id="r1", cache_key="k", remote_input_dir="~/i", remote_output_dir="~/o",
                                  remote_pidfile=PIDFILE, local_output_dir=out, local_input_mode=LocalInputMode.ZIP)
+        for said in spawn_says:              # what the real spawn logs before there is a stream
+            k["log_fn"](said)
         if stop:
             r._stop_requested.set()
+        if press is not None:
+            press(r)
         return _Proc(lines, rc)
 
     monkeypatch.setattr(remote, "spawn", spawn)
@@ -125,7 +130,9 @@ def _outcome(out):
 @pytest.fixture
 def host(tmp_path, monkeypatch):
     h = _remote_standins.install(tmp_path, monkeypatch)
-    h.write(PIDFILE, "99\n")                       # a pid nothing on this machine has
+    # The stand-in runs the host's commands on this machine, so the pidfile names a pid above any
+    # pid_max Linux allows: Stop's `kill -TERM $(cat pidfile)` must not reach a real process here.
+    h.write(PIDFILE, "2147483646\n")
     h.write(PIDFILE + ".slurm", "4242\n")
     return h
 
@@ -301,3 +308,41 @@ def test_a_read_failure_mid_run_is_not_called_a_failed_start(monkeypatch, tmp_pa
     assert errors == ["Pipeline stopped part way through the run: reading its output failed "
                       "(OSError: [Errno 5] Input/output error), so it was stopped. The wells that finished "
                       "are kept.\n"]
+
+
+# ── D6: Stop / Suspend while the job waits for a node ─────────────────────────
+
+REQUESTED = "[remote] scheduler: requesting allocation via: srun -p gpu\n"
+QUEUED = "srun: job 4242 queued and waiting for resources\n"
+REVOKED = "srun: Job allocation 4242 has been revoked\n"
+
+
+def _queued(host):
+    (host.home / ".allwell-staging/r1/run.pid.slurm").unlink()     # written only once the job starts
+    host.add_job("4242", "PENDING")
+
+
+def test_suspend_while_queued_cancels_the_queued_job(qtbot, tmp_path, monkeypatch, host):
+    """Suspend's request file is read only once the pipeline runs, so a queued job used to wait out the queue,
+    take a node, and suspend at once. Nothing has run: cancelling the job is the suspend."""
+    _queued(host)
+    runner, out = _runner(tmp_path, monkeypatch, lines=[QUEUED, REVOKED], rc=1, spawn_says=[REQUESTED],
+                          press=lambda r: r.suspend())
+    tab, _told, lines = _drain_into_tab(qtbot, runner)
+    assert host.cancelled == ["4242"], "the queued job was left in the queue"
+    assert _outcome(out) == "suspended"
+    assert tab._dashboard.headline_text() == "Cancelled — suspended; resume to finish"
+    assert any("suspended before it started: its job was still queued" in t for t, _tag in lines)
+
+
+def test_stop_while_queued_cancels_the_job_and_says_stopped(qtbot, tmp_path, monkeypatch, host):
+    """Stop of a job that never started used to end with "job already finished — nothing to cancel"."""
+    _queued(host)
+    runner, out = _runner(tmp_path, monkeypatch, lines=[QUEUED, REVOKED], rc=1, spawn_says=[REQUESTED],
+                          stop=True)
+    tab, _told, lines = _drain_into_tab(qtbot, runner)
+    texts = [t for t, _tag in lines]
+    assert host.cancelled == ["4242"]
+    assert tab._dashboard.headline_text() == "Cancelled — stopped"
+    assert not any("already finished" in t for t in texts), texts
+    assert _outcome(out) == "stopped"

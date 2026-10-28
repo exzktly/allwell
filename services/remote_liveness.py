@@ -37,7 +37,7 @@ PROBE_TIMEOUT_S = 20
 
 #: The scheduler states in which a job still holds (or is about to hold) a node.
 _LIVE_JOB_STATES = {"PENDING", "RUNNING", "CONFIGURING", "SUSPENDED", "REQUEUED",
-                    "RESIZING", "SIGNALING", "STAGE_OUT", "COMPLETING"}
+                    "RESIZING", "SIGNALING", "STAGE_OUT"}
 
 UNREACHABLE = "unreachable"
 ALIVE = "alive"
@@ -117,3 +117,28 @@ def probe(host, pidfile: str, *, scheduler: bool, job_hint: str = "",
     if scheduler:
         return Liveness(UNKNOWN, f"process {pid[0]} is not running on the login node this check reached")
     return Liveness(GONE, f"process {pid[0]} is no longer running on {name}")
+
+
+def cancel_pending(host, job_id: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> bool:
+    """``scancel`` *job_id* if it is ours and still PENDING; whether the ssh ran.
+
+    For a Stop or a Suspend pressed while the run's job was queued: the job has
+    no ``.slurm`` sidecar yet (that is written from inside the allocation), so
+    ``close_remote_job`` has no id to cancel, and the id the stream named is the
+    only handle on it. Killing the local ``srun`` usually withdraws it; with the
+    connection gone it does not. Owner-checked like every cancel this app sends
+    (``remote_jobs._only_my_job``), and only for a job still waiting.
+    """
+    from services.remote_jobs import _only_my_job
+
+    if not job_id.isdigit():
+        return False
+    script = (f'_jid={job_id}; ' + _only_my_job("_jid", "AW_NOTMINE") +
+              '[ "$(squeue -h -j "$_jid" -o %T 2>/dev/null | head -n1)" = PENDING ] && '
+              'scancel -u "$_aw_me" "$_jid" 2>/dev/null; echo AW_END')
+    try:
+        result = subprocess.run(host.ssh_argv(allocate_tty=False) + [script],
+                                capture_output=True, timeout=timeout_s, **TEXT_UTF8)
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return "AW_END" in (result.stdout or "")

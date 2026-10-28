@@ -515,7 +515,7 @@ def test_a_stop_during_the_reference_upload_is_not_a_fault(tmp_path):
     p = _batched(tmp_path, ["A01", "H12"], batch_size=1)
 
     def stopping_upload(zips, dest, *, stop_event=None, **kw):
-        stop_event.set()                    # the user clicks Stop mid-transfer
+        p._stop.set()                       # the user clicks Stop mid-transfer (the upload watches it)
         return (0, 0.0, 20)
 
     _stub_runner(p, proc, stopping_upload)

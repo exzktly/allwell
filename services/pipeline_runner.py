@@ -2184,7 +2184,10 @@ class PipelineRunner:
                         ))
                 self._enqueue(("done", "Remote pipeline completed successfully.\n"))
             elif rc != 0:
-                self._enqueue_error(exit_message(rc, tail, where="Remote pipeline"))
+                # A batched run's own reasons — a lost driver, a hand-off it could not make, which batches failed and
+                # what they lost — reach the log directly, never the stream this tail is read from, so they lead it.
+                reasons = list(getattr(proc, "failure_lines", ()) or ())
+                self._enqueue_error(exit_message(rc, [*reasons, *tail], where="Remote pipeline"))
             else:
                 # Through `_enqueue_error`, not by hand. Building the tuple
                 # here skipped `_had_error` and the cancel-state latch, so a

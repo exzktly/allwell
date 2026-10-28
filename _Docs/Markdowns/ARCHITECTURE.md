@@ -12241,8 +12241,11 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_scratch.py` | The leaves of the remote staging work, stdlib + `util` only: where transient bytes go while a transfer is in flight (`_scratch_dir`, `_transit_dir`, `TRANSIT_SUBDIR`), how a stale one is swept (`sweep_stale_scratch`), whether an archive arrived whole (`_zip_is_complete`), and what the user's own input archives hash to (`fingerprint_archives`, `source_fingerprint` — the discriminator the remote re-attach is keyed on). Nine functions whose only tie to `remote_runner` was one constant; every caller, the runner's own `source_fingerprint` read included, imports them from here. |
 | `remote_upload.py` | Getting a run's input onto the remote host, once. `DatasetCache` keys each upload by a stat-based fingerprint of the staged archives, so re-running the same input is a metadata round trip rather than a re-upload; streams rsync's output well by well (`_run_rsync_streaming`, `_UploadWellProgress`) so the Upload rail and each well's dial fill as its archive lands; and keeps the remote cache inside the host's budget. Its short ssh control commands are bounded by `SSH_CONTROL_TIMEOUT_S`. Line-budgeted (`REMOTE_UPLOAD_BUDGET`). |
 | `remote_jobs.py` | The scheduler jobs a remote run holds, and making sure none outlives it. `close_remote_job` is the teardown backstop every exit the app survives goes through (it reads the job id from `<pidfile>.slurm` and `scancel`s it); `sweep_orphaned_allocation` is what the next run of the same plate does about an exit the app did not survive, and returns its verdict (`swept`, `owned`, `notmine`, `unknown`, `none`) because the batched path acts on it. Both refuse to cancel a job that is not the caller's (`_only_my_job`), and both are no-ops on a host with no `compute_launcher`. `RemoteRunner.close_remote_job` and `_sweep_orphaned_allocation` delegate here. Line-budgeted (`REMOTE_JOBS_BUDGET`). |
-| `remote_process.py` | The run as the GUI sees it: `_RemoteProcess` wraps the single ssh that runs the pipeline and `_BatchedRemoteProcess` the driver that holds one allocation and runs the plate batch by batch. Both present the `subprocess.Popen` surface `PipelineRunner` reads and tee every line to the `Fetcher`, so per-well downloads start the moment a well is announced done; `wait` flushes the `Fetcher` and `terminate`/`kill` cancel it, and every exit path ends the run heartbeat (`_UploadHeartbeat`, `remote_heartbeat.py`) exactly once. A batch whose driver vanished marks the run failed (1); a stopped one reports 130. `tests/test_remote_process.py` drives the single-launch wrapper against a real child process. Line-budgeted (`REMOTE_PROCESS_BUDGET`). |
+| `remote_process.py` | The run as the GUI sees it: `_RemoteProcess` wraps the single ssh that runs the pipeline and `_BatchedRemoteProcess` the driver that holds one allocation and runs the plate batch by batch. Both present the `subprocess.Popen` surface `PipelineRunner` reads and tee every line to the `Fetcher`, so per-well downloads start the moment a well is announced done; `wait` flushes the `Fetcher` and `terminate`/`kill` cancel it, and every exit path ends the run heartbeat (`_UploadHeartbeat`, `remote_heartbeat.py`) exactly once. A batch whose driver vanished marks the run failed (1) without touching the caller's Stop; a stopped one reports 130. `tests/test_remote_process.py` drives the single-launch wrapper against a real child process. Line-budgeted (`REMOTE_PROCESS_BUDGET`). |
 | `remote_heartbeat.py` | `_UploadHeartbeat`: the daemon thread that touches a remote run's heartbeat file every `UPLOAD_HEARTBEAT_S` for as long as this app owns the run — for the whole run, not only its upload, because the orphan sweep and the batch driver both read it. The shell on the remote that judges it is `remote_wait_snippets.py`. Re-exported from `remote_process.py`. |
+| `remote_handoff.py` | Handing a batch to the batch driver and proving it arrived: `raise_flag` (a `touch` whose code is read, with 124 / 255 treated as unknown and settled by the driver's own word), `hand_off_and_wait`, and `chase_handoff` for a waiting driver that never started its batch. `HandoffWatch` follows the driver's `waiting for` / `starting` lines. |
+| `remote_batch_step.py` | One data batch of a batched run, split out of `_run_batches`: upload it, hand it over, wait for its code. Returns the code the batch counts for or a `Step` (`SUSPENDED`, `ENDED`). |
+| `remote_batch_ledger.py` | What a batched run's driver stream said about each well (`done`, `SKIP`, `PARTIAL`), and the batch loop's own failure lines (`fail`), which `_BatchedRemoteProcess.failure_lines` hands to the runner's headline. |
 | `remote_staging.py` | Turning the user's input into the per-well archives a remote run uploads: `stage_local_zips` detects the layout (one zip per well, well folders, loose TIFs, or a mix left by an interrupted zip-up), zips folders and loose TIFs **into the input directory itself** so the next run finds zips and skips the zip-up (a folder's archived TIFs are removed the moment its own zip is published), and returns a `ZippedInput`. The channel filter and an incremental run's split are both planned from each archive's member list before any image data is read, and only archives that change are written — to a staging directory beside the input, never over the user's archives. `ZippedInput.cleanup` removes every staging directory a run made (the filter's and the split's, joined), a failure part way through removes its own before the error propagates, and a filter that matches no image in any well is refused before anything moves, on both the ZIP and the MIXED path. Line-budgeted (`REMOTE_STAGING_BUDGET`); `tests/test_remote_staging.py` pins the cleanup contract. |
 | `remote_finished_wells.py` | Which wells a remote run need not send: `finished_here` answers, before staging, with the pipeline's own rule — the per-well CSV present, recorded under the key `pipeline.cli_args.settings_key_from_argv` gives this run's argv plus the host's flags, not forced, its completeness record whole, never an empty-well blank, and for a nanowell well every timepoint of its archive reached, with a verdict in its grid record, and its anchors those its last run used (`util.nanowell_anchors.wells_with_unused_anchors`) — and `drop_finished` removes them from a staged `ZippedInput` into its `up_to_date_wells`; `nanowell_forced` and `argv_forcing` force a nanowell well sent again over partial output here, and `pull_settings_marker` writes `UNKNOWN_SETTINGS` when a well's marker cannot be fetched. Called by `PipelineRunner._finished_here` and by batched mode's local-completion filter (see *What is finished here is not sent again*). |
 | `remote_plate_grids.py` | `seed_plate_grids`: before a remote nanowell run's pipeline starts, copies the local output's grid records of every well not in the run into the remote `nanowells/`, so the end-of-run re-anchoring can fit the plate's motion as a local run does. Called by `RemoteRunner._prepare_run` and `_BatchedRemoteProcess.__init__` (see *The host is given the rest of the plate*). |
@@ -12687,6 +12690,50 @@ driver still alive — the job still queued, so it has seen no request file —
 job, as it does for a failed run, rather than letting the job take a node later
 only to give it straight back; a driver that has already exited on its own is
 left alone.
+
+**Each batch is handed over by one flag, and the hand-off is proven, not assumed**
+(`services/remote_handoff.py`). The batch loop creates `<run>/.aw_batch_<i>_ready`
+with an `ssh touch` and the driver, polling for it, prints `batch-driver: batch <i>
+starting`. `raise_flag` reads the `touch`'s code: `0` proves the flag exists, and any
+other code from `touch` itself proves it does not, so after `FLAG_ATTEMPTS` the run
+ends with an ERROR. ssh's own failure (255) and a call that ran out of time (124)
+prove neither — the command may have run before the connection went — so before
+concluding anything the loop asks the driver (`HandoffWatch`, fed by the reader): a
+batch it says it started was handed over whatever ssh said; a driver already
+waiting for the batch is given `FLAG_CONFIRM_S` to say so; and a driver that has
+not yet asked for the batch (its job still queued, or the previous batch still
+running) cannot answer, so the hand-off is left to `chase_handoff`. That runs once a
+driver that said `waiting for batch <i>` has not started it within `ACK_TIMEOUT_S`
+of the hand-off: it asks `test -f` for the flag — present, the node has the batch
+and only its output is missing, said once; missing, the flag is raised again, once,
+and a driver that takes neither is given up on; and a check that could not run
+(124 / 255) is said once and asked again a window later, never read as "missing". A
+Stop during the pause between attempts ends the hand-off quietly with the stop's
+code (130). A run that ends on a failed hand-off says what it keeps in words true
+whether or not a resume can adopt the uploaded batches (`remote_handoff.KEPT`).
+
+**A driver that went away is a failure, never the user's Stop.** The reader learns
+of it as the stream ending with batches unreported and `_stop` clear — a walltime
+expiry, a node failure, the driver's own exit 75, a hand-off this side gave up on
+and released. It sets `_driver_lost` and nothing else. `_stop` is the caller's
+event (`PipelineRunner._stop_requested`, which the real `spawn` hands in), so
+setting it reported every lost driver as a Stop: amber "Cancelled — stopped", the
+journal saying `stopped`, the Job Queue marking the job cancelled and pausing the
+queue. The worker's waits watch `_AnySet(_stop, _driver_lost)` instead (the batch
+upload adds `_suspending`), the Fetcher is left to drain the finished batches'
+wells, and the run ends 1 with an ERROR naming the batch. A user's Stop still reads
+as one, because `PipelineRunner.stop` sets the event before it kills the ssh.
+`tests/test_a_lost_batch_driver_is_not_a_stop.py` drives this through the real
+`_run_pipeline_remote`.
+
+**A failed batched run's headline carries its reason.** The batch loop's own
+failure lines go to the log directly, not through the stream the runner's error
+tail is read from, so the headline used to say only "…exited with code 1."
+`remote_batch_ledger.fail` logs each such line and keeps it, and
+`_BatchedRemoteProcess.failure_lines` hands them to `_run_pipeline_remote`, which
+puts them in front of the tail it gives `exit_message`. The per-batch step itself —
+upload, hand over, wait — is `remote_batch_step.run_batch`, which returns the code
+a batch counts for or a `Step` that ends the loop.
 
 **An app that vanishes mid-batch suspends the batch.** The driver's heartbeat
 check otherwise runs only between batches, and an app that crashes or is

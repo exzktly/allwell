@@ -31,7 +31,7 @@ from services.remote_commands import (
     _batch_driver_snippet,
     _compose_driver_cmd,
 )
-from services.remote_process import _BatchedRemoteProcess
+from services.remote_process import _BatchedRemoteProcess, _QueueLineIterator
 
 _ARGV = ["python", "process_microscopy.py", "--input_dir", "/r/run-x/in"]
 
@@ -218,7 +218,20 @@ class _FakeProc:
         return self.returncode
 
     def terminate(self):
+        """What a real ssh does when it is signalled: it exits, and its stdout ends.
+
+        Recording the call and leaving the stream open made every test of a run
+        the app ended itself — a hand-off it gave up on, a driver it released —
+        stop one step short of what follows: the reader seeing the stream end
+        with batches unreported, which is where a lost driver used to be taken
+        for the user's Stop.
+        """
         self.terminated = True
+        if not self._done:
+            self.finish()
+
+    def kill(self):
+        self.terminate()
 
 
 def _batched(tmp_path, wells, batch_size=1):
@@ -235,6 +248,7 @@ def _batched(tmp_path, wells, batch_size=1):
     p._pipeline_argv = ["--csv_prefix", "measurements"]
     p._batch_size = batch_size
     p._line_q = queue.Queue()
+    p._lines = _QueueLineIterator(p._line_q)       # `stdout`, as the runner reads it
     p._log = lambda m: p._logged.append(m)
     p._logged = []
     p._returncode = None
@@ -508,10 +522,14 @@ def test_the_markers_never_reach_the_log(tmp_path, monkeypatch):
     assert not any("batch-driver" in ln for ln in lines)
 
 
-def test_a_dead_driver_stops_the_run_and_the_downloads(tmp_path, monkeypatch):
-    """A Stop arrives as a process-group kill, which sets none of this object's
-    state — so the stream ending is the only signal, and without acting on it
-    the run would carry on downloading as though nothing had happened."""
+def test_a_dead_driver_ends_the_run_as_a_failure_and_lets_the_downloads_drain(tmp_path, monkeypatch):
+    """The stream ending with batches unreported, and no Stop pressed, is the allocation going away.
+
+    It used to set the stop event — which is the runner's own `_stop_requested`,
+    so it was reported as the user's Stop — and cancel the Fetcher, leaving the
+    finished batch's wells on the remote. Now it is a failure that says so, the
+    caller's Stop is untouched, and the downloads finish.
+    """
     proc = _FakeProc()
     ordering: list[str] = []
     p = _batched(tmp_path, ["A01", "A02", "A03"])
@@ -521,36 +539,22 @@ def test_a_dead_driver_stops_the_run_and_the_downloads(tmp_path, monkeypatch):
 
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
+    proc.say("Well A01 — done.\n")
     proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
     proc.finish()                       # the allocation is gone
     worker.join(timeout=20)
 
     assert not worker.is_alive()
-    assert p._returncode not in (0, None)
-    assert p._cancelled, "the Fetcher kept downloading after the driver died"
+    assert p._returncode == 1
+    assert p._driver_lost.is_set()
+    assert not p._stop.is_set(), "a lost driver set the caller's Stop"
+    assert p._cancelled == [], "the Fetcher was cancelled with finished wells still on the remote"
     assert "upload:b3" not in ordering, "kept sending batches to a dead driver"
+    assert any(m.startswith("[remote] ERROR the allocation ended") for m in p._logged), p._logged
 
 
-def test_a_stop_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
-    """The regression the single long-lived driver introduced.
-
-    Stop reaches this object through ``signal_subprocess``, which reads
-    ``proc.pid``. In batched mode that used to be ``-1`` between batches, so the
-    kill fell back to ``terminate()`` — which sets ``_stop``. With one driver
-    held for the whole run there is always a real pid, the process group is
-    killed instead, and ``terminate()`` never runs. Nothing but the stream
-    ending says the run is over, and the worker is inside an rsync at the time:
-    ``upload_subset`` watches ``_stop``, so the beat has to be set from the
-    reader or the app keeps pushing wells at a node that is already gone.
-    """
-    proc = _FakeProc()
-    ordering: list[str] = []
-    p = _batched(tmp_path, ["A01", "A02", "A03"])
-    _stub_runner(p, proc, ordering)
-
-    uploading = threading.Event()
-
-    def blocking_upload(zips, dest, *, stop_event=None, **kw):
+def _blocking_upload(p, ordering, uploading):
+    def upload(zips, dest, *, stop_event=None, **kw):
         ordering.append(f"upload:{dest.rsplit('/', 1)[-1]}")
         uploading.set()
         # What the real rsync wrapper does: transfer until told to stop, then
@@ -558,25 +562,66 @@ def test_a_stop_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
         assert stop_event is not None, "the upload cannot see the Stop at all"
         stop_event.wait(timeout=20)
         return (0, 0.0, 0 if not stop_event.is_set() else 20)
+    p._runner._cache.upload_subset = upload
 
-    p._runner._cache.upload_subset = blocking_upload
+
+def test_a_stop_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
+    """Stop arrives as the event (`PipelineRunner.stop` sets it first) and then the ssh's death.
+
+    The worker is inside an rsync at the time; ``upload_subset`` watches the
+    event, so the transfer ends rather than pushing wells at a node the Stop
+    just released, and it reads as the user's Stop rather than as a fault.
+    """
+    proc = _FakeProc()
+    ordering: list[str] = []
+    p = _batched(tmp_path, ["A01", "A02", "A03"])
+    _stub_runner(p, proc, ordering)
+    uploading = threading.Event()
+    _blocking_upload(p, ordering, uploading)
     monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
 
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     assert uploading.wait(timeout=20), "batch 1 never started uploading"
+    p._stop.set()
     proc.finish()                       # the process-group kill, seen as EOF
 
     worker.join(timeout=20)
-    assert not worker.is_alive(), "the upload outlived the allocation"
-    assert p._stop.is_set()
-    assert p._cancelled, "downloads carried on after the run was killed"
+    assert not worker.is_alive(), "the upload outlived the Stop"
     assert [o for o in ordering if o.startswith("upload:")] == ["upload:b1"]
-    assert p._returncode not in (0, None)
+    assert p._returncode == 130
+    assert not p._driver_lost.is_set()
     assert not any("upload failed" in m for m in p._logged), (
         "an interrupted upload is not a fault to report as one")
     assert any("upload interrupted" in m for m in p._logged)
+
+
+def test_a_driver_lost_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
+    """The allocation ends while a batch is uploading: the transfer stops, as a failure, without the caller's Stop."""
+    proc = _FakeProc()
+    ordering: list[str] = []
+    p = _batched(tmp_path, ["A01", "A02", "A03"])
+    _stub_runner(p, proc, ordering)
+    uploading = threading.Event()
+    _blocking_upload(p, ordering, uploading)
+    monkeypatch.setattr("subprocess.Popen",
+                        lambda argv, **kw: proc)
+
+    worker = threading.Thread(target=p._run_batches, daemon=True)
+    worker.start()
+    assert uploading.wait(timeout=20), "batch 1 never started uploading"
+    proc.finish()                       # the node went away
+
+    worker.join(timeout=20)
+    assert not worker.is_alive(), "the upload outlived the allocation"
+    assert p._returncode == 1
+    assert not p._stop.is_set()
+    assert p._cancelled == []
+    assert [o for o in ordering if o.startswith("upload:")] == ["upload:b1"]
+    assert any(m.startswith("[remote] ERROR the allocation ended while batch 1/3 was uploading")
+               for m in p._logged), p._logged
+    assert not any("upload failed" in m for m in p._logged)
 
 
 def test_a_stop_before_the_first_batch_reaches_nothing_remote(tmp_path):

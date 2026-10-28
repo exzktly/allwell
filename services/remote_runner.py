@@ -420,7 +420,7 @@ class RemoteRunner:
             # run of this same dataset may have left holding a node.
             self._sweep_orphaned_allocation(
                 remote_pidfile, remote_heartbeat, log_fn=log)
-            heartbeat = _UploadHeartbeat(self._cache, remote_heartbeat)
+            heartbeat = _UploadHeartbeat(self._cache, remote_heartbeat, log_fn=log)
             # One beat before the job can look, so the first thing it sees is a
             # heartbeat that exists rather than one that is missing.
             heartbeat.beat()

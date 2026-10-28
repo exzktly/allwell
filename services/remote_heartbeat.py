@@ -10,13 +10,26 @@ driver's wait between batches and its watchdog beside each batch — is
 from __future__ import annotations
 
 import threading
+import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from services.remote_wait_snippets import UPLOAD_HEARTBEAT_S
+from services.remote_wait_snippets import (
+    MID_BATCH_HEARTBEAT_STALE_S,
+    UPLOAD_HEARTBEAT_S,
+    UPLOAD_HEARTBEAT_STALE_S,
+)
 from util.aw_safe import swallowed
 
 if TYPE_CHECKING:
     from services.remote_upload import DatasetCache
+
+#: Consecutive beats that did not land before the log says so, and before it says
+#: so as an error naming when the remote will act on the silence. One missed beat
+#: is an ssh blip the remote tolerates; three is a minute and a half of silence
+#: against a remote that gives the node back after two.
+WARN_AFTER_FAILURES = 2
+ERROR_AFTER_FAILURES = 3
 
 
 class _UploadHeartbeat:
@@ -41,12 +54,21 @@ class _UploadHeartbeat:
     """
 
     def __init__(self, cache: "DatasetCache", path: str,
-                 interval_s: float = UPLOAD_HEARTBEAT_S) -> None:
+                 interval_s: float = UPLOAD_HEARTBEAT_S, *,
+                 log_fn: Callable[[str], None] | None = None,
+                 batched: bool = False, clock: Callable[[], float] = time.time) -> None:
         self._cache = cache
         self._path = path
         self._interval = interval_s
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # A failing beat used to be invisible until the remote acted on the silence — gave the node back, or
+        # suspended the batch — and the remote's message then blamed the app. *log_fn* is told instead.
+        self._log = log_fn or (lambda _m: None)
+        self._batched = batched
+        self._clock = clock
+        self._failures = 0
+        self._last_ok: float | None = None
 
     def beat(self) -> None:
         """One touch, now. Called once before the job starts waiting, so the
@@ -57,8 +79,38 @@ class _UploadHeartbeat:
         letting them queue up would leave the thread minutes behind while the
         remote reads the silence as an app that died.
         """
-        self._cache._ssh_run(["touch", self._path], check=False,
-                             timeout_s=self._interval)
+        try:
+            result = self._cache._ssh_run(["touch", self._path], check=False,
+                                          timeout_s=self._interval)
+        except Exception:
+            self._missed(None)
+            raise
+        rc = getattr(result, "returncode", None)
+        if rc == 0:
+            if self._failures >= WARN_AFTER_FAILURES:
+                self._log(f"[remote] the heartbeat is reaching the host again after {self._failures} missed beat(s)\n")
+            self._failures, self._last_ok = 0, self._clock()
+        else:
+            self._missed(rc)
+
+    def _missed(self, rc: int | None) -> None:
+        """Count a beat that did not land, and say so at the 2nd and 3rd in a row."""
+        self._failures += 1
+        if self._failures not in (WARN_AFTER_FAILURES, ERROR_AFTER_FAILURES):
+            return
+        since = self._last_ok if self._last_ok is not None else self._clock()
+        at = lambda s: time.strftime("%H:%M:%S", time.localtime(since + s))     # noqa: E731
+        if self._failures == WARN_AFTER_FAILURES:
+            self._log(f"[remote] WARNING the run's heartbeat did not reach the host {self._failures} times in a row "
+                      f"(ssh exit {rc}) — still trying\n")
+            return
+        mid = (f"; a batch already running is suspended at about {at(MID_BATCH_HEARTBEAT_STALE_S)} "
+               f"({MID_BATCH_HEARTBEAT_STALE_S // 60} min)") if self._batched else ""
+        self._log(f"[remote] ERROR the run's heartbeat has not reached the host {self._failures} times in a row "
+                  f"(ssh exit {rc}). If it does not recover, the host takes the app for gone: a node waiting for "
+                  f"{'a batch' if self._batched else 'the upload'} is given back at about "
+                  f"{at(UPLOAD_HEARTBEAT_STALE_S)} ({UPLOAD_HEARTBEAT_STALE_S} s after the last beat that landed)"
+                  f"{mid}\n")
 
     def start(self) -> None:
         """Begin beating. Paired with :meth:`stop` — see the class docstring."""

@@ -1587,7 +1587,12 @@ folder, so Review cannot tell the difference afterwards.
 **A small server icon in the run panel's status line, at its right end, shows the run's Slurm job** on a host that
 runs through a scheduler. It is green while the job is open — granted a node
 and holding it — and grey while the job is still queued for a node; once the
-job closes, or on a host with no scheduler, there is no icon. Hover over it
+job closes, or on a host with no scheduler, there is no icon. The job is
+called closed only once the host confirms the scheduler no longer lists it.
+When the run has ended and that cannot be confirmed — the host did not answer,
+or the scheduler still lists the job — the icon stays, in amber, the log says
+*job state unknown* and why, and the job may still be running: check `squeue`
+on the host. Hover over it
 for the job number and what the node is: its name and partition, the CPUs the
 job was given out of the node's total, the CPU model, the memory given and the
 node's total, its GPUs, and the job's time limit. A detail the node could not
@@ -1894,13 +1899,32 @@ reading it. The log names any it kept over budget for that reason.
   wells being processed and leaves the fetching to the Download row on the stage
   rail and to the status line.
 - The line under the headline reports the plate-wide transfer while one is
-  running (`Transferring… 42%`), and clears itself the moment the pipeline
-  starts computing rather than lingering on whatever percentage the transfer
-  last reported.
+  running, and says which: `Uploading… 42%` for the images going up,
+  `Downloading… 42%` for the share of the run's wells fetched back. The upload
+  figure clears itself as soon as the upload is over — before a batch is handed
+  to the cluster and while it waits for a node — and any figure clears the
+  moment the pipeline starts computing, rather than lingering on whatever
+  percentage the transfer last reported.
 - Hover a well for its exact numbers — the stage it is in plus its field count
   (`FOV 7/12`) or transfer percentage. On a remote run an uploaded well waiting
   its turn has its own colour, distinct from one being computed — see the
   **Wells** legend beside the plate.
+- **A well that finished short is marked, not painted complete.** A well whose
+  FOV-groups partly failed, whose remaining groups were not attempted after a
+  storage failure, that produced no records, in which no image groups were found,
+  that a suspend reached part way, or — in a nanowell run — some of whose
+  timepoints came out without rows, still writes its CSV and `out.zip` from what
+  it had, and says `— done.`. On the plate it takes the **partial / unfinished**
+  colour and carries a `!`; hovering it names each shortfall in the pipeline's
+  own words (`A01: partial — 9 of 12 FOV-group(s) failed; the CSV and out.zip
+  cover the rest`). On a remote run the hover also says whether its output is
+  fetched locally or still on the server. A well that was still being computed
+  when the run ended — it crashed, was stopped, or lost its connection — is
+  marked the same way as **unfinished**, with its dial left where it got to,
+  instead of staying amber "processing" on a run that is over. The completion
+  headline counts them (`Complete — 40 well(s) processed; 3 partial or
+  unfinished (marked ! on the plate)`). Re-run with **incremental** to recover
+  the missing FOV-groups.
 - The **headline and progress bar** count wells, and count each well once. A
   well already finished by an earlier run is counted too — it is part of the
   plate you asked for, so a run that only has ten wells left to compute still
@@ -1976,7 +2000,11 @@ reading it. The log names any it kept over budget for that reason.
   finishes the fields in flight and the wells it finished keep downloading, so
   the run can take a little longer to end than a local one. Pressed while the
   plate is still uploading, there is nothing running on the host yet, so it
-  stops the run instead. A batched remote run finishes the batch it is on and
+  stops the run instead. Pressed while the job is still queued for a node,
+  nothing has run either: the queued job is cancelled (rather than left to wait
+  out the queue only to stop the moment it starts), the run is shown as
+  suspended — *suspended before it started* — and Resume queues it again. Stop
+  pressed during a queue wait cancels the queued job too. A batched remote run finishes the batch it is on and
   stops any upload of the next one. If the host cannot be reached, the log says
   so and the run keeps going — press Suspend again, or Stop; if the request did
   reach the host after all, the run still ends as suspended. Once everything
@@ -2053,7 +2081,40 @@ reading it. The log names any it kept over budget for that reason.
   upload it ends the upload and nothing is launched on the host; pressed later,
   the host-side kill runs in the background rather than holding up the window.
   On Windows this includes an All-Well started from a terminal: Stop ends the
-  connection to the host and leaves the app open.
+  connection to the host and leaves the app open. Once the run has ended, the
+  app checks with the host that it really stopped — on a cluster, that the
+  scheduler no longer lists the job. If the host cannot be reached (the network
+  is down, say), the headline says *stopped here, but not confirmed on the host
+  (… did not answer …) — it may still be running*: check the host yourself, with
+  `squeue` on a cluster, before you assume the allocation is gone.
+- **A run nobody stopped says what ended it.** On a cluster the pipeline is
+  sometimes ended from outside — the job reaches its time limit, it is
+  preempted, its node fails, an administrator cancels it, or a batch outlives
+  the time budget the batch driver gives it. The run is then reported as a
+  failure that names the cause (*Remote pipeline was terminated: the scheduler
+  ended job 4242 at its time limit.*), the raw log opens, and the run is
+  offered back as a *Failed run*. It is never shown as your Suspend — that is
+  only ever a Suspend you pressed. The wells that finished are kept; resume to
+  run the rest (for a time limit, with a longer `--time` in the host's
+  launcher, or a smaller batch size). A local run that is sent a termination
+  signal by something other than Stop or Suspend is reported the same way.
+- **A remote run that goes quiet is checked.** If a remote run prints nothing
+  for twenty minutes (outside a wait in the scheduler's queue, which is quiet by
+  nature), the status line says *No output from <host> for 21m00s — checking it
+  is still running…*, the log shows the last line received, and the app asks the
+  host whether the run is still there. The answer goes in the log: still
+  running (it is only slow — nothing to do), no longer running (press **Stop**,
+  then **Resume** to download the wells it finished and run the rest), or not
+  known (the host did not answer). Nothing is stopped for you. A healthy run is
+  never that quiet — every field, step or transfer prints something — so the
+  warning means something is worth a look, not that the run has failed.
+- **A dropped connection is reported as one.** If the connection to the host
+  breaks during a remote run, the headline says *Connection to <host> lost*
+  with ssh's own reason (*Timeout, server … not responding*, *Connection …
+  closed*, *Broken pipe*), the log shows that line in red, and the message says
+  whether the job is still running on the host, no longer running, or — when
+  the host cannot be reached to ask — may still be running. Resume downloads the
+  wells it finished and runs the rest.
 - Either way the wells already finished keep their results, so nothing you have
   waited for is thrown away — Suspend just also keeps the fields in progress and
   saves you re-entering the form.

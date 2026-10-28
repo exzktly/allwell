@@ -3483,7 +3483,8 @@ def test_close_remote_job_scancels_scheduled_host():
 
 def test_close_remote_job_logs_clean_finish_when_nothing_to_cancel():
     """The common case: srun already exited, so scancel finds nothing — we
-    still emit a definite end-of-job marker instead of silence."""
+    still say so instead of silence. Not "already finished": scancel's answer
+    is discarded, so the runner confirms the close with squeue (D3)."""
     r = _runner_with_run("srun --partition=gpu")
     logs: list[str] = []
     with patch("subprocess.run") as run:
@@ -3491,7 +3492,7 @@ def test_close_remote_job_logs_clean_finish_when_nothing_to_cancel():
             args=[], returncode=0, stdout="", stderr="",
         )
         r.close_remote_job(log_fn=logs.append)
-    assert any("already finished" in m for m in logs)
+    assert any("no job left to cancel" in m for m in logs)
 
 
 def test_close_remote_job_noop_before_run_starts():

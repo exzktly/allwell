@@ -4,7 +4,10 @@ Three states, because the user asked to tell exactly one of them apart from
 the other two: a job that is **open** — granted a node and holding it — as
 against one still **queued** for a node, or none at all (never requested, or
 closed). The indicator is lit only while open; queued shows it dimmed, so a
-queue wait is not mistaken for a running job; with no job it is hidden.
+queue wait is not mistaken for a running job; with no job it is hidden. A
+fourth, **unknown**, is for a run that has ended without the job being
+confirmed closed: it stays shown, in the warning colour, since a job that may
+still be running is not one the indicator may put out.
 
 Every transition comes from a line the run prints
 (``services.pipeline_runner.ProgressTracker`` turns them into ``sched`` and
@@ -19,6 +22,11 @@ from dataclasses import dataclass, field, replace
 NONE = "none"
 QUEUED = "queued"
 OPEN = "open"
+#: The run is over and the job could not be confirmed closed — the host did not
+#: answer, or the scheduler still lists it (``PipelineRunner._settle_remote_job``).
+#: Shown, in the warning colour, rather than put out: a job that may still be
+#: running (and billing) is the one thing the indicator must not hide.
+UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -53,6 +61,10 @@ def on_specs(job: SlurmJob, specs: dict[str, str]) -> SlurmJob:
 
 def on_closed(_job: SlurmJob) -> SlurmJob:
     return SlurmJob()
+
+
+def on_unknown(job: SlurmJob) -> SlurmJob:
+    return replace(job, state=UNKNOWN)
 
 
 #: Tooltip rows: (label, how to render from the specs). A row whose fields
@@ -102,6 +114,9 @@ def tooltip(job: SlurmJob) -> str:
     ident = f" {job.job_id}" if job.job_id else ""
     if job.state == QUEUED:
         return f"Slurm job{ident} is queued — waiting for the scheduler to grant a node."
+    if job.state == UNKNOWN:
+        return (f"Slurm job{ident} could not be confirmed closed — it may still be running. "
+                "Check squeue on the host; the run log says why.")
     if job.state != OPEN:
         return "No Slurm job is open."
     lines = [f"Slurm job{ident} is open."]

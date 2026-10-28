@@ -295,6 +295,7 @@ def test_the_runner_refuses_an_incremental_nanowell_run_before_staging_anything(
     runner._output_filter = "full"
     runner._remote = SimpleNamespace(name="bench-box")
     runner._stop_requested = threading.Event()
+    runner._job_settled = True          # nothing is launched, so there is no job to settle
     runner._enqueue = events.append
     runner._enqueue_error = lambda text: events.append(("error", text))
     runner._enqueue_stopped = lambda **k: events.append(("stopped", k))

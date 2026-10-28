@@ -431,7 +431,12 @@ class AnalyzeLogPaneMixin:
             if suspended:
                 self._dashboard.set_cancelled("suspended; resume to finish")
             elif stopped:
-                self._dashboard.set_cancelled("stopped")
+                # A Stop whose kill and scancel could not reach the host left
+                # the run going; "stopped" alone would say otherwise (D3).
+                unconfirmed = getattr(self._runner, "stop_unconfirmed", "")
+                self._dashboard.set_cancelled(
+                    f"stopped here, but not confirmed on the host ({unconfirmed}) — it may "
+                    f"still be running" if unconfirmed else "stopped")
             else:
                 self._dashboard.set_failed(_headline_of(text), tooltip=text)
         except Exception:

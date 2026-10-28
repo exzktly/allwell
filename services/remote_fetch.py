@@ -421,7 +421,7 @@ class Fetcher:
         self.run = run
         self.output_filter = output_filter
         self._log = log_fn or (lambda _msg: None)
-        self._progress = progress_fn
+        self._progress = getattr(progress_fn, "download", progress_fn)  # its own direction (TransferProgress)
         self._delete_after_download = delete_after_download
         self._stop = threading.Event()
         self._pending: queue.Queue = queue.Queue()  # well labels, after_queued tasks, None

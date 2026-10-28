@@ -10,8 +10,12 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
     zipper_start  int        Begin grouping phase, expected well count.
     zipper_well   str|None   One well finished grouping.
     zipper_done   None       Grouping phase finished.
-    remote_xfer   float      Remote rsync progress as a fraction in [0, 1].
+    remote_xfer   tuple      ("up"|"down", fraction in [0, 1]): the plate-wide
+                             upload's progress, or the share of the run's
+                             wells fetched back (``TransferProgress``).
                              Only emitted during remote-execution runs.
+    xfer_end      str        "up": the upload is over (``ProgressTracker``,
+                             from the uploader's own completion lines).
     well_xfer     tuple      (well, "up"|"down", fraction) — one well's own
                              upload or download progress, for its dial on the
                              plate map. Parsed out of the log stream by
@@ -66,7 +70,8 @@ from pipeline.slurm_node import parse_node_specs
 from util.aw_safe import swallow, swallowed
 from util.json_write import try_write_json_atomic
 from util.zip_append import recover_paths as recover_appends
-from pipeline.suspend import LOG_MARKER as _SUSPEND_LOG_MARKER
+from services.remote_liveness import ALIVE, GONE, Liveness, cancel_pending, probe
+from services.run_evidence import RunEvidence, is_ssh_reason
 
 _LOG = logging.getLogger("allwell.pipeline_runner")
 
@@ -135,6 +140,12 @@ def classify_log_line(line: str) -> str:
     tag = _RE_EXPLICIT_TAG.search(line)
     if tag:
         return _TAG_TO_LEVEL[tag.group(1).lower()]
+    if is_ssh_reason(line):
+        # ssh saying why the connection broke ("Timeout, server … not
+        # responding", "Connection … closed", "Broken pipe") carries none of
+        # the words below and read as INFO — the one line that explained a
+        # run's end, painted as routine (tracker D3).
+        return "ERROR"
     if _RE_SELF_DECLARED_NOTE.search(line):
         # "note:" is the author saying this is context, not a verdict. Nothing
         # that reports a failure introduces itself as a note.
@@ -229,10 +240,87 @@ _RE_WELL_FAIL = re.compile(r"FAILED well (\S+?)[:\s]")
 _RE_WELL_UPTODATE = re.compile(r"Well (\S+)\s+\S+\s+up to date")
 # A well skipped because its output already exists (re-run without --force) —
 # it's complete, so the dashboard must count it as done, not leave it pending.
-_RE_WELL_SKIP = re.compile(r"SKIP well (\S+)\s+\S+\s+output already exists")
+# The batched remote client prints two of its own: a well whose output is
+# already *here* ("output already exists locally; not uploaded") and an
+# empty-well blank that was sent only as the correction's reference
+# ("empty-well reference only; already complete locally").
+_RE_WELL_SKIP = re.compile(
+    r"SKIP well (\S+)\s+\S+\s+(?:output already exists|empty-well reference only)")
+# Those two say where the output is, which the pipeline's own SKIP (printed on
+# the host, about the host's folder) does not: on a remote run a well whose
+# output is already local is fetched, and painting it "on server, awaiting
+# fetch" left it blue for the rest of the run (tracker D6).
+_RE_WELL_SKIP_LOCAL = re.compile(
+    r"SKIP well (\S+)\s+\S+\s+(?:output already exists locally|empty-well reference only)")
 # Remote incremental: the runner emits this for wells it didn't need to upload /
 # re-fetch because their local output is already current — marks them complete.
 _RE_REMOTE_UPTODATE = re.compile(r"\[remote\] ✓ ([A-Ha-h]\d{1,2}): up to date")
+
+# Per-well markers that say a well's output is SHORT of its input. Each of these
+# is printed before the well's "— done." — which still fires, because the well
+# did write a CSV and an out.zip from the work it had — so a plate driven by
+# "done" alone painted every one of them complete, and the pipeline's own exit
+# line had to admit "partial wells look complete on the plate map" (tracker B3).
+# Each pattern carries the sentence the well's hover text gives for it; the
+# list of markers is held against every one the pipeline can print by
+# ``tests/test_every_well_marker_reaches_the_plate.py``.
+_PARTIAL_MARKERS: tuple[tuple[re.Pattern, str], ...] = (
+    (re.compile(r"Well (\S+)\s+\S+\s+PARTIAL: (?P<k>\d+) of (?P<n>\d+) FOV-group"),
+     "{k} of {n} FOV-group(s) failed; the CSV and out.zip cover the rest"),
+    (re.compile(r"Well (\S+)\s+\S+\s+NOT ATTEMPTED: (?P<k>\d+) FOV-group"),
+     "{k} FOV-group(s) not attempted after the well aborted"),
+    (re.compile(r"Well (\S+)\s+\S+\s+(?:storage failure|ABORTING after)"),
+     "the storage it writes to failed part way through the well"),
+    (re.compile(r"Well (\S+)\s+\S+\s+SUSPENDED part way: (?P<k>\d+) of (?P<n>\d+) FOV-group"),
+     "{k} of {n} FOV-group(s) not reached before the suspend"),
+    (re.compile(r"Well (\S+): no records produced"),
+     "no records produced, so it has no CSV rows"),
+    (re.compile(r"Well (\S+): no image groups found in (?P<zip>\S+?)\.?\s*$"),
+     "no image groups found in {zip}, so nothing was measured"),
+    # A nanowell well counts timepoints, and says how many came out with no rows.
+    (re.compile(r"Well (\S+)\s+\S+\s+done\. (?P<n>\d+) timepoint\(s\), (?P<k>[1-9]\d*) without rows"),
+     "{k} of {n} timepoint(s) without rows"),
+)
+# "No image groups" is the one partial marker no "— done." follows: the task
+# returns before writing anything, so it is the well's terminal marker too.
+_RE_WELL_NO_GROUPS = _PARTIAL_MARKERS[5][0]
+# A worker's own failure line, beside the orchestrator's "FAILED well X:".
+_RE_WELL_WORKER_FAIL = re.compile(r"Well (\S+) failed \(")
+# A well a suspend reached before it did any work. The second of the two is
+# printed after "— starting", so the well has to leave "processing".
+_RE_WELL_NOT_STARTED = re.compile(r"Well (\S+)\s+\S+\s+not started \(")
+
+
+def _job_events(line: str) -> list[tuple[str, object]]:
+    """``("slurm_job", …)`` for the node-specs line, the job closing, or its
+    state left unknown at the end of the run."""
+    events: list[tuple[str, object]] = []
+    specs = parse_node_specs(line)
+    if specs is not None:
+        events.append(("slurm_job", ("specs", specs)))
+    if _RE_JOB_CLOSED.search(line):
+        events.append(("slurm_job", ("closed", {})))
+    elif _RE_JOB_UNKNOWN.search(line):
+        events.append(("slurm_job", ("unknown", {})))
+    return events
+
+
+def _well_outcome_events(line: str) -> list[tuple[str, object]]:
+    """``("well_partial", (well, why))`` for a marker saying a well's output is
+    short, ``("well_stage", (well, "error"))`` for a worker's own failure line,
+    ``("well_not_started", well)`` for a well a suspend reached first."""
+    events: list[tuple[str, object]] = []
+    for pattern, why in _PARTIAL_MARKERS:
+        found = pattern.search(line)
+        if found:
+            events.append(("well_partial", (found.group(1), why.format(**found.groupdict()))))
+    found = _RE_WELL_WORKER_FAIL.search(line)
+    if found:
+        events.append(("well_stage", (found.group(1), "error")))
+    found = _RE_WELL_NOT_STARTED.search(line)
+    if found:
+        events.append(("well_not_started", found.group(1)))
+    return events
 
 # A scheduler-backed host queues the pipeline rather than starting it, and a
 # queue wait is indistinguishable from a hang: the upload finishes, the log
@@ -258,9 +346,14 @@ _RE_SCHED_ALLOCATED = re.compile(
 #: has exited — the moment the job is no longer open. Printed locally, after
 #: the ssh session ends, because nothing inside the allocation runs after the
 #: pipeline: the single-run launch ``exec``s it.
-JOB_CLOSED_LINE = "[remote] scheduler: job closed — the remote process has exited\n"
+JOB_CLOSED_LINE = "[remote] scheduler: job closed — the scheduler no longer lists it\n"
 _RE_JOB_CLOSED = re.compile(
     re.escape(JOB_CLOSED_LINE.strip()) + r"|\[remote\] releasing the allocation")
+#: What the runner prints instead when it could not confirm the job closed —
+#: the host did not answer, or the scheduler still lists it
+#: (``PipelineRunner._settle_remote_job``). The job indicator shows it as such.
+JOB_UNKNOWN_PREFIX = "[remote] scheduler: job state unknown — "
+_RE_JOB_UNKNOWN = re.compile(re.escape(JOB_UNKNOWN_PREFIX.strip()))
 # Remote per-well lifecycle: input zip uploaded, then the output is fetched as
 # TWO separate transfers — the well's output zip AND its per-well CSV(s). A well
 # is only "downloaded" once BOTH have landed; the ``✓ materialised`` line fires
@@ -360,6 +453,62 @@ def parse_well_transfer(line: str) -> tuple[str, str, float] | None:
     return m.group(2).upper(), m.group(1), max(0.0, min(1.0, fraction))
 
 
+#: Every pattern ``ProgressTracker`` derives a *state* from — a well reaching a
+#: stage or an end, the run's total, the scheduler's hand-off, the job closing
+#: — as against the samples it derives a gauge position from. A line matching
+#: one of these is never dropped when the run's event queue is full
+#: (``PipelineRunner._enqueue``): a dropped "— done." is a well left amber for
+#: the rest of the run and a headline that never reaches its total, which the
+#: one-line overflow warning did not say (tracker C11). Progress samples (FOV
+#: counts, transfer fractions) still drop, because the next one replaces them.
+_STATE_PATTERNS: tuple[re.Pattern, ...] = (
+    _RE_MODE_WELLS, _RE_WELL_START, _RE_WELL_DONE_ID, _RE_WELL_FAIL, _RE_WELL_UPTODATE,
+    _RE_WELL_SKIP, _RE_REMOTE_UPTODATE, _RE_WELL_WORKER_FAIL, _RE_WELL_NOT_STARTED,
+    *(p for p, _why in _PARTIAL_MARKERS), _RE_REMOTE_UP_WELL, _RE_FETCH_ZIP, _RE_FETCH_CSV,
+    _RE_THRESH_WELL, _RE_SCHED_REQUEST, _RE_SCHED_GRANTED, _RE_SCHED_QUEUED,
+    _RE_SCHED_ALLOCATED, _RE_JOB_CLOSED, _RE_JOB_UNKNOWN, _RE_WELL_REANCHORING, _RE_WELL_REANCHORED,
+    _RE_WELL_REANCHOR_FAILED, _RE_WELL_REANCHOR_UNCHANGED, _RE_WELL_HELD,
+    _RE_WELL_REFETCHED, _RE_WELL_REFETCH_SHORT,
+)
+
+
+def carries_state(line: str) -> bool:
+    """Whether *line* is one the run's displayed state is derived from."""
+    return any(p.search(line) for p in _STATE_PATTERNS) or bool(_RE_UPLOAD_OVER.search(line))
+
+
+class TransferProgress:
+    """The progress callback a remote run is handed, which knows its direction.
+
+    Called with a fraction it is the upload's (``RemoteRunner.spawn`` hands it
+    to the uploader); its :meth:`download` is the share of the run's wells
+    fetched back, which the ``Fetcher`` reaches for when it is there
+    (``Fetcher.__init__``). Both used to be one plain callable, so the
+    dashboard's "Transferring… NN%" was whichever wrote last, and a batch
+    upload's last tick sat there through the queue wait that followed
+    (tracker D5).
+    """
+
+    def __init__(self, enqueue: Callable[[tuple[str, object]], None]) -> None:
+        self._enqueue = enqueue
+
+    def __call__(self, pct: float) -> None:
+        self._enqueue(("remote_xfer", ("up", float(pct))))
+
+    def download(self, pct: float) -> None:
+        self._enqueue(("remote_xfer", ("down", float(pct))))
+
+
+# The uploader's own lines for an upload that is over — finished, interrupted
+# or failed — single-shot (``RemoteRunner._upload_input``), per batch
+# (``remote_process``) and for the empty-well reference. The label they end is
+# the upload's: a batch's upload is followed by its hand-off and a scheduler
+# wait in which nothing else writes the status line.
+_RE_UPLOAD_OVER = re.compile(
+    r"\[remote\] (?:uploaded [\d.]+ MB in|batch \d+(?:/\d+)?: upload (?:complete|interrupted)"
+    r"|batch \d+ upload failed|empty-well reference uploaded once|upload failed)")
+
+
 class ProgressTracker:
     """Pure log-line parser that tracks well-count progress.
 
@@ -392,7 +541,7 @@ class ProgressTracker:
         seen.add(part)
         return not was_complete and {"zip", "csv"} <= seen
 
-    #: What the run journal records for each of the three terminal markers,
+    #: What the run journal records for each kind of terminal marker,
     #: keyed by the marker's own name. Exhaustive on purpose — a new marker
     #: raises here rather than defaulting to one of the two answers, because
     #: guessing wrong in either direction is a record that claims work that did
@@ -401,17 +550,21 @@ class ProgressTracker:
     #: can see both states: that roster's liveness check reads dict values, and
     #: an earlier spelling as a conditional expression left ``analysed``
     #: visible only in a mapping nothing reached (CLAUDE.md §7.5 #10).
-    _RECORD_FOR_MARKER = {"process": "analysed", "uptodate": "skipped"}
+    #: ``empty`` is "no image groups found": the well is finished — nothing
+    #: will come of waiting for it — and nothing was measured, so it is
+    #: recorded as failed rather than as analysed.
+    _RECORD_FOR_MARKER = {"process": "analysed", "uptodate": "skipped", "empty": "failed"}
 
     def _count_well_done(self, well: str,
                          stage: str = "process") -> list[tuple[str, object]]:
         """Record that *well* reached a terminal state, counting it once.
 
         *stage* is what the marker said happened, and it is not always
-        "processed". Three lines reach here — "— done.", "up to date" and
-        "SKIP … output already exists" — and all three mean the well is
-        complete *for progress purposes*, which is why they share a counter.
-        Only the first means the pipeline computed anything. Collapsing them
+        "processed". Four lines reach here — "— done.", "up to date",
+        "SKIP … output already exists" (or a remote client's SKIP) and "no
+        image groups found" — and all four mean the well is finished *for
+        progress purposes*, which is why they share a counter. Only the first
+        means the pipeline computed anything. Collapsing them
         into one stage made an incremental run that touched 6 of 96 wells
         journal 96 as ``analysed`` and the readout say "It recorded 96
         finished", which is a claim about work that did not happen.
@@ -503,6 +656,8 @@ class ProgressTracker:
         # Remote transfer phases (the runner logs "[remote] ↑" while uploading
         # inputs, "[remote] ↓" while fetching outputs) drive the active stage.
         # Per-well: the input zip's upload and the output zip's local landing.
+        if _RE_UPLOAD_OVER.search(line):
+            events.append(("xfer_end", "up"))
         if "[remote] ↑" in line:
             events.append(("stage", "upload"))
             mu = _RE_REMOTE_UP_WELL.search(line)
@@ -538,9 +693,10 @@ class ProgressTracker:
             events.append(("well_stage", (mt.group(1), "threshold")))
         # Remote: a well skipped because its local output is already current —
         # mark it fetched/complete (green) on the plate.
-        mru = _RE_REMOTE_UPTODATE.search(line)
+        mru = _RE_REMOTE_UPTODATE.search(line) or _RE_WELL_SKIP_LOCAL.search(line)
         if mru:
             events.append(("well_stage", (mru.group(1), "download")))
+        events.extend(_well_outcome_events(line))
         # Scheduler hand-off. Reported as its own kind rather than folded into
         # ``status`` because the GUI has to start and stop a clock, not just
         # write a string — a wait that does not visibly count up is the hang it
@@ -561,11 +717,7 @@ class ProgressTracker:
         # handing its allocation back, and the runner noting that the remote
         # process which held the job has exited (the single-run launch execs
         # the pipeline, so nothing inside the job can say it is over).
-        specs = parse_node_specs(line)
-        if specs is not None:
-            events.append(("slurm_job", ("specs", specs)))
-        if _RE_JOB_CLOSED.search(line):
-            events.append(("slurm_job", ("closed", {})))
+        events.extend(_job_events(line))
         # Finalize-phase status — replace the generic "Finalizing…" with what
         # the run is actually doing so it doesn't read as a hang.
         if _RE_TF_SCAN.search(line):
@@ -615,19 +767,20 @@ class ProgressTracker:
             # too as a fallback for users running mismatched
             # client/server versions.
             #
-            # The three terminal markers — finished, incremental up-to-date,
-            # and already-complete-so-skipped — all mean the same thing to the
-            # progress count, and all name their well, so they share one
-            # identity-aware counter. An up-to-date well never emits "— done.";
-            # a skipped one never runs at all; both are complete.
+            # The terminal markers — finished, incremental up-to-date,
+            # already-complete-so-skipped, and no image groups found — all mean
+            # the same thing to the progress count, and all name their well, so
+            # they share one identity-aware counter. An up-to-date well never
+            # emits "— done."; a skipped one never runs at all; both are complete.
             # Matched separately rather than as one `or` chain, because which
-            # of the three fired is the thing the journal needs: they agree
+            # of them fired is the thing the journal needs: they agree
             # that the well is complete and disagree about whether this run
             # computed it.
             for pattern, stage in (
                 (_RE_WELL_DONE_ID, "process"),
                 (_RE_WELL_UPTODATE, "uptodate"),
                 (_RE_WELL_SKIP, "uptodate"),
+                (_RE_WELL_NO_GROUPS, "empty"),
             ):
                 md = pattern.search(line)
                 if md:
@@ -792,9 +945,9 @@ class PipelineRunner:
     """
 
     # Cap the log queue so a stalled UI thread can't let the reader stuff
-    # unbounded lines into memory. Overflow drops are surfaced to the GUI
-    # via a single warning line — the ring buffer in allwell captures
-    # everything for the help-drawer log tab.
+    # unbounded lines into memory. Only lines no state depends on are dropped,
+    # and how many is said in the log (``_enqueue``); they are not kept
+    # anywhere else.
     _LOG_QUEUE_MAXSIZE = 10000
 
     def __init__(self) -> None:
@@ -824,7 +977,10 @@ class PipelineRunner:
         # held so app close can wait for it (see `wait_for_teardown`).
         self._cancel_thread: threading.Thread | None = None
         self._last_output_dir: Path | None = None
-        self._log_overflow_warned: bool = False
+        # Lines dropped from a full queue since the count was last said
+        # (``_say_dropped``); several threads write the queue, hence the lock.
+        self._dropped_lines = 0
+        self._dropped_lock = threading.Lock()
         # Set on Stop; checked between the zipper phase and the pipeline
         # launch so a cancel during grouping doesn't slip through and
         # start a fresh pipeline run.
@@ -842,9 +998,26 @@ class PipelineRunner:
         self._suspend_thread: threading.Thread | None = None
         self._suspend_seq = 0
         self._run_generation = 0
-        # Set when the remote pipeline's own stream says it saw a suspend
-        # request (`pipeline.suspend.LOG_MARKER`) — the evidence that decides.
-        self._suspend_seen = False
+        # What the run's own stream said about how it ended — a suspend
+        # request seen (`pipeline.suspend.LOG_MARKER`), slurmstepd's
+        # cancellation, the driver's time budget, ssh's reason for a drop.
+        self._evidence = RunEvidence()
+        # Whether this run asked to suspend. `_suspend_requested` cannot say:
+        # a remote ask whose ssh failed clears it again. Without this a suspend
+        # marker counted as the user's whoever had sent the signal (D1).
+        self._suspend_asked = False
+        # The scheduler job's settlement (`_settle_remote_job`): done once,
+        # what the probe found, and what it could not confirm about a Stop.
+        self._job_settled = False
+        self._job_liveness: Liveness | None = None
+        self._stop_unconfirmed = ""
+        # A Suspend pressed while the job was queued, which cancels the job.
+        self._queued_suspend = False
+        # When the run last said anything, and what (``seconds_since_output``),
+        # and the silent-stream probe in flight (``probe_silence``).
+        self._last_output_at: float | None = None
+        self._last_output_line = ""
+        self._silence_probe: threading.Thread | None = None
         # Snapshots of the two events above, taken when a failure is queued —
         # see ``cancel_state_at_failure``.
         self._error_was_stopped = False
@@ -899,38 +1072,71 @@ class PipelineRunner:
     #: Suspend exits 0 on purpose, and it is neither a completion nor a failure.
     _CONTROL_KINDS = frozenset({"done", "suspended", "error", "finished"})
 
-    def _enqueue(self, event: tuple[str, object]) -> None:
-        """Non-blocking enqueue for a log line; drops the message on overflow
-        with a one-shot warning rather than blocking the reader thread.
+    def _enqueue(self, event: tuple[str, object], *, activity: bool = True) -> None:
+        """Non-blocking enqueue for a log line; drops it on overflow rather
+        than blocking the reader thread — unless the run's state depends on it.
 
-        ``done`` / ``error`` / ``finished`` are never dropped — they block
-        until the reader (draining at 80ms intervals in ``_poll_log``) makes
-        room, since losing one leaves a run's completion unobservable.
+        Two things are never dropped; they block until the reader (draining
+        in bounded slices in ``_poll_log``) makes room:
+
+        * the control events (``done`` / ``error`` / ``suspended`` /
+          ``finished``), since losing one leaves a run's completion
+          unobservable;
+        * a line the run's displayed state is derived from
+          (:func:`carries_state`) — a well's "— done.", its FAILED / PARTIAL /
+          SKIP, a fetch landing, the scheduler's hand-off. Dropping one of
+          those cost no mere log line: the well stayed "processing" for the
+          rest of the run and the headline never reached its total.
+
+        What is dropped is counted, and the count is said — in a line queued
+        as soon as there is room, and in any case before the next state line
+        or control event, so it is guaranteed to reach the log before the run
+        ends. The warning it replaced was tried once, could itself be dropped
+        when the queue was still full, and claimed the lost lines were "still
+        captured in the help-drawer log tab", which they were not: that tab
+        mirrors what this view shows (tracker C11).
         """
-        if event[0] in self._CONTROL_KINDS:
+        if activity and event[0] in ("line", "remote_xfer"):
+            # The run said something: the silent-stream check's clock
+            # (``seconds_since_output``). Not for the check's own report, which
+            # passes ``activity=False`` — a probe must not prove itself alive.
+            self._last_output_at = time.monotonic()
+            if event[0] == "line" and str(event[1]).strip():
+                self._last_output_line = str(event[1]).strip()
+        if event[0] == "line" and not str(event[1]).startswith(JOB_UNKNOWN_PREFIX):
+            # Every line the run says, from whichever thread: the stream, and
+            # the spawn's own lines before there is one (the allocation request).
+            # Not the runner's own report of a probe, which quotes ssh too.
+            self._evidence.note(str(event[1]))
+        must_keep = event[0] in self._CONTROL_KINDS or (
+            event[0] == "line" and carries_state(str(event[1])))
+        if must_keep:
+            self._say_dropped(block=True)
             self.log_q.put(event)
             return
         try:
+            self._say_dropped(block=False)
             self.log_q.put_nowait(event)
         except queue.Full:
-            if not self._log_overflow_warned:
-                self._log_overflow_warned = True
-                try:
-                    self.log_q.put_nowait((
-                        "line",
-                        "[warn] log queue full — dropping further "
-                        "lines from the live view. Subsequent output is "
-                        "still captured in the help-drawer log tab.\n",
-                    ))
-                except queue.Full:
-                    # The overflow warning itself could not be queued, which
-                    # means the reader has not drained a single slot since the
-                    # queue filled. Nothing to do and nothing to say — the one
-                    # channel for saying it is the thing that is full — and the
-                    # flag above already ensures this is attempted once per run
-                    # rather than per dropped line.
-                    swallowed("the log-overflow warning could not be queued "
-                              "either; the reader has drained nothing")
+            with self._dropped_lock:
+                self._dropped_lines += 1
+
+    def _say_dropped(self, *, block: bool) -> None:
+        """Queue the count of lines dropped since it was last said, if any."""
+        with self._dropped_lock:
+            n, self._dropped_lines = self._dropped_lines, 0
+        if not n:
+            return
+        line = ("line", f"[warn] {n} line(s) of the run's output were dropped from "
+                        f"this view because it fell behind. Every well's state and "
+                        f"the run's outcome are still shown; the dropped lines are "
+                        f"not kept anywhere else.\n")
+        try:
+            self.log_q.put(line) if block else self.log_q.put_nowait(line)
+        except queue.Full:
+            with self._dropped_lock:
+                self._dropped_lines += n         # said with the next one instead
+            raise
 
     @property
     def is_running(self) -> bool:
@@ -1081,7 +1287,14 @@ class PipelineRunner:
         # Clearing before the thread exists closes the window entirely.
         self._stop_requested.clear()
         self._suspend_requested.clear()
-        self._suspend_seen = False
+        self._evidence = RunEvidence()
+        self._suspend_asked = False
+        self._job_settled = False
+        self._job_liveness = None
+        self._stop_unconfirmed = ""
+        self._queued_suspend = False
+        self._last_output_at = time.monotonic()
+        self._last_output_line = ""
         self._run_generation += 1
         self._error_was_stopped = False
         self._error_was_suspended = False
@@ -1170,7 +1383,19 @@ class PipelineRunner:
             # request is a file, and asking twice is harmless.)
             return
         self._suspend_requested.set()
+        self._suspend_asked = True
         remote = self._remote_runner
+        if remote is not None and self._evidence.waiting_for_node:
+            # Still queued for a node: nothing has run, so there is nothing to
+            # wind down. The request file would only be read once the job
+            # started — so the job waited out the queue, took a node, and
+            # suspended at once (tracker D6). Cancelling it is the suspend.
+            self._queued_suspend = True
+            self._enqueue(("line", "[Suspending] The job is still queued for a node, so nothing "
+                                   "has run yet: cancelling the queued job rather than letting "
+                                   "it start only to wind down. Resume queues it again.\n"))
+            self.stop(escalate=False)
+            return
         if remote is not None and remote.can_request_suspend:
             # A remote run is asked through its request file and nothing else
             # (``RemoteRunner.request_suspend``): signalling the local ssh, as
@@ -1213,21 +1438,81 @@ class PipelineRunner:
         # `_run_pipeline_remote` restores the suspend from that line.
         self._suspend_requested.clear()
 
-    def _note_suspend_evidence(self, line: str) -> None:
-        """Remember that the remote pipeline reported seeing a suspend request."""
-        if not self._suspend_seen and _SUSPEND_LOG_MARKER in line:
-            self._suspend_seen = True
+    def _settle_remote_job(self) -> None:
+        """Once the remote process has exited (or the run failed before it
+        could): close its scheduler job, and say what the host now says.
 
-    def _note_scheduler_job_closed(self) -> None:
-        """Say that the remote process holding the run's scheduler job exited.
+        ``close_remote_job`` is the teardown backstop; it cancels what is left,
+        best-effort. What it cannot do is *know* — its ``scancel`` answer is
+        discarded, and a host that does not answer looks the same as one with
+        nothing to cancel — so the job is called closed (``JOB_CLOSED_LINE``,
+        which puts the Analyze pane's job indicator out) only once
+        :func:`services.remote_liveness.probe` finds the scheduler no longer
+        lists it. Otherwise the run says the job's state is unknown
+        (``JOB_UNKNOWN_PREFIX``) and why: the line used to be printed the moment
+        the local ssh returned, including when it returned because the network
+        went — exactly when a single-shot job keeps running and billing
+        (tracker D3).
 
-        The job has exited with it, and the Analyze pane's job indicator goes
-        out on this line (``JOB_CLOSED_LINE``). A host with no
-        ``compute_launcher`` holds no job, so it says nothing.
+        A Stop is confirmed the same way, on any host: the kill and the
+        ``scancel`` behind it are ssh round trips that fail with the network,
+        and the run was reported "stopped" while it went on. The cancel thread
+        is given its bounded time first, so the probe does not race the kill.
+        What a probe could not confirm is kept in ``_stop_unconfirmed``.
+
+        Idempotent: the reader calls it as soon as the stream ends, and the run
+        thread's ``finally`` again for a run that failed before it had one.
         """
-        host = getattr(self._remote_runner, "host", None)
-        if str(getattr(host, "compute_launcher", "") or "").strip():
-            self._enqueue(("line", JOB_CLOSED_LINE))
+        if self._job_settled or self._remote_runner is None:
+            return
+        self._job_settled = True
+        remote = self._remote_runner
+        host = getattr(remote, "host", None)
+        scheduler = bool(str(getattr(host, "compute_launcher", "") or "").strip())
+        stopping = self._stop_requested.is_set()
+        cancel = self._cancel_thread
+        if stopping and cancel is not None and cancel.is_alive():
+            cancel.join(25.0)            # a Stop's own kill + scancel go first, not alongside
+        try:
+            remote.close_remote_job(log_fn=lambda m: self._enqueue(("line", m)))
+        except Exception:  # best-effort teardown
+            swallowed("remote run: scheduler job close failed")
+        run = getattr(remote, "run", None)
+        if run is None or host is None or not (scheduler or stopping):
+            return
+        found = probe(host, run.remote_pidfile, scheduler=scheduler,
+                      job_hint=self._evidence.job_id)
+        if stopping and found.state == ALIVE and found.job_state == "PENDING" and found.job_id:
+            # Still queued: no sidecar, so the backstop had no id to cancel.
+            if cancel_pending(host, found.job_id):
+                found = probe(host, run.remote_pidfile, scheduler=scheduler, job_hint=found.job_id)
+        self._job_liveness = found
+        if scheduler:
+            self._enqueue(("line", JOB_CLOSED_LINE if found.state == GONE else
+                           f"{JOB_UNKNOWN_PREFIX}{found.words}; it may still be running — "
+                           f"check squeue on the host.\n"))
+        if stopping and found.state != GONE:
+            self._stop_unconfirmed = found.words
+
+    def _external_end(self, rc: int, *, where: str) -> str | None:
+        """The failure text for a run neither the user nor the pipeline's own
+        completion ended — a termination the scheduler, the driver or someone
+        else caused (tracker D1), or a connection that dropped (D3) — or
+        ``None``. Never for a run the user stopped or suspended: those are
+        theirs, and are reported as such."""
+        if self._stop_requested.is_set() or self._suspend_requested.is_set():
+            return None
+        said = self._evidence.termination(where)
+        if said is not None:
+            return said
+        if rc == 255 and self._remote_runner is not None:
+            found = self._job_liveness
+            words = {ALIVE: f"The job is still running ({found.words})." if found else "",
+                     GONE: f"The job is no longer running ({found.words})." if found else ""}
+            host = getattr(self._remote, "name", "") or "the remote host"
+            return self._evidence.connection_lost(
+                host, job_words=words.get(getattr(found, "state", ""), ""))
+        return None
 
     def _settle_remote_suspend(self) -> str:
         """Decide, once the remote pipeline has exited, whether it was suspended.
@@ -1238,7 +1523,11 @@ class PipelineRunner:
         configured one for a finished or suspended run (see :meth:`suspend`),
         never a deleting one for a stopped run.
         """
-        if self._suspend_seen:
+        # Only when this run asked. A suspend marker on a run that did not is a
+        # SIGTERM from somewhere else — walltime, preemption, an scancel, the
+        # driver's budget — and it is reported as the failure it is
+        # (``_external_end``), not as the user's suspend (tracker D1).
+        if self._evidence.suspend_seen and self._suspend_asked:
             self._suspend_requested.set()
         if self._stop_requested.is_set():
             return "none"
@@ -1253,6 +1542,71 @@ class PipelineRunner:
         failure — all three of which otherwise look the same from outside.
         """
         return self._suspend_requested.is_set()
+
+    @property
+    def seconds_since_output(self) -> float | None:
+        """Seconds since the run last said anything — a log line, a transient
+        progress line, a transfer tick — or ``None`` before any run.
+
+        For the silent-stream check (tracker C1). Nothing in the app noticed a
+        remote stream that had gone quiet: the reader blocks until the next
+        line, and an hour after the job had died every surface still read
+        "Processing N/M" and "ETA 0s".
+        """
+        return None if self._last_output_at is None else time.monotonic() - self._last_output_at
+
+    @property
+    def last_output_line(self) -> str:
+        """The last non-empty line the run said, for the silence warning."""
+        return self._last_output_line
+
+    @property
+    def remote_name(self) -> str:
+        """The remote host's name, or ``""`` for a local run."""
+        return str(getattr(self._remote, "name", "") or "")
+
+    def probe_silence(self) -> bool:
+        """Ask the host, on a thread of its own, whether a silent run is alive.
+
+        One bounded probe (``services.remote_liveness.probe``); its answer is a
+        log line, said with ``activity=False`` so it does not reset the silence
+        it reports on. Never stops or cancels anything — the user decides, and
+        the line says what each answer means for them. ``False`` when there is
+        nothing to ask (no remote run launched) or a probe is already out.
+        """
+        remote = self._remote_runner
+        run = getattr(remote, "run", None)
+        host = getattr(remote, "host", None)
+        if run is None or host is None:
+            return False
+        if self._silence_probe is not None and self._silence_probe.is_alive():
+            return False
+        scheduler = bool(str(getattr(host, "compute_launcher", "") or "").strip())
+        advice = {
+            ALIVE: "the run is still going there, so it is only quiet; nothing to do",
+            GONE: "the run is not running there any more — press Stop, then Resume from the "
+                  "Analyze banner to download the wells it finished and run the rest",
+        }
+
+        def _ask() -> None:
+            found = probe(host, run.remote_pidfile, scheduler=scheduler, job_hint=self._evidence.job_id)
+            then = advice.get(found.state, "the state of the run there is not known — if it stays "
+                                           "silent, Stop and Resume")
+            self._enqueue(("line", f"[remote] no-output check: {found.words}; {then}.\n"),
+                          activity=False)
+
+        self._silence_probe = threading.Thread(target=_ask, name="aw-silence-probe", daemon=True)
+        self._silence_probe.start()
+        return True
+
+    @property
+    def stop_unconfirmed(self) -> str:
+        """Why a stopped remote run could not be confirmed stopped, or ``""``.
+
+        Read by the Analyze pane, which says it beside "stopped": a Stop whose
+        kill and ``scancel`` could not reach the host leaves the run going.
+        """
+        return self._stop_unconfirmed
 
     @property
     def cancel_state_at_failure(self) -> tuple[bool, bool]:
@@ -1280,6 +1634,23 @@ class PipelineRunner:
         self._error_was_stopped = self._stop_requested.is_set()
         self._error_was_suspended = self._suspend_requested.is_set()
         self._had_error = True
+
+    def _enqueue_queued_suspend(self, *, where: str) -> None:
+        """Report a Suspend that cancelled a job still queued for a node.
+
+        Through the ``suspended`` event, as any suspend: the plate is not
+        finished and is offered back. Said apart because nothing was in flight
+        to finish — and, when the host could not confirm the job gone, said so.
+        """
+        unconfirmed = (f" The host could not confirm the job was cancelled "
+                       f"({self._stop_unconfirmed}); it may still be queued — check "
+                       f"squeue.") if self._stop_unconfirmed else ""
+        self._enqueue((
+            "suspended",
+            f"{where} suspended before it started: its job was still queued for a "
+            f"node, so the queued job was cancelled.{unconfirmed} Resume from the "
+            "Analyze banner to queue it again.\n",
+        ))
 
     def _enqueue_suspended(self, *, where: str = "Pipeline") -> None:
         """Report a run that wound down after Suspend and exited cleanly.
@@ -1317,6 +1688,13 @@ class PipelineRunner:
         the error seam, so it is latched as a cancel (`cancel_state_at_failure`)
         and the GUI shows it amber, the same as a Stop that ended by signal.
         """
+        if self._stop_unconfirmed:
+            self._enqueue_error(
+                f"{where} stopped here, but the run on the host could not be "
+                f"confirmed stopped: {self._stop_unconfirmed}. It may still be "
+                "running — check the host (squeue, for a cluster job). The wells "
+                "that finished are kept.\n")
+            return
         self._enqueue_error(
             f"{where} stopped: the wells that finished are kept; the rest were "
             "not processed.\n")
@@ -1338,6 +1716,19 @@ class PipelineRunner:
     def _enqueue_error(self, message: str) -> None:
         """Queue a failure. The queue itself records the cancel state."""
         self._enqueue(("error", message))
+
+    def _enqueue_read_failure(self, exc: BaseException, *, where: str) -> None:
+        """Report a run whose output stopped being readable part way through.
+
+        It used to escape to the launch's own handler and read "Failed to start
+        pipeline", for a pipeline that had started and had been computing —
+        sending the user to look for a launch problem that did not exist
+        (tracker D6). The pipeline is signalled before this is said.
+        """
+        self._enqueue_error(
+            f"{where} stopped part way through the run: reading its output failed "
+            f"({type(exc).__name__}: {exc}), so it was stopped. The wells that "
+            "finished are kept.\n")
 
     def _journal_outcome(self) -> str:
         """How this run ended, in the run journal's vocabulary.
@@ -1710,21 +2101,20 @@ class PipelineRunner:
                 # started. The decode case is now impossible (`errors="replace"`
                 # on the spawn) and this is the general guarantee, not a fix
                 # for that one cause.
-                self._enqueue((
-                    "line",
-                    f"[warn] reading the pipeline's output stopped early "
-                    f"({type(exc).__name__}: {exc}); the run is being "
-                    f"stopped.\n"))
                 self._signal_subprocess(proc)
-                raise
+                self._enqueue_read_failure(exc, where="Pipeline")
+                return
             finally:
                 with swallow("waiting for the pipeline subprocess"):
                     proc.wait()
             rc = proc.returncode
+            external = self._external_end(rc, where="Pipeline")
             if rc == 0 and self._suspend_requested.is_set():
                 self._enqueue_suspended()
             elif rc == 0 and self._stop_requested.is_set():
                 self._enqueue_stopped()
+            elif external is not None:
+                self._enqueue_error(external)
             elif rc == 0:
                 # v5.x.x: zipper-fired-this-run source cleanup. Only
                 # runs on a clean exit (rc == 0); any failure leaves
@@ -2078,12 +2468,7 @@ class PipelineRunner:
 
             output_filter = OutputFilter(self._output_filter)
 
-            def _on_xfer_progress(pct: float) -> None:
-                # Surface rsync progress as a dedicated queue event so the
-                # GUI can show a real bar during upload/download instead
-                # of a static spinner. A separate event kind keeps it out
-                # of the existing well-progress signal in ProgressTracker.
-                self._enqueue(("remote_xfer", pct))
+            _on_xfer_progress = TransferProgress(self._enqueue)
 
             try:
                 batch_size = int(opts.get("remote_batch_size", 0) or 0)
@@ -2113,31 +2498,22 @@ class PipelineRunner:
             try:
                 for line in proc.stdout:
                     self._enqueue(("line", line))
-                    self._note_suspend_evidence(line)
                     if line.strip():
                         tail.append(line.rstrip("\n"))
             except Exception as exc:
                 # Whatever ends the read, the child must still be signalled and
-                # reaped. It was started with `start_new_session=True`, so it
-                # is its own session leader and nothing else will reap it: an
-                # exception escaping here left the pipeline running against the
-                # user's plate while the GUI reported the run had never
-                # started. The decode case is now impossible (`errors="replace"`
-                # on the spawn) and this is the general guarantee, not a fix
-                # for that one cause.
-                self._enqueue((
-                    "line",
-                    f"[warn] reading the pipeline's output stopped early "
-                    f"({type(exc).__name__}: {exc}); the run is being "
-                    f"stopped.\n"))
+                # reaped (see the local reader); the run is then reported as
+                # what it is — a run whose output could no longer be read.
                 self._signal_subprocess(proc)
-                raise
+                self._enqueue_read_failure(exc, where="Remote pipeline")
+                return
             finally:
                 with swallow("waiting for the pipeline subprocess"):
                     proc.wait()
-                self._note_scheduler_job_closed()
+                self._settle_remote_job()
             rc = proc.returncode
             cleanup_mode = self._settle_remote_suspend()
+            external = self._external_end(rc, where="Remote pipeline")
 
             ok = self._remote_runner.verify_and_cleanup(
                 ok=(rc == 0),
@@ -2148,10 +2524,14 @@ class PipelineRunner:
             )
             # After the fetch above, which replaced the local sidecar.
             record_remote_batch_size(output_dir, opts)
-            if rc == 0 and ok and self._suspend_requested.is_set():
+            if self._queued_suspend:
+                self._enqueue_queued_suspend(where="Remote pipeline")
+            elif rc == 0 and ok and self._suspend_requested.is_set():
                 self._enqueue_suspended(where="Remote pipeline")
-            elif rc == 0 and self._stop_requested.is_set():
+            elif self._stop_requested.is_set() and (rc == 0 or self._stop_unconfirmed):
                 self._enqueue_stopped(where="Remote pipeline")
+            elif external is not None:
+                self._enqueue_error(external)
             elif rc == 0 and ok:
                 self._regate(output_dir, regate_argv)
                 # v5.x.x: clean run-to-completion. Fire both success
@@ -2215,17 +2595,10 @@ class PipelineRunner:
                 self._enqueue_error(f"Failed to run pipeline remotely: {exc}\n")
         finally:
             # Always close any scheduler job this run spawned — on success,
-            # failure, or exception. ``srun`` normally exits when the
-            # pipeline ends, so this is a no-op in the common case; it's the
-            # guarantee that an orphaned SLURM allocation never lingers in
-            # the queue waiting on the user. No-op on direct-execution hosts.
-            if self._remote_runner is not None:
-                try:
-                    self._remote_runner.close_remote_job(
-                        log_fn=lambda m: self._enqueue(("line", m)),
-                    )
-                except Exception:  # best-effort teardown
-                    swallowed("remote run: scheduler job close failed")
+            # failure, or exception — and say whether it is confirmed closed.
+            # The reader has usually done it already; this covers a run that
+            # failed before it had a stream. No-op on direct-execution hosts.
+            self._settle_remote_job()
             if zipped is not None and zipped.cleanup is not None:
                 try:
                     zipped.cleanup()

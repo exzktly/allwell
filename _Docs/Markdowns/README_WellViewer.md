@@ -1767,6 +1767,13 @@ is never cut off by this.
   no longer reports that "rsync reported success but some files did not reach
   the remote" for a listing that never ran.
 
+**The pipeline's code on the host is versioned.** Each run copies the code it
+needs into `<remote project dir>/code/<version>/` and runs it from there, so a
+second All-Well window of another version — or a newer build started while a
+batched run is between batches — can never change the code a run is in the
+middle of. Version folders nobody has used for 30 days are removed when a run
+starts. Bootstrap still installs into `<remote project dir>` itself.
+
 ### 11. Run / Suspend / Stop / Log
 
 - Click **Run** (in the footer under the form). While the run is going,

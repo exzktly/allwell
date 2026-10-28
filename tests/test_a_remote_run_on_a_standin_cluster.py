@@ -150,7 +150,9 @@ def test_a_stopped_batched_run_resumes_without_sending_the_plate_again(cluster, 
     assert first.ending[1].startswith("Remote pipeline stopped: the wells that finished are kept"), first.ending
     sent_before = [f for f in cluster.uploaded() if f.endswith(".zip")]
     assert sent_before == ["A01.zip", "A02.zip", "A03.zip", "B01.zip"], sent_before
-    assert {"A01", "A02"} <= complete_here(out, FIELD_WELLS)
+    # Batch 1's wells are here, or still on the host when the Stop cut a download short (it cancels the Fetcher);
+    # either way the resume brings them home without computing them again.
+    assert {"A01", "A02"} <= complete_here(out, FIELD_WELLS) | remote_output_wells(cluster)
 
     second = start_run(cluster, inp, out, stop_fetchers, field_opts(incremental=True))
 

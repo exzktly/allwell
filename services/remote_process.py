@@ -77,7 +77,7 @@ from services.remote_run_id import (
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
-from services.remote_handoff import chase_handoff, hand_off, watch_of
+from services.remote_handoff import chase_handoff, hand_off_and_wait, watch_of
 from services.remote_batch_resume import (
     _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
     reattach_output_dir, stage_leftovers, take_from_remote)
@@ -1217,12 +1217,9 @@ class _BatchedRemoteProcess:
                 # driver is already holding — there is no second queue wait and
                 # no second argv to build. Hand it the batch and wait for the
                 # code it reports back; one that cannot be made ends the run.
-                if not hand_off(self, batch_idx + 1, n_batches,
-                                self._batch_flag(BATCH_READY, batch_idx + 1)):
-                    self._returncode = 1
-                    return
-                download_adopted(self)      # the job has its first batch: drain the earlier attempt's wells meanwhile
-                rc = self._await_batch(batch_idx + 1, n_batches)
+                rc = hand_off_and_wait(self, batch_idx + 1, n_batches,
+                                       # the job has its first batch: drain the earlier attempt's wells meanwhile
+                                       meanwhile=lambda: download_adopted(self))
                 self._release_nanowell_batch(rc, batch_zips)
                 if rc is None:
                     # The driver is gone. Nothing further will ever be run, and

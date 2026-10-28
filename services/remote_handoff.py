@@ -37,6 +37,8 @@ import threading
 import time
 from collections.abc import Callable
 
+from services.remote_commands import BATCH_READY
+
 #: Attempts at creating one handshake flag before the hand-off is called failed.
 #: Each is one bounded ssh call (``remote_upload.SSH_CONTROL_TIMEOUT_S``).
 FLAG_ATTEMPTS = 4
@@ -146,6 +148,21 @@ def hand_off(proc, index: int, n_batches: int, path: str) -> bool:
               f"rather than leaving the node waiting for it. The uploaded wells stay on the remote — "
               f"Resume picks them up.\n")
     return False
+
+
+def hand_off_and_wait(proc, index: int, n_batches: int, *, meanwhile: Callable[[], object] = lambda: None) -> int | None:
+    """Hand batch *index* to the driver, run *meanwhile*, and wait for the batch's exit code.
+
+    ``None`` when there will be no code: the hand-off could not be made (the
+    run's code is then 1, and the log has said why), or the driver went away
+    (``_BatchedRemoteProcess._await_batch``). The final nanowell pass is the
+    driver's batch ``n_batches + 1`` and comes through here too.
+    """
+    if not hand_off(proc, index, n_batches, proc._batch_flag(BATCH_READY, index)):
+        proc._returncode = proc._returncode or 1
+        return None
+    meanwhile()
+    return proc._await_batch(index, n_batches)
 
 
 def chase_handoff(proc, index: int, n_batches: int, flag_path: Callable[[], str]) -> bool:

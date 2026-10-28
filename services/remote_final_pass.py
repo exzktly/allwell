@@ -19,9 +19,9 @@ from pathlib import Path
 
 import posixpath
 
-from services.remote_commands import BATCH_READY, BATCH_REANCHOR, BATCH_SKIP, HOLD_DIR
+from services.remote_commands import BATCH_REANCHOR, BATCH_SKIP, HOLD_DIR
 from services.remote_fetch_nanowells import held_wells
-from services.remote_handoff import hand_off, raise_flag
+from services.remote_handoff import hand_off_and_wait, raise_flag
 from services.remote_run_id import remote_run_dir
 from util.well_token import canonical_well_label
 
@@ -91,10 +91,9 @@ def run_final_pass(proc, n_batches: int) -> int | None:
                   "[remote] ERROR could not stage the held wells for the end-of-run re-anchoring; their unaddressed "
                   "timepoints stay unaddressed\n")
         names = []
-    if not hand_off(proc, index, index, proc._batch_flag(BATCH_READY, index)):
-        proc._returncode = proc._returncode or 1
+    rc = hand_off_and_wait(proc, index, index)
+    if rc is None:
         return None
-    rc = proc._await_batch(index, index)
     if rc == 0 and names:
         proc._release_nanowell_batch(rc, [Path(f"{name}.zip") for name in names], final=True)
     return rc

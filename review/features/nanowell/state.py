@@ -10,10 +10,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 
+from review.features.nanowell.series_compute import is_baseline
 from review.features.nanowell.subset_compute import Subset
 from review.features.nanowell.subset_compute import restore as restore_subset
 
-BASELINES = ("earliest", "first_measurable")
 AXES = ("time", "wells")            # what the Distribution view's x-axis carries
 VIEWS = ("distribution", "trajectories", "array", "position", "extremes")
 #: Views of earlier versions, and the view each is now. A page saved on Array map or Array QC opens on the Array
@@ -224,7 +224,9 @@ class NanowellState:
         fresh = NanowellState()
         view = config.get("view")
         self.view = _RENAMED_VIEWS.get(view, view) if _RENAMED_VIEWS.get(view, view) in VIEWS else fresh.view
-        self.baseline = config.get("baseline") if config.get("baseline") in BASELINES else fresh.baseline
+        # A rule, or a named timepoint (``series_compute.baseline_at``) — kept even when this dataset has no such
+        # timepoint, so the choice survives a restore made before the data is read; the figure then says why.
+        self.baseline = config.get("baseline") if is_baseline(config.get("baseline")) else fresh.baseline
         self.axis = config.get("axis") if config.get("axis") in AXES else fresh.axis
         self.metric = config.get("metric") if config.get("metric") in METRIC_KEYS else fresh.metric
         for name in ("well", "timepoint", "control", "channel", "image_channel"):

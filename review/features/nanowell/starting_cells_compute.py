@@ -6,8 +6,8 @@ with a minimum number of cells". That filter is now one kind of condition of the
 part that is about a count at the baseline alone — the presets, the bounds' rules, their text, and which occupancy
 classes a pair of bounds can hold.
 
-**What "starting" means.** A nanowell's count at the page's Baseline — the well's earliest timepoint, or the
-nanowell's first measurable one — which the metrics table holds as ``n0``: the same number the occupancy colours
+**What "starting" means.** A nanowell's count at the page's Baseline — the well's earliest timepoint, the
+nanowell's first measurable one, or the timepoint the Baseline names — which the metrics table holds as ``n0``: the same number the occupancy colours
 (0 / 1 / 2 / 3+) are drawn from, so the condition and the key always agree.
 
 Qt-free.

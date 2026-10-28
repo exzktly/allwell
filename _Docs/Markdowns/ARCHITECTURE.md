@@ -10979,9 +10979,18 @@ holds. `site_series` is one nanowell's rows in time order; an address the well n
 row (the state at the timepoint, the value missing there, the baseline's state or value, a baseline at zero:
 `seeded later` when cells arrive later, `empty at baseline` when not). The site signal is
 background-subtracted, so a ratio over a baseline at or below zero is undefined. The baseline is the well's
-earliest timepoint, or, per measurement, each nanowell's first timepoint in a measurable state at which that
+earliest timepoint; or, per measurement, each nanowell's first timepoint in a measurable state at which that
 measurement exists (the pipeline records `measured` with no count where no template could be built, and a
-fused nanowell has a confluence but no count). The growth rate is the least-squares slope of
+fused nanowell has a confluence but no count); or one named timepoint for every nanowell, spelled
+`"tp:<timepoint>"` (`baseline_at`, read back by `baseline_timepoint`, validated by `is_baseline`; the prefix keeps a
+timepoint called `earliest` from reading as the rule). A well with no timepoint by that name has no baseline row, so
+its fold changes and occupancy class are NaN with the baseline state `NO_BASELINE_TIMEPOINT` — never a baseline
+taken from another of its timepoints. The page's *Baseline* combo (`tab_view._fill_baselines`) lists the two rules
+and then every timepoint of the loaded data (a restored timepoint the data lacks is listed, marked, so the control
+shows what the figure was measured from); `NanowellState.apply_config` keeps any `is_baseline` value, since a
+restore runs before the data is read. Batch Export's Nanowells panel fills its own *Baseline* combo the same way in
+`_refresh_timepoints`. Figures name the baseline through `baseline_text` (the occupancy key) and
+`subset_compute._where` (the subset sentence). The growth rate is the least-squares slope of
 ln n against hours over at least three timepoints with n > 0. A plate of 96 wells × 1,000 nanowells × 10
 timepoints takes about 5 s to compute.
 
@@ -11019,7 +11028,7 @@ drawn wells), before any exclusion is worked out and before the fixed cohort, so
 under *Starting cells ≥1*, "empty at baseline" no longer appears among a fold change's exclusions. Every figure
 carries one sentence (`note`): the subset, the baseline when a condition depends on it (`uses_baseline`: `n0`, a
 fold change, or a value read at the baseline), the nanowells kept of all, those outside and those with no value, the
-kept nanowells counted after the earliest timepoint under *First measurable* (their cells may have divided, so a
+kept nanowells counted after the earliest timepoint under any baseline but *Earliest* (their cells may have divided, so a
 "single cell" condition there is not a clonality filter), and each drawn well keeping fewer than `FEW_BELOW`, since
 wells are the replicate unit. A subset that is one Starting cells condition (`is_starting_only`) is written as the
 Starting cells filter always was ("Starting cells 1 (count at the earliest timepoint): … outside the range, … with

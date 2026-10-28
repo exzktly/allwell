@@ -32,6 +32,7 @@ from review.features.nanowell.distribution_compute import TIME, DistributionMode
 from review.features.nanowell.extremes_compute import caption, format_value
 from review.features.nanowell.starting_cells_compute import occupancy_in_filter
 from review.features.nanowell.full_montage_compute import fit_region
+from review.features.nanowell.series_compute import baseline_text
 
 #: A dot's diameter, in points.
 DOT_PT = 3.4
@@ -444,7 +445,7 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
                       gid="nw-footer-used" if text is line1 else "nw-footer"), muted=text is not line1)
     # The occupancy key (U5): the colours decode only with it, and its title names the baseline in use.
     _occupancy_key(fig, "Cells at baseline",
-                   baseline="first measurable" if model.baseline == "first_measurable" else "earliest",
+                   baseline=baseline_text(model.baseline),
                    starting=model.starting)
 
 

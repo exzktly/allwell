@@ -44,6 +44,7 @@ import pandas as pd
 
 from review.features.nanowell import starting_cells_compute as sc
 from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL
+from review.features.nanowell.series_compute import baseline_timepoint
 from review.features.nanowell.views_compute import lattice_kind, lattice_ring, lattice_xy, well_pitch
 
 SITE_KEY = ["well", "nw_q", "nw_r"]
@@ -448,7 +449,7 @@ class SubsetResult:
     kept: int = 0
     outside: int = 0                # decided against by a condition
     unknown: int = 0                # undecided for want of a value
-    late: int = 0                   # kept, counted after the well's earliest timepoint (first measurable)
+    late: int = 0                   # kept, counted after the well's earliest timepoint (any baseline but earliest)
     per_well: dict = field(default_factory=dict)    # well -> nanowells kept
     outside_sites: frozenset = frozenset()          # (well, q, r) of every nanowell not kept
 
@@ -480,7 +481,7 @@ def apply(metrics: pd.DataFrame, subset: Subset, baseline: str, wells=None,
     done.per_well = {w: int(counts.get(w, 0)) for w in names}
     out = sites[~keep_site]
     done.outside_sites = frozenset(zip(out["well"], out["nw_q"].astype(int), out["nw_r"].astype(int)))
-    if baseline == "first_measurable" and subset.uses_baseline():
+    if baseline != "earliest" and subset.uses_baseline():
         first = frame[frame["tp_order"] == frame.groupby("well")["tp_order"].transform("min")]
         earliest = dict(zip(first["well"], first["timepoint"]))
         kept = sites[keep_site]
@@ -490,6 +491,9 @@ def apply(metrics: pd.DataFrame, subset: Subset, baseline: str, wells=None,
 
 
 def _where(baseline: str) -> str:
+    tp = baseline_timepoint(baseline)
+    if tp is not None:
+        return f"timepoint {tp}"
     return "each nanowell's first measurable timepoint" if baseline == "first_measurable" else "the earliest timepoint"
 
 

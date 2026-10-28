@@ -5386,8 +5386,12 @@ use them.
   timepoints along the axis and each well's median joined over time. *Wells*: one timepoint (the latest by
   default), wells and replicate sets along the axis. Growth rate and occupancy have one value per nanowell,
   so they are drawn across wells only.
-- **Baseline** — what a fold change is measured from: the well's *earliest* timepoint, or each nanowell's
-  *first measurable* one (for a bubble that clears after the first timepoint).
+- **Baseline** — what a fold change is measured from: the well's *earliest* timepoint, each nanowell's
+  *first measurable* one (for a bubble that clears after the first timepoint), or any one timepoint of the dataset,
+  listed after those two by its hours — for example the timepoint a treatment was added, so every fold change reads
+  against it. Under a named timepoint, a well that was never imaged at it has no fold change (the figure counts its
+  nanowells as excluded, "baseline timepoint not in this well") rather than one measured from another timepoint.
+  The occupancy colours and *Starting cells* use the count at the same baseline.
 - **Subset** — which nanowells every view uses. The quick choices keep the nanowells that held a given number of
   cells at the Baseline: *All nanowells*, *Starting cells ≥1 (occupied)*, *1 (single cell)*, *1–2* and *≥2*.
   *Custom subset…* or **Edit…** opens the subset editor under the controls, where you can combine any number of
@@ -5412,8 +5416,8 @@ use them.
   size. The *Array* view keeps every nanowell and dims the ones outside; the occupancy key fades the classes the
   subset removes; a selected nanowell outside it still opens its detail, which names the condition it failed. The
   box is outlined while a subset is set, and the subset is kept with the page's settings. For clonality use the
-  *Earliest* baseline: a count taken at a later first measurable timepoint may follow a division, and the figure
-  counts those nanowells.
+  *Earliest* baseline: a count taken later — at a first measurable or a named timepoint — may follow a division,
+  and the figure counts those nanowells.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
 - **Fixed cohort** (on *Distribution* and *Trajectories*) — use only the nanowells with a value at every
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
@@ -6407,7 +6411,8 @@ figure and an empty file.
 **Nanowells** (on a dataset with nanowell tables) exports the
 [Nanowells](#nanowells) page's figures one group at a time. Choose the **View**
 (Distribution, Array map, Trajectories or Position), tick the **Metrics**, and
-set **Along x**, **Baseline**, **Timepoint** (Latest, Earliest or one of the
+set **Along x**, **Baseline** (Earliest, First measurable or one of the dataset's
+timepoints), **Timepoint** (Latest, Earliest or one of the
 dataset's) and **Fixed cohort** as on the page — each greyed where it does not
 reach the view. **Responding above** asks for a number for each ticked metric,
 filled in from the page's where you set one there, and the run will not start

@@ -63,6 +63,18 @@ def test_under_first_measurable_a_count_taken_later_is_kept_and_said(tmp_path):
         done)
 
 
+def test_under_a_timepoint_baseline_the_count_is_taken_there_and_the_note_names_it(tmp_path):
+    """From t_a, A01's single-cell nanowells are q2, q5 and q6 (the earliest rule would keep q0, q2 and q4), and
+    every one of them was counted after the earliest timepoint."""
+    data = load_nanowell_data(_write_nanowell_dataset(tmp_path, counts=COUNTS))
+    kept, done = ss.apply(site_metrics(data, "tp:t_a"), ss.Subset.starting(*SINGLE), "tp:t_a", ["A01"])
+    assert _sites(kept) == [("A01", 2), ("A01", 5), ("A01", 6)] and done.late == 3
+    said = ss.note(done)
+    assert said.startswith("Starting cells 1 (count at timepoint t_a): 3 of 8 nanowells kept — 5 outside the range, "
+                           "0 with no count at baseline.")
+    assert "3 kept were counted after the earliest timepoint" in said
+
+
 def test_bounds_are_whole_numbers_and_a_minimum_of_zero_is_no_minimum():
     assert sc.normalise(0, None) == (None, None) and sc.normalise(1, 2) == (1, 2)
     for lo, hi in ((3, 2), (True, None), (-1, None), (1.5, None)):

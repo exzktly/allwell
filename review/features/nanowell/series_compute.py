@@ -33,7 +33,11 @@ one undefined case this table adds to §3.10.1's ("no signal above background at
 **Baseline** (§3.10.1): ``"earliest"`` — the well's earliest timepoint, so a site unmeasurable there has no
 fold change — or ``"first_measurable"``, the labelled alternative for a bubble that clears after t₀: for each
 measurement, the site's first timepoint in a measurable state at which that measurement exists, so a count's
-baseline and a confluence's can differ. ``baseline_timepoint`` / ``baseline_state`` are the count's.
+baseline and a confluence's can differ — or one named timepoint of the dataset (``"tp:<name>"``, built by
+:func:`baseline_at`), the same for every nanowell, so a fold change can be measured from a treatment timepoint
+rather than from the seeding. A well that has no such timepoint has no baseline: its fold changes are undefined
+with that reason (:data:`NO_BASELINE_TIMEPOINT`), never measured from some other timepoint in its place.
+``baseline_timepoint`` / ``baseline_state`` are the count's.
 
 Qt-free; vectorised over the whole dataset (a 96-well plate of 1,000 nanowells over ten timepoints is a
 million rows).
@@ -53,6 +57,36 @@ from review.features.nanowell.collect import (
 ABSENT = "absent"
 EARLIEST, FIRST_MEASURABLE = "earliest", "first_measurable"
 BASELINES = (EARLIEST, FIRST_MEASURABLE)
+#: The prefix of a baseline that names one timepoint (``"tp:T03"``). A prefix rather than the bare name, so a
+#: timepoint that happens to be called ``earliest`` can never be read as the rule of that name.
+TIMEPOINT_BASELINE = "tp:"
+#: The baseline "state" of a site whose well has no timepoint by the chosen baseline's name.
+NO_BASELINE_TIMEPOINT = "timepoint not in this well"
+
+
+def baseline_at(timepoint: str) -> str:
+    """The baseline that measures every fold change from *timepoint*."""
+    return TIMEPOINT_BASELINE + str(timepoint)
+
+
+def baseline_timepoint(baseline) -> str | None:
+    """The timepoint *baseline* names, or ``None`` for one of the rules (:data:`BASELINES`) or anything else."""
+    if isinstance(baseline, str) and baseline.startswith(TIMEPOINT_BASELINE) and len(baseline) > len(TIMEPOINT_BASELINE):
+        return baseline[len(TIMEPOINT_BASELINE):]
+    return None
+
+
+def is_baseline(baseline) -> bool:
+    """Whether *baseline* is one :func:`site_metrics` accepts: a rule of :data:`BASELINES` or a named timepoint."""
+    return baseline in BASELINES or baseline_timepoint(baseline) is not None
+
+
+def baseline_text(baseline) -> str:
+    """How a figure names *baseline*: ``earliest``, ``first measurable``, or the timepoint's own name."""
+    tp = baseline_timepoint(baseline)
+    if tp is not None:
+        return tp
+    return "first measurable" if baseline == FIRST_MEASURABLE else "earliest"
 OCCUPANCY_CLASSES = ("0", "1", "2", "3+")
 SITE_KEY = ["well", "nw_q", "nw_r"]
 
@@ -118,7 +152,10 @@ def _baseline_rows(frame: pd.DataFrame, baseline: str, value: str) -> pd.Series:
         measurable = frame["state"].isin(MEASURABLE) & frame[value].notna()
         first = frame["tp_order"].where(measurable).groupby([frame[k] for k in SITE_KEY]).transform("min")
         return measurable & (frame["tp_order"] == first)
-    raise ValueError(f"baseline must be one of {BASELINES}, not {baseline!r}")
+    tp = baseline_timepoint(baseline)
+    if tp is not None:
+        return frame["timepoint"].astype(str) == tp
+    raise ValueError(f"baseline must be one of {BASELINES} or a timepoint, not {baseline!r}")
 
 
 def _at_baseline(frame: pd.DataFrame, mask: pd.Series, column: str) -> pd.Series:
@@ -157,8 +194,8 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST) -> pd.DataFrame:
     ``c`` and per channel ``brightness_<ch>`` / ``signal_<ch>``, and the metrics listed in the module
     docstring.
     """
-    if baseline not in BASELINES:
-        raise ValueError(f"baseline must be one of {BASELINES}, not {baseline!r}")
+    if not is_baseline(baseline):
+        raise ValueError(f"baseline must be one of {BASELINES} or a timepoint, not {baseline!r}")
     frame = _addressed_grid(data)
     measurable = frame["state"].isin(MEASURABLE)
     frame["n"] = pd.to_numeric(frame.get("n_cells"), errors="coerce").where(measurable)
@@ -171,6 +208,10 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST) -> pd.DataFrame:
         mask = _baseline_rows(frame, baseline, value)
         frame[f"_base_tp_{value}"] = _at_baseline(frame, mask, "timepoint")
         frame[f"_base_state_{value}"] = _at_baseline(frame, mask, "state")
+        if baseline_timepoint(baseline) is not None:
+            # Every addressed nanowell has a row at each of its well's timepoints, so only a well without the
+            # named timepoint leaves a site with no baseline row: say so, rather than "never measured".
+            frame[f"_base_state_{value}"] = frame[f"_base_state_{value}"].fillna(NO_BASELINE_TIMEPOINT)
         base[value] = _at_baseline(frame, mask, value)
     frame["baseline_timepoint"] = frame["_base_tp_n"]           # the count's; see _baseline_rows for the others
     frame["baseline_state"] = frame["_base_state_n"]

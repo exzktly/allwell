@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from pipeline.run_report import cross_build_note
 from services import remote_finished_wells as _finished
 from services.remote_run_id import _choose_remote_output_dir, _forced_from_argv, _pipeline_launch_is_pointless
 from util.aw_safe import swallowed
@@ -59,6 +60,9 @@ def preflight_cache_hit(runner, zipped, pipeline_argv: list[str], remote_output:
                                      incremental=zipped.incremental):
         log("[remote] FULL CACHE HIT — every well has output already; skipping pipeline launch and proceeding "
             "straight to verify + fetch.\n")
+        note = cross_build_note({w: listing.builds.get(w, "") for w in finished})
+        if note:
+            log(f"[remote] pre-flight: {note}.\n")
         return True
     if len(finished) >= expected:
         # The remote has everything, but the run was told to reprocess. Say so: the cache-hit line above is the one

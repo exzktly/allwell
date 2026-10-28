@@ -41,7 +41,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
-from pipeline.run_report import COMPLETE_DIRNAME, finished_wells, well_of_out_zip, well_of_seal
+from pipeline.run_report import COMPLETE_DIRNAME, cross_build_note, finished_wells, well_of_out_zip, well_of_seal
 from services.remote_transport import _remote_quote
 from util.well_token import canonical_well_label
 
@@ -63,6 +63,13 @@ class Leftovers:
     finished: dict[str, str] = field(default_factory=dict)
     #: canonical well → an output directory holding its out.zip with no seal: what a well left part way leaves.
     part_way: dict[str, str] = field(default_factory=dict)
+    #: ``(well, output directory)`` → the build that sealed it there (``""``: before builds were recorded).
+    builds: dict[tuple[str, str], str] = field(default_factory=dict)
+
+
+#: How a seal's build travels on its listing line, and the ``sed`` that reads it out of the seal.
+_BUILD_TAG = "@build="
+_BUILD_SED = "'s/.*\"build\": *\"\\([^\"]*\\)\".*/\\1/p'"
 
 
 def run_dir_of(output_dir: str) -> str:
@@ -112,8 +119,10 @@ def find_leftovers(cache, *, own_run_dir: str, own_output_dir: str, earlier: Ite
     """
     roots = _roots(own_run_dir, own_output_dir, earlier)
     # A run directory's root also lists its output directory's completion seals (`./out/.aw_complete/A01.json`).
-    seals = [f"find ./{_remote_quote(f'{r.out_name}/{COMPLETE_DIRNAME}')} -maxdepth 1 -type f -name '*.json' "
-             f"2>/dev/null; " if r.run_dir else "" for r in roots]
+    # Each with the build that sealed it (`pipeline.run_report.this_build`), so an adoption across builds is named.
+    seals = [f"for f in ./{_remote_quote(f'{r.out_name}/{COMPLETE_DIRNAME}')}/*.json; do [ -f \"$f\" ] && "
+             f"echo \"$f {_BUILD_TAG}$(sed -n {_BUILD_SED} \"$f\" | head -n 1)\"; done; " if r.run_dir else ""
+             for r in roots]
     script = "".join(
         f"if cd {_remote_quote(r.path)} 2>/dev/null; then {{ find . -maxdepth 2 -type f -name '*.zip'; {seals[i]}}} "
         f"| sed 's|^|{i}\t|'; fi\n" for i, r in enumerate(roots)) + "true\n"
@@ -127,6 +136,7 @@ def find_leftovers(cache, *, own_run_dir: str, own_output_dir: str, earlier: Ite
         index, _, rel = line.partition("\t")
         if not index.isdigit() or int(index) >= len(roots):
             continue
+        rel, _, build = rel.partition(f" {_BUILD_TAG}")
         root = roots[int(index)]
         parts = PurePosixPath(rel).parts            # `./out/x.zip` → ("out", "x.zip"): the `.` is normalised away
         if not parts:
@@ -136,6 +146,7 @@ def find_leftovers(cache, *, own_run_dir: str, own_output_dir: str, earlier: Ite
         if root.run_dir and len(parts) == 3 and parts[:2] == (root.out_name, COMPLETE_DIRNAME):
             if well := well_of_seal(name):
                 outputs.setdefault(where, (set(), set()))[1].add(well)
+                found.builds.setdefault((well, where), build.strip())
             continue
         sub = parts[0] if len(parts) == 2 else ""
         if root.run_dir and sub == root.out_name:
@@ -205,6 +216,9 @@ def adopt_finished(cache, wells: Iterable[str], found: Leftovers, *, own_output_
         log(f"[remote] {len(adopted)} well(s) were finished on the remote and not yet downloaded — downloading them "
             f"instead of uploading and running them again: {', '.join(adopted[:12])}"
             + (" …" if len(adopted) > 12 else "") + "\n")
+        note = cross_build_note({w: found.builds.get((w, found.finished[w]), "") for w in adopted})
+        if note:
+            log(f"[remote] {note}.\n")
     return adopted
 
 

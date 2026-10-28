@@ -313,6 +313,9 @@ class RemoteOutputs:
 
     with_output: frozenset[str] = frozenset()
     sealed: frozenset[str] = frozenset()
+    #: ``{well: build}`` from each seal (``pipeline.run_report.this_build``; ``""`` for a seal from before builds were
+    #: recorded), so a reuse across builds can be named (``run_report.cross_build_note``).
+    builds: dict = dataclasses.field(default_factory=dict, compare=False)
 
     @property
     def finished(self) -> frozenset[str]:
@@ -345,7 +348,8 @@ def list_remote_outputs(cache, remote_dir: str) -> RemoteOutputs | None:
     script = (f"if [ ! -d {where} ]; then echo {_LISTED}; exit 0; fi\n"
               f"cd {where} || exit 3\n"
               "for f in ./*_out.zip; do [ -f \"$f\" ] && echo \"O ${f#./}\"; done\n"
-              f"for f in ./{COMPLETE_DIRNAME}/*.json; do [ -f \"$f\" ] && echo \"S ${{f##*/}}\"; done\n"
+              f"for f in ./{COMPLETE_DIRNAME}/*.json; do [ -f \"$f\" ] && echo \"S ${{f##*/}} "
+              "$(sed -n 's/.*\"build\": *\"\\([^\"]*\\)\".*/\\1/p' \"$f\" | head -n 1)\"; done\n"
               f"echo {_LISTED}\n")
     try:
         result = cache._ssh_script(script, check=False)
@@ -355,8 +359,9 @@ def list_remote_outputs(cache, remote_dir: str) -> RemoteOutputs | None:
     if result is None or getattr(result, "returncode", 1) != 0 or not lines or lines[-1].strip() != _LISTED:
         return None
     with_output = {w for ln in lines if ln.startswith("O ") and (w := well_of_out_zip(ln[2:].strip()))}
-    sealed = {w for ln in lines if ln.startswith("S ") and (w := well_of_seal(ln[2:].strip()))}
-    return RemoteOutputs(frozenset(with_output), frozenset(sealed))
+    builds = {w: build.strip() for ln in lines if ln.startswith("S ")
+              for name, _, build in [ln[2:].strip().partition(" ")] if (w := well_of_seal(name))}
+    return RemoteOutputs(frozenset(with_output), frozenset(builds), builds)
 
 
 def finished_on_remote(listing: RemoteOutputs | None) -> frozenset[str]:

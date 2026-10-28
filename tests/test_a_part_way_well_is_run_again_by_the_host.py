@@ -84,6 +84,22 @@ def test_a_well_left_part_way_is_run_again_not_skipped(tmp_path, monkeypatch, ca
     assert not withdrawn_note_path(plate / "out", "C01").exists(), "the seal did not clear its withdrawal note"
 
 
+def test_a_well_another_build_finished_is_reused_and_said_so(tmp_path, monkeypatch, caplog):
+    """Tracker F7: neither reuse key names the build, so a well a previous version of All-Well finished is reused
+    by this one in silence. The seal now records the build, and a reuse across builds is named per well."""
+    from version import __version__
+
+    plate = _plate(tmp_path)
+    _main(monkeypatch, plate)
+    seal = complete_seal_path(plate / "out", "C01")
+    assert json.loads(seal.read_text())["build"] == __version__, "the seal does not say which build made the well"
+    seal.write_text(json.dumps({"well": "C01", "build": "0.0.1"}))
+    with caplog.at_level(logging.INFO):
+        ran = _main(monkeypatch, plate)
+    assert ran == [], "a whole well was recomputed only because another build sealed it"
+    assert f"Well C01 was finished by build 0.0.1, not this build ({__version__})" in caplog.text, caplog.text
+
+
 def test_a_sealed_well_is_still_skipped(tmp_path, monkeypatch, caplog):
     """The other side of the same predicate: a whole well is not recomputed by a plain re-run."""
     plate = _plate(tmp_path)

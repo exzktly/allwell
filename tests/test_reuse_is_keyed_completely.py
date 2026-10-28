@@ -816,6 +816,27 @@ def test_the_launcher_does_not_reach_the_digest():
         f"{digests}")
 
 
+#: What each definition of the argv digest gives one argv that carries a flag every definition disagrees about —
+#: the current one first, then ``remote_run_id.EARLIER_ARGV_DEFINITIONS`` in order. Pinned per build, as the
+#: settings digest's earlier definitions are (tracker F7): a change to which flags count must append the definition it
+#: replaces to that roster, and its literal here, or every address journalled before it stops matching in silence.
+_PINNED_PER_DEFINITION = ("ed34655eac9f2335", "47a674a74375043b", "0ec0017dc8cc630a")
+
+
+def test_every_earlier_argv_definition_is_pinned_and_searched():
+    from services.remote_run_id import EARLIER_ARGV_DEFINITIONS, _digest, legacy_argv_digests, pipeline_argv_digest
+
+    argv = [*_local_argv(), "--workers", "6", "--force_wells", "A01", "B02", "--no_auto_threshold"]
+    extras = ["--cpu_only"]
+    got = (pipeline_argv_digest(argv, extras=extras),
+           *(_digest(argv, extras, d.skip_with_value, d.skip_flags, d.skip_multi) for d in EARLIER_ARGV_DEFINITIONS))
+    assert got == _PINNED_PER_DEFINITION, (
+        "a definition of the argv digest changed without its predecessor joining EARLIER_ARGV_DEFINITIONS (and its "
+        f"literal joining this pin): {got}")
+    assert set(got[1:]) <= set(legacy_argv_digests(argv, extras=extras)), (
+        "an earlier definition's digest is not searched, so the attempts it recorded are never found")
+
+
 # ── the per-well frame cache ────────────────────────────────────────────────
 #
 # Same discipline as the two above, and for the same reason: an entry in the

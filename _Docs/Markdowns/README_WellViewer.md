@@ -1917,7 +1917,9 @@ and by `remote_fetch_report.txt` in the output folder.
   pre-flight check counts only sealed wells, so a host that holds a part-way
   well never skips the pipeline. Results made by a version of All-Well from
   before the seal are still reused as they were, unless their own completeness
-  record says they ended short. When only part of a plate is sent, the
+  record says they ended short. A finished well is reused across versions of
+  All-Well too, and the log says so — *was finished by build …, not this build*
+  — so you can tick Force when an update changed how wells are computed. When only part of a plate is sent, the
   cell-gating thresholds are computed on this computer afterwards, over every
   well, so they are the plate's rather than the part's.
   A remote run in batches that is restarted — after Stop, Suspend, or a lost

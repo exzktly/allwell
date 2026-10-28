@@ -194,6 +194,19 @@ def test_a_nanowell_run_frees_the_wells_it_adopted(tmp_path, monkeypatch, nanowe
     assert bool(adopted_release) is nanowell
 
 
+def test_an_adoption_across_builds_is_named(tmp_path, monkeypatch):
+    """Tracker F7: a well another build finished is still adopted — the reuse keys deliberately span builds — but the
+    log says so, from the build its seal records."""
+    from pipeline.run_report import complete_seal_path
+
+    p, plate, run_dir, sent, observed, _ = _harness(tmp_path, monkeypatch)
+    _finished_on(run_dir / "out", "A02")
+    complete_seal_path(run_dir / "out", "A02").write_text('{"well": "A02", "build": "0.0.1"}')
+    _run(p, monkeypatch)
+    assert [line.split()[1] for line in observed] == ["A02"]
+    assert any("finished by another build" in m and "0.0.1" in m and "A02" in m for m in p._logged), p._logged
+
+
 def test_an_adopted_well_held_for_the_re_anchoring_is_not_freed_before_the_pass(tmp_path, monkeypatch):
     """Tracker F4: the adopted wells' release ran at batch 1's hand-off and deleted the archive and outputs the
     final pass re-runs a held well from. A well this run took over a hold for is kept until that pass."""

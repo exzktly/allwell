@@ -35,6 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from pipeline.run_report import cross_build_note
 from services import run_journal
 from services.remote_fetch import (
     _WELL_IN_MESSAGE,
@@ -182,6 +183,9 @@ def _recover_from(runner, remote_dir: str, local_output_dir: Path,
     log(f"[remote] resume: {host}:{remote_dir} holds {len(missing_wells)} "
         f"finished well(s) never downloaded ({_sample(missing_wells)}) — "
         f"downloading them instead of uploading and recomputing them\n")
+    note = cross_build_note({w: listing.builds.get(w, "") for w in missing_wells})
+    if note:
+        log(f"[remote] resume: {note}\n")
     verdict = verifier.verify(True, log=log)
     return Recovery(ok=verdict.passed, remote_dir=remote_dir,
                     on_remote=on_remote, missing_locally=missing_wells,

@@ -79,6 +79,44 @@ def withdrawn_note_path(output_dir: Path | str, well_label: str) -> Path:
 # (`services.remote_finished_wells.RemoteOutputs`), the pre-staging download (`services.remote_recover`).
 # `tests/test_one_definition_of_a_finished_well.py` holds that no other module lists `*_out.zip` to decide it.
 
+def this_build() -> str:
+    """The All-Well version computing now (``version.__version__``), or ``""`` where it cannot be imported.
+
+    Recorded in every completion seal, because neither reuse key says which build made an output: the settings
+    digest and the argv digest are deliberately identical across builds that compute the same thing, and a build
+    that changed a computation without changing either would otherwise have its predecessor's wells reused in
+    silence (tracker F7). Reuse across builds stays allowed — keying on the build would recompute every plate on
+    every upgrade — but it is named in the log (:func:`seal_build`)."""
+    try:
+        from version import __version__
+    except ImportError:
+        return ""
+    return str(__version__)
+
+
+def seal_build(output_dir: Path | str, well_label: str) -> str | None:
+    """The build that sealed *well_label*: its version, ``""`` for a seal written before builds were recorded,
+    ``None`` when there is no readable seal."""
+    try:
+        payload = json.loads(complete_seal_path(output_dir, well_label).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return str(payload.get("build") or "") if isinstance(payload, dict) else None
+
+
+def cross_build_note(builds: dict, *, current: str | None = None) -> str:
+    """One clause naming the wells of *builds* (``{well: build}``) sealed by another build than *current*, or ``""``.
+    ``""`` for a build means one from before builds were recorded."""
+    now = this_build() if current is None else current
+    other = sorted(w for w, b in builds.items() if b != now)
+    if not other or not now:
+        return ""
+    named = sorted({b or "an earlier build" for w, b in builds.items() if w in other})
+    return (f"{len(other)} of them finished by another build than this one ({now}): {', '.join(named)} — "
+            f"reused as they are; tick Force to recompute them with this build ({', '.join(other[:8])}"
+            + (" …" if len(other) > 8 else "") + ")")
+
+
 def well_of_out_zip(name: str) -> str | None:
     """The canonical well a ``<well>_out.zip`` file name belongs to, or ``None`` for any other name."""
     from util.well_token import canonical_well_label
@@ -317,7 +355,7 @@ def seal_well_complete(output_dir: Path | str, well_label: str) -> Path | None:
     path = complete_seal_path(output_dir, well_label)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        write_json_atomic(path, {"well": str(well_label)})
+        write_json_atomic(path, {"well": str(well_label), "build": this_build()})
     except OSError:
         return None
     from util.well_token import canonical_well_label

@@ -12077,7 +12077,15 @@ parent process supervises the per-well worker pool:
   it rewrites the sidecar) does not say it ended short. That keeps every plate
   made before the seal reusable, and runs again a well that was wound down part
   way, failed groups, or died mid-rewrite, which a plain run used to skip as
-  complete and a remote resume then fetched as the result.
+  complete and a remote resume then fetched as the result. **The seal records
+  the build that wrote it** (`run_report.this_build`, `version.__version__`,
+  which is therefore in the remote upload manifest). Neither reuse key names the
+  build — keying on it would recompute every plate on every upgrade — so a reuse
+  across builds is allowed and *said*: the host's skip logs it per well
+  (`well_skip.finished_output`), and the remote pre-flight, the pre-staging
+  download and the batched adoption name the wells another build finished
+  (`run_report.cross_build_note`, from the build `list_remote_outputs` and
+  `find_leftovers` read out of each seal).
   `tests/test_a_part_way_well_is_not_sealed.py` drives `main` through a whole
   well, a part-way one, its resume, and a seal that cannot be withdrawn;
   `tests/test_a_part_way_well_is_run_again_by_the_host.py` drives the real
@@ -12603,9 +12611,14 @@ where reuse is decided instead — a forced well is never adopted
 (`remote_batch_resume.take_from_remote`), the pre-flight never calls a forced
 run a cache hit, verification requires its archive be replaced — and re-attach
 declines only for `--force`, so one forced well no longer costs the rest of
-the plate its earlier directory. `legacy_argv_digests` adds the earlier
-definition (`earlier_argv_digest`) of the argv as it is and without those three
-flags, so an attempt journalled before is still found.
+the plate its earlier directory. Every earlier definition of the digest is a row
+of `remote_run_id.EARLIER_ARGV_DEFINITIONS`, the counterpart of the settings
+digest's `_EARLIER_DEFINITIONS`, and `legacy_argv_digests` asks each of them of
+the argv as it is, without `--incremental`, and without the force list, the
+subset and `--no_auto_threshold`, so an attempt journalled by an earlier build
+is still found. Each definition's digest of one argv they disagree on is pinned
+(`tests/test_reuse_is_keyed_completely.py::test_every_earlier_argv_definition_is_pinned_and_searched`),
+so a definition cannot change without its predecessor joining the roster.
 
 It is computed over the *flags*, never the launcher — `sys.executable` and
 either the local path to `process_microscopy.py` or the frozen bundle's

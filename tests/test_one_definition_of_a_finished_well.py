@@ -59,9 +59,9 @@ def _output_dir(tmp_path: Path) -> Path:
     (out / "._A01_out.zip").write_bytes(b"appledouble")                # a macOS sidecar, not a well
     (out / ".D04_out.zip.tmp").write_bytes(b"half")                    # an archive still being written
     (out / ".DS_Store").write_bytes(b"")
-    for well in ("A01", "E05"):                                          # E05: a seal with no output beside it
+    for well, seal in (("A01", '{"well": "A01", "build": "9.0.1"}'), ("E05", "{}")):  # E05: no output beside it
         complete_seal_path(out, well).parent.mkdir(exist_ok=True)
-        complete_seal_path(out, well).write_text("{}")
+        complete_seal_path(out, well).write_text(seal)
     withdrawn_note_path(out, "B02").touch()                             # B02: rewritten, never sealed
     return out
 
@@ -76,6 +76,16 @@ def test_the_listing_reads_archives_and_seals(tmp_path):
     assert finished_on_remote(listing) == {"A01"}, (
         f"finished must be archive AND seal: got {sorted(finished_on_remote(listing))}")
     assert listing.part_way == {"B02", "C03"}
+    assert listing.builds == {"A01": "9.0.1", "E05": ""}, "the build each seal names did not come back (F7)"
+
+
+def test_a_reuse_across_builds_is_named():
+    from pipeline.run_report import cross_build_note
+
+    note = cross_build_note({"A01": "9.0.1", "B02": "9.2.0", "C03": ""}, current="9.2.0")
+    assert note.startswith("2 of them finished by another build than this one (9.2.0): 9.0.1, an earlier build"), note
+    assert "A01, C03" in note
+    assert cross_build_note({"B02": "9.2.0"}, current="9.2.0") == ""
 
 
 def test_a_directory_that_is_not_there_holds_nothing_and_says_so(tmp_path):

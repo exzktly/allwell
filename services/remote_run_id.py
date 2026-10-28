@@ -140,39 +140,57 @@ _DIGEST_SKIP_FLAG = frozenset({
 #: Flags followed by any number of values (up to the next flag) that :func:`pipeline_argv_digest` leaves out: the
 #: wells a run is limited to or told to redo.
 _DIGEST_SKIP_MULTI = frozenset({"--force_wells", "--only_wells"})
-#: The bare flags the definition before :data:`_DIGEST_SKIP_MULTI` existed left out (:func:`earlier_argv_digest`).
-_EARLIER_SKIP_FLAG = _DIGEST_SKIP_FLAG - {"--no_auto_threshold"}
+
+
+@dataclass(frozen=True)
+class _ArgvDefinition:
+    """One way a build computed :func:`pipeline_argv_digest`: what it left out, and what changed after it."""
+
+    changed: str
+    skip_with_value: frozenset[str]
+    skip_flags: frozenset[str]
+    skip_multi: frozenset[str] = frozenset()
+
+
+#: Every earlier definition of :func:`pipeline_argv_digest`, newest first — the argv digest's counterpart of
+#: ``util.settings_digest._EARLIER_DEFINITIONS``. A change to which flags count must add its predecessor here, or
+#: every address a user's journal holds stops matching and every resume starts again from nothing; each entry's
+#: digest of a fixed argv is pinned in ``tests/test_reuse_is_keyed_completely.py``
+#: (``test_every_earlier_argv_definition_is_pinned_and_searched``), so a definition cannot change unrecorded.
+EARLIER_ARGV_DEFINITIONS: tuple[_ArgvDefinition, ...] = (
+    _ArgvDefinition("the force list, the subset and --no_auto_threshold were hashed (tracker F2)",
+                    _DIGEST_SKIP_VALUE, _DIGEST_SKIP_FLAG - {"--no_auto_threshold"}),
+    _ArgvDefinition("the execution knobs (--workers, --incremental…) were hashed",
+                    frozenset({"--input_dir", "--output_dir"}), frozenset({"--force"})),
+)
 
 
 def earlier_argv_digest(pipeline_argv: list[str], *, extras: Sequence[str] = ()) -> str:
     """What the build before :data:`_DIGEST_SKIP_MULTI` recorded for *pipeline_argv*: the force list, the subset and
     ``--no_auto_threshold`` all hashed. For finding an attempt it recorded, never for addressing a new run."""
-    return _digest(pipeline_argv, extras, _DIGEST_SKIP_VALUE, _EARLIER_SKIP_FLAG)
+    d = EARLIER_ARGV_DEFINITIONS[0]
+    return _digest(pipeline_argv, extras, d.skip_with_value, d.skip_flags, d.skip_multi)
 
 
 def legacy_argv_digests(pipeline_argv: list[str], *,
                         extras: Sequence[str] = ()) -> tuple[str, ...]:
     """The digests an earlier build would have recorded for this configuration.
 
-    Only for *finding* work: a plate whose finished remote output was recorded
-    before :func:`pipeline_argv_digest` stopped hashing the execution knobs
-    carries a digest the current one cannot produce, and without these the
-    download-before-staging step would miss exactly the plates that are stuck
-    on the server today. Never used to address a new run. Two shapes, because
-    the recording run may or may not itself have been incremental.
+    Only for *finding* work: a plate whose finished remote output was recorded under an earlier definition
+    (:data:`EARLIER_ARGV_DEFINITIONS`) carries a digest the current one cannot produce, and without these the
+    download-before-staging step and the batched resume would miss exactly the plates that are stuck on the server.
+    Never used to address a new run. Each definition is asked of three shapes of the argv, because the recording run
+    may differ from this one in what is not configuration: as it is; without ``--incremental`` (the recording run
+    may not have been incremental); and without the force list, the subset and ``--no_auto_threshold`` (the attempt a
+    Resume resumes usually had none — the Resume added its force list itself).
     """
-    old_values = frozenset({"--input_dir", "--output_dir"})
-    old_flags = frozenset({"--force"})
-    stripped = _strip(_without_launcher(pipeline_argv),
-                      frozenset({"--incremental_prior_dir"}),
-                      frozenset({"--incremental"}))
-    # The build before the force list, the subset and the gating switch left the digest: as this run is, and as the
-    # attempt it resumes most often was — without them, since the Resume added the force list itself.
-    unscoped = _strip(_without_launcher(pipeline_argv), frozenset(), frozenset({"--no_auto_threshold"}),
-                      _DIGEST_SKIP_MULTI)
+    argv = _without_launcher(pipeline_argv)
+    shapes = (argv,
+              _strip(argv, frozenset({"--incremental_prior_dir"}), frozenset({"--incremental"})),
+              _strip(argv, frozenset(), frozenset({"--no_auto_threshold"}), _DIGEST_SKIP_MULTI))
     current = pipeline_argv_digest(pipeline_argv, extras=extras)
-    found = (earlier_argv_digest(pipeline_argv, extras=extras), earlier_argv_digest(unscoped, extras=extras),
-             _digest(pipeline_argv, extras, old_values, old_flags), _digest(stripped, extras, old_values, old_flags))
+    found = (_digest(shape, extras, d.skip_with_value, d.skip_flags, d.skip_multi)
+             for d in EARLIER_ARGV_DEFINITIONS for shape in shapes)
     return tuple(d for d in dict.fromkeys(found) if d != current)
 
 

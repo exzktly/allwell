@@ -182,7 +182,7 @@ def finished_output(output_dir: Path, well_label: str, csv_prefix: str, settings
     and the run reported success (tracker B1). *records* is ``run_report.recorded_completeness`` of the output
     directory, read before the run rewrote its sidecar.
     """
-    from pipeline.run_report import finished_on_this_host
+    from pipeline.run_report import finished_on_this_host, seal_build, this_build
     from pipeline.settings_record import well_settings_allow_reuse
 
     exists = (output_exists_for_well_folder(output_dir, well_label, csv_prefix, compressed_output=True) if folder
@@ -190,6 +190,12 @@ def finished_output(output_dir: Path, well_label: str, csv_prefix: str, settings
     if not (exists and well_settings_allow_reuse(output_dir, well_label, settings_key)):
         return False
     if finished_on_this_host(output_dir, well_label, records=records):
+        sealed_by, now = seal_build(output_dir, well_label), this_build()
+        if sealed_by is not None and now and sealed_by != now:
+            # Neither reuse key names the build (tracker F7), so a reuse across builds is said, per well.
+            _log.info("Well %s was finished by %s, not this build (%s); its output is reused as it is — use "
+                      "--force to recompute it with this build.", well_label,
+                      f"build {sealed_by}" if sealed_by else "an earlier build", now)
         return True
     _log.info("Well %s has output here, but it was left part way (no completion seal) — running it again.",
               well_label)

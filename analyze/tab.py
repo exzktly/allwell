@@ -494,14 +494,8 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
                 elif kind == "workers":
                     pending.append(
                         (f"[info] Workers: {payload} parallel well(s).\n", "INFO"))
-                elif kind == "remote_xfer":
-                    # Remote upload/download progress in [0,1]. The dashboard
-                    # owns the label so the compute phase can retract it.
-                    try:
-                        pct = float(payload)
-                    except (TypeError, ValueError):
-                        pct = 0.0
-                    self._dashboard.set_transfer(pct)
+                elif kind == "remote_xfer":       # ("up"|"down", fraction): see _on_remote_xfer
+                    self._on_remote_xfer(payload)
                 elif kind in ("done", "suspended"):      # the two clean endings
                     (self._on_run_done if kind == "done" else self._on_run_suspended)(payload, pending)
                     pending = []

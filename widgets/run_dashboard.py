@@ -147,6 +147,7 @@ class RunDashboard(PlateProgress):
         # that one of them writes and neither retracts is exactly how it came
         # to sit on "Transferring… 92%" for the whole compute phase.
         self._transfer: float | None = None
+        self._transfer_direction = _XFER_UP
         self._rail: dict[str, tuple] = {}        # stage -> (dot,name,bar,count)
         super().__init__("Run Progress", parent)
         self.setObjectName("RunDashboard")
@@ -175,6 +176,7 @@ class RunDashboard(PlateProgress):
         self._unfinished = set()
         self._active_stage = ""
         self._transfer = None
+        self._transfer_direction = _XFER_UP
         self._bar.setRange(0, 100); self._bar.setValue(0)
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
@@ -184,12 +186,19 @@ class RunDashboard(PlateProgress):
         self._headline.setText("Preparing…")
         self._eta.setText(""); self._status.setText("")
 
-    def set_transfer(self, pct: float | None) -> None:
+    def set_transfer(self, pct: float | None, direction: str = _XFER_UP) -> None:
         """Show (or clear) the plate-wide transfer percentage on the status line.
 
         ``None`` ends the transfer. Callers do not have to know whether rsync's
         last tick happened to be 100% — whoever observes the run moving on says
         so, and the label goes with it.
+
+        *direction* says which transfer it is, and the label says it in words:
+        ``Uploading… 42%`` is the upload's bytes, ``Downloading… 42%`` the share
+        of the run's wells fetched back. Both used to read "Transferring…", fed
+        by the uploader and the Fetcher alike, so the figure on screen could be
+        either and a reader could not tell a stalled upload from a slow fetch
+        (tracker D5).
         """
         if pct is None:
             if self._transfer is None:
@@ -198,7 +207,14 @@ class RunDashboard(PlateProgress):
             self.set_status("")
             return
         self._transfer = max(0.0, min(1.0, float(pct)))
-        self.set_status(f"Transferring… {int(self._transfer * 100)}%")
+        self._transfer_direction = direction
+        verb = "Downloading" if direction == _XFER_DOWN else "Uploading"
+        self.set_status(f"{verb}… {int(self._transfer * 100)}%")
+
+    def end_transfer(self, direction: str) -> None:
+        """A transfer in *direction* is over: retract its label, and only its."""
+        if self._transfer is not None and self._transfer_direction == direction:
+            self.set_transfer(None)
 
     def transfer(self) -> float | None:
         return self._transfer

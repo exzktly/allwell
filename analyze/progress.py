@@ -491,6 +491,20 @@ class AnalyzeProgressMixin:
     #: number was for the whole compute phase.
     _COMPUTE_PHASE_EVENTS = ("well_total", "well_done", "well_fov", "well_sites")
 
+    def _on_remote_xfer(self, payload: object) -> None:
+        """The plate-wide transfer moved: ``("up"|"down", fraction)``.
+
+        The dashboard owns the label, so the phase that follows can retract it,
+        and says which transfer it is. A payload that cannot be read moves
+        nothing rather than writing a guessed figure.
+        """
+        try:
+            direction, pct = payload  # type: ignore[misc]
+            pct = float(pct)
+        except (TypeError, ValueError):
+            return
+        self._dashboard.set_transfer(pct, str(direction))
+
     def _apply_progress_event(self, kind: str, payload: object) -> None:
         """Render a progress event from :class:`ProgressTracker` to the UI."""
         if kind in self._COMPUTE_PHASE_EVENTS:
@@ -613,6 +627,12 @@ class AnalyzeProgressMixin:
         elif kind == "well_xfer":
             well, direction, frac = payload  # type: ignore[misc]
             self._dashboard.set_well_transfer(str(well), str(direction), float(frac))
+        elif kind == "xfer_end":
+            # The uploader said its upload is over. What follows — the
+            # hand-off, a scheduler queue, the compute — writes nothing to the
+            # status line until it starts, and the last rsync tick sat there
+            # for the whole wait (incident 1: 79 % for an hour).
+            self._dashboard.end_transfer(str(payload))
         elif kind == "status":
             # Descriptive finalize-phase status (auto-threshold / remote drain
             # / cleanup) so the post-well work doesn't read as a hang.

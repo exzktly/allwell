@@ -1795,9 +1795,12 @@ and by `remote_fetch_report.txt` in the output folder.
   wells being processed and leaves the fetching to the Download row on the stage
   rail and to the status line.
 - The line under the headline reports the plate-wide transfer while one is
-  running (`Transferring… 42%`), and clears itself the moment the pipeline
-  starts computing rather than lingering on whatever percentage the transfer
-  last reported.
+  running, and says which: `Uploading… 42%` for the images going up,
+  `Downloading… 42%` for the share of the run's wells fetched back. The upload
+  figure clears itself as soon as the upload is over — before a batch is handed
+  to the cluster and while it waits for a node — and any figure clears the
+  moment the pipeline starts computing, rather than lingering on whatever
+  percentage the transfer last reported.
 - Hover a well for its exact numbers — the stage it is in plus its field count
   (`FOV 7/12`) or transfer percentage. On a remote run an uploaded well waiting
   its turn has its own colour, distinct from one being computed — see the

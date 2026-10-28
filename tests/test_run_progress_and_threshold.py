@@ -230,7 +230,7 @@ def test_a_compute_event_ends_the_transfer_label(qapp, event, payload):
     d = host._dashboard
 
     d.set_transfer(0.92)
-    assert d._status.text() == "Transferring… 92%"
+    assert d._status.text() == "Uploading… 92%"
 
     host._apply_progress_event(event, payload)
     assert d._status.text() == ""

@@ -10,8 +10,12 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
     zipper_start  int        Begin grouping phase, expected well count.
     zipper_well   str|None   One well finished grouping.
     zipper_done   None       Grouping phase finished.
-    remote_xfer   float      Remote rsync progress as a fraction in [0, 1].
+    remote_xfer   tuple      ("up"|"down", fraction in [0, 1]): the plate-wide
+                             upload's progress, or the share of the run's
+                             wells fetched back (``TransferProgress``).
                              Only emitted during remote-execution runs.
+    xfer_end      str        "up": the upload is over (``ProgressTracker``,
+                             from the uploader's own completion lines).
     well_xfer     tuple      (well, "up"|"down", fraction) — one well's own
                              upload or download progress, for its dial on the
                              plate map. Parsed out of the log stream by
@@ -469,7 +473,39 @@ _STATE_PATTERNS: tuple[re.Pattern, ...] = (
 
 def carries_state(line: str) -> bool:
     """Whether *line* is one the run's displayed state is derived from."""
-    return any(p.search(line) for p in _STATE_PATTERNS)
+    return any(p.search(line) for p in _STATE_PATTERNS) or bool(_RE_UPLOAD_OVER.search(line))
+
+
+class TransferProgress:
+    """The progress callback a remote run is handed, which knows its direction.
+
+    Called with a fraction it is the upload's (``RemoteRunner.spawn`` hands it
+    to the uploader); its :meth:`download` is the share of the run's wells
+    fetched back, which the ``Fetcher`` reaches for when it is there
+    (``Fetcher.__init__``). Both used to be one plain callable, so the
+    dashboard's "Transferring… NN%" was whichever wrote last, and a batch
+    upload's last tick sat there through the queue wait that followed
+    (tracker D5).
+    """
+
+    def __init__(self, enqueue: Callable[[tuple[str, object]], None]) -> None:
+        self._enqueue = enqueue
+
+    def __call__(self, pct: float) -> None:
+        self._enqueue(("remote_xfer", ("up", float(pct))))
+
+    def download(self, pct: float) -> None:
+        self._enqueue(("remote_xfer", ("down", float(pct))))
+
+
+# The uploader's own lines for an upload that is over — finished, interrupted
+# or failed — single-shot (``RemoteRunner._upload_input``), per batch
+# (``remote_process``) and for the empty-well reference. The label they end is
+# the upload's: a batch's upload is followed by its hand-off and a scheduler
+# wait in which nothing else writes the status line.
+_RE_UPLOAD_OVER = re.compile(
+    r"\[remote\] (?:uploaded [\d.]+ MB in|batch \d+(?:/\d+)?: upload (?:complete|interrupted)"
+    r"|batch \d+ upload failed|empty-well reference uploaded once|upload failed)")
 
 
 class ProgressTracker:
@@ -619,6 +655,8 @@ class ProgressTracker:
         # Remote transfer phases (the runner logs "[remote] ↑" while uploading
         # inputs, "[remote] ↓" while fetching outputs) drive the active stage.
         # Per-well: the input zip's upload and the output zip's local landing.
+        if _RE_UPLOAD_OVER.search(line):
+            events.append(("xfer_end", "up"))
         if "[remote] ↑" in line:
             events.append(("stage", "upload"))
             mu = _RE_REMOTE_UP_WELL.search(line)
@@ -2316,12 +2354,7 @@ class PipelineRunner:
 
             output_filter = OutputFilter(self._output_filter)
 
-            def _on_xfer_progress(pct: float) -> None:
-                # Surface rsync progress as a dedicated queue event so the
-                # GUI can show a real bar during upload/download instead
-                # of a static spinner. A separate event kind keeps it out
-                # of the existing well-progress signal in ProgressTracker.
-                self._enqueue(("remote_xfer", pct))
+            _on_xfer_progress = TransferProgress(self._enqueue)
 
             try:
                 batch_size = int(opts.get("remote_batch_size", 0) or 0)

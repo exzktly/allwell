@@ -228,10 +228,73 @@ _RE_WELL_FAIL = re.compile(r"FAILED well (\S+?)[:\s]")
 _RE_WELL_UPTODATE = re.compile(r"Well (\S+)\s+\S+\s+up to date")
 # A well skipped because its output already exists (re-run without --force) —
 # it's complete, so the dashboard must count it as done, not leave it pending.
-_RE_WELL_SKIP = re.compile(r"SKIP well (\S+)\s+\S+\s+output already exists")
+# The batched remote client prints two of its own: a well whose output is
+# already *here* ("output already exists locally; not uploaded") and an
+# empty-well blank that was sent only as the correction's reference
+# ("empty-well reference only; already complete locally").
+_RE_WELL_SKIP = re.compile(
+    r"SKIP well (\S+)\s+\S+\s+(?:output already exists|empty-well reference only)")
+# Those two say where the output is, which the pipeline's own SKIP (printed on
+# the host, about the host's folder) does not: on a remote run a well whose
+# output is already local is fetched, and painting it "on server, awaiting
+# fetch" left it blue for the rest of the run (tracker D6).
+_RE_WELL_SKIP_LOCAL = re.compile(
+    r"SKIP well (\S+)\s+\S+\s+(?:output already exists locally|empty-well reference only)")
 # Remote incremental: the runner emits this for wells it didn't need to upload /
 # re-fetch because their local output is already current — marks them complete.
 _RE_REMOTE_UPTODATE = re.compile(r"\[remote\] ✓ ([A-Ha-h]\d{1,2}): up to date")
+
+# Per-well markers that say a well's output is SHORT of its input. Each of these
+# is printed before the well's "— done." — which still fires, because the well
+# did write a CSV and an out.zip from the work it had — so a plate driven by
+# "done" alone painted every one of them complete, and the pipeline's own exit
+# line had to admit "partial wells look complete on the plate map" (tracker B3).
+# Each pattern carries the sentence the well's hover text gives for it; the
+# list of markers is held against every one the pipeline can print by
+# ``tests/test_every_well_marker_reaches_the_plate.py``.
+_PARTIAL_MARKERS: tuple[tuple[re.Pattern, str], ...] = (
+    (re.compile(r"Well (\S+)\s+\S+\s+PARTIAL: (?P<k>\d+) of (?P<n>\d+) FOV-group"),
+     "{k} of {n} FOV-group(s) failed; the CSV and out.zip cover the rest"),
+    (re.compile(r"Well (\S+)\s+\S+\s+NOT ATTEMPTED: (?P<k>\d+) FOV-group"),
+     "{k} FOV-group(s) not attempted after the well aborted"),
+    (re.compile(r"Well (\S+)\s+\S+\s+(?:storage failure|ABORTING after)"),
+     "the storage it writes to failed part way through the well"),
+    (re.compile(r"Well (\S+)\s+\S+\s+SUSPENDED part way: (?P<k>\d+) of (?P<n>\d+) FOV-group"),
+     "{k} of {n} FOV-group(s) not reached before the suspend"),
+    (re.compile(r"Well (\S+): no records produced"),
+     "no records produced, so it has no CSV rows"),
+    (re.compile(r"Well (\S+): no image groups found in (?P<zip>\S+?)\.?\s*$"),
+     "no image groups found in {zip}, so nothing was measured"),
+    # A nanowell well counts timepoints, and says how many came out with no rows.
+    (re.compile(r"Well (\S+)\s+\S+\s+done\. (?P<n>\d+) timepoint\(s\), (?P<k>[1-9]\d*) without rows"),
+     "{k} of {n} timepoint(s) without rows"),
+)
+# "No image groups" is the one partial marker no "— done." follows: the task
+# returns before writing anything, so it is the well's terminal marker too.
+_RE_WELL_NO_GROUPS = _PARTIAL_MARKERS[5][0]
+# A worker's own failure line, beside the orchestrator's "FAILED well X:".
+_RE_WELL_WORKER_FAIL = re.compile(r"Well (\S+) failed \(")
+# A well a suspend reached before it did any work. The second of the two is
+# printed after "— starting", so the well has to leave "processing".
+_RE_WELL_NOT_STARTED = re.compile(r"Well (\S+)\s+\S+\s+not started \(")
+
+
+def _well_outcome_events(line: str) -> list[tuple[str, object]]:
+    """``("well_partial", (well, why))`` for a marker saying a well's output is
+    short, ``("well_stage", (well, "error"))`` for a worker's own failure line,
+    ``("well_not_started", well)`` for a well a suspend reached first."""
+    events: list[tuple[str, object]] = []
+    for pattern, why in _PARTIAL_MARKERS:
+        found = pattern.search(line)
+        if found:
+            events.append(("well_partial", (found.group(1), why.format(**found.groupdict()))))
+    found = _RE_WELL_WORKER_FAIL.search(line)
+    if found:
+        events.append(("well_stage", (found.group(1), "error")))
+    found = _RE_WELL_NOT_STARTED.search(line)
+    if found:
+        events.append(("well_not_started", found.group(1)))
+    return events
 
 # A scheduler-backed host queues the pipeline rather than starting it, and a
 # queue wait is indistinguishable from a hang: the upload finishes, the log
@@ -391,7 +454,7 @@ class ProgressTracker:
         seen.add(part)
         return not was_complete and {"zip", "csv"} <= seen
 
-    #: What the run journal records for each of the three terminal markers,
+    #: What the run journal records for each kind of terminal marker,
     #: keyed by the marker's own name. Exhaustive on purpose — a new marker
     #: raises here rather than defaulting to one of the two answers, because
     #: guessing wrong in either direction is a record that claims work that did
@@ -400,17 +463,21 @@ class ProgressTracker:
     #: can see both states: that roster's liveness check reads dict values, and
     #: an earlier spelling as a conditional expression left ``analysed``
     #: visible only in a mapping nothing reached (CLAUDE.md §7.5 #10).
-    _RECORD_FOR_MARKER = {"process": "analysed", "uptodate": "skipped"}
+    #: ``empty`` is "no image groups found": the well is finished — nothing
+    #: will come of waiting for it — and nothing was measured, so it is
+    #: recorded as failed rather than as analysed.
+    _RECORD_FOR_MARKER = {"process": "analysed", "uptodate": "skipped", "empty": "failed"}
 
     def _count_well_done(self, well: str,
                          stage: str = "process") -> list[tuple[str, object]]:
         """Record that *well* reached a terminal state, counting it once.
 
         *stage* is what the marker said happened, and it is not always
-        "processed". Three lines reach here — "— done.", "up to date" and
-        "SKIP … output already exists" — and all three mean the well is
-        complete *for progress purposes*, which is why they share a counter.
-        Only the first means the pipeline computed anything. Collapsing them
+        "processed". Four lines reach here — "— done.", "up to date",
+        "SKIP … output already exists" (or a remote client's SKIP) and "no
+        image groups found" — and all four mean the well is finished *for
+        progress purposes*, which is why they share a counter. Only the first
+        means the pipeline computed anything. Collapsing them
         into one stage made an incremental run that touched 6 of 96 wells
         journal 96 as ``analysed`` and the readout say "It recorded 96
         finished", which is a claim about work that did not happen.
@@ -537,9 +604,10 @@ class ProgressTracker:
             events.append(("well_stage", (mt.group(1), "threshold")))
         # Remote: a well skipped because its local output is already current —
         # mark it fetched/complete (green) on the plate.
-        mru = _RE_REMOTE_UPTODATE.search(line)
+        mru = _RE_REMOTE_UPTODATE.search(line) or _RE_WELL_SKIP_LOCAL.search(line)
         if mru:
             events.append(("well_stage", (mru.group(1), "download")))
+        events.extend(_well_outcome_events(line))
         # Scheduler hand-off. Reported as its own kind rather than folded into
         # ``status`` because the GUI has to start and stop a clock, not just
         # write a string — a wait that does not visibly count up is the hang it
@@ -614,19 +682,20 @@ class ProgressTracker:
             # too as a fallback for users running mismatched
             # client/server versions.
             #
-            # The three terminal markers — finished, incremental up-to-date,
-            # and already-complete-so-skipped — all mean the same thing to the
-            # progress count, and all name their well, so they share one
-            # identity-aware counter. An up-to-date well never emits "— done.";
-            # a skipped one never runs at all; both are complete.
+            # The terminal markers — finished, incremental up-to-date,
+            # already-complete-so-skipped, and no image groups found — all mean
+            # the same thing to the progress count, and all name their well, so
+            # they share one identity-aware counter. An up-to-date well never
+            # emits "— done."; a skipped one never runs at all; both are complete.
             # Matched separately rather than as one `or` chain, because which
-            # of the three fired is the thing the journal needs: they agree
+            # of them fired is the thing the journal needs: they agree
             # that the well is complete and disagree about whether this run
             # computed it.
             for pattern, stage in (
                 (_RE_WELL_DONE_ID, "process"),
                 (_RE_WELL_UPTODATE, "uptodate"),
                 (_RE_WELL_SKIP, "uptodate"),
+                (_RE_WELL_NO_GROUPS, "empty"),
             ):
                 md = pattern.search(line)
                 if md:

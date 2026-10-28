@@ -1797,6 +1797,22 @@ and by `remote_fetch_report.txt` in the output folder.
   (`FOV 7/12`) or transfer percentage. On a remote run an uploaded well waiting
   its turn has its own colour, distinct from one being computed — see the
   **Wells** legend beside the plate.
+- **A well that finished short is marked, not painted complete.** A well whose
+  FOV-groups partly failed, whose remaining groups were not attempted after a
+  storage failure, that produced no records, in which no image groups were found,
+  that a suspend reached part way, or — in a nanowell run — some of whose
+  timepoints came out without rows, still writes its CSV and `out.zip` from what
+  it had, and says `— done.`. On the plate it takes the **partial / unfinished**
+  colour and carries a `!`; hovering it names each shortfall in the pipeline's
+  own words (`A01: partial — 9 of 12 FOV-group(s) failed; the CSV and out.zip
+  cover the rest`). On a remote run the hover also says whether its output is
+  fetched locally or still on the server. A well that was still being computed
+  when the run ended — it crashed, was stopped, or lost its connection — is
+  marked the same way as **unfinished**, with its dial left where it got to,
+  instead of staying amber "processing" on a run that is over. The completion
+  headline counts them (`Complete — 40 well(s) processed; 3 partial or
+  unfinished (marked ! on the plate)`). Re-run with **incremental** to recover
+  the missing FOV-groups.
 - The **headline and progress bar** count wells, and count each well once. A
   well already finished by an earlier run is counted too — it is part of the
   plate you asked for, so a run that only has ten wells left to compute still

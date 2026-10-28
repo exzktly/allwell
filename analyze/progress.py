@@ -108,6 +108,11 @@ class AnalyzeProgressMixin:
     #: on an entry nothing could reach (CLAUDE.md §7.5 #10).
     _JOURNAL_STAGES = {"error": "failed"}
 
+    #: The reason recorded beside a completion whose journal word is not
+    #: ``analysed``: a skip names why nothing was computed, and the one
+    #: completion recorded as failed is a well with no image groups.
+    _JOURNAL_REASONS = {"skipped": "already up to date", "failed": "no image groups found"}
+
     # ── the headline: one phase, one writer ─────────────────────────────────
     # The headline had several writers and none of them owned it. Each wrote a
     # string when its own phase started, and that string stayed on screen until
@@ -219,6 +224,14 @@ class AnalyzeProgressMixin:
         if phase == _PHASE_FINALIZE:
             return f"Processed {int(self._well_done)} well(s) — finalizing…"
         return ""
+
+    def _partial_note(self) -> str:
+        """``"; 3 partial (marked ! on the plate)"`` for a run's completion
+        headline, or ``""``. A run whose wells all said "— done." can still
+        have left some of them short; the headline is the one line a user reads
+        to decide whether the plate is finished, so it says so."""
+        n = self._dashboard.partial_count()
+        return f"; {n} partial or unfinished (marked ! on the plate)" if n else ""
 
     def _journal_well_stage(self, well: str, stage: str) -> None:
         """Record a terminal well stage in the output directory's run journal.
@@ -572,10 +585,17 @@ class AnalyzeProgressMixin:
                 # never wrote it.
                 state = str(record[0])
                 self._journal_well(
-                    str(well), state,
-                    reason="already up to date" if state == "skipped" else "")
+                    str(well), state, reason=self._JOURNAL_REASONS.get(state, ""))
             else:
                 self._journal_well_stage(str(well), str(stage))
+        elif kind == "well_partial":
+            # The well's output is short of its input; the pipeline's marker
+            # says how. It arrives before the well's "— done.", which on its own
+            # paints the well like a whole one.
+            well, why = payload  # type: ignore[misc]
+            self._dashboard.set_well_partial(str(well), str(why))
+        elif kind == "well_not_started":
+            self._dashboard.set_well_not_started(str(payload))
         elif kind == "well_fov":
             well, done, total, *unit = payload  # type: ignore[misc]
             self._dashboard.set_well_fov(str(well), int(done), int(total), unit=(unit or ["FOV"])[0])

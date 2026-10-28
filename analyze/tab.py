@@ -428,7 +428,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
             self._dashboard.set_overall(self._well_done)
             self._dashboard.set_headline(
                 f"Complete — {self._well_done} of {self._well_total} "
-                f"well(s) processed; {missing} never reported completion")
+                f"well(s) processed; {missing} never reported completion{self._partial_note()}")
             self._log_line(
                 f"[warn] Run finished with {missing} of "
                 f"{self._well_total} well(s) never reporting "
@@ -439,7 +439,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
             )
         else:
             self._dashboard.set_overall(self._dashboard.overall_maximum() or 100)
-            self._dashboard.set_headline(f"Complete — {n} well(s) processed")
+            self._dashboard.set_headline(f"Complete — {n} well(s) processed{self._partial_note()}")
         self._dashboard.set_status("")
         self._dashboard.set_eta("")
         self._log_line(payload, "DONE")
@@ -523,8 +523,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
                     self._running = False
                     self._show_run_buttons(running=False)
                     self._on_run_settled()
-                    self._dashboard.set_status("")
-                    self._dashboard.set_eta("")
+                    self._dashboard.finish_run()  # wells still in flight are unfinished; status/ETA cleared
                     self._stop_eta_timer()
                     # C4: show the just-finished run — but only when there IS
                     # one. The card's only test is that pipeline_info.json

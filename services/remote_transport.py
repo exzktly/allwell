@@ -17,9 +17,11 @@ Callers import these names from here, never through ``remote_runner``.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shlex
+import signal
 import subprocess
 import threading
 import time
@@ -28,14 +30,20 @@ from functools import lru_cache
 from pathlib import Path
 
 from services.remote_config import (
+    keepalive_options,
     known_hosts_options,
     RemoteHost,
     resolve_rsync_binary,
     resolve_ssh_for_rsync,
     to_rsync_path,
+    unattended_options,
 )
-from util.aw_safe import swallow
+from util.aw_safe import swallow, swallowed
 from services.subprocess_text import TEXT_UTF8
+
+#: The real ``Popen`` class, captured at import. :func:`spawn_transfer` signals
+#: a process *group* only for an object of this type.
+_REAL_POPEN = subprocess.Popen
 
 def _fmt_bytes(n: float) -> str:
     """Bytes at a unit a human reads without counting zeros.
@@ -203,9 +211,10 @@ def _rsync_ssh_transport(host: RemoteHost) -> list[str]:
     ssh_inner = [
         resolve_ssh_for_rsync(),
         *known_hosts_options(),      # the same known-hosts file as every other ssh, not rsync runtime's own
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "ConnectTimeout=15",
-        "-o", "BatchMode=yes",
+        *unattended_options(),       # BatchMode, accept-new, ConnectTimeout
+        # A transfer whose connection died mid-file (a laptop that slept, a
+        # network change) is noticed in about two minutes, then retried.
+        *keepalive_options(),
     ]
     if host.ssh_key_path:
         key = str(Path(host.ssh_key_path).expanduser())
@@ -303,11 +312,171 @@ def _iter_rsync_lines(stdout) -> Iterable[str]:
 # (permission denied, no such file) exit 23 or 3 and still surface immediately.
 _RSYNC_RETRY_CODES = {10, 11, 12, 30, 35}
 
+#: rsync's exit code when the ssh under it failed. It is retried only when the
+#: output says the *connection* failed (:data:`_TRANSPORT_FAILURE_RE`), never
+#: when the login did (:data:`_LOGIN_FAILURE_RE`).
+RSYNC_SSH_FAILED = 255
+
+#: What ssh, or rsync quoting it, prints when the connection itself failed: a
+#: session dropped mid-transfer ("Broken pipe", "connection unexpectedly
+#: closed"), a login node throttling new connections (sshd's ``MaxStartups``
+#: answers with "kex_exchange_identification: … Connection reset" or
+#: "Connection closed by …"), a host briefly unreachable after a sleep or a
+#: network change. Each is worth another attempt.
+_TRANSPORT_FAILURE_RE = re.compile(
+    r"broken pipe|connection (?:closed|reset|refused|timed out)"
+    r"|connection unexpectedly closed|kex_exchange_identification"
+    r"|not responding|network is unreachable|no route to host",
+    re.IGNORECASE,
+)
+
+#: What ssh prints when the login was refused — a key that does not work, a
+#: changed host key, a name that does not resolve. Another attempt fails the
+#: same way and only delays the message the user needs, so these win over
+#: :data:`_TRANSPORT_FAILURE_RE` when both appear.
+_LOGIN_FAILURE_RE = re.compile(
+    r"permission denied|host key verification failed"
+    r"|remote host identification has changed|too many authentication failures"
+    r"|could not resolve hostname",
+    re.IGNORECASE,
+)
+
+
+def names_ssh_failure(line: str) -> bool:
+    """Whether *line* is ssh saying why a connection or a login failed."""
+    return bool(_TRANSPORT_FAILURE_RE.search(line) or _LOGIN_FAILURE_RE.search(line))
+
+
+def rsync_failure_is_transient(returncode: int, output: str | None) -> bool:
+    """Whether an rsync that exited *returncode*, printing *output*, is worth
+    another attempt.
+
+    The one retry rule both directions share: the upload's streaming loop
+    (``remote_upload._stream_rsync_with_retry``) and every captured transfer
+    (:func:`_rsync_with_retry`, which the Fetcher goes through). A code in
+    :data:`_RSYNC_RETRY_CODES` always is. Exit 255 — ssh failed under rsync —
+    is when the output names a connection failure and no login failure: a
+    dropped session or a throttled login node used to end a whole batched run
+    on its first attempt, while a refused key must still fail at once.
+    """
+    if returncode in _RSYNC_RETRY_CODES:
+        return True
+    if returncode != RSYNC_SSH_FAILED:
+        return False
+    text = output or ""
+    if _LOGIN_FAILURE_RE.search(text):
+        return False
+    return bool(_TRANSPORT_FAILURE_RE.search(text))
+
+
 # Backoff schedule for rsync retries — mirrors the git push/pull policy
 # documented at the top of the runner's invocation env. Total wait
 # across the three retries is 14 s, an upper bound the user can sit
 # through without thinking the run is hung.
 _RSYNC_RETRY_DELAYS = (2.0, 4.0, 8.0)
+
+
+def sleep_unless_stopped(delay: float, stop_event: threading.Event | None) -> bool:
+    """Sleep *delay* seconds in quarter-second steps; ``False`` as soon as
+    *stop_event* is set, ``True`` once the whole delay has passed.
+
+    A retry backoff a Stop cannot interrupt holds the run for the rest of it.
+    The steps go through ``time.sleep`` so a test that patches it skips the
+    wait rather than paying it.
+    """
+    slept = 0.0
+    while slept < delay:
+        if stop_event is not None and stop_event.is_set():
+            return False
+        step = min(0.25, delay - slept)
+        time.sleep(step)
+        slept += step
+    return not (stop_event is not None and stop_event.is_set())
+
+
+def spawn_transfer(cmd: list[str], **popen_kw) -> subprocess.Popen:
+    """Start an rsync in a process group of its own, so :func:`end_transfer`
+    can end the ssh it starts as well as rsync itself.
+
+    That ssh inherits rsync's stdout and stderr. Terminating only rsync left
+    the ssh — blocked on a frozen remote — holding the pipe open, so the
+    reader waiting for end-of-file waited until ssh's keepalive gave up.
+    """
+    if os.name != "nt":
+        popen_kw.setdefault("start_new_session", True)
+    proc = subprocess.Popen(cmd, **popen_kw)
+    # Marked only when the group is provably the one just made: a stand-in
+    # Popen's pid names nobody's group, and must never be signalled as one.
+    if os.name != "nt" and isinstance(proc, _REAL_POPEN):
+        try:
+            proc._aw_own_group = os.getpgid(proc.pid) == proc.pid  # type: ignore[attr-defined]
+        except (ProcessLookupError, PermissionError):
+            proc._aw_own_group = False  # type: ignore[attr-defined]
+    return proc
+
+
+def _signal_transfer(proc, sig: int) -> None:
+    """Send *sig* to *proc*'s whole group when :func:`spawn_transfer` made one,
+    else to *proc* alone. Never signals a group this module did not create, so
+    a stand-in process object is only ever asked to terminate itself."""
+    if getattr(proc, "_aw_own_group", False) is True:
+        try:
+            os.killpg(proc.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            return  # the group is already gone
+        return
+    if proc.poll() is None:
+        if sig == getattr(signal, "SIGKILL", None):
+            proc.kill()
+        else:
+            proc.terminate()
+
+
+def end_transfer(proc, *, grace_s: float = 5.0) -> None:
+    """Terminate a transfer and everything it started, and reap it."""
+    _signal_transfer(proc, signal.SIGTERM)
+    try:
+        proc.wait(timeout=grace_s)
+    except subprocess.TimeoutExpired:
+        _signal_transfer(proc, getattr(signal, "SIGKILL", signal.SIGTERM))
+        with swallow("reaping a transfer that ignored SIGKILL"):
+            proc.wait(timeout=grace_s)
+    # Whatever of the group outlived rsync (its ssh) is not wanted either.
+    _signal_transfer(proc, getattr(signal, "SIGKILL", signal.SIGTERM))
+
+
+class StopWatcher:
+    """Ends a running transfer the moment Stop is set, whether or not the
+    transfer is printing anything.
+
+    A reader that checks Stop between lines cannot hear it while rsync is
+    silent — a frozen remote, a stalled link — so the upload ran on, holding
+    a Slurm node through the heartbeat, until rsync's own timeout or the
+    keepalive ended it. This watches from its own thread instead.
+    """
+
+    def __init__(self, proc, stop_event: threading.Event | None) -> None:
+        self.fired = False
+        self._done = threading.Event()
+        self._thread: threading.Thread | None = None
+        if stop_event is not None:
+            self._thread = threading.Thread(
+                target=self._watch, args=(proc, stop_event),
+                name="transfer-stop-watch", daemon=True)
+            self._thread.start()
+
+    def _watch(self, proc, stop_event: threading.Event) -> None:
+        while not self._done.is_set():
+            if stop_event.wait(0.1) and not self._done.is_set():
+                self.fired = True
+                end_transfer(proc)
+                return
+
+    def close(self) -> None:
+        """Stop watching; returns once the watching thread has ended."""
+        self._done.set()
+        if self._thread is not None:
+            self._thread.join(timeout=15)
 
 def _rsync_with_retry(
     cmd: list[str],
@@ -360,18 +529,12 @@ def _rsync_with_retry(
                 f"in {delay:.0f}s (last exit code "
                 f"{last_result.returncode if last_result else '?'})\n"
             )
-            # Cooperatively interruptible sleep — check stop_event
-            # every 0.25s so a long backoff doesn't deafen Stop.
-            slept = 0.0
-            while slept < delay:
-                if stop_event is not None and stop_event.is_set():
-                    log("[remote] rsync cancelled during retry backoff.\n")
-                    return subprocess.CompletedProcess(
-                        cmd, returncode=130, stdout="", stderr="cancelled",
-                    )
-                step = min(0.25, delay - slept)
-                time.sleep(step)
-                slept += step
+            # Cooperatively interruptible, so a long backoff doesn't deafen Stop.
+            if not sleep_unless_stopped(delay, stop_event):
+                log("[remote] rsync cancelled during retry backoff.\n")
+                return subprocess.CompletedProcess(
+                    cmd, returncode=130, stdout="", stderr="cancelled",
+                )
         try:
             result = _rsync_run_cancellable(
                 cmd,
@@ -391,7 +554,8 @@ def _rsync_with_retry(
         if result.returncode == 130:
             # Stop fired mid-rsync — don't retry, return immediately.
             return result
-        if result.returncode not in _RSYNC_RETRY_CODES:
+        if not rsync_failure_is_transient(
+                result.returncode, f"{result.stdout or ''}\n{result.stderr or ''}"):
             # Non-transient — return immediately so the caller sees the
             # real error.
             return result
@@ -429,48 +593,32 @@ def _rsync_run_cancellable(
             cmd, capture_output=capture_output,
             timeout=timeout, cwd=cwd, **TEXT_UTF8,
         )
-    stdout_pipe = subprocess.PIPE if capture_output else None
-    stderr_pipe = subprocess.PIPE if capture_output else None
-    proc = subprocess.Popen(
-        cmd, stdout=stdout_pipe, stderr=stderr_pipe, cwd=cwd, **TEXT_UTF8,
-    )
+    pipe = subprocess.PIPE if capture_output else None
+    proc = spawn_transfer(cmd, stdout=pipe, stderr=pipe, cwd=cwd, **TEXT_UTF8)
     deadline = None if timeout is None else time.monotonic() + timeout
-    rc: int | None = None
+    out, err = "", ""
     try:
         while True:
             try:
-                rc = proc.wait(timeout=0.25)
+                # ``communicate`` rather than ``wait``: it drains the pipes as
+                # it waits, so a chatty transfer cannot fill one and block, and
+                # a retried call after a timeout loses no output.
+                o, e = proc.communicate(timeout=0.25)
+                out, err = o or "", e or ""
+                break
             except subprocess.TimeoutExpired:
                 if stop_event.is_set():
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
+                    end_transfer(proc)
                     return subprocess.CompletedProcess(
                         cmd, returncode=130, stdout="", stderr="cancelled",
                     )
                 if deadline is not None and time.monotonic() > deadline:
-                    proc.kill()
-                    raise subprocess.TimeoutExpired(cmd, timeout)
-                continue
-            break
+                    end_transfer(proc)
+                    raise subprocess.TimeoutExpired(cmd, timeout) from None
     finally:
         if proc.poll() is None:
-            proc.terminate()
-    out, err = ("", "")
-    if capture_output and proc.stdout is not None:
-        try:
-            out = proc.stdout.read()
-        except Exception:
-            out = ""
-    if capture_output and proc.stderr is not None:
-        try:
-            err = proc.stderr.read()
-        except Exception:
-            err = ""
-    assert rc is not None
-    return subprocess.CompletedProcess(cmd, rc, out, err)
+            end_transfer(proc)
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
 def pull_small_file(host: "RemoteHost", remote_path: str, dest: Path, *,
@@ -522,19 +670,156 @@ def delete_remote_paths(host: "RemoteHost", paths: Iterable[str], *,
     """
     script = "rm -f -- " + " ".join(paths) + "\n"
     try:
-        result = subprocess.run(
-            host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-            input=script.encode("utf-8"),
-            capture_output=True,
-            timeout=30,
-        )
+        result = ssh_control(host, ["bash", "-s"], stdin=script.encode("utf-8"),
+                             check=False, timeout_s=30, what=f"rm -f ({what})")
         if result.returncode != 0:
-            stderr = (
-                result.stderr.decode("utf-8", errors="replace")
-                if isinstance(result.stderr, (bytes, bytearray))
-                else (result.stderr or "")
-            )
             log_fn(f"[remote] warn: cleanup of {what} on remote "
-                   f"returned {result.returncode}: {stderr.strip()}\n")
-    except (subprocess.TimeoutExpired, OSError) as exc:
+                   f"returned {result.returncode}: {(result.stderr or '').strip()}\n")
+    except OSError as exc:
         log_fn(f"[remote] warn: cleanup of {what} on remote failed: {exc}\n")
+
+
+# ── Control commands: one short ssh, bounded, failing in its own words ──────
+
+#: Return code a control command reports when it did not finish in time —
+#: ``timeout(1)``'s own convention, so a ``check=False`` caller reading
+#: ``returncode`` sees a failure rather than a success it never had.
+SSH_TIMED_OUT = 124
+#: Ceiling on a script piped to the remote bash: listings, ``find``, ``du``
+#: over a dataset cache on a slow shared filesystem. Longer than a one-line
+#: control command's, and far short of the half hour a dead link used to hold
+#: a pre-launch resume listing for.
+SSH_SCRIPT_TIMEOUT_S = 300.0
+#: How long each probe :func:`recover_dead_master` makes may take.
+_MASTER_PROBE_TIMEOUT_S = 20.0
+_log = logging.getLogger(__name__)
+
+
+class RemoteCommandError(subprocess.CalledProcessError):
+    """A control command that failed, carrying what ssh or the remote said.
+
+    A ``CalledProcessError`` still (every caller catching that keeps working),
+    but its message is the reason — "Permission denied (publickey)", "Host
+    key verification failed", "Disk quota exceeded" — where the stock one was
+    "Command '[…]' returned non-zero exit status 255." and the user had
+    nothing to act on.
+    """
+
+    def __init__(self, returncode, cmd, output=None, stderr=None, *,
+                 alias: str = "", what: str = "") -> None:
+        super().__init__(returncode, cmd, output, stderr)
+        self.alias = alias
+        self.what = what
+
+    def __str__(self) -> str:
+        said = " / ".join(
+            line.strip() for line in (_as_text(self.stderr) or "").splitlines()
+            if line.strip())[-400:]
+        where = f" on {self.alias}" if self.alias else ""
+        return (f"the remote command `{self.what}`{where} failed with exit "
+                f"code {self.returncode}: {said or 'it printed no reason'}")
+
+
+def _as_text(value) -> str:
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8", errors="replace")
+    return value or ""
+
+
+def _without_connection_sharing(argv: list[str]) -> list[str]:
+    """*argv* (an ``ssh_argv``) as one fresh connection that shares nothing."""
+    out: list[str] = []
+    skip = False
+    for i, a in enumerate(argv):
+        if skip:
+            skip = False
+            continue
+        if a == "-o" and i + 1 < len(argv) and argv[i + 1].startswith("Control"):
+            skip = True
+            continue
+        out.append(a)
+    return [*out[:-1], "-o", "ControlMaster=no", "-o", "ControlPath=none", out[-1]]
+
+
+def recover_dead_master(host: "RemoteHost") -> bool:
+    """After a control command timed out: when the connection-sharing master
+    no longer answers but a fresh connection does, close the master
+    (``ssh -O exit``) so the next command opens a new one. ``True`` when it
+    did.
+
+    A laptop that slept, or a network change, leaves the master process alive
+    on a TCP connection that is gone. Every command multiplexed through it then
+    hangs — reproduced: each returned 124 while a fresh ssh to the same host
+    answered in 0.2 s — until the keepalive gives the master up. The master is
+    closed only on that evidence: a master that answers its probe means the
+    command was merely slow, and a fresh connection that fails too means the
+    network is down and the master may yet recover; closing it then would end
+    the driver stream multiplexed through it for nothing.
+    """
+    base = host.ssh_argv(allocate_tty=False)
+    if not any(a.startswith("ControlMaster=") for a in base):
+        return False
+    try:
+        if subprocess.run(base + ["true"], capture_output=True,
+                          timeout=_MASTER_PROBE_TIMEOUT_S).returncode == 0:
+            return False
+    except subprocess.TimeoutExpired:
+        swallowed("the shared ssh connection's probe timed out")
+    try:
+        fresh = subprocess.run(_without_connection_sharing(base) + ["true"],
+                               capture_output=True, timeout=_MASTER_PROBE_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return False
+    if fresh.returncode != 0:
+        return False
+    try:
+        subprocess.run([*base[:-1], "-O", "exit", base[-1]], capture_output=True,
+                       timeout=_MASTER_PROBE_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        swallowed("closing a shared ssh connection that stopped answering")
+    _log.warning("the shared ssh connection to %s had stopped answering while a "
+                 "fresh one worked; it was closed and the command retried", host.ssh_alias)
+    return True
+
+
+def ssh_control(host: "RemoteHost", remote: list[str], *, check: bool,
+                timeout_s: float, stdin: bytes | None = None,
+                what: str = "") -> subprocess.CompletedProcess[str]:
+    """Run one control command (``ssh <host> <remote…>``), bounded by
+    *timeout_s*, and answer with text output.
+
+    *stdin*, when given, is piped as bytes — a script for ``bash -s``, which is
+    how a multi-line script avoids the shell-quoting round trip; bytes because
+    a Windows text-mode pipe would turn ``\\n`` into ``\\r\\n`` and the remote
+    bash would then choke on every ``\\r``.
+
+    A timeout is first taken as possible evidence of a dead connection-sharing
+    master (:func:`recover_dead_master`); when that was it, the command is
+    retried once on a fresh connection. Otherwise it reports
+    :data:`SSH_TIMED_OUT` with a reason in ``stderr`` (``check=False``) or
+    raises ``RuntimeError`` (``check=True``). A non-zero exit under
+    ``check=True`` raises :class:`RemoteCommandError`, whose message is what
+    ssh or the remote printed.
+    """
+    cmd = host.ssh_argv(allocate_tty=False) + list(remote)
+    what = what or " ".join(str(a) for a in remote)[:80]
+    kw: dict = {"input": stdin} if stdin is not None else dict(TEXT_UTF8)
+    for attempt in (1, 2):
+        try:
+            raw = subprocess.run(cmd, capture_output=True, check=check,
+                                 timeout=timeout_s, **kw)
+            break
+        except subprocess.CalledProcessError as exc:
+            raise RemoteCommandError(exc.returncode, exc.cmd, _as_text(exc.stdout),
+                                     _as_text(exc.stderr), alias=host.ssh_alias,
+                                     what=what) from None
+        except subprocess.TimeoutExpired as exc:
+            if attempt == 1 and recover_dead_master(host):
+                continue
+            reason = f"the remote did not answer within {timeout_s:g}s: {what}"
+            if check:
+                raise RuntimeError(reason) from exc
+            return subprocess.CompletedProcess(cmd, SSH_TIMED_OUT, "", reason)
+    return subprocess.CompletedProcess(getattr(raw, "args", cmd), raw.returncode,
+                                       _as_text(getattr(raw, "stdout", "")),
+                                       _as_text(getattr(raw, "stderr", "")))

@@ -296,6 +296,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_stop_never_waits_on_a_remote_upload.py": "Stop, pressed while a remote run is still uploading, answers at once",
     "test_stream_rsync_retry.py": "Audit A11 — the shared streaming-rsync retry loop",
     "test_the_launch_command_survives_the_command_line.py": "The launch command reaches the remote intact from a Windows client",
+    "test_the_remote_link_fails_fast.py": "A bad link to the remote is noticed, retried or reported — never waited on",
     "test_the_slurm_job_indicator.py": "The Analyze pane's Slurm-job indicator: lit only while a job is open",
     "test_transient_progress_lines.py": "Transfer progress is live state, so it does not go in the log",
     "test_upload_rail_counts_wells.py": "The Upload rail counts wells that are on the remote, not rsync's chatter",

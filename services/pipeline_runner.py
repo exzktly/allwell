@@ -422,6 +422,30 @@ def parse_well_transfer(line: str) -> tuple[str, str, float] | None:
     return m.group(2).upper(), m.group(1), max(0.0, min(1.0, fraction))
 
 
+#: Every pattern ``ProgressTracker`` derives a *state* from — a well reaching a
+#: stage or an end, the run's total, the scheduler's hand-off, the job closing
+#: — as against the samples it derives a gauge position from. A line matching
+#: one of these is never dropped when the run's event queue is full
+#: (``PipelineRunner._enqueue``): a dropped "— done." is a well left amber for
+#: the rest of the run and a headline that never reaches its total, which the
+#: one-line overflow warning did not say (tracker C11). Progress samples (FOV
+#: counts, transfer fractions) still drop, because the next one replaces them.
+_STATE_PATTERNS: tuple[re.Pattern, ...] = (
+    _RE_MODE_WELLS, _RE_WELL_START, _RE_WELL_DONE_ID, _RE_WELL_FAIL, _RE_WELL_UPTODATE,
+    _RE_WELL_SKIP, _RE_REMOTE_UPTODATE, _RE_WELL_WORKER_FAIL, _RE_WELL_NOT_STARTED,
+    *(p for p, _why in _PARTIAL_MARKERS), _RE_REMOTE_UP_WELL, _RE_FETCH_ZIP, _RE_FETCH_CSV,
+    _RE_THRESH_WELL, _RE_SCHED_REQUEST, _RE_SCHED_GRANTED, _RE_SCHED_QUEUED,
+    _RE_SCHED_ALLOCATED, _RE_JOB_CLOSED, _RE_WELL_REANCHORING, _RE_WELL_REANCHORED,
+    _RE_WELL_REANCHOR_FAILED, _RE_WELL_REANCHOR_UNCHANGED, _RE_WELL_HELD,
+    _RE_WELL_REFETCHED, _RE_WELL_REFETCH_SHORT,
+)
+
+
+def carries_state(line: str) -> bool:
+    """Whether *line* is one the run's displayed state is derived from."""
+    return any(p.search(line) for p in _STATE_PATTERNS)
+
+
 class ProgressTracker:
     """Pure log-line parser that tracks well-count progress.
 
@@ -860,9 +884,9 @@ class PipelineRunner:
     """
 
     # Cap the log queue so a stalled UI thread can't let the reader stuff
-    # unbounded lines into memory. Overflow drops are surfaced to the GUI
-    # via a single warning line — the ring buffer in allwell captures
-    # everything for the help-drawer log tab.
+    # unbounded lines into memory. Only lines no state depends on are dropped,
+    # and how many is said in the log (``_enqueue``); they are not kept
+    # anywhere else.
     _LOG_QUEUE_MAXSIZE = 10000
 
     def __init__(self) -> None:
@@ -892,7 +916,10 @@ class PipelineRunner:
         # held so app close can wait for it (see `wait_for_teardown`).
         self._cancel_thread: threading.Thread | None = None
         self._last_output_dir: Path | None = None
-        self._log_overflow_warned: bool = False
+        # Lines dropped from a full queue since the count was last said
+        # (``_say_dropped``); several threads write the queue, hence the lock.
+        self._dropped_lines = 0
+        self._dropped_lock = threading.Lock()
         # Set on Stop; checked between the zipper phase and the pipeline
         # launch so a cancel during grouping doesn't slip through and
         # start a fresh pipeline run.
@@ -968,37 +995,58 @@ class PipelineRunner:
     _CONTROL_KINDS = frozenset({"done", "suspended", "error", "finished"})
 
     def _enqueue(self, event: tuple[str, object]) -> None:
-        """Non-blocking enqueue for a log line; drops the message on overflow
-        with a one-shot warning rather than blocking the reader thread.
+        """Non-blocking enqueue for a log line; drops it on overflow rather
+        than blocking the reader thread — unless the run's state depends on it.
 
-        ``done`` / ``error`` / ``finished`` are never dropped — they block
-        until the reader (draining at 80ms intervals in ``_poll_log``) makes
-        room, since losing one leaves a run's completion unobservable.
+        Two things are never dropped; they block until the reader (draining
+        in bounded slices in ``_poll_log``) makes room:
+
+        * the control events (``done`` / ``error`` / ``suspended`` /
+          ``finished``), since losing one leaves a run's completion
+          unobservable;
+        * a line the run's displayed state is derived from
+          (:func:`carries_state`) — a well's "— done.", its FAILED / PARTIAL /
+          SKIP, a fetch landing, the scheduler's hand-off. Dropping one of
+          those cost no mere log line: the well stayed "processing" for the
+          rest of the run and the headline never reached its total.
+
+        What is dropped is counted, and the count is said — in a line queued
+        as soon as there is room, and in any case before the next state line
+        or control event, so it is guaranteed to reach the log before the run
+        ends. The warning it replaced was tried once, could itself be dropped
+        when the queue was still full, and claimed the lost lines were "still
+        captured in the help-drawer log tab", which they were not: that tab
+        mirrors what this view shows (tracker C11).
         """
-        if event[0] in self._CONTROL_KINDS:
+        must_keep = event[0] in self._CONTROL_KINDS or (
+            event[0] == "line" and carries_state(str(event[1])))
+        if must_keep:
+            self._say_dropped(block=True)
             self.log_q.put(event)
             return
         try:
+            self._say_dropped(block=False)
             self.log_q.put_nowait(event)
         except queue.Full:
-            if not self._log_overflow_warned:
-                self._log_overflow_warned = True
-                try:
-                    self.log_q.put_nowait((
-                        "line",
-                        "[warn] log queue full — dropping further "
-                        "lines from the live view. Subsequent output is "
-                        "still captured in the help-drawer log tab.\n",
-                    ))
-                except queue.Full:
-                    # The overflow warning itself could not be queued, which
-                    # means the reader has not drained a single slot since the
-                    # queue filled. Nothing to do and nothing to say — the one
-                    # channel for saying it is the thing that is full — and the
-                    # flag above already ensures this is attempted once per run
-                    # rather than per dropped line.
-                    swallowed("the log-overflow warning could not be queued "
-                              "either; the reader has drained nothing")
+            with self._dropped_lock:
+                self._dropped_lines += 1
+
+    def _say_dropped(self, *, block: bool) -> None:
+        """Queue the count of lines dropped since it was last said, if any."""
+        with self._dropped_lock:
+            n, self._dropped_lines = self._dropped_lines, 0
+        if not n:
+            return
+        line = ("line", f"[warn] {n} line(s) of the run's output were dropped from "
+                        f"this view because it fell behind. Every well's state and "
+                        f"the run's outcome are still shown; the dropped lines are "
+                        f"not kept anywhere else.\n")
+        try:
+            self.log_q.put(line) if block else self.log_q.put_nowait(line)
+        except queue.Full:
+            with self._dropped_lock:
+                self._dropped_lines += n         # said with the next one instead
+            raise
 
     @property
     def is_running(self) -> bool:

@@ -482,10 +482,8 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
                 kind, payload = self._log_q.get_nowait()
                 if kind == "line":
                     for ev_kind, ev_payload in self._progress_tracker.parse(payload):
-                        if ev_kind == "line":
-                            self._log_q.put((ev_kind, ev_payload))
-                        elif ev_kind == "workers":
-                            self._log_q.put((ev_kind, ev_payload))
+                        if ev_kind == "workers":   # inline: a blocking put from the queue's only reader can deadlock
+                            pending.append((f"[info] Workers: {ev_payload} parallel well(s).\n", "INFO"))
                         else:
                             self._apply_progress_event(ev_kind, ev_payload)
                     if not is_transient_progress(payload):

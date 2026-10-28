@@ -6730,6 +6730,24 @@ remains, and `_log_lines` writes a slice's lines in one insert per colour run:
 so a run's summary cannot land above the output it summarises. Each of the three files carries a line budget
 (`test_monolith_budgets.py`).
 
+**A full queue drops noise, never state, and says how much it dropped.**
+`PipelineRunner._enqueue` blocks, rather than drops, on two kinds of event: the
+control events (`done` / `error` / `suspended` / `finished`) and any line the
+run's displayed state is derived from — `pipeline_runner.carries_state`, which
+asks every pattern `ProgressTracker` turns into a state (a well starting,
+finishing, failing, short, skipped, uploaded or fetched; the run's total; the
+scheduler's hand-off; the job closing), listed once in `_STATE_PATTERNS`. A
+dropped "— done." used to leave its well "processing" for the rest of the run.
+Everything else is dropped on overflow and counted (`_dropped_lines`, under a
+lock, since the fetcher and the reader both write), and `_say_dropped` queues the
+count as a `[warn]` line as soon as there is room — and, blocking, before the
+next kept line or control event, so the count always reaches the log before the
+run ends. The lines dropped are not kept anywhere else, and the warning says so;
+the help drawer's log mirrors what this view shows. The drain itself never puts
+back onto the queue it reads: the one event `parse` used to re-queue
+(`workers`) is written inline, since a blocking put from the queue's only reader
+would deadlock the window.
+
 The split follows the pane's three jobs. *Gathering* what a run is launched with
 is `analyze.form.AnalyzeTabFormMixin`: anything that reads the form's
 widgets lives with the widgets, so `_collect_run_options` and the well-field

@@ -136,6 +136,8 @@ UI_LANE_FILES: dict[str, str] = {
 #: and the CI workflow to running this lane.
 NANOWELL_E2E_FILES = {
     "test_nanowell_run.py": "the (well, timepoint) task body on rendered tiles; 475 s",
+    "test_nanowell_timepoint_frames.py": "a nanowell keeps its address across timepoints, on rendered tiles; 120 s",
+    "test_nanowell_relabel.py": "Validate relabels a dataset whose timepoints were addressed a step apart; 150 s",
     "test_nanowell_infer.py": "array inference on rendered images; 210 s",
     "test_nanowell_cli.py": "process_microscopy.main in nanowell mode, end to end; 111 s",
     "test_nanowell_detect.py": "lattice and site detection on rendered tiles; 52 s",

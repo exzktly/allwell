@@ -51,6 +51,7 @@ from pathlib import Path
 
 from datasets.core.concurrency import pick_workers
 from datasets.core.nanowell_tables import nanowell_findings
+from datasets.validate.nanowell_relabel import finding_of, plan_dataset as plan_relabels
 from pipeline.completeness import (
     csv_keys_from_rows,
     done_keys,
@@ -240,6 +241,9 @@ class DatasetReport:
     stale_available_fovs: tuple[str, ...] = ()
     missing_available_fovs: tuple[str, ...] = ()
     stale_override_count: int = 0
+    #: Nanowell wells whose timepoints were addressed in different lattice frames and can be relabelled onto one
+    #: (``datasets.validate.nanowell_relabel``).
+    misaddressed_nanowell_wells: tuple[str, ...] = ()
 
     @property
     def is_clean(self) -> bool:
@@ -252,7 +256,7 @@ class DatasetReport:
         return bool(
             self.stale_available_timepoints or self.missing_available_timepoints
             or self.stale_available_fovs or self.missing_available_fovs
-            or self.stale_override_count
+            or self.stale_override_count or self.misaddressed_nanowell_wells
         )
 
 
@@ -1104,6 +1108,8 @@ def build_report(
 
     findings.extend(_acquisition_findings(paths.root, schema_fields, sep))
     findings.extend(Finding(*f) for f in nanowell_findings(paths, in_containers(paths), schema_fields, sep))
+    relabels = plan_relabels(paths.out_dir)
+    findings.extend(Finding(*finding_of(plan), well=well) for well, plan in relabels.items())
 
     return DatasetReport(
         root=paths.root,
@@ -1116,6 +1122,7 @@ def build_report(
         stale_available_fovs=stale_fovs,
         missing_available_fovs=missing_fovs,
         stale_override_count=stale_override_count,
+        misaddressed_nanowell_wells=tuple(w for w, plan in relabels.items() if plan.repairable),
     )
 
 

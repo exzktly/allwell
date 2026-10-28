@@ -105,8 +105,20 @@ def well_shortfall(run, well: str, *, replace: bool) -> list[str]:
 
 def partial_wells(block: dict | None, scope) -> list[str]:
     """The wells of *scope* the client-side completeness record calls partial — output that covers fewer
-    FOV-groups than the input holds, while its CSV and archive look whole (tracker row B4)."""
+    FOV-groups than the input holds, while its CSV and archive look whole (tracker row B4).
+
+    A nanowell timepoint the run *reached* and recorded a verdict for without addressing it (too crowded, no
+    grid) is counted missing by the record but is the run's answer for it, not a gap in the output: it is listed
+    in ``not_addressed``, and only what is missing beyond those counts here. Failing every nanowell run with an
+    unaddressed timepoint would keep each one on the remote for ever.
+    """
     wells = (block or {}).get("wells") or {}
     scope = set(scope)
-    return sorted(w for w, rec in wells.items()
-                  if w in scope and isinstance(rec, dict) and rec.get("health") == "partial")
+
+    def _short(rec: dict) -> bool:
+        if rec.get("health") != "partial":
+            return False
+        missing, answered = int(rec.get("missing_count") or 0), int(rec.get("not_addressed_count") or 0)
+        return missing > answered or not missing        # a partial record with no count is taken at its word
+
+    return sorted(w for w, rec in wells.items() if w in scope and isinstance(rec, dict) and _short(rec))

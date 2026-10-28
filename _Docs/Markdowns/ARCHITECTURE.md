@@ -14651,7 +14651,9 @@ The completeness verdict reaches the log at warning level —
 `remote_log_adapter.LogFnLogger` carries the level as the `[warn]` / `[error]`
 tag `classify_log_line` believes — and verification fails a run whose record
 calls a well it covers partial, unless the run was suspended
-(`verify_and_cleanup(suspended=…)`, which also records the wind-down as one).
+(`verify_and_cleanup(suspended=…)`, which also records the wind-down as one); a
+nanowell timepoint the run reached and recorded as not addressed counts as
+answered there, not missing (`remote_fetch_verify.partial_wells`).
 Every pull is bounded by rsync's `--timeout=120` (I/O-idle) and by Stop rather
 than by a wall clock: `_rsync_optional`'s old 60 s cap killed a re-anchored
 nanowell archive that took longer, four times per well, and failed verification

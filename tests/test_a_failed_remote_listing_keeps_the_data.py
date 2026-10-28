@@ -329,6 +329,22 @@ def test_a_partial_well_fails_verification_and_says_so_at_warning_level(standin,
     assert _verify(standin, run, suspended=True).passed
 
 
+def test_a_nanowell_timepoint_the_run_answered_is_not_a_partial_well():
+    """A nanowell timepoint reached and recorded as not addressed (too crowded, no grid) is the run's verdict
+    for it; only a timepoint missing beyond those fails verification. The record's own shape, as
+    ``pipeline.completeness`` writes it."""
+    from services.remote_fetch_verify import partial_wells
+
+    block = {"wells": {
+        "A01": {"health": "partial", "missing_count": 1, "not_addressed_count": 1},     # answered: crowded
+        "B02": {"health": "partial", "missing_count": 2, "not_addressed_count": 1},     # one never reached
+        "C03": {"health": "partial", "missing_count": 1, "not_addressed_count": 0},     # an ordinary gap
+        "D04": {"health": "complete", "missing_count": 0, "not_addressed_count": 0},
+    }}
+    assert partial_wells(block, {"A01", "B02", "C03", "D04"}) == ["B02", "C03"]
+    assert partial_wells(block, {"A01", "D04"}) == []
+
+
 # ── B5: no "downloaded" line for a well the retry could not complete ─────────
 
 def test_the_retry_prints_no_downloaded_lines_for_a_well_it_did_not_complete(standin, tmp_path):

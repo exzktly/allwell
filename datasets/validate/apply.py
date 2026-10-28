@@ -1,9 +1,14 @@
-"""Metadata-only repairs for a dataset flagged by
-:mod:`~datasets.validate.validate_compute`.
+"""Repairs for a dataset flagged by :mod:`~datasets.validate.validate_compute`.
 
-Never touches measurement CSVs or well archives — only the two sidecar
-availability lists, the stale entries in ``cell_overrides.json``, and leftover
-staging files. Rebuilding the availability lists **read-modify-writes the
+Never touches well archives or the value of any measurement. The repairs are the
+two sidecar availability lists, the stale entries in ``cell_overrides.json``,
+leftover staging files, and the nanowell addresses of a timepoint addressed a
+lattice step off its well's other timepoints
+(:mod:`~datasets.validate.nanowell_relabel`), which renames rows in the
+nanowell and cell tables, backing the originals up first, and changes no
+measured value.
+
+Rebuilding the availability lists **read-modify-writes the
 already-loaded sidecar dict** rather than mimicking
 ``process_microscopy.write_pipeline_info``'s from-scratch rebuild (which must
 therefore name its four GUI-written preserved keys — ``cell_gating``,
@@ -31,6 +36,7 @@ from datasets.core.dataset_paths import (
     resolve_dataset,
 )
 from datasets.validate.validate_compute import DatasetReport, _OVERRIDES_FILENAME
+from datasets.validate.nanowell_relabel import BACKUP_DIRNAME, plan_dataset as plan_relabels, relabel_dataset
 from util.json_write import write_json_atomic
 from util.provenance_log import append_event
 
@@ -41,6 +47,7 @@ class RepairResult:
     pruned_overrides: int
     swept_staging_files: int
     summary: str
+    relabelled_nanowell_wells: tuple[str, ...] = ()
 
 
 def _fov_sort_key(value: str):
@@ -139,6 +146,10 @@ def apply_repairs(root: Path | str, report: DatasetReport) -> RepairResult:
 
     pruned = _prune_stale_overrides(paths)
     swept = _sweep_staging_files(paths)
+    # Planned again from disk rather than taken from the report: a well relabelled since the scan agrees now and is
+    # left alone, which keeps the repair idempotent.
+    plans = plan_relabels(paths.out_dir)
+    relabelled = relabel_dataset(paths.out_dir, plans, report.csv_prefixes) if plans else []
 
     parts = []
     if rebuilt:
@@ -147,6 +158,9 @@ def apply_repairs(root: Path | str, report: DatasetReport) -> RepairResult:
         parts.append(f"pruned {pruned} stale cell override(s)")
     if swept:
         parts.append(f"swept {swept} leftover staging file(s)")
+    if relabelled:
+        parts.append(f"relabelled {len(relabelled)} misaddressed nanowell well(s) (originals in "
+                     f"out/nanowells/{BACKUP_DIRNAME}/): " + "; ".join(relabelled))
     summary = "; ".join(parts) if parts else "nothing to repair"
     if parts:
         # Only a repair that changed something is history; the idempotent
@@ -156,6 +170,7 @@ def apply_repairs(root: Path | str, report: DatasetReport) -> RepairResult:
             "pruned_overrides": pruned,
             "swept_staging_files": swept,
             "rebuilt_availability": rebuilt,
+            "relabelled_nanowell_wells": relabelled,
         })
 
     return RepairResult(
@@ -163,4 +178,5 @@ def apply_repairs(root: Path | str, report: DatasetReport) -> RepairResult:
         pruned_overrides=pruned,
         swept_staging_files=swept,
         summary=summary,
+        relabelled_nanowell_wells=tuple(line.split(":", 1)[0] for line in relabelled),
     )

@@ -346,3 +346,13 @@ def test_the_array_record_says_when_a_timepoint_s_addresses_were_moved_or_may_na
     mismatched = record_lines(blocks, "T1")
     assert (f"roster mismatch — {FRAME_WARNING} (12 addresses differ from T0's)", "flag") in mismatched
     assert frame_lines(blocks["T0"]) == []                     # a timepoint that anchored where it is says nothing
+
+
+def test_the_array_record_says_a_timepoint_was_relabelled_and_what_its_rim_lost():
+    """A repaired timepoint's rim nanowells it never measured are rows with no values: said beside the figure."""
+    from review.features.nanowell.array_compute import frame_lines
+
+    block = {"status": "ok", "consistency": "consistent", "origin_shift": [1, 0], "origin_registered_to": "0h",
+             "relabelled": {"by": "Datasets → Validate", "unmeasured_sites": 19, "dropped_rows": 19}}
+    assert frame_lines(block)[1] == ("relabelled by Datasets → Validate: 19 rim nanowell(s) it never measured have "
+                                     "no values here, 19 row(s) measured beyond the rim were dropped")

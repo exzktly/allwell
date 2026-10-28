@@ -1840,28 +1840,6 @@ class CircleEvidence:
     misanchored: dict                                   # timepoint -> (dq, dr): its nanowells sit that step off
 
 
-#: How many lattice steps along each axis two timepoints' nanowells are searched over for the overlay that matches them
-#: best. An array centre two sites off was once reported as one step off, because only one step was searched.
-STEP_REACH = 3
-
-#: Which timepoint's origin a well's timepoints are put in the frame of when their nanowells sit a lattice step apart:
-#: the best-ranked source among them, lower first. A hand-set anchor is a person's decision; the central square is
-#: the array's own mark; the array's centre is a fitted circle that a hexagonal rim leaves loose by a fraction of a
-#: pitch (up to 0.27 on a small rendered array, 0.47 on a real one); a plate-rigid prediction is carried from other
-#: wells. A source not named here ranks last.
-ORIGIN_RANK = {"manual": 0, "fiducial": 1, "array_centre": 2, "plate_rigid": 3}
-
-
-def _best_step(mine, others) -> tuple[int, int]:
-    """The lattice step ``(dq, dr)`` that moves the addresses *mine* onto *others* best: ``(0, 0)`` unless some step
-    within :data:`STEP_REACH` overlaps them strictly more than they already do."""
-    others = set(others)
-    steps = [(dq, dr) for dq in range(-STEP_REACH, STEP_REACH + 1) for dr in range(-STEP_REACH, STEP_REACH + 1)]
-    overlap = {s: len({(q + s[0], r + s[1]) for q, r in mine} & others) for s in steps}
-    best = max(steps, key=lambda s: (overlap[s], s == (0, 0)))
-    return best if overlap[best] > overlap[(0, 0)] else (0, 0)
-
-
 def _misanchored(detected: dict, kept=()) -> dict:
     """``timepoint -> step`` for each timepoint whose detected sites match the other timepoints' better moved by a
     lattice step than where they are: its origin is a step off (review X35a-R2). A timepoint whose sites the others
@@ -1869,13 +1847,16 @@ def _misanchored(detected: dict, kept=()) -> dict:
     is wrong cannot be told from the sites alone. *kept* are the sites an earlier run's kept timepoints detected:
     the timepoints of an incremental run are judged against them too, and they are never listed themselves (review
     X35a-R7). A run settles such steps before deciding the rim (:func:`_settle_steps`), so here a timepoint is listed
-    only when that could not: one further off than :data:`STEP_REACH`, or against an earlier run's sites."""
+    only when that could not: one further off than ``nanowell_frames.STEP_REACH``, or against an earlier run's
+    sites."""
+    from pipeline.nanowell_frames import best_step
+
     out = {}
     for tp, mine in detected.items():
         others = set(kept).union(*(d for t, d in detected.items() if t != tp))
         if not others:
             continue
-        step = _best_step(mine, others)
+        step = best_step(mine, others)
         if step != (0, 0):
             out[tp] = step
     return out
@@ -1893,8 +1874,8 @@ def _settle_steps(outcome, anchored, kept: dict | None = None) -> tuple[list, li
     Every timepoint is anchored on its own evidence, so one whose origin landed a site off (an array centre a fitted
     circle left loose, a square misread) names every nanowell after its neighbour, and Review's join by address then
     pairs each nanowell with its neighbour from that timepoint on. The timepoints are grouped by the lattice step
-    their detected nanowells sit at against one another's (:func:`_best_step`, measured against the timepoint that
-    detected most); the frame kept is the one holding the best-ranked origin (:data:`ORIGIN_RANK`), then the most
+    their detected nanowells sit at against one another's (``nanowell_frames.settle_frames``, measured against the
+    timepoint that detected most); the frame kept is the one holding the best-ranked origin (``ORIGIN_RANK``), then the most
     timepoints, so a square-anchored baseline is never moved onto later timepoints that all share one wrong array
     centre. Every other timepoint's addresses are moved onto it, and its grid block says by how much. When two frames
     tie on both, nothing tells which is right: the timepoints of every frame are left unaddressed, measured with no
@@ -1905,62 +1886,38 @@ def _settle_steps(outcome, anchored, kept: dict | None = None) -> tuple[list, li
     wins, a new timepoint off it is moved onto it, with no re-analysis; when a new frame outranks it or ties with it,
     nothing is moved: ``outcome.frame_change`` says which timepoints sit how far off, and the caller analyses the
     well again over every timepoint, so that the frame is chosen with all of them in view."""
+    from pipeline.nanowell_frames import KEPT_OUTRANKED, SHIFT, TIE, settle_frames
     from util.nanowell_anchors import origin_phrase
 
     kept = kept or {}
-    kept_detected, kept_origins = set(kept.get("detected") or ()), dict(kept.get("origins") or {})
     found = {tp: _detected_addresses(outcome.located[tp]) for tp in anchored}
-    methods = {**kept_origins, **{tp: outcome.located[tp].origin_method for tp in anchored}}
-    if kept_detected:
-        onto = {tp: _best_step(found[tp], kept_detected) for tp in anchored}
-        frames: dict = {(0, 0): list(kept_origins)}
-        order = list(kept_origins) + list(anchored)
-    elif len(anchored) > 1:
-        pivot = max(anchored, key=lambda tp: (len(found[tp]), -anchored.index(tp)))
-        onto = {tp: (0, 0) if tp == pivot else _best_step(found[tp], found[pivot]) for tp in anchored}
-        frames, order = {}, list(anchored)
-    else:
+    methods = {tp: outcome.located[tp].origin_method for tp in anchored}
+    decision = settle_frames(found, methods, kept.get("detected"), kept.get("origins"))
+    if decision.verdict == KEPT_OUTRANKED:
+        outcome.frame_change = "; ".join(f"{tp}'s nanowells sit {decision.onto[tp]} lattice steps from the earlier "
+                                         "run's" for tp in anchored if decision.onto[tp] != (0, 0))
         return list(anchored), [], {}
-    for tp in anchored:
-        frames.setdefault(onto[tp], []).append(tp)
-    if len(frames) == 1:
-        return list(anchored), [], {}
-
-    def rank(step):
-        members = frames[step]
-        return min((ORIGIN_RANK.get(methods.get(tp), len(ORIGIN_RANK)) for tp in members),
-                   default=len(ORIGIN_RANK)), -len(members)
-
-    ordered = sorted(frames, key=lambda step: (rank(step), min((order.index(t) for t in frames[step]), default=-1)))
-    tied = rank(ordered[0]) == rank(ordered[1])
-    if kept_detected and (tied or ordered[0] != (0, 0)):
-        outcome.frame_change = "; ".join(f"{tp}'s nanowells sit {onto[tp]} lattice steps from the earlier run's"
-                                         for tp in anchored if onto[tp] != (0, 0))
-        return list(anchored), [], {}
-    if tied:
-        names = ", ".join("/".join(frames[step]) for step in ordered)
+    if decision.verdict == TIE:
+        names = ", ".join("/".join(frame) for frame in decision.frames)
         for tp in anchored:
             _unaddress(outcome, tp, f"Its nanowells sit a lattice step from those of another timepoint anchored as "
                                     f"well ({names}), so which origin is right cannot be told: measured with no "
                                     "address rather than under its neighbours' addresses. An anchor set by hand on "
                                     "the central square at one of them settles it")
         return [], list(anchored), {}
-    keep = ordered[0]
-    reference = frames[keep][0]
-    shifts = {}
-    for tp in anchored:
-        shift = (onto[tp][0] - keep[0], onto[tp][1] - keep[1])
-        if shift == (0, 0):
-            continue
+    if decision.verdict != SHIFT:
+        return list(anchored), [], {}
+    reference = decision.reference
+    reference_method = methods.get(reference) or (kept.get("origins") or {}).get(reference)
+    for tp, shift in decision.shifts.items():
         located = outcome.located[tp]
         _shift_origin(located, shift, reference,
                       f"its own origin ({origin_phrase(located.origin_method)}) landed a site off, and "
-                      f"{reference}'s ({origin_phrase(methods.get(reference))}) ranks above it or is shared by more "
+                      f"{reference}'s ({origin_phrase(reference_method)}) ranks above it or is shared by more "
                       "timepoints")
         outcome.timepoints[tp].update({k: located.grid[k]
                                        for k in ("origin_stage_um", "origin_shift", "origin_registered_to")})
-        shifts[tp] = shift
-    return list(anchored), [], shifts
+    return list(anchored), [], dict(decision.shifts)
 
 
 def _evidence_roster(located: dict, anchored, radius_um: float, settings: NanowellSettings,

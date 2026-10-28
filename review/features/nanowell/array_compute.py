@@ -261,6 +261,11 @@ def frame_lines(block: dict) -> list[str]:
         out.append(f"addresses moved by ({int(shift[0])}, {int(shift[1])}) lattice steps onto "
                    f"{block.get('origin_registered_to') or 'another timepoint'}'s, so that they name the same "
                    "nanowells as its (see the notes for why)")
+    relabelled = block.get("relabelled")
+    if isinstance(relabelled, dict):
+        out.append(f"relabelled by {relabelled.get('by', 'a repair')}: {relabelled.get('unmeasured_sites', '?')} rim "
+                   f"nanowell(s) it never measured have no values here, {relabelled.get('dropped_rows', '?')} row(s) "
+                   "measured beyond the rim were dropped")
     if block.get("consistency") == "roster_mismatch":
         detail = str(block.get("consistency_detail") or "").strip()
         out.append(f"roster mismatch — {FRAME_WARNING}" + (f" ({detail})" if detail else ""))

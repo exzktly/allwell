@@ -495,6 +495,19 @@ def _compose_remote_cmd(
     return _launch(launcher, inner, remote_pidfile, queue_wait_s=queue_wait_s)
 
 
+#: The first thing a launched job script does: any copy but the scheduler's first task leaves before it touches the
+#: run. The run is one process, and every copy a launch starts runs the whole script — five batch drivers over one
+#: run directory raced for batch 1's staged input, and the losers deleted the winner's (``remote_srun_retry.
+#: one_task``, which asks ``srun`` for one task, is the fix; this is the backstop for a launcher that is not
+#: ``srun``, or a cluster that starts more anyway). The first task says how many it was started beside.
+_FIRST_TASK_ONLY = (
+    'if [ "${SLURM_PROCID:-0}" != 0 ]; then exit 0; fi; '
+    'if [ "${SLURM_STEP_NUM_TASKS:-1}" -gt 1 ] 2>/dev/null; then '
+    'echo "[remote] scheduler: WARNING the launch started $SLURM_STEP_NUM_TASKS copies of the job; only the first '
+    'runs it and the others exit — ask the scheduler for one task"; fi; '
+)
+
+
 def _launch(launcher: str, inner: str, remote_pidfile: str, *, queue_wait_s: int = 0) -> str:
     """``<launcher> bash -lc <inner>`` for the login shell, PID recorded.
 
@@ -508,7 +521,10 @@ def _launch(launcher: str, inner: str, remote_pidfile: str, *, queue_wait_s: int
     ``shlex.split`` → ``join`` normalises whitespace and re-quotes any token
     carrying a shell metacharacter (``--constraint=a|b``), so the login shell
     passes it to the scheduler literally instead of reading ``|`` as a pipe.
+
+    *inner* runs behind :data:`_FIRST_TASK_ONLY`, whatever the launcher.
     """
+    inner = _FIRST_TASK_ONLY + inner
     if is_srun(launcher):
         stray = stray_words_message(launcher)
         if stray:

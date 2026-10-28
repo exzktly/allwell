@@ -308,6 +308,67 @@ def _split_launcher(tokens: list[str]) -> tuple[list[str], list[str], str]:
     return kept, [e for e in excluded if e], partition
 
 
+#: srun options that set how many copies of the command it starts, as ``(short, long)``. ``--ntasks`` is folded
+#: into ``--cpus-per-task`` (:func:`one_task`); the others are dropped.
+_TASK_COUNT_OPTS = (("-n", "--ntasks"), ("-N", "--nodes"), ("", "--ntasks-per-node"))
+_CPUS_OPTS = ("-c", "--cpus-per-task")
+
+
+def _take_option(tokens: list[str], short: str, long: str) -> tuple[list[str], list[str]]:
+    """``(tokens without the option, every value it was given)``, for the ``-xN``, ``-x N``, ``--long=N`` and
+    ``--long N`` spellings."""
+    kept: list[str] = []
+    values: list[str] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if tok == long or (short and tok == short):
+            if nxt is not None:
+                values.append(nxt)
+            i += 2
+            continue
+        if tok.startswith(long + "="):
+            values.append(tok.split("=", 1)[1])
+        elif short and tok.startswith(short) and len(tok) > len(short) and not tok.startswith("--"):
+            values.append(tok[len(short):])
+        else:
+            kept.append(tok)
+        i += 1
+    return kept, values
+
+
+def one_task(tokens: list[str]) -> list[str]:
+    """*tokens* (an ``srun`` launcher) asking for exactly one task on one node.
+
+    The run is one process that spreads its own workers over the CPUs it is given. Every task ``srun`` starts runs
+    the whole job script, so a launch that started five ran five batch drivers over one run directory at once: all
+    five found batch 1's staged directory, one moved it into ``in/``, the next deleted that ``in/`` and then failed
+    to move a directory that was no longer there ("could not stage its input"). The count need not be on the
+    launcher: ``srun`` reads ``SLURM_NTASKS`` / ``SLURM_NNODES`` from the environment just as it reads the flags,
+    so the login shell's environment can set it. ``--ntasks=1 --nodes=1`` are written last and explicitly, and
+    options on the command line override that environment.
+
+    A ``--ntasks`` written into the launcher is how a job template asks for cores, so it is folded into
+    ``--cpus-per-task`` as :func:`services.slurm_batch_script.single_task` does for a JupyterHub profile: ``-n 4
+    -c 2`` becomes ``--cpus-per-task=8``. A count that is not a whole number is dropped rather than guessed at.
+    """
+    out = list(tokens)
+    tasks: list[str] = []
+    for short, long in _TASK_COUNT_OPTS:
+        out, values = _take_option(out, short, long)
+        if long == "--ntasks":
+            tasks = values
+    if tasks:
+        out, cpus = _take_option(out, *_CPUS_OPTS)
+        n, per = tasks[-1], (cpus[-1] if cpus else "1")
+        if n.isdigit() and per.isdigit():
+            out.append(f"--cpus-per-task={int(n) * int(per)}")
+        elif cpus:
+            out.append(f"--cpus-per-task={per}")
+    return [*out, "--nodes=1", "--ntasks=1"]
+
+
 def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
                      err_file_q: str, *, start_slack_s: int = START_SLACK_S,
                      pending_fallback_s: int = PENDING_FALLBACK_S,
@@ -329,6 +390,7 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
     if redirect:
         raise ValueError(redirect)
     tokens, user_excl, partition = _split_launcher(shlex.split(launcher))
+    tokens = one_task(tokens)
     launcher_str = shlex.join(tokens)
     awake = "|".join(AWAKE_STATES)
     free = "|".join(FREE_STATES)

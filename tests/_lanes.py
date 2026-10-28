@@ -242,6 +242,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_failing_heartbeat_is_reported.py": "A heartbeat that is not reaching the host says so, before the host acts on the silence",
     "test_a_run_stream_has_its_own_connection.py": "A run's output stream rides a connection of its own, never the shared master",
     "test_a_forced_well_keeps_the_plate_s_reuse.py": "Forcing one well redoes it; the run's address and re-attach stay the plate's",
+    "test_a_launch_runs_one_copy_of_the_job.py": "A launch runs one copy of the job, however many tasks the environment asks srun for",
     "test_a_lost_batch_driver_is_not_a_stop.py": "A batch driver that went away is a failure with a reason, not the user's Stop",
     "test_a_lost_batch_handoff_is_noticed.py": "A batch handed to the batch driver either reaches it, or the run says it did not",
     "test_a_remote_cleanup_says_what_it_removed.py": "A remote cleanup says what it removed; a batch that cannot be pruned does not run",

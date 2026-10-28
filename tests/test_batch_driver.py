@@ -361,7 +361,7 @@ def test_the_batch_number_is_a_shell_variable_that_actually_expands():
 def test_the_composed_command_still_carries_the_cancel_channels():
     script = _batch_driver_snippet("/r/run-x", 2, _ARGV)
     cmd = _compose_driver_cmd("srun -N1", "/r/run-x/run.pid", script)
-    assert "srun -N1" in cmd
+    assert "srun --nodes=1 --ntasks=1" in cmd, "the run asks for one task on one node (`remote_srun_retry.one_task`)"
     assert "/r/run-x/run.pid.slurm" in cmd     # scancel reads this
     assert "echo $$ > " in cmd                 # kill -TERM reads this
     assert "held for every batch" in cmd

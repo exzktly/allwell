@@ -6,7 +6,7 @@ looked exactly like success. The batch hand-off ``touch`` that left a run silent
 for an hour, the flag-clearing ``rm`` that let a driver run a half-uploaded
 batch, the cleanup that logged "removed" over an ``rm`` that never ran — each
 was a call statement whose result was thrown away (review rows A7, G1, P2 in
-``_Docs/Markdowns/REMOTE_REVIEW_TRACKER.md``). The second shape was a
+the remote pipeline review (whose tracker is in git history)). The second shape was a
 ``subprocess.run`` with no timeout, which over a dead link waits for as long as
 TCP keepalive takes to give up (rows C7, C8, P3).
 

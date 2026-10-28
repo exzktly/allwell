@@ -166,7 +166,7 @@ def test_a_typoed_channel_on_a_mixed_plate_fails_before_staging(tmp_path):
 
 def test_a_staged_member_is_copied_a_chunk_at_a_time(tmp_path, monkeypatch):
     """A rewritten archive is written by streaming each kept member, never by
-    reading one whole into memory (REMOTE_REVIEW_TRACKER S10): a single image
+    reading one whole into memory (remote review S10): a single image
     of a stitched or multi-page acquisition is hundreds of megabytes, and
     ``writestr(info, src.read(member))`` held it all at once. Any read of a
     member larger than one copy chunk fails here — which also catches reading

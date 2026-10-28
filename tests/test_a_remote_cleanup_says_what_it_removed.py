@@ -1,7 +1,7 @@
 """A remote cleanup says what it actually removed, and a batch that cannot be pruned does not run.
 
 Both sites ran an ``rm -rf`` over ssh with ``check=False`` and threw the result
-away (review P2 in ``_Docs/Markdowns/REMOTE_REVIEW_TRACKER.md``): the run's
+away (review P2 in the remote pipeline review (whose tracker is in git history)): the run's
 cleanup then logged "removed …" over a directory still on the host, and a batch
 whose staged directory could be neither pruned nor cleared went ahead holding a
 stray well that would be run and reported twice.

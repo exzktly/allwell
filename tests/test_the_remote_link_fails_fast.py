@@ -1,6 +1,6 @@
 """A bad link to the remote is noticed, retried or reported — never waited on.
 
-The transport rows of ``_Docs/Markdowns/REMOTE_REVIEW_TRACKER.md`` (C3, C4, C8,
+The transport rows of the remote pipeline review (whose tracker is in git history) (C3, C4, C8,
 S4, S5, S8, S9, S10, and the dataset-cache half of E5), each reproduced against
 a real local sshd before it was fixed:
 

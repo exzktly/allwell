@@ -6,7 +6,7 @@ well has, which wells have an ``<well>_out.zip``, which nanowell tables exist. T
 node refusing the connection, a dropped link, a timeout — produced exactly the output of a directory with nothing
 in it. The code downstream then acted on "nothing there": it marked a well fetched whose CSV never arrived, passed
 verification over zero wells and removed the run directory, released a nanowell well whose re-anchored output was
-never pulled (``_Docs/Markdowns/REMOTE_REVIEW_TRACKER.md`` rows A1–A4, A10).
+never pulled (the remote pipeline review (whose tracker is in git history) rows A1–A4, A10).
 
 So a listing here has three answers, never two:
 

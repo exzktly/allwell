@@ -1,6 +1,6 @@
 """What a run is using on the remote is not changed or deleted under it.
 
-Two rows of ``_Docs/Markdowns/REMOTE_REVIEW_TRACKER.md``:
+Two rows of the remote pipeline review (whose tracker is in git history):
 
 * **E5 (the GC half)** — with ``auto_gc`` on, the dataset cache evicted the
   least recently *accessed* datasets with no regard for whether a run was

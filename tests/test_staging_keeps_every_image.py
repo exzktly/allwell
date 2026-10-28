@@ -6,7 +6,7 @@ sent. For a plate of loose images or well folders that conversion happens in the
 user's own input directory: each well folder is packed into ``<well>.zip`` and
 its images are deleted as soon as the archive is published, so that archive *is*
 the user's only copy of the well from then on. Three defects destroyed images
-along that path (REMOTE_REVIEW_TRACKER S1–S3):
+along that path (remote review S1–S3):
 
 * **S1** — the channel filter then rewrote those archives *in place*, keeping
   only the nuclear and selected channels. A DAPI/GFP/BF plate run with GFP

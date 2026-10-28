@@ -373,7 +373,7 @@ def test_a_stale_control_file_that_cannot_be_cleared_stops_the_launch(
     """`run_id` is deterministic, so a re-run lands where the last one left its "upload finished" sentinel and its
     suspend request. Their `rm` ran with ``check=False`` and its answer unread: a sentinel that survived let the
     job start before this run's upload was done, and a request that survived suspended the run before it did
-    anything. A clear that fails now ends the spawn before anything is launched (REMOTE_REVIEW_TRACKER A7)."""
+    anything. A clear that fails now ends the spawn before anything is launched (remote review A7)."""
     real = _FakeRemoteFs.run
 
     def run(self, argv):

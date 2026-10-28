@@ -8,7 +8,7 @@ that is uploaded is written fresh by staging — and it used to carry the time i
 was written as its mtime. Every attempt at the same plate under the same
 settings therefore had a different key: the whole plate was re-uploaded into an
 empty directory each time, and each failed attempt left a full copy behind on
-the remote (REMOTE_REVIEW_TRACKER S6).
+the remote (remote review S6).
 
 The staged copy is now byte-deterministic and stamped with its source archive's
 mtime. That alone would have opened the opposite hole — two channel selections

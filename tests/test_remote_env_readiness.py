@@ -5,7 +5,7 @@ one question of the ``allwell`` env: does ``conda-meta/history`` exist? The
 bootstrap creates the env and then pip-installs into it, detached; that install
 can fail, still be running, or leave a module that will not import, and in each
 case the guard passed and the run died on ``ModuleNotFoundError`` after its
-queue wait and its upload (REMOTE_REVIEW_TRACKER S7). The Cellpose env had a
+queue wait and its upload (remote review S7). The Cellpose env had a
 readiness probe, but it asked ``importlib.util.find_spec``, which finds an
 installed-but-broken module — a compiled extension built against another numpy,
 the ``imagecodecs`` case that has happened — and so did the bootstrap's own

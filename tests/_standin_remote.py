@@ -1,6 +1,6 @@
 """Stand-in ``ssh`` and ``rsync`` binaries: the real fetch code, a local "remote", and failures on cue.
 
-The fetch, verification and cleanup defects of ``_Docs/Markdowns/REMOTE_REVIEW_TRACKER.md`` section A were all
+The fetch, verification and cleanup defects of the remote pipeline review (whose tracker is in git history) section A were all
 hidden by test doubles that *agree with the code*: a ``SimpleNamespace`` fetcher whose listing always succeeds, a
 stub ``_rsync_optional`` whose ``None`` nobody read. A failed remote command read as "nothing there" is invisible
 to any double that cannot fail. So these tests replace only the two binaries:

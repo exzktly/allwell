@@ -3431,7 +3431,8 @@ def test_compose_remote_cmd_scheduled_wraps_in_srun():
     assert "sh -c 'echo $$ > \"$0\"; exec \"$@\"' \"$_aw_pid\"" in cmd
     assert cmd.index("_aw_pid=") < cmd.index("srun --partition")
     # The launcher tokens are present, then the exclusion slot, then bash -lc.
-    assert ("srun --partition=gpu --gres=gpu:1 --time=4:00:00 "
+    # One task on one node is asked for last (`remote_srun_retry.one_task`).
+    assert ("srun --partition=gpu --gres=gpu:1 --time=4:00:00 --nodes=1 --ntasks=1 "
             '${_aw_ex:+--exclude="$_aw_ex"} bash -lc') in cmd
     # conda + the pipeline are inside the wrapped (quoted) inner script.
     assert _CONDA_ACTIVATE_SNIPPET in cmd

@@ -1674,6 +1674,15 @@ it is still the scheduler command's `--cpus-per-task` that decides how many of
 the node's CPUs the run uses; the run log warns when Slurm gave it only one or
 two of a bigger node's.
 
+**A run is always one task on one node.** The app adds `--nodes=1 --ntasks=1`
+to the `srun` command it sends, because Slurm runs the whole job once per task
+and the run is a single process that spreads its own workers over the CPUs it is
+given. A task count can come from the cluster's environment as well as from the
+command, so this is added whatever the command says. A `-n` / `--ntasks` you
+wrote is read as a request for cores and becomes `--cpus-per-task` (`-n 4 -c 2`
+gives the run 8 CPUs), and `-N` / `--nodes` is dropped. If a scheduler still
+starts more than one copy, the run log says how many, and only the first runs.
+
 **Max queue wait** is how long a run waits for the scheduler to give it a node
 — queued, or granted a node that is still starting up — before it gives up. The
 time counts from the moment the run asks for the node, which on a scheduled host

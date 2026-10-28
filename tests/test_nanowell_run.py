@@ -677,6 +677,11 @@ _CLIPPED_RIM = [dict(rotation=7.0, timepoint=tp, seed=seed, cells=10, radius_fra
                 for tp, seed, shift in (("T0", 1, (-120.0, 0.0)), ("T1", 2, (250.0, 0.0)), ("T2", 3, (250.0, 0.0)))]
 
 
+# Three real pipeline runs over an 890-site well, five timepoints located and measured: 77 s alone on a quiet
+# 4-CPU container, nearly all of it in `measure_timepoint` (refine_sites, the owned geometries, rim focus), which is
+# the code under test. Against the lane's 90 s hang guard it timed out whenever the parallel lane loaded the
+# machine, so it carries a budget sized to its work; a hang still fails it.
+@pytest.mark.timeout(300)
 def test_a_timepoint_added_to_a_clipped_rim_well_is_analysed_alone_unless_the_roster_really_changes(
         tmp_path, monkeypatch):
     """X35a-R6. The rim is cut by the image's edge and the plate moves between timepoints. A band site a kept

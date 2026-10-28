@@ -13402,8 +13402,31 @@ host has it, `allwell-cellpose` (below). Two pieces of code care whether one is
 there — `remote_runner`'s pre-launch guard, and `services/remote_bootstrap.py`,
 which creates it — and they answer with the same shell,
 `remote_conda.CONDA_ENV_SHELL_HELPERS` (`aw_env_prefix` / `aw_env_is_valid` /
-`aw_env_stale_dir`). That sharing is the point of the module-level constant:
-when the two disagreed, the disagreement had no way out.
+`aw_env_ready` / `aw_env_stale_dir`). That sharing is the point of the
+module-level constant: when the two disagreed, the disagreement had no way out.
+
+**Valid is not ready.** The bootstrap creates an env and then pip-installs into
+it, detached; that install can fail, still be running, or leave a module that
+is installed and will not import. Each of those is a valid environment, so a
+guard that checked only `conda-meta/history` passed it and the run died on
+`ModuleNotFoundError` after its queue wait and its upload. After the validity
+check the guard therefore runs `aw_env_ready` on the env it resolved: no
+`.pip_failed` and no live `.pip_running` marker (the bootstrap's own, read only
+for the env it manages — `allwell`, or `allwell-cellpose` with the
+`pip_cellpose` tag; an env the user's Remote python names is judged on its
+imports alone), and then its python actually **importing** `remote_conda.
+PIPELINE_IMPORTS` — what the pipeline imports at module scope, plus
+`imagecodecs`. Importing, not `importlib.util.find_spec`: `find_spec` finds an
+installed-but-broken module (a compiled extension built against another numpy,
+the `imagecodecs` case that has happened), which then kills the run on its
+first `import`. A refusal exits 127 with the reason — `module: ExceptionType:
+message` for an import — and the remedy: Bootstrap, and when Bootstrap reports
+the env complete and the error comes back, remove the env and Bootstrap again,
+since pip leaves a package already at its pin alone however broken it is.
+`tests/test_remote_env_readiness.py` drives the guard under bash against envs
+whose python imports real stand-in modules, and holds `PIPELINE_IMPORTS`
+against the module-scope imports of `process_microscopy` and every first-party
+module it pulls in.
 
 **Validity is conda's own test.** A prefix is an environment iff it holds
 `conda-meta/history`. The bootstrap used to ask a different question — "is the
@@ -13451,14 +13474,16 @@ tests of this behaviour pass against the broken script too.
 
 **"The env is complete" means every pipeline package, not TensorFlow.** The
 probe reports which of `remote_bootstrap.REQUIRED_IMPORTS` — one import name per
-distribution `requirements-remote.txt` installs on Linux — the env cannot find,
-via `importlib.util.find_spec`, which locates a module without importing it, so
-the probe neither pays for loading Torch and TensorFlow nor risks the two
-refusing to share a process. A dotted name (`google.protobuf`) is looked up only
-once its top level is found, because `find_spec` imports the parent and raises
-when it is absent. `install_pip_deps` skips the `pip install -r` only when
-TensorFlow is present and nothing is missing; an env whose python cannot answer
-reports `?` and is installed into. The skip used to be TensorFlow alone, so an
+distribution `requirements-remote.txt` installs on Linux — the env cannot
+**import**, each in a python process of its own so that Torch and TensorFlow
+never have to share one. It used `importlib.util.find_spec`, which finds a
+module that is installed and will not import, so such an env read as complete
+and the install was skipped. `install_pip_deps` skips the `pip install -r` only
+when TensorFlow is present, nothing is missing and the last install did not fail
+(`HostProbe.pip_failed`, the `.pip_failed` marker; `install_cellpose_deps` reads
+`.pip_cellpose_failed` the same way) — the run's env guard refuses an env whose
+last install failed, and a skipped install would never clear the marker. An env
+whose python cannot answer reports `?` and is installed into. The skip used to be TensorFlow alone, so an
 env built before Cellpose joined the requirements, or one whose Torch half
 failed, reported ready on every re-bootstrap and the run died on the compute node
 at `from cellpose import models`. A package whose behaviour depends on its version is probed for the version too:
@@ -13492,11 +13517,14 @@ Which env a run uses is decided per run: `remote_conda.cellpose_env_selector` gi
 a run that segments with Cellpose (`runs_cellpose`: a nanowell run, or a Cellpose
 method) on a host left at the default env the `prefer` selector, and leaves a host
 whose Remote python names an env alone. `prefer` is resolved **on the remote**, by
-the env guard: the Cellpose env when it is ready (`aw_cellpose_env_ready`: a valid
-environment, no failed or still-running `pip_cellpose` install, and its python
-finds Cellpose, Torch, pandas, tifffile and imagecodecs — the bootstrap creates the
-env before it installs into it, non-fatally, so an env that merely exists is not
-one a run can import in), `allwell` otherwise with a line saying so, and the guard's usual failure when neither is. `conda run -p`
+the env guard: the Cellpose env when it is ready (`aw_cellpose_env_ready`, i.e.
+`aw_env_ready` with the `pip_cellpose` markers: a valid environment, no failed or
+still-running install, and its python importing `PIPELINE_IMPORTS` plus Cellpose,
+Torch and pandas — the bootstrap creates the env before it installs into it,
+non-fatally, so an env that merely exists is not one a run can import in),
+`allwell` otherwise with a line saying so and why, and the guard's usual failure
+when neither is — `allwell` is then held to the same readiness check, which the
+Cellpose env's, having already passed, makes unnecessary when it is chosen. `conda run -p`
 then reads the prefix the guard resolved (`remote_transport.AW_PREFIX_ARG`,
 `"$AW_PREFIX"`, the one argument `_remote_quote` passes through unquoted), so a host
 not yet bootstrapped for the Cellpose env still runs, in float32. The precision a
@@ -19775,6 +19803,16 @@ conda can see. Three causes, and the guard says which:
 - *The host's `remote_python` points at an env that isn't there.* The field is
   only consulted when the user has changed it from the placeholder; either fix
   the path or clear it to fall back to the env named `allwell`.
+
+**A remote run stops with `[remote] ERROR: conda env allwell on <host> is not
+ready to run the pipeline: …`.** — The env exists but cannot run the pipeline,
+and the line says which of three: the bootstrap's last pip install into it
+failed (its log is `~/.allwell-staging/.pip_install.log`), an install is still
+running, or its python cannot import a module the pipeline needs — named with
+the import's own error. Run Bootstrap; it re-runs a failed install. If it
+reports the env complete and the import error comes back, the package is
+installed at its pinned version and broken, which pip will not touch: remove
+the env on the host (`conda env remove -n allwell`) and Bootstrap again.
 
 A value that isn't shaped like `<env>/bin/python` cannot name an environment;
 the runner keeps the name selector and says so on a `[remote] warn:` line

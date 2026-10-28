@@ -1615,7 +1615,19 @@ GPU that supports it (an A10G or L4, not a T4). A host bootstrapped before this
 keeps working — its Cellpose runs use the first environment, in full precision,
 and the run log says so — until you press Bootstrap again. If the bootstrap warns
 that the new environment's Torch cannot see the GPU, the host's NVIDIA driver is
-too old for it (525 or later is needed). A malformed `remotes.toml` never blocks the app —
+too old for it (525 or later is needed). A package that is installed but no
+longer imports counts as missing, and a bootstrap whose last install failed
+runs it again rather than reporting the host ready.
+
+Before a remote run starts the pipeline it checks the environment can run it:
+not only that it exists, but that the last Bootstrap's install into it did not
+fail and is not still running, and that its Python can import what the pipeline
+needs. If not, the run stops at once with `[remote] ERROR: … is not ready to run
+the pipeline:` and the reason — for a module that will not import, the module
+and its error. Press Bootstrap; if it then says everything is installed and the
+same error comes back, remove the environment on the host (`conda env remove -n
+allwell`) and Bootstrap again, since the installer leaves a package that is at
+the right version alone even when it is broken. A malformed `remotes.toml` never blocks the app —
 the run log carries a warning and the dropdown stays on `Local`. Inside the
 dialog, a file that cannot be read or parsed is reported in a message naming the
 error rather than leaving Edit…, Test and the list silently doing nothing.

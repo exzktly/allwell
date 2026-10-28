@@ -276,6 +276,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_remote_config_writer.py": "Tests for services.remote_config.write_remote / delete_remote",
     "test_remote_dialog.py": "Smoke tests for analyze.remote_dialog (v5.1.0)",
     "test_remote_dialog_defects.py": "Audit U4, U5, U9, U10, U11, U14, U15, U16 — the Manage Remotes dialogs",
+    "test_remote_env_readiness.py": "A remote env is ready when the bootstrap's install did not fail and the pipeline's modules import",
     "test_remote_fetch_freshness.py": "A remote run has to prove it replaced the output it was told to replace",
     "test_remote_fetch_verification.py": "What a remote run's fetched output must prove before the remote copy goes",
     "test_remote_incremental.py": "Client-side incremental split for remote runs",

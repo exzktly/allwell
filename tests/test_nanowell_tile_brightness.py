@@ -9,6 +9,8 @@ same well imaged with no difference between tiles.
 
 from __future__ import annotations
 
+import functools
+
 import numpy as np
 import pytest
 
@@ -147,6 +149,15 @@ FINE_PX = 2.0
 
 
 def _fine_well():
+    """A fresh copy of the misread-surround cases' well: rendered once (12 s), copied for each case, which draws
+    its cells and its surround into its own copy."""
+    import copy
+
+    return copy.deepcopy(_rendered_fine_well())
+
+
+@functools.cache
+def _rendered_fine_well():
     from tests._nanowell_run_fixture import DIAMETER, PITCH, record_for
     from tests._nanowell_synth import TilePlan, render_tiles
 
@@ -159,12 +170,22 @@ def _fine_well():
 
 
 def _disk_add(rendered, centre_um, outer_um, amount, inner_um=-1.0):
-    """Add *amount* between *inner_um* and *outer_um* of *centre_um*, on every tile that sees it."""
+    """Add *amount* between *inner_um* and *outer_um* of *centre_um*, on every tile that sees it.
+
+    Only the pixels of the disk's bounding box are measured: every pixel outside it is farther than *outer_um*.
+    Over the whole tile, the forty-one disks of one case took 13.6 s of a test with a 90 s budget.
+    """
     for name, image in rendered.images.items():
         left, top = rendered.true_left_top_um[name]
-        yy, xx = np.mgrid[0:image.shape[0], 0:image.shape[1]]
+        x0 = max(0, int(np.floor((centre_um[0] - outer_um - left) / FINE_PX - 0.5)))
+        x1 = min(image.shape[1], int(np.ceil((centre_um[0] + outer_um - left) / FINE_PX + 0.5)) + 1)
+        y0 = max(0, int(np.floor((centre_um[1] - outer_um - top) / FINE_PX - 0.5)))
+        y1 = min(image.shape[0], int(np.ceil((centre_um[1] + outer_um - top) / FINE_PX + 0.5)) + 1)
+        if x0 >= x1 or y0 >= y1:
+            continue
+        yy, xx = np.mgrid[y0:y1, x0:x1]
         r = np.hypot((xx + 0.5) * FINE_PX + left - centre_um[0], (yy + 0.5) * FINE_PX + top - centre_um[1])
-        image[(r > inner_um) & (r <= outer_um)] += amount
+        image[y0:y1, x0:x1][(r > inner_um) & (r <= outer_um)] += amount
 
 
 def _loaded_pair(surround=0.0):

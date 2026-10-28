@@ -165,7 +165,8 @@ class FakeRemote:
 
         self._refuse_absolute_host_dirs(host)
         ssh_prefix = host.ssh_argv(allocate_tty=False)
-        ssh_prefix_tty = host.ssh_argv(allocate_tty=True)
+        # The run's output stream: a PTY on a connection of its own (`RemoteHost.ssh_argv(share_connection=False)`).
+        ssh_prefix_tty = host.ssh_argv(allocate_tty=True, share_connection=False)
         real_run = subprocess.run
 
         def _run(cmd, *a, **kw):

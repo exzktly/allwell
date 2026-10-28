@@ -50,6 +50,10 @@ class ZippedInput:
     every input FOV. The runner emits a synthetic ``[remote] ✓ X: up to date``
     for each so the dashboard marks them complete."""
 
+    outside_subset_wells: tuple[str, ...] = ()
+    """Wells of the plate that staging left unplanned because a ``--only_wells`` subset does not name them. Nothing
+    of theirs was read or rewritten; they are listed so the Group stage still counts the plate that was grouped."""
+
     acquisition_record: dict | None = None
     acquisition_schema: str = DEFAULT_SCHEMA
     acquisition_sep: str = DEFAULT_SEP

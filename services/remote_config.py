@@ -218,7 +218,7 @@ class RemoteHost:
             return self.compute_launcher
         return with_exclusive(self.compute_launcher)
 
-    def ssh_argv(self, *, allocate_tty: bool = True) -> list[str]:
+    def ssh_argv(self, *, allocate_tty: bool = True, share_connection: bool = True) -> list[str]:
         """Build the leading ``ssh`` command for this host.
 
         ``-tt`` allocates a PTY so SIGHUP propagates to the remote process
@@ -254,6 +254,15 @@ class RemoteHost:
         ``ConnectTimeout`` so an unreachable host fails in seconds. The fixed
         keepalive (:func:`keepalive_options`) bounds how long a dead link —
         a laptop that slept, a network change — goes unnoticed.
+
+        ``share_connection=False`` is for a run's output stream — the
+        single-shot pipeline's and the batch driver's. It opens a connection
+        of its own (:func:`own_connection_options`) instead of riding the
+        shared master, because everything multiplexed through a master ends
+        with it: a master that stops answering, or the ``ssh -O exit`` that
+        ``remote_transport.recover_dead_master`` sends to close one, would
+        otherwise take a running batch's stream — and, through the PTY's
+        SIGHUP, the batch itself — down with the heartbeat's connection.
         """
         argv = [resolve_ssh_binary(), *known_hosts_options()]
         if allocate_tty:
@@ -261,7 +270,7 @@ class RemoteHost:
         if self.ssh_key_path:
             argv += ["-i", str(Path(self.ssh_key_path).expanduser())]
         if not _is_windows():
-            argv += control_master_options()
+            argv += control_master_options() if share_connection else own_connection_options()
         argv += [*unattended_options(), *keepalive_options(), self.ssh_alias]
         return argv
 
@@ -285,8 +294,10 @@ def keepalive_options() -> list[str]:
     Fixed rather than derived from a setting, because what it bounds is how
     long a *dead* connection goes unnoticed, and that should be short on every
     host. With ``ControlMaster=auto`` the heartbeat, the batch hand-off,
-    ``scancel`` and the driver stream share one connection, so a dead master
-    leaves every one of them hanging for as long as this allows.
+    and ``scancel`` share one connection, so a dead master leaves every one
+    of them hanging for as long as this allows. A run's output stream has a
+    connection of its own (``RemoteHost.ssh_argv(share_connection=False)``),
+    which this same keepalive bounds.
     """
     return ["-o", f"ServerAliveInterval={SSH_KEEPALIVE_INTERVAL_S}",
             "-o", f"ServerAliveCountMax={SSH_KEEPALIVE_COUNT_MAX}"]
@@ -312,6 +323,16 @@ def control_master_options() -> list[str]:
     return ["-o", "ControlMaster=auto",
             "-o", f"ControlPath={_controlpath_template()}",
             "-o", "ControlPersist=60s"]
+
+
+def own_connection_options() -> list[str]:
+    """Options for an ssh that must not join or create a shared master (POSIX only).
+
+    Explicit rather than merely omitting :func:`control_master_options`, so a
+    ``ControlMaster`` / ``ControlPath`` in the user's own ``~/.ssh/config`` does
+    not multiplex the stream through a master after all.
+    """
+    return ["-o", "ControlMaster=no", "-o", "ControlPath=none"]
 
 
 #: The longest socket path the platform accepts (``sun_path``): 104 bytes on

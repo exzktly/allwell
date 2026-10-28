@@ -706,7 +706,9 @@ class _BatchedRemoteProcess:
                                            if blanks else ()),
                                        suspend_request=paths.suspend_request,
                                        final_pass=self._final_pass)
-        ssh_argv = host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(
+        # A connection of its own: the heartbeat's shared master hanging, or being closed to recover it, must not end
+        # the stream — and through the PTY's SIGHUP the batch — with it (`RemoteHost.ssh_argv`).
+        ssh_argv = host.ssh_argv(allocate_tty=True, share_connection=False) + [pack_for_login_shell(
             _compose_driver_cmd(launcher, run.remote_pidfile, driver,
                                 env_selector=self._runner.env_selector,
                                 scratch_dir=host.remote_scratch_dir, queue_wait_s=queue_wait_seconds(host)))

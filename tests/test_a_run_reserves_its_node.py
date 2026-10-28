@@ -1,12 +1,13 @@
-"""A scheduled run asks Slurm for its node to itself, unless told not to.
+"""A scheduled run asks Slurm for its node to itself when told to.
 
 Without ``--exclusive`` Slurm places a second job on a node whenever it looks
 to have room by what the jobs asked for, and on a cluster that does not count
 memory (AWS ParallelCluster's default) two runs that each size their workers to
 the whole node fit by CPU count. Two app instances running at once is the
-ordinary way to get there. ``RemoteHost.exclusive_node`` (on by default, which
-configs saved before it existed get too) makes every launch site send
-``srun --exclusive``; the Remotes dialog has a checkbox for it.
+ordinary way to get there. ``RemoteHost.exclusive_node`` makes every launch site send
+``srun --exclusive``; the Remotes dialog has a checkbox for it. It is off by
+default: reserving the whole node means every run on a power-saving cluster
+boots a fresh node, so a node type that cannot boot stops every run.
 
 The single-launch path is driven in ``test_remote_runner.py``
 (``test_a_scheduled_spawn_asks_for_the_node_to_itself``); this file covers the
@@ -49,31 +50,39 @@ def _host(**kw) -> RemoteHost:
                       compute_launcher="srun --partition=gpu --time=1:00:00", **kw)
 
 
-def test_it_is_on_by_default_and_leaves_the_stored_command_alone():
+def test_it_is_off_by_default_and_on_leaves_the_stored_command_alone():
     host = _host()
-    assert host.exclusive_node is True
-    assert host.compute_launcher == "srun --partition=gpu --time=1:00:00"
-    assert host.launch_command == "srun --exclusive --partition=gpu --time=1:00:00"
-    assert replace(host, exclusive_node=False).launch_command == host.compute_launcher
+    assert host.exclusive_node is False
+    assert host.launch_command == "srun --partition=gpu --time=1:00:00"
+    on = replace(host, exclusive_node=True)
+    assert on.compute_launcher == "srun --partition=gpu --time=1:00:00"
+    assert on.launch_command == "srun --exclusive --partition=gpu --time=1:00:00"
 
 
-def test_a_config_saved_before_the_setting_existed_reserves_the_node(tmp_path):
+def test_a_config_that_does_not_name_the_setting_does_not_reserve_the_node(tmp_path):
     cfg = tmp_path / "remotes.toml"
     cfg.write_text('[remote.hpc]\nssh_alias = "hpc.example"\n'
                    'compute_launcher = "srun -p gpu"\n', encoding="utf-8")
     host = get_remote("hpc", path=cfg)
-    assert host.exclusive_node is True
-    assert host.launch_command == "srun --exclusive -p gpu"
+    assert host.exclusive_node is False
+    assert host.launch_command == "srun -p gpu"
 
 
-def test_switching_it_off_survives_a_save_and_a_reload(tmp_path):
+def test_a_config_saved_with_it_switched_off_stays_off(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text('[remote.hpc]\nssh_alias = "hpc.example"\n'
+                   'compute_launcher = "srun -p gpu"\nexclusive_node = false\n', encoding="utf-8")
+    assert get_remote("hpc", path=cfg).exclusive_node is False
+
+
+def test_switching_it_on_survives_a_save_and_a_reload(tmp_path):
     cfg = tmp_path / "remotes.toml"
     assert "exclusive_node" not in _format_block(_host()), "the default is not written"
-    write_remote(_host(exclusive_node=False), path=cfg)
-    assert "exclusive_node = false" in cfg.read_text(encoding="utf-8")
+    write_remote(_host(exclusive_node=True), path=cfg)
+    assert "exclusive_node = true" in cfg.read_text(encoding="utf-8")
     reloaded = get_remote("hpc", path=cfg)
-    assert reloaded.exclusive_node is False
-    assert reloaded.launch_command == "srun --partition=gpu --time=1:00:00"
+    assert reloaded.exclusive_node is True
+    assert reloaded.launch_command == "srun --exclusive --partition=gpu --time=1:00:00"
 
 
 def test_the_scheduler_test_asks_for_the_node_a_run_would(monkeypatch):
@@ -81,9 +90,9 @@ def test_the_scheduler_test_asks_for_the_node_a_run_would(monkeypatch):
     reports a node shape the run will not get."""
     from services.scheduler_probe import ProbeRun
 
-    script = unpack_login_shell_command(ProbeRun(_host()).argv[-1])
+    script = unpack_login_shell_command(ProbeRun(_host(exclusive_node=True)).argv[-1])
     assert "srun --exclusive --partition=gpu" in script
-    script = unpack_login_shell_command(ProbeRun(_host(exclusive_node=False)).argv[-1])
+    script = unpack_login_shell_command(ProbeRun(_host()).argv[-1])
     assert "--exclusive" not in script
 
 
@@ -95,7 +104,7 @@ def test_the_batched_driver_asks_for_the_node_to_itself(tmp_path, monkeypatch):
     proc = _FakeProc()
     p = _batched(tmp_path, ["A01"])
     _stub_runner(p, proc, [])
-    real = replace(_host(), remote_staging_dir="/r")
+    real = replace(_host(exclusive_node=True), remote_staging_dir="/r")
     p._runner.host = real
     spawns: list[list[str]] = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: spawns.append(argv) or proc)
@@ -111,21 +120,21 @@ def test_the_batched_driver_asks_for_the_node_to_itself(tmp_path, monkeypatch):
     assert "srun --exclusive --partition=gpu" in script
 
 
-def test_the_dialog_checkbox_is_ticked_by_default_and_unticking_it_is_saved(qtbot, tmp_path):
+def test_the_dialog_checkbox_is_unticked_by_default_and_ticking_it_is_saved(qtbot, tmp_path):
     pytest.importorskip("PySide6")
     import analyze.remote_dialog as ard
 
     dlg = ard.RemoteFormDialog(None, host=_host())
     qtbot.addWidget(dlg)
-    assert dlg._exclusive_cb.isChecked()
-    assert dlg.result_host().exclusive_node is True
+    assert not dlg._exclusive_cb.isChecked()
+    assert dlg.result_host().exclusive_node is False
 
     dlg._exclusive_cb.click()
     host = dlg.result_host()
-    assert host.exclusive_node is False
+    assert host.exclusive_node is True
     write_remote(host, path=tmp_path / "remotes.toml")
-    assert get_remote("hpc", path=tmp_path / "remotes.toml").exclusive_node is False
+    assert get_remote("hpc", path=tmp_path / "remotes.toml").exclusive_node is True
 
     reopened = ard.RemoteFormDialog(None, host=host)
     qtbot.addWidget(reopened)
-    assert not reopened._exclusive_cb.isChecked(), "an unticked remote reopened ticked"
+    assert reopened._exclusive_cb.isChecked(), "a ticked remote reopened unticked"

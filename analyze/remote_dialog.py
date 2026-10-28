@@ -369,8 +369,8 @@ class RemoteFormDialog(QDialog):
         launcher_row.addWidget(self._test_sched_btn)
         sched_layout.addLayout(launcher_row)
 
-        # On by default: without it Slurm may put another job — a second app
-        # instance's run included — on the same node (RemoteHost.exclusive_node).
+        # Off by default: on, every run needs a whole idle node, so on a cluster
+        # that powers nodes down each run boots one (RemoteHost.exclusive_node).
         self._exclusive_cb = QCheckBox("Reserve the whole node (--exclusive)", self._scheduled_box)
         self._exclusive_cb.setToolTip(
             "Ask Slurm for the node to yourself, so no other job — another "

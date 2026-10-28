@@ -65,7 +65,9 @@ def test_on_the_lattice_a_dot_keeps_its_place_in_its_nanowell(tmp_path):
     places = {q: (scene.sites.x[k], scene.sites.y[k]) for k, (_w, q, _r) in enumerate(scene.sites.sites)}
     assert places[1] != CENTRES[1]                                           # the case where the frames differ
     expected = sorted((places[q][0] + dx, places[q][1] + dy) for tp, q, (dx, dy) in CELLS if tp == "t_c")
-    assert sorted(zip(*map(list, scene.cells))) == pytest.approx(expected)
+    # Flattened: pytest 9.2's approx refuses nested sequences, and a list of (x, y) pairs is one.
+    got = sorted(zip(*map(list, scene.cells)))
+    assert [c for xy in got for c in xy] == pytest.approx([c for xy in expected for c in xy])
 
 
 def test_a_well_without_a_cell_table_or_positions_says_so_and_draws_nothing(tmp_path):

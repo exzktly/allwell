@@ -24,7 +24,7 @@ from review.features.nanowell.collect import (
     NOT_LOCATED, SUPPORTED_SCHEMES, UNADDRESSED, NanowellSchemeError, load_nanowell_data, recorded_hours,
 )
 from review.features.nanowell.series_compute import (
-    exclusion_reason, site_metrics, site_series,
+    NO_BASELINE_TIMEPOINT, baseline_at, exclusion_reason, site_metrics, site_series,
 )
 from review.features.nanowell.state import NanowellState
 from review.features.nanowell.summary_compute import group_summary, well_summary
@@ -237,6 +237,45 @@ def test_a_nanowell_occluded_at_the_earliest_timepoint_has_a_fold_change_only_fr
     assert math.isnan(first["count_fc"].tolist()[0]) and set(first["baseline_timepoint"]) == {"t_a"}
 
 
+def test_a_named_timepoint_is_the_baseline_of_every_nanowell_at_every_timepoint(tmp_path):
+    """Site (0,0) holds 2 → occluded → 4 → 8 cells. From t_d (4 cells) the fold changes are 0.5, —, 1, 2; the
+    earliest baseline gives 1, —, 2, 4 and first measurable the same, so each wrong rule reads differently here."""
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": _series_well()}))
+    fixed = site_metrics(data, baseline_at("t_d"))
+    s = site_series(fixed, "A01", 0, 0).set_index("timepoint").loc[ORDER]
+    counts = s["count_fc"].tolist()
+    assert counts[0] == 0.5 and math.isnan(counts[1]) and counts[2:] == [1.0, 2.0]
+    assert s["confluence_fc"].tolist()[3] == pytest.approx(2.0)
+    assert s["signal_fc_GFP"].tolist()[0] == pytest.approx(1 / 3)
+    assert set(fixed["baseline_timepoint"]) == {"t_d"}
+    # Site (1,0) is empty at t_d: no count fold change, with the reason a baseline at zero always gives.
+    mine = (fixed["nw_q"] == 1) & (fixed["nw_r"] == 0)
+    assert fixed.loc[mine, "count_fc"].isna().all()
+    assert set(fixed.loc[mine, "occupancy_class"]) == {"0"}
+
+
+def test_a_well_without_the_named_baseline_timepoint_has_no_fold_change_and_says_why(tmp_path):
+    """B01 was never imaged at t_a: its nanowells have no baseline rather than one taken from t_c in its place."""
+    wells = {"A01": [_row("t_c", 0, 0, n=1, c=0.1), _row("t_a", 0, 0, n=2, c=0.2)],
+             "B01": [_row("t_c", 0, 0, n=3, c=0.3)]}
+    data = load_nanowell_data(_dataset(tmp_path, wells, starts={k: STARTS[k] for k in ("t_c", "t_a")}))
+    metrics = site_metrics(data, baseline_at("t_a"))
+    a01, b01 = metrics[metrics["well"] == "A01"], metrics[metrics["well"] == "B01"]
+    assert a01.set_index("timepoint")["count_fc"].to_dict() == {"t_c": 0.5, "t_a": 1.0}
+    assert b01["count_fc"].isna().all() and b01["occupancy_class"].isna().all()
+    reasons = exclusion_reason(metrics, "count_fc", ["GFP"])[metrics["well"] == "B01"]
+    assert set(reasons) == {f"baseline {NO_BASELINE_TIMEPOINT}"}
+    occupancy = exclusion_reason(metrics, "occupancy_class", ["GFP"])[metrics["well"] == "B01"]
+    assert set(occupancy) == {f"baseline {NO_BASELINE_TIMEPOINT}"}
+
+
+def test_a_baseline_that_is_neither_a_rule_nor_a_timepoint_is_refused(tmp_path):
+    data = load_nanowell_data(_dataset(tmp_path, {"A01": _series_well()}))
+    for bad in ("latest", "tp:", "t_d"):
+        with pytest.raises(ValueError):
+            site_metrics(data, bad)
+
+
 # ── D5: per well ─────────────────────────────────────────────────────────────
 def test_a_well_summary_counts_every_nanowell_as_used_or_excluded_by_reason(metrics):
     summary = well_summary(metrics, "count_fc", ["GFP"], responding_above=1.0).set_index("timepoint")
@@ -359,6 +398,14 @@ def test_the_page_s_choices_round_trip_and_a_dataset_without_them_starts_fresh(t
     assert fresh.to_config() == st.to_config()
     persist.load_from_data_dir(_ctx(tmp_path / "b"), st)                   # another dataset, nothing saved
     assert st.to_config() == NanowellState().to_config() and st.data == "the tables"
+
+
+def test_a_saved_timepoint_baseline_is_restored_even_before_the_data_is_read():
+    st = NanowellState()
+    st.apply_config({"baseline": "tp:t_a"})
+    assert st.baseline == "tp:t_a"
+    st.apply_config({"baseline": "tp:"})
+    assert st.baseline == NanowellState().baseline
 
 
 def test_a_saved_block_with_values_the_page_cannot_show_is_not_taken():

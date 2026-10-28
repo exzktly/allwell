@@ -298,6 +298,25 @@ def test_changing_the_baseline_and_back_never_lands_the_stale_result(page, qtbot
     assert footer.startswith("Nanowell × timepoint values used 14 of 16")
 
 
+def test_the_baseline_control_offers_every_timepoint_and_choosing_one_measures_from_it(page, qtbot):
+    """Through the real Baseline combo: the two rules, then t_c and t_a. From t_a, A01's nanowells q 0 and q 1 (1 and
+    2 cells at t_c, 2 and 4 at t_a) read 0.5 at t_c — the earliest and first-measurable rules both read 1.0 there."""
+    st = _loaded(qtbot, page)
+    st.metric = "count_fc"
+    baseline_cb = page.widgets.get("_nw_baseline_cb")
+    offered = [baseline_cb.itemData(i) for i in range(baseline_cb.count())]
+    assert offered == ["earliest", "first_measurable", "tp:t_c", "tp:t_a"]
+    baseline_cb.setCurrentIndex(baseline_cb.findData("tp:t_a"))
+    qtbot.waitUntil(lambda: st.loaded_for[1] == "tp:t_a" and not st.computing, timeout=20000)
+    assert st.baseline == "tp:t_a"
+    a01 = st.metrics[(st.metrics["well"] == "A01") & st.metrics["nw_q"].isin([0, 1])]
+    assert a01.groupby("timepoint")["count_fc"].apply(set).to_dict() == {"t_c": {0.5}, "t_a": {1.0}}
+    nwc.redraw(page)
+    legend = " ".join(_texts(page, "nw-legend"))
+    assert "Cells at baseline (t_a)" in legend
+    assert baseline_cb.currentData() == "tp:t_a"
+
+
 def test_a_baseline_changed_without_a_load_is_fetched_before_it_is_drawn(page, qtbot):
     """A reset or a restore writes the baseline straight onto the state; the next draw must not use stale
     fold changes for it."""

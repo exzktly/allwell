@@ -12662,7 +12662,19 @@ carries the written reason for each: the argv digest, `source_fingerprint` (the
 user's own input archives, which separates "staging rewrote" from "the images
 changed" — the two reasons the upload key churns), and the host alias, because
 the recorded address is a path on one machine and two hosts that share a
-filesystem will happily resolve each other's.
+filesystem will happily resolve each other's. The remote run's other reuse
+decisions are registered there too — `finished_here`, the batched resume's
+adoption (`take_from_remote`), the pre-staging download
+(`recover_finished_outputs`), the pre-flight's `_pipeline_launch_is_pointless`,
+`_nothing_left_to_upload` and the host's own `well_skip.finished_output` — each
+with its keys, each key mutated alone against real files (a real directory under
+bash for the remote ones) and required to decline. Which functions count as
+reuse decisions is derived, not listed: `reuse_sites` scans `services/`,
+`pipeline/` and `process_microscopy.py` for callers of the reuse primitives
+(the journal's address lookups, the definition of a finished well, the settings
+check, the whole-run predicates), and each one found must be filed under a
+registered decision (`DECISION_SITES`) or named, with a reason, as reusing
+nothing (`NOT_A_REUSE_DECISION`).
 
 `cache_key` hashes `int(st_mtime)`, so two staged copies written inside one
 wall-clock second key identically. That is why this drift is invisible in a

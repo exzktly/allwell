@@ -34,6 +34,7 @@ from services.acquisition_transport import acquisition_cache_key, carry_upload_r
 from services.remote_staging import (
     ZippedInput,
 )
+from services.remote_cache_gc import collect_garbage, in_use_stamp
 from services.remote_transport import (
     _RSYNC_RETRY_DELAYS,
     SSH_SCRIPT_TIMEOUT_S,
@@ -110,8 +111,13 @@ class DatasetCache:
         key = self.cache_key(zipped)
         remote_path = self.remote_dataset_dir(key)
 
-        # Ensure remote target dir exists.
-        self._ssh_run(["mkdir", "-p", remote_path], check=True)
+        # Ensure remote target dir exists, and mark the dataset in use so the
+        # cache GC of this or any other session leaves it alone.
+        stamp = in_use_stamp(self.host.remote_staging_dir, key)
+        self._ssh_run(["mkdir", "-p", remote_path, stamp.rsplit("/", 1)[0]], check=True)
+        if self._ssh_run(["touch", stamp], check=False).returncode != 0 and log_fn:
+            log_fn(f"[remote] warn: could not mark dataset {key[:8]} in use; "
+                   f"a cache GC could evict it during this run\n")
 
         sources = [to_rsync_path(p) for p in (*zipped.well_zips, *getattr(zipped, "extra_upload_files", ()))]
         # The trailing slash on the remote dest is critical for rsync's
@@ -279,51 +285,9 @@ class DatasetCache:
                     "eviction of old dataset caches.\n"
                 )
             return
-        # Send the script via stdin so the remote bash parses
-        # ~/.allwell-staging normally. Embedding it in a one-line ssh
-        # arg always loses tilde expansion via outer shell quoting.
-        listing = self._ssh_script(
-            f"cd {self.host.remote_staging_dir}/datasets 2>/dev/null && "
-            "du -sb -- */ 2>/dev/null | sort -nr || true",
-            check=False,
-        )
-        if not listing or not listing.stdout:
-            return
-        entries: list[tuple[int, str]] = []
-        for line in listing.stdout.splitlines():
-            parts = line.strip().split(maxsplit=1)
-            if len(parts) == 2 and parts[0].isdigit():
-                entries.append((int(parts[0]), parts[1].rstrip("/")))
-        total = sum(b for b, _ in entries)
-        if total <= max_bytes:
-            return
-        # Sort by access time ascending (oldest first). We don't have an
-        # easy LRU stamp without a stat round-trip, so approximate via the
-        # current sort: largest-first is wrong, so refetch with atime.
-        atime_cmd = self._ssh_script(
-            f"cd {self.host.remote_staging_dir}/datasets 2>/dev/null && "
-            "stat -c '%X %n' -- */ 2>/dev/null | sort -n || true",
-            check=False,
-        )
-        if not atime_cmd or not atime_cmd.stdout:
-            return
-        ordered: list[str] = []
-        for line in atime_cmd.stdout.splitlines():
-            parts = line.strip().split(maxsplit=1)
-            if len(parts) == 2 and parts[0].isdigit():
-                ordered.append(parts[1].rstrip("/"))
-        size_by_name = {n: b for b, n in entries}
-        for name in ordered:
-            if total <= max_bytes:
-                break
-            b = size_by_name.get(name, 0)
-            self._ssh_run(
-                ["rm", "-rf", f"{self.host.remote_staging_dir}/datasets/{name}"],
-                check=False,
-            )
-            total -= b
-            if log_fn:
-                log_fn(f"[remote] gc: evicted dataset {name} ({b // (1024**2)} MB)\n")
+        # Least recently used first, never one a run is using — see
+        # ``services/remote_cache_gc.py`` for what "in use" means.
+        collect_garbage(self, max_bytes, log_fn or (lambda _m: None))
 
     def _ssh_run(
         self, remote_argv: list[str], *, check: bool,

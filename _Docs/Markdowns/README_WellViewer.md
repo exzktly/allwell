@@ -1774,6 +1774,12 @@ batched run is between batches — can never change the code a run is in the
 middle of. Version folders nobody has used for 30 days are removed when a run
 starts. Bootstrap still installs into `<remote project dir>` itself.
 
+**Automatic cache clean-up never removes a dataset a run is using.** With
+`auto_gc = true` in `remotes.toml`, the least recently *used* cached inputs are
+deleted when the cache is over `cache_budget_gb`, but never one a run has used
+in the last seven days — another window's, or another person's, run may be
+reading it. The log names any it kept over budget for that reason.
+
 ### 11. Run / Suspend / Stop / Log
 
 - Click **Run** (in the footer under the form). While the run is going,

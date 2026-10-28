@@ -501,7 +501,7 @@ def test_the_loop_runs_the_final_pass_after_the_last_data_batch(tmp_path, monkey
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in (1, 2, 3):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()
     worker.join(timeout=20)
     assert not worker.is_alive()
@@ -528,7 +528,7 @@ def test_a_suspend_before_the_end_runs_no_final_pass(tmp_path, monkeypatch):
         time.sleep(0.01)
     p.note_suspend_requested()
     proc._done = True
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.say("[remote] batch-driver: suspended — no further batches\n")
     proc.finish()
     worker.join(timeout=20)
@@ -558,14 +558,14 @@ def test_a_suspend_during_the_last_data_batch_runs_no_final_pass(tmp_path, monke
     p._runner.close_remote_job = lambda **kw: None
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     import time
 
     deadline = time.monotonic() + 10
     while not any("_2_ready" in o for o in ordering) and time.monotonic() < deadline:
         time.sleep(0.01)
     p.note_suspend_requested()
-    proc.say("[remote] batch-driver: batch 2 finished rc=0\n")
+    proc.batch_finished(p, 2)
     proc.say("[remote] batch-driver: suspended — no further batches\n")
     proc.finish()
     worker.join(timeout=20)
@@ -582,7 +582,7 @@ def test_a_driver_lost_during_the_final_pass_is_lost_not_stopped(tmp_path, monke
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in (1, 2):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()                                   # the allocation ends before batch 3 reports
     worker.join(timeout=20)
     assert not worker.is_alive()

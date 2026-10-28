@@ -98,3 +98,55 @@ def fail(proc, message: str) -> None:
     """Log *message*, a reason the batched run is ending or failing, and keep it for the run's headline."""
     proc._log(message)
     ledger_of(proc).note_reason(message)
+
+
+def batch_wells(batch_zips) -> list[str]:
+    """The well labels of a batch's archives."""
+    return [_label(z.stem) for z in batch_zips]
+
+
+def unreported_after_success(proc, index: int, batch_zips) -> int:
+    """For a batch that exited 0: ``0`` when every well it was sent reported finished or skipped, else ``1``, having
+    said which did not.
+
+    An exit of 0 says the pipeline ran over the input directory it found, not that it found the batch it was sent:
+    a batch swapped in before its upload finished — a stale ``ready`` flag left by an earlier run — processes what
+    had arrived and exits 0. Its missing wells are then absent from the run's verification too, which builds its
+    list from the wells that announced themselves. A suspend is the one honest reason for silence: the wells it
+    reached part way and the ones it never started say so in their own words, and the resume runs them.
+    """
+    if proc._suspending.is_set():
+        return 0
+    missing = ledger_of(proc).unreported(batch_wells(batch_zips))
+    if not missing:
+        return 0
+    fail(proc, f"[remote] ERROR batch {index} exited 0, but {len(missing)} of its {len(batch_zips)} well(s) never "
+               f"reported finished — {', '.join(missing[:8])}{' …' if len(missing) > 8 else ''}; their output is "
+               f"missing\n")
+    return 1
+
+
+def failed_batches_line(proc, failed: dict[int, int], batches, n_batches: int) -> str:
+    """The end-of-run tally of the batches that failed, naming what each one actually lost.
+
+    A batch fails as a whole when one well in it does — a single partial well is enough — so "the wells of a failed
+    batch are missing" claimed far more than was true. Each batch is described from what its wells reported.
+    """
+    ledger = ledger_of(proc)
+    parts = []
+    for index in sorted(failed):
+        wells = batch_wells(batches[index - 1])
+        unfinished, partial = ledger.unreported(wells), ledger.partial(wells)
+        what = []
+        if unfinished:
+            what.append(f"{', '.join(unfinished)} not finished")
+        if partial:
+            what.append(f"{', '.join(partial)} partial")
+        if index in getattr(proc, "_over_budget", ()):
+            what.insert(0, "exceeded its time budget")
+        if not what:
+            what.append("every well reported finished")
+        rc = proc._batch_rc.get(index, failed[index])
+        parts.append(f"batch {index} (exit {rc}): {'; '.join(what)}")
+    return (f"[remote] ERROR {len(failed)} of {n_batches} batch(es) failed — {' | '.join(parts)}. Every other well "
+            f"completed.\n")

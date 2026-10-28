@@ -93,7 +93,7 @@ def test_a_touch_that_fails_is_tried_again_and_the_batch_still_runs(tmp_path, mo
     proc.say("[remote] batch-driver: waiting for batch 1 of 1\n")
     _until(lambda: len(_touches(asked, 1)) == 3)
     proc.say("[remote] batch-driver: batch 1 starting\n")
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.finish()
     worker.join(timeout=20)
 
@@ -159,7 +159,7 @@ def test_a_touch_that_timed_out_but_landed_is_not_given_up_on(tmp_path, monkeypa
     p, proc, worker, asked = _run(tmp_path, monkeypatch, ["A01"], answer)
     proc.say("[remote] batch-driver: waiting for batch 1 of 1\n")
     _until(lambda: watch_started(p, 1))
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     worker.join(timeout=20)
     proc.finish()
 
@@ -187,7 +187,7 @@ def test_an_unconfirmed_touch_before_the_driver_asks_is_checked_when_it_does(tmp
     proc.say("[remote] batch-driver: waiting for batch 1 of 1\n")
     _until(lambda: "the node has it" in "".join(p._logged))
     proc.say("[remote] batch-driver: batch 1 starting\n")
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     worker.join(timeout=20)
     proc.finish()
 
@@ -203,7 +203,7 @@ def test_a_flag_check_that_could_not_run_is_not_read_as_missing(tmp_path, monkey
     proc.say("[remote] batch-driver: waiting for batch 1 of 1\n")
     _until(lambda: len([a for a in asked if a[0] == "test"]) >= 2)        # asked again, a window later
     proc.say("[remote] batch-driver: batch 1 starting\n")
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     worker.join(timeout=20)
     proc.finish()
 
@@ -248,7 +248,7 @@ def test_a_lost_hand_off_is_raised_again_when_the_driver_waits_on_it(tmp_path, m
     proc.say("[remote] batch-driver: waiting for batch 1 of 1\n")
     _until(lambda: len(_touches(asked, 1)) == 2)
     proc.say("[remote] batch-driver: batch 1 starting\n")
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.finish()
     worker.join(timeout=20)
 
@@ -281,7 +281,7 @@ def test_a_driver_that_has_the_flag_but_goes_quiet_is_named_once_and_waited_for(
     proc.say("[remote] batch-driver: waiting for batch 1 of 1\n")
     _until(lambda: "the node's output is not reaching the app" in "".join(p._logged))
     time.sleep(2.5)                                 # several more overdue checks
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.finish()
     worker.join(timeout=20)
 
@@ -296,7 +296,7 @@ def test_a_driver_still_queued_is_never_chased(tmp_path, monkeypatch):
     time.sleep(2.5)
     proc.say("[remote] batch-driver: waiting for batch 1 of 1\n")
     proc.say("[remote] batch-driver: batch 1 starting\n")
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.finish()
     worker.join(timeout=20)
 

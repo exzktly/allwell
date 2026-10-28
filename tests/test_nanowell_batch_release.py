@@ -189,7 +189,7 @@ def _drive_batches(tmp_path, wells, *, nanowell, batch_size):
         worker = threading.Thread(target=p._run_batches, daemon=True)
         worker.start()
         for i in range(1, 7):
-            proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+            proc.batch_finished(p, i)
         proc.finish()
         worker.join(timeout=20)
     return p, queued

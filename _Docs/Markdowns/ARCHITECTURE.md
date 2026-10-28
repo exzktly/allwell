@@ -12735,6 +12735,21 @@ puts them in front of the tail it gives `exit_message`. The per-batch step itsel
 upload, hand over, wait — is `remote_batch_step.run_batch`, which returns the code
 a batch counts for or a `Step` that ends the loop.
 
+**A batch's exit code is checked against what its wells said.** The reader feeds
+every line to `remote_batch_ledger.BatchLedger`, which keeps the wells the pipeline
+reported `— done.`, `SKIP well …` (the host's own skip) and `PARTIAL`. A batch that
+exits 0 while some of the wells it was sent reported neither is counted failed
+(`unreported_after_success`), naming them: an exit of 0 says the pipeline ran over
+the input directory it found, and a batch swapped in before its upload finished
+processes what had arrived and exits 0 — and those wells would otherwise be absent
+from verification too, which lists the wells that announced themselves. A suspend
+is exempt, because the wells it reached part way or never started say so in their
+own words and the resume runs them. The end-of-run tally (`failed_batches_line`)
+describes each failed batch from the same record — which wells did not finish,
+which are partial, or that every well reported finished — because a batch fails as
+a whole when one partial well does, and "the wells of a failed batch are missing"
+claimed far more than was true.
+
 **An app that vanishes mid-batch suspends the batch.** The driver's heartbeat
 check otherwise runs only between batches, and an app that crashes or is
 force-quit leaves its ssh child alive as an orphan, so the srun holding the node

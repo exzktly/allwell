@@ -75,7 +75,7 @@ from services.remote_batch_staging import prune_staged, _empty_well_blanks
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, watch_of
-from services.remote_batch_ledger import fail, ledger_of
+from services.remote_batch_ledger import fail, failed_batches_line, ledger_of
 from services.remote_batch_step import Step, run_batch
 from services.remote_batch_resume import (
     _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
@@ -1086,12 +1086,7 @@ class _BatchedRemoteProcess:
                     return
 
             if failed:
-                names = ", ".join(str(i) for i in sorted(failed))
-                self._log(
-                    f"[remote] {len(failed)} of {n_batches} batch(es) failed "
-                    f"({names}); the rest completed. Wells from a failed batch "
-                    f"are missing from the output.\n"
-                )
+                fail(self, failed_batches_line(self, failed, batches, n_batches))
                 self._returncode = failed[min(failed)]
             else:
                 self._returncode = final_rc

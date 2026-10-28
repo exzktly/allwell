@@ -197,6 +197,21 @@ class _FakeProc:
     def say(self, line):
         self._q.put(line)
 
+    def batch_finished(self, owner, i, rc=0):
+        """What the driver's stream holds when batch *i* of *owner* (the batched process) ends.
+
+        A real batch that exits 0 has first printed ``Well <W> — done.`` for every
+        well it was sent, and the batch loop now checks that it did
+        (``remote_batch_ledger.unreported_after_success``). Written out when the
+        reader gets to it, because a test queues this before the loop has sliced
+        the plate into batches.
+        """
+        def lines():
+            batches = getattr(owner, "_batches", None) or ()
+            wells = [z.stem for z in batches[i - 1]] if rc == 0 and i <= len(batches) else []
+            return [f"Well {w} — done.\n" for w in wells] + [f"[remote] batch-driver: batch {i} finished rc={rc}\n"]
+        self._q.put(lines)
+
     def finish(self):
         self._done = True
         self._q.put(None)
@@ -208,6 +223,9 @@ class _FakeProc:
                 item = self._q.get()
                 if item is None:
                     return
+                if callable(item):
+                    yield from item()
+                    continue
                 yield item
         return _iter()
 
@@ -320,7 +338,7 @@ def test_one_allocation_serves_every_batch(tmp_path, monkeypatch):
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     for i in (1, 2, 3):
-        proc.say(f"[remote] batch-driver: batch {i} finished rc=0\n")
+        proc.batch_finished(p, i)
     proc.finish()
     worker.join(timeout=20)
 
@@ -332,26 +350,88 @@ def test_one_allocation_serves_every_batch(tmp_path, monkeypatch):
         "upload:b1", "upload:b2", "upload:b3"]
 
 
-def test_a_failed_batch_is_tallied_and_the_run_continues(tmp_path, monkeypatch):
+def _drive(tmp_path, monkeypatch, wells, batch_size, script):
+    """Run the batch loop over *wells*; *script(proc, p)* plays the driver. Returns the process once it ends."""
     proc = _FakeProc()
-    p = _batched(tmp_path, ["A01", "A02", "A03"])
+    p = _batched(tmp_path, wells, batch_size=batch_size)
     _stub_runner(p, proc, [])
     monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
-
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
-    proc.say("[remote] batch-driver: batch 2 finished rc=4\n")
-    proc.say("[remote] batch-driver: batch 3 finished rc=0\n")
+    script(proc, p)
     proc.finish()
     worker.join(timeout=20)
-
     assert not worker.is_alive()
+    return p
+
+
+def test_a_failed_batch_is_tallied_with_what_it_really_lost(tmp_path, monkeypatch):
+    """Batch 2 fails because one of its two wells came out partial: the tally says that, not that both are missing.
+
+    The tally used to say "Wells from a failed batch are missing from the output" whatever the batch had done — here
+    A03 finished whole, and A04 has its output less some FOV-groups."""
+    def driver(proc, p):
+        proc.batch_finished(p, 1)
+        proc.say("Well A03 — done.\n")
+        proc.say("2026-10-28 10:00:00  WARNING   Well A04 — PARTIAL: 2 of 9 FOV-group(s) FAILED (F003, F007).\n")
+        proc.say("Well A04 — done.\n")
+        proc.say("[remote] batch-driver: batch 2 finished rc=4\n")
+        proc.batch_finished(p, 3)
+
+    p = _drive(tmp_path, monkeypatch, ["A01", "A02", "A03", "A04", "A05", "A06"], 2, driver)
+
     assert p._returncode == 4, "a failed batch has to reach the run's own code"
-    tally = "".join(p._logged)
-    assert "1 of 3 batch(es) failed" in tally
-    assert "continuing with the remaining batches" in tally
+    tally = [m for m in p._logged if "batch(es) failed" in m]
+    assert tally == ["[remote] ERROR 1 of 3 batch(es) failed — batch 2 (exit 4): A04 partial. Every other well "
+                     "completed.\n"], p._logged
+    assert "continuing with the remaining batches" in "".join(p._logged)
+    assert p.failure_lines == (tally[0].strip(),), "the run's headline does not carry the tally"
+
+
+def test_a_failed_batch_names_the_wells_that_never_finished(tmp_path, monkeypatch):
+    def driver(proc, p):
+        proc.batch_finished(p, 1)
+        proc.say("2026-10-28 10:00:00  ERROR     FAILED well A03: out of memory.\n")
+        proc.say("Well A04 — done.\n")
+        proc.say("[remote] batch-driver: batch 2 finished rc=1\n")
+
+    p = _drive(tmp_path, monkeypatch, ["A01", "A02", "A03", "A04"], 2, driver)
+
+    assert p._returncode == 1
+    assert ("[remote] ERROR 1 of 2 batch(es) failed — batch 2 (exit 1): A03 not finished. Every other well "
+            "completed.\n") in p._logged, p._logged
+
+
+def test_a_batch_that_exits_0_without_its_wells_is_not_counted_complete(tmp_path, monkeypatch):
+    """A batch the driver swapped in before its upload finished (a stale `ready` flag) runs what had arrived and
+    exits 0. Two of its three wells never said a word, and the run used to report success over them."""
+    def driver(proc, p):
+        proc.say("Well A01 — done.\n")
+        proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+        proc.batch_finished(p, 2)
+
+    p = _drive(tmp_path, monkeypatch, ["A01", "A02", "A03", "A04"], 3, driver)
+
+    assert p._returncode == 1, "a batch whose wells never reported was counted complete"
+    log = "".join(p._logged)
+    assert ("[remote] ERROR batch 1 exited 0, but 2 of its 3 well(s) never reported finished — A02, A03; their "
+            "output is missing") in log
+    assert "batch 1 (exit 0): A02, A03 not finished" in log
+    assert "batch 2" not in log.split("batch(es) failed")[1], "batch 2 reported every well and is not a failure"
+
+
+def test_a_well_the_pipeline_skipped_is_accounted_for(tmp_path, monkeypatch):
+    """The host's own skip (its output already exists there) says so, and is not a missing well."""
+    def driver(proc, p):
+        proc.say("Well A01 — done.\n")
+        proc.say("2026-10-28 10:00:00  INFO      SKIP well A02 — output already exists. Use --force to reprocess.\n")
+        proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+
+    p = _drive(tmp_path, monkeypatch, ["A01", "A02"], 2, driver)
+
+    assert p._returncode == 0, p._logged
+    assert "ERROR" not in "".join(p._logged)
 
 
 def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
@@ -384,7 +464,7 @@ def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
     # The driver has exited by the time its last lines are read — set before
     # they are said, so the release never sees it still running by accident.
     proc._done = True
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.say("[remote] batch-driver: suspended — no further batches\n")
     proc.finish()
     worker.join(timeout=20)
@@ -427,7 +507,7 @@ def test_a_suspend_during_a_batch_upload_ends_the_upload(tmp_path, monkeypatch):
                         lambda argv, **kw: proc)
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     worker.join(timeout=5)
     interrupted = not worker.is_alive()
     proc.finish()
@@ -490,7 +570,7 @@ def test_a_suspended_plate_gets_no_thresholds_from_its_fraction(tmp_path, monkey
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     p.note_suspend_requested()
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.finish()
     worker.join(timeout=20)
     assert p._returncode == 0
@@ -509,7 +589,7 @@ def test_the_markers_never_reach_the_log(tmp_path, monkeypatch):
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     proc.say("Well A01 — done.\n")
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.finish()
     worker.join(timeout=20)
 
@@ -540,7 +620,7 @@ def test_a_dead_driver_ends_the_run_as_a_failure_and_lets_the_downloads_drain(tm
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     proc.say("Well A01 — done.\n")
-    proc.say("[remote] batch-driver: batch 1 finished rc=0\n")
+    proc.batch_finished(p, 1)
     proc.finish()                       # the allocation is gone
     worker.join(timeout=20)
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Callable
 
-from services.remote_batch_ledger import fail
+from services.remote_batch_ledger import fail, unreported_after_success
 from services.remote_batch_resume import download_adopted
 from services.remote_batch_staging import prune_staged
 from services.remote_handoff import hand_off_and_wait
@@ -103,5 +103,7 @@ def run_batch(proc, index: int, n_batches: int, batch_zips) -> int | Step:
         # names every batch that did this, and the run's own code carries the first of them.
         proc._log(f"[remote] batch {index} pipeline exited {rc}; continuing with the remaining batches\n")
         return rc
+    if unreported_after_success(proc, index, batch_zips):
+        return 1
     proc._log(f"[remote] batch {index}/{n_batches} complete\n")
     return 0

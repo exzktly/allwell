@@ -237,6 +237,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_batched_subset_run_finds_its_wells.py": "A remote run split into batches can be limited to named wells",
     "test_a_failed_remote_listing_keeps_the_data.py": "A remote command that failed is never read as nothing there: the fetch keeps the well, verify fails closed",
     "test_a_failing_heartbeat_is_reported.py": "A heartbeat that is not reaching the host says so, before the host acts on the silence",
+    "test_a_run_stream_has_its_own_connection.py": "A run's output stream rides a connection of its own, never the shared master",
     "test_a_forced_well_keeps_the_plate_s_reuse.py": "Forcing one well redoes it; the run's address and re-attach stay the plate's",
     "test_a_lost_batch_driver_is_not_a_stop.py": "A batch driver that went away is a failure with a reason, not the user's Stop",
     "test_a_lost_batch_handoff_is_noticed.py": "A batch handed to the batch driver either reaches it, or the run says it did not",

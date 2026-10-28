@@ -1422,8 +1422,8 @@ skip what is done".
   well the input does not hold, and when it starts it says on the run panel
   which wells it is limited to. Combine it with **Fill in what's missing** to finish
   partial wells and with **Force these wells** to regenerate named ones. It
-  also works for remote runs: only the named wells are uploaded (plus an
-  empty-well blank the correction needs), including runs the remote splits
+  also works for remote runs: only the named wells are prepared and uploaded
+  (plus an empty-well blank the correction needs), including runs the remote splits
   into batches, where each batch runs the named wells it was sent. It is never filled in from a previous
   run's settings — a subset is a decision for one run. The pipeline flag is
   `--only_wells`. When an earlier run of the plate did not finish, a run limited

@@ -2150,6 +2150,7 @@ class PipelineRunner:
         """
         grouped = [wz.stem for wz in zipped.well_zips]
         grouped += [w for w in zipped.up_to_date_wells if w not in grouped]
+        grouped += [w for w in getattr(zipped, "outside_subset_wells", ()) if w not in grouped]
         blanks = ()
         if "empty_well" in (opts.get("background"), opts.get("flatfield")):
             blanks = blank_wells_for_run(opts.get("background_well", ""),
@@ -2452,6 +2453,9 @@ class PipelineRunner:
                                         opts.get("flatfield"))
                     else ""),
                 skip_wells=finished,
+                # Only the named wells (and the blanks) are planned and rewritten; the scope below still decides
+                # what is uploaded.
+                only_wells=opts.get("only_wells"),
             )
             zipped = drop_finished(zipped, finished)
             scope = self._scope_remote_run(zipped, opts, args)

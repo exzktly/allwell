@@ -98,7 +98,7 @@ def choose_frame(onto: dict, methods: dict, order, kept=None) -> FrameDecision:
     frames: dict = {(0, 0): list(kept)} if kept is not None else {}
     for tp, step in onto.items():
         frames.setdefault(step, []).append(tp)
-    if len(frames) == 1:
+    if len(frames) <= 1:                 # one frame, or no timepoint to compare (none anchored): nothing to choose
         return FrameDecision(AGREE, onto=dict(onto))
 
     def rank(step):

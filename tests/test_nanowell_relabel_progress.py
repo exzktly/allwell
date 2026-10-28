@@ -57,3 +57,14 @@ def test_planning_says_what_it_found_for_each_well(tmp_path):
     said = []
     assert rl.plan_dataset(tmp_path, said.append) == {}
     assert said == ["  A01 (1/2): timepoints share one frame", "  A02 (2/2): timepoints share one frame"]
+
+
+def test_a_well_with_no_anchored_timepoint_has_nothing_to_relabel():
+    """``choose_frame`` indexed the second-best frame of an empty set and raised ``IndexError``, so Validate crashed
+    on any circular well none of whose timepoints was anchored (every one unaddressed, or a record with no origin)."""
+    from pipeline.nanowell_frames import AGREE, choose_frame
+
+    assert choose_frame({}, {}, []).verdict == AGREE
+    grid = {"array_radius": {"radius_um": 900.0, "roster": [[0, 0], [1, 0]]},
+            "timepoints": {"0h": {"status": "unaddressed"}, "24h": {"status": "ok"}}}
+    assert rl.plan_well("A01", grid, [{"timepoint": "24h", "nw_q": "0", "nw_r": "0", "detected": "True"}]) is None

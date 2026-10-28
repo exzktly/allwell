@@ -1,4 +1,5 @@
-"""Two single-timepoint raw datasets, concatenated, then analysed: every nanowell joined across both (tracker P12).
+"""Two single-timepoint datasets, concatenated, then analysed: every nanowell joined across both (tracker P12) —
+raw + raw, analysed + raw, and two analysed datasets joined by address.
 
 The plate is imaged on day 0 with a 2 x 2 tile plan and again after being taken out and put back, moved,
 with smaller, more heavily overlapped tiles. Concatenate relabels the second dataset's timepoint by the gap the user enters
@@ -118,14 +119,76 @@ def test_successive_imaging_analysed_then_raw_then_incremental_adds_the_new_time
     assert grid["timepoints"]["24h"]["template"]["earliest_timepoint"] == "0h"
 
 
-def test_two_analysed_nanowell_datasets_are_refused_with_the_route_that_works(tmp_path, monkeypatch):
-    for name, token in (("d1", "0h"), ("d2", "0h")):
-        rendered, record = build_well(rows=1, cols=1, tile=(900, 900), timepoint=token, radius_fraction=0.26)
-        _raw_dataset(tmp_path / name, rendered, record, token)
+def _analysed_pair(tmp_path, monkeypatch):
+    """The same plate imaged twice and analysed each time on its own: 0h with a few cells, then 0h again with
+    others (another seed), each dataset its own run, its own roster and its own template."""
+    from tests._nanowell_run_fixture import paint_cell
+
+    first, record1 = build_well(rows=1, cols=1, tile=(900, 900), timepoint="0h", radius_fraction=0.26)
+    second, record2 = build_well(rows=1, cols=1, tile=(900, 900), timepoint="0h", radius_fraction=0.26, seed=5)
+    for site in list(second.sites_um)[:5]:                   # dataset 2's rows differ from dataset 1's
+        paint_cell(second, site, dx_um=3.0)
+    for name, rendered, record in (("d1", first, record1), ("d2", second, record2)):
+        _raw_dataset(tmp_path / name, rendered, record, "0h")
         _run_main(monkeypatch, tmp_path / name, "--nanowell_format", "100um")
-    with pytest.raises(cc.ConcatError, match="cannot carry them when both datasets are analysed") as raised:
-        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest", gap_hours=24.0)
-    assert "Concatenate the analysed dataset with dataset 2's raw images instead" in str(raised.value)
+    return tmp_path / "d1", tmp_path / "d2"
+
+
+def _measured_by_analyze(monkeypatch, dest) -> list[str]:
+    """The timepoints an incremental Analyze of *dest* measures (not the ones it keeps)."""
+    from pipeline import nanowell_run as nr
+
+    measured = []
+    real = nr.measure_timepoint
+    monkeypatch.setattr(nr, "measure_timepoint",
+                        lambda located, *a, **k: (measured.append(located.timepoint), real(located, *a, **k))[1])
+    _run_main(monkeypatch, dest, "--nanowell_format", "100um", "--incremental")
+    return measured
+
+
+def _sites(root, tp=None):
+    rows = list(csv.DictReader((root / "out" / "nanowells" / f"{WELL}.csv").open()))
+    return rows if tp is None else [r for r in rows if r["timepoint"] == tp]
+
+
+def test_two_analysed_datasets_of_one_plate_join_by_address_and_leave_analyze_nothing_to_do(tmp_path, monkeypatch):
+    """Two analyses of the same nanowells agree on the roster: Concatenate joins dataset 2's rows, renamed, onto
+    dataset 1's nanowells, and an incremental Analyze of the result keeps every timepoint as it is."""
+    d1, d2 = _analysed_pair(tmp_path, monkeypatch)
+    plan = cc.build_merge_plan(d1, d2, tmp_path / "dest", gap_hours=24.0)
+    assert plan.nanowell_link.joined == (WELL,) and not plan.nanowell_link.set_aside
+    apply.execute_plan(plan)
+    dest = tmp_path / "dest"
+    second_rows = [dict(r, timepoint="24h") for r in _sites(d2, "0h")]
+    assert _sites(dest, "0h") == _sites(d1, "0h") and _sites(dest, "24h") == second_rows
+    assert second_rows != [dict(r, timepoint="24h") for r in _sites(d1, "0h")]     # the two halves differ
+    grid = json.loads((dest / "out" / "nanowells" / f"{WELL}_grid.json").read_text())
+    assert [grid["timepoints"][t]["status"] for t in ("0h", "24h")] == ["ok", "ok"]
+    assert _measured_by_analyze(monkeypatch, dest) == []                   # both timepoints kept, none measured
+    assert _sites(dest, "24h") == second_rows
+
+
+def test_a_dataset_2_whose_roster_differs_is_left_out_and_analyze_measures_it_onto_dataset_1s(tmp_path, monkeypatch):
+    """Dataset 2's analysis counted one nanowell fewer: its rows cannot be joined as they are. Its timepoint is
+    left out of the destination, and the incremental Analyze measures exactly it, onto dataset 1's roster."""
+    d1, d2 = _analysed_pair(tmp_path, monkeypatch)
+    grid_path = d2 / "out" / "nanowells" / f"{WELL}_grid.json"
+    grid = json.loads(grid_path.read_text())
+    dropped = grid["array_radius"]["roster"].pop()
+    grid_path.write_text(json.dumps(grid))
+    rows = [r for r in _sites(d2) if [int(r["nw_q"]), int(r["nw_r"])] != dropped]
+    with (d2 / "out" / "nanowells" / f"{WELL}.csv").open("w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    plan = cc.build_merge_plan(d1, d2, tmp_path / "dest", gap_hours=24.0)
+    assert set(plan.nanowell_link.set_aside[WELL]) == {"24h"}
+    apply.execute_plan(plan)
+    dest = tmp_path / "dest"
+    assert _sites(dest, "24h") == []
+    assert _measured_by_analyze(monkeypatch, dest) == ["24h"]                 # 0h kept, 24h measured
+    by_tp = {tp: {(r["nw_q"], r["nw_r"]) for r in _sites(dest, tp)} for tp in ("0h", "24h")}
+    assert by_tp["0h"] == by_tp["24h"] and (str(dropped[0]), str(dropped[1])) in by_tp["24h"]
 
 
 def test_raw_images_without_a_record_are_refused_onto_an_analysed_nanowell_dataset(tmp_path, monkeypatch):

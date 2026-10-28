@@ -71,7 +71,7 @@ def _well_zips_in(input_dir: Path):
 
 
 def fingerprint_archives(paths) -> str:
-    """Hash a set of archives by ``(basename, size, whole-second mtime)``.
+    """Hash a set of archives by name, size, whole-second mtime and members.
 
     One definition, two questions. :meth:`DatasetCache.cache_key` asks it of the
     archives being *uploaded*, to decide whether the remote already holds them.
@@ -80,6 +80,18 @@ def fingerprint_archives(paths) -> str:
     diverge exactly when staging rewrites — which is the whole reason the second
     one is needed — so they must not be two hashes that could drift apart in
     any other way.
+
+    **The member list is part of the key** — each member's name, uncompressed
+    size and CRC-32, read from the central directory (a small read at the end of
+    the file, no image data). A staged copy carries its source archive's mtime
+    (``services.remote_staging._write_kept_members``), so that an unchanged
+    plate keys the same on every attempt; without the members, two different
+    channel selections of the same plate could then key the same as well — an
+    uncompressed TIF of one channel is often exactly the size of another's — and
+    the run would reuse a remote dataset holding the channel it did not ask for.
+    The CRCs also catch an archive whose images were replaced by a tool that
+    kept its size and timestamp. An archive whose directory cannot be read is
+    keyed on its stat alone, marked as such; the upload reports the real error.
     """
     h = hashlib.blake2b(digest_size=16)
     for path in paths:
@@ -90,6 +102,15 @@ def fingerprint_archives(paths) -> str:
         h.update(b"\0")
         h.update(str(int(stat.st_mtime)).encode("ascii"))
         h.update(b"\0")
+        try:
+            with zipfile.ZipFile(path) as zf:
+                members = sorted((i.filename, i.file_size, i.CRC) for i in zf.infolist())
+        except (OSError, zipfile.BadZipFile):
+            h.update(b"\0unreadable\0")
+            continue
+        for name, size, crc in members:
+            h.update(f"{name}\0{size}\0{crc:08x}\0".encode("utf-8", "surrogateescape"))
+        h.update(b"\0\0")
     return h.hexdigest()
 
 

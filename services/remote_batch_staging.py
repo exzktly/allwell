@@ -11,8 +11,8 @@ uploaded and never touched.
 
 A retry used to delete every staged directory first and send those wells again.
 They are kept now, because the reuse is keyed completely: ``run_id`` — and so
-the run directory — is derived from the name, size and whole-second mtime of
-every staged archive (``services.remote_scratch.fingerprint_archives``) plus the
+the run directory — is derived from the name, size, whole-second mtime and
+member list of every staged archive (``services.remote_scratch.fingerprint_archives``) plus the
 pipeline arguments. A file of a given name in that directory is therefore a
 whole or partial copy of the archive this run would send under that name; a
 changed archive changes the fingerprint and lands the run in a different

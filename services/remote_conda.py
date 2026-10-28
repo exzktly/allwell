@@ -158,6 +158,35 @@ def cellpose_env_selector(base: EnvSelector, argv) -> EnvSelector:
     return ("prefer", f"{CELLPOSE_CONDA_ENV} {DEFAULT_CONDA_ENV}")
 
 
+#: What the pipeline imports at module scope, through every first-party module
+#: ``process_microscopy`` imports at module scope — so an env that cannot import
+#: one of these cannot start a run at all — plus ``imagecodecs``, which
+#: ``tifffile`` loads to decode a compressed TIFF and which is the module that
+#: broke in the field (an installed-but-unimportable build after numpy moved).
+#: ``tests/test_remote_env_readiness.py`` holds the roster against the source.
+PIPELINE_IMPORTS: tuple[str, ...] = (
+    "numpy", "scipy", "skimage", "tifffile", "imageio", "imagecodecs",
+)
+#: What a Cellpose run additionally imports in the ``allwell-cellpose`` env.
+CELLPOSE_IMPORTS: tuple[str, ...] = ("cellpose", "torch", "pandas")
+
+#: Imports each module named on its command line, in order, and on the first
+#: that fails prints ``module: ExceptionType: message`` and exits 1. Importing,
+#: not ``importlib.util.find_spec``: a module that is present but cannot be
+#: imported — a compiled extension built against another numpy — is found by
+#: ``find_spec`` and then kills the run on its first ``import``. No quotes,
+#: dollar signs or backslashes: it is embedded in a double-quoted shell string,
+#: inside a single-quoted one.
+_IMPORT_PROBE_PY = (
+    "import importlib, sys\n"
+    "for m in sys.argv[1:]:\n"
+    "    try:\n"
+    "        importlib.import_module(m)\n"
+    "    except BaseException as e:\n"
+    "        print(m + chr(58), type(e).__name__ + chr(58), str(e).strip()[:300])\n"
+    "        sys.exit(1)\n"
+)
+
 # Shell helpers for locating and validating a conda env on the remote. Shared
 # with ``services/remote_bootstrap.py`` so the runner's pre-launch check and the
 # bootstrap's create-or-skip decision cannot disagree about whether an
@@ -168,6 +197,16 @@ def cellpose_env_selector(base: EnvSelector, argv) -> EnvSelector:
 # environment iff it holds ``conda-meta/history``. A directory without that file
 # is not an environment no matter what it contains, and conda refuses both to
 # run in it and to create over it.
+#
+# Readiness is more than validity: the bootstrap creates an env, then
+# pip-installs into it detached, and that install can fail, still be running,
+# or have left a module that will not import. ``aw_env_ready`` asks all three,
+# reading the install's own markers (``.<tag>_failed`` / ``.<tag>_running`` in
+# ``~/.allwell-staging``, ``services/remote_bootstrap.pip_install_script``) and
+# then importing what the pipeline needs; it leaves the reason in
+# ``AW_NOT_READY``. A ``.<tag>_running`` pid is only checked with ``kill -0``,
+# which on a compute node cannot see a login node's process — the import probe
+# is what catches a half-finished install there.
 CONDA_ENV_SHELL_HELPERS = r"""
 aw_env_prefix() {
     conda env list 2>/dev/null | awk -v n="$1" '$1 == n { print $NF }' | head -1
@@ -175,18 +214,33 @@ aw_env_prefix() {
 aw_env_is_valid() {
     [ -n "$1" ] && [ -f "$1/conda-meta/history" ]
 }
-aw_cellpose_env_ready() {
-    # An env conda created is not yet one Cellpose can run in: the bootstrap creates it, then pip-installs into it
-    # detached, and that install can fail, still be running, or be cut off. Ready means valid, no live or failed
-    # install of it (the pip_cellpose markers, services/remote_bootstrap.pip_install_script), and its python finding
-    # what the pipeline imports there. No single quotes: this is embedded in one.
-    aw_env_is_valid "$1" || return 1
-    _st="$HOME/.allwell-staging"
-    [ -f "$_st/.pip_cellpose_failed" ] && return 1
-    if [ -f "$_st/.pip_cellpose_running" ] && kill -0 "$(cat "$_st/.pip_cellpose_running")" 2>/dev/null; then
+aw_env_ready() {
+    AW_NOT_READY=""
+    _aw_p="$1"; _aw_tag="$2"; shift 2
+    if ! aw_env_is_valid "$_aw_p"; then
+        AW_NOT_READY="it is not a conda environment"; return 1
+    fi
+    _aw_st="$HOME/.allwell-staging"
+    if [ -n "$_aw_tag" ] && [ -f "$_aw_st/.${_aw_tag}_failed" ]; then
+        AW_NOT_READY="the last pip install into it failed (its log is ~/.allwell-staging/.${_aw_tag}_install.log)"
         return 1
     fi
-    "$1/bin/python" -c "import importlib.util as u, sys; sys.exit(0 if all(u.find_spec(m) for m in sys.argv[1:]) else 1)" cellpose torch pandas tifffile imagecodecs 2>/dev/null
+    if [ -n "$_aw_tag" ] && [ -f "$_aw_st/.${_aw_tag}_running" ] && kill -0 "$(cat "$_aw_st/.${_aw_tag}_running" 2>/dev/null)" 2>/dev/null; then
+        AW_NOT_READY="a pip install into it is still running"
+        return 1
+    fi
+    _aw_why="$("$_aw_p/bin/python" -c "__IMPORT_PROBE_PY__" "$@" 2>/dev/null)"
+    _aw_rc=$?
+    if [ "$_aw_rc" -ne 0 ]; then
+        AW_NOT_READY="its python cannot import what the pipeline needs (${_aw_why:-python exited $_aw_rc})"
+        return 1
+    fi
+    return 0
+}
+aw_cellpose_env_ready() {
+    # Ready for a Cellpose run: everything the pipeline imports, plus Cellpose and Torch, and no live or failed
+    # install of the env (the pip_cellpose markers).
+    aw_env_ready "$1" pip_cellpose __PIPELINE_IMPORTS__ __CELLPOSE_IMPORTS__
 }
 aw_env_stale_dir() {
     for _c in "$HOME/.conda/envs/$1" "$(conda info --base 2>/dev/null)/envs/$1"; do
@@ -197,7 +251,9 @@ aw_env_stale_dir() {
     done
     return 1
 }
-"""
+""".replace("__IMPORT_PROBE_PY__", _IMPORT_PROBE_PY) \
+    .replace("__PIPELINE_IMPORTS__", " ".join(PIPELINE_IMPORTS)) \
+    .replace("__CELLPOSE_IMPORTS__", " ".join(CELLPOSE_IMPORTS))
 
 
 def _conda_env_guard(selector: EnvSelector) -> str:
@@ -235,23 +291,24 @@ def _conda_env_guard(selector: EnvSelector) -> str:
         first, second = value.split()
         first_q, second_q = _remote_quote(first), _remote_quote(second)
         resolve = (
-            f'AW_PREFIX="$(aw_env_prefix {first_q})"; '
-            f'if aw_cellpose_env_ready "$AW_PREFIX"; then '
+            f'AW_PREFIX="$(aw_env_prefix {first_q})"; AW_TAG=pip; AW_CHECKED=""; '
+            f'if aw_cellpose_env_ready "$AW_PREFIX"; then AW_CHECKED=1; '
             f'echo "[remote] conda env: {first} (Cellpose, Torch with bfloat16)"; '
-            f'else AW_PREFIX="$(aw_env_prefix {second_q})"; '
-            f'echo "[remote] note: env {first} is not installed, or not ready, on $(hostname), so Cellpose runs in {second} '
-            f'(float32). Run Analyze -> Remotes -> Bootstrap to install it."; fi; '
+            f'else AW_WHY="$AW_NOT_READY"; AW_PREFIX="$(aw_env_prefix {second_q})"; '
+            f'echo "[remote] note: env {first} is not installed, or not ready, on $(hostname) ($AW_WHY), so Cellpose '
+            f'runs in {second} (float32). Run Analyze -> Remotes -> Bootstrap to install it."; fi; '
             f'AW_STALE="$(aw_env_stale_dir {second_q} || true)"'
         )
         what = f"conda env {second}"
         missing_fix = ('Run Analyze -> Remotes -> Bootstrap for this host to '
                        'create it, or set Remote python to an existing env '
                        'python.')
+        ready_fix = _bootstrap_ready_fix(second)
     elif kind == "prefix":
         # The prefix is given, so there is nothing to look up: it either is an
         # environment, is a directory that is not one, or is absent.
         resolve = (
-            f'AW_PREFIX={value_q}; '
+            f'AW_PREFIX={value_q}; AW_TAG=""; AW_CHECKED=""; '
             f'AW_STALE=""; '
             f'if [ -d "$AW_PREFIX" ] && ! aw_env_is_valid "$AW_PREFIX"; then '
             f'AW_STALE="$AW_PREFIX"; fi'
@@ -262,15 +319,25 @@ def _conda_env_guard(selector: EnvSelector) -> str:
         # and the message arrives mangled (or the shell fails to parse it).
         missing_fix = ('Set this hosts Remote python to the env python, or run '
                        'Analyze -> Remotes -> Bootstrap to create the env.')
+        ready_fix = ('Install what it cannot import into the env this hosts '
+                     'Remote python points at, or point Remote python at a '
+                     'working env.')
     else:
+        # The bootstrap's install markers describe the env it manages, so they
+        # are read only for that one; any other named env is judged on whether
+        # it imports what the pipeline needs.
+        tag = "pip" if value == DEFAULT_CONDA_ENV else ""
         resolve = (
-            f'AW_PREFIX="$(aw_env_prefix {value_q})"; '
+            f'AW_PREFIX="$(aw_env_prefix {value_q})"; AW_TAG={tag}; AW_CHECKED=""; '
             f'AW_STALE="$(aw_env_stale_dir {value_q} || true)"'
         )
         what = f"conda env {value}"
         missing_fix = ('Run Analyze -> Remotes -> Bootstrap for this host to '
                        'create it, or set Remote python to an existing env '
                        'python.')
+        ready_fix = (_bootstrap_ready_fix(value) if tag else
+                     'Install what it cannot import into that env, or set '
+                     'Remote python to a working env python.')
     # The guard never deletes: a run is not the time to modify the host, and
     # what is inside that directory is unreadable to us. Print the one command
     # that unblocks it and let the user decide.
@@ -304,5 +371,28 @@ def _conda_env_guard(selector: EnvSelector) -> str:
         # confusion the whole guard exists to remove.
         f"conda env list 2>/dev/null | sed 's/^/[remote]   /' >&2 || true; "
         f'exit 127; '
+        f'fi; '
+        # Valid is not ready: a bootstrap whose pip install failed, is still
+        # running, or left a module that will not import passed the check
+        # above, and the run then died on ModuleNotFoundError after its queue
+        # wait and its upload.
+        f'if [ -z "$AW_CHECKED" ] && ! aw_env_ready "$AW_PREFIX" "$AW_TAG" {" ".join(PIPELINE_IMPORTS)}; then '
+        f'echo "[remote] ERROR: {what} on $(hostname) is not ready to run the pipeline: $AW_NOT_READY." >&2; '
+        f'echo "[remote] {ready_fix}" >&2; '
+        f'exit 127; '
         f'fi'
     )
+
+
+def _bootstrap_ready_fix(env: str) -> str:
+    """What to do about a bootstrap-managed env that exists but is not ready.
+
+    Bootstrap first, since it re-runs a failed or interrupted install. A module
+    that is installed at its pinned version but will not import is left alone
+    by pip, so the second step is the one that rebuilds it. No quotes: this is
+    interpolated into a double-quoted ``echo``.
+    """
+    return (f'Run Analyze -> Remotes -> Bootstrap for this host to finish '
+            f'installing it. If Bootstrap then reports the env complete and this '
+            f'error comes back, remove the env on the host (conda env remove -n '
+            f'{env}) and Bootstrap again.')

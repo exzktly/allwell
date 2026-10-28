@@ -12242,7 +12242,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_upload.py` | Getting a run's input onto the remote host, once. `DatasetCache` keys each upload by a stat-based fingerprint of the staged archives, so re-running the same input is a metadata round trip rather than a re-upload; streams rsync's output well by well (`_run_rsync_streaming`, `_UploadWellProgress`) so the Upload rail and each well's dial fill as its archive lands; and keeps the remote cache inside the host's budget. Its short ssh control commands are bounded by `SSH_CONTROL_TIMEOUT_S`. Line-budgeted (`REMOTE_UPLOAD_BUDGET`). |
 | `remote_jobs.py` | The scheduler jobs a remote run holds, and making sure none outlives it. `close_remote_job` is the teardown backstop every exit the app survives goes through (it reads the job id from `<pidfile>.slurm` and `scancel`s it); `sweep_orphaned_allocation` is what the next run of the same plate does about an exit the app did not survive, and returns its verdict (`swept`, `owned`, `notmine`, `unknown`, `none`) because the batched path acts on it. Both refuse to cancel a job that is not the caller's (`_only_my_job`), and both are no-ops on a host with no `compute_launcher`. `RemoteRunner.close_remote_job` and `_sweep_orphaned_allocation` delegate here. Line-budgeted (`REMOTE_JOBS_BUDGET`). |
 | `remote_process.py` | The run as the GUI sees it: `_RemoteProcess` wraps the single ssh that runs the pipeline and `_BatchedRemoteProcess` the driver that holds one allocation and runs the plate batch by batch. Both present the `subprocess.Popen` surface `PipelineRunner` reads and tee every line to the `Fetcher`, so per-well downloads start the moment a well is announced done; `wait` flushes the `Fetcher` and `terminate`/`kill` cancel it, and every exit path ends the run heartbeat (`_UploadHeartbeat`) exactly once. A batch whose driver vanished marks the run failed (1); a stopped one reports 130. `tests/test_remote_process.py` drives the single-launch wrapper against a real child process. Line-budgeted (`REMOTE_PROCESS_BUDGET`). |
-| `remote_staging.py` | Turning the user's input into the per-well archives a remote run uploads: `stage_local_zips` detects the layout (one zip per well, well folders, loose TIFs, or a mix left by an interrupted zip-up), zips folders and loose TIFs **into the input directory itself** so the next run finds zips and skips the zip-up (a folder's archived TIFs are removed the moment its own zip is published), and returns a `ZippedInput`. The channel filter and an incremental run's split are both planned from each archive's member list before any image data is read, and only archives that change are written — to a staging directory beside the input, never over the user's archives. `ZippedInput.cleanup` removes every staging directory a run made (the filter's and the split's, joined), a failure part way through removes its own before the error propagates, and a filter that matches no image in any well is refused before anything moves, on both the ZIP and the MIXED path. Line-budgeted (`REMOTE_STAGING_BUDGET`); `tests/test_remote_staging.py` pins the cleanup contract. |
+| `remote_staging.py` | Turning the user's input into the per-well archives a remote run uploads: `stage_local_zips` detects the layout (one zip per well, well folders, loose TIFs, or a mix left by an interrupted zip-up), zips folders and loose images **into the input directory itself** so the next run finds zips and skips the zip-up (a folder's archived images are removed the moment its own zip is published, so that archive — which holds every image the folder had — is the user's copy of the well from then on), and returns a `ZippedInput`. The channel filter and an incremental run's split are both planned from each archive's member list before any image data is read, in every layout, and only archives that change are written — to a staging directory beside the input, never over the user's archives, including the ones the zip-up has just written. The success hook deletes a loose top-level image only once its name, size and CRC-32 match a member of a well archive, and never touches a well folder; a folder with no images, and a loose image in no well, are left where they are and named in the log as not uploaded. `ZippedInput.cleanup` removes every staging directory a run made (the filter's and the split's, joined), a failure part way through removes its own before the error propagates, and a filter that matches no image in any well is refused before anything moves, on both the ZIP and the MIXED path. Line-budgeted (`REMOTE_STAGING_BUDGET`); `tests/test_remote_staging.py` pins the cleanup contract. |
 | `remote_finished_wells.py` | Which wells a remote run need not send: `finished_here` answers, before staging, with the pipeline's own rule — the per-well CSV present, recorded under the key `pipeline.cli_args.settings_key_from_argv` gives this run's argv plus the host's flags, not forced, its completeness record whole, never an empty-well blank, and for a nanowell well every timepoint of its archive reached, with a verdict in its grid record, and its anchors those its last run used (`util.nanowell_anchors.wells_with_unused_anchors`) — and `drop_finished` removes them from a staged `ZippedInput` into its `up_to_date_wells`; `nanowell_forced` and `argv_forcing` force a nanowell well sent again over partial output here, and `pull_settings_marker` writes `UNKNOWN_SETTINGS` when a well's marker cannot be fetched. Called by `PipelineRunner._finished_here` and by batched mode's local-completion filter (see *What is finished here is not sent again*). |
 | `remote_plate_grids.py` | `seed_plate_grids`: before a remote nanowell run's pipeline starts, copies the local output's grid records of every well not in the run into the remote `nanowells/`, so the end-of-run re-anchoring can fit the plate's motion as a local run does. Called by `RemoteRunner._prepare_run` and `_BatchedRemoteProcess.__init__` (see *The host is given the rest of the plate*). |
 | `remote_fetch.py` | Bringing a remote run's output home, and proving it arrived. `Fetcher` pulls each well's output the moment the pipeline announces it done (overlapping download with later wells' compute), merges an incremental run's partial zip and CSV into the local ones rather than overwriting them, keeps the mid-run `pipeline_info.json` current, and removes a well's remote files only once its local artefact is in place. `FetchedOutputVerifier` runs after the pipeline exits: it pulls the top-level artefacts, merges the fetched sidecar's run-report, field-quality and user blocks with the local ones, writes the client-side completeness record, checks every expected well's CSV and non-empty `<well>_out.zip` are present (and replaced, for a forced well), re-pulls what is missing, and returns a `FetchVerification`. It never deletes the run's remote directory — `RemoteRunner.verify_and_cleanup` does that, on a passing verdict only. Its collaborators (host, run record, the dataset cache whose ssh it borrows, the stop flag) are passed in, never read off the runner. Line-budgeted (`REMOTE_FETCH_BUDGET`). |
@@ -12318,28 +12318,47 @@ This is not an edge case: the Analyze tab always requests selective channels, so
 a run whose channel list happens to cover every image in the plate takes the
 filtered path with a filter that drops nothing — and used to copy the whole plate
 into the OS temp dir to get there. It also makes the upload cache work as
-designed, since `RemoteRunner.cache_key` hashes each archive's `(name, size,
-mtime)`: a freshly-written staging copy has a new mtime every run, so an
-unchanged plate keyed differently every time and re-uploaded; passing the source
-through keeps the key stable and the second run skips the transfer.
+designed, since `RemoteRunner.cache_key` hashes each archive's name, size,
+whole-second mtime and member list (`remote_scratch.fingerprint_archives`), and
+passing the source through keeps all four as they are.
 **MIXED mode** — some wells zipped, others still folders, the signature of a
 run that died mid-compression — stages through the same two passes; it is the
 mode most likely to arise on a slow share, so a full copy there was the worst
 place to keep one. Its leftover folders are still zipped into the *input* dir
 (persisted deliberately, so the next run sees plain ZIP mode and re-zips
 nothing), and with no channel filter it uploads from the input dir with no
-staging at all. `_filter_channels_in_staging` survives for the FOLDER / FLAT
-path, which filters zips it has just written itself.
+staging at all. **FOLDER and FLAT** take the same two passes over the archives
+their zip-up has just written into the input dir. Those archives are not
+scratch: each folder's images are deleted the moment its archive is published,
+so the archive is the only copy of the well on disk, and the filter writes its
+trimmed copy into the transit directory like any other. (Rewriting them in place
+— which an earlier shape did, on the theory that the loose sources were still
+intact — deleted every unselected channel from the user's only copy before a
+byte was uploaded; `tests/test_staging_keeps_every_image.py` holds every layout,
+copy and move mode, to "every image still exists under the input, byte for
+byte, after staging, after a failed run and after a successful one".)
 
-**An archive that *is* rewritten keys differently every run, and the run journal
-is what stops that losing work.** The pass-through above keeps the key stable
-only for archives nothing was dropped from; a channel filter that clears
-`REWRITE_MIN_SAVING`, and every incremental split, write a fresh copy into
-scratch, so the file being hashed was created moments ago and the plate resolves
-to a different `runs/<run_id>/out` on each run. Whatever the previous one
-computed but had not yet fetched then sits somewhere nothing will look again.
-So `spawn` records the address it used into the output directory's journal
-(§6.5) and `_reattach_output_dir` consults it on the next run:
+**An archive that *is* rewritten keys the same on every attempt.** A channel
+filter that clears `REWRITE_MIN_SAVING`, and every incremental split, write a
+copy into the transit directory, and that copy is deterministic:
+`_write_kept_members` streams each kept member under its source `ZipInfo` (so
+the same members of the same source compress to the same bytes) and then stamps
+the copy with its source archive's mtime. A copy carrying the time it was
+written gave every retry of an unchanged plate a new key, a new
+`datasets/<key>/` that started empty, a full re-upload and a different
+`runs/<run_id>/out`, and left each failed attempt's full copy on the remote.
+Because the copy's name, size and mtime are now the same across channel
+selections whose frames happen to be the same size, `fingerprint_archives` also
+hashes each archive's member names, sizes and CRC-32s from its central
+directory — so a different selection, or an image replaced at the same size and
+timestamp, keys anew (`tests/test_staged_archives_key_the_same.py`).
+
+**The run journal is what stops an address change losing work.** A plate whose
+images, settings or channel selection did change resolves to a different
+`runs/<run_id>/out`, and whatever the previous run computed but had not yet
+fetched then sits somewhere nothing will look again. So `spawn` records the
+address it used into the output directory's journal (§6.5) and
+`_reattach_output_dir` consults it on the next run:
 `_choose_remote_output_dir` is a module-level function, given the freshly
 derived address, the recorded one, whether the run is forced, and whether
 `_list_completed_wells_in` found anything still in the recorded directory. The
@@ -13054,9 +13073,11 @@ full copies of the plate on the user's own volume at peak, on exactly the runs
 where the input is largest.
 
 **The folder is not the unit of deletion; the archived files are.** Every one of
-these paths packs an *extension-filtered* subset — the folder zippers take
-`.tif`/`.tiff` only, and `compress_images_to_zip` adds `.png` — so removing the
-folder destroyed everything the filter skipped: OME companion XML, acquisition
+these paths packs a *filtered* subset — remote staging's `_zip_well_folder`
+takes the run-input images (`util.image_exts.is_run_input_member`: PNG and JPEG
+included, AppleDouble `._*` sidecars and other dotfiles not), other folder
+zippers `.tif`/`.tiff` only, and `compress_images_to_zip` adds `.png` — so
+removing the folder destroyed everything the filter skipped: OME companion XML, acquisition
 logs, mask subdirectories, and on macOS the `.DS_Store` in every folder a user
 has opened in Finder, with no copy anywhere.
 `util.zip_write.replace_folder_with_archive` is the one answer: it deletes
@@ -13064,8 +13085,10 @@ exactly the files that went into the archive and removes the directory only when
 nothing is left in it. A folder still holding something survives carrying just
 that remainder, and the caller's log line names what it kept rather than
 reporting the folder gone. Four paths route through it —
-`remote_staging._zip_well_folder`'s two callers (plus the post-success hook, which
-skips any folder the pass preserved),
+`remote_staging._zip_well_folder`'s two callers (the post-success hook touches
+no folder at all: whatever is left in one is by definition in no archive, and a
+folder with no images is never packed, never removed, and named in the log as a
+well not uploaded),
 `pipeline.mixed_input.consolidate_mixed_to_zips`, the Datasets pane's
 `_zip_well_folders`, and
 `process_microscopy.compress_folder_images_to_zip_and_remove`. The extension
@@ -13379,8 +13402,31 @@ host has it, `allwell-cellpose` (below). Two pieces of code care whether one is
 there — `remote_runner`'s pre-launch guard, and `services/remote_bootstrap.py`,
 which creates it — and they answer with the same shell,
 `remote_conda.CONDA_ENV_SHELL_HELPERS` (`aw_env_prefix` / `aw_env_is_valid` /
-`aw_env_stale_dir`). That sharing is the point of the module-level constant:
-when the two disagreed, the disagreement had no way out.
+`aw_env_ready` / `aw_env_stale_dir`). That sharing is the point of the
+module-level constant: when the two disagreed, the disagreement had no way out.
+
+**Valid is not ready.** The bootstrap creates an env and then pip-installs into
+it, detached; that install can fail, still be running, or leave a module that
+is installed and will not import. Each of those is a valid environment, so a
+guard that checked only `conda-meta/history` passed it and the run died on
+`ModuleNotFoundError` after its queue wait and its upload. After the validity
+check the guard therefore runs `aw_env_ready` on the env it resolved: no
+`.pip_failed` and no live `.pip_running` marker (the bootstrap's own, read only
+for the env it manages — `allwell`, or `allwell-cellpose` with the
+`pip_cellpose` tag; an env the user's Remote python names is judged on its
+imports alone), and then its python actually **importing** `remote_conda.
+PIPELINE_IMPORTS` — what the pipeline imports at module scope, plus
+`imagecodecs`. Importing, not `importlib.util.find_spec`: `find_spec` finds an
+installed-but-broken module (a compiled extension built against another numpy,
+the `imagecodecs` case that has happened), which then kills the run on its
+first `import`. A refusal exits 127 with the reason — `module: ExceptionType:
+message` for an import — and the remedy: Bootstrap, and when Bootstrap reports
+the env complete and the error comes back, remove the env and Bootstrap again,
+since pip leaves a package already at its pin alone however broken it is.
+`tests/test_remote_env_readiness.py` drives the guard under bash against envs
+whose python imports real stand-in modules, and holds `PIPELINE_IMPORTS`
+against the module-scope imports of `process_microscopy` and every first-party
+module it pulls in.
 
 **Validity is conda's own test.** A prefix is an environment iff it holds
 `conda-meta/history`. The bootstrap used to ask a different question — "is the
@@ -13428,14 +13474,16 @@ tests of this behaviour pass against the broken script too.
 
 **"The env is complete" means every pipeline package, not TensorFlow.** The
 probe reports which of `remote_bootstrap.REQUIRED_IMPORTS` — one import name per
-distribution `requirements-remote.txt` installs on Linux — the env cannot find,
-via `importlib.util.find_spec`, which locates a module without importing it, so
-the probe neither pays for loading Torch and TensorFlow nor risks the two
-refusing to share a process. A dotted name (`google.protobuf`) is looked up only
-once its top level is found, because `find_spec` imports the parent and raises
-when it is absent. `install_pip_deps` skips the `pip install -r` only when
-TensorFlow is present and nothing is missing; an env whose python cannot answer
-reports `?` and is installed into. The skip used to be TensorFlow alone, so an
+distribution `requirements-remote.txt` installs on Linux — the env cannot
+**import**, each in a python process of its own so that Torch and TensorFlow
+never have to share one. It used `importlib.util.find_spec`, which finds a
+module that is installed and will not import, so such an env read as complete
+and the install was skipped. `install_pip_deps` skips the `pip install -r` only
+when TensorFlow is present, nothing is missing and the last install did not fail
+(`HostProbe.pip_failed`, the `.pip_failed` marker; `install_cellpose_deps` reads
+`.pip_cellpose_failed` the same way) — the run's env guard refuses an env whose
+last install failed, and a skipped install would never clear the marker. An env
+whose python cannot answer reports `?` and is installed into. The skip used to be TensorFlow alone, so an
 env built before Cellpose joined the requirements, or one whose Torch half
 failed, reported ready on every re-bootstrap and the run died on the compute node
 at `from cellpose import models`. A package whose behaviour depends on its version is probed for the version too:
@@ -13469,11 +13517,14 @@ Which env a run uses is decided per run: `remote_conda.cellpose_env_selector` gi
 a run that segments with Cellpose (`runs_cellpose`: a nanowell run, or a Cellpose
 method) on a host left at the default env the `prefer` selector, and leaves a host
 whose Remote python names an env alone. `prefer` is resolved **on the remote**, by
-the env guard: the Cellpose env when it is ready (`aw_cellpose_env_ready`: a valid
-environment, no failed or still-running `pip_cellpose` install, and its python
-finds Cellpose, Torch, pandas, tifffile and imagecodecs — the bootstrap creates the
-env before it installs into it, non-fatally, so an env that merely exists is not
-one a run can import in), `allwell` otherwise with a line saying so, and the guard's usual failure when neither is. `conda run -p`
+the env guard: the Cellpose env when it is ready (`aw_cellpose_env_ready`, i.e.
+`aw_env_ready` with the `pip_cellpose` markers: a valid environment, no failed or
+still-running install, and its python importing `PIPELINE_IMPORTS` plus Cellpose,
+Torch and pandas — the bootstrap creates the env before it installs into it,
+non-fatally, so an env that merely exists is not one a run can import in),
+`allwell` otherwise with a line saying so and why, and the guard's usual failure
+when neither is — `allwell` is then held to the same readiness check, which the
+Cellpose env's, having already passed, makes unnecessary when it is chosen. `conda run -p`
 then reads the prefix the guard resolved (`remote_transport.AW_PREFIX_ARG`,
 `"$AW_PREFIX"`, the one argument `_remote_quote` passes through unquoted), so a host
 not yet bootstrapped for the Cellpose env still runs, in float32. The precision a
@@ -13943,7 +13994,7 @@ appended and verified, one line per well (a folder well lists each file), and
 dataset 2's acquisition record, so the user can delete them by hand. An
 analysed dataset 1 gets a `derived_from` provenance line with
 `mode: "in_place"`. The saving is local: the remote dataset cache is keyed on
-each archive's size and modification time (`services/remote_scratch.fingerprint_archives`),
+each archive's size, modification time and members (`services/remote_scratch.fingerprint_archives`),
 so after an append a remote Analyze run uploads to a new cache directory
 (tracker M24).
 
@@ -19752,6 +19803,16 @@ conda can see. Three causes, and the guard says which:
 - *The host's `remote_python` points at an env that isn't there.* The field is
   only consulted when the user has changed it from the placeholder; either fix
   the path or clear it to fall back to the env named `allwell`.
+
+**A remote run stops with `[remote] ERROR: conda env allwell on <host> is not
+ready to run the pipeline: …`.** — The env exists but cannot run the pipeline,
+and the line says which of three: the bootstrap's last pip install into it
+failed (its log is `~/.allwell-staging/.pip_install.log`), an install is still
+running, or its python cannot import a module the pipeline needs — named with
+the import's own error. Run Bootstrap; it re-runs a failed install. If it
+reports the env complete and the import error comes back, the package is
+installed at its pinned version and broken, which pip will not touch: remove
+the env on the host (`conda env remove -n allwell`) and Bootstrap again.
 
 A value that isn't shaped like `<env>/bin/python` cannot name an environment;
 the runner keeps the name selector and says so on a `[remote] warn:` line

@@ -295,6 +295,11 @@ class HostProbe:
     the env."""
     cellpose_pip_in_progress: bool = False
     """A detached install into that env, from an earlier bootstrap, still running."""
+    pip_failed: bool = False
+    """The last pip install into ``allwell`` failed (its ``.pip_failed`` marker
+    is present): the install runs again whatever the module probe says."""
+    cellpose_pip_failed: bool = False
+    """The same for the ``allwell-cellpose`` env (``.pip_cellpose_failed``)."""
 
 
 # ── argv ───────────────────────────────────────────────────────────────────
@@ -609,16 +614,18 @@ _OFF_PIN_PY = (
 )
 
 #: Prints the comma-joined modules among its arguments that the interpreter
-#: cannot find. ``find_spec`` locates a module without importing it, so the
-#: probe neither pays for importing Torch and TensorFlow nor risks the two
-#: refusing to share a process. A dotted name (``google.protobuf``) is looked
-#: up only once its top level is found, because ``find_spec`` imports the
-#: parent and raises when the parent is absent. No single quotes: it is
-#: embedded in one.
+#: cannot **import**. Found is not importable: ``find_spec`` locates an
+#: installed-but-broken module — a compiled extension built against another
+#: numpy, the imagecodecs case that has happened — so a probe built on it
+#: reported the env complete, the bootstrap skipped the install, and the run
+#: died on its first import. Each module is imported in a process of its own,
+#: so Torch and TensorFlow never have to share one and one failure cannot hide
+#: the rest. No single quotes: it is embedded in one.
 _MISSING_MODULES_PY = (
-    "import importlib.util as u, sys; "
+    "import subprocess, sys; "
     'print(",".join(m for m in sys.argv[1:] '
-    'if u.find_spec(m.split(".")[0]) is None or u.find_spec(m) is None))'
+    'if subprocess.run([sys.executable, "-c", "import " + m], '
+    'capture_output=True, timeout=600).returncode))'
 )
 
 _PROBE_SCRIPT = r"""
@@ -718,6 +725,11 @@ if [ -f "$PIP_RUNNING_MARKER" ]; then
     fi
 fi
 echo "pip_in_progress=$PIP_IN_PROGRESS"
+# A failed install leaves its marker until the next install starts, so a
+# bootstrap that skipped pip would leave it for ever — and the run's env guard
+# (services/remote_conda.aw_env_ready) refuses an env whose last install failed.
+echo "pip_failed=$([ -f "$HOME/.allwell-staging/.pip_failed" ] && echo true || echo false)"
+echo "cellpose_pip_failed=$([ -f "$HOME/.allwell-staging/.pip_cellpose_failed" ] && echo true || echo false)"
 CP_PIP_MARKER="$HOME/.allwell-staging/.pip_cellpose_running"
 CP_PIP_IN_PROGRESS=false
 if [ -f "$CP_PIP_MARKER" ]; then
@@ -772,6 +784,8 @@ def probe_host(alias: str, *, ssh_key_path: str = "") -> HostProbe:
         cellpose_off_pin=tuple(m for m in fields.get("cellpose_off_pin", "").split(",") if m),
         cellpose_cuda=fields.get("cellpose_cuda", ""),
         cellpose_pip_in_progress=_bool("cellpose_pip_in_progress"),
+        pip_failed=_bool("pip_failed"),
+        cellpose_pip_failed=_bool("cellpose_pip_failed"),
     )
 
 
@@ -1054,13 +1068,15 @@ def install_pip_deps(
     to exit so the synchronous code path stays as it was on a stable
     connection.
     """
-    if probe.tensorflow_version and not probe.missing_modules and not probe.off_pin:
+    if probe.tensorflow_version and not probe.missing_modules and not probe.off_pin and not probe.pip_failed:
         say(
             f"Remote already has tensorflow {probe.tensorflow_version} and "
             "every other pipeline package at its pin — skipping pip install."
         )
         return
-    if probe.tensorflow_version:
+    if probe.pip_failed:
+        say("The last pip install on the remote failed (~/.allwell-staging/.pip_failed) — running it again.")
+    elif probe.tensorflow_version:
         wrong = ([f"is missing {', '.join(probe.missing_modules)}"] if probe.missing_modules else []) + (
             [f"is not at {', '.join(probe.off_pin)}"] if probe.off_pin else [])
         say(
@@ -1103,7 +1119,8 @@ def install_cellpose_deps(
     does ``allwell``'s: skipped when the probe found the env with every module and pin, detached and re-attachable
     otherwise. A failure here is not the bootstrap's: Cellpose and nanowell runs fall back to ``allwell`` (float32) on
     a host without a usable Cellpose env, so it is said and the bootstrap goes on."""
-    if probe.cellpose_env and not probe.cellpose_missing_modules and not probe.cellpose_off_pin:
+    if probe.cellpose_env and not probe.cellpose_missing_modules and not probe.cellpose_off_pin \
+            and not probe.cellpose_pip_failed:
         say(f"Remote {CELLPOSE_ENV_NAME} env already has every package at its pin — skipping its pip install.")
         return
     if probe.cellpose_pip_in_progress:

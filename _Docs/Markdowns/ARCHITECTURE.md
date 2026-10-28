@@ -10783,7 +10783,8 @@ resume, or a plate with an unfinished run behind it — goes well by well instea
 (`analyze.run_spec._nanowell_remote_resume_by_well` drops the incremental and logs why): the finished-wells step
 skips every well whose tables here cover all its archive's timepoints (each with a verdict in its grid record —
 reached is enough: an `unaddressed` timepoint is the run's verdict on those images, which sending the well again
-cannot change unless its anchors did — and its completeness record, when the sidecar has one, whole), and every other well is sent whole, analysed in
+cannot change unless its anchors did — and its completeness record, when the sidecar has one, whole, which for a
+nanowell record asks the same question: every timepoint reached, `run_report.well_is_whole`), and every other well is sent whole, analysed in
 full, and forced (`remote_finished_wells.nanowell_forced`, merged into the argv by `argv_forcing`) when it has
 output here, so an earlier attempt's partial tables on the host cannot be kept in its place. In
 `datasets/core/nanowell_tables`, `carry_nanowell_tables` copies a dataset's tables through a well map (canonical
@@ -12036,7 +12037,14 @@ parent process supervises the per-well worker pool:
   seal standing over a rewrite that may die part way. `seal_well_complete` — called beside `record_well_settings`
   in all three well paths, after both artefacts are on disk — writes it back only
   when the record just written says the output covers the whole input (no group
-  failed, skipped or missing). Never cleared by a run, it is what a later remote
+  failed, skipped or missing). A nanowell well's record counts timepoints
+  (`nanowell_task.record_nanowell_completeness`): `groups_covered` is the
+  `ok`-only count Validate and the INCOMPLETE summary read, and `groups_reached`
+  the timepoints the run gave any verdict, which is what `run_report.well_is_whole`
+  asks of such a record — an `unaddressed` or `no_lattice` timepoint is the run's
+  finding about those images, not work the well still owes, so the well is sealed
+  and finished with it (its `failed` list names the verdicts that wrote no rows,
+  for the end-of-run summary). Never cleared by a run, it is what a later remote
   resume reads before it adopts a well left on the host
   (`services/remote_batch_resume.py`); `tests/test_a_part_way_well_is_not_sealed.py`
   drives `main` through a whole well, a part-way one, its resume, and a seal that

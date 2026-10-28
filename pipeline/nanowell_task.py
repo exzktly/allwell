@@ -834,7 +834,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
     """
     from pipeline.fov_checkpoint import _staging_dir_for, extract_dir_for
     from pipeline.io import remove_directory, write_well_csv
-    from pipeline.run_report import seal_well_complete, write_well_report
+    from pipeline.run_report import seal_well_complete
     from pipeline.settings_record import record_well_settings
 
     output_dir = Path(output_dir)
@@ -857,9 +857,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
             return records, failed
         grid = json.loads(grid_path.read_text(encoding="utf-8"))
         total = len(grid["timepoints"])
-        write_well_report(output_dir, well_label, groups_total=total,
-                          groups_covered=sum(1 for b in grid["timepoints"].values() if b.get("status") == nr.OK),
-                          failed=failed)
+        record_nanowell_completeness(output_dir, well_label, grid, failed)
         record_well_settings(output_dir, well_label, settings_key)
         seal_well_complete(output_dir, well_label)       # after the montage archive and the tables
         # "— done." exactly as a field-mode well says it: the remote Fetcher and Analyze's progress count a well
@@ -875,6 +873,23 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
         if owned:
             remove_directory(scratch)
             remove_directory(staging)
+
+
+def record_nanowell_completeness(output_dir, well_label: str, grid: dict, failed) -> None:
+    """Record a nanowell well's completeness from its grid record (*grid*), in timepoints, the unit of work here.
+
+    ``groups_covered`` counts the timepoints addressed ``ok`` — Validate's and the INCOMPLETE summary's question.
+    ``groups_reached`` counts those the run reached with any verdict, which is what decides whether the well is whole
+    and so sealed (``pipeline.run_report.well_is_whole``): a timepoint left ``unaddressed`` is a finding the end-of-run
+    re-anchoring may yet change, not work the well still owes. *failed* are the timepoints whose verdict wrote no rows.
+    """
+    from pipeline.run_report import write_well_report
+
+    blocks = grid.get("timepoints") or {}
+    write_well_report(output_dir, well_label, groups_total=len(blocks),
+                      groups_covered=sum(1 for b in blocks.values() if b.get("status") == nr.OK),
+                      groups_reached=sum(1 for b in blocks.values() if b.get("status")),
+                      failed=failed)
 
 
 def reanchored_line(well_label: str, grid: dict, asked, total: int, n_failed: int) -> str:

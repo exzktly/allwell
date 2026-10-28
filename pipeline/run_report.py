@@ -157,10 +157,30 @@ def well_is_whole(rec) -> bool:
     attempted is not whole even when the coverage arithmetic happens to agree,
     and a well whose input held nothing (:func:`found_nothing`) has nothing to
     vouch for.
+
+    **A nanowell record is counted in timepoints and carries** ``groups_reached``
+    (:func:`pipeline.nanowell_task.record_nanowell_completeness`). There the
+    question is whether the run *reached* every timepoint of the well's input —
+    gave each a verdict in its grid record — not whether every verdict was
+    ``ok``: an ``unaddressed`` or ``no_lattice`` timepoint is the run's finding
+    about those images under these settings, which running the well again,
+    alone, cannot change (only an anchor set since can, and
+    ``util.nanowell_anchors.wells_with_unused_anchors`` asks that). Its
+    ``failed`` list names the timepoints whose verdict wrote no rows — findings
+    the end-of-run summary reports, not failures of the run — so it does not
+    bar the well. ``groups_covered`` stays the ``ok``-only count Validate and the
+    INCOMPLETE summary read. Gating the seal on that count left every well with
+    one unaddressed timepoint unsealed and unfinished for ever: each re-run or
+    resume sent it again alone and forced, and alone it lost the plate the
+    end-of-run re-anchoring fits its addresses from.
     """
-    return (isinstance(rec, dict) and not is_incomplete(rec) and not found_nothing(rec)
-            and not rec.get("failed") and not rec.get("not_attempted")
-            and not rec.get("aborted_reason"))
+    if not isinstance(rec, dict) or found_nothing(rec):
+        return False
+    if rec.get("not_attempted") or rec.get("aborted_reason"):
+        return False
+    if "groups_reached" in rec:
+        return _int(rec, "groups_reached") >= _int(rec, "groups_total")
+    return not is_incomplete(rec) and not rec.get("failed")
 
 
 def seal_well_complete(output_dir: Path | str, well_label: str) -> Path | None:
@@ -195,6 +215,7 @@ def write_well_report(
     failed: list[str] | None = None,
     aborted_reason: str = "",
     not_attempted: tuple[str, ...] | list[str] = (),
+    groups_reached: int | None = None,
 ) -> Path | None:
     """Record one well's completeness. Best-effort, with one exception.
 
@@ -208,6 +229,10 @@ def write_well_report(
     output CSV actually carries once this run finished — ground truth read back
     from the artifact rather than inferred from what the run believed it did, so
     it stays correct across incremental runs and resumed checkpoints alike.
+
+    ``groups_reached``, given only for a nanowell well (counted in timepoints),
+    is how many of them the run reached with a verdict; :func:`well_is_whole`
+    then asks it rather than ``groups_covered``.
     """
     payload = {
         "well": str(well_label),
@@ -222,6 +247,8 @@ def write_well_report(
         # for twenty tracebacks when three had been written.
         "not_attempted": sorted(not_attempted or ()),
     }
+    if groups_reached is not None:
+        payload["groups_reached"] = int(groups_reached)
     withdraw_seal(output_dir, well_label)
     try:
         d = _report_dir(output_dir)

@@ -150,6 +150,15 @@ class _RemoteRun:
     # directory it *did* delete belongs to a run this one only borrowed a name
     # from.
     reattached: bool = False
+    #: Set once this run has launched the ssh that asks the scheduler for its
+    #: own allocation. Until then the job named by ``<pidfile>.slurm`` — and the
+    #: PID in ``<pidfile>`` — can only be somebody else's: ``run_id`` is
+    #: deterministic in the plate and the settings, so a second session on the
+    #: same plate reads the first session's files, and a run refused before it
+    #: launched used to ``scancel`` the very job its refusal was protecting.
+    #: :func:`services.remote_jobs.close_remote_job` and
+    #: :meth:`RemoteRunner.cancel` act only when it is set.
+    owns_remote_job: bool = False
     # Why each well the Fetcher declined to transfer was declined, ``well ->
     # reason``. "Why was this well not fetched?" was answerable only from
     # stdout as it streamed, which is no help once the log window is closed;

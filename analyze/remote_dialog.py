@@ -46,7 +46,7 @@ from services.remote_config import (
 from services import remote_config
 from services import ssh_key_setup
 from services.subprocess_kill import signal_subprocess
-from services.remote_srun_retry import stray_words_message
+from services.remote_srun_retry import redirect_words_message, stray_words_message
 from services.scheduler_probe import ProbeRun
 from analyze.scheduler_test_dialog import SchedulerTestDialog
 from services.subprocess_text import TEXT_UTF8
@@ -610,7 +610,8 @@ class RemoteFormDialog(QDialog):
                 "machine itself”."
             )
         if self._compute_loc_combo.currentData() == "scheduled":
-            return stray_words_message(self._compute_launcher_edit.text())
+            launcher = self._compute_launcher_edit.text()
+            return stray_words_message(launcher) or redirect_words_message(launcher)
         return None
 
     def _open_scheduler_test(self) -> None:

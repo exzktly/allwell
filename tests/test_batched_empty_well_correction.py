@@ -400,6 +400,7 @@ def _stub_runner(p, proc, upload_subset):
         env_selector=("name", "allwell"),
         _build_remote_argv=lambda *a, **k: ["python", "pm.py"],
         _sweep_orphaned_allocation=lambda *a, **k: None,
+        _claim_run_dirs=lambda *a, **k: "",
     )
     return proc
 

@@ -74,6 +74,7 @@ def _remote(p, proc, remote_root: Path, sent: list[str]):
         env_selector=("name", "allwell"),
         _build_remote_argv=lambda *a, **k: ["python", "pm.py"],
         _sweep_orphaned_allocation=lambda *a, **k: None,
+        _claim_run_dirs=lambda *a, **k: "",
         close_remote_job=lambda **kw: None,
     )
     return run_dir

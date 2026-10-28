@@ -194,6 +194,7 @@ def _spawn_with(host, plate, monkeypatch, stop_fetchers, *,
     # Not what these tests are about, and it shells out for real.
     monkeypatch.setattr(RemoteRunner, "_sweep_orphaned_allocation",
                         lambda self, *a, **kw: None)
+    monkeypatch.setattr(RemoteRunner, "_claim_run_dirs", lambda self, *a, **kw: "")
 
     def fake_popen(argv, **kw):
         m = MagicMock()

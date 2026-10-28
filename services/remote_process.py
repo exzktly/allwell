@@ -60,6 +60,7 @@ from services.remote_commands import (
     BATCH_READY,
     BATCH_REANCHOR,
     BATCH_SKIP,
+    BATCH_STAGED,
     HOLD_DIR,
     _batch_driver_snippet,
     _compose_driver_cmd, batch_pipeline_argv, pack_for_login_shell,
@@ -75,6 +76,7 @@ from services.remote_run_id import (
     remote_run_paths,
 )
 from services.remote_batch_staging import prune_staged, _empty_well_blanks
+from services.remote_srun_retry import queue_wait_seconds
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, hand_off_and_wait, watch_of
@@ -702,13 +704,12 @@ class _BatchedRemoteProcess:
         # plate and the arguments, so a second session on the same plate lands
         # on the same path — its `rm -rf` would take the first session's staged
         # batches and input directory out from under a running pipeline.
-        if self._runner._sweep_orphaned_allocation(
-                run.remote_pidfile, heartbeat, log_fn=self._log) == "owned":
-            self._log(
-                "[remote] ERROR another session is already running this exact "
-                "dataset and configuration on this host. Both would use the "
-                "same remote run directory, so this run stops here rather "
-                "than corrupting the one already going.\n")
+        # Every earlier attempt of the plate is asked too: a resume writes into the one it resumes.
+        refusal = self._runner._claim_run_dirs(
+            run.remote_pidfile, heartbeat, local_output_dir=self._local_output_dir,
+            pipeline_argv=self._pipeline_argv, output_filter=self._output_filter, log_fn=self._log)
+        if refusal:
+            self._log(f"[remote] ERROR {refusal}\n")
             self._returncode = 1
             return False
 
@@ -724,7 +725,7 @@ class _BatchedRemoteProcess:
             ["rm", "-rf", paths.suspend_request, f"{run_dir}/{HOLD_DIR}"]
             + [self._batch_flag(t, i)
                for i in range(1, total + 1)
-               for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP)],
+               for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP, BATCH_STAGED)],
             check=False,
         )
         # Whatever input archives the remote already holds — in `in/`, in a staged batch, or in an earlier
@@ -779,7 +780,7 @@ class _BatchedRemoteProcess:
         ssh_argv = host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(
             _compose_driver_cmd(launcher, run.remote_pidfile, driver,
                                 env_selector=self._runner.env_selector,
-                                scratch_dir=host.remote_scratch_dir))
+                                scratch_dir=host.remote_scratch_dir, queue_wait_s=queue_wait_seconds(host)))
         ]
         proc = subprocess.Popen(
             ssh_argv,
@@ -801,7 +802,7 @@ class _BatchedRemoteProcess:
         # what `_release_driver` acts on. Set only after the launch: an abort
         # before it would otherwise `scancel` a sidecar written by a *previous*
         # run of this same dataset, or by the other session that made us stop.
-        self._owns_allocation = True
+        self._owns_allocation = run.owns_remote_job = True
         self._reader = threading.Thread(
             target=self._read_driver, args=(proc,), daemon=True,
             name="aw-batch-driver-reader")

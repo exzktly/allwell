@@ -100,6 +100,10 @@ BATCH_REANCHOR = ".aw_batch_{i}_reanchor"
 #: pass (``--nanowell_hold_dir``).
 HOLD_DIR = "keep"
 BATCH_SKIP = ".aw_batch_{i}_skip"
+#: Written by the driver once batch *i*'s staged directory has been moved into
+#: ``in/``: a replayed pass (the ``srun`` wrapper re-running the driver) then
+#: finds the batch's input already in place rather than deleting it.
+BATCH_STAGED = ".aw_batch_{i}_staged"
 _BATCH_DONE_RE = re.compile(
     r"\[remote\] batch-driver: batch (\d+) finished rc=(-?\d+)")
 
@@ -203,6 +207,9 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
     marker = BATCH_DONE_MARKER.format(i="$_aw_i", rc="$_aw_rc")
     total = int(n_batches) + (1 if final_pass else 0)
 
+    staged_flag = (_remote_quote(run_dir)
+                   + '"/' + BATCH_STAGED.format(i="${_aw_i}") + '"')
+
     def flag(template: str) -> str:
         return _remote_quote(run_dir) + '"/' + template.format(i="${_aw_i}") + '"'
 
@@ -242,6 +249,12 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         f'_aw_i=1; '
         f'while [ "$_aw_i" -le {total} ]; do '
         f'{suspended}'
+        # A batch that already finished in this run is not run again. The app
+        # clears every `done` before it launches the driver, so one present here
+        # was written by this launch — by a pass the srun wrapper replayed.
+        f'if [ -f {done} ]; then _aw_rc=$(cat {done}); '
+        f'echo "[remote] batch-driver: batch $_aw_i already finished (rc=$_aw_rc) — not run again"; '
+        f'echo "{marker}"; _aw_i=$((_aw_i+1)); continue; fi; '
         f'echo "[remote] batch-driver: waiting for batch $_aw_i of '
         f'{total}"; '
         f'_aw_w=0; {hb_init}'
@@ -259,7 +272,16 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         # pipeline cannot see a partially-populated input dir, and it cannot
         # see the previous batch's leftovers either — the whole directory is
         # replaced rather than being emptied well by well as downloads land.
-        f'rm -rf {in_q} && mv {staged} {in_q} || {{ '
+        # `in/` is emptied only for a batch whose staged directory is there to
+        # replace it. Without one, `in/` may already be this batch's — moved in
+        # by a pass that was replayed (`.aw_batch_<i>_staged` says so) — and
+        # removing it would delete the batch's input and, in a final pass, the
+        # held archives.
+        f'if [ -d {staged} ]; then rm -rf {in_q} && mv {staged} {in_q} '
+        f'&& {{ : > {staged_flag} || true; }}; '
+        f'elif [ -f {staged_flag} ] && [ -d {in_q} ]; then '
+        f'echo "[remote] batch-driver: batch $_aw_i: its input is already in place"; '
+        f'else false; fi || {{ '
         f'echo "[remote] ERROR batch $_aw_i: could not stage its input"; '
         f'echo "90" > {done}; echo "{marker_fail}"; '
         f'_aw_i=$((_aw_i+1)); continue; }}; '
@@ -280,6 +302,7 @@ def _compose_driver_cmd(
     *,
     env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
     scratch_dir: str = "",
+    queue_wait_s: int = 0,
 ) -> str:
     """The login-shell command that puts :func:`_batch_driver_snippet` on a node.
 
@@ -323,7 +346,7 @@ def _compose_driver_cmd(
         f'(partition ${{SLURM_JOB_PARTITION:-?}}) — held for every batch"; '
         f"{driver_script}"
     )
-    return _launch(launcher, inner, remote_pidfile)
+    return _launch(launcher, inner, remote_pidfile, queue_wait_s=queue_wait_s)
 
 
 def _compose_remote_cmd(
@@ -336,6 +359,7 @@ def _compose_remote_cmd(
     upload_sentinel: str = "",
     upload_heartbeat: str = "",
     scratch_dir: str = "",
+    queue_wait_s: int = 0,
 ) -> str:
     """Build the bash command string ssh runs on the remote login node.
 
@@ -411,16 +435,18 @@ def _compose_remote_cmd(
         f"{wait_snippet}"
         f"exec {_remote_join(remote_argv)}"
     )
-    return _launch(launcher, inner, remote_pidfile)
+    return _launch(launcher, inner, remote_pidfile, queue_wait_s=queue_wait_s)
 
 
-def _launch(launcher: str, inner: str, remote_pidfile: str) -> str:
+def _launch(launcher: str, inner: str, remote_pidfile: str, *, queue_wait_s: int = 0) -> str:
     """``<launcher> bash -lc <inner>`` for the login shell, PID recorded.
 
     An ``srun`` launcher goes through :func:`services.remote_srun_retry.
-    wrap_srun_launch`, which prefers nodes that are powered on and retries a
-    node that fails to boot; that wrapper records ``srun``'s own PID. Any other
-    launcher is exec'd as it always was, the login shell's PID recorded first.
+    wrap_srun_launch`, which prefers nodes that are powered on, retries a
+    node that fails to boot and gives up after *queue_wait_s* without a node
+    (the host's Max queue wait; ``0`` waits indefinitely); that wrapper records
+    ``srun``'s own PID. Any other launcher is exec'd as it always was, the login
+    shell's PID recorded first, and waits as long as its scheduler makes it.
 
     ``shlex.split`` → ``join`` normalises whitespace and re-quotes any token
     carrying a shell metacharacter (``--constraint=a|b``), so the login shell
@@ -435,7 +461,7 @@ def _launch(launcher: str, inner: str, remote_pidfile: str) -> str:
             raise ValueError(stray)
         return wrap_srun_launch(
             launcher, shlex.quote(inner), _remote_quote(remote_pidfile),
-            _remote_quote(f"{remote_pidfile}.srun-err"))
+            _remote_quote(f"{remote_pidfile}.srun-err"), queue_wait_s=queue_wait_s)
     return (
         f"echo $$ > {_remote_quote(remote_pidfile)}; "
         f"exec {shlex.join(shlex.split(launcher))} bash -lc {shlex.quote(inner)}"

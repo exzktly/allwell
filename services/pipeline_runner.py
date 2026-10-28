@@ -60,6 +60,7 @@ from services.remote_finished_wells import argv_forcing, drop_finished, nanowell
 from services.remote_process import run_local_auto_threshold
 from services.remote_recover import recover_finished_outputs
 from services.remote_run_state import refuse_remote_nanowell_incremental
+from services.sleep_guard import SleepGuard
 from services.subprocess_kill import signal_subprocess
 from pipeline.slurm_node import parse_node_specs
 from util.aw_safe import swallow, swallowed
@@ -2022,6 +2023,10 @@ class PipelineRunner:
         assert self._remote is not None
         zipped = None
         regate_argv = None
+        # This machine drives the run for its whole length; one that sleeps
+        # stops it on the cluster (services.sleep_guard). Released in `finally`.
+        awake = SleepGuard(log_fn=lambda m: self._enqueue(("line", m)))
+        awake.start()
         try:
             self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
             incremental = self._recover_remote_outputs(output_dir, args, opts)
@@ -2222,3 +2227,4 @@ class PipelineRunner:
                     zipped.cleanup()
                 except OSError:
                     swallowed("remote run: staging zip cleanup failed")
+            awake.stop()

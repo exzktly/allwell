@@ -77,6 +77,7 @@ def _harness(tmp_path, monkeypatch, *, earlier=(), force=False, nanowell=False):
         env_selector=("name", "allwell"),
         _build_remote_argv=lambda *a, **k: ["python", "pm.py"],
         _sweep_orphaned_allocation=lambda *a, **k: None,
+        _claim_run_dirs=lambda *a, **k: "",
         close_remote_job=lambda **kw: None,
     )
     p._pipeline_argv = ["--force"] if force else []

@@ -13,7 +13,7 @@ the archives a run uploads, ``services.remote_upload`` gets them onto the host
 once, ``services.remote_process`` presents the run as a process the GUI reads
 and stops, ``services.remote_fetch`` owns bringing output home and proving it
 arrived, ``services.remote_run_state`` the record a run carries,
-``services.remote_jobs`` the scheduler jobs a run holds, and
+``services.remote_jobs`` and ``services.remote_sweep`` its scheduler jobs, and
 ``services.remote_wire`` the lines the stages print and parse:
 
 * **Per-well zip granularity** — ``remote_staging.stage_local_zips`` runs the existing
@@ -38,6 +38,7 @@ arrived, ``services.remote_run_state`` the record a run carries,
 from __future__ import annotations
 
 import os
+import posixpath
 import re
 import subprocess
 import threading
@@ -82,7 +83,8 @@ from services.remote_process import (
     _run_prepared,
     _scheduler_handoff_lines,
 )
-from services.remote_jobs import close_remote_job, sweep_orphaned_allocation
+from services.remote_jobs import close_remote_job, kill_remote_pipeline
+from services.remote_sweep import claim_run_dirs, earlier_attempt_dirs, sweep_orphaned_allocation
 from services.remote_fetch import (
     FetchedOutputVerifier,
     Fetcher,
@@ -91,11 +93,11 @@ from services.remote_fetch import (
 from services.remote_transport import (
     _fmt_secs,
     _remote_join,
-    _remote_quote,
 )
 from services.remote_suspend import request_suspend as _request_suspend
 from services.remote_code_sync import sync_pipeline_code
 from services.remote_commands import _compose_remote_cmd, pack_for_login_shell
+from services.remote_srun_retry import queue_wait_seconds
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
 from services.remote_run_id import (
@@ -334,7 +336,6 @@ class RemoteRunner:
             zipped, pipeline_argv, prep.remote_output, log)
         overlap, ssh_argv = self._compose_launch(
             prep, zipped, pipeline_argv, output_filter, cache_hit, log)
-        remote_pidfile = prep.paths.pidfile
         remote_sentinel = prep.paths.sentinel
         remote_heartbeat = prep.paths.heartbeat
 
@@ -344,15 +345,12 @@ class RemoteRunner:
 
         heartbeat: _UploadHeartbeat | None = None
         if overlap:
-            # Before adding an allocation of our own, hand back one a crashed
-            # run of this same dataset may have left holding a node.
-            self._sweep_orphaned_allocation(
-                remote_pidfile, remote_heartbeat, log_fn=log)
             heartbeat = _UploadHeartbeat(self._cache, remote_heartbeat)
             # One beat before the job can look, so the first thing it sees is a
             # heartbeat that exists rather than one that is missing.
             heartbeat.beat()
             popen = self._start_ssh(ssh_argv)
+            self._run.owns_remote_job = True     # from here the job is ours to cancel
             try:
                 heartbeat.start()
                 upload()
@@ -388,6 +386,7 @@ class RemoteRunner:
             if not cache_hit:  # the remote already holds every well's output
                 upload()
             popen = self._start_ssh(ssh_argv)
+            self._run.owns_remote_job = True
 
         fetcher = Fetcher(
             self.host,
@@ -452,6 +451,13 @@ class RemoteRunner:
         # ``source_fingerprint``: the upload key churns for two different
         # reasons and only one of them is a reason to re-attach.
         source_key = source_fingerprint(_local_input_dir_from_argv(pipeline_argv))
+        # Before anything below empties, borrows or writes a directory: no job
+        # of another session, or of an earlier attempt still being fed, may be
+        # writing in this run's directory or in the one a resume re-attaches to.
+        refusal = self._claim_run_dirs(own.pidfile, own.heartbeat, local_output_dir=local_output_dir,
+                                       pipeline_argv=pipeline_argv, output_filter=output_filter, log_fn=log)
+        if refusal:
+            raise RuntimeError(refusal)
         own_output = remote_output
         # An incremental run uploads a split — only the groups still missing —
         # so any earlier directory's outputs can only mislead it: the pre-flight
@@ -647,7 +653,7 @@ class RemoteRunner:
             env_selector=self.env_selector,
             upload_sentinel=remote_sentinel if overlap else "",
             upload_heartbeat=remote_heartbeat if overlap else "",
-            scratch_dir=self.host.remote_scratch_dir,
+            scratch_dir=self.host.remote_scratch_dir, queue_wait_s=queue_wait_seconds(self.host),
         )
         ssh_argv = self.host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(remote_cmd)]
 
@@ -921,9 +927,17 @@ class RemoteRunner:
         *, log_fn: Callable[[str], None] | None = None,
     ) -> str:
         """Cancel an allocation a crashed earlier run left behind (see
-        :func:`services.remote_jobs.sweep_orphaned_allocation`)."""
-        return sweep_orphaned_allocation(self.host, remote_pidfile, heartbeat,
-                                         log_fn=log_fn)
+        :func:`services.remote_sweep.sweep_orphaned_allocation`)."""
+        return sweep_orphaned_allocation(self.host, remote_pidfile, heartbeat, log_fn=log_fn)
+
+    def _claim_run_dirs(self, pidfile: str, heartbeat: str, *, local_output_dir, pipeline_argv,
+                        output_filter, log_fn: Callable[[str], None] | None = None) -> str:
+        """``""`` when this run may use its run directory, else why not: its own and every earlier attempt
+        of the plate the journal recorded are swept (:func:`services.remote_sweep.claim_run_dirs`)."""
+        earlier = earlier_attempt_dirs(self.host, local_output_dir, pipeline_argv,
+                                       extras=self._host_argv_extras(output_filter),
+                                       own_run_dir=posixpath.dirname(pidfile))
+        return claim_run_dirs(self.host, pidfile, heartbeat, earlier, log_fn=log_fn)
 
     @property
     def can_request_suspend(self) -> bool:
@@ -959,25 +973,9 @@ class RemoteRunner:
                 self._fetcher.cancel()
             except Exception:  # best-effort
                 swallowed()  # was: pass (silent except)
-        if self._run is None:
-            return
-        run = self._run
-        pidfile_q = _remote_quote(run.remote_pidfile)
-        try:
-            subprocess.run(
-                self.host.ssh_argv(allocate_tty=False) + [
-                    f"kill -TERM $(cat {pidfile_q} 2>/dev/null) 2>/dev/null || true"
-                ],
-                capture_output=True, timeout=10,
-            )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            # Best-effort (the local process-group kill is primary), but don't
-            # swallow it silently — record that this teardown channel failed
-            # (audit E13); close_remote_job() below is the scheduler backstop.
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "remote cancel: ssh kill failed (%s); relying on the local "
-                "process-group kill + scancel backstop", exc)
+        if self._run is None or not self._run.owns_remote_job:
+            return      # nothing launched: the pidfile is the last run's, maybe another session's srun
+        kill_remote_pipeline(self.host, self._run)
         # Belt-and-braces: also cancel the scheduler job (no-op on
         # direct-execution hosts / when no job id was recorded).
         self.close_remote_job()

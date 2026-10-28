@@ -288,6 +288,7 @@ def _stub_runner(p, proc, ordering):
         env_selector=("name", "allwell"),
         _build_remote_argv=lambda *a, **k: ["python", "pm.py"],
         _sweep_orphaned_allocation=lambda *a, **k: None,
+        _claim_run_dirs=lambda *a, **k: "",
     )
     return proc
 
@@ -598,7 +599,9 @@ def test_a_second_session_on_the_same_plate_does_not_clear_the_first_s_input(
     ordering: list[str] = []
     p = _batched(tmp_path, ["A01", "A02"])
     _stub_runner(p, proc, ordering)
-    p._runner._sweep_orphaned_allocation = lambda *a, **k: "owned"
+    from services.remote_sweep import _refusal
+    p._runner._claim_run_dirs = lambda *a, **k: _refusal(
+        "owned", ["4242"], "this dataset's run directory")
 
     spawns = []
     monkeypatch.setattr("subprocess.Popen",

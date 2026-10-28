@@ -1667,6 +1667,35 @@ it is still the scheduler command's `--cpus-per-task` that decides how many of
 the node's CPUs the run uses; the run log warns when Slurm gave it only one or
 two of a bigger node's.
 
+**Max queue wait** is how long a run waits for the scheduler to give it a node
+— queued, or granted a node that is still starting up — before it gives up. The
+time counts from the moment the run asks for the node, which on a scheduled host
+is before the plate starts uploading, so the queue wait and the upload run side
+by side: on a cluster that queues the run for longer than the setting, the run
+fails even while the plate is still uploading (a batched run stops its upload; a
+single run finishes sending first), and what reached the cluster is kept for the
+next attempt. When it runs out the job is cancelled and the run stops with
+`no node was granted within 30 min, this host's Max queue wait — cancelled job
+…`; raise the setting for a busy cluster, or set it to **Wait indefinitely**
+(0), which never gives up. A run that has started on its node is never cut
+short by it, however long it runs. It applies when the scheduler command is an
+`srun` command.
+
+**A scheduler command that sends the run's output elsewhere is refused**, when
+you save the host and when a run starts: `-o` / `--output`, `-e` / `--error`
+and `--pty` would put everything the run prints — its progress, its results,
+its errors — in a file on the cluster or on a terminal of its own, and
+All-Well, which reads the run as it goes, would see nothing and the run would
+look hung. Leave them out; the run's own log keeps all of it.
+
+**A remote run keeps the Mac awake.** All-Well drives a remote run from your computer for its whole length — it tells the cluster it is still there, hands over each batch and downloads every well — so a Mac that goes to sleep stops the run on the cluster. While a remote run is going the Mac is kept from sleeping (it may still dim the screen), and it is let sleep again when the run ends. Closing the lid of a Mac on battery still sleeps it; keep it on power, or open, for a long run.
+
+**A node that fails while the run is going is not asked for again.** A node
+that fails to start is replaced automatically (see *A node that fails to boot is
+retried* below), but once the run has started on a node, asking again would
+start it from the beginning. The run stops and the log says which node failed;
+**Resume** continues from where it stopped.
+
 **Fetch** next to *Compute profile* reads the cluster's JupyterHub
 configuration and lists the compute options its web page offers; picking one
 fills in the scheduler command. The command is built the way JupyterHub builds
@@ -6891,7 +6920,7 @@ you typed.
 
 **A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, plus one batch's worth again for the transfers that happen while the node is held, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those. **A node that fails to boot is retried automatically.** On a cluster that powers idle nodes down, Slurm can give a run a sleeping node; if that node does not start within the cluster's own limit, `srun` reports `srun: error: Nodes … are still not ready` and then `Something is wrong with the boot of the nodes`. All-Well then asks for another node with the failed one excluded, up to 3 more times, and says so in the log (`node(s) n01 failed to boot — requesting another node (retry 1 of 3)`); after the third it names every node that failed, which is the list to send your cluster's admins. Before each attempt it also checks which nodes are powered on (`idle`, `mix`, or busy but running) and steers the job away from the ones that are asleep, booting or out of service; when none of the powered-on nodes can take the request — they are a different instance type from the one the command asks for, say — it finds that out first, without queuing anything, says `no powered-on node matches this request — Slurm will start one`, and lets Slurm boot one. Starting a node can take several minutes. It also stops avoiding them when every powered-on node is already running a job: the log then says `no free powered-on node in … — Slurm will boot one`, and Slurm starts a powered-down node instead of keeping the job queued behind other people's jobs. On a cluster that does not power nodes down there is nothing to start, and the log says so instead: `every powered-on node in … is busy and none is powered down to boot — the job waits in the queue for one to free`. A run that does end before its node starts keeps the wells it had already uploaded, so retrying the same plate with the same settings does not send them again. This applies when the host's launcher is an `srun` command. **A word left on its own in that command is refused**, both when you save the host and when a run starts: `srun` would take it for the program to run and the job would fail with `execve(): … No such file or directory` only after a node had started. An instance or node type belongs in a constraint, for example `--constraint=g4dn.12xlarge`.
 
-If you start the same plate with the same settings from a second window while the first is still running, the second one stops and says so rather than starting: both would use the same folder on the cluster, and the second would clear the first's input out from under it. Wait for the first to finish, or change something about the run.
+If you start the same plate with the same settings from a second window while the first is still running, the second one stops and says so rather than starting (`another session is already running this exact dataset and configuration on this host (job …, in …)`): both would use the same folder on the cluster, and the second would clear the first's input out from under it. The first run is left exactly as it was — the refused one cancels nothing. Wait for the first to finish, or change something about the run. A **Resume** is checked the same way against every earlier attempt of the plate the output folder's journal remembers, because it writes into the attempt it resumes: if that attempt's job is still running on the cluster and an app is still feeding it, the resume stops with the same message; if no app has fed it for a few minutes — the window that ran it was closed or crashed — it is your own abandoned attempt, and it is cancelled (`cancelled a job left over from an earlier run of this dataset (…, in an earlier attempt's run directory, …)`) before the resume starts. Only a job the scheduler still lists as running counts: **Resume straight after Stop works**, because a stopped run's job has ended. If a Stop could not reach the cluster (the network was down), the job may still be running; the message then tells you to wait two minutes or cancel it yourself with `scancel <job>`.
 
 **The stage path is drawn under the plate**, at the same scale, whenever the
 file carries coordinates. **Scroll on it to zoom, drag to move around, and

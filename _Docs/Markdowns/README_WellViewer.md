@@ -1932,7 +1932,11 @@ and by `remote_fetch_report.txt` in the output folder.
   half-downloaded file is never taken for the finished one, and the next run
   fetches it again. An input archive
   that was already uploaded is reused rather than sent again (one that differs
-  from your copy is still re-sent). The log lists both, and names any well the
+  from your copy is still re-sent). Naming wells in **Force wells** for the
+  restart — or the restart forcing a well itself, as it does for a nanowell well
+  with partial results here — redoes those wells only: the earlier attempt is
+  still found, and everything else it finished or uploaded is still used.
+  The log lists both, and names any well the
   earlier attempt's record says was finished, uploaded or downloaded that is
   nonetheless being redone, with the reason. A well the earlier attempt left
   part-way continues from its last finished field rather than starting again —

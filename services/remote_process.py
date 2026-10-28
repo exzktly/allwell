@@ -534,7 +534,7 @@ class _BatchedRemoteProcess:
         # part-way checkpoints on its output directory, so only there does a half-finished well continue.
         remote_output = reattach_output_dir(
             runner, local_output_dir, self._journal_keys, self._legacy_digests, fresh=own.out,
-            forced=bool(_force or _forced_wells), log=self._log)
+            forced=bool(_force), log=self._log)  # forced wells: per well (F2)
         runner._cache._ssh_run(
             ["mkdir", "-p", remote_input, remote_output],
             check=True,

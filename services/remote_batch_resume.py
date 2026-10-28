@@ -18,7 +18,8 @@ the same host** (``run_journal.stored_remote_addresses`` — the keys that make 
   from the groups it finished, and says "— done." like a whole one. The pipeline seals a well only when its output
   covers every FOV-group its input holds, and withdraws the seal before it rewrites the well. A sealed well is not
   uploaded or run; its output files are brought into this run's output directory on the remote and the Fetcher
-  downloads them like any other well's. Never for a forced run, which asked for the wells to be computed again.
+  downloads them like any other well's. Never under ``--force``, and never for a well named in ``--force_wells``:
+  those were asked to be computed again.
 * **Wells left part way** — an out.zip with no seal. Not adopted: the well is uploaded and run again, and in a
   re-attached output directory the checkpoints its suspended attempt kept (``pipeline.fov_checkpoint.
   release_staging``) carry its finished groups over; its new output replaces the partial one. An output directory
@@ -278,7 +279,7 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     *proc* for :func:`stage_leftovers`, which runs once the batches are known.
     """
     from services import run_journal
-    from services.remote_run_id import remote_run_dir
+    from services.remote_run_id import _forced_from_argv, remote_run_dir
 
     proc._leftovers = Leftovers()
     keys = getattr(proc, "_journal_keys", None)
@@ -300,7 +301,11 @@ def take_from_remote(proc, zips: list, *, force: bool) -> tuple[list, list[str]]
     if force:
         return list(zips), []
     mark_part_way(runner._cache, found, own_output_dir=own_output)
-    wanted = [w for w in (canonical_well_label(z.stem) for z in zips) if w and w in found.finished]
+    # A well named in --force_wells is to be computed again, so its finished output is not taken — per well, rather
+    # than the whole plate declining (tracker F2). Its uploaded archive is still reused: the input is the same.
+    _all, forced = _forced_from_argv(list(getattr(proc, "_pipeline_argv", []) or []))
+    wanted = [w for w in (canonical_well_label(z.stem) for z in zips)
+              if w and w in found.finished and w not in forced]
     adopted = set(adopt_finished(runner._cache, wanted, found, own_output_dir=own_output,
                                  nanowell=bool(proc._fetcher.run.nanowell), log=proc._log))
     remaining = [z for z in zips if canonical_well_label(z.stem) not in adopted]
@@ -417,7 +422,8 @@ def reattach_output_dir(runner, local_output_dir, keys: dict, legacy_digests, *,
     staged archives, and so its run id and directory, differ from the attempt it resumes. So the newest address the
     journal recorded under the same settings, source images and host (the current and the earlier builds' digests,
     ``remote_run_id.legacy_argv_digests``) is used when the remote still has it — the same rule the single-shot
-    path re-attaches by. Never for a forced run, which asked for everything to be computed again. Returns *fresh*
+    path re-attaches by. Never under ``--force``, which asked for everything to be computed again (forced wells
+    alone are redone in place). Returns *fresh*
     whenever anything is in doubt: a lookup or a probe that fails costs a recomputed well, never a wrong one.
     """
     from services import run_journal

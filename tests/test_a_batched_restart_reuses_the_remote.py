@@ -586,3 +586,49 @@ def test_a_well_the_remote_left_part_way_is_run_again_not_adopted(tmp_path, monk
         f"{where}: the note is for the directory the host writes into, and only that one")
     if where == "re-attached":
         assert not finished_on_this_host(old / "out", "A02"), "the host would still skip the part-way well"
+
+
+# ── the incident: a Resume that forces a well must still find the attempt it resumes (tracker F2) ──────────────
+
+@pytest.mark.parametrize("recorded_by", ["this build", "the build before"])
+def test_a_resume_that_forces_a_well_takes_over_the_attempt_it_resumes(tmp_path, monkeypatch, recorded_by):
+    """Incident 1's shape. The first attempt finished batches 1 and 2 on the remote (A01–A04, sealed, not yet
+    downloaded when the run stopped), uploaded batch 3 (A05, A06) to its ``b3`` and stopped. The Resume names A04
+    in ``--force_wells`` — the user's Force wells, or the runner's own ``nanowell_forced`` for a well with partial
+    tables here. ``--force_wells`` was part of the run's digest, so the Resume could not find the attempt it
+    resumed: every finished well was recomputed and both uploaded archives sent again. Now the force list is left
+    out of the digest, the attempt is found, A01–A03 are taken from it, A04 alone is run again (not adopted), and
+    nothing already on the remote is uploaded."""
+    from services import run_journal as J
+    from services.remote_finished_wells import argv_forcing
+    from services.remote_run_id import legacy_argv_digests, pipeline_argv_digest
+
+    old = tmp_path / "remote" / "runs" / "run-old"
+    p, plate, run_dir, sent, observed, _ = _harness(tmp_path, monkeypatch)
+    monkeypatch.undo()                                  # the real stored_remote_addresses, not the stub
+    monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")
+    out = p._local_output_dir
+    first = ["python", "process_microscopy.py", "--input_dir", str(plate), "--output_dir", str(out),
+             "--csv_prefix", "measurements", "--nuclear_token", "DAPI"]
+    resume = argv_forcing(first, ["A04"])
+    recorded = (pipeline_argv_digest(first) if recorded_by == "this build"
+                else __import__("services.remote_run_id", fromlist=["x"]).earlier_argv_digest(first))
+    J.open_run(out, spec={}, mode="remote-batched", input_dir=str(plate), argv=first)
+    J.record_remote(out, run_id="run-old", cache_key="k-old", host_alias="h", remote_input_dir=str(old / "in"),
+                    remote_output_dir=str(old / "out"), argv_digest=recorded, source_key="s")
+    J.open_run(out, spec={}, mode="remote-batched", input_dir=str(plate), argv=resume)   # the Resume
+    p._pipeline_argv = resume
+    p._journal_keys = dict(argv_digest=pipeline_argv_digest(resume), source_key="s", host_alias="h")
+    p._legacy_digests = legacy_argv_digests(resume)
+    for well in ("A01", "A02", "A03", "A04"):
+        _finished_on(old / "out", well)
+    _uploaded_copy(plate, old / "in", "A04")            # batch 2's input, swapped in and never cleared
+    for well in ("A05", "A06"):
+        _uploaded_copy(plate, old / "b3", well)
+
+    _run(p, monkeypatch)
+
+    assert p._returncode == 0, p._logged
+    assert sorted(line.split()[1] for line in observed) == ["A01", "A02", "A03"], (
+        f"the Resume did not take the earlier attempt's finished wells, or took the forced one: {observed}")
+    assert sent == [], f"archives the earlier attempt had already uploaded were sent again: {sent}"

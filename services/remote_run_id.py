@@ -104,8 +104,22 @@ def pipeline_argv_digest(
     (``services.remote_recover``). ``--allow_low_disk`` is the one "Load
     previous run" does not restore, so hashing it broke the match for anyone
     who had ticked it.
+
+    **Which wells run, and which are redone, are not configuration either**
+    (:data:`_DIGEST_SKIP_MULTI`): ``--force_wells`` and ``--only_wells`` name
+    wells, and ``--no_auto_threshold`` switches only the plate-level gating
+    pass, which no well's output depends on (the app recomputes the plate's
+    gating itself when the host is told to skip it). A Resume adds
+    ``--force_wells`` itself (``remote_finished_wells.nanowell_forced``), and a
+    re-run that sends part of a plate adds ``--no_auto_threshold``; hashing
+    them made the Resume a differently-configured run than the attempt it
+    resumed, so it found nothing of it — its finished wells recomputed, its
+    uploaded batches sent again, its held wells never re-anchored (tracker F2).
+    Per-well forcing is honoured where reuse is decided instead: a forced well
+    is never adopted (``remote_batch_resume.take_from_remote``) and its archive
+    must be replaced (``FetchedOutputVerifier``).
     """
-    return _digest(pipeline_argv, extras, _DIGEST_SKIP_VALUE, _DIGEST_SKIP_FLAG)
+    return _digest(pipeline_argv, extras, _DIGEST_SKIP_VALUE, _DIGEST_SKIP_FLAG, _DIGEST_SKIP_MULTI)
 
 
 #: Flags followed by a value that :func:`pipeline_argv_digest` leaves out. Paths
@@ -121,8 +135,19 @@ _DIGEST_SKIP_VALUE = frozenset({
 #: Bare flags :func:`pipeline_argv_digest` leaves out: re-processing knobs and
 #: pre-flight / audit switches that compute nothing.
 _DIGEST_SKIP_FLAG = frozenset({
-    "--force", "--incremental", "--allow_low_disk", "--no_run_check",
+    "--force", "--incremental", "--allow_low_disk", "--no_run_check", "--no_auto_threshold",
 })
+#: Flags followed by any number of values (up to the next flag) that :func:`pipeline_argv_digest` leaves out: the
+#: wells a run is limited to or told to redo.
+_DIGEST_SKIP_MULTI = frozenset({"--force_wells", "--only_wells"})
+#: The bare flags the definition before :data:`_DIGEST_SKIP_MULTI` existed left out (:func:`earlier_argv_digest`).
+_EARLIER_SKIP_FLAG = _DIGEST_SKIP_FLAG - {"--no_auto_threshold"}
+
+
+def earlier_argv_digest(pipeline_argv: list[str], *, extras: Sequence[str] = ()) -> str:
+    """What the build before :data:`_DIGEST_SKIP_MULTI` recorded for *pipeline_argv*: the force list, the subset and
+    ``--no_auto_threshold`` all hashed. For finding an attempt it recorded, never for addressing a new run."""
+    return _digest(pipeline_argv, extras, _DIGEST_SKIP_VALUE, _EARLIER_SKIP_FLAG)
 
 
 def legacy_argv_digests(pipeline_argv: list[str], *,
@@ -141,21 +166,26 @@ def legacy_argv_digests(pipeline_argv: list[str], *,
     stripped = _strip(_without_launcher(pipeline_argv),
                       frozenset({"--incremental_prior_dir"}),
                       frozenset({"--incremental"}))
-    return tuple(dict.fromkeys((
-        _digest(pipeline_argv, extras, old_values, old_flags),
-        _digest(stripped, extras, old_values, old_flags),
-    )))
+    # The build before the force list, the subset and the gating switch left the digest: as this run is, and as the
+    # attempt it resumes most often was — without them, since the Resume added the force list itself.
+    unscoped = _strip(_without_launcher(pipeline_argv), frozenset(), frozenset({"--no_auto_threshold"}),
+                      _DIGEST_SKIP_MULTI)
+    current = pipeline_argv_digest(pipeline_argv, extras=extras)
+    found = (earlier_argv_digest(pipeline_argv, extras=extras), earlier_argv_digest(unscoped, extras=extras),
+             _digest(pipeline_argv, extras, old_values, old_flags), _digest(stripped, extras, old_values, old_flags))
+    return tuple(d for d in dict.fromkeys(found) if d != current)
 
 
-def _digest(pipeline_argv, extras, skip_with_value, skip_flags) -> str:
+def _digest(pipeline_argv, extras, skip_with_value, skip_flags, skip_multi=frozenset()) -> str:
     """Hash *pipeline_argv*, launcher and skipped flags removed, plus *extras*."""
-    filtered = _strip(_without_launcher(pipeline_argv), skip_with_value, skip_flags)
+    filtered = _strip(_without_launcher(pipeline_argv), skip_with_value, skip_flags, skip_multi)
     filtered.extend(str(e) for e in extras)
     return hashlib.blake2b("|".join(filtered).encode(), digest_size=8).hexdigest()
 
 
-def _strip(pipeline_argv, skip_with_value, skip_flags) -> list[str]:
-    """*pipeline_argv* without the named flags (and the values that follow them)."""
+def _strip(pipeline_argv, skip_with_value, skip_flags, skip_multi=frozenset()) -> list[str]:
+    """*pipeline_argv* without the named flags (and the values that follow them: one for *skip_with_value*, every
+    one up to the next flag for *skip_multi*)."""
     filtered: list[str] = []
     i = 0
     while i < len(pipeline_argv):
@@ -165,6 +195,11 @@ def _strip(pipeline_argv, skip_with_value, skip_flags) -> list[str]:
             continue
         if a in skip_flags:
             i += 1
+            continue
+        if a in skip_multi:
+            i += 1
+            while i < len(pipeline_argv) and not str(pipeline_argv[i]).startswith("--"):
+                i += 1
             continue
         filtered.append(a)
         i += 1
@@ -186,14 +221,15 @@ def _choose_remote_output_dir(
     behaviour.
 
     ``fresh`` is the address derived the usual way, from the staged archives'
-    ``(name, size, mtime)`` and the pipeline argv. ``stored`` is the one a
-    previous run of this same configuration recorded in the output directory's
-    journal, or ``""``. They differ when the previous run's upload was
-    *rewritten* into scratch — a channel filter that cleared
-    ``REWRITE_MIN_SAVING``, or an incremental split — because a fresh staging
-    copy carries a new mtime every run and so keys differently every run. The
-    work that run computed is then sitting in a directory nothing will look in
-    again.
+    fingerprint (``remote_scratch.fingerprint_archives``: member names, sizes
+    and CRCs, so a staged rewrite of an unchanged plate keys the same on every
+    attempt) and the pipeline argv. ``stored`` is the one a previous run of
+    this same configuration recorded in the output directory's journal, or
+    ``""``. They still differ when what was *staged* differs while the images
+    and settings do not — an incremental split, which uploads only the groups
+    still missing — and when the address was recorded by a build whose digest or fingerprint
+    was defined differently. The work that run computed is then sitting in a
+    directory the fresh address does not name.
 
     Returns ``(chosen, reason)``. The stored address wins only when it exists,
     differs, is not overridden by a forced run, **and** the caller has confirmed

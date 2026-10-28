@@ -89,15 +89,17 @@ def reattach_output_dir(runner, fresh: str, local_output_dir: Path, pipeline_arg
     candidate = str((stored or {}).get("remote_output_dir") or "")
     if not candidate or candidate == fresh:
         return fresh
-    forced, forced_wells = _forced_from_argv(pipeline_argv)
+    # Only --force declines the whole directory. A well named in --force_wells is redone where it lies — the host
+    # forces it, the pre-flight never calls a forced run a cache hit, and verification requires its archive be
+    # replaced — so one forced well no longer costs every other well its earlier output (tracker F2).
+    forced, _forced_wells = _forced_from_argv(pipeline_argv)
     # The listing is skipped for a forced run: it cannot change the answer, and an ssh round-trip whose result is
     # discarded is a wait the user pays for twice — once here, once when the pipeline runs anyway.
     has_outputs = False
-    if not (forced or forced_wells):
+    if not forced:
         listing = _finished.list_remote_outputs(runner._cache, candidate)
         has_outputs = listing is not None and bool(listing.with_output)
-    chosen, reason = _choose_remote_output_dir(
-        fresh, candidate, forced=bool(forced or forced_wells), remote_has_outputs=has_outputs)
+    chosen, reason = _choose_remote_output_dir(fresh, candidate, forced=forced, remote_has_outputs=has_outputs)
     if reason:
         log(f"[remote] {reason}\n")
     return chosen

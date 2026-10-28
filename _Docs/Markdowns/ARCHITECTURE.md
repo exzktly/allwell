@@ -12380,9 +12380,11 @@ recorded directory (`services.remote_reuse.reattach_output_dir`) — any, sealed
 or not, because re-attaching is what lets a well left part way continue from its
 checkpoints, and the host runs every unsealed well again; a listing that fails
 holds nothing. The journal proposes and the remote listing decides — a recorded address is a
-statement about where work was *sent*, not that it is still there — and a forced
-run never re-attaches, since landing in a directory already full of the previous
-run's output is exactly how a forced re-run gets skipped. **Neither does an
+statement about where work was *sent*, not that it is still there — and a run
+under `--force` never re-attaches, since landing in a directory already full of the previous
+run's output is exactly how a forced re-run gets skipped. A run that forces only
+named wells does re-attach: the host redoes those wells where they lie, and the
+pre-flight and verification already treat them as owed. **Neither does an
 incremental run**, and its own output directory is emptied before it launches:
 its upload is a split holding only the groups still missing, so a previous
 run's outputs in the directory can only mislead it — the remote pipeline runs
@@ -12565,6 +12567,22 @@ threshold overridden per host, address the directory another configuration had
 already filled, be found complete by the pre-flight check, and have that
 configuration's numbers fetched back as its own. One definition feeds both the
 launched command and the digest.
+
+It leaves out what names wells rather than configures them: `--force_wells`
+and `--only_wells`, each with every value up to the next flag
+(`_DIGEST_SKIP_MULTI`), and `--no_auto_threshold`, which switches only the
+plate-level gating pass. A Resume adds `--force_wells` itself
+(`remote_finished_wells.nanowell_forced`) and a run that sends part of a plate
+adds `--no_auto_threshold`, so with them hashed the Resume could not find the
+attempt it resumed: its uploaded batches were sent again, its finished wells
+recomputed, its held wells never re-anchored. Forcing is honoured per well
+where reuse is decided instead — a forced well is never adopted
+(`remote_batch_resume.take_from_remote`), the pre-flight never calls a forced
+run a cache hit, verification requires its archive be replaced — and re-attach
+declines only for `--force`, so one forced well no longer costs the rest of
+the plate its earlier directory. `legacy_argv_digests` adds the earlier
+definition (`earlier_argv_digest`) of the argv as it is and without those three
+flags, so an attempt journalled before is still found.
 
 It is computed over the *flags*, never the launcher — `sys.executable` and
 either the local path to `process_microscopy.py` or the frozen bundle's
@@ -14468,8 +14486,11 @@ before uploading; it is never set on a single-process run, local or remote, and
 it is under `NOT_KEYED_ON` like `--only_wells` itself. It is added after
 `pipeline_argv_digest` is taken, so it does not change the run address. Pinned
 by `tests/test_a_batched_subset_run_finds_its_wells.py`, which reads the flag
-out of the launched driver script. The subset rides in `pipeline_argv_digest`, so a different subset is a
-different run address and never reattaches to another run's directory. The
+out of the launched driver script. The subset is **not** in `pipeline_argv_digest` (`_DIGEST_SKIP_MULTI`): which
+wells a run covers is not how any one well is computed. A different subset still uploads different archives, so
+its run directory — keyed on the upload too — is its own; what the shared digest allows is re-attaching to, and
+taking leftovers from, an earlier attempt of the same plate and settings, where each well is judged by its own
+settings marker and seal. The
 fetch's `merge_fetched_run_report` / `merge_fetched_field_quality` keep every
 local record the fetched block does not name — which also means a subset well
 that dies on the host without writing any record keeps its earlier local one;

@@ -50,6 +50,32 @@ Counts are not kept in this header; derive them from the rows
 - **MEDIUM** — degraded behaviour with a workaround.
 - **LOW** — cosmetic or narrow.
 
+
+## Where the work stands (for a session picking this up)
+
+Every row is being fixed in one pull request from `claude/batch-handoff-ack`.
+The rows were split into seven slices, each worked on its own branch and
+merged into `claude/batch-handoff-ack` when finished:
+
+| Slice | Rows | Branch | Snapshot of unfinished work |
+|---|---|---|---|
+| staging | S1–S3, S6, S7, H1, S10 (staging RAM item) | `review/staging` | `backup/review-staging` |
+| fetch | A1–A6, A8, A10, B4–B6, C5, C7 | `review/fetch` | `backup/review-fetch` |
+| transport | C3 (keepalive), C4, C8, S4, S5, S8–S10, E5 (GC) | `review/transport` | `backup/review-transport` |
+| driver | G1–G6, C2, C6, C10, A7, A9, D2, D4 | `review/driver` | `backup/review-driver` |
+| allocation | E1–E4, E5 (launcher), C9, C3 (queue-wait deadline) | `review/allocation` | `backup/review-allocation` |
+| resume | B1, B2, F1–F8, P4 | `review/resume` | `backup/review-resume` |
+| reporting | B3, C1, C11, D1, D3, D5, D6 | `review/reporting` | `backup/review-reporting` |
+
+The `backup/review-*` branches on the remote are snapshots of each slice's
+working tree, uncommitted edits included, as a single commit on top of that
+slice's last commit; they are a recovery point, not reviewed work. To resume a
+slice: check out its `backup/` branch, read its rows here, re-run its tests,
+and continue. After the slices merge: P2 and P3 (guards over the merged tree),
+P1 (the localhost end-to-end harness), the full fast lane plus the remote and
+nanowell lanes, one version bump, then the pull request. This section is
+removed with the rest of the file when the last row closes.
+
 ---
 
 ## The one pattern behind most of it

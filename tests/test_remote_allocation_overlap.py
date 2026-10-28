@@ -582,7 +582,7 @@ def test_resume_right_after_stop_is_not_refused(monkeypatch, tmp_path):
 def test_a_scheduled_run_asks_for_the_node_to_itself(
         monkeypatch, tmp_path, stop_fetchers, exclusive, expected):
     """The single-launch path sends ``RemoteHost.launch_command``: with
-    ``exclusive_node`` on (the default) srun carries ``--exclusive``, so a
+    ``exclusive_node`` on srun carries ``--exclusive``, so a
     second run — another app instance's — cannot be placed on the same machine;
     off, the command is exactly what the user wrote
     (``tests/test_a_run_reserves_its_node.py`` covers the other launch sites)."""

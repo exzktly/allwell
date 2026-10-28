@@ -72,8 +72,11 @@ class ValidateWorker(QThread):
     def _emit_well_scanned(self, well_report: WellReport) -> None:
         self.wellScanned.emit(well_report)
         state = well_health(well_report)
+        # A nanowell well's missing work is whole timepoints, listed with no fov (pipeline.completeness).
+        unit = ("timepoint(s)" if well_report.missing and all(not fov for fov, _tp in well_report.missing)
+                else "(fov, timepoint) pair(s)")
         detail = (
-            f"{len(well_report.missing)} (fov, timepoint) pair(s) missing"
+            f"{len(well_report.missing)} {unit} missing"
             if state == "partial" else _STATE_WORD.get(state, state)
         )
         self.logLine.emit(f"  {well_report.well}: {detail}")
@@ -94,7 +97,7 @@ class ValidateWorker(QThread):
         if self._apply_repair and report.repairable:
             self.logLine.emit("Applying repairs…")
             try:
-                result = apply_repairs(self._root, report)
+                result = apply_repairs(self._root, report, progress=self.logLine.emit)
             except Exception as exc:  # pragma: no cover — defensive
                 swallowed("validate repair")
                 self.failed.emit(f"Repair failed: {exc}")

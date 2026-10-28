@@ -14592,6 +14592,12 @@ distinguishable — the latter looks, from Home, exactly like a scan that never
 ran.
 
 `validate_compute.py::build_report(root)` is a read-only Qt-free scan.
+A well with a nanowell grid record (`out/nanowells/<WELL>_grid.json`) is counted in timepoints instead, through
+`pipeline.completeness.nanowell_coverage` — the rule Review Home uses — so the two surfaces cannot disagree:
+its cell CSV has rows only for tiles that own a nanowell holding a cell, and its out archive holds one montage
+per timepoint, so a per-(fov, timepoint) diff read a complete nanowell well as missing pairs. Its missing
+work is `("", timepoint)` pairs, and the per-(fov, timepoint) schema-mismatch check is skipped for it, since
+its CSV `fov` is the owner tile. The paragraphs below describe every other well.
 *Intent* — what a well's raw input actually contains — is read through
 `pipeline.incremental_keys.fov_keys_from_member_names`, the name-parsing half of
 `read_done_fov_keys_from_zip`/`_from_folder`, applied to `in/<WELL>.zip`/
@@ -14767,9 +14773,9 @@ explains, or a disk-rule well with no kept roster: re-run). `build_report`
 lists each as a warning and puts the repairable wells in
 `DatasetReport.misaddressed_nanowell_wells`, which makes the report
 `repairable`. `apply_repairs` plans again from disk, so a repeat is a no-op,
-and `relabel_dataset` copies each well's grid record, sites table and cell
+and `relabel_dataset` reports to the Validate log as it goes (`progress`, the worker's `logLine`: each well as it is planned, each well relabelled, the backup, each cell table with a running count every `PROGRESS_EVERY_ROWS`, the sites table) and copies each well's grid record, sites table and cell
 tables to `out/nanowells/relabel_backup/<time>/`, then renames addresses
-`(q, r) -> (q + dq, r + dr)` with `nw_ring`/`nw_label` recomputed. Measured
+`(q, r) -> (q + dq, r + dr)` (cell tables streamed row by row, never held whole) with `nw_ring`/`nw_label` recomputed. Measured
 values and `well_x_um`/`well_y_um` (physical positions) are kept as they are.
 When the winning frame is not the one the roster was decided in, the roster
 moves too (`roster_offset`). A row that lands outside the roster is dropped. A

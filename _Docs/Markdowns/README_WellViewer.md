@@ -8029,7 +8029,9 @@ say — the raw log says so and the findings are unaffected.
    and missed the matching crescent inside it: the first is dropped, and the
    second is written as `clipped` with no values. The Array view then shows,
    for that timepoint, that it was relabelled and how many rim nanowells it
-   has no values for. The original tables are copied to
+   has no values for. The log reports each well as it is checked and
+   relabelled, and counts each cell table's rows as it rewrites them.
+   The original tables are copied to
    `out/nanowells/relabel_backup/` first. Two kinds of well are listed and
    left alone. In one, two timepoints anchored equally well disagree, and
    nothing in the tables says which is right: set an anchor by hand on the

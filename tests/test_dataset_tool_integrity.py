@@ -367,6 +367,7 @@ def test_a_repair_preserves_the_user_blocks_it_rewrites_around(tmp_path):
         root=root,
         stale_available_timepoints=["0h"], missing_available_timepoints=[],
         stale_available_fovs=[], missing_available_fovs=[],
+        misaddressed_nanowell_wells=(), csv_prefixes=(),
     )
     validate_apply.apply_repairs(root, report)
 

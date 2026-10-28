@@ -57,6 +57,7 @@ from pipeline.completeness import (
     done_keys,
     health as _health,
     missing_keys,
+    nanowell_coverage,
     reduce_csv_state,
 )
 from pipeline.incremental_keys import fov_keys_from_member_names
@@ -731,6 +732,7 @@ def _no_csv_finding(well: str, evidence: WellEvidence) -> Finding:
 def _scan_one_well(
     well: str, *, in_map, zip_map, folder_map, csv_candidates, schema_fields, sep: str,
     fov_field_present: bool, evidence_map: dict[str, WellEvidence] | None = None,
+    nanowell_dir: Path | None = None,
 ) -> tuple[WellReport, list[Finding], set[str] | None]:
     """Read-only per-well diff: intent (from the input container) vs. done
     (from the CSV/out-zip/out-folder). Pulled out of :func:`_scan_wells` so
@@ -768,8 +770,21 @@ def _scan_one_well(
     # _well_intent's return. The rule itself — including the single-FOV
     # timepoint-only fallback — is pipeline.completeness.missing_keys, shared
     # with the pipeline's end-of-run check.
+    # A nanowell well is counted in timepoints, as Review Home counts it (pipeline.completeness.nanowell_coverage):
+    # its cell CSV has rows only for the tiles that own a nanowell holding a cell, and its out archive holds one
+    # montage per timepoint, so per (fov, timepoint) a complete well with an empty tile read as missing that tile at
+    # every timepoint — and a well of empty nanowells as missing everything.
+    grid_path = None if nanowell_dir is None else Path(nanowell_dir) / f"{well}_grid.json"
+    nanowell = grid_path is not None and grid_path.is_file()
+    intent_count, covered_any = len(intent), len(done)
     if container is None:
         missing: set[tuple[str, str]] = set()
+    elif nanowell:
+        coverage = nanowell_coverage(
+            well, in_members=members, grid_path=grid_path, sites_path=grid_path.with_name(f"{well}.csv"),
+            has_out_zip=out_zip is not None, schema=schema_fields, sep=sep, skip_hidden=container.is_dir())
+        missing = set(coverage.missing)
+        intent_count, covered_any = coverage.intent, coverage.covered_any
     else:
         missing = missing_keys(intent, done, fov_field_present=fov_field_present)
     report = WellReport(
@@ -778,7 +793,7 @@ def _scan_one_well(
         has_out_folder=out_folder is not None,
         zero_cell_recorded=evidence.segmented_zero_cells,
         not_fetched_recorded=evidence.stranded_on_remote,
-        intent=len(intent), covered_csv=len(csv_keys), covered_any=len(done),
+        intent=intent_count, covered_csv=len(csv_keys), covered_any=covered_any,
     )
 
     # A well with real recorded output (done) should have every one of its
@@ -792,7 +807,7 @@ def _scan_one_well(
     # parse is reading the wrong tokens as fov/timepoint. Left undetected,
     # that silently turns into a wall of individually-wrong missing_fov_tp
     # findings for a well that may well be genuinely complete.
-    if container is not None and len(done) >= 4:
+    if container is not None and len(done) >= 4 and not nanowell:   # a nanowell CSV's fov is the owner tile
         unmatched_done = done - intent
         if len(unmatched_done) >= 0.5 * len(done):
             findings.append(Finding(
@@ -810,7 +825,16 @@ def _scan_one_well(
                 ),
             ))
 
-    if missing:
+    if missing and nanowell:
+        sample = sorted(tp for _fov, tp in missing)[:5]
+        findings.append(Finding(
+            severity="error", code="missing_fov_tp", well=well,
+            message=(
+                f"Well {well}: {len(missing)} timepoint(s) present in the input and not analysed to an addressed "
+                f"grid (its nanowell record) — e.g. {sample}."
+            ),
+        ))
+    elif missing:
         if fov_field_present:
             sample = sorted(missing)[:5]
             findings.append(Finding(
@@ -889,6 +913,7 @@ def _scan_wells(
             well, in_map=in_map, zip_map=zip_map, folder_map=folder_map,
             csv_candidates=csv_candidates, schema_fields=schema_fields, sep=sep,
             fov_field_present=fov_field_present, evidence_map=evidence_map,
+            nanowell_dir=paths.out_dir / "nanowells",
         )
         if progress is not None and progress.on_well_done is not None:
             progress.on_well_done(result[0])

@@ -70,7 +70,6 @@ def _follows(rows, timepoints) -> bool:
 def test_validate_finds_and_relabels_a_timepoint_whose_array_centre_landed_a_site_off(tmp_path, monkeypatch):
     """0h and 24h read the square; 48h cannot, and its array centre lands a site off. The caller's real sequence:
     the run writes the dataset, Validate scans it, Apply repairs relabels it, Validate scans it again."""
-    from datasets.validate.apply import apply_repairs
     from datasets.validate.nanowell_relabel import BACKUP_DIRNAME, UNMEASURED_STATE
     from datasets.validate.validate_compute import build_report
 
@@ -86,8 +85,25 @@ def test_validate_finds_and_relabels_a_timepoint_whose_array_centre_landed_a_sit
     assert finding.well == "A01" and "48h by (1, 0)" in finding.message and "0h's" in finding.message
     assert report.misaddressed_nanowell_wells == ("A01",) and report.repairable
 
-    result = apply_repairs(plate, report)
+    # Through the worker the Validate page runs, so the log a person reads is what is checked: reported, the repair
+    # said "Applying repairs…" and nothing else until it finished.
+    from datasets.validate.worker import ValidateWorker
+
+    lines, outcome = [], []
+    worker = ValidateWorker(str(plate), apply_repair=True)
+    worker.logLine.connect(lines.append)
+    worker.succeeded.connect(lambda rep, res: outcome.append(res))
+    worker.run()
+    [result] = outcome
     assert result.relabelled_nanowell_wells == ("A01",) and "relabelled 1 misaddressed nanowell well" in result.summary
+    log = lines[lines.index("Applying repairs…"):]
+    for expected in ("Nanowell addresses: reading each well's grid record and sites table again…",
+                     "  A01 (1/1): to relabel: 48h by (1, 0)",
+                     "  Relabelling A01 (1/1): 48h by (1, 0) onto 0h's nanowells",
+                     "Nanowell addresses: 1 well(s) relabelled."):
+        assert expected in log, expected
+    assert any(line.startswith("    backed up 3 file(s)") for line in log)          # grid, sites, cells
+    assert any("cell(s) read" in line for line in log) and any("site row(s) written" in line for line in log)
     sites = _sites(plate)
     assert _follows(sites, hours)
 

@@ -805,3 +805,53 @@ def test_a_zip_beside_its_own_well_folder_is_not_a_collision(tmp_path):
 
     assert not [f for f in report.findings
                 if f.code == "well_spelling_collision"]
+
+
+def _nanowell_dataset(root, statuses: dict, cell_rows=()):
+    """A nanowell well as a run leaves it: two tiles per timepoint in the input, a grid record with one block per
+    timepoint, a sites table, one montage per timepoint in the out archive, and a cell table whose rows exist only
+    for the tiles that own a nanowell holding a cell."""
+    from tests.fixtures.dataset_builder import BASE_INFO
+
+    in_dir, out_dir = root / "in", root / "out"
+    (out_dir / "nanowells").mkdir(parents=True)
+    in_dir.mkdir()
+    info = dict(BASE_INFO, available_timepoints=list(statuses), available_fovs=["F001", "F002"])
+    (out_dir / "pipeline_info.json").write_text(json.dumps(info))
+    with zipfile.ZipFile(in_dir / "A01.zip", "w") as zf:
+        for tp in statuses:
+            for fov in ("F001", "F002"):
+                zf.writestr(f"exp_nir_A01_{fov}_{tp}.tif", b"img")
+    with zipfile.ZipFile(out_dir / "A01_out.zip", "w") as zf:
+        for tp in statuses:
+            zf.writestr(f"A01_{tp}_montage.png", b"png")
+    grid = {"scheme_version": 1, "array_radius": {"radius_um": 900.0},
+            "timepoints": {tp: {"status": status} for tp, status in statuses.items()}}
+    (out_dir / "nanowells" / "A01_grid.json").write_text(json.dumps(grid))
+    (out_dir / "nanowells" / "A01.csv").write_text(
+        "timepoint,nw_q,nw_r\n" + "".join(f"{tp},0,0\n" for tp, st in statuses.items() if st == "ok"))
+    with (out_dir / "measurements_A01.csv").open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["well", "fov", "timepoint", "timepoint_hours", "nucleus_id", "area_px", "nw_q", "nw_r"])
+        writer.writerows(cell_rows)
+
+
+def test_a_complete_nanowell_well_with_empty_tiles_is_complete(tmp_path):
+    """Reported: Validate said every nanowell well had (fov, timepoint) pairs missing while Review Home showed none.
+    A nanowell well's cell table has rows only for tiles that own a cell, and its out archive holds one montage per
+    timepoint, so counted per (fov, timepoint) a well of empty nanowells read as missing every pair. It is counted
+    per timepoint, from its grid record, as Home counts it."""
+    _nanowell_dataset(tmp_path, {"0h": "ok", "24h": "ok"}, [("A01", "F001", "0h", 0.0, 1, 50, 0, 0)])
+    report = vc.build_report(tmp_path)
+    [well] = report.wells
+    assert (well.missing, well.intent, well.covered_any, well.complete) == ((), 2, 2, True)
+    assert not [f for f in report.findings if f.code in ("missing_fov_tp", "schema_mismatch_suspected")]
+
+
+def test_a_nanowell_timepoint_that_was_not_addressed_is_the_one_reported_missing(tmp_path):
+    _nanowell_dataset(tmp_path, {"0h": "ok", "24h": "unaddressed"})
+    report = vc.build_report(tmp_path)
+    [well] = report.wells
+    assert well.missing == (("", "24h"),) and not well.complete
+    [finding] = [f for f in report.findings if f.code == "missing_fov_tp"]
+    assert "1 timepoint(s)" in finding.message and "24h" in finding.message

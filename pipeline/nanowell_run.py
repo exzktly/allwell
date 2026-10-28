@@ -1840,7 +1840,7 @@ class CircleEvidence:
     misanchored: dict                                   # timepoint -> (dq, dr): its nanowells sit that step off
 
 
-def _misanchored(detected: dict, kept=()) -> dict:
+def misanchored(detected: dict, kept=()) -> dict:
     """``timepoint -> step`` for each timepoint whose detected sites match the other timepoints' better moved by a
     lattice step than where they are: its origin is a step off (review X35a-R2). A timepoint whose sites the others
     do not overlap better anywhere is not listed. With two timepoints a step apart, both are listed: which of them
@@ -1934,7 +1934,7 @@ def _evidence_roster(located: dict, anchored, radius_um: float, settings: Nanowe
     nothing could have shown it absent. A site within that band whose whole disk was imaged and where no nanowell was
     ever detected is floor, and is not in the roster. The first anchored timepoint's lattice measures the distances.
 
-    A timepoint whose detections sit a lattice step from the other timepoints' (:func:`_misanchored`) is anchored a
+    A timepoint whose detections sit a lattice step from the other timepoints' (:func:`misanchored`) is anchored a
     step off, and its detections decide nothing: taken at face value one such timepoint put 17 rows of floor into
     every timepoint of a well (review X35a-R2). *kept* is an earlier run's evidence for the timepoints it kept
     (``{"detected": sites, "imaged": sites}``, from its rows), so that an incremental run decides the roster a run
@@ -1950,7 +1950,7 @@ def _evidence_roster(located: dict, anchored, radius_um: float, settings: Nanowe
     distance = {a: float(np.linalg.norm(basis @ np.asarray(a, dtype=float))) for a in candidates}
     found = {tp: {(e.q, e.r) for e in located[tp].indexed if e.q is not None} for tp in anchored}
     kept = kept or {}
-    misanchored = _misanchored(found, kept.get("detected", ())) if len(anchored) > 1 or kept.get("detected") else {}
+    off = misanchored(found, kept.get("detected", ())) if len(anchored) > 1 or kept.get("detected") else {}
     band = {a for a in candidates if radius_um - pitch / 4 < distance[a] <= radius_um + pitch / 4}
     imaged = {tp: set() for tp in anchored}
     for tp in anchored:
@@ -1976,11 +1976,11 @@ def _evidence_roster(located: dict, anchored, radius_um: float, settings: Nanowe
                          or (a in detected and distance[a] <= radius_um + pitch)
                          or (a in band and a not in seen_whole))
 
-    trusted = [tp for tp in anchored if tp not in misanchored]
+    trusted = [tp for tp in anchored if tp not in off]
     detected = set(kept.get("detected", ())).union(*(found[tp] for tp in trusted))
     seen_whole = set(kept.get("imaged", ())).union(kept_out, *(imaged[tp] for tp in trusted))
     return CircleEvidence(supported(detected, seen_whole), {tp: supported(found[tp], imaged[tp]) for tp in anchored},
-                          misanchored)
+                          off)
 
 
 def _circle_roster(outcome, anchored, radius_um, settings, fixed_roster, fixed_radius_um, kept=None):

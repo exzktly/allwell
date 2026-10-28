@@ -167,20 +167,94 @@ def test_build_copy_command_uses_ssh_copy_id_when_available(tmp_path, monkeypatc
     assert "bigbox" in cmd
 
 
+_PUB = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq8+/xY0abc="
+
+
+def _write_pub(tmp_path, comment="zak@my $pc"):
+    key = tmp_path / "key"
+    # CRLF and a comment holding a ``$`` — what a key edited or reused on
+    # Windows can carry, and what the shells must never be shown.
+    (tmp_path / "key.pub").write_text(f"{_PUB} {comment}\r\n", newline="")
+    return key
+
+
 def test_build_copy_command_falls_back_when_ssh_copy_id_missing(
     tmp_path, monkeypatch,
 ):
     monkeypatch.setattr("services.ssh_key_setup.shutil.which", lambda _: None)
-    key = tmp_path / "key"
+    key = _write_pub(tmp_path)
     cmd = build_copy_command("bigbox", key)
-    # Manual cat | ssh pipeline.
-    assert cmd.startswith("cat ")
-    assert "key.pub" in cmd
-    assert "bigbox" in cmd
-    assert "authorized_keys" in cmd
-    # Permissions hardening.
-    assert "chmod 700 ~/.ssh" in cmd
-    assert "chmod 600 ~/.ssh/authorized_keys" in cmd
+    assert cmd == (
+        'ssh bigbox "mkdir -p ~/.ssh && chmod 700 ~/.ssh && '
+        "touch ~/.ssh/authorized_keys && "
+        f"(grep -qF '{_PUB}' ~/.ssh/authorized_keys || "
+        f"echo '{_PUB}' >> ~/.ssh/authorized_keys) && "
+        'chmod 600 ~/.ssh/authorized_keys"'
+    )
+
+
+def test_fallback_survives_cmd_exe_which_ignores_single_quotes(
+    tmp_path, monkeypatch,
+):
+    """The reported Windows failure: in cmd.exe, ``'`` is not a quote, so the
+    old ``ssh host 'mkdir -p ~/.ssh && ...'`` was split at ``&&`` and the remote
+    shell got ``'mkdir -p ~/.ssh`` -> "unexpected EOF while looking for
+    matching `''". cmd.exe honours only double quotes; every ``&&``, ``||``
+    and ``>>`` must therefore sit inside the one double-quoted argument, and
+    nothing outside it may need quoting at all."""
+    monkeypatch.setattr("services.ssh_key_setup.shutil.which", lambda _: None)
+    cmd = build_copy_command("bigbox", _write_pub(tmp_path))
+    head, quoted, tail = cmd.partition('"')
+    assert head == "ssh bigbox "
+    assert quoted == '"' and tail.endswith('"') and '"' not in tail[:-1]
+    # No pipe either: cmd.exe has no ``cat``, and PowerShell 5 has no ``<``.
+    assert "|" not in head and "cat " not in cmd
+    # The free-text comment (here holding a ``$``, which PowerShell would
+    # expand inside double quotes) never reaches the command.
+    assert "$" not in cmd and "zak@" not in cmd
+
+
+def test_fallback_remote_half_installs_the_key_once(tmp_path, monkeypatch):
+    """Run the remote command the way sshd does (``sh -c <arg>``) against a
+    scratch HOME, twice: one entry, owner-only permissions."""
+    import os
+    import shlex
+
+    monkeypatch.setattr("services.ssh_key_setup.shutil.which", lambda _: None)
+    argv = shlex.split(build_copy_command("bigbox", _write_pub(tmp_path)))
+    assert argv[:2] == ["ssh", "bigbox"] and len(argv) == 3
+    home = tmp_path / "home"
+    home.mkdir()
+    for _ in range(2):
+        result = subprocess.run(
+            ["sh", "-c", argv[2]], env={**os.environ, "HOME": str(home)},
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+    auth = home / ".ssh" / "authorized_keys"
+    assert auth.read_text() == f"{_PUB}\n"
+    assert auth.stat().st_mode & 0o777 == 0o600
+
+
+def test_fallback_without_a_readable_pub_still_double_quotes(tmp_path, monkeypatch):
+    monkeypatch.setattr("services.ssh_key_setup.shutil.which", lambda _: None)
+    cmd = build_copy_command("bigbox", tmp_path / "missing")
+    assert cmd.startswith("cat ") and "missing.pub" in cmd
+    assert cmd.endswith('chmod 600 ~/.ssh/authorized_keys"')
+    assert "chmod 700 ~/.ssh" in cmd and " | ssh bigbox \"" in cmd
+
+
+def test_windows_paths_are_double_quoted(tmp_path, monkeypatch):
+    """``shlex.quote``'s single quotes are literal characters to cmd.exe, so
+    ``ssh-copy-id -i 'C:\\...pub'`` would look for a file whose name starts
+    with a quote. On Windows the path is double-quoted instead."""
+    import services.ssh_key_setup as sks
+
+    monkeypatch.setattr("services.ssh_key_setup.shutil.which", lambda _: "ssh-copy-id")
+    monkeypatch.setattr(sks, "_WINDOWS", True)
+    assert sks._shell_word(r"C:\Users\Zak Singer\.ssh\allwell_hpc.pub") == \
+        r'"C:\Users\Zak Singer\.ssh\allwell_hpc.pub"'
+    assert sks._shell_word("hpc") == "hpc"
 
 
 def test_build_copy_command_quotes_pathological_alias(tmp_path, monkeypatch):

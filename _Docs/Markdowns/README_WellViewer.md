@@ -520,7 +520,14 @@ successive-imaging workflow: concatenate the analysed dataset with the new timep
 Analyze with Run scope set to *Fill in what's missing* — the earlier timepoints are kept, and the new one is added onto the same nanowells.
 The new images need an acquisition record of their own when the analysed dataset has one (convert them with
 the CZI, ND2 or OME import); without it the merge is refused, because the merged dataset would have no record
-to add the new timepoint from. Two datasets that both hold nanowell results are refused. Each tool checks the tables before it writes anything,
+to add the new timepoint from. *Concatenate* also joins two datasets that were each analysed in nanowell mode:
+nanowells are matched by address, so dataset 2's timepoints land on dataset 1's nanowells. Where the two analyses
+disagree about a well — they found different nanowells in it, a timepoint of dataset 2 sits a lattice step off, or
+it was measured on dataset 2's own fallback template — those timepoints of dataset 2 are left out, and the log
+names each one and why; run Analyze with Run scope set to *Fill in what's missing* to measure them onto dataset 1's
+nanowells. Each half keeps the nanowell diameter its own analysis measured. Two analyses under different nanowell
+settings are refused, as is a pair where only one dataset holds nanowell results or only one has an acquisition
+record. Each tool checks the tables before it writes anything,
 and refuses tables it cannot carry whole (a well with a grid record and no sites table, an unreadable record, one
 well under two spellings). *Validate* checks the tables against the grid record and the archives.
 
@@ -1654,6 +1661,14 @@ error rather than leaving Edit…, Test and the list silently doing nothing.
 background: an unreachable host takes up to fifteen seconds to time out and the
 rest of the app — including a running plate's log — keeps working meanwhile.
 The same is true of **Verify** in the SSH-key wizard.
+
+The SSH-key wizard's **Step 2** command is the one line you paste into your own
+terminal to install the key on the remote, typing the remote password once. When
+`ssh-copy-id` is installed it is a plain `ssh-copy-id` call. When it is not — the
+usual case on Windows — the command is a single `ssh` call with the public key
+written into it, inside double quotes, so the same line works in Command Prompt,
+PowerShell, Git Bash and a macOS or Linux terminal. Running it twice does not add
+the key twice.
 
 **On a node it schedules** requires a scheduler command. Saving that choice with
 the command box empty would mean *run on the SSH host itself*, which on an HPC

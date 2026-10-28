@@ -12242,7 +12242,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_upload.py` | Getting a run's input onto the remote host, once. `DatasetCache` keys each upload by a stat-based fingerprint of the staged archives, so re-running the same input is a metadata round trip rather than a re-upload; streams rsync's output well by well (`_run_rsync_streaming`, `_UploadWellProgress`) so the Upload rail and each well's dial fill as its archive lands; and keeps the remote cache inside the host's budget. Its short ssh control commands are bounded by `SSH_CONTROL_TIMEOUT_S`. Line-budgeted (`REMOTE_UPLOAD_BUDGET`). |
 | `remote_jobs.py` | The scheduler jobs a remote run holds, and making sure none outlives it. `close_remote_job` is the teardown backstop every exit the app survives goes through (it reads the job id from `<pidfile>.slurm` and `scancel`s it); `sweep_orphaned_allocation` is what the next run of the same plate does about an exit the app did not survive, and returns its verdict (`swept`, `owned`, `notmine`, `unknown`, `none`) because the batched path acts on it. Both refuse to cancel a job that is not the caller's (`_only_my_job`), and both are no-ops on a host with no `compute_launcher`. `RemoteRunner.close_remote_job` and `_sweep_orphaned_allocation` delegate here. Line-budgeted (`REMOTE_JOBS_BUDGET`). |
 | `remote_process.py` | The run as the GUI sees it: `_RemoteProcess` wraps the single ssh that runs the pipeline and `_BatchedRemoteProcess` the driver that holds one allocation and runs the plate batch by batch. Both present the `subprocess.Popen` surface `PipelineRunner` reads and tee every line to the `Fetcher`, so per-well downloads start the moment a well is announced done; `wait` flushes the `Fetcher` and `terminate`/`kill` cancel it, and every exit path ends the run heartbeat (`_UploadHeartbeat`) exactly once. A batch whose driver vanished marks the run failed (1); a stopped one reports 130. `tests/test_remote_process.py` drives the single-launch wrapper against a real child process. Line-budgeted (`REMOTE_PROCESS_BUDGET`). |
-| `remote_staging.py` | Turning the user's input into the per-well archives a remote run uploads: `stage_local_zips` detects the layout (one zip per well, well folders, loose TIFs, or a mix left by an interrupted zip-up), zips folders and loose TIFs **into the input directory itself** so the next run finds zips and skips the zip-up (a folder's archived TIFs are removed the moment its own zip is published), and returns a `ZippedInput`. The channel filter and an incremental run's split are both planned from each archive's member list before any image data is read, and only archives that change are written — to a staging directory beside the input, never over the user's archives. `ZippedInput.cleanup` removes every staging directory a run made (the filter's and the split's, joined), a failure part way through removes its own before the error propagates, and a filter that matches no image in any well is refused before anything moves, on both the ZIP and the MIXED path. Line-budgeted (`REMOTE_STAGING_BUDGET`); `tests/test_remote_staging.py` pins the cleanup contract. |
+| `remote_staging.py` | Turning the user's input into the per-well archives a remote run uploads: `stage_local_zips` detects the layout (one zip per well, well folders, loose TIFs, or a mix left by an interrupted zip-up), zips folders and loose images **into the input directory itself** so the next run finds zips and skips the zip-up (a folder's archived images are removed the moment its own zip is published, so that archive — which holds every image the folder had — is the user's copy of the well from then on), and returns a `ZippedInput`. The channel filter and an incremental run's split are both planned from each archive's member list before any image data is read, in every layout, and only archives that change are written — to a staging directory beside the input, never over the user's archives, including the ones the zip-up has just written. The success hook deletes a loose top-level image only once its name, size and CRC-32 match a member of a well archive, and never touches a well folder; a folder with no images, and a loose image in no well, are left where they are and named in the log as not uploaded. `ZippedInput.cleanup` removes every staging directory a run made (the filter's and the split's, joined), a failure part way through removes its own before the error propagates, and a filter that matches no image in any well is refused before anything moves, on both the ZIP and the MIXED path. Line-budgeted (`REMOTE_STAGING_BUDGET`); `tests/test_remote_staging.py` pins the cleanup contract. |
 | `remote_finished_wells.py` | Which wells a remote run need not send: `finished_here` answers, before staging, with the pipeline's own rule — the per-well CSV present, recorded under the key `pipeline.cli_args.settings_key_from_argv` gives this run's argv plus the host's flags, not forced, its completeness record whole, never an empty-well blank, and for a nanowell well every timepoint of its archive reached, with a verdict in its grid record, and its anchors those its last run used (`util.nanowell_anchors.wells_with_unused_anchors`) — and `drop_finished` removes them from a staged `ZippedInput` into its `up_to_date_wells`; `nanowell_forced` and `argv_forcing` force a nanowell well sent again over partial output here, and `pull_settings_marker` writes `UNKNOWN_SETTINGS` when a well's marker cannot be fetched. Called by `PipelineRunner._finished_here` and by batched mode's local-completion filter (see *What is finished here is not sent again*). |
 | `remote_plate_grids.py` | `seed_plate_grids`: before a remote nanowell run's pipeline starts, copies the local output's grid records of every well not in the run into the remote `nanowells/`, so the end-of-run re-anchoring can fit the plate's motion as a local run does. Called by `RemoteRunner._prepare_run` and `_BatchedRemoteProcess.__init__` (see *The host is given the rest of the plate*). |
 | `remote_fetch.py` | Bringing a remote run's output home, and proving it arrived. `Fetcher` pulls each well's output the moment the pipeline announces it done (overlapping download with later wells' compute), merges an incremental run's partial zip and CSV into the local ones rather than overwriting them, keeps the mid-run `pipeline_info.json` current, and removes a well's remote files only once its local artefact is in place. `FetchedOutputVerifier` runs after the pipeline exits: it pulls the top-level artefacts, merges the fetched sidecar's run-report, field-quality and user blocks with the local ones, writes the client-side completeness record, checks every expected well's CSV and non-empty `<well>_out.zip` are present (and replaced, for a forced well), re-pulls what is missing, and returns a `FetchVerification`. It never deletes the run's remote directory — `RemoteRunner.verify_and_cleanup` does that, on a passing verdict only. Its collaborators (host, run record, the dataset cache whose ssh it borrows, the stop flag) are passed in, never read off the runner. Line-budgeted (`REMOTE_FETCH_BUDGET`). |
@@ -12328,8 +12328,16 @@ mode most likely to arise on a slow share, so a full copy there was the worst
 place to keep one. Its leftover folders are still zipped into the *input* dir
 (persisted deliberately, so the next run sees plain ZIP mode and re-zips
 nothing), and with no channel filter it uploads from the input dir with no
-staging at all. `_filter_channels_in_staging` survives for the FOLDER / FLAT
-path, which filters zips it has just written itself.
+staging at all. **FOLDER and FLAT** take the same two passes over the archives
+their zip-up has just written into the input dir. Those archives are not
+scratch: each folder's images are deleted the moment its archive is published,
+so the archive is the only copy of the well on disk, and the filter writes its
+trimmed copy into the transit directory like any other. (Rewriting them in place
+— which an earlier shape did, on the theory that the loose sources were still
+intact — deleted every unselected channel from the user's only copy before a
+byte was uploaded; `tests/test_staging_keeps_every_image.py` holds every layout,
+copy and move mode, to "every image still exists under the input, byte for
+byte, after staging, after a failed run and after a successful one".)
 
 **An archive that *is* rewritten keys differently every run, and the run journal
 is what stops that losing work.** The pass-through above keeps the key stable
@@ -13054,9 +13062,11 @@ full copies of the plate on the user's own volume at peak, on exactly the runs
 where the input is largest.
 
 **The folder is not the unit of deletion; the archived files are.** Every one of
-these paths packs an *extension-filtered* subset — the folder zippers take
-`.tif`/`.tiff` only, and `compress_images_to_zip` adds `.png` — so removing the
-folder destroyed everything the filter skipped: OME companion XML, acquisition
+these paths packs a *filtered* subset — remote staging's `_zip_well_folder`
+takes the run-input images (`util.image_exts.is_run_input_member`: PNG and JPEG
+included, AppleDouble `._*` sidecars and other dotfiles not), other folder
+zippers `.tif`/`.tiff` only, and `compress_images_to_zip` adds `.png` — so
+removing the folder destroyed everything the filter skipped: OME companion XML, acquisition
 logs, mask subdirectories, and on macOS the `.DS_Store` in every folder a user
 has opened in Finder, with no copy anywhere.
 `util.zip_write.replace_folder_with_archive` is the one answer: it deletes
@@ -13064,8 +13074,10 @@ exactly the files that went into the archive and removes the directory only when
 nothing is left in it. A folder still holding something survives carrying just
 that remainder, and the caller's log line names what it kept rather than
 reporting the folder gone. Four paths route through it —
-`remote_staging._zip_well_folder`'s two callers (plus the post-success hook, which
-skips any folder the pass preserved),
+`remote_staging._zip_well_folder`'s two callers (the post-success hook touches
+no folder at all: whatever is left in one is by definition in no archive, and a
+folder with no images is never packed, never removed, and named in the log as a
+well not uploaded),
 `pipeline.mixed_input.consolidate_mixed_to_zips`, the Datasets pane's
 `_zip_well_folders`, and
 `process_microscopy.compress_folder_images_to_zip_and_remove`. The extension

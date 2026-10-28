@@ -35,7 +35,6 @@ from services.remote_transport import _rsync_ssh_transport
 from services.remote_upload import DatasetCache
 from services.remote_staging import (
     _detect_local_input_mode,
-    _filter_channels_in_staging,
     _member_matches,
     _required_tokens,
 )
@@ -357,65 +356,6 @@ def test_member_matches_simple():
     assert _member_matches("subfolder/Exp_NIR_A01.tif", {"NIR"}) is True
 
 
-def test_filter_channels_drops_unused(tmp_path):
-    z = _make_well_zip(
-        tmp_path,
-        "A01.zip",
-        [
-            "Exp_NIR_A01_F001.tif",
-            "Exp_GFP_A01_F001.tif",
-            "Exp_mCherry_A01_F001.tif",
-            "Exp_DAPI_A01_F001.tif",
-        ],
-    )
-    zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z,))
-    _filter_channels_in_staging(
-        tmp_path, (z,), LocalInputMode.ZIP,
-        keep_tokens={"NIR", "GFP"},
-        log_fn=None,
-    )
-    with zipfile.ZipFile(z, "r") as zf:
-        remaining = zf.namelist()
-    assert any("NIR" in m for m in remaining)
-    assert any("GFP" in m for m in remaining)
-    assert not any("mCherry" in m for m in remaining)
-    assert not any("DAPI" in m for m in remaining)
-
-
-def test_filter_channels_noop_when_all_kept(tmp_path):
-    members = ["Exp_NIR_A01.tif", "Exp_GFP_A01.tif"]
-    z = _make_well_zip(tmp_path, "A01.zip", members)
-    size_before = z.stat().st_size
-    _filter_channels_in_staging(
-        tmp_path, (z,), LocalInputMode.ZIP,
-        keep_tokens={"NIR", "GFP"},
-        log_fn=None,
-    )
-    # No rewrite needed.
-    assert z.stat().st_size == size_before
-    with zipfile.ZipFile(z, "r") as zf:
-        assert sorted(zf.namelist()) == sorted(members)
-
-
-def test_filter_channels_raises_when_typo_drops_everything(tmp_path):
-    """v5.2.18: if a typo'd channel name matches zero members in a
-    well, refuse to ship an empty zip. The pipeline downstream would
-    crash with a confusing 'no images found' message far from the
-    real cause."""
-    z = _make_well_zip(
-        tmp_path,
-        "A01.zip",
-        ["Exp_NIR_A01_F001.tif", "Exp_GFP_A01_F001.tif"],
-    )
-    # User typoed "GP" instead of "GFP" — neither token matches.
-    with pytest.raises(RuntimeError, match=r"matched zero images.*A01.*typo"):
-        _filter_channels_in_staging(
-            tmp_path, (z,), LocalInputMode.ZIP,
-            keep_tokens={"NUR", "GP"},  # both typoed
-            log_fn=None,
-        )
-
-
 def test_stage_local_zips_with_fluor_filter_preserves_user_input(tmp_path):
     """v5.2.18: stage_local_zips MUST NOT modify the user's original
     input zips. Pre-v5.2.18 it rewrote them in place — a typo'd
@@ -663,39 +603,6 @@ def test_stage_local_zips_typoed_channel_does_not_corrupt_user_input(tmp_path):
     assert z.read_bytes() == original_bytes
     with zipfile.ZipFile(z, "r") as zf:
         assert sorted(zf.namelist()) == sorted(members)
-
-
-def test_filter_channels_logs_per_well_progress(tmp_path):
-    """v5.2.20: pre-v5.2.20 the channel filter only emitted ONE
-    summary line at the end of the whole plate. For a 96-well filter
-    that meant total silence for tens of seconds. Now each well
-    contributes a progress line so the user can see the filter
-    chewing through the plate."""
-    # A01 — all kept (no-op). B02 — partial (rewrite). C03 — all kept.
-    a01 = _make_well_zip(tmp_path, "A01.zip", ["NIR_F001.tif", "GFP_F001.tif"])
-    b02 = _make_well_zip(
-        tmp_path, "B02.zip",
-        ["NIR_F001.tif", "GFP_F001.tif", "DAPI_F001.tif"],
-    )
-    c03 = _make_well_zip(tmp_path, "C03.zip", ["NIR_F001.tif", "GFP_F001.tif"])
-
-    lines: list[str] = []
-    _filter_channels_in_staging(
-        tmp_path, (a01, b02, c03), LocalInputMode.ZIP,
-        keep_tokens={"NIR", "GFP"},
-        log_fn=lambda s: lines.append(s),
-    )
-    blob = "".join(lines)
-    # Per-well status with position-of-total prefix.
-    assert "(1/3): A01" in blob
-    assert "(2/3): B02" in blob
-    assert "(3/3): C03" in blob
-    # No-op wells say "all N kept".
-    assert "A01" in blob and "no-op" in blob
-    # The rewrite well reports its before→after size.
-    assert "B02" in blob and "kept 2/3" in blob
-    # End-of-plate summary still fires.
-    assert "summary" in blob and "rewrote 1" in blob
 
 
 # ── DatasetCache: cache-key stability ───────────────────────────────────────

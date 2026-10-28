@@ -1699,6 +1699,19 @@ well — it says so and uploads the archive untouched instead, because copying i
 locally to save that would cost more than it saves. An archive with nothing to
 drop is never copied and never mentioned.
 
+The rebuilt archives are **copies**, made in a hidden `.allwell-transit` folder
+beside your input and deleted when the run ends; your own files keep every
+channel. That holds for every input layout, including a plate of loose images
+or well folders, which a remote run first packs into one `<well>.zip` per well
+inside your input folder — each of those holds every image the well had, and
+the next run uses them directly. After a successful run, the loose images that
+were packed are removed; an image is removed only once its name, size and
+checksum match a file inside one of those archives, so a flat-field reference,
+a plate overview or anything else that is in no well stays where it is. A well
+folder with no images in it is left untouched, and the log names it as a well
+that was not uploaded — as it does any image whose name does not parse to a
+well under your filename schema.
+
 Your own machine's home volume is not used by a remote run either. Wells arrive
 into a hidden `.allwell-transit` folder inside your chosen output folder and
 move into place from there, so the only volumes a remote run needs room on are

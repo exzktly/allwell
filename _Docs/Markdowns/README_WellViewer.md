@@ -1364,6 +1364,8 @@ look for, in order of what they mean:
 | `none of its N image member(s) could be placed by the run's filename schema …` | the schema does not match the filenames |
 | `… holds N member(s) but no '_labels' segmentation image` | that well's archive carries no segmentation mask, so no cell could be sampled from it |
 | `produced no new defaults (every channel already has a stored value)` | nothing to do; the dataset already had thresholds |
+| `estimated … but saved nothing — there is no pipeline_info.json in … to save them into` | the values were computed and could not be kept: the output folder has no run record. The values are in the line, to type into Cell Gating by hand |
+| `[remote] WARN cell-gating thresholds not computed: this run's pipeline_info.json is not here …` | *(batched remote run)* the run's record could not be brought from the server before the pass, so there was nowhere to save thresholds; the rest of the run is unaffected |
 | *(no `Auto-threshold` line at all)* | the run ended before the pass — check for an earlier failure |
 
 The last routine case is worth knowing: thresholds already stored for a channel

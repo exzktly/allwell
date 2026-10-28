@@ -2528,7 +2528,9 @@ class PipelineRunner:
                 self._enqueue_queued_suspend(where="Remote pipeline")
             elif rc == 0 and ok and self._suspend_requested.is_set():
                 self._enqueue_suspended(where="Remote pipeline")
-            elif self._stop_requested.is_set() and (rc == 0 or self._stop_unconfirmed):
+            # 130 is a batched run's own code for a Stop (`_BatchedRemoteProcess`, set only once its stop event is
+            # set); read as an exit code, a Stop between batches said "Remote pipeline exited with code 130" (D8).
+            elif self._stop_requested.is_set() and (rc in (0, 130) or self._stop_unconfirmed):
                 self._enqueue_stopped(where="Remote pipeline")
             elif external is not None:
                 self._enqueue_error(external)

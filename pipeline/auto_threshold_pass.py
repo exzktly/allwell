@@ -29,6 +29,14 @@ from pipeline.threshold_optimize import estimate_thresholds_from_controls
 from util.json_write import write_json_atomic
 
 
+def _sidecar_path(output_dir: Path) -> Path | None:
+    """The run's ``pipeline_info.json`` — in *output_dir*, else its parent — or ``None`` when neither exists."""
+    for candidate in (output_dir / "pipeline_info.json", output_dir.parent / "pipeline_info.json"):
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _apply_thresholds_to_pipeline_info(
     output_dir: Path,
     thresholds: dict[str, float],
@@ -39,11 +47,13 @@ def _apply_thresholds_to_pipeline_info(
     """
     if not thresholds:
         return {}
-    info_path = output_dir / "pipeline_info.json"
-    if not info_path.exists():
-        info_path = output_dir.parent / "pipeline_info.json"
-    if not info_path.exists():
-        log.info("Auto-threshold: pipeline_info.json not found — defaults not persisted.")
+    info_path = _sidecar_path(output_dir)
+    if info_path is None:
+        # A warning, with the values: they were estimated and are being thrown away, which the summary line after
+        # this used to report as "every channel already has a stored value" (row B7).
+        log.warning("Auto-threshold: estimated %s but saved nothing — there is no pipeline_info.json in %s to "
+                    "save them into.", ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in thresholds.items()),
+                    output_dir)
         return {}
     try:
         existing = json.loads(info_path.read_text())
@@ -182,7 +192,7 @@ def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list
                 len(written),
                 ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items()),
             )
-        elif estimated or not non_seg:
+        elif (estimated or not non_seg) and _sidecar_path(output_dir) is not None:
             log.info("Auto-threshold pass produced no new defaults "
                      "(every channel already has a stored value).")
         return written

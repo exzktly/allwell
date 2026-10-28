@@ -1154,7 +1154,12 @@ class _BatchedRemoteProcess:
         return "--no_auto_threshold" in list(self._pipeline_argv or [])
 
     def _run_local_auto_threshold(self) -> None:
-        """The plate's cell-gating thresholds, computed here over every downloaded well (``run_local_auto_threshold``)."""
+        """The plate's cell-gating thresholds, computed here over every downloaded well (``run_local_auto_threshold``),
+        into the local sidecar — pulled first when the Fetcher's poller has not brought it yet (row B7)."""
+        if not self._fetcher.pull_sidecar_now():
+            self._log("[remote] WARN cell-gating thresholds not computed: this run's pipeline_info.json is not here "
+                      "and could not be pulled, so there is nowhere to save them.\n")
+            return
         run_local_auto_threshold(self._local_output_dir, self._pipeline_argv, self._log)
 
 

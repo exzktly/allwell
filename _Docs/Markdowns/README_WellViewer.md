@@ -2100,7 +2100,7 @@ reading it. The log names any it kept over budget for that reason.
   signal by something other than Stop or Suspend is reported the same way.
 - **A remote run that goes quiet is checked.** If a remote run prints nothing
   for twenty minutes (outside a wait in the scheduler's queue, which is quiet by
-  nature), the status line says *No output from <host> for 21m00s — checking it
+  nature), the status line says *No output from `<host>` for 21m00s — checking it
   is still running…*, the log shows the last line received, and the app asks the
   host whether the run is still there. The answer goes in the log: still
   running (it is only slow — nothing to do), no longer running (press **Stop**,
@@ -2109,7 +2109,7 @@ reading it. The log names any it kept over budget for that reason.
   never that quiet — every field, step or transfer prints something — so the
   warning means something is worth a look, not that the run has failed.
 - **A dropped connection is reported as one.** If the connection to the host
-  breaks during a remote run, the headline says *Connection to <host> lost*
+  breaks during a remote run, the headline says *Connection to `<host>` lost*
   with ssh's own reason (*Timeout, server … not responding*, *Connection …
   closed*, *Broken pipe*), the log shows that line in red, and the message says
   whether the job is still running on the host, no longer running, or — when

@@ -281,7 +281,6 @@ REMOTE_FILES: dict[str, str] = {
     "test_remote_allocation_overlap.py": "Ask the scheduler for a node while the plate is still uploading",
     "test_remote_cellpose_env.py": "A Cellpose run on a remote host uses the ``allwell-cellpose`` env when the host has it, …",
     "test_remote_conda_env.py": "The remote run resolves — and checks — the conda environment it will use",
-    "test_remote_commands_are_checked_and_bounded.py": "No remote command result is thrown away, and every services subprocess is bounded",
     "test_remote_config.py": "Tests for services/remote_config.py",
     "test_remote_config_writer.py": "Tests for services.remote_config.write_remote / delete_remote",
     "test_remote_dialog.py": "Smoke tests for analyze.remote_dialog (v5.1.0)",

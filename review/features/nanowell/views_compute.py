@@ -117,12 +117,16 @@ class TrajectoryPanel:
     class_medians: dict                   # occupancy class -> median at each time (NaN where none)
     n_without_value: int                  # nanowells with no value at any timepoint (not drawn)
     in_hours: bool = False                # the times are recorded hours, not the timepoints' order
+    #: x -> verdict for the timepoints whose nanowell identity is not confirmed (``identity_compute.timepoint_marks``)
+    marks: dict = field(default_factory=dict)
 
 
-def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool = False) -> list[TrajectoryPanel]:
+def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool = False,
+                      marks: dict | None = None) -> list[TrajectoryPanel]:
     """One panel per well: a line per nanowell over time, and the median of each occupancy class. With *cohort*,
     only the nanowells with a value at every timepoint are drawn and pooled (tracker I8); the rest are counted
-    among those not drawn."""
+    among those not drawn. *marks* is ``well -> {timepoint -> verdict}`` for the timepoints whose nanowell identity
+    is not confirmed, carried onto each panel by its x position."""
     out = []
     for well in wells:
         rows = metrics[metrics["well"] == well]
@@ -151,7 +155,9 @@ def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool
                 with np.errstate(all="ignore"):
                     medians[cls] = np.array([np.nanmedian(col) if np.isfinite(col).any() else np.nan
                                              for col in ys.T])
-        out.append(TrajectoryPanel(well, xs, tps, lines, medians, empty, in_hours=bool(use_time)))
+        mine = (marks or {}).get(well) or {}
+        out.append(TrajectoryPanel(well, xs, tps, lines, medians, empty, in_hours=bool(use_time),
+                                   marks={float(x): mine[tp] for x, tp in zip(xs, tps) if tp in mine}))
     return out
 
 

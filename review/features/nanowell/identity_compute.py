@@ -43,23 +43,20 @@ def identity_counts(data, wells) -> dict[str, dict[str, list[str]]]:
 
 
 def identity_note(data, wells) -> str:
-    """The footer sentence(s) for *wells*: which timepoints the identity check contradicted (left out), and which
-    wells it could not confirm (inconclusive or not checked); ``""`` when every timepoint is confirmed or is the
-    reference."""
+    """The footer sentence for *wells*: which timepoints the identity check contradicted (left out) and which wells
+    it could not confirm (inconclusive or not checked); ``""`` when every timepoint is confirmed or the reference.
+    Short, because a footer line is not wrapped: ``Nanowell identity — B02 T3 contradicted (left out); A01, C03 not
+    confirmed (see Identity).``"""
     counts = identity_counts(data, wells)
     parts = []
     bad = counts.get(CONTRADICTED) or {}
     if bad:
-        parts.append("Nanowell identity contradicted at " + _named([f"{w} {'/'.join(t)}" for w, t in bad.items()])
-                     + ": those timepoints' addresses name other nanowells, so their rows are left out of every "
-                       "comparison over time (see Identity).")
+        parts.append(_named([f"{w} {'/'.join(t)}" for w, t in bad.items()]) + " contradicted (left out)")
     unsure = sorted(set(counts.get(INCONCLUSIVE) or {}) | set(counts.get(NOT_CHECKED) or {}))
     if unsure:
         unchecked = set(counts.get(NOT_CHECKED) or {})
-        label = ("not checked" if unchecked >= set(unsure) else "not confirmed")
-        parts.append(f"Nanowell identity {label} for {_named(unsure)}: that each address names the same nanowell "
-                     "at every timepoint is unverified there (see Identity).")
-    return " ".join(parts)
+        parts.append(f"{_named(unsure)} " + ("not checked" if unchecked >= set(unsure) else "not confirmed"))
+    return f"Nanowell identity — {'; '.join(parts)} (see Identity)." if parts else ""
 
 
 def all_good(data, wells) -> bool:
@@ -476,3 +473,28 @@ def diagnostics(pair: IdentityPair) -> Diagnostics:
 
 def _num(value) -> str:
     return "—" if value is None else f"{float(value):.3f}"
+
+
+# ── marks on the line plots ──────────────────────────────────────────────────
+#: The verdicts a line plot marks at their timepoint, with the word it writes there.
+MARK_WORDS = {CONTRADICTED: "contradicted", INCONCLUSIVE: "inconclusive", NOT_CHECKED: "not checked"}
+
+
+def timepoint_marks(data, well: str) -> dict[str, str]:
+    """``timepoint -> verdict`` for the timepoints of *well* a line plot marks: every ``contradicted`` and
+    ``inconclusive`` one, and a ``not_checked`` one when another timepoint of the well was checked (a well never
+    checked at all is said once, in the footer, rather than hatched at every timepoint)."""
+    verdicts = (getattr(data, "identity", None) or {}).get(well) or {}
+    checked = any(verdict != NOT_CHECKED for verdict, _why in verdicts.values())
+    return {tp: verdict for tp, (verdict, _why) in verdicts.items()
+            if verdict in (CONTRADICTED, INCONCLUSIVE) or (verdict == NOT_CHECKED and checked)}
+
+
+def marks_legend(verdicts) -> str:
+    """The footer sentence saying what the hatching means, naming only the kinds drawn; ``""`` for none."""
+    kinds = [v for v in (INCONCLUSIVE, CONTRADICTED, NOT_CHECKED) if v in set(verdicts)]
+    if not kinds:
+        return ""
+    hatch = {INCONCLUSIVE: "//", CONTRADICTED: "xx", NOT_CHECKED: ".."}
+    said = ", ".join(f"{hatch[v]} {MARK_WORDS[v]}" for v in kinds)
+    return f"Hatched: nanowell identity not confirmed ({said}); lines through them dashed."

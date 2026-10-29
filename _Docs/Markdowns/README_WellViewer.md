@@ -5611,15 +5611,19 @@ each well's array moved with the plate. Each timepoint gets one of:
 
 - **confirmed** (or **reference**) — the addresses were checked and agree;
 - **contradicted** — they do not. The figures leave that timepoint out of every comparison over time, counting its
-  nanowells as excluded with the reason "identity contradicted", and the footer names it. The analysis log says
+  nanowells as excluded with the reason "identity contradicted", and the footer names it; the line plots cross-hatch
+  it (xx) and label it, so the gap in the lines is explained. The analysis log says
   what was found: *every address one lattice step off*, *a turn by 60°*, *a reflection*, *tile F3*, or a decoy
   taken for the central square;
 - **inconclusive** — the check could not decide (no central square visible, the plate moved too far, the timepoint
   had no addresses, the tiles were not acquired on one grid, or the array's outline and its central square disagree)
   and the footer says so. **These timepoints are still used in every comparison over time**: inconclusive means
-  unverified, not wrong. Look at them in the Identity view before relying on them;
+  unverified, not wrong. In *Trajectories* and in *Distribution* over time each one is drawn hatched (//) and
+  labelled *inconclusive* at its place on the time axis, and every line into or out of it is dashed. Look at them
+  in the Identity view before relying on them;
 - **not checked** — the tables were analysed before this check existed, or changed after it ran (a Validate
-  relabel, a concatenation). The footer says so, and these timepoints are used as they are.
+  relabel, a concatenation). The footer says so, and these timepoints are used as they are. When only some of a
+  well's timepoints are unchecked (a timepoint added later), the line plots dot-hatch those (..).
 
 When two timepoints disagree and nothing tells which is right, both are **contradicted**; when the earliest
 timepoint is the one that disagrees with the rest, the rest are kept and it is the one left out.

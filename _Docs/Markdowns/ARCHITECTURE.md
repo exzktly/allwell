@@ -11057,7 +11057,13 @@ the identity check contradicted (`NanowellData.identity`, read per well by `read
 addresses name other nanowells than the reference's, so it is no fold change's numerator or baseline, and an address
 only it holds is not followed at all. Every figure `controller.draw_view` composes says in its footer which
 timepoints were contradicted and which wells are not confirmed or not checked (`identity_compute.identity_note`):
-a dataset analysed before the check existed reads `not_checked` until the audit command is run over it. Contents values are used only in a measurable state (`measured` / `empty`), whatever the table
+a dataset analysed before the check existed reads `not_checked` until the audit command is run over it. The line plots
+mark it where it is (`identity_compute.timepoint_marks`, drawn by `_identity_marks`): Trajectories (through
+`TrajectoryPanel.marks`) and the Distribution view over time (`DistributionModel.identity_marks`) draw a hatched band
+at each timepoint that is `inconclusive` (//), `contradicted` (xx) or, in a well where another timepoint was checked,
+`not_checked` (..), with the verdict written in it, and dash every line segment into or out of it
+(`_identity_marks.split_segments`); a well never checked is said once in the footer rather than hatched at every
+timepoint, and `marks_legend` adds the footer sentence naming the hatches drawn. Contents values are used only in a measurable state (`measured` / `empty`), whatever the table
 holds. `site_series` is one nanowell's rows in time order; an address the well never had is an empty frame.
 
 **Metrics** are the nanowell tracker's per-nanowell metrics table, NaN where undefined, with `exclusion_reason` naming the cause per

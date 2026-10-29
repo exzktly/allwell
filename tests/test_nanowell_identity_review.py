@@ -75,7 +75,7 @@ def test_without_a_sidecar_every_timepoint_reads_not_checked_and_the_figure_says
     assert set(data.identity["A01"].values()) == {(ni.NOT_CHECKED,
                                                    "the identity check has not been run on these tables")}
     assert at_count(metrics, "t_a") == 4.0 / 2.0                        # nothing left out: unverified, not refuted
-    assert identity_note(data, ["A01"]).startswith("Nanowell identity not checked for A01:")
+    assert identity_note(data, ["A01"]).startswith("Nanowell identity — A01 not checked")
 
 
 def at_count(metrics, tp):
@@ -84,8 +84,8 @@ def at_count(metrics, tp):
 
 @pytest.mark.parametrize("verdicts, note", [
     ({"t_c": ni.REFERENCE, "t_a": ni.CONFIRMED, "t_d": ni.CONFIRMED}, ""),
-    ({"t_c": ni.REFERENCE, "t_a": ni.INCONCLUSIVE, "t_d": ni.CONFIRMED}, "Nanowell identity not confirmed for A01:"),
-    ({"t_c": ni.REFERENCE, "t_a": ni.CONTRADICTED, "t_d": ni.CONFIRMED}, "Nanowell identity contradicted at A01 t_a:"),
+    ({"t_c": ni.REFERENCE, "t_a": ni.INCONCLUSIVE, "t_d": ni.CONFIRMED}, "Nanowell identity — A01 not confirmed"),
+    ({"t_c": ni.REFERENCE, "t_a": ni.CONTRADICTED, "t_d": ni.CONFIRMED}, "Nanowell identity — A01 t_a contradicted (left out)"),
 ])
 def test_the_footer_note_follows_the_verdicts(tmp_path, verdicts, note):
     _, data = _metrics(_out(tmp_path, verdicts))
@@ -114,7 +114,7 @@ def test_the_page_s_figures_carry_the_note(tmp_path):
               axis="groups", timepoint="t_d", control="", baseline="earliest", cohort=False, well="A01",
               well_timepoint="t_d")
     texts = " ".join(t.get_text() for t in fig.texts)
-    assert "Nanowell identity contradicted at A01 t_a" in texts
+    assert "Nanowell identity — A01 t_a contradicted" in texts
 
 
 def test_the_export_carries_nothing_measured_at_a_contradicted_timepoint(tmp_path):
@@ -127,3 +127,73 @@ def test_the_export_carries_nothing_measured_at_a_contradicted_timepoint(tmp_pat
     assert row["state"] == IDENTITY_CONTRADICTED and row["reason"] == WHY
     assert row[["n_cells", "confluence", "area_est_cells", "imaged_fraction", "visible_fraction"]].isna().all()
     assert table.loc[(0, 0, "t_d"), "area_est_cells"] == 8
+
+
+# ── the line plots mark what was not confirmed ────────────────────────────────
+def _figure(out, view, axis="time"):
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.controller import draw_view
+
+    metrics, data = _metrics(out)
+    fig = Figure(figsize=(8, 6))
+    draw_view(fig, view, metrics, data, groups={"A01": ["A01"]}, metric="n", channel=None, axis=axis,
+              timepoint="t_d", control="", baseline="earliest", cohort=False, well="A01", well_timepoint="t_d")
+    return fig
+
+
+def _bands(fig):
+    return [(round(float(p.get_x() + p.get_width() / 2), 3), p.aw_verdict, p.get_hatch())
+            for ax in fig.axes for p in ax.patches if p.get_gid() == "nw-identity-band"]
+
+
+def _segments(fig, style):
+    from matplotlib.collections import LineCollection
+
+    out = []
+    for ax in fig.axes:
+        for coll in ax.collections:
+            if isinstance(coll, LineCollection) and (coll.get_linestyle()[0][1] is not None) == (style == "--"):
+                out += [tuple(round(float(x), 3) for x in seg[:, 0]) for seg in coll.get_segments()]
+    return out
+
+
+def test_trajectories_hatch_an_inconclusive_timepoint_and_dash_the_lines_through_it(tmp_path):
+    """Asked for: an inconclusive timepoint is labelled as such in the line plots, not only in the footer."""
+    fig = _figure(_out(tmp_path, {"t_c": ni.REFERENCE, "t_a": ni.INCONCLUSIVE, "t_d": ni.CONFIRMED}),
+                  "trajectories")
+    assert _bands(fig) == [(5.0, ni.INCONCLUSIVE, "////")]               # t_a is at 5 h
+    assert [t.get_text() for t in fig.texts + fig.axes[0].texts if t.get_gid() == "nw-identity-mark"] == \
+        ["inconclusive"]
+    dashed, solid = _segments(fig, "--"), _segments(fig, "-")
+    assert dashed and all(5.0 in seg for seg in dashed)                  # every segment touching t_a is dashed
+    assert not any(5.0 in seg for seg in solid)
+    footer = " ".join(t.get_text() for t in fig.texts if t.get_gid() == "nw-traj-footer")
+    assert "Hatched: nanowell identity not confirmed (// inconclusive); lines through them dashed." in footer
+
+
+def test_a_contradicted_timepoint_is_cross_hatched_and_its_gap_explained(tmp_path):
+    fig = _figure(_out(tmp_path, {"t_c": ni.REFERENCE, "t_a": ni.CONTRADICTED, "t_d": ni.CONFIRMED}),
+                  "trajectories")
+    assert _bands(fig) == [(5.0, ni.CONTRADICTED, "xxxx")]
+    assert not any(5.0 in seg for seg in _segments(fig, "-") + _segments(fig, "--"))   # no value there: a gap
+
+
+def test_a_well_never_checked_is_said_once_not_hatched_everywhere(tmp_path):
+    fig = _figure(_out(tmp_path, None), "trajectories")
+    assert _bands(fig) == [] and _segments(fig, "--") == []
+    footer = " ".join(t.get_text() for t in fig.texts if t.get_gid() == "nw-traj-footer")
+    assert "Nanowell identity — A01 not checked" in footer
+
+
+def test_the_distribution_over_time_hatches_the_swarm_and_dashes_the_median(tmp_path):
+    fig = _figure(_out(tmp_path, {"t_c": ni.REFERENCE, "t_a": ni.INCONCLUSIVE, "t_d": ni.CONFIRMED}),
+                  "distribution")
+    (x, verdict, hatch), = _bands(fig)
+    assert (verdict, hatch) == (ni.INCONCLUSIVE, "////")
+    ax = fig.axes[0]
+    swarm_x = dict(zip([t.get_text() for t in ax.get_xticklabels()], ax.get_xticks()))
+    assert x == pytest.approx(swarm_x[next(k for k in swarm_x if "t_a" in k or "5" in k)])
+    medians = [line for line in ax.lines if line.get_linewidth() == 1.2]
+    styles = {tuple(round(v, 3) for v in line.get_xdata()): line.get_linestyle() for line in medians}
+    assert styles and all((style == "--") == (x in xs) for xs, style in styles.items())

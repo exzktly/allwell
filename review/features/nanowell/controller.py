@@ -22,13 +22,13 @@ from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
-    METRICS, PER_NANOWELL, distribution_model, match_channel, metric_column,
+    METRICS, PER_NANOWELL, TIME, distribution_model, match_channel, metric_column,
 )
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, one_to_one
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import _identity_controller as idc
-from review.features.nanowell.identity_compute import identity_note
+from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
@@ -529,7 +529,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if filtered is not None:
         note = " ".join(filter(None, [ss.note(filtered), note]))
     if view == "trajectories":
-        render_trajectories(fig, vc.trajectory_panels(metrics, wells, metric_column(metric, channel), cohort=cohort),
+        marks = {w: timepoint_marks(data, w) for w in wells}
+        render_trajectories(fig, vc.trajectory_panels(metrics, wells, metric_column(metric, channel), cohort=cohort,
+                                                      marks=marks),
                             cohort=cohort, label=_label(metric, channel), time_source=data.time_source, note=note)
         return None, None
     if view == "position":
@@ -546,6 +548,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above)
     model.starting = subset.start_bounds()
+    if model.axis == TIME:
+        model.identity_marks = {(w, tp): v for w in wells for tp, v in timepoint_marks(data, w).items()}
+        legend = marks_legend(model.identity_marks.values())
+        if legend:
+            model.notes.append(legend)
     if tableless:
         model.notes.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
                               f"{', '.join(tableless)}.")

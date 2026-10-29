@@ -168,6 +168,9 @@ class DistributionModel:
     #: The count at the baseline the *Subset* holds every kept nanowell to (``Subset.start_bounds``; ``(None, None)``:
     #: no bound), for the occupancy key, which greys the classes the subset removes.
     starting: tuple = (None, None)
+    #: ``(well, timepoint) -> verdict`` for the timepoints whose nanowell identity is not confirmed, which the time
+    #: axis hatches (``identity_compute.timepoint_marks``); empty along wells.
+    identity_marks: dict = field(default_factory=dict)
 
     def swarms(self):
         return [s for p in self.panels for s in p.swarms]

@@ -4924,7 +4924,16 @@ columns, because the cutoff that applies follows the selected Property:
 `ThreshFracOn` for an intensity, `ThreshCountOn` for an smFISH count. A channel
 with no spot-count column renders an em-dash in the count column rather than an
 empty cell — it has no count cutoff to set, which is not the same as one left
-unfilled. Two tables rather than one with two
+unfilled. The line-edits are created once per channel and cached in
+`ctx.runtime.cell_gating.{fluor_gate,thresh_frac,thresh_count}_edits`, so a
+rebuild re-parents them into the new table and keeps unsaved keystrokes. The old
+table is deleted, and the cached edits are its children, so
+`_drop_edits_without_a_row` first forgets (and deletes) every cached edit the new
+table has no row for — a channel absent from the newly loaded dataset, a removed
+ratio, a channel that no longer carries a spot count. Left in its map, such an
+edit died with the old table and the next ThreshFracOn edit raised "Internal C++
+object already deleted" while walking the map. The value survives on the typed
+slice and seeds the edit again if the channel returns. Two tables rather than one with two
 columns: the numbers share a shape but not a meaning — one decides membership of
 the dataset, the other only how members are counted — so a shared table needs a
 heading that names neither decision, which is the original defect (both columns

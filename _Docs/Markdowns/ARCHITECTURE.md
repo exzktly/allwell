@@ -763,8 +763,8 @@ allwell/
 │   ├── schema_section.py       ← the Filename schema section: picker, detection,
 │   │                            readout, and the preview that refreshes them
 │   ├── seg_params.py           ← per-method segmentation params + StarDist thresholds
-│   ├── well_scope.py           ← the Only these wells / Force these wells rows and the
-│   │                              run options they contribute
+│   ├── well_scope.py           ← the Only these wells / Skip these wells / Force these
+│   │                              wells rows and the run options they contribute
 │   ├── slurm_job_view.py       ← the Slurm-job icon in the run dashboard's status line — lit while a job
 │   │                              is open, dimmed while queued, its tooltip the node
 │   ├── log_pane.py             ← the output pane — log view, raw-log toggle,
@@ -14885,9 +14885,23 @@ one). An incremental subset adds to its wells' field-quality records instead,
 as any incremental run does. `run_check` is handed the whole input's container
 map, not the subset's: it describes the directory the run leaves behind.
 
-The Analyze form carries it as **Only these wells** beside **Force these wells**
-(`analyze/well_scope.py`; `analyze.domain.well_list.parse_well_list` is the one
-parse for both). `build_pipeline_args` emits it canonical and sorted, because
+The Analyze form carries it as **Only these wells** beside **Skip these wells**
+and **Force these wells** (`analyze/well_scope.py`;
+`analyze.domain.well_list.parse_well_list` is the one parse for all three).
+**Skip these wells** is not a pipeline flag: a skipped well is one the run leaves
+exactly as it is, which is what `--only_wells` already promises every well it does
+not name, so `PipelineRunner._apply_skip_wells` turns `opts["skip_wells"]` into that
+subset — the input's wells (`input_resolution_service.iter_all_well_tokens`, read
+once the input folder is resolved), or *Only these wells* when given, minus the
+skipped ones (`pipeline.well_skip.skip_wells_scope`) — immediately before
+`build_pipeline_args`. Local, remote and batched runs therefore all reach the
+subset machinery below with nothing new to know. A skipped well also leaves
+`force_wells`; a named well the input lacks, or a typo, is a warning rather than a
+refusal; a skip that leaves no well refuses the run before anything is spawned.
+`skip_wells` is a run-scope key (`run_provenance.SCOPE_KEYS`, the preflight's
+`_SCOPE_KEYS`), never restored from a sidecar, and restored from a queued job
+(`analyze/domain/job_edit.py`). `tests/test_skip_these_wells.py` drives
+`PipelineRunner.start` over a real input folder and reads the argv it spawns. `build_pipeline_args` emits it canonical and sorted, because
 the remote run address hashes the argv and a spelling must not decide whether a
 run reattaches to its own directory. A run started with a subset says so in the
 log and on the dashboard (`only_wells_note`), since it otherwise looks exactly

@@ -36,7 +36,7 @@ output are restored only when the user asks, through the same
 ``_apply_pipeline_info`` the manual *Open pipeline_info.json* path uses. A form
 the user has been typing into is not overwritten because they pointed at a
 folder. And the run-scope knobs — ``force``, ``force_wells``, ``incremental``,
-``only_wells`` — are never restored at all: they say what the *last* run was told to do, and
+``only_wells``, ``skip_wells`` — are never restored at all: they say what the *last* run was told to do, and
 silently re-forcing a plate because the previous run was forced would be the
 most expensive kind of surprise.
 
@@ -83,7 +83,7 @@ _SETTLE_MS = 400
 
 #: Run-scope knobs are deliberately not restored from a previous run. See the
 #: module docstring: they record what that run was *told* to do.
-_SCOPE_KEYS = ("force", "force_wells", "incremental", "only_wells")
+_SCOPE_KEYS = ("force", "force_wells", "incremental", "only_wells", "skip_wells")
 
 
 class _ScanSignals(QObject):

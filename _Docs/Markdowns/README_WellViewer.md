@@ -5397,12 +5397,14 @@ use them.
 
 - **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
   *Extremes* and *Identity*. Each view shows only the controls it uses.
-- **Metric** — what each dot is: cell count, confluence, brightness (mean per-cell intensity), site signal
-  (integrated intensity above the empty nanowells' background), their fold changes against the baseline,
+- **Metric** — what each dot is: cell count, confluence, brightness (the mean intensity of the cells in the
+  nanowell), **nanowell fluorescence** (the whole nanowell's summed intensity minus what an empty nanowell gives —
+  all the light its cells give off, near zero for an empty nanowell; it grows with both how many cells there are
+  and how bright each is, where brightness follows only the latter), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
   ln count against time, per hour, over at least three timepoints with cells) and occupancy at baseline.
-  Brightness and site signal, and their fold changes, are of the fluorescence channel chosen in **Channel**.
-- **Channel** — beside Metric, on every view: the fluorescence channel Brightness and Site signal are drawn for,
+  Brightness and nanowell fluorescence, and their fold changes, are of the fluorescence channel chosen in **Channel**.
+- **Channel** — beside Metric, on every view: the fluorescence channel Brightness and Nanowell fluorescence are drawn for,
   in the figures, the site detail and the crop captions. It starts on the channel the Plotting tabs use when the
   run measured it, else on the first channel it measured. A channel the run read but did not measure in the
   nanowells is listed greyed, as *(not measured)*; its tooltip says to re-run the wells with it among the
@@ -5423,7 +5425,7 @@ use them.
   *Custom subset…* or **Edit…** opens the subset editor under the controls, where you can combine any number of
   conditions and choose whether a nanowell must meet *all* of them or *any*. Each condition tests one of:
   - **Starting cells** — the count at the Baseline;
-  - **a metric** — cell count, confluence, brightness and site signal (per channel), any fold change or the growth
+  - **a metric** — cell count, confluence, brightness and nanowell fluorescence (per channel), any fold change or the growth
     rate. A metric with a value per timepoint is read *at baseline*, at the well's *earliest* or *latest*
     timepoint, at a timepoint you name, or *at any* / *at every* timepoint (*every*: the nanowell needs a passing
     value at each of its well's timepoints);
@@ -5518,7 +5520,7 @@ use them.
   rank, address and the fold change it was ranked by, and the ranking timepoint's column is outlined. Each crop
   carries its own numbers inside it, so they take no room from the crops: the fold change at that timepoint in its
   top-left corner, and along its foot as many of the nanowell's measurements there as fit one line — cell count,
-  confluence, then the channel's site signal and brightness. The pop-out writes all of them under each panel. The
+  confluence, then the channel's nanowell fluorescence and brightness. The pop-out writes all of them under each panel. The
   montage fills the figure: the Largest and Smallest blocks sit side by side whenever that gives bigger crops, and
   **Timepoints** (beside *Largest & smallest*) chooses which timepoints are shown — fewer give bigger crops; the
   ranking timepoint is always shown. Crops too small to hold a line of measurements show the fold change only, and
@@ -5590,7 +5592,7 @@ use them.
   layers that view drew.
 
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
-brightness and site signal against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
+brightness and nanowell fluorescence against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
 six nanowells to compare; clicking empty space on the plot clears them. A timepoint where the
 nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
 Under the plots, a strip of crops shows the first selected nanowell at each timepoint, cut at full resolution
@@ -5647,9 +5649,14 @@ against the others than it did at the reference, and, on a plate of five or more
 each well's array moved with the plate. Each timepoint gets one of:
 
 - **confirmed** (or **reference**) — the addresses were checked and agree;
-- **contradicted** — they do not. The figures leave that timepoint out of every comparison over time, counting its
-  nanowells as excluded with the reason "identity contradicted", and the footer names it; the line plots cross-hatch
-  it (xx) and label it, so the gap in the lines is explained. The analysis log says
+- **partial** — the timepoint registered cleanly and most of its nanowells land on themselves, but some do not:
+  those whose address landed on a neighbour, and every nanowell of an imaging tile that was placed a whole nanowell
+  spacing off in the montage. Only those nanowells are left out of comparisons over time; the rest of the timepoint
+  is used. The line plots hatch it (`\\`) and the Identity view's *Status* colouring shows which were left out;
+- **contradicted** — the registration itself, or every address at once, is wrong (all one step off, turned, a decoy
+  taken for the square). Its values are still drawn — a count at that timepoint is a count of some nanowell — over a
+  cross-hatched (xx) background, but as points joined to nothing: no fold change, growth rate or trajectory line
+  uses them, and the footer names the timepoint. The analysis log says
   what was found: *every address one lattice step off*, *a turn by 60°*, *a reflection*, *tile F3*, or a decoy
   taken for the central square;
 - **inconclusive** — the check could not decide (no central square visible, the plate moved too far, the timepoint
@@ -5665,6 +5672,35 @@ each well's array moved with the plate. Each timepoint gets one of:
 When two timepoints disagree and nothing tells which is right, both are **contradicted**; when the earliest
 timepoint is the one that disagrees with the rest, the rest are kept and it is the one left out.
 
+Small differences in where an imaging tile was placed — tens of micrometres, typical of a corner tile with few or no
+nanowells, which can only be placed where the stage said it was — do not change any nanowell's name and are only
+reported, as are nanowells whose fitted position is a little off. An empty tile is not considered at all.
+
+**How the run keeps a tile from landing a whole nanowell off.** Neighbouring imaging tiles are placed against each
+other by the nanowell pattern they share, which says where a tile sits only up to a whole nanowell spacing: every
+spacing looks the same. The run settles which spacing in this order:
+
+1. **What is in the overlap.** Cells, debris, the central square and the edge of the array do not repeat, so the run
+   removes the repeating pattern from both tiles and matches what is left. When one placement matches clearly better
+   than every other — by well beyond what the overlap gives by chance — it is used, whatever the stage recorded. An
+   overlap with little in it, or one only a corner wide, decides nothing, which is the usual case: most corrections
+   come from step 3.
+2. **The tiles around it.** Tiles form closed loops, so once the overlap has settled some pairs, a pair between them
+   (two tiles meeting only at a corner, say) must fit with them.
+3. **The well's other timepoints.** The microscope repeats the same tile layout at every timepoint, so when most
+   timepoints (three at least, counting those an earlier run kept) agree where two tiles sit and one timepoint is a
+   whole spacing off, that timepoint is placed again with their layout. Its grid record says which tiles disagreed
+   and by how much (`tile_layout`).
+4. **The stage's record**, which is right as long as the stage was off by less than half a spacing.
+
+When what the overlaps decided and the stage's record for the rest cannot all be true at once (the tiles would not
+fit together), the run places the tiles by the record alone rather than half a spacing astray, and step 3 then
+corrects a tile left a whole spacing off.
+
+Each timepoint's grid record lists, for every pair of tiles, which of these settled it (`registration.steps`). A
+timepoint an earlier run kept is not placed again by an incremental run; analyse the plate again in full to put it
+right.
+
 What the check cannot see: a turn of the array by a symmetry it shares with the central square — a half turn
 (180°), or on a square lattice a quarter turn (90°). The array looks the same either way, so such a turn would be
 confirmed. A keyed plate is put back within a few degrees, so this matters only if the array itself can turn in its
@@ -5674,16 +5710,27 @@ well. The check expects the plate to turn less than 30° between timepoints (45�
 Well list says each well's worst verdict, and it opens on the first timepoint that is not confirmed. *Compare*
 chooses what it draws:
 
-- **Distance map** — every nanowell at its place, coloured by how far its address landed from itself in nanowell
-  spacings (the quarter-spacing limit is marked on the colour bar); failing nanowells are outlined in red, and an
-  imaging tile that sits differently than at the reference is drawn in red and named.
+- **Distance map** — every nanowell at its place. *Colour* chooses how it is filled: **Status** sorts the
+  nanowells into lands on itself (green), imprecise (amber), wrong name (red), in a misregistered tile (red,
+  hatched) and not compared (grey), with a count of each in the legend, so the few that fail stand out among many
+  that pass; **Distance** fills each by how far its address landed from itself in nanowell spacings (the
+  quarter-spacing limit is marked on the colour bar); **Auto** shows Status unless the timepoint is confirmed.
+  Failing nanowells are outlined in red. An imaging tile a whole spacing off is drawn in red labelled with how far
+  it moved; one placed slightly differently, in amber, with how far off it is.
 - **Blink** — the two whole-well images alternating twice a second, the later one turned and moved onto the
   reference by the registration, with addresses written on both. When the addresses are right the array and its
   labels stay still; when they are wrong, the labels jump a nanowell or turn.
 - **Side by side** — the two images next to each other; point at a nanowell on either and it lights on both, with a
   cross where the registration says it should be.
-- **Diagnostics** — how the central square was found: its match across the search area, how far it stands above the
-  next best place, and the turn and shift between the timepoints.
+- **Diagnostics** — how the central square was found, in three pictures: the reference image around its square
+  (what was looked for), the later image turned into the reference's orientation with the match outlined (where it
+  was found), and the match score across the search area with the best and next-best places marked (how clearly).
+  Below them, one line per check with a ✓, ✗ or ! — the verdict and why, the square, how the plate moved, the
+  array's outline, the tiles and the addresses — and a check that could not run says why.
+
+Every Compare mode zooms with the scroll wheel and pans by dragging. Side by side's two images move together, as do
+Diagnostics' two images. The zoom stays while the same well, timepoint and mode are shown and resets when any of them
+changes.
 
 To check a dataset analysed earlier without analysing it again, run
 `python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well): it writes

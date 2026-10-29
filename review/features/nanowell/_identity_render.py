@@ -14,7 +14,13 @@ test reads the figure back rather than the model (CLAUDE.md §7.4 #1):
   timer calls :func:`show_frame`, which only flips visibilities, so a test steps it frame by frame.
 * **Side by side** (:func:`render_sides`, :func:`show_hover`) — the two montages each in its own frame, with the
   hovered address lit on both and the registration's prediction for it crossed on the compared side.
-* **Diagnostics** (:func:`render_diagnostics`) — the correlation surface with its peak and runner-up marked.
+* **Diagnostics** — drawn by ``_identity_diagnostics_render``: the square looked for and where it was found, the
+  match scores around it, and the verdict block.
+
+The Distance map colours each nanowell either by its distance or by its *status* (``identity_compute.status_map``:
+kept, imprecise, wrong name, in a misregistered tile, not compared). Every drawn view names the axes a reader may
+zoom and pan (``IdentityDrawn.zoomable``) and which of them move together (``links``); ``_identity_zoom`` does the
+zooming.
 """
 
 from __future__ import annotations
@@ -25,7 +31,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from review.features.nanowell.identity_compute import DISTANCE_TOP_PITCHES
+from review.features.nanowell.identity_compute import DISTANCE_TOP_PITCHES, STATUS_CLASSES
 
 from review.features.nanowell.renderer import (
     _FOOTER_BASE, _LINE, _PREF_PT, GRID_TYPE_SCALE, MAP_CMAP, _ink, _inks, render_message,
@@ -50,8 +56,13 @@ class IdentityDrawn:
     hover: dict = field(default_factory=dict)         # Side by side: the artists that light up an address
     lit: tuple | None = None                          # the address lit now
     distance: object = None                           # identity_compute.DistanceMap
+    status: object = None                             # identity_compute.StatusMap, when coloured by status
     blink: object = None                              # identity_compute.BlinkFrames
     diagnostics: object = None                        # identity_compute.Diagnostics
+    crops: object = None                              # identity_compute.Crops (Diagnostics)
+    zoomable: tuple = ()                              # the names in ``axes`` a reader zooms and pans
+    links: tuple = ()                                 # groups of those names that move together
+    home: dict = field(default_factory=dict)          # name -> (xlim, ylim) as drawn: the full view
 
 
 def title_text(pair) -> str:
@@ -121,58 +132,140 @@ def _discs(ax, x, y, radius: float, **kw):
 
 
 # ── the Distance map ─────────────────────────────────────────────────────────
-def render_distance(fig, pair, dmap, lines: list[str]) -> IdentityDrawn:
-    """Each compared address at its reference position filled by its distance in pitches, the failing ones outlined,
-    the compared timepoint's tiles mapped into the reference frame."""
-    from matplotlib.colors import Normalize
+def _status_colours() -> dict:
+    """Each status class's colour, from the theme: kept success, imprecise warn, a wrong name or a misregistered tile
+    danger (the tile's hatched), not compared the undefined ink."""
+    from ui.theme import Colors
+
+    return {"kept": Colors.success, "imprecise": Colors.warn, "wrong_name": Colors.danger,
+            "misregistered": Colors.danger, "not_compared": Colors.plot_undefined_ink}
+
+
+#: The hatching of the nanowells in a misregistered tile, which share the wrong names' colour.
+STATUS_HATCH = "////"
+
+
+#: The legend's short words for each status class; the footer says what each means in full.
+STATUS_KEY_WORDS = {"kept": "Lands on itself", "imprecise": "Imprecise", "wrong_name": "Wrong name",
+                    "misregistered": "In a misregistered tile", "not_compared": "Not compared"}
+
+
+def _draw_status(fig, ax, status) -> None:
+    """Each nanowell filled by its status class, a misregistered tile's hatched, with a legend counting each class."""
+    from matplotlib.patches import Patch
+
+    colours = _status_colours()
+    _bg, ink, muted = _inks(ax)
+    handles = []
+    for cls, _label in STATUS_CLASSES:
+        keep = np.array([s == cls for s in status.status], dtype=bool)
+        hatch = STATUS_HATCH if cls == "misregistered" else None
+        if keep.any():
+            coll = _discs(ax, status.x[keep], status.y[keep], status.radius_um, facecolors=colours[cls],
+                          edgecolors=ink if hatch else "none", linewidths=0.0, zorder=3)
+            if hatch:
+                coll.set_hatch(hatch)
+            coll.set_gid(f"nw-identity-status-{cls}")
+        handles.append(Patch(facecolor=colours[cls], edgecolor=ink if hatch else colours[cls], hatch=hatch,
+                             label=f"{STATUS_KEY_WORDS[cls]} ({int(keep.sum()):,})"))
+    key = ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize=7.5, frameon=False,
+                    title="Nanowells", title_fontsize=8, borderaxespad=0.0)
+    for text in [*key.get_texts(), key.get_title()]:
+        text.set_gid("nw-identity-status-key")
+        text.set_color(ink)
+        _ink(text)
+
+
+def _status_lines(pair, tolerance: float) -> list[str]:
+    from pipeline.nanowell_identity import PARTIAL
+
+    out = [f"Each nanowell at its position at {pair.reference} (µm, the reference's frame), coloured by what the check "
+           f"found at {pair.timepoint}: lands on itself (within {tolerance:g} spacing of where the registration puts "
+           f"it), imprecise (nearest itself but further), wrong name (it lands on another nanowell, or another lands "
+           f"on it), or in a tile placed a lattice step off (hatched)."]
+    if pair.verdict == PARTIAL:
+        out.append("The wrong names and the misregistered tiles' nanowells are left out of every figure at "
+                   f"{pair.timepoint}; the rest are used.")
+    return out
+
+
+def _draw_tiles(ax, dmap, muted) -> tuple[list, list]:
+    """The compared timepoint's tiles in the reference's frame: a tile a lattice step off in the danger colour, one
+    placed imprecisely in the warning colour, each named with how far; the points they reach."""
     from matplotlib.patches import Polygon
 
     from ui.theme import Colors
 
-    lines = list(lines) + [f"Each nanowell at its position at {pair.reference} (µm, the reference's frame), filled by "
-                           f"how far its address lands from itself at {pair.timepoint}, in pitches; outlined in red "
-                           f"where it fails. Tiles of {pair.timepoint} mapped into {pair.reference}'s frame; a tile "
-                           "placed differently drawn in red."]
-    bottom = _frame(fig, pair, lines)
-    ax = _image_axes(fig, [0.03, bottom, 0.82, _TOP - bottom])
-    drawn = IdentityDrawn("distance", pair, {"map": ax}, distance=dmap)
-    _bg, ink, muted = _inks(ax)
-    has = np.isfinite(dmap.distance)
-    norm = Normalize(0.0, DISTANCE_TOP_PITCHES, clip=False)
-    if has.any():
-        fill = _discs(ax, dmap.x[has], dmap.y[has], dmap.radius_um, cmap=MAP_CMAP, norm=norm, edgecolors="none",
-                      zorder=3)
-        fill.set_array(dmap.distance[has])
-        fill.set_gid("nw-identity-fill")
-        tolerance = float((pair.payload or {}).get("tolerance_pitches") or 0.25)
-        bar = _colourbar(fig, ax, fill, f"Distance (pitches) · red line: the tolerance, {tolerance:g}", extend="max")
-        bar.ax.axhline(tolerance, color=Colors.danger, lw=1.4, gid="nw-identity-tolerance")
-    if (~has).any():                        # an address only the reference holds: nothing to fill, still failing
-        _discs(ax, dmap.x[~has], dmap.y[~has], dmap.radius_um, facecolors="none", edgecolors=Colors.plot_undefined_ink,
-               linewidths=0.8, zorder=3)
-    failing = np.array([a in dmap.failing for a in dmap.addresses], dtype=bool)
-    if failing.any():
-        _discs(ax, dmap.x[failing], dmap.y[failing], dmap.radius_um * 1.15, facecolors="none",
-               edgecolors=Colors.danger, linewidths=1.4, zorder=4).set_gid("nw-identity-failing")
-    xs, ys = list(dmap.x), list(dmap.y)
+    xs, ys = [], []
     for tile in dmap.tiles:
-        colour = Colors.danger if tile.moved_um is not None else muted
-        label = tile.tile + (f" moved {tile.moved_um:.0f} µm" if tile.moved_um is not None else "")
+        if tile.moved_um is not None:
+            colour, label, gid, width = Colors.danger, f" moved {tile.moved_um:.0f} µm", "nw-identity-tile-moved", 2.0
+        elif tile.imprecise_um is not None:
+            colour, label, gid = Colors.warn, f" {tile.imprecise_um:.0f} µm off", "nw-identity-tile-imprecise"
+            width = 1.6
+        else:
+            colour, label, gid, width = muted, "", "nw-identity-tile", 0.8
         if tile.corners is not None:
-            ax.add_patch(Polygon(tile.corners, closed=True, fill=False, edgecolor=colour,
-                                 linewidth=2.0 if tile.moved_um is not None else 0.8, zorder=2,
-                                 gid="nw-identity-tile-moved" if tile.moved_um is not None else "nw-identity-tile"))
+            ax.add_patch(Polygon(tile.corners, closed=True, fill=False, edgecolor=colour, linewidth=width, zorder=2,
+                                 gid=gid))
             xs += list(tile.corners[:, 0])
             ys += list(tile.corners[:, 1])
         else:
-            ax.plot([tile.corner[0]], [tile.corner[1]], marker="+", markersize=9, color=colour, zorder=2)
+            ax.plot([tile.corner[0]], [tile.corner[1]], marker="+", markersize=9, color=colour, zorder=2, gid=gid)
             xs.append(tile.corner[0])
             ys.append(tile.corner[1])
-        text = ax.text(tile.corner[0], tile.corner[1], " " + label, fontsize=6.5, color=colour, va="top",
+        text = ax.text(tile.corner[0], tile.corner[1], " " + tile.tile + label, fontsize=6.5, color=colour, va="top",
                        clip_on=True, gid="nw-identity-tile-label")
-        if tile.moved_um is None:
+        if colour == muted:
             _ink(text, muted=True)
-    _limits(ax, xs, ys, dmap.pitch_um or 1.0)
+    return xs, ys
+
+
+def render_distance(fig, pair, dmap, lines: list[str], status=None) -> IdentityDrawn:
+    """Each compared address at its reference position, filled by its distance in pitches with the failing ones
+    outlined — or, given *status* (``identity_compute.StatusMap``), by its status class with a legend counting each
+    — and the compared timepoint's tiles mapped into the reference frame."""
+    from matplotlib.colors import Normalize
+
+    from ui.theme import Colors
+
+    tolerance = float((pair.payload or {}).get("tolerance_pitches") or 0.25)
+    if status is not None:
+        lines = list(lines) + _status_lines(pair, tolerance)
+    else:
+        lines = list(lines) + [f"Each nanowell at its position at {pair.reference} (µm, the reference's frame), "
+                               f"filled by how far its address lands from itself at {pair.timepoint}, in pitches; "
+                               "outlined in red where it fails."]
+    lines.append(f"Tiles of {pair.timepoint} mapped into {pair.reference}'s frame: a tile a lattice step off in red, "
+                 "one placed imprecisely in amber.")
+    bottom = _frame(fig, pair, lines)
+    ax = _image_axes(fig, [0.03, bottom, 0.70 if status is not None else 0.82, _TOP - bottom])
+    drawn = IdentityDrawn("distance", pair, {"map": ax}, distance=dmap, status=status, zoomable=("map",))
+    _bg, ink, muted = _inks(ax)
+    xs, ys = list(dmap.x), list(dmap.y)
+    if status is not None:
+        _draw_status(fig, ax, status)
+        xs, ys = xs + list(status.x), ys + list(status.y)
+    else:
+        has = np.isfinite(dmap.distance)
+        norm = Normalize(0.0, DISTANCE_TOP_PITCHES, clip=False)
+        if has.any():
+            fill = _discs(ax, dmap.x[has], dmap.y[has], dmap.radius_um, cmap=MAP_CMAP, norm=norm, edgecolors="none",
+                          zorder=3)
+            fill.set_array(dmap.distance[has])
+            fill.set_gid("nw-identity-fill")
+            bar = _colourbar(fig, ax, fill, f"Distance (pitches) · red line: the tolerance, {tolerance:g}",
+                             extend="max")
+            bar.ax.axhline(tolerance, color=Colors.danger, lw=1.4, gid="nw-identity-tolerance")
+        if (~has).any():                    # an address only the reference holds: nothing to fill, still failing
+            _discs(ax, dmap.x[~has], dmap.y[~has], dmap.radius_um, facecolors="none",
+                   edgecolors=Colors.plot_undefined_ink, linewidths=0.8, zorder=3)
+        failing = np.array([a in dmap.failing for a in dmap.addresses], dtype=bool)
+        if failing.any():
+            _discs(ax, dmap.x[failing], dmap.y[failing], dmap.radius_um * 1.15, facecolors="none",
+                   edgecolors=Colors.danger, linewidths=1.4, zorder=4).set_gid("nw-identity-failing")
+    tx, ty = _draw_tiles(ax, dmap, muted)
+    _limits(ax, xs + tx, ys + ty, dmap.pitch_um or 1.0)
     return drawn
 
 
@@ -188,7 +281,7 @@ def render_blink(fig, pair, frames, lines: list[str]) -> IdentityDrawn:
         lines.append(f"The compared montage covers {frames.covered:.0%} of the reference's frame.")
     bottom = _frame(fig, pair, lines)
     ax = _image_axes(fig, [0.03, bottom, 0.94, _TOP - bottom])
-    drawn = IdentityDrawn("blink", pair, {"map": ax}, blink=frames)
+    drawn = IdentityDrawn("blink", pair, {"map": ax}, blink=frames, zoomable=("map",))
     _bg, ink, _muted = _inks(ax)
     from ui.theme import Colors
 
@@ -254,15 +347,21 @@ def render_sides(fig, pair, ref_montage, other_montage, lines: list[str]) -> Ide
     bottom = _frame(fig, pair, lines)
     left = _image_axes(fig, [0.03, bottom, 0.455, _TOP - bottom])
     right = _image_axes(fig, [0.515, bottom, 0.455, _TOP - bottom])
-    drawn = IdentityDrawn("sides", pair, {"reference": left, "compared": right})
+    drawn = IdentityDrawn("sides", pair, {"reference": left, "compared": right}, zoomable=("reference", "compared"),
+                          links=(("reference", "compared"),))
     _bg, ink, muted = _inks(left)
     pitch = getattr(pair.ref, "pitch", None) or 1.0
+    xs, ys = [], []
     for ax, montage, own, name in ((left, ref_montage, pair.ref, f"{pair.reference} (reference)"),
                                    (right, other_montage, pair.other, pair.timepoint)):
-        xs, ys = _montage_side(ax, montage, getattr(own, "sites", {}) or {}, muted)
-        _limits(ax, xs, ys, 0.0)
+        more_x, more_y = _montage_side(ax, montage, getattr(own, "sites", {}) or {}, muted)
+        xs, ys = xs + more_x, ys + more_y
         _ink(ax.text(0.01, 0.99, name, transform=ax.transAxes, fontsize=8, color=ink, va="top",
                      gid="nw-identity-side"))
+    # Both in the acquisition's common frame, so one set of limits shows the same place on each: they zoom and pan
+    # together (``_identity_zoom``).
+    for ax in (left, right):
+        _limits(ax, xs, ys, 0.0)
     drawn.hover = {
         "reference": left.add_patch(Circle((0, 0), _HOVER_RING * pitch, fill=False, edgecolor=Colors.heatmap_selection,
                                            linewidth=1.8, zorder=5, visible=False, gid="nw-identity-hover-ref")),
@@ -307,44 +406,6 @@ def show_hover(drawn: IdentityDrawn, target) -> bool:
             said += f" · not addressed at {drawn.pair.reference}"
         hover["label"].set_text(said)
     return True
-
-
-# ── Diagnostics ──────────────────────────────────────────────────────────────
-def render_diagnostics(fig, pair, diag, lines: list[str]) -> IdentityDrawn:
-    """The registration's correlation surface (the compared timepoint's frame, µm) with the peak, the runner-up, the
-    reference's square and the square the run accepted marked; the numbers in the footer."""
-    from ui.theme import Colors
-
-    lines = list(diag.lines) + list(lines) + [
-        "Correlation of the reference's square over the compared montage (lattice residuals): + the peak, × the "
-        "runner-up more than half a pitch away, □ where the reference's square is, ○ the square the run accepted."]
-    bottom = _frame(fig, pair, lines)
-    ax = _image_axes(fig, [0.03, bottom, 0.82, _TOP - bottom])
-    drawn = IdentityDrawn("diagnostics", pair, {"surface": ax}, diagnostics=diag)
-    _bg, ink, muted = _inks(ax)
-    if diag.surface is None:
-        _ink(ax.text(0.5, 0.5, "No correlation surface was recorded for this timepoint.", transform=ax.transAxes,
-                     ha="center", va="center", fontsize=9, color=muted, gid="nw-identity-no-surface"), muted=True)
-        return drawn
-    left, top, right, bottom_um = diag.box
-    image = ax.imshow(np.ma.masked_invalid(diag.surface), cmap=MAP_CMAP, extent=(left, right, bottom_um, top),
-                      interpolation="nearest", zorder=0, gid="nw-identity-surface")
-    _colourbar(fig, ax, image, "Correlation")
-    marks = (("found_um", "+", Colors.success if (pair.entry.get("square") or {}).get("ok") else Colors.danger,
-              "nw-identity-peak"),
-             ("runner_up_um", "x", Colors.warn, "nw-identity-runner-up"),
-             ("expected_um", "s", ink, "nw-identity-expected"),
-             ("accepted_um", "o", Colors.accent, "nw-identity-accepted"))
-    for name, marker, colour, gid in marks:
-        at = getattr(diag, name)
-        if at is None:
-            continue
-        filled = marker in ("+", "x")
-        ax.plot([at[0]], [at[1]], marker=marker, markersize=12, mew=2.0, linestyle="none", gid=gid, zorder=3,
-                color=colour, markerfacecolor=colour if filled else "none")
-    ax.set_xlim(left, right)
-    ax.set_ylim(bottom_um, top)
-    return drawn
 
 
 def render_identity_message(fig, text: str) -> None:

@@ -147,9 +147,10 @@ def test_a_mirrored_lattice_is_contradicted(pair):
     assert result["verdict"] == ni.CONTRADICTED and "mirrored" in result["reason"]
 
 
-def test_one_tile_a_step_off_is_contradicted_and_named(pair):
+def test_one_tile_a_step_off_leaves_out_exactly_that_tile_s_nanowells(pair):
     """A tile placed a step off moves its sites' positions and addresses together, so every address still lands on
-    itself; the tile layout is what shows it."""
+    itself; the tile layout is what shows it. Only that tile's nanowells are left out (U5): the registration is
+    trusted and the other tiles' nanowells land on themselves."""
     ref, other = pair
     step = _a1(other)
     broken = copy.deepcopy(other)
@@ -162,17 +163,23 @@ def test_one_tile_a_step_off_is_contradicted_and_named(pair):
             broken.owners[key] = other.owners[a]
     broken.tiles[TILE] = tuple(np.add(other.tiles[TILE], step))
     result = ni.compare(ref, broken)
-    assert result["verdict"] == ni.CONTRADICTED
+    assert result["verdict"] == ni.PARTIAL
     assert result["tiles"]["moved"] and result["tiles"]["moved"][0][0] == TILE
     assert result["tiles"]["moved"][0][1] == pytest.approx(PITCH, abs=1.0)
+    in_tile = {a for a, owner in broken.owners.items() if owner == TILE}
+    assert {(q, r) for q, r, why in result["excluded"] if why == "misregistered_tile"} == in_tile
+    assert len(result["excluded"]) == len(in_tile) < result["compared"] / 2
 
 
-def test_failures_confined_to_one_tile_are_diagnosed_as_that_tile(pair):
+def test_wrong_names_confined_to_one_tile_leave_out_those_nanowells_only(pair):
     ref, other = pair
     broken = _relabel(other, lambda a: (a[0] + 1, a[1]) if other.owners[a] == TILE else a)
     result = ni.compare(ref, broken)
-    assert result["verdict"] == ni.CONTRADICTED
+    assert result["verdict"] == ni.PARTIAL
     assert result["diagnosis"] == {"kind": "tile", "detail": result["diagnosis"]["detail"], "tile": TILE}
+    wrong = {(q, r) for q, r, _d, lq, lr, _t in result["failing"] if (lq, lr) != (q, r)}
+    assert wrong and wrong <= {(q, r) for q, r, _why in result["excluded"]}
+    assert len(result["excluded"]) < result["compared"] / 2
 
 
 def test_a_decoy_square_the_run_accepted_is_contradicted(pair):
@@ -558,10 +565,29 @@ def test_one_site_a_quarter_pitch_out_is_not_a_wrong_well(pair):
     loose.sites[(2, 1)] = tuple(np.add(other.sites[(2, 1)], (0.3 * PITCH, 0.0)))
     result = ni.compare(ref, loose)
     assert result["verdict"] == ni.CONFIRMED and result["loose_count"] == 1
+    # Twenty such sites are still twenty right names (U6): reported, nothing left out.
     many = copy.deepcopy(other)
     for a in list(other.sites)[:20]:
         many.sites[a] = tuple(np.add(other.sites[a], (0.3 * PITCH, 0.0)))
-    assert ni.compare(ref, many)["verdict"] == ni.CONTRADICTED
+    result = ni.compare(ref, many)
+    assert result["verdict"] == ni.CONFIRMED and result["loose_count"] == 20 and "name is right" in result["reason"]
+
+
+def test_a_corner_tile_placed_a_third_of_a_pitch_differently_is_imprecise_not_wrong(pair):
+    """U6, the suspected cause of the first real plate's verdicts: an empty corner tile has only the stage's position,
+    which wobbles by tens of micrometres between timepoints. Its nanowells stay on their nearest lattice sites, so
+    their names are right; it is reported, nothing is left out."""
+    ref, other = pair
+    shifted = copy.deepcopy(other)
+    nudge = np.array([0.33 * PITCH, 0.0])
+    shifted.tiles[TILE] = tuple(np.add(other.tiles[TILE], nudge))
+    for a, owner in other.owners.items():
+        if owner == TILE:
+            shifted.sites[a] = tuple(np.add(other.sites[a], nudge))
+    result = ni.compare(ref, shifted)
+    assert result["verdict"] == ni.CONFIRMED, result["reason"]
+    assert result["tiles"]["moved"] == [] and result["tiles"]["imprecise"][0][0] == TILE
+    assert result["loose_count"] > 0 and "names unaffected" in result["reason"]
 
 
 def test_a_decoy_followed_two_sites_off_is_contradicted_by_the_array_s_outline(pair):
@@ -623,3 +649,15 @@ def test_the_numbers_table_carries_the_measurements_and_no_sentences(pair, tmp_p
     assert (stepped["verdict"], stepped["diagnosis"], stepped["why"]) == ("contradicted", "step", "addresses")
     assert float(stepped["p95_pitches"]) == pytest.approx(1.0, abs=0.01)
     assert rows[("A01", "T0")]["verdict"] == "reference"
+
+
+
+def test_a_tile_that_holds_no_nanowell_is_not_compared(pair):
+    """U6: an empty corner tile is placed by the stage alone, so it wobbles a pitch or more between timepoints; it
+    names nothing, so it can make no name wrong and is left out of the layout test."""
+    ref, other = pair
+    ref2, other2 = copy.deepcopy(ref), copy.deepcopy(other)
+    ref2.tiles["F9"] = (5000.0, 5000.0)
+    other2.tiles["F9"] = (5000.0 + 1.5 * PITCH, 5000.0)             # far off, and it owns nothing
+    result = ni.compare(ref2, other2)
+    assert result["verdict"] == ni.CONFIRMED and result["tiles"]["moved"] == []

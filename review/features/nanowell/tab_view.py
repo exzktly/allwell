@@ -89,9 +89,12 @@ _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their 
                "then. The others are counted as outside the fixed cohort. See also Subset, which chooses nanowells "
                "by how many cells they held at the baseline, a metric, their position or their imaging field.")
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
-_METRIC_TIP = ("What each dot is. Brightness and site signal, and their fold changes, are of the fluorescence "
-               "channel chosen beside this (Channel); they are greyed when the run measured no fluorescence.")
-_CHANNEL_TIP = ("The fluorescence channel Brightness and Site signal (and their fold changes) are drawn for, on every "
+_METRIC_TIP = ("What each dot is. Brightness is the mean intensity of the cells in a nanowell; nanowell "
+               "fluorescence is the whole nanowell's summed intensity minus what an empty nanowell gives, so it "
+               "counts every cell's light (and nothing else) and is near zero for an empty one. Both, and their fold "
+               "changes, are of the fluorescence channel chosen beside this (Channel); they are greyed when the run "
+               "measured no fluorescence.")
+_CHANNEL_TIP = ("The fluorescence channel Brightness and Nanowell fluorescence (and their fold changes) are drawn for, on every "
                 "view and in the site detail. A channel the run read but did not measure in the nanowells is listed "
                 "greyed, with why.")
 _IMAGE_CHANNEL_TIP = ("The channel the crops are cut from — the site detail's strip, Pop out, the Extremes montage — "
@@ -218,7 +221,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     grp_well = band.add_scope("Well", well_cb)
 
     array_controls = _build_array_controls(ctx, band)
-    identity_seg, grp_identity = build_identity_controls(ctx, band)
+    identity = build_identity_controls(ctx, band)
 
     # The Plotting tabs' timepoint control (Distribution, Heat Map): a LabeledComboBox painting its own
     # "Timepoint:" prefix, the timepoints in time order and named by their hours. One control for every view that
@@ -338,7 +341,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
     controls = (metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box,
-                responding_edit, extremes_spin, extremes_cells, extremes_numbers, identity_seg, *start.signalling,
+                responding_edit, extremes_spin, extremes_cells, extremes_numbers, *identity.signalling, *start.signalling,
                 *array_controls.signalling)
 
     def refresh_controls() -> None:
@@ -391,7 +394,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             cohort_box.setChecked(st.cohort)
             start.refresh(st)
             _refresh_array_controls(ctx, st, array, array_controls)
-            refresh_identity_controls(st, identity_seg, grp_identity, view == "identity")
+            refresh_identity_controls(st, identity, view == "identity")
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
             # applies to what it draws, so its box stays where it can be turned off.

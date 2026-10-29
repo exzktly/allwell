@@ -4,7 +4,8 @@
 page and Batch Export share — and is Qt-free: it reads the well's sidecar when it is not handed one, builds the
 comparison (``identity_compute``) and draws the chosen mode (``_identity_render``). The rest is the page's side:
 the sidecar and the montages read once per well (the montages on a worker, through the page's own montage store),
-the Blink frames resampled once per pair, the Blink timer started and stopped, and the pointer on *Side by side*.
+the Blink frames resampled once per pair, the Blink timer started and stopped, the pointer on *Side by side*, and the
+canvas's press, drag, release and wheel handed to ``_identity_zoom``, which zooms and pans every mode.
 
 The Blink timer is a ``QTimer`` the view builds (``identity_view``); :func:`blink_tick` stops it on the first tick
 after the page is hidden or the view, mode or figure changed, so it can never outlive what it blinks, and
@@ -15,7 +16,9 @@ from __future__ import annotations
 
 import logging
 
+from review.features.nanowell import _identity_diagnostics_render as idr
 from review.features.nanowell import _identity_render as ir
+from review.features.nanowell import _identity_zoom as izoom
 from review.features.nanowell.image_compute import read_montage, tile_boxes
 from review.features.nanowell import identity_compute as ic
 from review.features.nanowell.state import IDENTITY_MODES
@@ -26,6 +29,8 @@ log = logging.getLogger("review")
 READ = object()
 #: How long each Blink frame is shown, in milliseconds: about two a second.
 BLINK_MS = 500
+#: The footer line every drawn Identity view ends with: how to zoom it (``_identity_zoom``).
+ZOOM_HINT = "Wheel to zoom about the pointer, drag to pan, double-click for the whole view."
 
 
 def _tile_sizes(data, well: str, timepoint: str) -> dict:
@@ -34,13 +39,14 @@ def _tile_sizes(data, well: str, timepoint: str) -> dict:
 
 
 def draw_identity(fig, data, *, well: str, timepoint: str, mode: str = "distance", payload=READ, images=None,
-                  frames_cache: dict | None = None, note: str = "") -> ir.IdentityDrawn | None:
+                  frames_cache: dict | None = None, note: str = "", colour: str = "auto") -> ir.IdentityDrawn | None:
     """**The one composition of the Identity view**: *well*'s *timepoint* against its reference, in *mode*.
 
     *payload* is the well's sidecar (``None``: none current); by default it is read here. *images* is
-    ``{"reference": Montage | None, "compared": Montage | None, "why": str}`` — what Blink and Side by side draw;
-    without them those modes say what they are waiting for. *frames_cache* keeps the Blink frames per
-    ``(well, timepoint, reference)``. ``None`` when the figure is a message: no sidecar (with the command that makes
+    ``{"reference": Montage | None, "compared": Montage | None, "why": str}`` — what Blink, Side by side and the
+    Diagnostics' crops draw; without them those say what they are waiting for. *frames_cache* keeps the Blink frames
+    per ``(well, timepoint, reference)``. *colour* is what the Distance map colours by (``state.IDENTITY_COLOURS``;
+    ``identity_compute.colour_by``). ``None`` when the figure is a message: no sidecar (with the command that makes
     one), the reference itself, or no reference."""
     from pipeline.nanowell_identity import read_sidecar
 
@@ -55,22 +61,27 @@ def draw_identity(fig, data, *, well: str, timepoint: str, mode: str = "distance
     if said:
         ir.render_identity_message(fig, said)
         return None
-    lines = ic.summary_lines(pair) + ([note] if note else [])
+    notes = [note] if note else []
     mode = mode if mode in IDENTITY_MODES else "distance"
     if mode == "distance" and pair.entry.get("distances") is None:
         mode = "diagnostics"
-        lines.append("No address was compared, so there is no distance map: the registration on the square is "
+        notes.append("No address was compared, so there is no distance map: the registration on the square is "
                      "shown instead.")
-    if mode == "distance":
-        return ir.render_distance(fig, pair, ic.distance_map(pair, _tile_sizes(data, well, timepoint)), lines)
-    if mode == "diagnostics":
-        return ir.render_diagnostics(fig, pair, ic.diagnostics(pair), lines)
+    lines = ic.summary_lines(pair) + notes
     images = images or {}
+    if mode == "distance":
+        status = ic.status_map(pair) if ic.colour_by(colour, pair) == "status" else None
+        return ir.render_distance(fig, pair, ic.distance_map(pair, _tile_sizes(data, well, timepoint)),
+                                  lines + [ZOOM_HINT], status)
+    if mode == "diagnostics":
+        crops = ic.diagnostic_crops(pair, images.get("reference"), images.get("compared"))
+        why = images.get("why") or ("" if images else "The montages are not read.")
+        return idr.render_diagnostics(fig, pair, ic.diagnostics(pair), crops, notes + [ZOOM_HINT], why=why)
     ref_image, other_image = images.get("reference"), images.get("compared")
     if mode == "sides":
         if ref_image is None or other_image is None:
             lines.append(images.get("why") or "The montages are not read: only the nanowells' positions are drawn.")
-        return ir.render_sides(fig, pair, ref_image, other_image, lines)
+        return ir.render_sides(fig, pair, ref_image, other_image, lines + [ZOOM_HINT])
     if pair.forward is None or pair.inverse is None:
         ir.render_identity_message(fig, f"{well} at {timepoint}: the registration on the square located nothing, so "
                                          f"there is nothing to map the montages with — {pair.reason}.")
@@ -86,7 +97,7 @@ def draw_identity(fig, data, *, well: str, timepoint: str, mode: str = "distance
         if frames_cache is not None:
             frames_cache.clear()                     # one pair at a time: a montage pair is megabytes
             frames_cache[key] = frames
-    return ir.render_blink(fig, pair, frames, lines)
+    return ir.render_blink(fig, pair, frames, lines + [ZOOM_HINT])
 
 
 # ── the page ─────────────────────────────────────────────────────────────────
@@ -131,18 +142,21 @@ def _images(ctx, st, well: str, timepoint: str, reference: str | None, fetch) ->
 
 
 def page_inputs(ctx, st, well: str, timepoint: str, fetch) -> dict:
-    """What the page hands :func:`draw_identity`: its mode, the sidecar it holds, the montages Blink and Side by
-    side draw (read only for those modes), and its Blink frames."""
+    """What the page hands :func:`draw_identity`: its mode and colouring, the sidecar it holds, the montages Blink,
+    Side by side and the Diagnostics draw (read only for those modes), and its Blink frames."""
     payload = page_sidecar(st, well)
     images = None
-    if st.identity_mode in ("blink", "sides") and payload is not None:
+    if st.identity_mode in ("blink", "sides", "diagnostics") and payload is not None:
         images = _images(ctx, st, well, timepoint, payload.get("reference"), fetch)
-    return {"mode": st.identity_mode, "payload": payload, "images": images, "frames_cache": st.identity_frames}
+    return {"mode": st.identity_mode, "payload": payload, "images": images, "frames_cache": st.identity_frames,
+            "colour": st.identity_colour}
 
 
 def after_draw(ctx, st, drawn) -> None:
-    """Keep what was drawn, and run the Blink timer exactly while Blink frames are on screen."""
+    """Keep what was drawn, put back the reader's zoom when it is the same well, timepoint and mode
+    (``_identity_zoom.restore``), and run the Blink timer exactly while Blink frames are on screen."""
     st.identity_drawn = drawn
+    izoom.restore(st, drawn)
     timer = ctx.widgets.get_or_none("_nw_blink_timer")
     if timer is None:
         return
@@ -154,8 +168,9 @@ def after_draw(ctx, st, drawn) -> None:
 
 
 def leave(ctx, st) -> None:
-    """The page drew another view (or nothing): forget the Identity figure and stop its timer."""
+    """The page drew another view (or nothing): forget the Identity figure and its zoom, and stop its timer."""
     st.identity_drawn = None
+    izoom.forget(st)
     timer = ctx.widgets.get_or_none("_nw_blink_timer")
     if timer is not None:
         timer.stop()
@@ -196,11 +211,34 @@ def step_blink(ctx, k: int) -> int | None:
     return shown
 
 
-def on_motion(ctx, event) -> None:
-    """The pointer over *Side by side*: light the address under it on both images (``identity_compute.hover_target``
-    does the finding), or clear it off the images."""
+def on_press(ctx, event) -> None:
+    """A press on the Identity view: a pan starts, or a double-click shows the whole view (``_identity_zoom``)."""
     st = ctx.state.feature_slice("nanowell")
-    drawn = st.identity_drawn if st is not None else None
+    if st is not None:
+        izoom.on_press(ctx, st, event)
+
+
+def on_release(ctx, _event) -> None:
+    st = ctx.state.feature_slice("nanowell")
+    if st is not None:
+        izoom.on_release(st)
+
+
+def on_scroll(ctx, event) -> None:
+    """The wheel on the Identity view zooms the panel under the pointer (``_identity_zoom``)."""
+    st = ctx.state.feature_slice("nanowell")
+    if st is not None:
+        izoom.on_scroll(ctx, st, event)
+
+
+def on_motion(ctx, event) -> None:
+    """The pointer on the Identity view: a drag pans (``_identity_zoom.on_drag``); otherwise, over *Side by side*,
+    light the address under it on both images (``identity_compute.hover_target`` does the finding), or clear it off
+    the images."""
+    st = ctx.state.feature_slice("nanowell")
+    if st is None or izoom.on_drag(ctx, st, event):
+        return
+    drawn = st.identity_drawn
     if drawn is None or drawn.mode != "sides":
         return
     side = next((name for name, ax in drawn.axes.items() if ax is event.inaxes), None)

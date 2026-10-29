@@ -36,9 +36,12 @@ from review.features.nanowell.renderer import (
     render_position, render_site_detail, render_trajectories,
 )
 from review.features.nanowell.state import (
-    IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
+    IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
 )
 from review.features.nanowell.series_compute import crop_metric_lines, long_format, site_metrics, site_series
+from review.features.nanowell.zoom_compute import (  # noqa: F401 — the band and its tests read them here
+    BUTTON_STEP, WHEEL_STEP, ZOOM_IN_LIMIT, ZOOM_OUT_LIMIT, held_factor,
+)
 
 log = logging.getLogger("review")
 
@@ -403,7 +406,7 @@ def resolve_metric(view: str, metric: str, active_channel, channels) -> tuple[st
 
 
 def page_channel_name(ctx) -> str:
-    """The channel the page's Brightness and Site signal are for, as the user named it: the page's own *Channel*
+    """The channel the page's Brightness and Nanowell fluorescence are for, as the user named it: the page's own *Channel*
     choice when it is set; else the app's shared channel selector when the tables carry that channel; else the
     tables' first fluorescence channel. The shared selector lives on the Plotting band, which this page does not
     show, so a shared channel the tables lack (the phase channel, a ratio) must not leave every fluorescence metric
@@ -841,12 +844,6 @@ def array_one_to_one(ctx) -> None:
 
 #: A press that moves less than this many pixels before it is released is a click, not a drag.
 CLICK_SLOP_PX = 4
-#: One wheel notch zooms by this factor; the *−* and *+* buttons step by two notches.
-WHEEL_STEP = 0.8
-BUTTON_STEP = WHEEL_STEP ** 2
-#: How far the Array view zooms, against what *Fit* shows: out to a quarter of it, in to 500 times it — past
-#: either the view is a speck or one pixel of the raw tiles is wider than the screen.
-ZOOM_OUT_LIMIT, ZOOM_IN_LIMIT = 0.25, 500.0
 
 
 def array_zoom_factor(drawn) -> float | None:
@@ -861,15 +858,9 @@ def array_zoom_factor(drawn) -> float | None:
 def _zoom_to(ctx, st, factor: float, at_um) -> None:
     """Zoom the drawn view by *factor* (under 1 zooms in) about *at_um*, within the zoom limits, and draw it."""
     drawn = st.drawn
-    now = array_zoom_factor(drawn)
-    if now is not None:
-        # A view already past a limit (a refit to a new axes shape can put it there) is not stepped further
-        # past it, and is never stepped the opposite way to the one asked for.
-        if (factor > 1 and now <= ZOOM_OUT_LIMIT) or (factor < 1 and now >= ZOOM_IN_LIMIT):
-            return
-        # The zoom after this step, held inside the limits: the step is shortened to land on the limit.
-        target = min(max(now / factor, ZOOM_OUT_LIMIT), ZOOM_IN_LIMIT)
-        factor = now / target
+    # A view already past a limit (a refit to a new axes shape can put it there) is not stepped further past it;
+    # otherwise the step is shortened to land on the limit (``zoom_compute.held_factor``).
+    factor = held_factor(array_zoom_factor(drawn), factor)
     if factor == 1.0:
         return
     st.region = fmc.zoom_region(drawn.region, factor, at_um)
@@ -952,6 +943,18 @@ def _array_press(st, event) -> None:
     st.press = (event.x, event.y, ax.get_xlim(), ax.get_ylim(), ax.transData.inverted().frozen(), _adding(event))
 
 
+def set_identity_colour(ctx, colour: str) -> None:
+    """Choose what the Identity view's Distance map colours by (``state.IDENTITY_COLOURS``); kept with the page's
+    settings."""
+    st = _state(ctx)
+    if st is None or colour not in IDENTITY_COLOURS or st.identity_colour == colour:
+        return
+    st.identity_colour = colour
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
+
+
 def set_identity_mode(ctx, mode: str) -> None:
     """Choose what the Identity view shows (``state.IDENTITY_MODES``); kept with the page's settings."""
     st = _state(ctx)
@@ -965,7 +968,7 @@ def set_identity_mode(ctx, mode: str) -> None:
 
 def on_motion(ctx, event) -> None:
     """A drag on the Array view pans it; the pixels follow at once and the image is drawn again on release. On the
-    Identity view's *Side by side* the pointer lights the address under it."""
+    Identity view a drag pans the panel pressed, and on *Side by side* the pointer lights the address under it."""
     st = _state(ctx)
     if st is not None and st.view == "identity":
         idc.on_motion(ctx, event)
@@ -985,6 +988,9 @@ def on_release(ctx, event) -> None:
     """The end of a press on the Array view: a drag keeps where it panned to; a click sets the anchor (with *Set
     anchor* on) or selects the nanowell under it, as on the Distribution figure."""
     st = _state(ctx)
+    if st is not None and st.view == "identity":
+        idc.on_release(ctx, event)
+        return
     press = st.press if st is not None else None
     if press is None:
         return
@@ -1009,6 +1015,9 @@ def on_scroll(ctx, event) -> None:
     figure but off the image (the colour bar, the footer). Over VNC from a phone a two-finger swipe arrives as the
     wheel, at wherever the remote pointer was last left, which is often not over the image."""
     st = _state(ctx)
+    if st is not None and st.view == "identity":
+        idc.on_scroll(ctx, event)                # every Identity sub-view zooms its own panels
+        return
     drawn = st.drawn if st is not None and st.view == "array" else None
     if drawn is None or drawn.region is None or not event.step:
         return
@@ -1375,6 +1384,9 @@ def on_click(ctx, event) -> None:
     ⌘/Ctrl), or clear the selection on empty space. On the Array view a press starts a drag or a click, which
     :func:`on_release` tells apart. The plate selection is never touched."""
     st = _state(ctx)
+    if st is not None and st.view == "identity":
+        idc.on_press(ctx, event)                 # a pan, or a double-click back to the whole view
+        return
     if st is not None and st.view == "extremes":
         if event.button == 1:
             _select(ctx, st.extreme_axes.get(event.inaxes), _adding(event))
@@ -1542,7 +1554,7 @@ def set_crop_cells(ctx, on: bool) -> None:
 
 
 def set_channel(ctx, channel: str) -> None:
-    """The fluorescence channel the page's Brightness and Site signal are drawn for."""
+    """The fluorescence channel the page's Brightness and Nanowell fluorescence are drawn for."""
     _set(ctx, "channel", channel or "")
 
 

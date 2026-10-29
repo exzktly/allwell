@@ -105,10 +105,25 @@ def test_a_checkpoint_is_keyed_on_the_anchor_it_was_located_with():
 
     outcome = SimpleNamespace(timepoints={"0h": {"record_digest": "d"}}, radius={})
     def key(anchor):
-        located = SimpleNamespace(status="ok", origin_method="manual", manual_anchor_um=anchor)
+        located = SimpleNamespace(status="ok", origin_method="manual", manual_anchor_um=anchor, grid={})
         return nr._checkpoint_key(outcome, "0h", located, 100.0, None, nr.NanowellSettings("100um"), {})
     assert key((1.0, 2.0)) != key((101.0, 2.0)) and key((1.0, 2.0))["manual_anchor_um"] == [1.0, 2.0]
     assert "manual_anchor_um" not in key(None)                     # a well never clicked keeps its checkpoints
+
+
+def test_a_checkpoint_is_keyed_on_the_registration_it_was_measured_on():
+    """A timepoint registered again with its well's agreed tile layout has a tile a lattice step from where the
+    checkpointed measurement read it (tracker U9b); the registration's key is what says so."""
+    from types import SimpleNamespace
+
+    outcome = SimpleNamespace(timepoints={"0h": {"record_digest": "d"}}, radius={})
+
+    def key(registration_key):
+        located = SimpleNamespace(status="ok", origin_method="fiducial", manual_anchor_um=None,
+                                  grid={"registration": {"key": registration_key}})
+        return nr._checkpoint_key(outcome, "0h", located, 100.0, None, nr.NanowellSettings("100um"), {})
+    assert key("first")["registration"] == "first"
+    assert key("first") != key("agreed")
 
 
 def test_an_incremental_run_recomputes_a_timepoint_whose_anchor_was_set_or_moved(tmp_path, monkeypatch):

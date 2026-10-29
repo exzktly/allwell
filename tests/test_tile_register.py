@@ -7,9 +7,9 @@ import pytest
 
 from pipeline.nanowell_lattice import LatticeFit, fit_lattice
 from pipeline.tile_register import (
-    LATTICE, OVERLAP, RECORDED, PairConstraint, TileObservation, build_montage, correlate_overlap,
-    fused_crop, lattice_phase_constraints, overlap_constraints, register_tiles, search_radius_px,
-    solve_placements,
+    LATTICE, MIN_PEAK, OVERLAP, RECORDED, STEP_CHAINED, STEP_CONTENT, STEP_STAGE, STEP_TIMEPOINTS, PairConstraint, TileObservation,
+    build_montage, correlate_overlap, fused_crop, lattice_phase_constraints, overlap_constraints, register_tiles,
+    search_radius_px, solve_placements,
 )
 from tests._nanowell_synth import TilePlan, render_tiles
 
@@ -167,9 +167,9 @@ def test_a_recorded_error_nearing_half_a_pitch_is_warned_about():
 
 
 def test_a_recorded_error_past_half_a_pitch_is_wrong_by_one_vector_and_nothing_says_so():
-    # The limit of the method, pinned so it is not mistaken for a bug: the lattice cannot tell an
-    # error of 0.62 pitch from one of -0.38 pitch the other way. The assumption is that the stage
-    # is repeatable to under half a pitch within one acquisition.
+    # The limit of the lattice phase alone, pinned so it is not mistaken for a bug: with no images to read
+    # the overlap's content from and no other timepoint to agree with, the lattice cannot tell an error of
+    # 0.62 pitch from one of -0.38 pitch the other way. The tests after this one lift it.
     plan = TilePlan(2, 2, (220, 220), 0.30, PX)
     rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=1800, rotation_deg=0,
                             noise_sigma=0.03, seed=3)
@@ -485,3 +485,149 @@ def test_a_disk_both_tiles_hold_whole_is_attributed_to_the_first_id():
     tiles = {"B": (image, 0.0, 0.0), "A": (image, 0.0, 0.0)}
     crop = fused_crop((50.0, 50.0), 20.0, tiles, 1.0)
     assert crop.disk_fraction == {"A": 1.0, "B": 1.0} and crop.attributed_tile == "A"
+
+
+# ── the whole-vector choice (tracker U9a, U9b) ───────────────────────────────
+def _off_by(observations, tile, dx):
+    return [o if o.tile_id != tile else
+            TileObservation(tile, (o.recorded_left_top_um[0] + dx, o.recorded_left_top_um[1]), o.extent_um, o.fit)
+            for o in observations]
+
+
+def _lattice_constraint(result, pair):
+    return next(c for c in result.constraints if (c.i, c.j) == pair and c.source == LATTICE)
+
+
+def test_a_stage_error_past_half_a_pitch_is_put_right_by_the_overlap_s_content():
+    """The stage recorded F1 0.62 pitch to the right. The lattice alone takes the nearer whole vector, a pitch
+    from the truth (the test above); cells in the overlap break the lattice's periodicity and pick the right one."""
+    plan = TilePlan(2, 2, (400, 400), 0.3, PX)
+    rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=1800, rotation_deg=6,
+                            noise_sigma=0.05, cells=400, seed=3, blur_px=1.0)
+    observations = _off_by(_observations(rendered), "F1", 0.62 * PITCH)
+    assert _error(register_tiles(observations), rendered) == pytest.approx(PITCH, rel=0.05)
+    result = register_tiles(observations, images=rendered.images, pixel_size_um=PX, pitch_um=PITCH)
+    assert _error(result, rendered) < 1.0
+    pair = _lattice_constraint(result, ("F0", "F1"))
+    assert pair.step_from == STEP_CONTENT
+    assert np.hypot(*pair.step_moved_um) == pytest.approx(PITCH, rel=0.02)   # one whole vector from the stage's pick
+    # The diagonal F1-F2 meets at a corner too small to decide; the edges around it settle it, or the stage's wrong
+    # step would be averaged into the solve against them.
+    assert _lattice_constraint(result, ("F1", "F2")).step_from == STEP_CHAINED
+    assert result.warnings == ()
+
+
+def test_content_that_leaves_a_loop_open_gives_way_to_a_layout_that_closes():
+    """F1 recorded 0.62 pitch off. Content settles F0-F2 and F1-F3, but not F0-F1, whose stage pick is a step wrong:
+    the loop F0-F1-F3-F2 cannot close, and solving it as it stands would average F1 half a step astray, a placement
+    no timepoint has. The choices made without content close the loop (F1 a whole pitch off, which the well's other
+    timepoints then put right) and are used, with the reason named."""
+    plan = TilePlan(2, 2, (500, 500), 0.2, PX)
+    rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=1800, rotation_deg=6,
+                            noise_sigma=0.05, cells=400, seed=2, blur_px=1.0)
+    observations = _off_by(_observations(rendered), "F1", 0.62 * PITCH)
+    result = register_tiles(observations, images=rendered.images, pixel_size_um=PX, pitch_um=PITCH)
+    assert any("loops that do not close, so this pair's step is taken from the stage" in w for w in result.warnings)
+    assert {c.step_from for c in result.constraints if c.source == LATTICE} == {STEP_STAGE}
+    assert _error(result, rendered) == pytest.approx(PITCH, abs=1.0)
+
+
+def test_a_loop_whose_steps_contradict_one_another_is_warned_about():
+    """F1 recorded 0.62 pitch off, and only F0-F1 told the right offset: F1's other pairs keep the stage's wrong
+    step, the loop F0-F1-F3 cannot close, and the pairs it misses are named."""
+    plan = TilePlan(2, 2, (300, 300), 0.15, PX)
+    rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=4000, rotation_deg=6,
+                            noise_sigma=0.05, seed=3, blur_px=1.0, array_shift_um=(-500.0, -500.0))
+    observations = _off_by(_observations(rendered), "F1", 0.62 * PITCH)
+    truth = tuple(np.subtract(rendered.true_left_top_um["F1"], rendered.true_left_top_um["F0"]))
+    result = register_tiles(observations, images=rendered.images, pixel_size_um=PX, pitch_um=PITCH,
+                            preferred={("F0", "F1"): truth})
+    assert any(w.startswith("F0-F1: the tiles' loop does not close") for w in result.warnings)
+
+
+def test_a_search_window_reaching_past_the_overlap_s_far_edge_does_not_raise():
+    # The window around an offset that leaves the tiles a few pixels of overlap holds offsets with none at all; their
+    # ranges in the second tile fell outside its summed-area table.
+    rng = np.random.default_rng(0)
+    a, b = rng.normal(size=(300, 300)), rng.normal(size=(300, 300))
+    result = correlate_overlap(a, b, (-295, 259), search_radius=19)
+    assert not result.ok and result.peak < MIN_PEAK          # scored, and noise matches nothing
+
+
+@pytest.mark.parametrize("seed, cells", [(1, 0), (3, 0), (1, 400), (3, 400)])
+def test_the_content_never_picks_a_wrong_step(seed, cells):
+    """Vignetting, the array's rim in some overlaps, diagonal pairs meeting at a corner, and the stage's record a
+    pitch and more from the truth for F4: content decides only where it can, and every pair it decides is right."""
+    plan = TilePlan(3, 3, (700, 700), 0.10, PX)
+    extent = plan.step_um[0] * 2 + plan.extent_um[0]
+    rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=0.40 * extent, rotation_deg=7,
+                            noise_sigma=0.05, blur_px=1.0, seed=seed, vignette=0.3, stage_jitter_um=20, cells=cells)
+    for shifted in (False, True):
+        observations = _observations(rendered)
+        if shifted:
+            observations = _off_by(observations, "F4", 0.7 * PITCH)
+        constraints, _ = lattice_phase_constraints(observations, images=rendered.images, pixel_size_um=PX)
+        decided = [c for c in constraints if c.step_from in (STEP_CONTENT, STEP_CHAINED)]
+        if cells and not shifted:
+            # Cells give content something to decide on. With F4 shifted, what it decides about F4 leaves loops open
+            # against the stage's picks, and the layout falls back to the stage's
+            # (test_content_that_leaves_a_loop_open_gives_way_to_a_layout_that_closes).
+            assert decided
+        for c in decided:
+            truth = np.subtract(rendered.true_left_top_um[c.j], rendered.true_left_top_um[c.i])
+            assert np.hypot(*(np.asarray(c.offset_um) - truth)) < 0.25 * PITCH, (c.i, c.j, c.step_from)
+
+
+def test_the_other_timepoints_settle_a_step_the_content_cannot():
+    """No cells, no rim, and the central square inside F0 alone: nothing breaks the lattice in any overlap, so
+    content cannot choose, and the stage's 0.62-pitch error would put F1 a pitch off. The offset the well's other
+    timepoints agree on settles it."""
+    plan = TilePlan(2, 2, (300, 300), 0.15, PX)
+    rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=4000, rotation_deg=6,
+                            noise_sigma=0.05, seed=3, blur_px=1.0, array_shift_um=(-500.0, -500.0))
+    observations = _off_by(_observations(rendered), "F1", 0.62 * PITCH)
+    alone = register_tiles(observations, images=rendered.images, pixel_size_um=PX, pitch_um=PITCH)
+    assert _lattice_constraint(alone, ("F0", "F1")).step_from == STEP_STAGE
+    assert _error(alone, rendered) == pytest.approx(PITCH, rel=0.05)
+    assert alone.warnings == ()      # one tile wrong in every pair it is in: its loops close, nothing else can tell
+    agreed = {(i, j): tuple(np.subtract(rendered.true_left_top_um[j], rendered.true_left_top_um[i]) + (3.0, -2.0))
+              for i, j in (("F0", "F1"), ("F0", "F2"), ("F0", "F3"), ("F1", "F2"), ("F1", "F3"), ("F2", "F3"))}
+    helped = register_tiles(observations, images=rendered.images, pixel_size_um=PX, pitch_um=PITCH, preferred=agreed)
+    assert {c.step_from for c in helped.constraints if c.source == LATTICE} == {STEP_TIMEPOINTS}
+    assert _error(helped, rendered) < 1.0
+    assert helped.warnings == ()
+
+
+def test_content_that_disagrees_with_the_other_timepoints_is_used_and_said():
+    plan = TilePlan(2, 2, (400, 400), 0.3, PX)
+    rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=1800, rotation_deg=6,
+                            noise_sigma=0.05, cells=400, seed=3, blur_px=1.0)
+    observations = _observations(rendered)
+    wrong = tuple(np.subtract(rendered.true_left_top_um["F1"], rendered.true_left_top_um["F0"]) + (PITCH, 0.0))
+    result = register_tiles(observations, images=rendered.images, pixel_size_um=PX, pitch_um=PITCH,
+                            preferred={("F0", "F1"): wrong})
+    assert _error(result, rendered) < 1.0
+    assert _lattice_constraint(result, ("F0", "F1")).step_from == STEP_CONTENT
+    assert any("F0-F1" in w and "other timepoints" in w for w in result.warnings)
+
+
+def test_the_timepoints_agree_on_a_pair_only_by_a_majority_of_two_or_more():
+    from pipeline.tile_register import agreed_offsets, disagreeing_pairs
+
+    pair = ("F0", "F1")
+    right, off = (1000.0, 0.0), (1000.0 + PITCH, 0.0)
+    three = {"T0": {pair: right}, "T1": {pair: off}, "T2": {pair: (1002.0, 1.0)}}
+    assert agreed_offsets(three, PITCH)[pair] == pytest.approx((1001.0, 0.5))      # the two that agree, averaged
+    assert [p for p, _ in disagreeing_pairs(three["T1"], agreed_offsets(three, PITCH), PITCH)] == [pair]
+    assert disagreeing_pairs(three["T0"], agreed_offsets(three, PITCH), PITCH) == []
+    assert agreed_offsets({"T0": {pair: right}, "T1": {pair: off}}, PITCH) == {}    # two cannot say which is wrong
+    split = {"T0": {pair: right}, "T1": {pair: off}, "T2": {pair: right}, "T3": {pair: off}}
+    assert agreed_offsets(split, PITCH) == {}                                     # an even split: nobody agrees
+    # Two of five agree and the other three are scattered a step or two either way: the two are a plurality round the
+    # median, not a majority, and a plurality is not evidence of which step is right.
+    two_steps = (1000.0 + 2 * PITCH, 0.0)
+    plurality = {"T0": {pair: off}, "T1": {pair: (off[0] + 1.0, 0.0)}, "T2": {pair: right}, "T3": {pair: two_steps},
+                 "T4": {pair: (1000.0 + 3 * PITCH, 0.0)}}
+    assert agreed_offsets(plurality, PITCH) == {}
+    near = {"T0": {pair: right}, "T1": {pair: (1000.0 + 0.4 * PITCH, 0.0)}, "T2": {pair: right}}
+    assert disagreeing_pairs(near["T1"], agreed_offsets(near, PITCH), PITCH) == []   # under half a pitch: not a step

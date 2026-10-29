@@ -9893,15 +9893,75 @@ recorded position and says so; it never fails the solve.
 
 *Lattice phase.* A tile's fit gives a site position `p` in tile-local coordinates;
 for one physical lattice `o_j - o_i == p_i - p_j` modulo a lattice vector, where
-`o` is a tile's origin. The recorded offset chooses the vector (searched among
-the neighbouring integer pairs, because rounding in lattice coordinates is not
-always the nearest lattice point). This uses every nanowell in the tile and is
-unaffected by a bubble in the overlap. It is right while the recorded error
-*between two tiles* is under half a pitch; a pair whose recorded error passes 40 %
-of a pitch is warned about, and past 50 % it is wrong by exactly one lattice
-vector with nothing in the data to say so, a limit the tests pin rather than hide.
-Two fits whose bases differ by more than 5 % of a pitch are not treated as one
-lattice and give no constraint.
+`o` is a tile's origin. This uses every nanowell in the tile and is unaffected by
+a bubble in the overlap. Two fits whose bases differ by more than 5 % of a pitch
+are not treated as one lattice and give no constraint.
+
+*The whole-vector choice* (`choose_step`, recorded per pair as
+`PairConstraint.step_from` and `step_moved_um`). Which lattice vector is settled
+in this order:
+
+1. **The overlap's content** (`content`). Each tile is reduced to its aperiodic
+   part (`aperiodic_tile`): block-averaged until a pitch spans about 16 px, then
+   each pixel minus the mean of itself shifted by every nearest-neighbour lattice
+   vector *whose source lies inside the tile* — continuing the edge instead would
+   leave the lattice standing in exactly the strip that overlaps the next tile —
+   and band-passed at 0.04 / 0.25 pitch with normalised convolution. Every
+   candidate offset a whole vector apart within two pitches of the recorded one
+   is scored by the Pearson correlation of the two reduced tiles over **one
+   common region**: the pixels of the first tile that the recorded offset says
+   the two share (`candidate_scores`, best of the 3 × 3 pixels around each
+   candidate). Scoring each candidate over its own shared region judged a
+   candidate that puts the tiles closer on more of the first tile, and on a
+   rendered well a wrong candidate a step closer matched a cell outside the true
+   overlap against one a lattice vector away (0.36 against the true corner's
+   0.08). A candidate whose part of the region is at least `STEP_MIN_AREA_PITCH2`
+   (six square pitches, half a pitch wide) may win; one with at least
+   `STEP_COMPETE_AREA_PITCH2` (1.5, a quarter pitch wide) only competes. The
+   winner must reach `STEP_MIN_PEAK` 0.25 and lead every other candidate by
+   `STEP_MIN_MARGIN` 0.12 and by `STEP_MARGIN_SPREADS` (three) times the robust
+   spread of the losers' scores, which is the noise the region gives where the
+   tiles do not match: a region of a few square pitches holds only a few dozen
+   independent samples once band-passed, and a fixed lead is a fraction of its
+   noise there. Cells, debris, the central square and the array's rim decide it;
+   bare lattice cannot. A straight stretch of rim is itself periodic along its
+   tangent, so it leaves neighbouring candidates close and decides nothing. Two
+   diagonal neighbours at a 10 % overlap share a corner too small to win on, so
+   they are settled by the loops. A stage error large enough to leave the common
+   region thin decides nothing either, and falls to the next source.
+2. **The loops** (`chained`, `_settle_by_loops`). Tiles form loops (a 2 × 2 grid's
+   four edges and two diagonals) and every loop must close: the content-decided
+   pairs are solved alone, and a pair joining two tiles they reach takes the
+   candidate nearest the offset between them. Without this a diagonal pair keeps
+   the stage's choice and is averaged into the solve against the edges content
+   put right.
+3. **The well's other timepoints** (`timepoints`): *preferred*, the offset most of
+   them agree on (below, *Agreeing on the tile layout*).
+4. **The recorded position** (`stage`): the candidate nearest it, right while the
+   recorded error *between two tiles* is under half a pitch; one past 40 % is
+   warned about, and past 50 % it is wrong by exactly one lattice vector with
+   nothing in that pair's data to say so — the limit `test_tile_register` pins
+   for registration without images.
+
+After every choice the pairs are solved together (`_open_loops`). When some pair
+misses the joint solve by a quarter pitch or more and content took part, content's
+choices and the others contradict one another: typically content settled one
+pair of a tile and the stage's pick for another pair of it is a step wrong.
+Solving that as it stands would average the tile half a step astray, a placement
+no timepoint has, so the choices made without content (the other timepoints',
+else the stage's) are used instead whenever they close, each such pair warned
+about; a layout a whole step off is what the timepoints' agreement can then put
+right. A loop that still does not close is warned about pair by pair: which pair
+of it is wrong is not decidable from the loop alone. One tile wrong in every pair
+it is in closes all its loops, so a single tile the stage misplaced shows only
+across timepoints. On renders (three families: 3 × 3 grids at a 10 % overlap, 2 ×
+3 grids at 8 %, and 2 × 2 wells with painted cells; cells, camera noise
+0.05–0.2, vignetting 0–0.3; with and without a 0.7-pitch stage error on one
+tile), content and the loops settled 528 pair choices and none wrongly. Content
+decides a minority of pairs (about 5–13 % of them, fewer under a stage error),
+so most stage errors are put right by the timepoints' agreement, not here. The overlap correlation
+below is then centred on the chosen lattice offset rather than the recorded one,
+so a corrected pair is not searched half a pitch from where it now sits.
 
 *Overlap correlation.* An array is periodic, so correlating two tiles of it has a
 peak at the true shift and at every lattice vector from it, and an unconstrained
@@ -10509,14 +10569,30 @@ only with no outline fitted is it the sites detected. Consistency of pitch and r
 timepoint; the lattice angle is not checked within one well, because the plate's rotation between timepoints
 is only measurable across wells.
 
+**Agreeing on the tile layout** (`run_well` → `_agree_tile_layouts`; `tile_register.pair_offsets`,
+`agreed_offsets`, `disagreeing_pairs`). The stage runs one tile program at every timepoint, so neighbouring tiles
+sit the same distance apart each time, to the stage's repeatability, and a whole-vector choice gone wrong is a pitch
+from the rest. Once every timepoint is located, each one's offsets between pairs of lattice-placed tiles are compared:
+a pair is agreed when more than half of the timepoints placing it, and at least two, lie within half a pitch of their
+median (so two timepoints a step apart agree on nothing, and it takes a third), the agreed offset being their mean.
+The earlier run's kept timepoints take part through `kept_layouts` (`nanowell_task._kept_layouts`, from their grid
+blocks' `tiles`) without being located again. A timepoint with a pair half a pitch or more from the agreed offset is
+located again with the agreed offsets as `preferred`, and its grid block records `tile_layout`: the pairs that
+disagreed and by how much, any that still do, and the timepoints compared with. Content measured on that timepoint's
+own pixels still wins over the agreement, with a registration warning. The relocated montage spills under its own
+name (`<well>_<tp>_agreed`), since the first is still mapped. A kept timepoint is never registered again here: an
+incremental run takes it as it was, and only a full re-run puts it right.
+
 **Registration reuse** (`nanowell_run.registration_key`, `stored_placement`, `Placement`). A plate analysed a
 second time with other segmentation or measurement settings does not register its tiles again. Every grid block
 that carries `tiles` also carries a `registration` block: the key the placement was solved under, the
-registration's own warnings, how many tiles' lattice fits constrained it, and `reused_from` (the folder it was
-taken from, or `null` when this run solved it). The key digests everything registration reads:
+registration's own warnings, how many tiles' lattice fits constrained it, `reused_from` (the folder it was
+taken from, or `null` when this run solved it) and `steps` (each lattice pair's whole-vector choice: where it came
+from and how far it moved from the stage's own pick). The key digests everything registration reads:
 `REGISTRATION_SCHEME` (raise it whenever `tile_register` or the per-tile fits could move a tile), the timepoint's
-`record_digest`, every tile's pixels, the geometry, nominal pitch and diameter, and the working pitch and lattice
-kind measured on the timepoint — and nothing that acts after registration (cell diameter, margin, square edge,
+`record_digest`, every tile's pixels, the geometry, nominal pitch and diameter, the working pitch and lattice
+kind measured on the timepoint, and the agreed tile offsets when the timepoint is registered again with them — and
+nothing that acts after registration (cell diameter, margin, square edge,
 occlusion and clipping thresholds, the segmenter). `locate_timepoint` computes the key once the working pitch is
 measured and takes the first stored placement under it for exactly the plan's tiles, skipping the per-tile fits
 and `register_tiles`; otherwise it registers. So reuse is a cache whose hits are the positions registering would
@@ -10670,19 +10746,23 @@ off had left the rim a quarter pitch out. **Address test** (`address_test`): eve
 transform the match gives (`mapper`) and must land within `TOLERANCE_PITCHES` (0.25) of the same address in the
 other timepoint's `nanowells/<well>.csv` positions, and nearer it than any other site; an address only the
 reference holds fails when its mapped point lands on a site carrying another address. A site that lands nearest its own address but beyond the tolerance has a fitted position that
-is off, not a wrong name; up to two of them or 2 % (`LOOSE_SHARE`) are counted (`loose_count`) and do not contradict,
-while one address landing on another's site does: one site a quarter pitch out had contradicted a 265-site well. `diagnose` reads the
+is off, not a wrong name: it is counted (`loose_count`) and never left out or contradicting, however many there are;
+an address landing on another's site is a wrong name. `diagnose` reads the
 addresses the mapped sites landed on: one constant lattice step, one element of the lattice's point group
 (`point_group`: twelve on a hexagonal lattice, eight on a square one — a turn by 60°, 90°, 120° or 180°, or a
 reflection) explaining at least 80 % of them, failures confined to one tile, or `scattered`. **Tile layout**
 (`tile_layout_test`): a tile placed a lattice step off inside one montage moves its sites' positions and their
 addresses together, so every address still lands on itself in the common frame and the address test cannot see it;
-the stage visits the same fields at every timepoint, so the tiles are grouped by how far they moved between the two
-timepoints, the largest group within a quarter pitch of one another is the grid's motion, and any tile off it by
-more was placed differently in one of the two montages. A median would not do: with half the grid a step off it
-falls between the halves and every tile departs by half a pitch. Two equal groups still disagree and are
-contradicted; only a tile more than `LAYOUT_REACH_PITCHES` (3) off means the timepoints were not acquired on one
-grid, and then the timepoint cannot be confirmed. **Square agreement**: the correlation peak must sit within a
+the stage visits the same fields at every timepoint, so the tiles that own a nanowell at either timepoint (an empty
+one names nothing) are grouped by how far they moved between the two timepoints, and the largest group within a
+quarter pitch of one another is the grid's motion. A tile off it by `MISREGISTERED_PITCHES` (half a pitch) or more
+is **moved** — misregistered a lattice step, its nanowells' names wrong in one of the two; one off by less is
+**imprecise** — placed tens of micrometres differently, as an empty or sparse corner tile with only the stage's
+position is, which leaves every address on its nearest lattice site, so it is reported and nothing is left out. A
+median would not do: with half the grid a step off it falls between the halves and every tile departs by half a
+pitch. Two equal groups (`split`) disagree and nothing tells which is right; only a tile more than
+`LAYOUT_REACH_PITCHES` (3) off means the timepoints were not acquired on one grid, and then the timepoint cannot be
+confirmed. **Square agreement**: the correlation peak must sit within a
 quarter pitch of the square the run accepted at that timepoint, or the run took something else for the square. A
 mirrored flag that differs from the reference's, or a lattice of another kind, is contradicted outright.
 **Second landmark**: the square is the registration's only landmark, so a square-like decoy the run accepted at both
@@ -10694,11 +10774,16 @@ or three sites off taken by the run, the correlation follows it (it is the best 
 on itself, while the rim-fitted centres sat 1.75 and 3.0 pitches apart. The converse — the run right, the square
 hidden, and the correlation following a decoy — contradicts correct addresses; it fails safe (the rows are left out),
 and nothing in one timepoint's image tells the two apart.
-**Verdicts**: `confirmed`, `contradicted` (any failure above), `inconclusive` (no reference square, no montage, a
-peak or margin too low, an unaddressed timepoint, fewer than `MIN_COMPARED` addresses in common, a tile layout from
-another grid, a rim centre that disagrees), `reference`, and `not_checked` for a timepoint never tested; only
-`confirmed` and `reference` are good. Review leaves only `contradicted` timepoints out of its joins; `inconclusive`
-and `not_checked` are joined and footnoted. **The reference** (`reference_candidates`, `check_well`) is an addressed
+**Verdicts**: `confirmed`; `partial` — the registration is trusted and most nanowells land on themselves, but some
+are shown wrong, and only those are listed in `excluded` (`_excluded`: an address whose mapped site landed on
+another's, the address it landed on, every nanowell of a moved tile); `contradicted` — the registration or every
+address at once is wrong (a constant step or a lattice symmetry, a rim centre 1.5 pitches off, a square the run
+took elsewhere, a split tile layout, a mirror or another lattice kind, or more than `PARTIAL_MAX_SHARE` (half) of the
+nanowells shown wrong); `inconclusive` (no reference square, no montage, a margin too low, an unaddressed timepoint,
+fewer than `MIN_COMPARED` addresses in common, a tile layout from another grid, a rim centre between 0.75 and 1.5
+pitches off); `reference`; and `not_checked` for a timepoint never tested. Only `confirmed` and `reference` are good;
+`AGREES` adds `partial`. Review leaves a `contradicted` timepoint and a `partial` one's `excluded` nanowells out of its
+joins (`exclusions` reads them); `inconclusive` and `not_checked` are joined and footnoted. **The reference** (`reference_candidates`, `check_well`) is an addressed
 timepoint whose square the run accepted, those whose square carries `(0, 0)` first (`square_names_the_centre`:
 the square is the central nanowell by convention), earliest first. A reference addressed off itself would make
 every correct timepoint contradicted, so when the contradicted timepoints agree on one step or symmetry and are at
@@ -10776,7 +10861,9 @@ timepoint) — fails the well with the file's problem named, never runs it as if
 **Reuse is keyed on the anchor.** `_prior_state` keeps a timepoint only when its recorded `manual_anchor_um`
 is the current one, so an incremental run recomputes a timepoint whose anchor was set, moved or cleared, and
 the resume checkpoint key (`_checkpoint_key`) carries it too. That key also holds the well's diameter in every
-geometry, since a resumed run over another set of timepoints can move the median it is taken from. A `plate_rigid` timepoint was carried from another
+geometry, since a resumed run over another set of timepoints can move the median it is taken from, and the
+registration's own key, since a timepoint registered again with its well's agreed tile layout has a tile a lattice
+step from where a checkpointed measurement read it. A `plate_rigid` timepoint was carried from another
 timepoint or other wells, any of which a click may have moved, so every located timepoint also records
 `anchors_digest` — a digest of the whole plate's anchors when it was located — and a `plate_rigid` one is kept
 only under the same digest. For a remote run, `acquisition_transport` uploads
@@ -11074,24 +11161,30 @@ those whose labels happen to parse — and the growth rate is undefined.
 every timepoint of its well. A timepoint where it has no row still has one, with a state saying why:
 `unaddressed` (the timepoint was located but given no origin), `not_located` (the grid record names the
 timepoint and the table has no row for it) or `absent` (addressed, not in that roster), plus the grid's
-reason, or its status, or a sentence saying the grid lists the timepoint and the table has no rows. A timepoint
-the identity check contradicted (`NanowellData.identity`, read per well by `read_well_part` through
-`pipeline.nanowell_identity.verdicts`) has every row `identity_contradicted`, with the check's reason: its
-addresses name other nanowells than the reference's, so it is no fold change's numerator or baseline, and an address
-only it holds is not followed at all. Every figure `controller.draw_view` composes says in its footer which
+reason, or its status, or a sentence saying the grid lists the timepoint and the table has no rows. Every row
+carries its timepoint's identity verdict (`identity`, `identity_reason`; `NanowellData.identity`, read per well by
+`read_well_part` through `pipeline.nanowell_identity.verdicts`) and `identity_ok`, False on every row of a
+`contradicted` timepoint and on each nanowell a `partial` one leaves out (`NanowellData.identity_excluded`, through
+`exclusions`; `series_compute._mark_identity`). Such a row keeps what was measured — a count at that timepoint is a
+count of *some* nanowell, so per-timepoint figures draw it — but no comparison over time uses it: its fold changes
+are undefined with the reason `identity_contradicted`, a fold change from a baseline row like it with `baseline
+identity_contradicted`, the growth rate skips it, the occupancy class is not taken at it, Trajectories draw it as a
+point joined to nothing (`TrajectoryPanel.line_ok`) and in no class median, and the export carries `identity` and
+`identity_ok` beside its values. Every figure `controller.draw_view` composes says in its footer which
 timepoints were contradicted and which wells are not confirmed or not checked (`identity_compute.identity_note`):
 a dataset analysed before the check existed reads `not_checked` until the audit command is run over it. The line plots
 mark it where it is (`identity_compute.timepoint_marks`, drawn by `_identity_marks`): Trajectories (through
-`TrajectoryPanel.marks`) and the Distribution view over time (`DistributionModel.identity_marks`) draw a hatched band
-at each timepoint that is `inconclusive` (//), `contradicted` (xx) or, in a well where another timepoint was checked,
-`not_checked` (..), with the verdict written in it, and dash every line segment into or out of it
+`TrajectoryPanel.marks`) and the Distribution view over time (`DistributionModel.identity_marks`) draw a light hatched
+band behind the datapoints at each timepoint that is `inconclusive` (//), `partial` (`\\`), `contradicted` (xx) or, in a
+well where another timepoint was checked, `not_checked` (..), with the verdict written above it, and dash every line
+segment into or out of it
 (`_identity_marks.split_segments`); a well never checked is said once in the footer rather than hatched at every
 timepoint, and `marks_legend` adds the footer sentence naming the hatches drawn. Contents values are used only in a measurable state (`measured` / `empty`), whatever the table
 holds. `site_series` is one nanowell's rows in time order; an address the well never had is an empty frame.
 
 **Metrics** are the nanowell tracker's per-nanowell metrics table, NaN where undefined, with `exclusion_reason` naming the cause per
 row (the state at the timepoint, the value missing there, the baseline's state or value, a baseline at zero:
-`seeded later` when cells arrive later, `empty at baseline` when not). The site signal is
+`seeded later` when cells arrive later, `empty at baseline` when not). The nanowell fluorescence (`signal_<channel>`) is
 background-subtracted, so a ratio over a baseline at or below zero is undefined. The baseline is the well's
 earliest timepoint; or, per measurement, each nanowell's first timepoint in a measurable state at which that
 measurement exists (the pipeline records `measured` with no count where no template could be built, and a
@@ -11263,7 +11356,7 @@ shared with the enlarged crops), the ranking timepoint's column outlined, each r
 value, and **every word a crop carries is written inside it**, on a translucent band of the ground: the fold change
 at its timepoint in its top-left corner (`format_value`: `2.31×`, or a signed difference on log₂), and along its
 foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines`: count, confluence as a
-percentage, the shared channel's site signal and brightness, in that order of importance, `compact_number` for
+percentage, the shared channel's nanowell fluorescence and brightness, in that order of importance, `compact_number` for
 thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
 crop's width (`renderer._one_line`), the caption saying when some were left for the pop-out, which writes each
 panel's full metrics under it (`render_crop_grid(…, metrics=…)`, `controller.crop_metrics`). Text under or beside
@@ -11304,22 +11397,41 @@ against the well's reference. It is drawn through `controller.draw_view(view="id
 like the others; `_identity_controller.draw_identity` composes it from the sidecar (read itself when not handed one),
 `identity_compute` holds the Qt-free data (`distance_map`, `blink_frames`, `hover_target`, `diagnostics`,
 `identity_message`, `summary_lines`, `stage_line`, `worst_verdict`, `default_timepoint`), `_identity_render` draws it
-(every text a reader sees carries a `nw-identity-*` gid) and `identity_view` builds the *Compare* control and the
-Blink timer. Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
+(every text a reader sees carries a `nw-identity-*` gid; the Diagnostics figure is `_identity_diagnostics_render`)
+and `identity_view` builds the *Compare* and *Colour* controls and the Blink timer. Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
 included). Four modes, `NanowellState.identity_mode` (persisted; an unknown one falls back to `distance`):
-*Distance map* — each compared address at its reference's measured position (well frame, µm), filled by its
-distance in pitches (viridis 0–0.5, the tolerance marked on the colour bar), failing addresses outlined in
-`Colors.danger` (the sidecar's list plus every address beyond the tolerance, since the list is capped at
-`MAX_LISTED`), the compared timepoint's tiles mapped into the reference frame through the inverse registration with
-the moved ones drawn in red and named; *Blink* — the compared montage resampled onto the reference's pixel grid
+*Distance map* — each compared address at its reference's measured position (well frame, µm), coloured by
+`NanowellState.identity_colour` (`IDENTITY_COLOURS`, persisted): `distance` fills it by its distance in pitches
+(viridis 0–0.5, the tolerance marked on the colour bar), `status` by its class — lands on itself (`Colors.success`),
+imprecise (`warn`), wrong name (`danger`, which folds in `neighbour_of_wrong`), in a misregistered tile (`danger`,
+hatched) or not compared (muted), the legend counting each — and `auto` is `status` unless the timepoint is
+confirmed. Classes come from the sidecar's `excluded` list, or for a sidecar without one from `tiles.moved` and tile
+ownership. Failing addresses are outlined in `Colors.danger` (the sidecar's list plus every address beyond the
+tolerance, since the list is capped at `MAX_LISTED`), and the compared timepoint's tiles are mapped into the
+reference frame through the inverse registration, moved ones in red labelled "moved N µm", imprecise ones in amber
+labelled "N µm off"; *Blink* — the compared montage resampled onto the reference's pixel grid
 through `mapper` (at most 1,024 px a side, cached one pair at a time in `st.identity_frames`), the two frames drawn
 once and alternated by a 500 ms `QTimer` parented to the band that starts only when frames are on screen and stops on
 the first tick after the page, view, mode or figure changes; labels on the addresses whose q and r are multiples of
 three, each frame placing its own addresses, so wrong addresses visibly jump; *Side by side* — each montage in its own
 frame, and the pointer (`controller.on_motion`) lights the address under it on both, with a cross where the
-registration predicts the reference site lands (`hover_target`); *Diagnostics* — the correlation surface over
-`surface_box_um` with the peak, the runner-up, the reference square and the accepted square marked, and peak and
-margin against `MIN_PEAK` / `MIN_MARGIN`, the turn, scale and translation, the square agreement. With no sidecar it
+registration predicts the reference site lands (`hover_target`); *Diagnostics* — three panels and a verdict block:
+what was looked for (the reference montage around its square, `PATCH_PITCHES` each side, the square outlined at a
+nominal `SQUARE_OUTLINE_PITCHES`, since the sidecar records where the square is but not its size), where it was found
+(the compared montage read through the registration into the reference's orientation, the match outlined and the
+square the run accepted ringed), and how clearly (the match-score surface over `surface_box_um` in µm from the
+reference square, with a labelled colour bar and the best and next-best places marked with their scores). The
+verdict block below gives one line per check — verdict and reason, the square, plate movement and refit, square
+agreement, array outline, tiles, addresses — each with a glyph and a theme colour (`STATE_GLYPHS`, `state_colour`),
+and a check that did not run says why. While the montages load, the two crops say so and the rest is drawn.
+
+Every mode zooms and pans: the scroll wheel zooms about the pointer and a drag pans, through the canvas wiring the
+Array view uses (`controller.on_scroll` routes Identity events to `_identity_zoom`). The limit arithmetic is Qt-free
+in `zoom_compute` (`wheel_limits`, `pan_limits`, `linked`, `held_factor`), shared with the Array view, whose zoom
+constants live there too. Side by side's two images share one initial extent and move together, as do Diagnostics'
+two crops; the surface zooms alone. The zoom (`NanowellState.identity_zoom`, never persisted) is kept across a redraw
+of the same well, timepoint and mode (montages arriving, a setting changed) and dropped when any of the three
+changes; a Blink frame flip leaves it alone. With no sidecar it
 says the check has not been run and names the audit command; at the reference it says so. On this view the Well
 combo reads each well's worst verdict, and the timepoint shown by default is the well's first contradicted, then
 inconclusive or unchecked, then first non-reference timepoint. Montages are read on a worker through the page's
@@ -11498,7 +11610,7 @@ the first, Position and *Along x: Wells* offer every timepoint and start at the 
 the slider and the figure always agree. `page_well` is the chosen well when it is drawn, else the first drawn
 well. Wells are what `data_loading.plot_group_well_lists(ctx, fallback_to_all=False)` says every plotting tab
 draws — so a group-by variable, hidden sets and the solo-well toggles mean the same here as elsewhere — never
-every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and site signal, and
+every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and nanowell fluorescence, and
 their fold changes, are drawn for the page's own **Channel** (`_nw_channel_cb`, `NanowellState.channel`, persisted),
 beside Metric on every view: the app's shared channel selector sits on the Plotting band, which this page does not show,
 so the page cannot depend on it alone. `controller.page_channel_name` resolves it — the page's choice when set; else

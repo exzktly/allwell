@@ -46,18 +46,36 @@ def _metrics(out, baseline="earliest"):
     return site_metrics(data, baseline), data
 
 
-def test_a_contradicted_timepoint_joins_nothing_and_says_why(tmp_path):
+def test_a_contradicted_timepoint_keeps_its_values_and_joins_nothing(tmp_path):
+    """U4: a value measured at a contradicted timepoint is a measurement of *some* nanowell, so it stays (as a count,
+    in the per-timepoint figures); no comparison over time uses it."""
     metrics, data = _metrics(_out(tmp_path, {"t_c": ni.REFERENCE, "t_a": ni.CONTRADICTED, "t_d": ni.CONFIRMED}))
     assert data.identity["A01"]["t_a"] == (ni.CONTRADICTED, WHY)
     at = metrics.set_index(["nw_q", "nw_r", "timepoint"])
-    assert at.loc[(0, 0, "t_a"), "state"] == IDENTITY_CONTRADICTED
-    assert at.loc[(0, 0, "t_a"), "reason"] == WHY
-    assert math.isnan(at.loc[(0, 0, "t_a"), "count_fc"])
+    row = at.loc[(0, 0, "t_a")]
+    assert (row["state"], row["identity"], bool(row["identity_ok"]), row["n"]) == ("measured", ni.CONTRADICTED, False, 4)
+    assert math.isnan(row["count_fc"])
     assert at.loc[(0, 0, "t_d"), "count_fc"] == 4.0                    # the confirmed timepoint still joins
-    assert sorted({(q, r) for q, r in zip(metrics["nw_q"], metrics["nw_r"])}) == [(0, 0), (1, 0)]  # no ghost
+    assert at.loc[(5, 0, "t_a"), "n"] == 9                              # an address only it names: still a count
     reasons = exclusion_reason(metrics, "count_fc").groupby(metrics["timepoint"]).agg(set)
     assert reasons["t_a"] == {IDENTITY_CONTRADICTED}
+    assert exclusion_reason(metrics, "n")[metrics["timepoint"].eq("t_a")].eq("").all()
     assert dc.reason_label(IDENTITY_CONTRADICTED) == "identity contradicted"
+
+
+def test_a_partial_timepoint_leaves_out_only_its_listed_nanowells(tmp_path):
+    out = _dataset(tmp_path, {"A01": _well()}, starts=STARTS)
+    ni.write_sidecar(out, "A01", {
+        "version": ni.IDENTITY_VERSION, "well": "A01", "inputs": ni.inputs_digest(out, "A01"), "reference": "t_c",
+        "timepoints": {"t_c": {"verdict": ni.REFERENCE, "reason": ""},
+                       "t_a": {"verdict": ni.PARTIAL, "reason": "1 left out", "excluded": [[1, 0, "wrong_name"]]},
+                       "t_d": {"verdict": ni.CONFIRMED, "reason": ""}}})
+    metrics, data = _metrics(out)
+    at = metrics.set_index(["nw_q", "nw_r", "timepoint"])
+    assert data.identity_excluded["A01"]["t_a"] == frozenset({(1, 0)})
+    assert at.loc[(0, 0, "t_a"), "count_fc"] == 2.0                     # kept
+    assert math.isnan(at.loc[(1, 0, "t_a"), "count_fc"])                # left out
+    assert at.loc[(1, 0, "t_d"), "count_fc"] == 1.0                     # its other timepoints still join
 
 
 def test_a_contradicted_baseline_leaves_every_fold_change_from_it_undefined(tmp_path):
@@ -85,7 +103,7 @@ def at_count(metrics, tp):
 @pytest.mark.parametrize("verdicts, note", [
     ({"t_c": ni.REFERENCE, "t_a": ni.CONFIRMED, "t_d": ni.CONFIRMED}, ""),
     ({"t_c": ni.REFERENCE, "t_a": ni.INCONCLUSIVE, "t_d": ni.CONFIRMED}, "Nanowell identity — A01 not confirmed"),
-    ({"t_c": ni.REFERENCE, "t_a": ni.CONTRADICTED, "t_d": ni.CONFIRMED}, "Nanowell identity — A01 t_a contradicted (left out)"),
+    ({"t_c": ni.REFERENCE, "t_a": ni.CONTRADICTED, "t_d": ni.CONFIRMED}, "Nanowell identity — A01 t_a contradicted (left out of joins)"),
 ])
 def test_the_footer_note_follows_the_verdicts(tmp_path, verdicts, note):
     _, data = _metrics(_out(tmp_path, verdicts))
@@ -117,16 +135,17 @@ def test_the_page_s_figures_carry_the_note(tmp_path):
     assert "Nanowell identity — A01 t_a contradicted" in texts
 
 
-def test_the_export_carries_nothing_measured_at_a_contradicted_timepoint(tmp_path):
-    """R9: the row under an address at a contradicted timepoint was measured on another physical nanowell."""
+def test_the_export_says_which_rows_join_nothing(tmp_path):
+    """R9, revised by U4: the export keeps what was measured and says the row's identity, so nothing is hidden and
+    nothing is attributed silently; the fold changes of such a row are blank."""
     from review.features.nanowell.series_compute import long_format
 
     metrics, data = _metrics(_out(tmp_path, {"t_c": ni.REFERENCE, "t_a": ni.CONTRADICTED, "t_d": ni.CONFIRMED}))
     table = long_format(metrics, data.channels).set_index(["nw_q", "nw_r", "timepoint"])
     row = table.loc[(0, 0, "t_a")]
-    assert row["state"] == IDENTITY_CONTRADICTED and row["reason"] == WHY
-    assert row[["n_cells", "confluence", "area_est_cells", "imaged_fraction", "visible_fraction"]].isna().all()
-    assert table.loc[(0, 0, "t_d"), "area_est_cells"] == 8
+    assert (row["identity"], bool(row["identity_ok"]), row["n_cells"]) == (ni.CONTRADICTED, False, 4)
+    assert math.isnan(row["count_fc"])
+    assert bool(table.loc[(0, 0, "t_d"), "identity_ok"])
 
 
 # ── the line plots mark what was not confirmed ────────────────────────────────
@@ -172,11 +191,17 @@ def test_trajectories_hatch_an_inconclusive_timepoint_and_dash_the_lines_through
     assert "Hatched: nanowell identity not confirmed (// inconclusive); lines through them dashed." in footer
 
 
-def test_a_contradicted_timepoint_is_cross_hatched_and_its_gap_explained(tmp_path):
+def test_a_contradicted_timepoint_keeps_its_points_over_the_hatching_joined_to_nothing(tmp_path):
+    """U4: the hatching is a background behind the datapoints, not a replacement for them."""
     fig = _figure(_out(tmp_path, {"t_c": ni.REFERENCE, "t_a": ni.CONTRADICTED, "t_d": ni.CONFIRMED}),
                   "trajectories")
     assert _bands(fig) == [(5.0, ni.CONTRADICTED, "xxxx")]
-    assert not any(5.0 in seg for seg in _segments(fig, "-") + _segments(fig, "--"))   # no value there: a gap
+    band = next(p for ax in fig.axes for p in ax.patches if p.get_gid() == "nw-identity-band")
+    assert not any(5.0 in seg for seg in _segments(fig, "-") + _segments(fig, "--"))   # joined to nothing
+    points = [c for ax in fig.axes for c in ax.collections if c.get_gid() == "nw-traj-unjoined"]
+    assert len(points) == 1 and sorted(map(tuple, points[0].get_offsets().round(3))) == [(5.0, 1.0), (5.0, 4.0),
+                                                                                         (5.0, 9.0)]
+    assert points[0].get_zorder() > band.get_zorder()
 
 
 def test_a_well_never_checked_is_said_once_not_hatched_everywhere(tmp_path):

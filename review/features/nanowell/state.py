@@ -19,6 +19,10 @@ VIEWS = ("distribution", "trajectories", "array", "position", "extremes", "ident
 #: The Identity view's modes (``identity_compute``): the distance map, the two montages blinked in one frame, the two
 #: side by side with a linked cursor, and the registration's correlation surface.
 IDENTITY_MODES = ("distance", "blink", "sides", "diagnostics")
+#: What the Identity view's Distance map colours each nanowell by: ``status`` (kept, imprecise, wrong name, in a
+#: misregistered tile, not compared), ``distance`` (how far its address lands from itself), or ``auto`` — the
+#: status when the timepoint is not confirmed, so the nanowells left out are seen at once, else the distance.
+IDENTITY_COLOURS = ("auto", "status", "distance")
 #: Views of earlier versions, and the view each is now. A page saved on Array map or Array QC opens on the Array
 #: view with the layers that view drew (:meth:`ArrayLayers.preset`).
 _RENAMED_VIEWS = {"array_map": "array", "array_qc": "array"}
@@ -130,7 +134,7 @@ class NanowellState:
     #: The counted cells drawn as dots on every crop the page shows — the site detail's strip, the pop-out and the
     #: Extremes montage — as the Array view's Cells layer draws them on the array.
     crop_cells: bool = False
-    #: The fluorescence channel Brightness and Site signal are drawn for, as the page's *Channel* control names it;
+    #: The fluorescence channel Brightness and Nanowell fluorescence are drawn for, as the page's *Channel* control names it;
     #: ``""`` follows the app's shared channel selector, as the page did before it had a control of its own.
     channel: str = ""
     #: The channel every picture on the page is of — the crop strip, the pop-out, the Extremes montage and the Array
@@ -151,6 +155,8 @@ class NanowellState:
     subset: Subset = field(default_factory=Subset)
     #: What the Identity view shows of the chosen timepoint against the well's reference (:data:`IDENTITY_MODES`).
     identity_mode: str = "distance"
+    #: What the Distance map colours by (:data:`IDENTITY_COLOURS`).
+    identity_colour: str = "auto"
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
@@ -202,6 +208,12 @@ class NanowellState:
     identity_sidecars: dict = field(default_factory=dict)
     identity_frames: dict = field(default_factory=dict)
     identity_drawn: object = None
+    # The Identity view's zoom, never persisted: each zoomed axes' ``(xlim, ylim)`` by its name on the drawn view,
+    # for the ``(well, timepoint, mode)`` in ``identity_zoom_for`` (another one starts at its full view), and the
+    # press a pan started with (``_identity_zoom``).
+    identity_zoom: dict = field(default_factory=dict)
+    identity_zoom_for: object = None
+    identity_press: object = None
 
     def release_tiles(self) -> None:
         """Stop the reads of the tiles held so far and let their pixels go: another well, timepoint or dataset."""
@@ -218,6 +230,7 @@ class NanowellState:
         self.anchor_mode, self.array_message = False, ""
         self.extreme_axes = {}
         self.identity_sidecars, self.identity_frames, self.identity_drawn = {}, {}, None
+        self.identity_zoom, self.identity_zoom_for, self.identity_press = {}, None, None
         self.release_tiles()
 
     def to_config(self) -> dict:
@@ -228,7 +241,7 @@ class NanowellState:
                 "crop_metrics": self.crop_metrics,
                 "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
-                "identity_mode": self.identity_mode,
+                "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -247,6 +260,8 @@ class NanowellState:
         self.cohort = config.get("cohort") is True
         mode = config.get("identity_mode")
         self.identity_mode = mode if mode in IDENTITY_MODES else fresh.identity_mode
+        colour = config.get("identity_colour")
+        self.identity_colour = colour if colour in IDENTITY_COLOURS else fresh.identity_colour
         self.subset = _subset_from(config)
         count = config.get("extremes_n")
         self.extremes_n = (count if isinstance(count, int) and not isinstance(count, bool)

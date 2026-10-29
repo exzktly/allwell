@@ -7726,6 +7726,15 @@ puts the user's own form back (`_restore_form`) before showing the refusal, and
 logs nothing of what `hydrate_job` could not restore, since that text is the
 queue editor's. `tests/test_analyze_resume_offer.py::test_a_resume_the_run_refuses_leaves_the_user_s_form_alone`.
 
+The strip's middle button, **Load settings** (`_load_resumable_settings`), runs
+the same `_show_resumed_settings` and stops there: nothing starts, the record is
+neither cleared nor dismissed, and incremental is left as the run recorded it
+rather than forced, since nothing is being resumed. Forcing it is unnecessary for
+safety — a Run on that input while the unfinished record stands is still made
+incremental by `resume_aware_spec`. What `hydrate_job` could not restore is
+logged at once, because here the load is the whole action.
+`tests/test_analyze_resume_offer.py::test_load_settings_fills_the_form_without_starting_or_dismissing`.
+
 `detect_layout` infers the schema from a dense sample of the input's names
 (`_INFER_SAMPLE`, 20,000) but reads the **channel list from every name**
 (`_ENUMERATE_LIMIT`): the channel list decides what is quantified, so a channel
@@ -13671,7 +13680,7 @@ because it is used on a *page*, where a sentence beside two buttons still has
 most of the width. This strip lives in the Analyze sidebar, which is
 `theme.Metrics.rail_w` and fixed at it, with 319 px of scrolling viewport
 inside that. Measured in a real `AnalyzeTab` at the app's default window size,
-`Resume` and `Discard` beside the label leave the offer **139 px**, so it
+`Resume` and `Discard` (two buttons; the row now holds three) beside the label leave the offer **139 px**, so it
 reflows into a 192-px column of twelve lines running down the side of two
 buttons floating in the middle of it. Text above its own right-aligned action
 row gives the same words **295 px** and four lines.

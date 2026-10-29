@@ -2115,7 +2115,10 @@ reading it. The log names any it kept over budget for that reason.
   computing only the field/timepoint groups still missing, and fills the
   sidebar with that run's settings so the form shows what is actually running.
   If the run cannot start — the earlier run is still going, say — the message
-  says why and the form is left as you had it. **Discard** beside it
+  says why and the form is left as you had it. **Load settings**, in the
+  middle, only fills the sidebar with that run's recorded settings — nothing
+  starts and the card stays up — so you can change an option and press Run, or
+  just see what the run used. **Discard**, on the left,
   forgets the offer and deletes nothing — the results already written stay
   exactly as they are, and you can still finish the plate later by re-running
   that input with **incremental** ticked.

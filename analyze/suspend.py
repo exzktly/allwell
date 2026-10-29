@@ -410,7 +410,11 @@ class AnalyzeSuspendMixin:
         return banner
 
     def _build_resume_actions(self, banner: QWidget) -> QWidget:
-        """The action row: Discard, then Resume, pushed to the right.
+        """The action row: Discard, Load settings, then Resume, pushed to the right.
+
+        Load settings sits between the two: it fills the form from the recorded
+        run without starting it or touching the offer, so it is neither the
+        dismissal nor the primary action.
 
         Resume last because it is the one the strip exists for, and last is
         where the eye finishes a right-aligned group. Discard is not destructive
@@ -433,6 +437,14 @@ class AnalyzeSuspendMixin:
             "ticked.")
         discard_btn.clicked.connect(self._discard_suspended)
         lay.addWidget(discard_btn)
+
+        load_btn = QPushButton("Load settings", row)
+        load_btn.setToolTip(
+            "Fill the form with this run's recorded settings without starting "
+            "anything. The offer stays up, so you can still Resume or Discard; "
+            "edit what you like and press Run when ready.")
+        load_btn.clicked.connect(self._load_resumable_settings)
+        lay.addWidget(load_btn)
 
         resume_btn = QPushButton("Resume", row)
         resume_btn.setProperty("variant", "primary")
@@ -940,6 +952,35 @@ class AnalyzeSuspendMixin:
             self._log_line(f"\n[Resuming] {offer.headline}\n", "INFO")
         except RunSpecError as exc:
             QMessageBox.critical(self, "Resume Error", str(exc))
+        except Exception:
+            swallowed()
+
+    def _load_resumable_settings(self) -> None:
+        """Put the offered run's recorded settings on the form, and nothing else.
+
+        For the user who wants that run's configuration — to change one option
+        and run again, or just to see what it used — without resuming it. The
+        spec goes on the form exactly as recorded: incremental is *not* forced
+        here, because nothing is being resumed. A later Run on the same input is
+        still made incremental by ``resume_aware_spec`` while the unfinished run
+        stands behind it, so loading cannot turn a half-done plate into one that
+        reports complete. The offer is left up and its record untouched — Load
+        is not a decision about the run, and Resume or Discard remain available.
+        """
+        try:
+            offer = self._resumable()
+            if offer is None:
+                self.refresh_resume_banner()
+                return
+            spec = RunSpec.from_json(offer.spec)
+            problems = self._show_resumed_settings(spec)
+            for problem in problems:
+                self._log_line(f"[warn] {problem}\n", "WARNING")
+            self._log_line(
+                f"\n[Loaded settings] {offer.title or offer.output_dir} — the form now holds that run's "
+                f"recorded settings. Nothing was started.\n", "INFO")
+        except RunSpecError as exc:
+            QMessageBox.critical(self, "Load Settings Error", str(exc))
         except Exception:
             swallowed()
 

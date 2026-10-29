@@ -115,3 +115,15 @@ def test_the_page_s_figures_carry_the_note(tmp_path):
               well_timepoint="t_d")
     texts = " ".join(t.get_text() for t in fig.texts)
     assert "Nanowell identity contradicted at A01 t_a" in texts
+
+
+def test_the_export_carries_nothing_measured_at_a_contradicted_timepoint(tmp_path):
+    """R9: the row under an address at a contradicted timepoint was measured on another physical nanowell."""
+    from review.features.nanowell.series_compute import long_format
+
+    metrics, data = _metrics(_out(tmp_path, {"t_c": ni.REFERENCE, "t_a": ni.CONTRADICTED, "t_d": ni.CONFIRMED}))
+    table = long_format(metrics, data.channels).set_index(["nw_q", "nw_r", "timepoint"])
+    row = table.loc[(0, 0, "t_a")]
+    assert row["state"] == IDENTITY_CONTRADICTED and row["reason"] == WHY
+    assert row[["n_cells", "confluence", "area_est_cells", "imaged_fraction", "visible_fraction"]].isna().all()
+    assert table.loc[(0, 0, "t_d"), "area_est_cells"] == 8

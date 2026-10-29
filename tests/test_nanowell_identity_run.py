@@ -4,7 +4,7 @@
 runs the real detection and addressing on rendered tiles and checks what the run actually wrote:
 
 * a well whose second timepoint could not read its square and was anchored on its fitted array centre a step off
-  is put right by the run (``nanowell_run._settle_steps``), and the check confirms it — and with that repair
+  is put right by the run (``nanowell_run._settle_steps``), and every address lands on itself — and with that repair
   disabled, the check is what catches the step, naming it (E10, the mutation that proves the check bites on
   the pipeline's own output rather than on hand-built tables);
 * ``process_microscopy.main`` writes ``nanowells/<well>_identity.json`` for a two-timepoint well, confirmed, and
@@ -89,7 +89,7 @@ def _run(record, images):
                        segmenter=threshold_segmenter())
 
 
-def test_a_timepoint_anchored_a_step_off_and_put_right_by_the_run_is_confirmed(well, monkeypatch):
+def test_a_timepoint_anchored_a_step_off_and_put_right_by_the_run_lands_on_itself(well, monkeypatch):
     record, images = well
     _t1_misses_its_square_and_its_centre_is_a_step_off(monkeypatch)
     outcome = _run(record, images)
@@ -98,8 +98,12 @@ def test_a_timepoint_anchored_a_step_off_and_put_right_by_the_run_is_confirmed(w
     result = _identity(outcome)
     assert result["reference"] == "T0"
     t1 = result["timepoints"]["T1"]
-    assert t1["verdict"] == ni.CONFIRMED, t1["reason"]
-    assert t1["max_pitches"] < 0.15 and t1["compared"] > 200
+    # Every address lands on itself. The fitted rim this test moved a whole pitch is what the check's second
+    # landmark reads, so it withholds the confirmation, and says why: a rim that far off cannot be told from a
+    # square that moved against the array.
+    assert t1["failing_count"] == 0 and t1["max_pitches"] < 0.15 and t1["compared"] > 200
+    assert t1["centre_agreement_pitches"] == pytest.approx(1.0, abs=0.1)
+    assert t1["verdict"] == ni.INCONCLUSIVE and "fitted centre" in t1["reason"]
 
 
 def test_with_the_run_s_repair_disabled_the_check_catches_the_step(well, monkeypatch):

@@ -121,6 +121,27 @@ States: `todo`, `wip`, `done` (implemented and pinned by a test watched failing 
 | A9 | Tile layout test: each tile's registered position relative to the grid must not change between timepoints by a quarter pitch | done | mutation `"ok": not moved` → `"ok": True` fails the tile test |
 | A10 | Decoy square: the correlation peak must sit on the square the run accepted | done | mutation removing the agreement test fails `test_a_decoy_square_the_run_accepted_is_contradicted` |
 
+### R — adversarial review of the committed check (4e2f6ba)
+
+Each row is the reviewer's finding as measured on rendered plates (scripts under the session scratchpad), and what
+was done about it.
+
+| id | finding | state | evidence |
+|---|---|---|---|
+| R1 | **False confirm.** Half the tile grid a step off (a row or a column of a 2 × 2, one tile of two) puts the median between the two groups, every tile departs by half a pitch, and "more than half moved" returned *does not apply* — `confirmed`. The single-tile test passes against that code | done | largest group of agreeing tile motions, not a median; two equal groups contradicted; >3 pitches = another grid → `inconclusive`. `test_half_the_grid_a_step_off_is_contradicted_not_waved_through` (row, column, other column), `test_one_of_two_tiles_a_step_off_is_contradicted`, `test_tiles_from_another_grid_withhold_a_confirmation`; the original median + "more than half" code fails all four |
+| R2 | **False confirm (batched remote).** The final pass's `stage_check` wrote through `read_sidecar(verify=True)`, which fails once a released well's `_out.zip` is deleted on the remote: the stage block was dropped silently, and the well read its image verdict locally | done | stage block written with `read_sidecar(verify=False)`; the digest is checked where it is read. `test_the_stage_block_survives_a_released_well_s_archive` (mutation back to `verify=True` fails it) |
+| R3 | **False accusation.** `stage_check` fitted one rigid motion across both plates of a Merge Plates dataset (every one of 12 wells flagged, 560–700 um) and used plate-rigid origins (circular) | done | per `plates_of`, only `_INDEPENDENT` origins. `test_each_plate_of_a_merged_dataset_is_fitted_on_its_own`, `test_plate_rigid_origins_take_no_part_in_the_stage_check` (each fails under its mutation) |
+| R4 | **Wrong blame.** A reference addressed a step off made every correct timepoint `contradicted` and kept the wrong one | done | candidates whose square carries (0, 0) first, then a majority fallback; a tie contradicts both groups. `test_a_reference_addressed_off_its_own_square_is_not_the_reference`, `test_the_majority_decides_when_every_square_carries_its_origin` (fails with the fallback disabled), `test_two_timepoints_that_disagree_alike_are_both_contradicted`. The (0, 0) preference alone is not pinned: with it removed the majority fallback reaches the same answer on the three-timepoint fixture |
+| R5 | A plate turned beyond the fold (37°, 40°, 47° hex) without the square anchoring: `inconclusive` (peak 0.18–0.19) only by 0.11 of headroom; the registration takes rotation from the same folded angle | todo | |
+| R7a | *Finding while fixing R7:* `test_nanowell_identity_run.py` moves a timepoint's fitted array centre a whole pitch to make it anchor a step off; with the centre landmark that timepoint reads `inconclusive` (centre 1.0 pitch off) though every address lands on itself — correct for that evidence. A 0.55-pitch move leaves the timepoint unaddressed instead, so the test keeps the whole pitch and asserts no failing address, the centre disagreement and the inconclusive verdict | done | `test_a_timepoint_anchored_a_step_off_and_put_right_by_the_run_lands_on_itself` |
+| R5a | `inconclusive` rows are still joined in every figure; the README did not say so | done | README says inconclusive and not-checked rows are joined; ARCHITECTURE says only contradicted are left out |
+| R6 | A *physical* 180° turn of the array (labelled as the run would) is `confirmed`: hexagonal lattice plus square share the 180° symmetry, nothing in the images can tell. E3 tests only a relabel. A limitation, to be stated | done | limitation stated in the module docstring, ARCHITECTURE §6.2i and the README; E3 is a relabel test, said there |
+| R7 | The only landmark is the run's own square: a decoy accepted at both timepoints that moves a site between them is followed by the correlation and `confirmed`. Add the array's rim-fitted centre as a second landmark | done | `CENTRE_AGREEMENT_PITCHES` 0.75 withholds the confirmation (inconclusive, not contradicted: a fitted rim is loose by up to half a pitch). `test_a_rim_centre_that_disagrees_with_the_square_withholds_a_confirmation` (fails with the gate removed). The run-output test's mutated array centre is a whole pitch, so that timepoint now reads inconclusive — see R7a |
+| R8 | Memory: every montage held at once as float32 (67 MB each at 4096², ~1 GB for 15 timepoints per worker) | done | `montage_loaders`, `Timepoint.pixels`/`release`. `test_a_well_s_memory_does_not_grow_with_its_timepoints`: peak grows by under 1.5 montages from 2 to 8 timepoints; with `release` a no-op it grew by 6.5 |
+| R9 | `long_format` still exports the raw per-site columns (fused, fractions, area estimate) of `identity_contradicted` rows | done | `long_format` blanks the measured columns of `identity_contradicted` rows. `test_the_export_carries_nothing_measured_at_a_contradicted_timepoint` (fails without it) |
+| R10 | `choose_reference` does not require the reference's status to be `ok` | done | `reference_candidates` requires status `ok`. `test_an_unaddressed_timepoint_is_never_the_reference` |
+| R11 | The stage tolerance (0.25 pitch) is uncalibrated and a flag overrules a good image verdict | blocked | needs a real plate's stage repeatability: Q5 |
+
 ### B — integration
 
 | id | item | state | evidence |
@@ -163,7 +184,7 @@ States: `todo`, `wip`, `done` (implemented and pinned by a test watched failing 
 | E7 | No square at the reference / anywhere is `inconclusive` | done | `test_a_timepoint_where_the_square_cannot_be_seen_is_inconclusive`, `test_a_well_with_no_accepted_square_is_inconclusive_throughout` |
 | E8 | A stale sidecar reads `not_checked` | done | `test_the_sidecar_is_written_read_and_goes_stale_with_its_tables`, `test_a_sidecar_for_other_tables_is_not_believed` |
 | E9 | End to end through `process_microscopy.main`: the sidecar is written and `confirmed` | done | `test_nanowell_identity_run.py::test_a_run_writes_a_confirmed_identity_sidecar` |
-| E10 | Mutation on the run's own output: with `_settle_steps` disabled, a timepoint anchored a step off is caught and named a step; with it, `confirmed` | done | `test_nanowell_identity_run.py`, two tests |
+| E10 | Mutation on the run's own output: with `_settle_steps` disabled, a timepoint anchored a step off is caught and named a step; with it, every address lands on itself (inconclusive only by the moved rim, R7a) | done | `test_nanowell_identity_run.py`, two tests |
 
 ### Q — open questions (need real data)
 
@@ -172,6 +193,8 @@ States: `todo`, `wip`, `done` (implemented and pinned by a test watched failing 
 | Q1 | Is 0.25 pitch the right tolerance on real plates (thermal / swelling distortion across a 3 mm array)? | todo | |
 | Q2 | What margin does a real square give against its lattice-step neighbours? `MIN_MARGIN` is a synthetic choice | todo | |
 | Q3 | Plates without a central square: stage cross-check only — is that acceptable? | todo | |
+| Q4 | Is 0.75 pitch right for the rim-fitted centre's agreement (`CENTRE_AGREEMENT_PITCHES`)? Real fits were up to 0.47 pitch loose | todo | |
+| Q5 | The stage cross-check's tolerance: what is a real stage's repeatability over a plate re-seat? | todo | |
 
 ### F — docs
 

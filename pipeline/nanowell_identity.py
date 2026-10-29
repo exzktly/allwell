@@ -23,8 +23,17 @@ another by construction. This module checks the result against evidence the addr
    it; but the stage visits the same fields at every timepoint, so each tile's registered position relative to the
    rest of the grid must not change between timepoints by anything near a pitch.
 
-Each timepoint is compared with one **reference** — the earliest whose square the run accepted — so the verdicts
-compose. The verdicts are :data:`CONFIRMED`, :data:`CONTRADICTED`, :data:`INCONCLUSIVE` (the evidence cannot
+4. **The array's own outline is a second landmark** (``CENTRE_AGREEMENT_PITCHES``): the rim-fitted centre, mapped
+   through the registration, must land near the other timepoint's, or a square-like decoy that moved could have
+   been followed; a disagreement withholds the confirmation.
+
+Each timepoint is compared with one **reference** — the earliest addressed timepoint whose square the run accepted
+and carries ``(0, 0)``, unless the timepoints it contradicts agree among themselves and outnumber those it confirms
+(:func:`check_well`) — so the verdicts compose.
+
+**What it cannot see**: a *physical* half turn of the array. The hexagonal lattice and the square share the 180°
+symmetry, so nothing in the images tells an array turned 180° from one that did not turn; a keyed plate cannot be
+put back so, and only an array that turns inside its well could. The verdicts are :data:`CONFIRMED`, :data:`CONTRADICTED`, :data:`INCONCLUSIVE` (the evidence cannot
 decide, with the reason), :data:`REFERENCE` and, for a timepoint never tested or a sidecar that no longer
 describes the tables, :data:`NOT_CHECKED`. Only the first and the reference are good.
 
@@ -89,6 +98,16 @@ MIN_PEAK = 0.3
 MIN_COMPARED = 6
 #: How far a correlation peak may sit from the square the run accepted at that timepoint, in pitches.
 SQUARE_AGREEMENT_PITCHES = 0.25
+#: How far, in pitches, the reference's rim-fitted array centre may land from the other timepoint's once mapped
+#: through the registration. The square is the registration's only landmark; a square-like decoy the run accepted
+#: at both timepoints that moved a site between them is followed by the correlation, and only the array's own
+#: outline can say so. A fitted circle is loose by up to half a pitch on a real plate (ARCHITECTURE §6.2i), so
+#: beyond this the timepoint is ``inconclusive``, not contradicted: a second landmark that cannot be trusted to a
+#: pitch can withhold a confirmation but not accuse (tracker R7, Q4).
+CENTRE_AGREEMENT_PITCHES = 0.75
+#: Beyond this many pitches, two timepoints' tiles sit so differently against one another that they were not
+#: acquired on one tile grid, and the layout test does not apply (the timepoint is then ``inconclusive``).
+LAYOUT_REACH_PITCHES = 3.0
 #: The fewest wells addressed at both timepoints for the stage cross-check to accuse one. With four, the rigid fit
 #: absorbs a well a pitch off and spreads it over the rest (a 172 um error left residuals of 26 to 103 um on all
 #: four), so a good well can read as the bad one.
@@ -153,7 +172,10 @@ class Timepoint:
     """One timepoint of a well, as the check reads it."""
     name: str
     status: str
-    image: np.ndarray | None = None          # the montage, float32
+    #: The montage (uint8 as the run wrote it), or a function of no arguments that reads it: :meth:`pixels` reads it
+    #: once and :meth:`release` drops it, so a well's check holds two montages at a time, not every timepoint's
+    #: (a 4096-pixel montage is 16 MB; fifteen as float32 were a gigabyte per worker, tracker R8).
+    image: object = None
     um_per_px: float | None = None
     origin_um: tuple[float, float] | None = None  # common-frame position of the montage's pixel (0, 0) corner
     pitch: float | None = None
@@ -166,6 +188,16 @@ class Timepoint:
     sites: dict = field(default_factory=dict)     # (q, r) -> (x, y) common frame
     owners: dict = field(default_factory=dict)    # (q, r) -> owner tile
     tiles: dict = field(default_factory=dict)     # tile -> (left, top) common frame
+
+    def pixels(self) -> np.ndarray:
+        if callable(self.image):
+            self.image = np.asarray(self.image())
+        return self.image
+
+    def release(self) -> None:
+        """Drop a montage that can be read again; one that was handed in as an array is kept."""
+        if isinstance(self.image, np.ndarray) and getattr(self, "_loader", None) is not None:
+            self.image = self._loader
 
     @property
     def lattice_ok(self) -> bool:
@@ -212,13 +244,13 @@ def timepoints_of(grid: dict, site_rows, montages: dict) -> dict[str, Timepoint]
         square, why = square_accepted(block)
         boundary = block.get("array_boundary") if isinstance(block.get("array_boundary"), dict) else None
         image = montages.get(name)
-        t = Timepoint(name, str(block.get("status")),
-                      None if image is None else np.asarray(image, dtype=np.float32),
+        t = Timepoint(name, str(block.get("status")), image,
                       _float(block.get("montage_um_per_px")),
                       _pair(block.get("montage_origin_um")), _float(block.get("pitch_um")),
                       _float(block.get("angle_deg")), "square" if block.get("lattice_kind") == "square" else "hex",
                       bool(block.get("mirrored")), square, why,
                       _pair((boundary or {}).get("centre_um")))
+        t._loader = image if callable(image) else None
         for tile in block.get("tiles") or ():
             try:
                 t.tiles[str(tile["tile"])] = (float(tile["left_um"]), float(tile["top_um"]))
@@ -254,15 +286,35 @@ def _pair(value) -> tuple[float, float] | None:
     return (x, y) if math.isfinite(x) and math.isfinite(y) else None
 
 
+def square_names_the_centre(t: Timepoint) -> bool:
+    """Whether the site nearest the square the run accepted at *t* is address ``(0, 0)``, within the tolerance.
+
+    The square is the central nanowell by convention (``pipeline_info.json``'s conventions, the rings Review
+    counts), so a timepoint whose own square does not carry ``(0, 0)`` is addressed off its own landmark."""
+    if t.square_um is None or (0, 0) not in t.sites or not t.pitch:
+        return False
+    names = list(t.sites)
+    d = np.hypot(*(np.array([t.sites[a] for a in names]) - np.asarray(t.square_um)).T)
+    k = int(np.argmin(d))
+    return names[k] == (0, 0) and d[k] <= TOLERANCE_PITCHES * t.pitch
+
+
+def reference_candidates(timepoints: dict[str, Timepoint], order) -> list[str]:
+    """The timepoints that can be a reference, in the order they are preferred: addressed (status ``ok``), with a
+    square the run accepted, a readable montage and lattice and sites — those whose square carries ``(0, 0)``
+    first, each group in *order*."""
+    usable = [n for n in order if (t := timepoints.get(n)) is not None and t.status == "ok"
+              and t.square_um is not None and t.lattice_ok and t.sites] if True else []
+    return sorted(usable, key=lambda n: not square_names_the_centre(timepoints[n]))
+
+
 def choose_reference(timepoints: dict[str, Timepoint], order) -> tuple[str | None, str]:
-    """``(reference, why none)``: the earliest timepoint in *order* whose square the run accepted and whose montage
-    and lattice can be read."""
-    for name in order:
-        t = timepoints.get(name)
-        if t is not None and t.square_um is not None and t.lattice_ok and t.sites:
-            return name, ""
-    return None, ("no timepoint of this well has a central square the run accepted, so there is no landmark to "
-                  "register the timepoints on")
+    """``(reference, why none)``: the first of :func:`reference_candidates`."""
+    candidates = reference_candidates(timepoints, order)
+    if candidates:
+        return candidates[0], ""
+    return None, ("no addressed timepoint of this well has a central square the run accepted, so there is no "
+                  "landmark to register the timepoints on")
 
 
 # ── registering on the square ────────────────────────────────────────────────
@@ -358,7 +410,7 @@ def register_on_square(ref: Timepoint, other: Timepoint) -> SquareMatch:
     # The reference's residual around its square, sampled on the other's pixel grid through the inverse transform.
     centre_r = _to_px(ref, ref.square_um)
     reach_r = int(math.ceil((PATCH_PITCHES * math.sqrt(2) + 1.5) * pitch_r)) + 2
-    crop_r, (x0r, y0r) = _crop(ref.image, centre_r, reach_r)
+    crop_r, (x0r, y0r) = _crop(ref.pixels(), centre_r, reach_r)
     if min(crop_r.shape) < 2 * reach_r - 2:
         return SquareMatch(False, "the reference's square is too near the edge of its montage to be read",
                            rotation_deg=rotation, scale=scale)
@@ -376,11 +428,11 @@ def register_on_square(ref: Timepoint, other: Timepoint) -> SquareMatch:
     # The other's residual over the search box.
     centres = np.array([_to_px(other, c) for c in search_centres(ref, other)])
     span = SEARCH_PITCHES * pitch_o + half_o + 1.5 * pitch_o + 2
-    h, w = other.image.shape
+    h, w = other.pixels().shape
     bx0, by0 = int(max(0, math.floor(centres[:, 0].min() - span))), int(max(0, math.floor(centres[:, 1].min() - span)))
     bx1 = int(min(w, math.ceil(centres[:, 0].max() + span) + 1))
     by1 = int(min(h, math.ceil(centres[:, 1].max() + span) + 1))
-    box = other.image[by0:by1, bx0:bx1]
+    box = other.pixels()[by0:by1, bx0:bx1]
     if min(box.shape) <= 2 * half_o + 1:
         return SquareMatch(False, "the other timepoint's montage does not reach where the square should be",
                            rotation_deg=rotation, scale=scale)
@@ -550,30 +602,43 @@ def diagnose(test: AddressTest, kind: str) -> dict:
 
 
 def tile_layout_test(ref: Timepoint, other: Timepoint) -> dict:
-    """Whether each tile sits where it did relative to the rest of the grid: ``{"ok", "moved": [[tile, um]],
-    "reason"}``.
+    """Whether each tile sits where it did relative to the rest of the grid: ``{"ok", "applies", "moved": [[tile,
+    um]], "reason"}``.
 
     The stage visits the same fields at every timepoint, so the registered tile positions of two timepoints differ
-    by one translation (the plate moves under the stage; the stage grid does not turn). A tile whose difference
-    departs from the median by more than :data:`TOLERANCE_PITCHES` was placed differently inside one of the two
-    montages — a tile a lattice step off, whose sites' positions and addresses are wrong together. When more than
-    half the tiles depart, the two timepoints were not acquired on one grid and the test does not apply."""
+    by one translation (the plate moves under the stage; the stage grid does not turn). The tiles are grouped by
+    that difference: the largest group whose differences agree within :data:`TOLERANCE_PITCHES` is the grid's
+    motion, and a tile departing from it by more was placed differently inside one of the two montages — a tile a
+    lattice step off, whose sites' positions and addresses are wrong together, which the address test cannot see.
+    A median would not do: with half the grid a step off (a row or a column of a 2 x 2) it falls between the two
+    halves, and every tile departs by half a pitch (tracker R1). When the groups are as large as each other, which
+    half is right cannot be told, and the layout still disagrees. A tile further than
+    :data:`LAYOUT_REACH_PITCHES` from the grid's motion means the timepoints were not acquired on one tile grid:
+    the test does not apply, and the caller cannot confirm."""
     common = sorted(set(ref.tiles) & set(other.tiles))
     if len(common) < 2:
         return {"ok": True, "applies": False, "moved": [], "reason": "fewer than two tiles in common"}
     deltas = np.array([np.subtract(other.tiles[t], ref.tiles[t]) for t in common])
-    median = np.median(deltas, axis=0)
-    off = np.hypot(*(deltas - median).T)
     tol = TOLERANCE_PITCHES * other.pitch
+    apart = np.hypot(*(deltas[:, None, :] - deltas[None, :, :]).transpose(2, 0, 1))
+    support = (apart <= tol).sum(axis=1)
+    best = int(np.argmax(support))
+    centre = np.median(deltas[apart[best] <= tol], axis=0)
+    off = np.hypot(*(deltas - centre).T)
     moved = [[t, round(float(d), 2)] for t, d in zip(common, off) if d > tol]
-    if len(moved) > len(common) / 2:
+    if not moved:
+        return {"ok": True, "applies": True, "moved": [], "reason": ""}
+    if float(off.max()) > LAYOUT_REACH_PITCHES * other.pitch:
         return {"ok": True, "applies": False, "moved": moved,
-                "reason": "most tiles sit differently relative to one another, so the two timepoints were not "
-                          "acquired on one tile grid and their layouts cannot be compared"}
-    return {"ok": not moved, "applies": True, "moved": moved, "reason": "" if not moved else (
+                "reason": f"tiles sit up to {float(off.max()):.0f} um differently relative to one another, more than "
+                          f"{LAYOUT_REACH_PITCHES:g} pitches, so the two timepoints were not acquired on one tile grid "
+                          "and their layouts cannot be compared"}
+    split = int(support[best]) * 2 <= len(common)
+    return {"ok": False, "applies": True, "moved": moved, "reason": (
         "tile(s) " + ", ".join(f"{t} ({d:.0f} um, {d / other.pitch:.2f} pitch)" for t, d in moved)
         + " sit differently against the rest of the grid than at the reference: placed differently in one of the "
-          "two montages")}
+          "two montages" + ("; the tiles split into groups as large as each other, so which group is right cannot "
+                            "be told from the layout" if split else ""))}
 
 
 # ── one timepoint against the reference ──────────────────────────────────────
@@ -612,6 +677,10 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
                   failing=test.failing[:MAX_LISTED], failing_count=len(test.failing), diagnosis=diagnosis,
                   square_agreement_pitches=None if agreement is None else round(agreement, 4),
                   distances=[[a[0], a[1], round(d, 4)] for a, d in sorted(test.distances.items())])
+    centre = None
+    if ref.centre_um is not None and other.centre_um is not None:
+        centre = float(np.hypot(*(transform(ref.centre_um)[0] - np.asarray(other.centre_um)))) / other.pitch
+        result["centre_agreement_pitches"] = round(centre, 4)
     problems = []
     if test.failing:
         problems.append(f"{len(test.failing)} of {test.compared} addresses do not land on themselves: "
@@ -625,33 +694,96 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
         result.update(verdict=CONTRADICTED, reason="; ".join(problems))
     elif test.compared < MIN_COMPARED:
         result["reason"] = (f"only {test.compared} address(es) in common with the reference, {MIN_COMPARED} needed")
+    elif not layout["applies"] and len(set(ref.tiles) & set(other.tiles)) >= 2:
+        result["reason"] = f"every address lands on itself, but {layout['reason']}, so a tile placed a step off " \
+                           "could not be ruled out"
+    elif centre is not None and centre > CENTRE_AGREEMENT_PITCHES:
+        result["reason"] = (f"every address lands on itself, but the array's fitted centre lands {centre:.2f} pitch "
+                            "from this timepoint's once registered on the square: the square may have moved against "
+                            "the array (a decoy), or a fitted rim is loose")
     else:
         result.update(verdict=CONFIRMED, reason=f"{test.compared} addresses land on themselves, at most "
                                                 f"{test.max_pitches:.2f} pitch off")
     return result
 
 
-def check_well(grid: dict, site_rows, montages: dict, order=None) -> dict:
-    """Every timepoint of one well against its reference: the sidecar's ``timepoints`` and ``reference``."""
-    timepoints = timepoints_of(grid, site_rows, montages)
-    order = list(order) if order is not None else list(timepoints)
-    reference, why = choose_reference(timepoints, order)
-    out = {"reference": reference, "reference_reason": why, "timepoints": {}}
+def _against(timepoints: dict, reference: str, order) -> dict:
+    """Every timepoint of *order* compared with *reference*; each other montage is dropped once compared."""
+    out = {}
     for name in order:
         t = timepoints.get(name)
         if t is None:
             continue
-        if reference is None:
-            out["timepoints"][name] = {"verdict": INCONCLUSIVE, "reason": why}
-        elif name == reference:
-            out["timepoints"][name] = {"verdict": REFERENCE, "reason": "the reference timepoint",
-                                       "square_um": _round(t.square_um)}
-        else:
-            try:
-                out["timepoints"][name] = compare(timepoints[reference], t)
-            except (ValueError, np.linalg.LinAlgError, MemoryError) as exc:
-                log.warning("Identity check of timepoint %s failed: %s", name, exc, exc_info=True)
-                out["timepoints"][name] = {"verdict": INCONCLUSIVE, "reason": f"the check failed: {exc}"}
+        if name == reference:
+            out[name] = {"verdict": REFERENCE, "reason": "the reference timepoint", "square_um": _round(t.square_um)}
+            continue
+        try:
+            out[name] = compare(timepoints[reference], t)
+        except (ValueError, np.linalg.LinAlgError, MemoryError) as exc:
+            log.warning("Identity check of timepoint %s failed: %s", name, exc, exc_info=True)
+            out[name] = {"verdict": INCONCLUSIVE, "reason": f"the check failed: {exc}"}
+        t.release()
+    return out
+
+
+def _signature(entry: dict) -> tuple | None:
+    """What a contradicted timepoint's addresses are against the reference (a step, a symmetry), or ``None``."""
+    diagnosis = entry.get("diagnosis") or {}
+    if entry.get("verdict") != CONTRADICTED or diagnosis.get("kind") not in ("step", "symmetry"):
+        return None
+    return diagnosis["kind"], tuple(diagnosis.get("step") or ()), diagnosis.get("symmetry")
+
+
+def _good(results: dict) -> int:
+    return sum(v.get("verdict") in GOOD for v in results.values())
+
+
+def check_well(grid: dict, site_rows, montages: dict, order=None) -> dict:
+    """Every timepoint of one well against its reference: the sidecar's ``timepoints`` and ``reference``.
+
+    The reference is the first of :func:`reference_candidates`. A reference addressed off itself would make every
+    correct timepoint ``contradicted`` and keep the wrong one (tracker R4), so when the contradicted timepoints
+    agree on what they are against it (one step, one symmetry) and are at least as many as those it confirms, the
+    first of them that can be a reference is tried as well, and the reference that more timepoints agree with is
+    kept. Alike, the one whose square carries ``(0, 0)`` is kept when only one does; otherwise which is right cannot
+    be told, and every timepoint of both is ``contradicted`` with that reason: the two are known to disagree, so
+    neither may be joined to the other, as the run leaves both frames of a tie unaddressed rather than guess
+    (``nanowell_run._settle_steps``)."""
+    timepoints = timepoints_of(grid, site_rows, montages)
+    order = list(order) if order is not None else list(timepoints)
+    candidates = reference_candidates(timepoints, order)
+    if not candidates:
+        _, why = choose_reference(timepoints, order)
+        return {"reference": None, "reference_reason": why,
+                "timepoints": {n: {"verdict": INCONCLUSIVE, "reason": why} for n in order if n in timepoints}}
+    reference = candidates[0]
+    results = _against(timepoints, reference, order)
+    timepoints[reference].release()
+    out = {"reference": reference, "reference_reason": "", "timepoints": results}
+    signatures = Counter(sig for v in results.values() if (sig := _signature(v)) is not None)
+    if not signatures:
+        return out
+    signature, count = signatures.most_common(1)[0]
+    group = [n for n in candidates if n != reference and _signature(results.get(n, {})) == signature]
+    if not group or count < _good(results) - 1:
+        return out
+    other = group[0]
+    alternative = _against(timepoints, other, order)
+    timepoints[other].release()
+    mine, theirs = _good(results), _good(alternative)
+    centred = {n: square_names_the_centre(timepoints[n]) for n in (reference, other)}
+    if theirs > mine or (theirs == mine and centred[other] and not centred[reference]):
+        alternative_reason = (f"{reference}, the first candidate, is contradicted by {count} timepoint(s) that agree "
+                              f"with one another; {other} is confirmed by more of the well's timepoints")
+        return {"reference": other, "reference_reason": alternative_reason, "timepoints": alternative}
+    if theirs == mine and centred[other] == centred[reference]:
+        why = (f"{reference} and {other} each make the other's addresses wrong ({signature[0]}), and as many "
+               "timepoints agree with each: which is right cannot be told. An anchor set by hand on the central "
+               "square settles it")
+        disputed = {n for n, v in {**results, **alternative}.items() if v.get("verdict") in GOOD + (CONTRADICTED,)}
+        for n in disputed:
+            results[n] = {"verdict": CONTRADICTED, "reason": why, "diagnosis": {"kind": "tie", "detail": why}}
+        out["reference"], out["reference_reason"] = None, why
     return out
 
 
@@ -680,6 +812,32 @@ def inputs_digest(out_dir, well: str) -> str | None:
         except (OSError, zipfile.BadZipFile):
             h.update(b"unreadable-archive")
     return h.hexdigest()[:20]
+
+
+def montage_loaders(out_dir, well: str, timepoints) -> dict:
+    """``timepoint -> function reading its uint8 montage`` from ``<well>_out.zip``, for the timepoints the archive
+    holds: :func:`check_well` reads each when it compares it and drops it after, rather than holding them all."""
+    from skimage.io import imread
+
+    archive = Path(out_dir) / f"{well}_out.zip"
+    if not archive.is_file():
+        return {}
+    try:
+        with zipfile.ZipFile(archive) as zf:
+            names = set(zf.namelist())
+    except (OSError, zipfile.BadZipFile) as exc:
+        log.warning("Well %s — the montage archive cannot be read for the identity check: %s", well, exc)
+        return {}
+
+    def loader(name):
+        def load():
+            with zipfile.ZipFile(archive) as zf:
+                image = imread(io.BytesIO(zf.read(name)))
+            return image if image.ndim == 2 else image[..., 0]
+        return load
+
+    return {tp: loader(_MONTAGE_NAME.format(well=well, tp=tp)) for tp in timepoints
+            if _MONTAGE_NAME.format(well=well, tp=tp) in names}
 
 
 def read_montages(out_dir, well: str, timepoints) -> dict:
@@ -720,7 +878,7 @@ def check_well_dir(out_dir, well: str, order=None) -> dict | None:
     names = list(order) if order is not None else list(grid.get("timepoints") or {})
     payload = {"version": IDENTITY_VERSION, "well": well, "inputs": digest,
                "tolerance_pitches": TOLERANCE_PITCHES, "min_margin": MIN_MARGIN,
-               **check_well(grid, _read_sites(sites_path), read_montages(out_dir, well, names), names)}
+               **check_well(grid, _read_sites(sites_path), montage_loaders(out_dir, well, names), names)}
     previous = read_sidecar(out_dir, well, verify=False)
     if previous and isinstance(previous.get("stage"), dict) and previous.get("inputs") == digest:
         payload["stage"] = previous["stage"]
@@ -777,19 +935,20 @@ def verdicts(out_dir, well: str, timepoints) -> dict[str, tuple[str, str]]:
         why = ("the identity check has not been run on these tables" if not sidecar_path(out_dir, well).is_file()
                else "the identity check was run on other tables than these (they changed since)")
         return {tp: (NOT_CHECKED, why) for tp in timepoints}
-    out = {}
-    stage = (payload.get("stage") or {}).get("timepoints") or {}
-    for tp in timepoints:
-        entry = (payload.get("timepoints") or {}).get(tp)
-        if not isinstance(entry, dict):
-            out[tp] = (NOT_CHECKED, "the identity check did not reach this timepoint")
-            continue
-        verdict, reason = str(entry.get("verdict") or NOT_CHECKED), str(entry.get("reason") or "")
-        flagged = stage.get(tp)
-        if isinstance(flagged, dict) and flagged.get("ok") is False and verdict in GOOD + (INCONCLUSIVE,):
-            verdict, reason = CONTRADICTED, flagged.get("reason") or "the stage cross-check failed"
-        out[tp] = (verdict if verdict in VERDICTS else NOT_CHECKED, reason)
-    return out
+    return {tp: verdict_in(payload, tp) for tp in timepoints}
+
+
+def verdict_in(payload: dict, tp: str) -> tuple[str, str]:
+    """``(verdict, reason)`` for *tp* in a sidecar *payload* already read: :data:`NOT_CHECKED` for a timepoint it does
+    not name, and a stage-check failure overriding a good or inconclusive verdict."""
+    entry = (payload.get("timepoints") or {}).get(tp)
+    if not isinstance(entry, dict):
+        return NOT_CHECKED, "the identity check did not reach this timepoint"
+    verdict, reason = str(entry.get("verdict") or NOT_CHECKED), str(entry.get("reason") or "")
+    flagged = ((payload.get("stage") or {}).get("timepoints") or {}).get(tp)
+    if isinstance(flagged, dict) and flagged.get("ok") is False and verdict in GOOD + (INCONCLUSIVE,):
+        verdict, reason = CONTRADICTED, flagged.get("reason") or "the stage cross-check failed"
+    return (verdict if verdict in VERDICTS else NOT_CHECKED), reason
 
 
 # ── the plate-level stage cross-check ────────────────────────────────────────
@@ -798,9 +957,14 @@ def stage_check(out_dir, wells=None) -> dict:
     the wells off it; the result is written into each checked well's sidecar under ``stage`` and returned as
     ``well -> {timepoint -> {"ok", "residual_um", "reason"}}``.
 
-    It needs a stage position for every tile (``origin_stage_um`` in the grid block) and :data:`STAGE_MIN_WELLS`
-    wells addressed at both timepoints; otherwise nothing is flagged and the reason is recorded."""
-    from pipeline.nanowell_lattice import fit_plate_rigid
+    Each physical plate is fitted on its own (``nanowell_task.plates_of``): a Merge Plates dataset holds two plates
+    that moved differently, and one fit over both flagged every well (tracker R3). Only origins anchored on the
+    well's own evidence take part (``nanowell_task._INDEPENDENT``): a plate-rigid origin was predicted from this very
+    fit and would agree with it by construction. It needs a stage position for every tile (``origin_stage_um``)
+    and :data:`STAGE_MIN_WELLS` such wells at both timepoints; otherwise nothing is flagged and the reason is
+    recorded. The tolerance is the image check's quarter pitch, not calibrated on a real plate's stage (tracker
+    Q5)."""
+    from pipeline.nanowell_task import plates_of
 
     folder = Path(out_dir) / NANOWELL_DIR
     grids = {}
@@ -812,6 +976,35 @@ def stage_check(out_dir, wells=None) -> dict:
             grids[well] = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+    results: dict[str, dict] = {w: {} for w in grids}
+    references, reasons = {}, {}
+    for plate, members in plates_of(grids).items():
+        reference, reason = _stage_check_plate(members, results)
+        references[plate], reasons[plate] = reference, reason
+    for well, entries in results.items():
+        # Read without verifying the digest: in a batched remote run the final pass runs after a released well's
+        # montage archive was deleted on the remote, which would fail the digest there and drop this block without
+        # a word (tracker R2). The block lands in the sidecar the well's own check wrote; the digest is verified
+        # where the sidecar is read.
+        payload = read_sidecar(out_dir, well, verify=False)
+        if payload is None:
+            if entries:
+                log.warning("Well %s — no identity sidecar to record the stage cross-check in", well)
+            continue
+        plate = grids[well].get("plate") or ""
+        payload["stage"] = {"reference": references.get(plate), "reason": reasons.get(plate, ""),
+                            "timepoints": entries}
+        write_sidecar(out_dir, well, payload)
+    single = len(references) == 1
+    return {"reference": next(iter(references.values())) if single else references,
+            "reason": next(iter(reasons.values())) if single else reasons, "wells": results}
+
+
+def _stage_check_plate(grids: dict, results: dict) -> tuple[str | None, str]:
+    """:func:`stage_check` over one plate's wells (*grids*), filling *results*; ``(reference, why none)``."""
+    from pipeline.nanowell_lattice import fit_plate_rigid
+    from pipeline.nanowell_task import _INDEPENDENT
+
     origins: dict[str, dict] = {}
     pitches: dict[str, float] = {}
     order: list[str] = []
@@ -819,17 +1012,17 @@ def stage_check(out_dir, wells=None) -> dict:
         for tp, block in (grid.get("timepoints") or {}).items():
             if tp not in order:
                 order.append(tp)
-            point = _pair((block or {}).get("origin_stage_um")) if isinstance(block, dict) else None
-            if point is not None and block.get("status") == "ok":
+            if not isinstance(block, dict) or block.get("status") != "ok":
+                continue
+            point = _pair(block.get("origin_stage_um"))
+            if point is not None and block.get("origin_method") in _INDEPENDENT:
                 origins.setdefault(tp, {})[well] = point
                 if _float(block.get("pitch_um")):
                     pitches[well] = float(block["pitch_um"])
-    results: dict[str, dict] = {w: {} for w in grids}
     reference = next((tp for tp in order if len(origins.get(tp, {})) >= STAGE_MIN_WELLS), None)
     if reference is None:
-        return {"reference": None, "reason": f"fewer than {STAGE_MIN_WELLS} wells have stage positions at any one "
-                                             "timepoint",
-                "wells": results}
+        return None, (f"fewer than {STAGE_MIN_WELLS} wells anchored on their own evidence have stage positions at any "
+                      "one timepoint")
     for tp in order:
         if tp == reference:
             continue
@@ -837,8 +1030,8 @@ def stage_check(out_dir, wells=None) -> dict:
         fit = (fit_plate_rigid(origins[reference], origins[tp]) if len(common) >= STAGE_MIN_WELLS else None)
         if fit is None or not fit.ok:
             why = (fit.reason if fit is not None else
-                   f"{len(common)} well(s) have stage positions at both {reference} and {tp}; the plate's motion needs "
-                   f"{STAGE_MIN_WELLS} wells before it can single one out")
+                   f"{len(common)} well(s) anchored on their own evidence have stage positions at both {reference} "
+                   f"and {tp}; the plate's motion needs {STAGE_MIN_WELLS} before it can single one out")
             for well in grids:
                 results[well][tp] = {"ok": None, "residual_um": None, "reason": why}
             continue
@@ -848,12 +1041,7 @@ def stage_check(out_dir, wells=None) -> dict:
             results[well][tp] = {"ok": ok, "residual_um": round(float(residual), 3), "reason": "" if ok is not False
                                  else (f"the well's address origin sits {residual:.0f} um off the plate's rigid "
                                        f"motion since {reference} (stage positions), more than {tol:.0f} um")}
-    for well, entries in results.items():
-        payload = read_sidecar(out_dir, well)
-        if payload is not None:
-            payload["stage"] = {"reference": reference, "timepoints": entries}
-            write_sidecar(out_dir, well, payload)
-    return {"reference": reference, "reason": "", "wells": results}
+    return reference, ""
 
 
 # ── the audit ────────────────────────────────────────────────────────────────

@@ -381,4 +381,11 @@ def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
     out = metrics.reindex(columns=columns)
     out["n_cells"] = metrics["n"]
     out["confluence"] = metrics["c"]
+    # A contradicted timepoint's row under this address belongs to another physical nanowell: none of what was
+    # measured there is this nanowell's, so the export carries the state and reason and blanks the rest.
+    foreign = metrics["state"].eq(IDENTITY_CONTRADICTED)
+    if foreign.any():
+        raw = ["fused", "partially_visible", "imaged_fraction", "visible_fraction", "area_est_cells",
+               "count_disagreement"] + [c for ch in channels for c in (f"brightness_{ch}", f"signal_{ch}")]
+        out.loc[foreign, raw] = np.nan
     return out

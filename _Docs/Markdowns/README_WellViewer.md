@@ -5615,9 +5615,18 @@ each well's array moved with the plate. Each timepoint gets one of:
   what was found: *every address one lattice step off*, *a turn by 60°*, *a reflection*, *tile F3*, or a decoy
   taken for the central square;
 - **inconclusive** — the check could not decide (no central square visible, the plate moved too far, the timepoint
-  had no addresses) and the footer says so;
+  had no addresses, the tiles were not acquired on one grid, or the array's outline and its central square disagree)
+  and the footer says so. **These timepoints are still used in every comparison over time**: inconclusive means
+  unverified, not wrong. Look at them in the Identity view before relying on them;
 - **not checked** — the tables were analysed before this check existed, or changed after it ran (a Validate
-  relabel, a concatenation). The footer says so.
+  relabel, a concatenation). The footer says so, and these timepoints are used as they are.
+
+When two timepoints disagree and nothing tells which is right, both are **contradicted**; when the earliest
+timepoint is the one that disagrees with the rest, the rest are kept and it is the one left out.
+
+What the check cannot see: a *physical* half turn of the array (180°). The hexagonal lattice and the central square
+both look the same turned half way round, so an array that turned inside its well would be confirmed. A plate is
+keyed and cannot be put back half turned, so this matters only if the array itself can turn.
 
 To check a dataset analysed earlier without analysing it again, run
 `python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well): it writes

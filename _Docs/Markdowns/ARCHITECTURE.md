@@ -10664,19 +10664,43 @@ addresses the mapped sites landed on: one constant lattice step, one element of 
 reflection) explaining at least 80 % of them, failures confined to one tile, or `scattered`. **Tile layout**
 (`tile_layout_test`): a tile placed a lattice step off inside one montage moves its sites' positions and their
 addresses together, so every address still lands on itself in the common frame and the address test cannot see it;
-the stage visits the same fields at every timepoint, so each tile's registered position relative to the grid's
-median must not move by a quarter pitch between timepoints (when most tiles move, the timepoints were not
-acquired on one grid and the test does not apply). **Square agreement**: the correlation peak must sit within a
+the stage visits the same fields at every timepoint, so the tiles are grouped by how far they moved between the two
+timepoints, the largest group within a quarter pitch of one another is the grid's motion, and any tile off it by
+more was placed differently in one of the two montages. A median would not do: with half the grid a step off it
+falls between the halves and every tile departs by half a pitch. Two equal groups still disagree and are
+contradicted; only a tile more than `LAYOUT_REACH_PITCHES` (3) off means the timepoints were not acquired on one
+grid, and then the timepoint cannot be confirmed. **Square agreement**: the correlation peak must sit within a
 quarter pitch of the square the run accepted at that timepoint, or the run took something else for the square. A
 mirrored flag that differs from the reference's, or a lattice of another kind, is contradicted outright.
+**Second landmark**: the square is the registration's only landmark, so a square-like decoy the run accepted at both
+timepoints that moved a site between them would be followed; the reference's rim-fitted array centre, mapped
+through the registration, must land within `CENTRE_AGREEMENT_PITCHES` (0.75) of the other's, or the timepoint is
+`inconclusive` — not contradicted, because a fitted circle is loose by up to half a pitch on a real plate.
 **Verdicts**: `confirmed`, `contradicted` (any failure above), `inconclusive` (no reference square, no montage, a
-peak or margin too low, an unaddressed timepoint, fewer than `MIN_COMPARED` addresses in common), `reference`,
-and `not_checked` for a timepoint never tested; only `confirmed` and `reference` are good. **Stage cross-check**
+peak or margin too low, an unaddressed timepoint, fewer than `MIN_COMPARED` addresses in common, a tile layout from
+another grid, a rim centre that disagrees), `reference`, and `not_checked` for a timepoint never tested; only
+`confirmed` and `reference` are good. Review leaves only `contradicted` timepoints out of its joins; `inconclusive`
+and `not_checked` are joined and footnoted. **The reference** (`reference_candidates`, `check_well`) is an addressed
+timepoint whose square the run accepted, those whose square carries `(0, 0)` first (`square_names_the_centre`:
+the square is the central nanowell by convention), earliest first. A reference addressed off itself would make
+every correct timepoint contradicted, so when the contradicted timepoints agree on one step or symmetry and are at
+least as many as those confirmed, the first of them is tried as the reference too, and the one more timepoints
+agree with is kept; alike, the one whose square carries `(0, 0)`; otherwise both groups are `contradicted`, as the
+run leaves both frames of a tie unaddressed. **Limitation**: a *physical* 180° turn of the array is confirmed — the
+hexagonal lattice and the square share the 180° symmetry, so nothing in the images tells it from no turn. A keyed
+plate cannot turn so; only an array that turns inside its well could. The tests' symmetry cases relabel addresses on
+unturned positions, which is the run's failure mode, not this one. **Stage cross-check**
 (`stage_check`, plate level): each timepoint's well origins in stage coordinates (`origin_stage_um`) are fitted to
-the earliest timepoint's by the plate's rigid motion (`nanowell_lattice.fit_plate_rigid`), and a well off it by
-more than the tolerance is flagged; it shares no evidence with the images. It needs `STAGE_MIN_WELLS` (5) wells at
+the earliest timepoint's by the plate's rigid motion (`nanowell_lattice.fit_plate_rigid`), each physical plate on
+its own (`nanowell_task.plates_of`: a Merge Plates dataset holds two plates that moved differently) and only origins
+anchored on the well's own evidence (`nanowell_task._INDEPENDENT`; a plate-rigid origin came from this very fit),
+and a well off it by more than the tolerance is flagged; it shares no evidence with the images. The block is written
+into the sidecar without checking its digest, because a batched remote run's final pass runs after released wells'
+montage archives were deleted there; the digest is checked where the sidecar is read. It needs `STAGE_MIN_WELLS` (5) wells at
 both timepoints, because with four the fit absorbed a well a pitch off and spread it over the others (172 µm became
-residuals of 26 to 103 µm on all four). **Files**: the check reads only what the run writes — the montage PNGs in
+residuals of 26 to 103 µm on all four). A well's check reads each montage when it compares it and drops it after
+(`montage_loaders`, `Timepoint.pixels` / `release`): holding every timepoint's at once was about a gigabyte per worker
+for fifteen timepoints. **Files**: the check reads only what the run writes — the montage PNGs in
 `<well>_out.zip`, `nanowells/<well>_grid.json`, `nanowells/<well>.csv` — and writes `nanowells/<well>_identity.json`
 (`check_well_dir`) with a digest of those files (`inputs_digest`: the two tables' bytes and the montages' CRCs);
 `read_sidecar` / `verdicts` read a sidecar whose digest no longer matches (a relabel, a concatenation, a re-run)

@@ -326,10 +326,193 @@ def test_the_stage_cross_check_accuses_no_well_on_too_few_wells(pair, tmp_path):
 def test_the_audit_command_writes_sidecars_and_exits_by_the_worst_verdict(pair, tmp_path, capsys):
     ref, other = pair
     _write_dataset(tmp_path / "good", "A01", {"T0": ref, "T1": other})
-    _write_dataset(tmp_path / "bad", "A01", {"T0": ref, "T1": _relabel(other, lambda a: (-a[0], -a[1]))})
+    _write_dataset(tmp_path / "bad", "A01", {"T0": ref, "T1": _relabel(other, lambda a: (a[0] + 1, a[1]))})
     assert ni.main([str(tmp_path / "good")]) == 0
     assert ni.main([str(tmp_path / "bad")]) == 1
     out = capsys.readouterr().out
-    assert "1 contradicted" in out and "a turn by 180°" in out
+    assert "1 contradicted" in out and "one lattice step (+1, +0)" in out
     assert (tmp_path / "bad" / "nanowells" / "A01_identity.json").is_file()
     assert ni.main([str(tmp_path / "nothing")]) == 2
+
+
+# ── the adversarial review's findings (tracker R) ────────────────────────────
+def _tiles_stepped(t, tiles):
+    """*t* with each tile of *tiles* placed one ``a1`` step off: its sites' positions and addresses move with it."""
+    step = _a1(t)
+    out = copy.deepcopy(t)
+    out.sites, out.owners = {}, {}
+    for a, p in t.sites.items():
+        moved = t.owners[a] in tiles
+        key = (a[0] + 1, a[1]) if moved else a
+        if moved or key not in out.sites:
+            out.sites[key] = tuple(np.add(p, step)) if moved else p
+            out.owners[key] = t.owners[a]
+    for tile in tiles:
+        out.tiles[tile] = tuple(np.add(t.tiles[tile], step))
+    return out
+
+
+@pytest.mark.parametrize("tiles", [("F0", "F1"), ("F0", "F2"), ("F1", "F3")])
+def test_half_the_grid_a_step_off_is_contradicted_not_waved_through(pair, tiles):
+    """R1: a median of the tiles' motions falls between two halves, every tile then departs by half a pitch, and
+    "most tiles moved" read as "not one grid" — confirmed. Two halves a pitch apart are one grid that disagrees."""
+    ref, other = pair
+    result = ni.compare(ref, _tiles_stepped(other, tiles))
+    assert result["verdict"] == ni.CONTRADICTED, result["reason"]
+    assert result["tiles"]["applies"] and not result["tiles"]["ok"]
+    assert "which group is right cannot be told" in result["tiles"]["reason"]
+
+
+def test_one_of_two_tiles_a_step_off_is_contradicted(pair):
+    ref, other = pair
+    keep = ("F0", "F1")
+    ref2, other2 = copy.deepcopy(ref), _tiles_stepped(other, ("F1",))
+    ref2.tiles = {k: v for k, v in ref.tiles.items() if k in keep}
+    other2.tiles = {k: v for k, v in other2.tiles.items() if k in keep}
+    assert ni.tile_layout_test(ref2, other2)["ok"] is False
+
+
+def test_tiles_from_another_grid_withhold_a_confirmation(pair):
+    ref, other = pair
+    other = copy.deepcopy(other)
+    other.tiles = {k: (v[0] + 2000.0 * i, v[1]) for i, (k, v) in enumerate(other.tiles.items())}
+    result = ni.compare(ref, other)
+    assert result["verdict"] == ni.INCONCLUSIVE and "not acquired on one tile grid" in result["reason"]
+
+
+def test_a_rim_centre_that_disagrees_with_the_square_withholds_a_confirmation(pair):
+    """R7: the square is the registration's only landmark; a decoy that moved a site and was taken for the square at
+    both timepoints is followed. The array's fitted centre, mapped through the registration, must land near the
+    other's, or the timepoint is not confirmed."""
+    ref, other = pair
+    moved = copy.deepcopy(other)
+    moved.centre_um = tuple(np.add(other.centre_um, _a1(other)))
+    result = ni.compare(ref, moved)
+    assert result["verdict"] == ni.INCONCLUSIVE
+    assert result["centre_agreement_pitches"] == pytest.approx(1.0, abs=0.05)
+    assert ni.compare(ref, other)["centre_agreement_pitches"] < 0.05
+
+
+def test_a_reference_addressed_off_its_own_square_is_not_the_reference(pair):
+    """R4: the earliest timepoint addressed a step off made every correct timepoint contradicted and kept itself."""
+    ref, other = pair
+    third = _timepoint("T2", 8.0, (-30.0, 20.0), 6)[0]
+    wrong = _relabel(ref, lambda a: (a[0] + 1, a[1]))
+    grid, rows, montages = _files_of({"T0": wrong, "T1": other, "T2": third})
+    result = ni.check_well(grid, rows, montages, ["T0", "T1", "T2"])
+    assert result["reference"] == "T1"
+    assert result["timepoints"]["T0"]["verdict"] == ni.CONTRADICTED
+    assert result["timepoints"]["T2"]["verdict"] == ni.CONFIRMED
+
+
+def test_the_majority_decides_when_every_square_carries_its_origin(pair):
+    """R4, the fallback: a 180° relabel keeps (0, 0) on the square, so the square cannot say which timepoint is
+    wrong; the timepoints that agree with one another can."""
+    ref, other = pair
+    third = _timepoint("T2", 8.0, (-30.0, 20.0), 6)[0]
+    turned = _relabel(ref, lambda a: (-a[0], -a[1]))
+    grid, rows, montages = _files_of({"T0": turned, "T1": other, "T2": third})
+    result = ni.check_well(grid, rows, montages, ["T0", "T1", "T2"])
+    assert result["reference"] == "T1" and "confirmed by more" in result["reference_reason"]
+    assert [result["timepoints"][t]["verdict"] for t in ("T0", "T2")] == [ni.CONTRADICTED, ni.CONFIRMED]
+
+
+def test_two_timepoints_that_disagree_alike_are_both_contradicted(pair):
+    ref, other = pair
+    grid, rows, montages = _files_of({"T0": ref, "T1": _relabel(other, lambda a: (-a[0], -a[1]))})
+    result = ni.check_well(grid, rows, montages, ["T0", "T1"])
+    assert result["reference"] is None and "cannot be told" in result["reference_reason"]
+    assert {v["verdict"] for v in result["timepoints"].values()} == {ni.CONTRADICTED}
+
+
+def test_an_unaddressed_timepoint_is_never_the_reference(pair):
+    ref, other = pair
+    unaddressed = copy.deepcopy(ref)
+    unaddressed.status = "unaddressed"
+    grid, rows, montages = _files_of({"T0": unaddressed, "T1": other})
+    assert ni.check_well(grid, rows, montages, ["T0", "T1"])["reference"] == "T1"
+
+
+def _plate_dataset(tmp_path, ref, other, wells, motion, *, plate=None, off=(), method="fiducial"):
+    turn, shift = motion
+    for well, origin in wells.items():
+        moved = turn @ np.asarray(origin) + shift + (_a1(other) if well in off else 0.0)
+        _write_dataset(tmp_path, well, {"T0": ref, "T1": other}, stage_origin={"T0": origin, "T1": moved})
+        if plate is not None or method != "fiducial":
+            path = tmp_path / "nanowells" / f"{well}_grid.json"
+            grid = json.loads(path.read_text())
+            if plate is not None:
+                grid["plate"] = plate
+            for block in grid["timepoints"].values():
+                block["origin_method"] = method
+            path.write_text(json.dumps(grid))
+        ni.check_well_dir(tmp_path, well)
+
+
+SIX = {"A01": (0.0, 0.0), "A02": (9000.0, 0.0), "B01": (0.0, 9000.0), "B02": (9000.0, 9000.0),
+       "C01": (0.0, 18000.0), "C02": (9000.0, 18000.0)}
+
+
+def test_each_plate_of_a_merged_dataset_is_fitted_on_its_own(pair, tmp_path):
+    """R3: two plates of one Merge Plates dataset moved differently; one fit over both flagged all twelve wells."""
+    ref, other = pair
+    _plate_dataset(tmp_path, ref, other, SIX, (ni._screen_rotation(0.5), np.array([120.0, -80.0])), plate="P1",
+                   off=("B02",))
+    _plate_dataset(tmp_path, ref, other, {f"{w}x": o for w, o in SIX.items()},
+                   (ni._screen_rotation(-0.8), np.array([-300.0, 410.0])), plate="P2")
+    result = ni.stage_check(tmp_path)
+    flagged = sorted(w for w, e in result["wells"].items() if e["T1"]["ok"] is False)
+    assert flagged == ["B02"]
+
+
+def test_plate_rigid_origins_take_no_part_in_the_stage_check(pair, tmp_path):
+    ref, other = pair
+    _plate_dataset(tmp_path, ref, other, SIX, (ni._screen_rotation(0.5), np.array([120.0, -80.0])),
+                   method="plate_rigid")
+    result = ni.stage_check(tmp_path)
+    assert result["reference"] is None and "own evidence" in result["reason"]
+
+
+def test_the_stage_block_survives_a_released_well_s_archive(pair, tmp_path):
+    """R2: in a batched remote run the final pass's stage check runs after a released well's montage archive was
+    deleted, which failed the digest there and dropped the block without a word."""
+    ref, other = pair
+    _plate_dataset(tmp_path, ref, other, SIX, (ni._screen_rotation(0.5), np.array([120.0, -80.0])), off=("B02",))
+    archive = tmp_path / "B02_out.zip"
+    kept = archive.read_bytes()
+    archive.unlink()                                    # released on the remote
+    ni.stage_check(tmp_path)
+    archive.write_bytes(kept)                           # fetched back beside the tables
+    verdict, reason = ni.verdicts(tmp_path, "B02", ["T1"])["T1"]
+    assert verdict == ni.CONTRADICTED and "rigid motion" in reason
+
+
+def test_a_well_s_memory_does_not_grow_with_its_timepoints(pair):
+    """R8: every montage held at once (as float32) was about a gigabyte for fifteen timepoints per worker. Checked
+    from loaders, the peak a well's check allocates is the same for two timepoints as for eight: each compared
+    montage is dropped once compared. (The peak itself is the correlation's transient arrays over the search box.)"""
+    import tracemalloc
+
+    ref, other = pair
+
+    def peak_for(count):
+        timepoints = {"T0": ref}
+        for k in range(1, count):
+            timepoints[f"T{k}"] = copy.deepcopy(other)
+            timepoints[f"T{k}"].name = f"T{k}"
+        grid, rows, _ = _files_of(timepoints)
+        pixels = {name: t.image.astype(np.uint8) for name, t in timepoints.items()}
+        montages = {name: (lambda name=name: pixels[name].copy()) for name in timepoints}
+        tracemalloc.start()
+        try:
+            result = ni.check_well(grid, rows, montages, sorted(timepoints))
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert {v["verdict"] for n, v in result["timepoints"].items() if n != "T0"} == {ni.CONFIRMED}
+        return peak
+
+    one = other.image.size                                # one uint8 montage, bytes
+    peak_for(2)                                           # first imports (scikit-image, scipy) are not the check's
+    grown = peak_for(8) - peak_for(2)
+    assert grown < 1.5 * one, f"the peak grew by {grown / one:.1f} montages over six more timepoints"

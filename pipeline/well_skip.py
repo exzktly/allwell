@@ -20,6 +20,7 @@ Three decisions live here, and they are the same three every run makes per well:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from util.well_token import (
@@ -224,3 +225,50 @@ def output_exists_for_well_folder(
     csv_ok     = csv_path.exists() and csv_path.stat().st_size > 0
     out_ok     = zip_ok if compressed_output else folder_ok
     return out_ok and csv_ok
+
+
+@dataclass(frozen=True)
+class SkipScope:
+    """What a run's *Skip these wells* becomes: the ``--only_wells`` subset it runs as, and what to say about it.
+
+    ``only_wells`` is ``None`` when nothing is skipped (the run is unchanged). ``skipped`` are the named wells the
+    plate holds, ``absent`` the named wells it does not, ``unforced`` the *Force these wells* entries a skip
+    overrules, and ``refusal`` is set when skipping leaves the run nothing to do.
+    """
+
+    only_wells: list[str] | None
+    skipped: list[str] = field(default_factory=list)
+    absent: list[str] = field(default_factory=list)
+    unforced: list[str] = field(default_factory=list)
+    refusal: str = ""
+
+
+def skip_wells_scope(only_wells, skip_wells, plate_wells, force_wells=()) -> SkipScope:
+    """Turn *Skip these wells* into the ``--only_wells`` subset that runs everything else.
+
+    A skipped well is one this run leaves exactly as it is — its output, its records in ``pipeline_info.json`` —
+    which is what ``--only_wells`` already promises every well it does not name, so a skip is carried as that
+    subset rather than as a second, separately-plumbed flag: the remote upload, the run journal, the gating carry
+    and the completeness check then treat a skipped well the way they have always treated a well outside a subset.
+
+    The subset is *only_wells* when given (else every well of *plate_wells*) minus the skipped wells, matched
+    canonically (``C8`` == ``C08``). A skipped well wins over *force_wells*. A named well the plate does not hold
+    is reported, not refused: skipping it is already true. A skip that leaves no well refuses the run.
+    """
+    skip = _canonical_force_wells(skip_wells)
+    # An entry that is not a well label at all (a typo) is reported with the absent ones, as typed.
+    unreadable = sorted({str(w).strip() for w in skip_wells or ()
+                         if str(w).strip() and not _canonical_well_label(str(w).strip())})
+    if not skip:
+        return SkipScope(only_wells=None, absent=unreadable)
+    plate = _canonical_force_wells(plate_wells)
+    base = _canonical_force_wells(only_wells) if only_wells else plate
+    kept = sorted(base - skip)
+    scope = SkipScope(only_wells=kept, skipped=sorted(skip & plate), absent=sorted(skip - plate) + unreadable,
+                      unforced=sorted(skip & _canonical_force_wells(force_wells)))
+    if not kept:
+        named = "the wells in Only these wells" if only_wells else "every well in the input"
+        return replace(scope, only_wells=None, refusal=(
+            f"Skip these wells covers {named} ({', '.join(scope.skipped or sorted(skip))}), so the run would "
+            "process nothing. Remove a well from Skip these wells, or clear it."))
+    return scope

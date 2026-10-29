@@ -76,8 +76,12 @@ def test_a_clean_batched_run_brings_every_well_home_and_cleans_the_host(cluster,
     assert complete_here(out, FIELD_WELLS) == set(FIELD_WELLS)
     starts = [ln for ln in run.text.splitlines() if re.search(r"batch-driver: batch \d starting", ln)]
     assert starts == [f"[remote] batch-driver: batch {i} starting" for i in (1, 2, 3)], starts
-    # One allocation for the plate, granted once and handed back.
+    # One allocation for the plate, granted once and handed back. It was asked for before the plate was planned,
+    # and took the driver when the plate was ready (services.remote_reservation).
     assert run.text.count("[remote] scheduler: allocation granted") == 1
+    assert run.text.index("[remote] scheduler: early: requesting allocation via:") < run.text.index(
+        "[remote] planning "), run.text
+    assert "[remote] scheduler: the run is handed to the node asked for early" in run.text, run.text
     assert cluster.jobs() == [], "the allocation outlived the run"
     assert journal_states(out) == {w: "fetched" for w in FIELD_WELLS}
     # The plate's cell-gating thresholds, computed here after the batches, are in the sidecar Review reads (B7).

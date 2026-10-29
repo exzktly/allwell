@@ -113,6 +113,7 @@ def stage_local_zips(
     background_wells: Iterable[str] | str | None = None,
     skip_wells: Iterable[str] = (),
     only_wells: Iterable[str] | None = None,
+    on_well_count: Callable[[int], None] | None = None,
 ) -> ZippedInput:
     """Return a directory of per-well zips for ``input_dir``.
 
@@ -146,8 +147,19 @@ def stage_local_zips(
     MIXED resume) return every archive, and the whole-well zip-up of a FOLDER
     or FLAT plate still covers the plate, since its archives become the user's
     copy of each well.
+
+    *on_well_count* is told, once, how many well archives the run can hold at
+    most — as soon as every layout knows it and before anything is planned or
+    rewritten — so a scheduler job can be queued while the rest of staging
+    runs (``services.remote_reservation``). Planning only removes wells, so
+    the count is an upper bound.
     """
     input_dir = input_dir.resolve()
+
+    def _counted(well_zips: tuple[Path, ...]) -> tuple[Path, ...]:
+        if on_well_count is not None:
+            on_well_count(len(_within_only_wells(tuple(well_zips), only_wells, background_wells)))
+        return well_zips
     # Reclaim local scratch leaked by a previously-killed run before we stage a
     # fresh (potentially multi-GB) copy of the input. The input volume's own
     # transit directory is swept too — that is where a rewritten archive is
@@ -218,7 +230,7 @@ def stage_local_zips(
             raise RuntimeError(
                 f"Input dir reports zip-mode but contains no A01.zip-style files: {input_dir}"
             )
-        well_zips = _without_finished(well_zips, skip_wells)
+        well_zips = _counted(_without_finished(well_zips, skip_wells))
         if fluor_tokens is None and not incremental:
             # No filtering — use the user's zips directly (read-only).
             return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
@@ -234,9 +246,11 @@ def stage_local_zips(
         # through compress_input_well_folders. Resume by trusting the
         # existing zips and zipping the leftover folders into a
         # staging dir.
-        return _then_split(_stage_mixed_mode(
+        mixed = _stage_mixed_mode(
             input_dir, fluor_tokens=fluor_tokens, nuclear_token=nuclear_token,
-            log_fn=log_fn))
+            log_fn=log_fn)
+        _counted(mixed.well_zips)
+        return _then_split(mixed)
 
     # Folder or flat mode. Loose images are grouped into ``<well>/`` folders by
     # well_plate_zipper (in ``input_dir`` itself), then each well folder is
@@ -256,6 +270,7 @@ def stage_local_zips(
     well_zips, _on_success = _zip_up_in_place(
         input_dir, mode, filename_schema=filename_schema, filename_sep=filename_sep,
         log_fn=log_fn, proc_hook=proc_hook, move_source_tifs=move_source_tifs)
+    _counted(well_zips)
     if fluor_tokens is None and not incremental:
         return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips,
                            cleanup=None, on_pipeline_success=_on_success)

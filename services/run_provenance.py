@@ -43,7 +43,7 @@ _LOG = logging.getLogger("allwell.provenance")
 #: The run-scope options a ``run_started`` event records. They say which wells
 #: the run was told to touch, which is what makes a selective rerun legible in
 #: the history.
-SCOPE_KEYS = ("force", "force_wells", "incremental", "only_wells")
+SCOPE_KEYS = ("force", "force_wells", "incremental", "only_wells", "skip_wells")
 
 
 def _scope_of(opts: dict) -> dict:

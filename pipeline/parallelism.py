@@ -57,6 +57,11 @@ CELLPOSE_METHODS = ("cellpose", "cellpose_labelfree")
 #: Workers allowed per visible GPU when Cellpose runs on it.
 CELLPOSE_WORKERS_PER_GPU = 2
 
+#: The environment variable the run sets, before its worker pool spawns, to the number of workers that share each
+#: GPU (``ParallelPlan.gpu_sharers``). A worker sizes its Cellpose network batch to its share of the GPU's memory
+#: (``pipeline.cellpose._network_batch``); it cannot count the other workers itself.
+GPU_SHARERS_ENV = "ALLWELL_CELLPOSE_WORKERS_PER_DEVICE"
+
 
 @dataclass(frozen=True)
 class ParallelPlan:
@@ -69,6 +74,8 @@ class ParallelPlan:
     device_str: str
     #: One line saying where Cellpose will run and why; empty for other methods.
     cellpose_note: str = ""
+    #: Workers sharing each GPU when Cellpose runs on one (workers spread over the GPUs, rounded up); 0 otherwise.
+    gpu_sharers: int = 0
 
 
 def visible_gpu_count() -> int:
@@ -191,6 +198,9 @@ def plan_parallelism(args, log: logging.Logger) -> ParallelPlan:
         workers, available, workers_override)
     if threads is not None:
         tf_threads = threads
+    method = str(getattr(args, "segmentation_method", "") or "")
+    n_gpu = visible_gpu_count() if method in CELLPOSE_METHODS else 0
+    sharers = -(-workers // n_gpu) if n_gpu else 0
 
     if args.cpu_only:
         device_str = "CPU only (--cpu_only)"
@@ -199,4 +209,14 @@ def plan_parallelism(args, log: logging.Logger) -> ParallelPlan:
     else:
         device_str = "CPU only (non-macOS)"
     return ParallelPlan(cpu_count, available, tf_threads, workers, tf_threads,
-                        workers_override, device_str, note)
+                        workers_override, device_str, note, sharers)
+
+
+def export_gpu_sharers(plan: ParallelPlan, environ=None) -> None:
+    """Tell the workers about to spawn how many share each GPU (``GPU_SHARERS_ENV``), since spawned processes
+    inherit the environment; a plan with no GPU removes any value an earlier run in this process left."""
+    environ = os.environ if environ is None else environ
+    if plan.gpu_sharers:
+        environ[GPU_SHARERS_ENV] = str(plan.gpu_sharers)
+    else:
+        environ.pop(GPU_SHARERS_ENV, None)

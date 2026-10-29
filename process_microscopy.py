@@ -112,7 +112,7 @@ from pipeline.shape_features import BORDER_COLUMN, labels_touching_border
 import pipeline.stardist as _stardist
 import pipeline.suspend as _suspend
 from pipeline.mixed_input import consolidate_mixed_to_zips
-from pipeline.parallelism import plan_parallelism
+from pipeline.parallelism import export_gpu_sharers, plan_parallelism
 from pipeline.stardist import (
     _segment_stardist_nuclei,
     _segment_stardist_seeded_watershed_cell,
@@ -3236,6 +3236,7 @@ def main() -> None:
     # ── Parallelism auto-configuration (pipeline.parallelism) ─────────────────
     plan = plan_parallelism(args, log)
     workers, threads_per_worker = plan.workers, plan.threads_per_worker
+    export_gpu_sharers(plan)        # each worker sizes its Cellpose batch to its share of the GPU
 
     log.info("Input    : %s", input_dir)
     log.info("Output   : %s", output_dir)

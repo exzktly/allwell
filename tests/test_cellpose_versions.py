@@ -51,7 +51,10 @@ def _install(monkeypatch, major: int, *, cuda: bool = True, bf16: bool = True, t
     torch.version = types.SimpleNamespace(cuda="11.7" if cuda else None)
     monkeypatch.setitem(sys.modules, "torch", torch)
     monkeypatch.setattr(cp, "cellpose_major", lambda version=None: major)
+    # The fake builds its own masks; Cellpose's flows, which pipeline.cellpose_masks reads, it does not return.
+    monkeypatch.setattr("pipeline.cellpose_masks.installed_version", lambda: None)
     monkeypatch.setattr(cp, "_CELLPOSE_MODELS", {})
+    monkeypatch.setattr(cp, "_NETWORK_BATCHES", {})
     return calls
 
 

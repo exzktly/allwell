@@ -226,16 +226,21 @@ def test_a_tile_a_step_off_at_one_timepoint_is_put_right_by_the_others(monkeypat
     assert result["timepoints"]["T1"]["verdict"] in ni.GOOD, result["timepoints"]["T1"]["reason"]
 
 
-def test_cells_in_the_overlap_put_the_tile_right_without_the_other_timepoints():
+def test_cells_in_the_overlap_and_the_other_timepoints_put_the_tile_right_together():
+    """With cells in the overlaps, content settles T1's F0-F1 across the stage's 0.62-pitch error, but not every pair
+    F1 is in: F1-F3 leads by 0.48 where its noise asks for 0.52. The loop then cannot close, the first registration
+    falls back to the stage's whole-step layout, and the other timepoints put F1 right, with content's own decision
+    kept in the relocated registration. Content alone settling a tile is ``test_tile_register``'s, on wider overlaps."""
     from pipeline import tile_register
     from tests._nanowell_run_fixture import PITCH
 
     record, images = _three_timepoints(cells=600)
     outcome = _layout_run(record, images)
     t1 = outcome.timepoints["T1"]
-    assert "tile_layout" not in t1                          # nothing to put right after the first registration
+    assert "tile_layout" in t1 and t1["tile_layout"]["still_disagree"] == []
     assert {s["pair"]: s["from"] for s in t1["registration"]["steps"]}["F0-F1"] == tile_register.STEP_CONTENT
     assert np.linalg.norm(_f1_from_f0(outcome, "T1") - _f1_from_f0(outcome, "T0")) < 0.1 * PITCH
+    assert _identity(outcome, LAYOUT_POSES)["timepoints"]["T1"]["verdict"] in ni.GOOD
 
 
 def test_a_kept_timepoint_s_layout_takes_part_in_the_agreement(monkeypatch):

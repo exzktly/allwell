@@ -89,6 +89,7 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
     outcome = nr.run_well(well_label, record, todo, load_phase, settings, segmenter=segmenter, channels=channels,
                           fixed_radius_um=fixed, fixed_roster=fixed_roster, plate_rigid=plate_rigid,
                           reference=_reference_of(prior), kept_evidence=_kept_evidence(prior),
+                          kept_layouts=_kept_layouts(prior),
                           checkpoint=None if staging_dir is None else TimepointCheckpoints(staging_dir, settings_key),
                           earliest_template=None if saved is None else saved[0],
                           spill_dir=Path(scratch_dir) / ".montages",     # removed with the scratch (X23)
@@ -549,6 +550,21 @@ class TimepointCheckpoints:
 
     def _template_path(self, timepoint: str) -> Path:
         return self.staging / f"nw_{timepoint}.template.npz"
+
+
+def _kept_layouts(prior: dict | None) -> dict | None:
+    """Each kept timepoint's registered tile positions (``{tile: (left, top)}``), for the new timepoints' tile layout
+    to be checked against (``nanowell_run._agree_tile_layouts``); ``None`` without an earlier run."""
+    if prior is None:
+        return None
+    out = {}
+    for tp in prior["kept"]:
+        tiles = (prior["grid"]["timepoints"].get(tp) or {}).get("tiles") or ()
+        try:
+            out[tp] = {t["tile"]: (float(t["left_um"]), float(t["top_um"])) for t in tiles}
+        except (KeyError, TypeError, ValueError):
+            continue                                   # a block written by hand or by an older run: no layout
+    return out
 
 
 def _reference_of(prior: dict | None) -> dict | None:

@@ -5665,6 +5665,25 @@ Small differences in where an imaging tile was placed — tens of micrometres, t
 nanowells, which can only be placed where the stage said it was — do not change any nanowell's name and are only
 reported, as are nanowells whose fitted position is a little off. An empty tile is not considered at all.
 
+**How the run keeps a tile from landing a whole nanowell off.** Neighbouring imaging tiles are placed against each
+other by the nanowell pattern they share, which says where a tile sits only up to a whole nanowell spacing: every
+spacing looks the same. The run settles which spacing in this order:
+
+1. **What is in the overlap.** Cells, debris, the central square and the edge of the array do not repeat, so the run
+   removes the repeating pattern from both tiles and matches what is left. When one placement clearly matches best,
+   it is used, whatever the stage recorded.
+2. **The tiles around it.** Tiles form closed loops, so once the overlap has settled some pairs, a pair between them
+   (two tiles meeting only at a corner, say) must fit with them.
+3. **The well's other timepoints.** The microscope repeats the same tile layout at every timepoint, so when most
+   timepoints (three at least, counting those an earlier run kept) agree where two tiles sit and one timepoint is a
+   whole spacing off, that timepoint is placed again with their layout. Its grid record says which tiles disagreed
+   and by how much (`tile_layout`).
+4. **The stage's record**, which is right as long as the stage was off by less than half a spacing.
+
+Each timepoint's grid record lists, for every pair of tiles, which of these settled it (`registration.steps`). A
+timepoint an earlier run kept is not placed again by an incremental run; analyse the plate again in full to put it
+right.
+
 What the check cannot see: a turn of the array by a symmetry it shares with the central square — a half turn
 (180°), or on a square lattice a quarter turn (90°). The array looks the same either way, so such a turn would be
 confirmed. A keyed plate is put back within a few degrees, so this matters only if the array itself can turn in its

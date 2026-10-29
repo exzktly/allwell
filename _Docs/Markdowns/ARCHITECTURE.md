@@ -9893,15 +9893,55 @@ recorded position and says so; it never fails the solve.
 
 *Lattice phase.* A tile's fit gives a site position `p` in tile-local coordinates;
 for one physical lattice `o_j - o_i == p_i - p_j` modulo a lattice vector, where
-`o` is a tile's origin. The recorded offset chooses the vector (searched among
-the neighbouring integer pairs, because rounding in lattice coordinates is not
-always the nearest lattice point). This uses every nanowell in the tile and is
-unaffected by a bubble in the overlap. It is right while the recorded error
-*between two tiles* is under half a pitch; a pair whose recorded error passes 40 %
-of a pitch is warned about, and past 50 % it is wrong by exactly one lattice
-vector with nothing in the data to say so, a limit the tests pin rather than hide.
-Two fits whose bases differ by more than 5 % of a pitch are not treated as one
-lattice and give no constraint.
+`o` is a tile's origin. This uses every nanowell in the tile and is unaffected by
+a bubble in the overlap. Two fits whose bases differ by more than 5 % of a pitch
+are not treated as one lattice and give no constraint.
+
+*The whole-vector choice* (`choose_step`, recorded per pair as
+`PairConstraint.step_from` and `step_moved_um`). Which lattice vector is settled
+in this order:
+
+1. **The overlap's content** (`content`). Each tile is reduced to its aperiodic
+   part (`aperiodic_tile`): block-averaged until a pitch spans about 16 px, then
+   each pixel minus the mean of itself shifted by every nearest-neighbour lattice
+   vector *whose source lies inside the tile* — continuing the edge instead would
+   leave the lattice standing in exactly the strip that overlaps the next tile —
+   and band-passed at 0.04 / 0.25 pitch with normalised convolution. Every
+   candidate offset a whole vector apart within two pitches of the recorded one
+   is scored by the Pearson correlation of the two reduced tiles' shared pixels
+   (`candidate_scores`, best of the 3 × 3 pixels around it). Cells, debris, the
+   central square and the array's rim decide it; bare lattice cannot. The best
+   must reach `STEP_MIN_PEAK` 0.25 and lead the runner-up by `STEP_MIN_MARGIN`
+   0.12, and a candidate sharing less than `STEP_MIN_AREA_PITCH2` (six square
+   pitches, half a pitch wide) is not scored: two diagonal neighbours sharing a
+   corner of about three square pitches led with a wrong candidate on renders,
+   while shared edges never did. A straight stretch of rim is itself periodic
+   along its tangent, so it leaves neighbouring candidates close and decides
+   nothing — which the margin, not the peak, catches.
+2. **The loops** (`chained`, `_settle_by_loops`). Tiles form loops (a 2 × 2 grid's
+   four edges and two diagonals) and every loop must close: the content-decided
+   pairs are solved alone, and a pair joining two tiles they reach takes the
+   candidate nearest the offset between them. Without this a diagonal pair keeps
+   the stage's choice and is averaged into the solve against the edges content
+   put right.
+3. **The well's other timepoints** (`timepoints`): *preferred*, the offset most of
+   them agree on (below, *Agreeing on the tile layout*).
+4. **The recorded position** (`stage`): the candidate nearest it, right while the
+   recorded error *between two tiles* is under half a pitch; one past 40 % is
+   warned about, and past 50 % it is wrong by exactly one lattice vector with
+   nothing in that pair's data to say so — the limit `test_tile_register` pins
+   for registration without images.
+
+After every choice the pairs are solved together, and a pair the solve misses by a
+quarter pitch or more is warned about (`_mark_open_loops`): one pair of its loop is
+a whole step wrong, and which one is not decidable from the loop alone. One tile
+wrong in every pair it is in closes all its loops, so this catches a wrong
+decision among several pairs, not a single tile the stage misplaced. On renders
+(12 conditions of cells, camera noise 0.05–0.2, vignetting 0–0.3, with and without
+a 0.7-pitch stage error, 1,920 pair decisions) content decided 4–50 % of pairs
+and none wrongly; noise 0.2 is where it stops deciding. The overlap correlation
+below is then centred on the chosen lattice offset rather than the recorded one,
+so a corrected pair is not searched half a pitch from where it now sits.
 
 *Overlap correlation.* An array is periodic, so correlating two tiles of it has a
 peak at the true shift and at every lattice vector from it, and an unconstrained
@@ -10509,14 +10549,30 @@ only with no outline fitted is it the sites detected. Consistency of pitch and r
 timepoint; the lattice angle is not checked within one well, because the plate's rotation between timepoints
 is only measurable across wells.
 
+**Agreeing on the tile layout** (`run_well` → `_agree_tile_layouts`; `tile_register.pair_offsets`,
+`agreed_offsets`, `disagreeing_pairs`). The stage runs one tile program at every timepoint, so neighbouring tiles
+sit the same distance apart each time, to the stage's repeatability, and a whole-vector choice gone wrong is a pitch
+from the rest. Once every timepoint is located, each one's offsets between pairs of lattice-placed tiles are compared:
+a pair is agreed when more than half of the timepoints placing it, and at least two, lie within half a pitch of their
+median (so two timepoints a step apart agree on nothing, and it takes a third), the agreed offset being their mean.
+The earlier run's kept timepoints take part through `kept_layouts` (`nanowell_task._kept_layouts`, from their grid
+blocks' `tiles`) without being located again. A timepoint with a pair half a pitch or more from the agreed offset is
+located again with the agreed offsets as `preferred`, and its grid block records `tile_layout`: the pairs that
+disagreed and by how much, any that still do, and the timepoints compared with. Content measured on that timepoint's
+own pixels still wins over the agreement, with a registration warning. The relocated montage spills under its own
+name (`<well>_<tp>_agreed`), since the first is still mapped. A kept timepoint is never registered again here: an
+incremental run takes it as it was, and only a full re-run puts it right.
+
 **Registration reuse** (`nanowell_run.registration_key`, `stored_placement`, `Placement`). A plate analysed a
 second time with other segmentation or measurement settings does not register its tiles again. Every grid block
 that carries `tiles` also carries a `registration` block: the key the placement was solved under, the
-registration's own warnings, how many tiles' lattice fits constrained it, and `reused_from` (the folder it was
-taken from, or `null` when this run solved it). The key digests everything registration reads:
+registration's own warnings, how many tiles' lattice fits constrained it, `reused_from` (the folder it was
+taken from, or `null` when this run solved it) and `steps` (each lattice pair's whole-vector choice: where it came
+from and how far it moved from the stage's own pick). The key digests everything registration reads:
 `REGISTRATION_SCHEME` (raise it whenever `tile_register` or the per-tile fits could move a tile), the timepoint's
-`record_digest`, every tile's pixels, the geometry, nominal pitch and diameter, and the working pitch and lattice
-kind measured on the timepoint — and nothing that acts after registration (cell diameter, margin, square edge,
+`record_digest`, every tile's pixels, the geometry, nominal pitch and diameter, the working pitch and lattice
+kind measured on the timepoint, and the agreed tile offsets when the timepoint is registered again with them — and
+nothing that acts after registration (cell diameter, margin, square edge,
 occlusion and clipping thresholds, the segmenter). `locate_timepoint` computes the key once the working pitch is
 measured and takes the first stored placement under it for exactly the plan's tiles, skipping the per-tile fits
 and `register_tiles`; otherwise it registers. So reuse is a cache whose hits are the positions registering would
@@ -10785,7 +10841,9 @@ timepoint) — fails the well with the file's problem named, never runs it as if
 **Reuse is keyed on the anchor.** `_prior_state` keeps a timepoint only when its recorded `manual_anchor_um`
 is the current one, so an incremental run recomputes a timepoint whose anchor was set, moved or cleared, and
 the resume checkpoint key (`_checkpoint_key`) carries it too. That key also holds the well's diameter in every
-geometry, since a resumed run over another set of timepoints can move the median it is taken from. A `plate_rigid` timepoint was carried from another
+geometry, since a resumed run over another set of timepoints can move the median it is taken from, and the
+registration's own key, since a timepoint registered again with its well's agreed tile layout has a tile a lattice
+step from where a checkpointed measurement read it. A `plate_rigid` timepoint was carried from another
 timepoint or other wells, any of which a click may have moved, so every located timepoint also records
 `anchors_digest` — a digest of the whole plate's anchors when it was located — and a `plate_rigid` one is kept
 only under the same digest. For a remote run, `acquisition_transport` uploads

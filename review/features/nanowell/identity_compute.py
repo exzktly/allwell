@@ -9,8 +9,11 @@ exactly like a verified one. A ``contradicted`` timepoint is already kept out of
 The page's **Identity** view is computed here too, one well's timepoint against its reference (:func:`identity_pair`):
 the Distance map's distances at the reference's measured positions in its common frame (:func:`distance_map`), the
 Blink frames resampled into the reference montage's pixels through the registration (:func:`blink_frames`), the
-address under the pointer on *Side by side* (:func:`hover_target`), and the registration's correlation surface with
-its peak and runner-up (:func:`diagnostics`). ``_identity_render`` draws them; nothing here draws.
+address under the pointer on *Side by side* (:func:`hover_target`), each nanowell's status for the Distance map's
+*Status* colouring (:func:`status_map`, :func:`colour_by`), and the Diagnostics: the correlation surface with its
+peak and runner-up (:func:`diagnostics`), the crops of the square looked for and where it was found
+(:func:`diagnostic_crops`) and the verdict block, one line per check with its state (:func:`checks`).
+``_identity_render`` and ``_identity_diagnostics_render`` draw them; nothing here draws.
 
 Qt-free.
 """
@@ -21,7 +24,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from pipeline.nanowell_identity import CONTRADICTED, GOOD, INCONCLUSIVE, NOT_CHECKED, TOLERANCE_PITCHES
+from pipeline.nanowell_identity import CONTRADICTED, GOOD, INCONCLUSIVE, NOT_CHECKED, PARTIAL, TOLERANCE_PITCHES
 
 #: Wells named in a footer line at most; the rest are counted.
 MAX_NAMED = 6
@@ -51,7 +54,13 @@ def identity_note(data, wells) -> str:
     parts = []
     bad = counts.get(CONTRADICTED) or {}
     if bad:
-        parts.append(_named([f"{w} {'/'.join(t)}" for w, t in bad.items()]) + " contradicted (left out)")
+        parts.append(_named([f"{w} {'/'.join(t)}" for w, t in bad.items()]) + " contradicted (left out of joins)")
+    some = counts.get(PARTIAL) or {}
+    if some:
+        excluded = getattr(data, "identity_excluded", None) or {}
+        left = sum(len(excluded.get(w, {}).get(tp, ())) for w, tps in some.items() for tp in tps)
+        parts.append(_named([f"{w} {'/'.join(t)}" for w, t in some.items()])
+                     + f" partial ({left:,} nanowell(s) left out of joins)")
     unsure = sorted(set(counts.get(INCONCLUSIVE) or {}) | set(counts.get(NOT_CHECKED) or {}))
     if unsure:
         unchecked = set(counts.get(NOT_CHECKED) or {})
@@ -90,27 +99,28 @@ def audit_command(out_dir) -> str:
 
 
 def worst_verdict(data, well: str) -> str | None:
-    """The worst of *well*'s verdicts (``CONTRADICTED`` first, then ``INCONCLUSIVE``, ``NOT_CHECKED``), ``CONFIRMED``
-    when every timepoint is good, or ``None`` when the data holds no verdicts for it."""
-    from pipeline.nanowell_identity import CONFIRMED
+    """The worst of *well*'s verdicts (``CONTRADICTED`` first, then ``INCONCLUSIVE``, ``NOT_CHECKED``, ``PARTIAL``),
+    ``CONFIRMED`` when every timepoint is good, or ``None`` when the data holds no verdicts for it."""
+    from pipeline.nanowell_identity import CONFIRMED, PARTIAL
 
     found = {verdict for verdict, _why in ((getattr(data, "identity", None) or {}).get(well) or {}).values()}
     if not found:
         return None
-    for verdict in (CONTRADICTED, INCONCLUSIVE, NOT_CHECKED):
+    for verdict in (CONTRADICTED, INCONCLUSIVE, NOT_CHECKED, PARTIAL):
         if verdict in found:
             return verdict
     return CONFIRMED
 
 
 def default_timepoint(data, well: str, timepoints) -> str:
-    """The timepoint the Identity view opens on: the well's first contradicted one, else its first inconclusive or
-    unchecked one, else its first that is not the reference (a reference compared with itself shows nothing)."""
-    from pipeline.nanowell_identity import REFERENCE
+    """The timepoint the Identity view opens on: the well's first contradicted one, else its first inconclusive,
+    unchecked or partial one, else its first that is not the reference (a reference compared with itself shows
+    nothing)."""
+    from pipeline.nanowell_identity import PARTIAL, REFERENCE
 
     verdicts = (getattr(data, "identity", None) or {}).get(well) or {}
     tps = list(timepoints)
-    for wanted in (CONTRADICTED, INCONCLUSIVE, NOT_CHECKED):
+    for wanted in (CONTRADICTED, INCONCLUSIVE, NOT_CHECKED, PARTIAL):
         for tp in tps:
             if (verdicts.get(tp) or ("",))[0] == wanted:
                 return tp
@@ -267,7 +277,8 @@ class MappedTile:
     tile: str
     corners: np.ndarray | None
     corner: tuple
-    moved_um: float | None = None                    # how far it sits from the rest of the grid, when it moved
+    moved_um: float | None = None                    # how far it sits from the rest of the grid: a lattice step off
+    imprecise_um: float | None = None                # placed differently by less than half a pitch: names unaffected
 
 
 @dataclass
@@ -304,6 +315,7 @@ def distance_map(pair: IdentityPair, tile_sizes: dict | None = None) -> Distance
     xy = np.array([sites[a] for a in addresses], dtype=float).reshape(-1, 2)
     pitch = getattr(ref, "pitch", None)
     moved = {str(t): float(um) for t, um in (entry.get("tiles") or {}).get("moved") or ()}
+    imprecise = {str(t): float(um) for t, um in (entry.get("tiles") or {}).get("imprecise") or ()}
     tiles = []
     other = pair.other
     if other is not None and pair.inverse is not None:
@@ -314,7 +326,7 @@ def distance_map(pair: IdentityPair, tile_sizes: dict | None = None) -> Distance
             if size and size[0] and size[1]:
                 w, h = size
                 corners = pair.inverse([(left, top), (left + w, top), (left + w, top + h), (left, top + h)])
-            tiles.append(MappedTile(name, corners, corner, moved.get(name)))
+            tiles.append(MappedTile(name, corners, corner, moved.get(name), imprecise.get(name)))
     return DistanceMap(addresses, xy[:, 0], xy[:, 1], np.array([values.get(a, np.nan) for a in addresses], dtype=float),
                        failing, 0.35 * pitch if pitch else 1.0, tiles, pitch)
 
@@ -412,72 +424,399 @@ def hover_target(side: str, x: float, y: float, pair: IdentityPair, radius_um: f
                        None if address not in other_sites else tuple(other_sites[address]), predicted)
 
 
+# ── the status of each nanowell (the Distance map's *Status* colouring) ─────
+#: The *Status* classes in the legend's order, each with what its legend says (``{tol}``: the tolerance, pitches).
+STATUS_CLASSES = (
+    ("kept", "Lands on itself"),
+    ("imprecise", "Lands nearest itself, beyond {tol:g} spacing"),
+    ("wrong_name", "Wrong name: lands on another, or another lands on it"),
+    ("misregistered", "In a tile placed a lattice step off"),
+    ("not_compared", "Not compared"),
+)
+#: How far, in pitches, an address no row of the sidecar names may land from itself and still be nearest itself:
+#: half the spacing, the nearest any other site can be on either lattice. Used only beyond the sidecar's list of
+#: failing addresses (``MAX_LISTED``), where where it landed is not recorded.
+NEAREST_ITSELF_PITCHES = 0.5
+
+
+@dataclass
+class StatusMap:
+    """Every nanowell of the comparison at its reference position (the reference's common frame, µm) with its class
+    (:data:`STATUS_CLASSES`)."""
+    addresses: list
+    x: np.ndarray
+    y: np.ndarray
+    status: list
+    radius_um: float
+
+    def of(self, address) -> str:
+        return self.status[self.addresses.index(tuple(address))]
+
+    def members(self, cls: str) -> set:
+        return {a for a, s in zip(self.addresses, self.status) if s == cls}
+
+    @property
+    def counts(self) -> dict[str, int]:
+        return {cls: sum(s == cls for s in self.status) for cls, _label in STATUS_CLASSES}
+
+
+def _classes(pair: IdentityPair) -> dict:
+    """``address -> class`` from the sidecar entry, the most specific record first: the check's own list of the
+    nanowells it left out (``excluded``: ``misregistered_tile``, ``wrong_name``, ``neighbour_of_wrong``) — or, in a
+    sidecar written before that list existed, the nanowells of the tiles it found a step off (``tiles.moved``) —
+    then each listed failing address (landed on itself: imprecise; on another: a wrong name), then each distance
+    (within the tolerance: kept; beyond it, nearest itself — :data:`NEAREST_ITSELF_PITCHES` — imprecise, else a
+    wrong name), and every other address of the reference not compared."""
+    entry = pair.entry
+    tolerance = float((pair.payload or {}).get("tolerance_pitches") or TOLERANCE_PITCHES)
+    out: dict = {}
+    if entry.get("excluded") is not None:
+        for q, r, why, *_rest in entry["excluded"]:
+            out[(int(q), int(r))] = "misregistered" if why == "misregistered_tile" else "wrong_name"
+    else:
+        moved = {str(t) for t, _um in (entry.get("tiles") or {}).get("moved") or ()}
+        for address, owner in (getattr(pair.other, "owners", None) or {}).items():
+            if owner in moved:
+                out[tuple(address)] = "misregistered"
+    for row in entry.get("failing") or ():
+        address, landed = (int(row[0]), int(row[1])), (int(row[3]), int(row[4]))
+        out.setdefault(address, "imprecise" if landed == address and row[2] is not None else "wrong_name")
+    for q, r, d in entry.get("distances") or ():
+        d = float(d)
+        out.setdefault((int(q), int(r)), "kept" if d <= tolerance else
+                       "imprecise" if d <= NEAREST_ITSELF_PITCHES else "wrong_name")
+    for address in getattr(pair.ref, "sites", None) or {}:
+        out.setdefault(tuple(address), "not_compared")
+    return out
+
+
+def status_map(pair: IdentityPair) -> StatusMap:
+    """The *Status* colouring's data: each nanowell's class (:func:`_classes`) at its reference position, or — for
+    an address only the compared timepoint holds — at its position there mapped into the reference's frame."""
+    ref_sites = getattr(pair.ref, "sites", None) or {}
+    other_sites = getattr(pair.other, "sites", None) or {}
+    addresses, xy, status = [], [], []
+    for address, cls in sorted(_classes(pair).items()):
+        if address in ref_sites:
+            point = ref_sites[address]
+        elif address in other_sites and pair.inverse is not None:
+            point = tuple(pair.inverse([other_sites[address]])[0])
+        else:
+            continue
+        addresses.append(address)
+        xy.append(point)
+        status.append(cls)
+    xy = np.array(xy, dtype=float).reshape(-1, 2)
+    pitch = getattr(pair.ref, "pitch", None)
+    return StatusMap(addresses, xy[:, 0], xy[:, 1], status, 0.35 * pitch if pitch else 1.0)
+
+
+def colour_by(choice: str, pair: IdentityPair) -> str:
+    """What the Distance map colours by for the page's *choice* (``state.IDENTITY_COLOURS``): ``auto`` is the
+    status unless the timepoint is confirmed."""
+    from pipeline.nanowell_identity import CONFIRMED
+
+    if choice in ("status", "distance"):
+        return choice
+    return "distance" if pair.verdict == CONFIRMED else "status"
+
+
+# ── Diagnostics: the registration on the central square ──────────────────────
+#: The states a line of the Diagnostics' verdict block is drawn in: passed, failed, a warning (it withholds or
+#: qualifies), information (no threshold applies), and a check that did not run.
+CHECK_STATES = ("pass", "fail", "warn", "info", "skip")
+#: The longest side, in samples, of the Diagnostics' montage crops: a crop is about three pitches wide, a few hundred
+#: montage pixels, and more samples than the panel's pixels add nothing.
+CROP_MAX_SIDE = 256
+
+
+@dataclass
+class Check:
+    """One line of the Diagnostics' verdict block: which check (``key``), how it came out (:data:`CHECK_STATES`),
+    and the sentence, with its numbers and their thresholds."""
+    key: str
+    state: str
+    text: str
+
+
 @dataclass
 class Diagnostics:
-    """The registration on the square, as the Diagnostics view draws it."""
+    """The registration on the square, as the Diagnostics view draws it. Positions are in the compared timepoint's
+    common frame; :meth:`relative` measures them from ``origin``, where the heat map's axes start."""
     surface: np.ndarray | None                       # the reduced correlation surface, NaN where not searched
     box: tuple | None                                # (left, top, right, bottom), compared timepoint's common frame
     found_um: tuple | None
     runner_up_um: tuple | None                       # located on the reduced surface (the sidecar keeps its value only)
     expected_um: tuple | None                        # the reference's square, where an unmoved plate puts it
     accepted_um: tuple | None                        # the square the run accepted at the compared timepoint
-    lines: list = field(default_factory=list)
+    checks: list = field(default_factory=list)       # [Check]: the verdict block, top to bottom
+    origin: tuple | None = None                      # the expected square, else the match: the heat map's (0, 0)
+    pitch_um: float | None = None
+
+    def relative(self, xy) -> tuple | None:
+        """*xy* (common frame) measured from :attr:`origin`, in µm; ``None`` for ``None``."""
+        if xy is None or self.origin is None:
+            return None
+        return float(xy[0]) - self.origin[0], float(xy[1]) - self.origin[1]
+
+    @property
+    def extent(self) -> tuple | None:
+        """``(left, right, bottom, top)`` of the surface measured from :attr:`origin`, for ``imshow(extent=…)``."""
+        if self.box is None or self.origin is None:
+            return None
+        left, top, right, bottom = self.box
+        ox, oy = self.origin
+        return left - ox, right - ox, bottom - oy, top - oy
+
+
+def _runner_up_place(surface, box, found, pitch) -> tuple | None:
+    """Where the reduced surface is highest more than half a pitch from *found* (the sidecar keeps the runner-up's
+    value, not its place): the centre of that sample, common frame."""
+    if surface is None or found is None or not pitch or not np.isfinite(surface).any():
+        return None
+    rows, cols = surface.shape
+    cw, ch = (box[2] - box[0]) / cols, (box[3] - box[1]) / rows
+    cx, cy = np.meshgrid(box[0] + (np.arange(cols) + 0.5) * cw, box[1] + (np.arange(rows) + 0.5) * ch)
+    away = np.where(np.hypot(cx - found[0], cy - found[1]) > 0.5 * pitch, surface, np.nan)
+    if not np.isfinite(away).any():
+        return None
+    iy, ix = np.unravel_index(int(np.nanargmax(away)), away.shape)
+    return float(cx[iy, ix]), float(cy[iy, ix])
 
 
 def diagnostics(pair: IdentityPair) -> Diagnostics:
-    """The correlation surface with its peak and runner-up, and the transform, agreement and thresholds as text."""
-    from pipeline.nanowell_identity import MIN_MARGIN, MIN_PEAK, SQUARE_AGREEMENT_PITCHES
-
+    """The correlation surface with the match, the runner-up and the expected square, and the verdict block
+    (:func:`checks`)."""
     square = pair.entry.get("square") or {}
     surface = box = None
     if square.get("surface") and square.get("surface_box_um"):
         surface = np.array([[np.nan if v is None else float(v) for v in row] for row in square["surface"]], dtype=float)
         box = tuple(float(v) for v in square["surface_box_um"])
     found = tuple(float(v) for v in square["found_um"]) if square.get("found_um") else None
-    pitch = getattr(pair.other, "pitch", None)
-    runner = None
-    if surface is not None and found is not None and pitch and np.isfinite(surface).any():
-        rows, cols = surface.shape
-        cw, ch = (box[2] - box[0]) / cols, (box[3] - box[1]) / rows
-        cx, cy = np.meshgrid(box[0] + (np.arange(cols) + 0.5) * cw, box[1] + (np.arange(rows) + 0.5) * ch)
-        away = np.where(np.hypot(cx - found[0], cy - found[1]) > 0.5 * pitch, surface, np.nan)
-        if np.isfinite(away).any():
-            iy, ix = np.unravel_index(int(np.nanargmax(away)), away.shape)
-            runner = (float(cx[iy, ix]), float(cy[iy, ix]))
+    pitch = getattr(pair.other, "pitch", None) or getattr(pair.ref, "pitch", None)
     ref_entry = ((pair.payload or {}).get("timepoints") or {}).get(pair.reference) or {}
     expected = ref_entry.get("square_um") or getattr(pair.ref, "square_um", None)
     expected = tuple(float(v) for v in expected) if expected else None
     accepted = getattr(pair.other, "square_um", None)
-    lines = []
-    if square:
-        peak, margin = square.get("peak"), square.get("margin")
-        lines.append(f"Peak {_num(peak)} (at least {MIN_PEAK:g} needed) · runner-up {_num(square.get('runner_up'))} · "
-                     f"margin {_num(margin)} (at least {MIN_MARGIN:g} needed): "
-                     + ("the square is found." if square.get("ok") else
-                        f"the square is not found — {square.get('reason') or 'no reason recorded'}."))
-        rotation, scale = float(square.get("rotation_deg") or 0.0), float(square.get("scale") or 1.0)
-        shift = ("—" if found is None or expected is None else
-                 f"({found[0] - expected[0]:+.1f}, {found[1] - expected[1]:+.1f}) µm")
-        lines.append(f"Transform, reference square to the match: turn {rotation:+.2f}°, scale {scale:.4f}, "
-                     f"translation {shift}.")
-    else:
-        lines.append("The registration on the square was not attempted: " + (pair.reason or "no reason recorded") + ".")
-    agreement = pair.entry.get("square_agreement_pitches")
+    out = Diagnostics(surface, box, found, _runner_up_place(surface, box, found, pitch), expected, accepted,
+                      origin=expected or found, pitch_um=pitch)
+    out.checks = checks(pair, out)
+    return out
+
+
+def _sp(value: float) -> str:
+    """A distance in nanowell spacings, as a reader says it."""
+    return f"{value:.2f} spacing" + ("s" if value > 1 else "")
+
+
+def _deg(value: float) -> str:
+    return f"{float(value) + 0.0:+.1f}°".replace("-0.0°", "+0.0°")
+
+
+def _square_check(square: dict, pair: IdentityPair) -> Check:
+    from pipeline.nanowell_identity import MIN_MARGIN, MIN_PEAK
+
+    if not square:
+        return Check("square", "fail", f"Central square not looked for: {pair.reason or 'no reason recorded'}.")
+    if square.get("peak") is None:
+        return Check("square", "fail", f"Central square not found: {square.get('reason') or 'no reason recorded'}.")
+    peak, runner, margin = float(square["peak"]), square.get("runner_up"), float(square.get("margin") or 0.0)
+    numbers = (f"best match {peak:.2f} (needs {MIN_PEAK:.2f}), next best "
+               f"{'—' if runner is None else f'{float(runner):.2f}'} — lead {margin:.2f} (needs {MIN_MARGIN:.2f})")
+    if square.get("ok"):
+        return Check("square", "pass", f"Central square found clearly: {numbers}.")
+    edge = peak >= MIN_PEAK and margin >= MIN_MARGIN
+    return Check("square", "fail", f"Central square not found clearly: {numbers}"
+                 + (f"; {square.get('reason') or 'no reason recorded'}." if edge else "."))
+
+
+def _motion_check(square: dict, diag: Diagnostics, pair: IdentityPair) -> Check:
+    if diag.found_um is None or diag.expected_um is None:
+        return Check("motion", "skip", "Plate movement not measured: the square was not found.")
+    moved = math.dist(diag.found_um, diag.expected_um)
+    text = f"Plate moved {moved:.0f} µm and turned {_deg(square.get('rotation_deg') or 0.0)} since {pair.reference}"
+    scale = float(square.get("scale") or 1.0)
+    if abs(scale - 1.0) >= 0.0005:
+        text += f", scale ×{scale:.3f}"
+    refined = square.get("refined") or {}
+    if refined.get("sites"):
+        turn = float(refined.get("rotation_deg") or 0.0) - float(refined.get("registered_rotation_deg") or 0.0)
+        ratio = float(refined.get("scale") or 1.0) / float(refined.get("registered_scale") or 1.0)
+        if refined.get("kept"):
+            text += f" (refit on {int(refined['sites']):,} nanowells: {_deg(turn)}, scale ×{ratio:.3f})"
+        else:
+            text += (f" (a refit on {int(refined['sites']):,} nanowells would turn it {_deg(turn)} and scale it "
+                     f"×{ratio:.3f}: too far, not used)")
+    if square.get("turned_deg"):
+        text += f"; found only with the reference turned a further {_deg(square['turned_deg'])}"
+    return Check("motion", "info", text + ".")
+
+
+def _agreement_check(entry: dict, square: dict, pair: IdentityPair) -> Check:
+    from pipeline.nanowell_identity import SQUARE_AGREEMENT_PITCHES as LIMIT
+
+    agreement = entry.get("square_agreement_pitches")
+    name = f"Square the run picked at {pair.timepoint}"
     if agreement is not None:
-        lines.append(f"The square the run accepted at {pair.timepoint} is {float(agreement):.3f} pitch from the match "
-                     f"(at most {SQUARE_AGREEMENT_PITCHES:g} agrees).")
-    elif accepted is None:
-        lines.append(f"The run accepted no square at {pair.timepoint}, so the match has nothing to agree with.")
-    return Diagnostics(surface, box, found, runner, expected, accepted, lines)
+        a = float(agreement)
+        if a <= LIMIT:
+            return Check("square_agreement", "pass", f"{name} agrees: {_sp(a)} apart (limit {LIMIT:g}).")
+        return Check("square_agreement", "fail", f"{name} is elsewhere: {_sp(a)} away (limit {LIMIT:g}), so the run "
+                                                 "took something else for the square.")
+    if not square.get("ok"):
+        return Check("square_agreement", "skip", f"{name}: not compared, the square was not found.")
+    if pair.other is not None and getattr(pair.other, "square_um", None) is None:
+        return Check("square_agreement", "skip", f"{name}: none, the run accepted no square there.")
+    return Check("square_agreement", "skip", f"{name}: not compared.")
 
 
-def _num(value) -> str:
-    return "—" if value is None else f"{float(value):.3f}"
+def _outline_check(entry: dict, square: dict) -> Check:
+    from pipeline.nanowell_identity import CENTRE_AGREEMENT_PITCHES as AGREES, CENTRE_CONTRADICTS_PITCHES as BEYOND
+
+    centre = entry.get("centre_agreement_pitches")
+    if centre is None:
+        why = ("the square was not found" if not square.get("ok") else
+               "an array outline was not fitted at both timepoints")
+        return Check("outline", "skip", f"Array outline not compared: {why}.")
+    c = float(centre)
+    if c <= AGREES:
+        return Check("outline", "pass", f"Array outline agrees: {_sp(c)} apart (limit {AGREES:g}).")
+    if c < BEYOND:
+        return Check("outline", "warn", f"Array outline loose: {_sp(c)} apart (agrees within {AGREES:g}, contradicts "
+                                        f"from {BEYOND:g}), so the timepoint cannot be confirmed.")
+    return Check("outline", "fail", f"Array outline disagrees: {_sp(c)} apart (contradicts from {BEYOND:g}): the "
+                                    "registration followed something that moved against the array.")
+
+
+def _tiles_check(entry: dict, pair: IdentityPair) -> Check:
+    tiles = entry.get("tiles")
+    if not isinstance(tiles, dict):
+        return Check("tiles", "skip", "Tiles not compared.")
+    pitch = getattr(pair.other, "pitch", None)
+
+    def listed(rows) -> str:
+        return ", ".join(f"{t} {float(um):.0f} µm" + (f" ({float(um) / pitch:.2f} spacing)" if pitch else "")
+                         for t, um in rows)
+    if not tiles.get("applies"):
+        reason = tiles.get("reason") or "no reason recorded"
+        return Check("tiles", "skip" if "fewer than two" in reason else "warn", f"Tiles not compared: {reason}.")
+    if tiles.get("moved"):
+        whole = "which group is right cannot be told" if tiles.get("split") else "their nanowells are left out"
+        return Check("tiles", "fail", f"Tiles placed a lattice step differently than at {pair.reference}: "
+                                      f"{listed(tiles['moved'])}; {whole}.")
+    if tiles.get("imprecise"):
+        return Check("tiles", "warn", f"Tiles placed as at {pair.reference}, except {listed(tiles['imprecise'])} "
+                                      "differently (under half a spacing: names unaffected).")
+    return Check("tiles", "pass", f"Tiles placed as at {pair.reference}.")
+
+
+def _addresses_check(entry: dict, square: dict, pair: IdentityPair) -> Check:
+    from pipeline.nanowell_identity import TOLERANCE_PITCHES as LIMIT
+
+    if "compared" not in entry:
+        why = "the square was not found" if not square.get("ok") else (pair.reason or "no reason recorded")
+        return Check("addresses", "skip", f"Addresses not compared: {why}.")
+    compared = int(entry.get("compared") or 0)
+    loose = int(entry.get("loose_count") or 0)
+    wrong = max(0, int(entry.get("failing_count") or 0) - loose)
+    worst = entry.get("max_pitches")
+    worst_said = "" if worst is None else f", worst {_sp(float(worst))} (limit {LIMIT:g})"
+    if wrong:
+        detail = (entry.get("diagnosis") or {}).get("detail")
+        return Check("addresses", "fail", f"Addresses: {wrong:,} of {compared:,} land on another nanowell"
+                     + (f": {detail}." if detail else "."))
+    text = f"Addresses: {compared - loose:,} of {compared:,} land on themselves{worst_said}"
+    if loose:
+        text += f"; {loose:,} land nearest themselves but beyond {LIMIT:g} (names right)"
+    return Check("addresses", "warn" if loose else "pass", text + ".")
+
+
+#: The state the verdict line is drawn in, by verdict.
+_VERDICT_STATE = {"confirmed": "pass", "partial": "warn", "inconclusive": "warn", "contradicted": "fail"}
+
+
+def checks(pair: IdentityPair, diag: Diagnostics) -> list[Check]:
+    """The Diagnostics' verdict block: the verdict and why, then each check the identity check made, in the order
+    it made them, with its numbers against its thresholds — the square found, the plate's movement, the square the
+    run picked, the array's outline, the tiles, the addresses, and the plate-level stage cross-check when there is
+    one. A check that did not run says why (``skip``)."""
+    entry = pair.entry
+    square = entry.get("square") or {}
+    verdict = pair.verdict.replace("_", " ")
+    out = [Check("verdict", _VERDICT_STATE.get(pair.verdict, "info"),
+                 f"Verdict: {verdict}" + (f" — {pair.reason}." if pair.reason else ".")),
+           _square_check(square, pair), _motion_check(square, diag, pair), _agreement_check(entry, square, pair),
+           _outline_check(entry, square), _tiles_check(entry, pair), _addresses_check(entry, square, pair)]
+    stage = stage_line(pair)
+    if stage:
+        ok = (((pair.payload or {}).get("stage") or {}).get("timepoints") or {}).get(pair.timepoint, {}).get("ok")
+        out.append(Check("stage", {True: "pass", False: "fail"}.get(ok, "skip"), stage))
+    return out
+
+
+@dataclass
+class Crops:
+    """The Diagnostics' two pictures of the square, on one grid measured from the square's centre (µm): the
+    reference's montage around its square (what was looked for) and the compared montage around the match (where
+    it was found), turned and scaled into the reference's orientation through the registration when there is one."""
+    looked: np.ndarray | None                        # float32, NaN outside the montage; None without the montage
+    found: np.ndarray | None
+    extent: tuple                                    # (left, right, bottom, top), µm from the square's centre
+    half_um: float
+    turned: bool                                     # whether ``found`` was mapped through the registration
+    accepted: tuple | None                           # the run's own square at the compared timepoint, same coordinates
+    found_at: tuple | None                           # the centre of ``found``, the compared timepoint's common frame
+
+
+def diagnostic_crops(pair: IdentityPair, ref_montage, other_montage, *, max_side: int = CROP_MAX_SIDE
+                     ) -> Crops | None:
+    """The two crops, each :data:`PATCH_PITCHES` reference pitches either side of its centre — the patch the check
+    correlated. *What was looked for* is centred on the reference's square. *Where it was found* is the compared
+    montage read at each point of that grid mapped forward through the registration, so it shows the match turned
+    into the reference's orientation, centred on ``found_um``; without a registration it is the compared montage
+    as it is, around the point where the square was expected. ``None`` without the reference's square or pitch."""
+    from pipeline.nanowell_identity import PATCH_PITCHES
+
+    ref = pair.ref
+    ref_entry = ((pair.payload or {}).get("timepoints") or {}).get(pair.reference) or {}
+    centre = ref_entry.get("square_um") or getattr(ref, "square_um", None)
+    pitch = getattr(ref, "pitch", None)
+    if centre is None or not pitch:
+        return None
+    centre = np.asarray([float(v) for v in centre], dtype=float)
+    half = PATCH_PITCHES * float(pitch)
+    um = float(ref_montage.um_per_px) if ref_montage is not None else float(getattr(ref, "um_per_px", 0) or 0)
+    n = int(min(max_side, max(16, round(2 * half / um)))) if um > 0 else max_side
+    offsets = -half + (np.arange(n) + 0.5) * (2 * half / n)
+    gx, gy = np.meshgrid(offsets, offsets)
+    grid = np.column_stack([gx.ravel(), gy.ravel()])
+    looked = found = None
+    if ref_montage is not None:
+        looked = _sample(ref_montage.image, ref_montage.origin_um, ref_montage.um_per_px, grid + centre)
+        looked = looked.reshape(n, n).astype(np.float32)
+    turned = pair.forward is not None
+    accepted = getattr(pair.other, "square_um", None)
+    if turned:
+        found_at = tuple(float(v) for v in pair.forward([centre])[0])
+        if accepted is not None and pair.inverse is not None:
+            accepted = tuple(float(v) for v in pair.inverse([accepted])[0] - centre)
+        else:
+            accepted = None
+        points = pair.forward(grid + centre)
+    else:
+        found_at = tuple(centre)
+        accepted = None if accepted is None else (float(accepted[0]) - centre[0], float(accepted[1]) - centre[1])
+        points = grid + centre
+    if other_montage is not None:
+        found = _sample(other_montage.image, other_montage.origin_um, other_montage.um_per_px, points)
+        found = found.reshape(n, n).astype(np.float32)
+    return Crops(looked, found, (-half, half, half, -half), half, turned, accepted, found_at)
 
 
 # ── marks on the line plots ──────────────────────────────────────────────────
 #: The verdicts a line plot marks at their timepoint, with the word it writes there.
-MARK_WORDS = {CONTRADICTED: "contradicted", INCONCLUSIVE: "inconclusive", NOT_CHECKED: "not checked"}
+MARK_WORDS = {CONTRADICTED: "contradicted", PARTIAL: "partial", INCONCLUSIVE: "inconclusive",
+              NOT_CHECKED: "not checked"}
 
 
 def timepoint_marks(data, well: str) -> dict[str, str]:
@@ -487,14 +826,16 @@ def timepoint_marks(data, well: str) -> dict[str, str]:
     verdicts = (getattr(data, "identity", None) or {}).get(well) or {}
     checked = any(verdict != NOT_CHECKED for verdict, _why in verdicts.values())
     return {tp: verdict for tp, (verdict, _why) in verdicts.items()
-            if verdict in (CONTRADICTED, INCONCLUSIVE) or (verdict == NOT_CHECKED and checked)}
+            if verdict in (CONTRADICTED, PARTIAL, INCONCLUSIVE) or (verdict == NOT_CHECKED and checked)}
 
 
 def marks_legend(verdicts) -> str:
     """The footer sentence saying what the hatching means, naming only the kinds drawn; ``""`` for none."""
-    kinds = [v for v in (INCONCLUSIVE, CONTRADICTED, NOT_CHECKED) if v in set(verdicts)]
+    kinds = [v for v in (INCONCLUSIVE, PARTIAL, CONTRADICTED, NOT_CHECKED) if v in set(verdicts)]
     if not kinds:
         return ""
-    hatch = {INCONCLUSIVE: "//", CONTRADICTED: "xx", NOT_CHECKED: ".."}
+    hatch = {INCONCLUSIVE: "//", PARTIAL: "\\\\", CONTRADICTED: "xx", NOT_CHECKED: ".."}
     said = ", ".join(f"{hatch[v]} {MARK_WORDS[v]}" for v in kinds)
-    return f"Hatched: nanowell identity not confirmed ({said}); lines through them dashed."
+    joined = ("; contradicted values are points joined to nothing" if CONTRADICTED in kinds or PARTIAL in kinds
+              else "")
+    return f"Hatched: nanowell identity not confirmed ({said}); lines through them dashed{joined}."

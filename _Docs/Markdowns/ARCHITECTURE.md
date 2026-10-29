@@ -10670,19 +10670,23 @@ off had left the rim a quarter pitch out. **Address test** (`address_test`): eve
 transform the match gives (`mapper`) and must land within `TOLERANCE_PITCHES` (0.25) of the same address in the
 other timepoint's `nanowells/<well>.csv` positions, and nearer it than any other site; an address only the
 reference holds fails when its mapped point lands on a site carrying another address. A site that lands nearest its own address but beyond the tolerance has a fitted position that
-is off, not a wrong name; up to two of them or 2 % (`LOOSE_SHARE`) are counted (`loose_count`) and do not contradict,
-while one address landing on another's site does: one site a quarter pitch out had contradicted a 265-site well. `diagnose` reads the
+is off, not a wrong name: it is counted (`loose_count`) and never left out or contradicting, however many there are;
+an address landing on another's site is a wrong name. `diagnose` reads the
 addresses the mapped sites landed on: one constant lattice step, one element of the lattice's point group
 (`point_group`: twelve on a hexagonal lattice, eight on a square one — a turn by 60°, 90°, 120° or 180°, or a
 reflection) explaining at least 80 % of them, failures confined to one tile, or `scattered`. **Tile layout**
 (`tile_layout_test`): a tile placed a lattice step off inside one montage moves its sites' positions and their
 addresses together, so every address still lands on itself in the common frame and the address test cannot see it;
-the stage visits the same fields at every timepoint, so the tiles are grouped by how far they moved between the two
-timepoints, the largest group within a quarter pitch of one another is the grid's motion, and any tile off it by
-more was placed differently in one of the two montages. A median would not do: with half the grid a step off it
-falls between the halves and every tile departs by half a pitch. Two equal groups still disagree and are
-contradicted; only a tile more than `LAYOUT_REACH_PITCHES` (3) off means the timepoints were not acquired on one
-grid, and then the timepoint cannot be confirmed. **Square agreement**: the correlation peak must sit within a
+the stage visits the same fields at every timepoint, so the tiles that own a nanowell at either timepoint (an empty
+one names nothing) are grouped by how far they moved between the two timepoints, and the largest group within a
+quarter pitch of one another is the grid's motion. A tile off it by `MISREGISTERED_PITCHES` (half a pitch) or more
+is **moved** — misregistered a lattice step, its nanowells' names wrong in one of the two; one off by less is
+**imprecise** — placed tens of micrometres differently, as an empty or sparse corner tile with only the stage's
+position is, which leaves every address on its nearest lattice site, so it is reported and nothing is left out. A
+median would not do: with half the grid a step off it falls between the halves and every tile departs by half a
+pitch. Two equal groups (`split`) disagree and nothing tells which is right; only a tile more than
+`LAYOUT_REACH_PITCHES` (3) off means the timepoints were not acquired on one grid, and then the timepoint cannot be
+confirmed. **Square agreement**: the correlation peak must sit within a
 quarter pitch of the square the run accepted at that timepoint, or the run took something else for the square. A
 mirrored flag that differs from the reference's, or a lattice of another kind, is contradicted outright.
 **Second landmark**: the square is the registration's only landmark, so a square-like decoy the run accepted at both
@@ -10694,11 +10698,16 @@ or three sites off taken by the run, the correlation follows it (it is the best 
 on itself, while the rim-fitted centres sat 1.75 and 3.0 pitches apart. The converse — the run right, the square
 hidden, and the correlation following a decoy — contradicts correct addresses; it fails safe (the rows are left out),
 and nothing in one timepoint's image tells the two apart.
-**Verdicts**: `confirmed`, `contradicted` (any failure above), `inconclusive` (no reference square, no montage, a
-peak or margin too low, an unaddressed timepoint, fewer than `MIN_COMPARED` addresses in common, a tile layout from
-another grid, a rim centre that disagrees), `reference`, and `not_checked` for a timepoint never tested; only
-`confirmed` and `reference` are good. Review leaves only `contradicted` timepoints out of its joins; `inconclusive`
-and `not_checked` are joined and footnoted. **The reference** (`reference_candidates`, `check_well`) is an addressed
+**Verdicts**: `confirmed`; `partial` — the registration is trusted and most nanowells land on themselves, but some
+are shown wrong, and only those are listed in `excluded` (`_excluded`: an address whose mapped site landed on
+another's, the address it landed on, every nanowell of a moved tile); `contradicted` — the registration or every
+address at once is wrong (a constant step or a lattice symmetry, a rim centre 1.5 pitches off, a square the run
+took elsewhere, a split tile layout, a mirror or another lattice kind, or more than `PARTIAL_MAX_SHARE` (half) of the
+nanowells shown wrong); `inconclusive` (no reference square, no montage, a margin too low, an unaddressed timepoint,
+fewer than `MIN_COMPARED` addresses in common, a tile layout from another grid, a rim centre between 0.75 and 1.5
+pitches off); `reference`; and `not_checked` for a timepoint never tested. Only `confirmed` and `reference` are good;
+`AGREES` adds `partial`. Review leaves a `contradicted` timepoint and a `partial` one's `excluded` nanowells out of its
+joins (`exclusions` reads them); `inconclusive` and `not_checked` are joined and footnoted. **The reference** (`reference_candidates`, `check_well`) is an addressed
 timepoint whose square the run accepted, those whose square carries `(0, 0)` first (`square_names_the_centre`:
 the square is the central nanowell by convention), earliest first. A reference addressed off itself would make
 every correct timepoint contradicted, so when the contradicted timepoints agree on one step or symmetry and are at
@@ -11074,24 +11083,30 @@ those whose labels happen to parse — and the growth rate is undefined.
 every timepoint of its well. A timepoint where it has no row still has one, with a state saying why:
 `unaddressed` (the timepoint was located but given no origin), `not_located` (the grid record names the
 timepoint and the table has no row for it) or `absent` (addressed, not in that roster), plus the grid's
-reason, or its status, or a sentence saying the grid lists the timepoint and the table has no rows. A timepoint
-the identity check contradicted (`NanowellData.identity`, read per well by `read_well_part` through
-`pipeline.nanowell_identity.verdicts`) has every row `identity_contradicted`, with the check's reason: its
-addresses name other nanowells than the reference's, so it is no fold change's numerator or baseline, and an address
-only it holds is not followed at all. Every figure `controller.draw_view` composes says in its footer which
+reason, or its status, or a sentence saying the grid lists the timepoint and the table has no rows. Every row
+carries its timepoint's identity verdict (`identity`, `identity_reason`; `NanowellData.identity`, read per well by
+`read_well_part` through `pipeline.nanowell_identity.verdicts`) and `identity_ok`, False on every row of a
+`contradicted` timepoint and on each nanowell a `partial` one leaves out (`NanowellData.identity_excluded`, through
+`exclusions`; `series_compute._mark_identity`). Such a row keeps what was measured — a count at that timepoint is a
+count of *some* nanowell, so per-timepoint figures draw it — but no comparison over time uses it: its fold changes
+are undefined with the reason `identity_contradicted`, a fold change from a baseline row like it with `baseline
+identity_contradicted`, the growth rate skips it, the occupancy class is not taken at it, Trajectories draw it as a
+point joined to nothing (`TrajectoryPanel.line_ok`) and in no class median, and the export carries `identity` and
+`identity_ok` beside its values. Every figure `controller.draw_view` composes says in its footer which
 timepoints were contradicted and which wells are not confirmed or not checked (`identity_compute.identity_note`):
 a dataset analysed before the check existed reads `not_checked` until the audit command is run over it. The line plots
 mark it where it is (`identity_compute.timepoint_marks`, drawn by `_identity_marks`): Trajectories (through
-`TrajectoryPanel.marks`) and the Distribution view over time (`DistributionModel.identity_marks`) draw a hatched band
-at each timepoint that is `inconclusive` (//), `contradicted` (xx) or, in a well where another timepoint was checked,
-`not_checked` (..), with the verdict written in it, and dash every line segment into or out of it
+`TrajectoryPanel.marks`) and the Distribution view over time (`DistributionModel.identity_marks`) draw a light hatched
+band behind the datapoints at each timepoint that is `inconclusive` (//), `partial` (`\\`), `contradicted` (xx) or, in a
+well where another timepoint was checked, `not_checked` (..), with the verdict written above it, and dash every line
+segment into or out of it
 (`_identity_marks.split_segments`); a well never checked is said once in the footer rather than hatched at every
 timepoint, and `marks_legend` adds the footer sentence naming the hatches drawn. Contents values are used only in a measurable state (`measured` / `empty`), whatever the table
 holds. `site_series` is one nanowell's rows in time order; an address the well never had is an empty frame.
 
 **Metrics** are the nanowell tracker's per-nanowell metrics table, NaN where undefined, with `exclusion_reason` naming the cause per
 row (the state at the timepoint, the value missing there, the baseline's state or value, a baseline at zero:
-`seeded later` when cells arrive later, `empty at baseline` when not). The site signal is
+`seeded later` when cells arrive later, `empty at baseline` when not). The nanowell fluorescence (`signal_<channel>`) is
 background-subtracted, so a ratio over a baseline at or below zero is undefined. The baseline is the well's
 earliest timepoint; or, per measurement, each nanowell's first timepoint in a measurable state at which that
 measurement exists (the pipeline records `measured` with no count where no template could be built, and a
@@ -11263,7 +11278,7 @@ shared with the enlarged crops), the ranking timepoint's column outlined, each r
 value, and **every word a crop carries is written inside it**, on a translucent band of the ground: the fold change
 at its timepoint in its top-left corner (`format_value`: `2.31×`, or a signed difference on log₂), and along its
 foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines`: count, confluence as a
-percentage, the shared channel's site signal and brightness, in that order of importance, `compact_number` for
+percentage, the shared channel's nanowell fluorescence and brightness, in that order of importance, `compact_number` for
 thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
 crop's width (`renderer._one_line`), the caption saying when some were left for the pop-out, which writes each
 panel's full metrics under it (`render_crop_grid(…, metrics=…)`, `controller.crop_metrics`). Text under or beside
@@ -11304,22 +11319,41 @@ against the well's reference. It is drawn through `controller.draw_view(view="id
 like the others; `_identity_controller.draw_identity` composes it from the sidecar (read itself when not handed one),
 `identity_compute` holds the Qt-free data (`distance_map`, `blink_frames`, `hover_target`, `diagnostics`,
 `identity_message`, `summary_lines`, `stage_line`, `worst_verdict`, `default_timepoint`), `_identity_render` draws it
-(every text a reader sees carries a `nw-identity-*` gid) and `identity_view` builds the *Compare* control and the
-Blink timer. Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
+(every text a reader sees carries a `nw-identity-*` gid; the Diagnostics figure is `_identity_diagnostics_render`)
+and `identity_view` builds the *Compare* and *Colour* controls and the Blink timer. Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
 included). Four modes, `NanowellState.identity_mode` (persisted; an unknown one falls back to `distance`):
-*Distance map* — each compared address at its reference's measured position (well frame, µm), filled by its
-distance in pitches (viridis 0–0.5, the tolerance marked on the colour bar), failing addresses outlined in
-`Colors.danger` (the sidecar's list plus every address beyond the tolerance, since the list is capped at
-`MAX_LISTED`), the compared timepoint's tiles mapped into the reference frame through the inverse registration with
-the moved ones drawn in red and named; *Blink* — the compared montage resampled onto the reference's pixel grid
+*Distance map* — each compared address at its reference's measured position (well frame, µm), coloured by
+`NanowellState.identity_colour` (`IDENTITY_COLOURS`, persisted): `distance` fills it by its distance in pitches
+(viridis 0–0.5, the tolerance marked on the colour bar), `status` by its class — lands on itself (`Colors.success`),
+imprecise (`warn`), wrong name (`danger`, which folds in `neighbour_of_wrong`), in a misregistered tile (`danger`,
+hatched) or not compared (muted), the legend counting each — and `auto` is `status` unless the timepoint is
+confirmed. Classes come from the sidecar's `excluded` list, or for a sidecar without one from `tiles.moved` and tile
+ownership. Failing addresses are outlined in `Colors.danger` (the sidecar's list plus every address beyond the
+tolerance, since the list is capped at `MAX_LISTED`), and the compared timepoint's tiles are mapped into the
+reference frame through the inverse registration, moved ones in red labelled "moved N µm", imprecise ones in amber
+labelled "N µm off"; *Blink* — the compared montage resampled onto the reference's pixel grid
 through `mapper` (at most 1,024 px a side, cached one pair at a time in `st.identity_frames`), the two frames drawn
 once and alternated by a 500 ms `QTimer` parented to the band that starts only when frames are on screen and stops on
 the first tick after the page, view, mode or figure changes; labels on the addresses whose q and r are multiples of
 three, each frame placing its own addresses, so wrong addresses visibly jump; *Side by side* — each montage in its own
 frame, and the pointer (`controller.on_motion`) lights the address under it on both, with a cross where the
-registration predicts the reference site lands (`hover_target`); *Diagnostics* — the correlation surface over
-`surface_box_um` with the peak, the runner-up, the reference square and the accepted square marked, and peak and
-margin against `MIN_PEAK` / `MIN_MARGIN`, the turn, scale and translation, the square agreement. With no sidecar it
+registration predicts the reference site lands (`hover_target`); *Diagnostics* — three panels and a verdict block:
+what was looked for (the reference montage around its square, `PATCH_PITCHES` each side, the square outlined at a
+nominal `SQUARE_OUTLINE_PITCHES`, since the sidecar records where the square is but not its size), where it was found
+(the compared montage read through the registration into the reference's orientation, the match outlined and the
+square the run accepted ringed), and how clearly (the match-score surface over `surface_box_um` in µm from the
+reference square, with a labelled colour bar and the best and next-best places marked with their scores). The
+verdict block below gives one line per check — verdict and reason, the square, plate movement and refit, square
+agreement, array outline, tiles, addresses — each with a glyph and a theme colour (`STATE_GLYPHS`, `state_colour`),
+and a check that did not run says why. While the montages load, the two crops say so and the rest is drawn.
+
+Every mode zooms and pans: the scroll wheel zooms about the pointer and a drag pans, through the canvas wiring the
+Array view uses (`controller.on_scroll` routes Identity events to `_identity_zoom`). The limit arithmetic is Qt-free
+in `zoom_compute` (`wheel_limits`, `pan_limits`, `linked`, `held_factor`), shared with the Array view, whose zoom
+constants live there too. Side by side's two images share one initial extent and move together, as do Diagnostics'
+two crops; the surface zooms alone. The zoom (`NanowellState.identity_zoom`, never persisted) is kept across a redraw
+of the same well, timepoint and mode (montages arriving, a setting changed) and dropped when any of the three
+changes; a Blink frame flip leaves it alone. With no sidecar it
 says the check has not been run and names the audit command; at the reference it says so. On this view the Well
 combo reads each well's worst verdict, and the timepoint shown by default is the well's first contradicted, then
 inconclusive or unchecked, then first non-reference timepoint. Montages are read on a worker through the page's
@@ -11498,7 +11532,7 @@ the first, Position and *Along x: Wells* offer every timepoint and start at the 
 the slider and the figure always agree. `page_well` is the chosen well when it is drawn, else the first drawn
 well. Wells are what `data_loading.plot_group_well_lists(ctx, fallback_to_all=False)` says every plotting tab
 draws — so a group-by variable, hidden sets and the solo-well toggles mean the same here as elsewhere — never
-every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and site signal, and
+every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and nanowell fluorescence, and
 their fold changes, are drawn for the page's own **Channel** (`_nw_channel_cb`, `NanowellState.channel`, persisted),
 beside Metric on every view: the app's shared channel selector sits on the Plotting band, which this page does not show,
 so the page cannot depend on it alone. `controller.page_channel_name` resolves it — the page's choice when set; else

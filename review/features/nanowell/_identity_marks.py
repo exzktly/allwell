@@ -1,20 +1,21 @@
 """The line plots' marks for timepoints whose nanowell identity is not confirmed (pure matplotlib).
 
 Trajectories and the Distribution view over time join each nanowell across timepoints by address. A timepoint the
-identity check (``pipeline/nanowell_identity.py``) could not confirm is drawn where it is, but as what it is: a
-hatched band at its place on the time axis with the verdict written in it, and every line segment into or out of
-it dashed, so the join through it reads as unverified at a glance (``identity_compute.timepoint_marks``). A
-contradicted timepoint has no values (``series_compute`` leaves it out), so its band explains the gap.
+identity check (``pipeline/nanowell_identity.py``) could not confirm is drawn where it is, but as what it is: a light
+hatched band *behind* its datapoints at its place on the time axis, the verdict written above it, and every line
+segment into or out of it dashed, so the join through it reads as unverified at a glance
+(``identity_compute.timepoint_marks``). Its datapoints stay: a value measured at a contradicted timepoint is a
+measurement of *some* nanowell, so it is drawn, but joined to nothing (``series_compute``'s ``identity_ok``).
 """
 from __future__ import annotations
 
 import numpy as np
 
-from pipeline.nanowell_identity import CONTRADICTED, INCONCLUSIVE, NOT_CHECKED
+from pipeline.nanowell_identity import CONTRADICTED, INCONCLUSIVE, NOT_CHECKED, PARTIAL
 from review.features.nanowell.identity_compute import MARK_WORDS
 
 #: The hatch each verdict's band is drawn with.
-HATCH = {INCONCLUSIVE: "////", CONTRADICTED: "xxxx", NOT_CHECKED: "...."}
+HATCH = {INCONCLUSIVE: "////", PARTIAL: "\\\\\\\\", CONTRADICTED: "xxxx", NOT_CHECKED: "...."}
 
 
 def mark_timepoints(ax, xs, marks: dict, colours: dict, *, width: float, fontsize: float, ground: str) -> list:
@@ -30,7 +31,7 @@ def mark_timepoints(ax, xs, marks: dict, colours: dict, *, width: float, fontsiz
         if verdict not in HATCH:
             continue
         band = ax.axvspan(x - width / 2, x + width / 2, facecolor="none", edgecolor=colours[verdict],
-                          hatch=HATCH[verdict], linewidth=0, alpha=0.55, zorder=0.6, gid="nw-identity-band")
+                          hatch=HATCH[verdict], linewidth=0, alpha=0.3, zorder=0.2, gid="nw-identity-band")
         band.aw_verdict = verdict
         bands.append(band)
         ax.text(x, 0.985, MARK_WORDS[verdict], transform=top, ha="center", va="top", fontsize=fontsize,

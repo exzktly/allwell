@@ -79,9 +79,16 @@ CONTRADICTED = "contradicted"
 INCONCLUSIVE = "inconclusive"
 REFERENCE = "reference"
 NOT_CHECKED = "not_checked"
+#: The registration is trusted and most nanowells land on themselves, but some are shown wrong: an address that lands
+#: on another's site, the address it lands on, and every nanowell of a tile placed a lattice step off. Those are left
+#: out (``excluded``); the rest of the timepoint is used (tracker U5).
+PARTIAL = "partial"
 #: The verdicts under which a timepoint's addresses may be joined with the reference's.
 GOOD = (CONFIRMED, REFERENCE)
-VERDICTS = (CONFIRMED, REFERENCE, INCONCLUSIVE, CONTRADICTED, NOT_CHECKED)
+#: The verdicts under which the registration was trusted and the timepoint agrees with the reference where it was
+#: shown to: confirmed, the reference, and a partial timepoint outside its exclusions.
+AGREES = (CONFIRMED, REFERENCE, PARTIAL)
+VERDICTS = (CONFIRMED, REFERENCE, PARTIAL, INCONCLUSIVE, CONTRADICTED, NOT_CHECKED)
 
 #: How far, in pitches, a mapped address may land from the same address at the other timepoint. A lattice step
 #: error moves it a whole pitch; registration and site-fit noise on rendered plates are a few hundredths. Assumed,
@@ -118,9 +125,14 @@ LAYOUT_REACH_PITCHES = 3.0
 #: plate), so the registration followed something that moved against the array: contradicted, not withheld. A decoy
 #: two or three sites off put them 1.75 and 3.0 pitches apart on rendered plates (tracker S1).
 CENTRE_CONTRADICTS_PITCHES = 1.5
-#: The share of compared addresses that may land nearest themselves but beyond the tolerance before that is a pattern
-#: rather than a few sites' fitted positions (one site of 265 a quarter pitch off contradicted a well: tracker S6).
-LOOSE_SHARE = 0.02
+#: A tile placed differently from the rest of the grid by at least this many pitches is misregistered: its sites'
+#: positions and addresses are a lattice step off together, so its nanowells are left out. Less than half a pitch is
+#: imprecise placement (an empty corner tile placed by the stage alone): every address there is still assigned to
+#: its nearest lattice site, so the names are right and nothing is left out (tracker U6).
+MISREGISTERED_PITCHES = 0.5
+#: More than this share of the compared nanowells shown wrong is not a part of the timepoint that is wrong but the
+#: timepoint: it is contradicted whole rather than kept partially.
+PARTIAL_MAX_SHARE = 0.5
 #: The fewest wells addressed at both timepoints for the stage cross-check to accuse one. With four, the rigid fit
 #: absorbs a well a pitch off and spreads it over the rest (a 172 um error left residuals of 26 to 103 um on all
 #: four), so a good well can read as the bad one.
@@ -734,21 +746,27 @@ def diagnose(test: AddressTest, kind: str) -> dict:
 
 def tile_layout_test(ref: Timepoint, other: Timepoint) -> dict:
     """Whether each tile sits where it did relative to the rest of the grid: ``{"ok", "applies", "moved": [[tile,
-    um]], "reason"}``.
+    um]], "imprecise": [[tile, um]], "split", "reason"}``.
 
     The stage visits the same fields at every timepoint, so the registered tile positions of two timepoints differ
     by one translation (the plate moves under the stage; the stage grid does not turn). The tiles are grouped by
     that difference: the largest group whose differences agree within :data:`TOLERANCE_PITCHES` is the grid's
-    motion, and a tile departing from it by more was placed differently inside one of the two montages — a tile a
-    lattice step off, whose sites' positions and addresses are wrong together, which the address test cannot see.
-    A median would not do: with half the grid a step off (a row or a column of a 2 x 2) it falls between the two
-    halves, and every tile departs by half a pitch (tracker R1). When the groups are as large as each other, which
-    half is right cannot be told, and the layout still disagrees. A tile further than
+    motion (a median would fall between two halves of a grid, tracker R1). A tile departing from it by
+    :data:`MISREGISTERED_PITCHES` or more is **moved**: placed a lattice step off in one of the two montages, so its
+    sites' positions and addresses are wrong together, which the address test cannot see. One departing by less
+    is **imprecise**: placed tens of micrometres differently (an empty corner tile has only the stage's position),
+    which leaves every address it holds on its nearest lattice site — reported, not a wrong name (tracker U6). Only
+    tiles that own a nanowell at either timepoint are compared: an empty one names nothing. When
+    the groups are as large as each other (``split``), which is right cannot be told. A tile further than
     :data:`LAYOUT_REACH_PITCHES` from the grid's motion means the timepoints were not acquired on one tile grid:
     the test does not apply, and the caller cannot confirm."""
-    common = sorted(set(ref.tiles) & set(other.tiles))
+    # A tile that owns no nanowell at either timepoint (an empty corner over a circular array) names nothing, so how
+    # it was placed cannot make a name wrong; such tiles are also the ones with only the stage's position to go on.
+    holding = set(ref.owners.values()) | set(other.owners.values())
+    common = sorted((set(ref.tiles) & set(other.tiles)) & holding) if holding else sorted(set(ref.tiles) & set(other.tiles))
+    out = {"ok": True, "applies": False, "moved": [], "imprecise": [], "split": False, "reason": ""}
     if len(common) < 2:
-        return {"ok": True, "applies": False, "moved": [], "reason": "fewer than two tiles in common"}
+        return {**out, "reason": "fewer than two tiles in common"}
     deltas = np.array([np.subtract(other.tiles[t], ref.tiles[t]) for t in common])
     tol = TOLERANCE_PITCHES * other.pitch
     apart = np.hypot(*(deltas[:, None, :] - deltas[None, :, :]).transpose(2, 0, 1))
@@ -756,20 +774,24 @@ def tile_layout_test(ref: Timepoint, other: Timepoint) -> dict:
     best = int(np.argmax(support))
     centre = np.median(deltas[apart[best] <= tol], axis=0)
     off = np.hypot(*(deltas - centre).T)
-    moved = [[t, round(float(d), 2)] for t, d in zip(common, off) if d > tol]
-    if not moved:
-        return {"ok": True, "applies": True, "moved": [], "reason": ""}
     if float(off.max()) > LAYOUT_REACH_PITCHES * other.pitch:
-        return {"ok": True, "applies": False, "moved": moved,
+        return {**out, "far": [[t, round(float(d), 2)] for t, d in zip(common, off) if d > tol],
                 "reason": f"tiles sit up to {float(off.max()):.0f} um differently relative to one another, more than "
                           f"{LAYOUT_REACH_PITCHES:g} pitches, so the two timepoints were not acquired on one tile grid "
                           "and their layouts cannot be compared"}
-    split = int(support[best]) * 2 <= len(common)
-    return {"ok": False, "applies": True, "moved": moved, "reason": (
-        "tile(s) " + ", ".join(f"{t} ({d:.0f} um, {d / other.pitch:.2f} pitch)" for t, d in moved)
-        + " sit differently against the rest of the grid than at the reference: placed differently in one of the "
-          "two montages" + ("; the tiles split into groups as large as each other, so which group is right cannot "
-                            "be told from the layout" if split else ""))}
+    step = MISREGISTERED_PITCHES * other.pitch
+    moved = [[t, round(float(d), 2)] for t, d in zip(common, off) if d >= step]
+    imprecise = [[t, round(float(d), 2)] for t, d in zip(common, off) if tol < d < step]
+    split = bool(moved) and int(support[best]) * 2 <= len(common)
+    reason = ""
+    if moved:
+        reason = ("tile(s) " + ", ".join(f"{t} ({d:.0f} um, {d / other.pitch:.2f} pitch)" for t, d in moved)
+                  + " placed a lattice step differently against the rest of the grid than at the reference, so their "
+                    "nanowells' addresses are wrong in one of the two" + (
+                        "; the tiles split into groups as large as each other, so which group is right cannot be told "
+                        "from the layout" if split else ""))
+    return {"ok": not moved, "applies": True, "moved": moved, "imprecise": imprecise, "split": split,
+            "reason": reason}
 
 
 # ── one timepoint against the reference ──────────────────────────────────────
@@ -814,24 +836,32 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
     if ref.centre_um is not None and other.centre_um is not None:
         centre = float(np.hypot(*(transform(ref.centre_um)[0] - np.asarray(other.centre_um)))) / other.pitch
         result["centre_agreement_pitches"] = round(centre, 4)
-    problems = []
-    # A site that lands nearest its own address but beyond the tolerance has a fitted position that is off; a few
-    # are measurement, many are a pattern (a turn the registration missed). One wrong name is a wrong name.
-    loose_allowed = max(2, int(LOOSE_SHARE * test.compared))
-    if test.wrong or test.loose > loose_allowed:
-        problems.append(f"{len(test.failing)} of {test.compared} addresses do not land on themselves: "
-                        f"{diagnosis['detail']}")
+    # Problems with the registration itself, or with every address at once: nothing in the timepoint can be kept.
+    whole = []
+    if diagnosis.get("kind") in ("step", "symmetry"):
+        whole.append(f"{test.wrong} of {test.compared} addresses land on other nanowells: {diagnosis['detail']}")
     if centre is not None and centre >= CENTRE_CONTRADICTS_PITCHES:
-        problems.append(f"the array's fitted centre lands {centre:.2f} pitch from this timepoint's once registered on "
-                        "the square, further than any rim fit is loose: the registration followed something that "
-                        "moved against the array (a decoy taken for the square)")
+        whole.append(f"the array's fitted centre lands {centre:.2f} pitch from this timepoint's once registered on "
+                     "the square, further than any rim fit is loose: the registration followed something that moved "
+                     "against the array (a decoy taken for the square)")
     if agreement is not None and agreement > SQUARE_AGREEMENT_PITCHES:
-        problems.append(f"the square the run accepted at this timepoint is {agreement:.2f} pitch from where the "
-                        "reference's square correlates: the run took something else for the square")
-    if not layout["ok"]:
-        problems.append(layout["reason"])
-    if problems:
-        result.update(verdict=CONTRADICTED, reason="; ".join(problems))
+        whole.append(f"the square the run accepted at this timepoint is {agreement:.2f} pitch from where the "
+                     "reference's square correlates: the run took something else for the square")
+    if layout["split"]:
+        whole.append(layout["reason"])
+    excluded = _excluded(test, layout, other)
+    if not whole and excluded and len(excluded) > PARTIAL_MAX_SHARE * max(test.compared, 1):
+        whole.append(f"{len(excluded)} of {test.compared} nanowells are shown wrong, more than half: "
+                     f"{diagnosis['detail'] or layout['reason']}")
+    notes = []
+    if test.loose:
+        notes.append(f"{test.loose} land nearest themselves but beyond {TOLERANCE_PITCHES:g} pitch (a site's fitted "
+                     "position off; the name is right)")
+    if layout.get("imprecise"):
+        notes.append("tile(s) " + ", ".join(f"{t} ({d:.0f} um)" for t, d in layout["imprecise"])
+                     + " placed less than half a pitch differently (names unaffected)")
+    if whole:
+        result.update(verdict=CONTRADICTED, reason="; ".join(whole))
     elif test.compared < MIN_COMPARED:
         result["reason"] = (f"only {test.compared} address(es) in common with the reference, {MIN_COMPARED} needed")
     elif not layout["applies"] and len(set(ref.tiles) & set(other.tiles)) >= 2:
@@ -841,13 +871,33 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
         result["reason"] = (f"every address lands on itself, but the array's fitted centre lands {centre:.2f} pitch "
                             "from this timepoint's once registered on the square: the square may have moved against "
                             "the array (a decoy), or a fitted rim is loose")
+    elif excluded:
+        causes = sorted({why for why in excluded.values()})
+        result.update(verdict=PARTIAL, excluded=[[a[0], a[1], why] for a, why in sorted(excluded.items())],
+                      reason=f"{len(excluded)} of {test.compared} nanowells left out ({', '.join(causes)}"
+                             + (f": {layout['reason']}" if layout["moved"] else "") + "); the rest land on themselves"
+                             + "".join(f"; {n}" for n in notes))
     else:
-        loose = (f"; {test.loose} land nearest themselves but beyond {TOLERANCE_PITCHES:g} pitch (a site's fitted "
-                 "position off)") if test.loose else ""
-        result.update(verdict=CONFIRMED, reason=f"{test.compared - test.loose} of {test.compared} addresses land on "
-                                                f"themselves, at most {test.max_pitches:.2f} pitch off" + loose)
+        result.update(verdict=CONFIRMED, reason=f"{test.compared} addresses land on themselves, at most "
+                                                f"{test.max_pitches:.2f} pitch off" + "".join(f"; {n}" for n in notes))
     result["loose_count"] = test.loose
     return result
+
+
+def _excluded(test: AddressTest, layout: dict, other: Timepoint) -> dict:
+    """``address -> why`` for the other timepoint's nanowells shown wrong: an address whose mapped reference site
+    landed on another's (``wrong_name``), the address it landed on (``neighbour_of_wrong``: that row is another
+    nanowell's), and every nanowell of a tile placed a lattice step off (``misregistered_tile``)."""
+    out: dict = {}
+    for q, r, _d, lq, lr, _tile in test.failing:
+        if (lq, lr) != (q, r):
+            out.setdefault((q, r), "wrong_name")
+            out.setdefault((lq, lr), "neighbour_of_wrong")
+    moved = {t for t, _d in layout.get("moved") or ()}
+    for address, owner in other.owners.items():
+        if owner in moved:
+            out[address] = "misregistered_tile"
+    return out
 
 
 def _against(timepoints: dict, reference: str, order) -> dict:
@@ -878,7 +928,7 @@ def _signature(entry: dict) -> tuple | None:
 
 
 def _good(results: dict) -> int:
-    return sum(v.get("verdict") in GOOD for v in results.values())
+    return sum(v.get("verdict") in AGREES for v in results.values())
 
 
 def check_well(grid: dict, site_rows, montages: dict, order=None) -> dict:
@@ -923,7 +973,7 @@ def check_well(grid: dict, site_rows, montages: dict, order=None) -> dict:
         why = (f"{reference} and {other} each make the other's addresses wrong ({signature[0]}), and as many "
                "timepoints agree with each: which is right cannot be told. An anchor set by hand on the central "
                "square settles it")
-        disputed = {n for n, v in {**results, **alternative}.items() if v.get("verdict") in GOOD + (CONTRADICTED,)}
+        disputed = {n for n, v in {**results, **alternative}.items() if v.get("verdict") in AGREES + (CONTRADICTED,)}
         for n in disputed:
             results[n] = {"verdict": CONTRADICTED, "reason": why, "diagnosis": {"kind": "tie", "detail": why}}
         out["reference"], out["reference_reason"] = None, why
@@ -1089,9 +1139,22 @@ def verdict_in(payload: dict, tp: str) -> tuple[str, str]:
         return NOT_CHECKED, "the identity check did not reach this timepoint"
     verdict, reason = str(entry.get("verdict") or NOT_CHECKED), str(entry.get("reason") or "")
     flagged = ((payload.get("stage") or {}).get("timepoints") or {}).get(tp)
-    if isinstance(flagged, dict) and flagged.get("ok") is False and verdict in GOOD + (INCONCLUSIVE,):
+    if isinstance(flagged, dict) and flagged.get("ok") is False and verdict in AGREES + (INCONCLUSIVE,):
         verdict, reason = CONTRADICTED, flagged.get("reason") or "the stage cross-check failed"
     return (verdict if verdict in VERDICTS else NOT_CHECKED), reason
+
+
+def exclusions(out_dir, well: str) -> dict[str, frozenset]:
+    """``timepoint -> addresses`` a ``partial`` timepoint of *well* leaves out, from a current sidecar; empty when
+    there is none (a stale or missing sidecar excludes nothing: every timepoint reads not checked)."""
+    payload = read_sidecar(out_dir, well)
+    if payload is None:
+        return {}
+    out = {}
+    for tp, entry in (payload.get("timepoints") or {}).items():
+        if isinstance(entry, dict) and verdict_in(payload, tp)[0] == PARTIAL:
+            out[tp] = frozenset((int(q), int(r)) for q, r, *_why in entry.get("excluded") or ())
+    return out
 
 
 # ── the plate-level stage cross-check ────────────────────────────────────────
@@ -1239,9 +1302,11 @@ NUMBER_COLUMNS = ("well", "timepoint", "verdict", "diagnosis", "why", "peak", "m
 #: finds; the reason itself is not written, because it is a sentence rather than a number.
 _WHY = (("too near the edge of its montage", "square_at_montage_edge"), ("correlates at most", "peak"),
         ("leads the next place", "margin"), ("edge of the search window", "search_edge"),
-        ("do not land on themselves", "addresses"), ("took something else", "decoy"),
+        ("land on other nanowells", "addresses"), ("more than half", "addresses"), ("left out", "partial"),
+        ("took something else", "decoy"),
         ("fitted centre", "centre"), ("tile grid", "tile_grid"), ("sit differently", "tile"),
         ("mirrored", "mirror"), ("lattice is", "lattice_kind"), ("cannot be told", "tie"),
+        ("placed a lattice step", "tile"),
         ("in common with the reference", "too_few"), ("the timepoint is", "not_addressed"),
         ("no montage", "no_montage"), ("central square", "no_reference_square"), ("rigid motion", "stage"))
 

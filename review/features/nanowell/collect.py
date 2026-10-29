@@ -86,7 +86,7 @@ class NanowellData:
     #: and the full-resolution montage can be drawn from besides the phase image.
     image_channels: list = field(default_factory=list)
     #: ``channel -> why`` for each of :attr:`image_channels` with no site intensities, so the page can say why a
-    #: channel the run read offers no Brightness or Site signal rather than leaving it out without a word.
+    #: channel the run read offers no Brightness or Nanowell fluorescence rather than leaving it out without a word.
     unmeasured_channels: dict = field(default_factory=dict)
     #: Wells left out and why, as sentences.
     problems: list = field(default_factory=list)
@@ -97,6 +97,8 @@ class NanowellData:
     #: ``well -> {timepoint -> (verdict, reason)}``: whether each timepoint's addresses name the same nanowells as
     #: the well's reference timepoint (``pipeline.nanowell_identity``; ``not_checked`` without a current sidecar).
     identity: dict = field(default_factory=dict)
+    #: ``well -> {timepoint -> addresses}`` that a ``partial`` timepoint leaves out of every comparison over time.
+    identity_excluded: dict = field(default_factory=dict)
     #: Where the run's files are, for the readers of images (crops, montages): the output folder holding
     #: ``nanowells/``, and the input folder holding ``<well>.zip`` (``None`` when it is not beside the data).
     out_dir: Path | None = None
@@ -331,6 +333,8 @@ class WellPart:
     #: ``timepoint -> (verdict, reason)`` from the identity check's sidecar (``pipeline.nanowell_identity.verdicts``):
     #: ``not_checked`` for every timepoint when there is no current sidecar.
     identity: dict = field(default_factory=dict)
+    #: ``timepoint -> addresses`` a ``partial`` timepoint leaves out (``pipeline.nanowell_identity.exclusions``).
+    identity_excluded: dict = field(default_factory=dict)
 
 
 def read_well_part(folder: Path, well: str, cell_files, wells) -> WellPart:
@@ -361,13 +365,14 @@ def read_well_part(folder: Path, well: str, cell_files, wells) -> WellPart:
                                       "the well is left out.")
     tables: dict = {}
     brightness = _cell_brightness(_cell_files_of(well, cell_files, wells), well, tables)
-    from pipeline.nanowell_identity import verdicts
+    from pipeline.nanowell_identity import exclusions, verdicts
 
     return WellPart(well, table=table, grid=grid.get("timepoints") or {},
                     roster_rule=roster_rule(grid.get("array_radius")),
                     reanalysed=(grid.get("array_radius") or {}).get("reanalysed_because") or "",
                     brightness=brightness, cell_table=tables.get(well),
-                    identity=verdicts(folder.parent, well, list(grid.get("timepoints") or {})))
+                    identity=verdicts(folder.parent, well, list(grid.get("timepoints") or {})),
+                    identity_excluded=exclusions(folder.parent, well))
 
 
 def _phase_token(sidecar: dict) -> str:
@@ -399,7 +404,7 @@ def _image_channels(sidecar: dict, phase: str, channels: list, *, read_any: bool
         for token in out:
             if token.lower() not in by_lower:
                 unmeasured[token] = (f"The run read {token} images, but the nanowell tables of the wells shown carry "
-                                     f"no {token}_integrated column, so there is no {token} brightness or site signal "
+                                     f"no {token}_integrated column, so there is no {token} brightness or nanowell fluorescence "
                                      f"to draw. Re-run the wells with {token} among the fluorescence channels to "
                                      f"measure it.")
     return out, unmeasured
@@ -452,6 +457,8 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
     roster_rules = {p.well: p.roster_rule for p in parts if p.table is not None}
     reanalysed = {p.well: p.reanalysed for p in parts if p.table is not None and p.reanalysed}
     identity = {p.well: dict(p.identity) for p in parts if p.table is not None}
+    identity_excluded = {p.well: dict(p.identity_excluded) for p in parts
+                         if p.table is not None and p.identity_excluded}
     problems = [p.problem for p in parts if p.problem]
     sites = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["well", "timepoint"])
     phase = _phase_token(sidecar)
@@ -482,7 +489,8 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
                         phase_token=str(options.get("phase_token") or sidecar.get("phase_token") or ""),
                         channels=channels, image_channels=image_channels, unmeasured_channels=unmeasured,
                         problems=problems, roster_rules=roster_rules,
-                        reanalysed=reanalysed, available=available, cell_tables=cell_tables, identity=identity)
+                        reanalysed=reanalysed, available=available, cell_tables=cell_tables, identity=identity,
+                        identity_excluded=identity_excluded)
 
 
 #: The columns of a nanowell run's cell table the Cells layer reads.

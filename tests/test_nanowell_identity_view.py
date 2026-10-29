@@ -7,7 +7,7 @@ checked by the pipeline's own ``check_well_dir``, so the sidecar the view draws 
 * ``A01`` — the clean pair, ``confirmed``;
 * ``A02`` — the same pair with every address of ``T1`` one lattice step off, ``contradicted`` (a ``step``);
 * ``A03`` — the clean pair never checked: no sidecar;
-* ``A04`` — ``T1``'s tile F3 placed one lattice step off with its sites, ``contradicted`` by the tile layout.
+* ``A04`` — ``T1``'s tile F3 placed one lattice step off with its sites, ``partial``: the tile's nanowells left out.
 
 Every assertion is of a value drawn — a fill's number, an outline's position, a label's place, a marker's
 coordinates, a text — against the number the sidecar holds (CLAUDE.md §7.8). One test drives the real page builder.
@@ -28,6 +28,7 @@ import pytest
 from pipeline import nanowell_identity as ni
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell import _identity_render as ir
+from review.features.nanowell import controller as nwc
 from review.features.nanowell import identity_compute as ic
 from review.features.nanowell.collect import load_nanowell_data
 from review.features.nanowell.image_compute import read_montage
@@ -92,7 +93,7 @@ def dataset(tmp_path_factory):
         ni.check_well_dir(out, well, ["T0", "T1"])
     data = load_nanowell_data(out)
     assert data.identity["A01"]["T1"][0] == ni.CONFIRMED, data.identity["A01"]
-    assert data.identity["A02"]["T1"][0] == ni.CONTRADICTED and data.identity["A04"]["T1"][0] == ni.CONTRADICTED
+    assert data.identity["A02"]["T1"][0] == ni.CONTRADICTED and data.identity["A04"]["T1"][0] == ni.PARTIAL
     assert data.identity["A03"]["T1"][0] == ni.NOT_CHECKED
     return out, data, ref, other
 
@@ -144,7 +145,7 @@ def _by_gid(ax, gid):
 def test_the_distance_map_fills_each_address_with_its_sidecar_distance_at_its_reference_position(dataset):
     out, _data, ref, _other = dataset
     entry = ni.read_sidecar(out, "A02")["timepoints"]["T1"]
-    fig, drawn = _draw(dataset, "A02")
+    fig, drawn = _draw(dataset, "A02", colour="distance")
     (fill,) = _by_gid(drawn.axes["map"], "nw-identity-fill")
     distances = {(q, r): d for q, r, d in entry["distances"]}
     at = {tuple(np.round(p, 3)): float(v) for p, v in zip(fill.get_offsets(), fill.get_array())}
@@ -176,7 +177,7 @@ def test_a_confirmed_well_has_no_failing_outline_and_its_fills_are_its_small_dis
 def test_the_distance_map_says_who_against_whom_and_why(dataset):
     out, _data, _ref, _other = dataset
     entry = ni.read_sidecar(out, "A02")["timepoints"]["T1"]
-    fig, _drawn = _draw(dataset, "A02")
+    fig, _drawn = _draw(dataset, "A02", colour="distance")
     assert _texts(fig, "nw-identity-title") == ["A02 · T1 vs T0 · contradicted"]
     assert _footer(fig).startswith(" ".join([
         f"Contradicted: {entry['reason']}",
@@ -241,10 +242,17 @@ def test_an_inconclusive_timepoint_draws_its_surface_and_its_reason(dataset):
         entry.pop(key)
     entry.update(verdict=ni.INCONCLUSIVE, reason=reason)
     entry["square"].update(ok=False, reason=reason)
+    square = entry["square"]
     fig, drawn = _draw(dataset, "A01", payload=payload)
     assert drawn.mode == "diagnostics" and _by_gid(drawn.axes["surface"], "nw-identity-surface")
-    assert _footer(fig).startswith(f"Peak {entry['square']['peak']:.3f}")
-    assert f"Inconclusive: {reason}" in _footer(fig)
+    assert _check(fig, "verdict") == f"Verdict: inconclusive — {reason}."
+    # The numbers pass their thresholds but the check said no: its own reason is given.
+    assert _check(fig, "square") == (f"Central square not found clearly: best match {square['peak']:.2f} (needs 0.15), "
+                                     f"next best {square['runner_up']:.2f} — lead {square['margin']:.2f} (needs 0.10); "
+                                     f"{reason}.")
+    assert _check(fig, "addresses") == "Addresses not compared: the square was not found."
+    assert _texts(fig, "nw-identity-state-verdict") == ["!"] and _texts(fig, "nw-identity-state-square") == ["✗"]
+    assert "No address was compared, so there is no distance map" in _footer(fig)
     assert _texts(fig, "nw-identity-title") == ["A01 · T1 vs T0 · inconclusive"]
 
 
@@ -334,27 +342,313 @@ def test_the_hover_lights_both_sides_and_crosses_the_prediction(dataset):
 
 
 # ── Diagnostics ──────────────────────────────────────────────────────────────
-def test_the_diagnostics_mark_the_peak_at_the_sidecar_s_match_and_print_the_transform(dataset):
+def _check(fig, key) -> str:
+    """One line of the verdict block as drawn: its rows joined (a long line is broken over rows at single spaces)."""
+    return " ".join(_texts(fig, f"nw-identity-check-{key}"))
+
+
+def _glyph(fig, key):
+    (text,) = [t for t in fig.texts if t.get_gid() == f"nw-identity-state-{key}"]
+    return text.get_text(), text.get_color()
+
+
+def _xy(line):
+    return float(line.get_xdata()[0]), float(line.get_ydata()[0])
+
+
+def test_the_verdict_block_of_a_confirmed_pair_reads_each_check_against_its_threshold(dataset):
+    from ui.theme import Colors
+
     out, _data, _ref, other = dataset
-    entry = ni.read_sidecar(out, "A01")["timepoints"]["T1"]
-    square = entry["square"]
+    payload = ni.read_sidecar(out, "A01")
+    entry, square = payload["timepoints"]["T1"], payload["timepoints"]["T1"]["square"]
+    moved = math.dist(square["found_um"], payload["timepoints"]["T0"]["square_um"])
+    refit = square["refined"]
+    fig, drawn = _draw(dataset, "A01", mode="diagnostics")
+    expected = {
+        "verdict": f"Verdict: confirmed — {entry['reason']}.",
+        "square": f"Central square found clearly: best match {square['peak']:.2f} (needs 0.15), next best "
+                  f"{square['runner_up']:.2f} — lead {square['margin']:.2f} (needs 0.10).",
+        "motion": f"Plate moved {moved:.0f} µm and turned +2.0° since T0 (refit on {refit['sites']} nanowells: +0.0°, "
+                  "scale ×1.000).",
+        "square_agreement": f"Square the run picked at T1 agrees: {entry['square_agreement_pitches']:.2f} spacing apart "
+                            "(limit 0.25).",
+        "outline": f"Array outline agrees: {entry['centre_agreement_pitches']:.2f} spacing apart (limit 0.75).",
+        "tiles": "Tiles placed as at T0.",
+        "addresses": f"Addresses: {entry['compared']} of {entry['compared']} land on themselves, worst "
+                     f"{entry['max_pitches']:.2f} spacing (limit 0.25).",
+    }
+    assert [c.key for c in drawn.diagnostics.checks] == list(expected)
+    assert {key: _check(fig, key) for key in expected} == expected
+    assert moved == pytest.approx(math.hypot(60.0, 40.0), abs=2.0)          # the plate moved (60, -40) µm
+    passed = {key: _glyph(fig, key) for key in expected}
+    assert passed == {**{key: ("✓", Colors.success) for key in expected},
+                      "motion": ("•", passed["motion"][1])}               # no threshold: muted, not a pass
+    assert passed["motion"][1] not in (Colors.success, Colors.danger, Colors.warn)
+
+
+def test_the_verdict_block_of_a_stepped_pair_names_the_step_and_the_failure(dataset):
+    from ui.theme import Colors
+
+    out, _data, _ref, _other = dataset
+    entry = ni.read_sidecar(out, "A02")["timepoints"]["T1"]
+    fig, _drawn = _draw(dataset, "A02", mode="diagnostics")
+    assert _check(fig, "verdict") == f"Verdict: contradicted — {entry['reason']}."
+    assert _check(fig, "addresses") == (f"Addresses: {entry['compared']} of {entry['compared']} land on another "
+                                        "nanowell: every address is one lattice step (+1, +0) off (100% of the "
+                                        "sites).")
+    assert _glyph(fig, "verdict") == ("✗", Colors.danger) and _glyph(fig, "addresses") == ("✗", Colors.danger)
+    # The registration itself found the square: what failed is the names, not the match.
+    assert _glyph(fig, "square") == ("✓", Colors.success) and _glyph(fig, "tiles") == ("✓", Colors.success)
+
+
+def test_the_verdict_block_of_a_partial_pair_names_the_tile_left_out(dataset):
+    from ui.theme import Colors
+
+    out, _data, _ref, other = dataset
+    entry = ni.read_sidecar(out, "A04")["timepoints"]["T1"]
+    ((tile, um),) = entry["tiles"]["moved"]
+    fig, _drawn = _draw(dataset, "A04", mode="diagnostics")
+    assert tile == TILE
+    assert _check(fig, "tiles") == (f"Tiles placed a lattice step differently than at T0: {TILE} {um:.0f} µm "
+                                    f"({um / other.pitch:.2f} spacing); their nanowells are left out.")
+    assert _glyph(fig, "tiles") == ("✗", Colors.danger) and _glyph(fig, "verdict") == ("!", Colors.warn)
+
+
+def test_the_heat_map_marks_the_best_match_at_the_surface_s_peak_in_um_from_where_it_was_expected(dataset):
+    out, _data, _ref, other = dataset
+    payload = ni.read_sidecar(out, "A01")
+    square, expected = payload["timepoints"]["T1"]["square"], payload["timepoints"]["T0"]["square_um"]
     fig, drawn = _draw(dataset, "A01", mode="diagnostics")
     ax = drawn.axes["surface"]
-    (peak,) = _by_gid(ax, "nw-identity-peak")
-    assert (peak.get_xdata()[0], peak.get_ydata()[0]) == pytest.approx(tuple(square["found_um"]))
-    (runner,) = _by_gid(ax, "nw-identity-runner-up")
-    assert math.dist((runner.get_xdata()[0], runner.get_ydata()[0]), square["found_um"]) > 0.5 * other.pitch
     (surface,) = _by_gid(ax, "nw-identity-surface")
     left, top, right, bottom = square["surface_box_um"]
-    assert tuple(surface.get_extent()) == pytest.approx((left, right, bottom, top))
-    footer = _footer(fig)
-    assert footer.startswith(f"Peak {square['peak']:.3f} (at least {ni.MIN_PEAK:g} needed) · runner-up "
-                             f"{square['runner_up']:.3f} · margin {square['margin']:.3f} (at least {ni.MIN_MARGIN:g} "
-                             "needed): the square is found.")
-    shift = np.subtract(square["found_um"], ni.read_sidecar(out, "A01")["timepoints"]["T0"]["square_um"])
-    assert (f"Transform, reference square to the match: turn {square['rotation_deg']:+.2f}°, scale "
-            f"{square['scale']:.4f}, translation ({shift[0]:+.1f}, {shift[1]:+.1f}) µm.") in footer
-    assert f"is {entry['square_agreement_pitches']:.3f} pitch from the match" in footer
+    ex, ey = expected
+    assert tuple(surface.get_extent()) == pytest.approx((left - ex, right - ex, bottom - ey, top - ey))
+    (peak,) = _by_gid(ax, "nw-identity-peak")
+    assert _xy(peak) == pytest.approx((square["found_um"][0] - ex, square["found_um"][1] - ey))
+    # ... which is inside the surface's highest sample, mapped to µm from the expected square.
+    grid = np.array([[np.nan if v is None else v for v in row] for row in square["surface"]], dtype=float)
+    iy, ix = np.unravel_index(int(np.nanargmax(grid)), grid.shape)
+    cw, ch = (right - left) / grid.shape[1], (bottom - top) / grid.shape[0]
+    assert left - ex + ix * cw <= _xy(peak)[0] <= left - ex + (ix + 1) * cw
+    assert top - ey + iy * ch <= _xy(peak)[1] <= top - ey + (iy + 1) * ch
+    (where,) = _by_gid(ax, "nw-identity-expected")
+    assert _xy(where) == (0.0, 0.0)
+    (runner,) = _by_gid(ax, "nw-identity-runner-up")
+    assert math.dist(_xy(runner), _xy(peak)) > 0.5 * other.pitch
+    assert _texts(fig, "nw-identity-mark-label") == ["at T0", f"best {square['peak']:.2f}",
+                                                     f"next {square['runner_up']:.2f}"]
+
+
+def test_the_crops_show_the_square_looked_for_and_the_match_turned_into_the_reference_s_orientation(dataset):
+    _out, data, ref, other = dataset
+    payload = ni.read_sidecar(_out, "A01")
+    centre = payload["timepoints"]["T0"]["square_um"]
+    images = _montages(dataset, "A01")
+    fig, drawn = _draw(dataset, "A01", mode="diagnostics", images=images)
+    crops, half = drawn.crops, ni.PATCH_PITCHES * ref.pitch
+    (looked,) = _by_gid(drawn.axes["looked"], "nw-identity-crop-looked")
+    (found,) = _by_gid(drawn.axes["found"], "nw-identity-crop-found")
+    assert tuple(looked.get_extent()) == pytest.approx((-half, half, half, -half))
+    assert tuple(found.get_extent()) == pytest.approx((-half, half, half, -half))
+
+    # Centred on the reference's square: the crop matches the montage's own pixels best with no shift at all.
+    montage = images["reference"]
+    n = crops.looked.shape[0]
+    cx, cy = ((np.asarray(centre) - montage.origin_um) / montage.um_per_px - 0.5).round().astype(int)
+
+    def agreement(a, b):
+        keep = np.isfinite(a) & np.isfinite(b)
+        return np.corrcoef(a[keep], b[keep])[0, 1]
+
+    def at(dx, dy):
+        x0, y0 = cx + dx - n // 2, cy + dy - n // 2
+        return montage.image[y0:y0 + n, x0:x0 + n].astype(float)
+    shifts = [(dx, dy) for dx in range(-4, 5) for dy in range(-4, 5)]
+    best = max(shifts, key=lambda s: agreement(crops.looked, at(*s)))
+    assert max(abs(best[0]), abs(best[1])) <= 1, best
+    # Where it was found, read through the registration, looks like what was looked for; the compared montage read
+    # at the same place without the registration does not (the plate moved 72 µm, most of a nanowell).
+    other_m = images["compared"]
+    ox, oy = ((np.asarray(centre) - other_m.origin_um) / other_m.um_per_px - 0.5).round().astype(int)
+    unmapped = other_m.image[oy - n // 2:oy - n // 2 + n, ox - n // 2:ox - n // 2 + n].astype(float)
+    assert agreement(crops.looked, crops.found) > 0.8 > 0.5 > agreement(crops.looked, unmapped)
+    assert crops.found_at == pytest.approx(tuple(payload["timepoints"]["T1"]["square"]["found_um"]), abs=1e-6)
+    (ring,) = _by_gid(drawn.axes["found"], "nw-identity-accepted")
+    assert math.hypot(*_xy(ring)) / ref.pitch < 0.05                       # the run's own square agrees with it
+    assert _texts(fig, "nw-identity-crop-key") == ["▢ dashed: the central square", "▢ the match",
+                                                   "○ the square the run picked at T1"]
+    assert _texts(fig, "nw-identity-panel-note-found") == ["T1, turned +2.0° into T0's orientation"]
+
+
+def test_the_crops_say_they_wait_for_the_montages_and_the_rest_is_drawn(dataset):
+    fig, drawn = _draw(dataset, "A01", mode="diagnostics", images={"why": "Reading the montages…"})
+    assert _texts(fig, "nw-identity-panel-message") == ["Reading the montages…", "Reading the montages…"]
+    assert _by_gid(drawn.axes["surface"], "nw-identity-surface") and _check(fig, "verdict").startswith("Verdict:")
+    assert _texts(fig, "nw-identity-crop-key") == []
+
+
+# ── the Distance map's Status colouring ──────────────────────────────────────
+def _offsets(collection) -> set:
+    return {tuple(np.round(p, 3)) for p in collection.get_offsets()}
+
+
+def test_a_partial_well_s_status_puts_exactly_the_stepped_tile_s_nanowells_in_the_misregistered_class(dataset):
+    _out, _data, ref, other = dataset
+    broken = _tile_off(other)
+    in_tile = {a for a, owner in broken.owners.items() if owner == TILE}
+    status = ic.status_map(_pair(dataset, "A04"))
+    assert status.members("misregistered") == in_tile
+    assert status.members("kept") == (set(ref.sites) & set(broken.sites)) - in_tile
+    assert status.members("not_compared") == set(ref.sites) - set(broken.sites) - in_tile
+    assert status.members("wrong_name") == set() == status.members("imprecise")
+    # Drawn: the Auto colouring of a timepoint that is not confirmed is the status, a count of each in the key.
+    fig, drawn = _draw(dataset, "A04")
+    assert drawn.status is not None and _by_gid(drawn.axes["map"], "nw-identity-fill") == []
+    (hatched,) = _by_gid(drawn.axes["map"], "nw-identity-status-misregistered")
+    pair = _pair(dataset, "A04")
+    where = {a: ref.sites[a] if a in ref.sites else tuple(pair.inverse([broken.sites[a]])[0]) for a in in_tile}
+    assert _offsets(hatched) == {tuple(np.round(p, 3)) for p in where.values()} and hatched.get_hatch() == "////"
+    (kept,) = _by_gid(drawn.axes["map"], "nw-identity-status-kept")
+    assert _offsets(kept) == {tuple(np.round(ref.sites[a], 3)) for a in status.members("kept")}
+    counts = status.counts
+    key = drawn.axes["map"].get_legend()
+    assert {t.get_gid() for t in [*key.get_texts(), key.get_title()]} == {"nw-identity-status-key"}
+    assert [t.get_text() for t in [*key.get_texts(), key.get_title()]] == [
+        f"Lands on itself ({counts['kept']})", "Imprecise (0)", "Wrong name (0)",
+        f"In a misregistered tile ({len(in_tile)})", f"Not compared ({counts['not_compared']})", "Nanowells"]
+    assert "The wrong names and the misregistered tiles' nanowells are left out of every figure at T1" in _footer(fig)
+
+
+def test_a_sidecar_without_an_excluded_list_still_finds_the_tile_and_a_stepped_well_is_all_wrong_names(dataset):
+    out, _data, _ref, other = dataset
+    payload = ni.read_sidecar(out, "A04")
+    payload["timepoints"]["T1"].pop("excluded")
+    old = ic.status_map(ic.identity_pair(dataset[1], "A04", "T1", payload))
+    assert old.members("misregistered") == {a for a, o in _tile_off(other).owners.items() if o == TILE}
+    stepped = ic.status_map(_pair(dataset, "A02"))
+    entry = ni.read_sidecar(out, "A02")["timepoints"]["T1"]
+    compared = {(q, r) for q, r, _d in entry["distances"]}
+    # Every address both hold lands a step off, and each one only the reference holds that lands on a site the
+    # compared timepoint names otherwise is listed failing with no distance: all wrong names, nothing kept.
+    landed_elsewhere = {(f[0], f[1]) for f in entry["failing"] if f[2] is None}
+    assert landed_elsewhere and not landed_elsewhere & compared
+    assert stepped.members("wrong_name") == compared | landed_elsewhere and stepped.members("kept") == set()
+
+
+def test_an_imprecise_nanowell_and_tile_are_drawn_in_the_warning_colour(dataset):
+    from matplotlib.colors import to_rgba
+
+    from ui.theme import Colors
+
+    out, data, ref, _other = dataset
+    payload = ni.read_sidecar(out, "A01")
+    entry = payload["timepoints"]["T1"]
+    loose, unlisted = (1, 1), (2, -1)
+    entry["distances"] = [[q, r, 0.3 if (q, r) == loose else 0.6 if (q, r) == unlisted else d]
+                          for q, r, d in entry["distances"]]
+    entry["failing"] = [[1, 1, 0.3, 1, 1, "F0"]]                          # landed on itself, beyond the tolerance
+    entry["tiles"]["imprecise"] = [["F1", 30.0]]
+    status = ic.status_map(ic.identity_pair(data, "A01", "T1", payload))
+    assert status.members("imprecise") == {loose}
+    assert status.members("wrong_name") == {unlisted}                    # unlisted, beyond half a spacing
+    fig, drawn = _draw(dataset, "A01", payload=payload, colour="status")
+    (amber,) = _by_gid(drawn.axes["map"], "nw-identity-status-imprecise")
+    assert _offsets(amber) == {tuple(np.round(ref.sites[loose], 3))}
+    assert tuple(amber.get_facecolor()[0]) == pytest.approx(to_rgba(Colors.warn))
+    (tile,) = _by_gid(drawn.axes["map"], "nw-identity-tile-imprecise")
+    assert tile.get_edgecolor() == pytest.approx(to_rgba(Colors.warn))
+    assert " F1 30 µm off" in _texts(fig, "nw-identity-tile-label")
+
+
+def test_auto_colours_a_confirmed_timepoint_by_distance_and_the_switch_overrides_it(dataset):
+    _fig, confirmed = _draw(dataset, "A01")
+    assert confirmed.status is None and _by_gid(confirmed.axes["map"], "nw-identity-fill")
+    _fig, chosen = _draw(dataset, "A04", colour="distance")
+    assert chosen.status is None and _by_gid(chosen.axes["map"], "nw-identity-fill")
+    _fig, status = _draw(dataset, "A01", colour="status")
+    assert status.status is not None and status.status.counts["kept"] == len(status.status.addresses)
+
+
+# ── zoom: the arithmetic ─────────────────────────────────────────────────────
+def test_one_wheel_step_zooms_about_the_pointer_and_keeps_it_where_it_is_on_screen():
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import zoom_compute as zc
+
+    xlim, ylim, at = (0.0, 100.0), (80.0, 0.0), (30.0, 20.0)              # y down, as every image here is drawn
+    assert zc.wheel_limits(xlim, ylim, at, 1) == (pytest.approx((6.0, 86.0)), pytest.approx((68.0, 4.0)))
+    assert zc.wheel_limits(xlim, ylim, at, -1) == (pytest.approx((-7.5, 117.5)), pytest.approx((95.0, -5.0)))
+    ax = Figure(figsize=(4, 4)).add_axes([0.1, 0.1, 0.8, 0.8])
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    before = ax.transData.transform(at)
+    new_x, new_y = zc.wheel_limits(xlim, ylim, at, 1)
+    ax.set_xlim(*new_x)
+    ax.set_ylim(*new_y)
+    assert tuple(ax.transData.transform(at)) == pytest.approx(tuple(before))
+    # Held at the limits against the full view: 500 times in, a further step in does nothing; out stops at 4x.
+    tight = (50.0, 50.0 + 100.0 / zc.ZOOM_IN_LIMIT)
+    assert zc.wheel_limits(tight, (0.2, 0.0), (50.1, 0.1), 1, home_xlim=xlim)[0] == pytest.approx(tight)
+    wide = zc.wheel_limits((-100.0, 200.0), (0.0, 1.0), (50.0, 0.5), -3, home_xlim=xlim)[0]
+    assert wide[1] - wide[0] == pytest.approx(100.0 / zc.ZOOM_OUT_LIMIT)
+
+
+def test_a_drag_moves_the_limits_by_its_delta_and_linked_axes_name_each_other():
+    from review.features.nanowell import zoom_compute as zc
+
+    assert zc.pan_limits((0.0, 100.0), (80.0, 0.0), 10.0, -5.0) == ((-10.0, 90.0), (85.0, 5.0))
+    links = (("reference", "compared"),)
+    assert zc.linked(links, "compared") == ("reference", "compared") == zc.linked(links, "reference")
+    assert zc.linked(links, "surface") == ("surface",)
+
+
+class _Widgets:
+    """The page's widget registry as the zoom reads it: only to repaint, and there is no canvas to repaint here."""
+    @staticmethod
+    def get_or_none(_name):
+        return None
+
+
+def _scroll(drawn, name, at, step=1):
+    from matplotlib.backend_bases import MouseEvent
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    ax = drawn.axes[name]
+    canvas = ax.figure.canvas if isinstance(ax.figure.canvas, FigureCanvasAgg) else FigureCanvasAgg(ax.figure)
+    canvas.draw()
+    x, y = ax.transData.transform(at)
+    return MouseEvent("scroll_event", canvas, x, y, step=step)
+
+
+def test_a_redraw_of_the_same_view_keeps_the_zoom_and_another_timepoint_starts_at_the_whole_view(dataset):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from review.features.nanowell import _identity_zoom as izoom
+    from review.features.nanowell.state import NanowellState
+
+    _out, _data, ref, _other = dataset
+    st, ctx = NanowellState(), SimpleNamespace(widgets=_Widgets())
+    _fig, waiting = _draw(dataset, "A01", mode="sides")                   # the montages not read yet: sites only
+    st.identity_drawn = waiting
+    izoom.restore(st, waiting)
+    at = ref.sites[(0, 0)]
+    izoom.on_scroll(ctx, st, _scroll(waiting, "reference", at))
+    zoomed = (waiting.axes["reference"].get_xlim(), waiting.axes["reference"].get_ylim())
+    assert zoomed[0] != waiting.home["reference"][0]
+    assert (waiting.axes["compared"].get_xlim(), waiting.axes["compared"].get_ylim()) == zoomed       # linked
+    _fig, arrived = _draw(dataset, "A01", mode="sides", images=_montages(dataset, "A01"))
+    izoom.restore(st, arrived)
+    for name in ("reference", "compared"):
+        assert (arrived.axes[name].get_xlim(), arrived.axes[name].get_ylim()) == tuple(map(pytest.approx, zoomed))
+    # Another timepoint (or well, or mode) of the same figure starts at its whole view.
+    _fig, later = _draw(dataset, "A01", mode="sides")
+    later.pair = replace(later.pair, timepoint="T2")
+    izoom.restore(st, later)
+    assert st.identity_zoom == {}
+    assert later.axes["reference"].get_xlim() == pytest.approx(later.home["reference"][0])
 
 
 # ── the rest of the page: state, the well list ───────────────────────────────
@@ -364,18 +658,18 @@ def test_the_mode_is_kept_with_the_page_s_settings_and_an_unknown_one_is_refused
 
     assert tuple(key for key, _label in MODES) == IDENTITY_MODES
     st = NanowellState()
-    st.view, st.identity_mode = "identity", "sides"
+    st.view, st.identity_mode, st.identity_colour = "identity", "sides", "status"
     again = NanowellState()
     again.apply_config(st.to_config())
-    assert (again.view, again.identity_mode) == ("identity", "sides")
-    again.apply_config({"identity_mode": "hologram"})
-    assert again.identity_mode == "distance"
+    assert (again.view, again.identity_mode, again.identity_colour) == ("identity", "sides", "status")
+    again.apply_config({"identity_mode": "hologram", "identity_colour": "rainbow"})
+    assert (again.identity_mode, again.identity_colour) == ("distance", "auto")
 
 
 def test_the_worst_verdict_and_the_timepoint_the_view_opens_on(dataset):
     _out, data, _ref, _other = dataset
     assert [ic.worst_verdict(data, w) for w in ("A01", "A02", "A03", "A04")] == [
-        ni.CONFIRMED, ni.CONTRADICTED, ni.NOT_CHECKED, ni.CONTRADICTED]
+        ni.CONFIRMED, ni.CONTRADICTED, ni.NOT_CHECKED, ni.PARTIAL]
     assert ic.default_timepoint(data, "A01", ["T0", "T1"]) == "T1"         # not the reference compared with itself
 
 
@@ -467,6 +761,135 @@ def test_the_pointer_on_the_page_s_side_by_side_lights_the_address(page, qtbot):
     canvas.callbacks.process("motion_notify_event", MouseEvent("motion_notify_event", canvas, x, y))
     assert drawn.lit == (0, 0)
     assert drawn.hover["compared"].center == pytest.approx(drawn.pair.other.sites[(0, 0)])
+
+
+def _wheel(xlim, ylim, at, steps):
+    """The limits *steps* wheel notches should give, worked out here rather than by the code under test: each end's
+    distance from the pointer times 0.8 per notch."""
+    f = 0.8 ** steps
+    (x0, x1), (y0, y1) = xlim, ylim
+    return ((at[0] - (at[0] - x0) * f, at[0] + (x1 - at[0]) * f),
+            (at[1] - (at[1] - y0) * f, at[1] + (y1 - at[1]) * f))
+
+
+def _event(canvas, name, ax, at, **kw):
+    from matplotlib.backend_bases import MouseEvent
+
+    x, y = ax.transData.transform(at)
+    return MouseEvent(name, canvas, x, y, **kw)
+
+
+def _limits(ax):
+    return ax.get_xlim(), ax.get_ylim()
+
+
+def test_the_page_zooms_side_by_side_and_blink_through_its_canvas(page, qtbot):
+    from review.features.nanowell.identity_view import MODES
+    from review.features.nanowell.tab_view import VIEWS
+    from tests.test_nanowell_page import _loaded
+
+    ctx = page
+    st = _loaded(qtbot, ctx)
+    canvas = ctx.widgets.get("_nw_canvas")
+    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_identity_mode_seg", "sides", [k for k, _l in MODES])
+    qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.mode == "sides"
+                    and len(st.identity_drawn.axes["reference"].images) == 1, timeout=20000)
+    drawn = st.identity_drawn
+    canvas.draw()
+    left, right = drawn.axes["reference"], drawn.axes["compared"]
+    home = _limits(left)
+    at = drawn.pair.ref.sites[(0, 0)]
+    before = left.transData.transform(at)
+    canvas.callbacks.process("scroll_event", _event(canvas, "scroll_event", left, at, step=1))
+    expected = _wheel(*home, at, 1)
+    assert _limits(left) == (pytest.approx(expected[0]), pytest.approx(expected[1]))
+    assert _limits(right) == _limits(left)                                 # both images move together
+    assert tuple(left.transData.transform(at)) == pytest.approx(tuple(before), abs=1e-6)
+    # The hover still finds the address under the pointer, zoomed.
+    canvas.draw()
+    canvas.callbacks.process("motion_notify_event", _event(canvas, "motion_notify_event", left,
+                                                           drawn.pair.ref.sites[(1, 0)]))
+    assert drawn.lit == (1, 0)
+    # A drag pans by its delta in data units: the picture follows the pointer.
+    zoomed = _limits(left)
+    start, end = left.transData.transform(at), left.transData.transform(at) + (40.0, -25.0)
+    inverse = left.transData.inverted()
+    dx, dy = inverse.transform(end) - inverse.transform(start)
+    canvas.callbacks.process("button_press_event", _event(canvas, "button_press_event", left, at, button=1))
+    canvas.callbacks.process("motion_notify_event", _event(canvas, "motion_notify_event", left,
+                                                           tuple(inverse.transform(end))))
+    canvas.callbacks.process("button_release_event", _event(canvas, "button_release_event", left,
+                                                            tuple(inverse.transform(end)), button=1))
+    panned = ((zoomed[0][0] - dx, zoomed[0][1] - dx), (zoomed[1][0] - dy, zoomed[1][1] - dy))
+    assert _limits(left) == (pytest.approx(panned[0]), pytest.approx(panned[1]))
+    assert _limits(right) == _limits(left) and st.identity_press is None
+    # A redraw of the same view (a setting changed, the montages arriving) keeps it.
+    nwc.redraw(ctx)
+    assert st.identity_drawn is not drawn
+    drawn = st.identity_drawn
+    assert _limits(drawn.axes["reference"]) == (pytest.approx(panned[0]), pytest.approx(panned[1]))
+    # A double-click shows the whole view again.
+    canvas.draw()
+    canvas.callbacks.process("button_press_event", _event(canvas, "button_press_event", drawn.axes["compared"],
+                                                          at, button=1, dblclick=True))
+    assert _limits(drawn.axes["reference"]) == _limits(drawn.axes["compared"]) == drawn.home["reference"]
+    assert st.identity_zoom == {}
+
+    # Blink: another mode starts at the whole view; a zoom survives the frames flipping.
+    _choose(ctx, "_nw_identity_mode_seg", "blink", [k for k, _l in MODES])
+    qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.mode == "blink", timeout=20000)
+    blink = st.identity_drawn
+    canvas.draw()
+    ax = blink.axes["map"]
+    assert _limits(ax) == blink.home["map"]
+    canvas.callbacks.process("scroll_event", _event(canvas, "scroll_event", ax, at, step=2))
+    zoomed = _limits(ax)
+    assert zoomed == tuple(map(pytest.approx, _wheel(*blink.home["map"], at, 2)))
+    idc.blink_tick(ctx)
+    assert blink.frame == 1 and _limits(ax) == zoomed
+    idc.step_blink(ctx, 0)
+    assert _limits(ax) == zoomed
+
+
+def test_the_page_keeps_the_zoom_when_the_montages_arrive_and_starts_another_well_whole(page, qtbot):
+    from review.features.nanowell.identity_view import MODES
+    from review.features.nanowell.tab_view import VIEWS
+    from tests.test_nanowell_page import _loaded
+
+    ctx = page
+    st = _loaded(qtbot, ctx)
+    canvas = ctx.widgets.get("_nw_canvas")
+    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    assert ctx.widgets.get("_nw_identity_colour_seg").isVisibleTo(ctx.window)          # on the Distance map
+    _choose(ctx, "_nw_identity_mode_seg", "diagnostics", [k for k, _l in MODES])
+    assert not ctx.widgets.get("_nw_identity_colour_seg").isVisibleTo(ctx.window)
+    drawn = st.identity_drawn
+    assert drawn.mode == "diagnostics" and drawn.crops.looked is None                   # the montages on their way
+    assert _page_texts(ctx, "nw-identity-panel-message") == ["Reading the montages…"] * 2
+    canvas.draw()
+    looked, surface = drawn.axes["looked"], drawn.axes["surface"]
+    canvas.callbacks.process("scroll_event", _event(canvas, "scroll_event", looked, (20.0, -10.0), step=1))
+    zoomed = _limits(looked)
+    assert zoomed == tuple(map(pytest.approx, _wheel(*drawn.home["looked"], (20.0, -10.0), 1)))
+    assert _limits(drawn.axes["found"]) == zoomed and _limits(surface) == drawn.home["surface"]
+    qtbot.waitUntil(lambda: st.identity_drawn is not drawn and st.identity_drawn.crops.looked is not None,
+                    timeout=20000)
+    arrived = st.identity_drawn
+    assert _limits(arrived.axes["looked"]) == _limits(arrived.axes["found"]) == tuple(map(pytest.approx, zoomed))
+    # The heat map zooms on its own.
+    canvas.draw()
+    canvas.callbacks.process("scroll_event", _event(canvas, "scroll_event", arrived.axes["surface"], (0.0, 0.0),
+                                                    step=1))
+    assert _limits(arrived.axes["surface"]) == tuple(map(pytest.approx,
+                                                         _wheel(*arrived.home["surface"], (0.0, 0.0), 1)))
+    assert _limits(arrived.axes["looked"]) == tuple(map(pytest.approx, zoomed))
+    # Another well starts at its whole view.
+    well_cb = ctx.widgets.get("_nw_well_cb")
+    well_cb.setCurrentIndex(well_cb.findData("A02"))
+    other = st.identity_drawn
+    assert other.pair.well == "A02" and st.identity_zoom == {}
+    assert _limits(other.axes["looked"]) == other.home["looked"]
 
 
 def dataset_out(ctx):

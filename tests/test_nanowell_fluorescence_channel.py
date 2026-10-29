@@ -1,4 +1,4 @@
-"""Fluorescence on the Nanowells page: the page's own *Channel* control for Brightness and Site signal, and the
+"""Fluorescence on the Nanowells page: the page's own *Channel* control for Brightness and Nanowell fluorescence, and the
 image-channel control that cuts every crop and the full-resolution montage from a fluorescence channel.
 
 Reported: "There is no channel selector so it is not clear what is selected. EGFP shows up nowhere even though that
@@ -141,7 +141,7 @@ pytest.importorskip("PySide6")
 
 
 def _two_channel_dataset(tmp_path):
-    """The page tests' dataset with RFP measured beside GFP (brightness 50 + q against GFP's 10 + q, site signal
+    """The page tests' dataset with RFP measured beside GFP (brightness 50 + q against GFP's 10 + q, nanowell fluorescence
     3× GFP's), CY5 read and not measured, and the input archive holding a phase, GFP and RFP tile."""
     from tests.test_nanowell_page import _write_nanowell_dataset
 
@@ -210,7 +210,7 @@ def test_choosing_a_channel_on_the_page_draws_that_channel_s_brightness(page, qt
 def test_a_fold_change_of_a_fluorescence_channel_is_drawn_for_the_page_s_channel(page):
     _choose(page.widgets.get("_nw_channel_cb"), "RFP")
     _choose(page.widgets.get("_nw_metric_cb"), "signal_fc")
-    assert page.widgets.get("_nw_fig").axes[0].get_ylabel() == "Site-signal fold change · RFP"
+    assert page.widgets.get("_nw_fig").axes[0].get_ylabel() == "Nanowell fluorescence fold change · RFP"
     from review.features.nanowell import controller as nwc
 
     assert nwc.drawn_metric_column(page) == "signal_fc_RFP"

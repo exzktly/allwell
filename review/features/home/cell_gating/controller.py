@@ -1699,6 +1699,8 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
             label = r.name
         row_specs.append((r.key(), f"{label} (ratio):"))
 
+    _drop_edits_without_a_row(ctx, kind, {channel for channel, _ in row_specs})
+
     if not row_specs:
         lbl = QLabel("No channels loaded", host)
         lbl.setObjectName("Muted")
@@ -1813,6 +1815,32 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
                 grid.addWidget(absent, r, 2)
 
     inner_layout.addWidget(table)
+
+
+def _drop_edits_without_a_row(ctx, kind: str, row_keys: set) -> None:
+    """Forget every cached edit of *kind*'s table that the new table has no row for.
+
+    The cached edits are children of the table being replaced, and that table is
+    deleted. Each edit the new table has a row for is re-parented out of it in
+    time; an edit for a channel that has left (a dataset with a different channel
+    set, a removed ratio, a channel that no longer carries an smFISH count) would
+    die with the old table while staying in its map — and every handler that
+    walks the map, ``cell_gating_on_threshold_frac_on_change`` first among them,
+    would then raise "Internal C++ object already deleted" on the user's next
+    edit. Its value is not lost: the typed slice holds it, and a returning
+    channel's new edit is seeded from there.
+    """
+    rt = ctx.runtime.cell_gating
+    smfish = ctx.state.channel.smfish_channels
+    if kind == "include":
+        maps = [(rt.fluor_gate_edits, row_keys)]
+    else:
+        count_keys = {ch for ch in row_keys if channel_supports_smfish(ch, smfish)}
+        maps = [(rt.thresh_frac_edits, row_keys),
+                (rt.thresh_count_edits, count_keys)]
+    for edits, keep in maps:
+        for channel in [ch for ch in (edits or {}) if ch not in keep]:
+            edits.pop(channel).deleteLater()
 
 
 def _threshold_edit_widgets(ctx) -> set:

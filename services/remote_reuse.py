@@ -135,9 +135,10 @@ _REMOVE_IF_IDLE = (
     "if [ $_r -eq 0 ] && echo \"$_o\" | grep -qx \"$_jid\"; then _live=job; "
     "elif [ $_r -ne 0 ] && ! echo \"$_o\" | grep -qi 'invalid job id'; then _live=unknown; fi; "
     "else _live=unknown; fi; fi; "
-    "if [ -e \"$d/{heartbeat}\" ]; then _hb=$(stat -c %Y \"$d/{heartbeat}\" 2>/dev/null || "
-    "stat -f %m \"$d/{heartbeat}\" 2>/dev/null || echo 0); "
-    "[ $(( $(date +%s) - _hb )) -le {stale} ] && _live=heartbeat; fi; "
+    "for _f in \"$d/{heartbeat}\" \"$d/{legacy}\"; do "
+    "if [ -e \"$_f\" ]; then _hb=$(stat -c %Y \"$_f\" 2>/dev/null || "
+    "stat -f %m \"$_f\" 2>/dev/null || echo 0); "
+    "[ $(( $(date +%s) - _hb )) -le {stale} ] && _live=heartbeat; fi; done; "
     "if [ -n \"$_live\" ]; then echo \"AW_LIVE $d $_live\"; else rm -rf \"$d\" && echo \"AW_GONE $d\"; fi; }}\n"
 )
 
@@ -162,7 +163,7 @@ def clean_earlier_attempts(runner, *, log: Callable[[str], None]) -> None:
     from services.remote_run_id import remote_run_dir
     from services.remote_transport import _remote_quote
     from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
-    from services.remote_run_id import UPLOAD_HEARTBEAT
+    from services.remote_run_id import LEGACY_UPLOAD_HEARTBEAT, UPLOAD_HEARTBEAT
 
     run = runner._run
     own = remote_run_dir(runner.host, run.run_id)
@@ -185,7 +186,7 @@ def clean_earlier_attempts(runner, *, log: Callable[[str], None]) -> None:
     removable = [d for d, out in dirs.items() if _all_brought_home(runner, out, log=log)]
     if not removable:
         return
-    script = (_REMOVE_IF_IDLE.format(heartbeat=UPLOAD_HEARTBEAT, stale=UPLOAD_HEARTBEAT_STALE_S, hold=HOLD_DIR)
+    script = (_REMOVE_IF_IDLE.format(heartbeat=UPLOAD_HEARTBEAT, legacy=LEGACY_UPLOAD_HEARTBEAT, stale=UPLOAD_HEARTBEAT_STALE_S, hold=HOLD_DIR)
               + "".join(f"_aw_clean {_remote_quote(d)}\n" for d in removable))
     result = runner._cache._ssh_script(script, check=False)
     for line in ((getattr(result, "stdout", "") or "") if result is not None else "").splitlines():

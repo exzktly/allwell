@@ -5598,6 +5598,32 @@ until the page has drawn the new baseline's numbers, saving says so and writes n
 drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
 is opened again.
 
+**Is each nanowell the same nanowell at every timepoint?** Every comparison over time — fold changes,
+trajectories, starting cells, growth rate — pairs a nanowell with itself by its address. If one timepoint's
+addresses were assigned a step off, turned, mirrored, or one imaging tile was placed a step off, every nanowell
+there would be paired with a neighbour, and the numbers would look normal. So after each well the analysis checks
+the addresses against the images: it registers each timepoint's whole-well montage onto a reference timepoint's
+(the earliest whose central square was found) by the central square, which is the array's one feature that does not
+repeat, then confirms that every nanowell, carried through that registration, lands on the nanowell with its own
+address — within a quarter of the spacing between nanowells. It also checks that no imaging tile sits differently
+against the others than it did at the reference, and, on a plate of five or more wells with stage positions, that
+each well's array moved with the plate. Each timepoint gets one of:
+
+- **confirmed** (or **reference**) — the addresses were checked and agree;
+- **contradicted** — they do not. The figures leave that timepoint out of every comparison over time, counting its
+  nanowells as excluded with the reason "identity contradicted", and the footer names it. The analysis log says
+  what was found: *every address one lattice step off*, *a turn by 60°*, *a reflection*, *tile F3*, or a decoy
+  taken for the central square;
+- **inconclusive** — the check could not decide (no central square visible, the plate moved too far, the timepoint
+  had no addresses) and the footer says so;
+- **not checked** — the tables were analysed before this check existed, or changed after it ran (a Validate
+  relabel, a concatenation). The footer says so.
+
+To check a dataset analysed earlier without analysing it again, run
+`python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well): it writes
+`nanowells/<well>_identity.json` beside the tables, prints each well's verdicts, and Review picks them up the next
+time the dataset is opened. It exits 1 when any timepoint is contradicted and 2 when any is inconclusive.
+
 ### Image Browser
 
 The **Image Browser** rail entry (Images group) hosts four image-review

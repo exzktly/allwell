@@ -177,5 +177,5 @@ States: `todo`, `wip`, `done` (implemented and pinned by a test watched failing 
 
 | id | item | state | evidence |
 |---|---|---|---|
-| F1 | ARCHITECTURE.md section on the identity check | todo | |
-| F2 | README_WellViewer.md: the Identity view and the audit command | todo | |
+| F1 | ARCHITECTURE.md section on the identity check | done | §6.2i *Identity over time*, §6.2j *Joining*; the Identity view joins §6.2k with D |
+| F2 | README_WellViewer.md: the Identity view and the audit command | wip | the verdicts, the footers and the audit command are in *Nanowells*; the Identity view's paragraph waits on D |

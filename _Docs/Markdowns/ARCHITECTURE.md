@@ -10638,6 +10638,61 @@ anchor (`review/features/home/collect.py`; `tests/test_an_unaddressed_nanowell_w
 Validate's scan does not use this rule for nanowell wells — it counts (fov, timepoint) pairs from the
 measurements CSV — so a record Validate rewrites carries no `not_addressed`.
 
+**Identity over time** (`pipeline/nanowell_identity.py`, Qt-free, in the remote manifest). Everything above that
+keeps a nanowell's address across timepoints — `best_step` over the detected address sets, the pitch / angle /
+roster consistency (whose angle comparison folds a turn by the lattice's own symmetry away), the square's
+orientation — is built from the evidence the addresses were made from, so those checks agree with one another by
+construction. This module checks the written result against evidence they do not use. **Reference**: the earliest
+timepoint whose square the run accepted (`square_accepted`: the grid block's fiducial scores pass the run's own
+margin and ratio rule, or the timepoint was anchored on it); every other timepoint is compared with it, so the
+verdicts compose. **Registration on the square** (`register_on_square`): the reference's montage patch around its
+square (1.5 pitches each side) is correlated (normalised cross-correlation) over the other timepoint's montage within
+4 pitches of where the square is expected (the same common-frame point, the square the run accepted there, the
+array's fitted centre). Both images are first replaced by their **lattice residual** (`lattice_residual`): the image
+minus the mean of itself shifted by each nearest-neighbour lattice vector, which cancels the periodic array and
+leaves the square (unlike any of its neighbours), cells, debris and the rim. Without it the square's correlation
+peak is not unique: on a rendered pair the plain correlation read 0.983 at the square and 0.975 one step away; the
+residual reads 0.552 against 0.234. The patch is turned by the two timepoints' lattice angles' difference folded to
+the smallest turn and scaled by their pitch ratio. The peak must reach `MIN_PEAK` (0.3) and lead the best place more
+than half a pitch from it by `MIN_MARGIN` (0.15; a synthetic choice, tracker Q2), or the timepoint is
+`inconclusive`. **Address test** (`address_test`): every reference address is mapped through the similarity
+transform the match gives (`mapper`) and must land within `TOLERANCE_PITCHES` (0.25) of the same address in the
+other timepoint's `nanowells/<well>.csv` positions, and nearer it than any other site; an address only the
+reference holds fails when its mapped point lands on a site carrying another address. `diagnose` reads the
+addresses the mapped sites landed on: one constant lattice step, one element of the lattice's point group
+(`point_group`: twelve on a hexagonal lattice, eight on a square one — a turn by 60°, 90°, 120° or 180°, or a
+reflection) explaining at least 80 % of them, failures confined to one tile, or `scattered`. **Tile layout**
+(`tile_layout_test`): a tile placed a lattice step off inside one montage moves its sites' positions and their
+addresses together, so every address still lands on itself in the common frame and the address test cannot see it;
+the stage visits the same fields at every timepoint, so each tile's registered position relative to the grid's
+median must not move by a quarter pitch between timepoints (when most tiles move, the timepoints were not
+acquired on one grid and the test does not apply). **Square agreement**: the correlation peak must sit within a
+quarter pitch of the square the run accepted at that timepoint, or the run took something else for the square. A
+mirrored flag that differs from the reference's, or a lattice of another kind, is contradicted outright.
+**Verdicts**: `confirmed`, `contradicted` (any failure above), `inconclusive` (no reference square, no montage, a
+peak or margin too low, an unaddressed timepoint, fewer than `MIN_COMPARED` addresses in common), `reference`,
+and `not_checked` for a timepoint never tested; only `confirmed` and `reference` are good. **Stage cross-check**
+(`stage_check`, plate level): each timepoint's well origins in stage coordinates (`origin_stage_um`) are fitted to
+the earliest timepoint's by the plate's rigid motion (`nanowell_lattice.fit_plate_rigid`), and a well off it by
+more than the tolerance is flagged; it shares no evidence with the images. It needs `STAGE_MIN_WELLS` (5) wells at
+both timepoints, because with four the fit absorbed a well a pitch off and spread it over the others (172 µm became
+residuals of 26 to 103 µm on all four). **Files**: the check reads only what the run writes — the montage PNGs in
+`<well>_out.zip`, `nanowells/<well>_grid.json`, `nanowells/<well>.csv` — and writes `nanowells/<well>_identity.json`
+(`check_well_dir`) with a digest of those files (`inputs_digest`: the two tables' bytes and the montages' CRCs);
+`read_sidecar` / `verdicts` read a sidecar whose digest no longer matches (a relabel, a concatenation, a re-run)
+as `not_checked`, never as its stale verdict, and a stage-check failure overrules a good image verdict. The run
+calls `check_after_run` at the end of `nanowell_task._finish_well`, once the tables and the montage archive are
+written (a well whose archive this run did not write is not checked), and `stage_check_after_run` at the end of
+`nanowell_endgame`; each logs a warning per timepoint that is not good, and a check that cannot run is logged
+and leaves no sidecar. The remote fetch (`remote_fetch_nanowells`) and batch resume (`remote_batch_resume`) carry
+the sidecar by exact name. `python -m pipeline.nanowell_identity <output_dir> [--well W]` audits an analysed
+dataset (exit 1 when any timepoint is contradicted, 2 when any is inconclusive). Pinned by
+`tests/test_nanowell_identity.py` (each fault injected into tables built from the renderer's ground truth: a step,
+the four hexagonal symmetries, a square lattice's 90° turn, a mirror, one tile a step off, a decoy square, no
+square, a stale sidecar, the stage check) and `tests/test_nanowell_identity_run.py` (over the real run's output:
+a timepoint anchored a step off is confirmed once `_settle_steps` moves it, and caught and named a step with
+`_settle_steps` disabled; `process_microscopy.main` writes a confirmed sidecar).
+
 **End of run.** `nanowell_endgame` re-runs each unaddressed (well, timepoint) the rest of the plate can anchor,
 the wells in parallel on the run's worker pool (`pool`, which `process_microscopy` gives as `_well_pool` — the same
 spawned, `_worker_init`-ed pool the wells ran on; `reanchor_plate` → `_each_reanchored` → `_reanchor_well`, a
@@ -10972,7 +11027,13 @@ those whose labels happen to parse — and the growth rate is undefined.
 every timepoint of its well. A timepoint where it has no row still has one, with a state saying why:
 `unaddressed` (the timepoint was located but given no origin), `not_located` (the grid record names the
 timepoint and the table has no row for it) or `absent` (addressed, not in that roster), plus the grid's
-reason, or its status, or a sentence saying the grid lists the timepoint and the table has no rows. Contents values are used only in a measurable state (`measured` / `empty`), whatever the table
+reason, or its status, or a sentence saying the grid lists the timepoint and the table has no rows. A timepoint
+the identity check contradicted (`NanowellData.identity`, read per well by `read_well_part` through
+`pipeline.nanowell_identity.verdicts`) has every row `identity_contradicted`, with the check's reason: its
+addresses name other nanowells than the reference's, so it is no fold change's numerator or baseline, and an address
+only it holds is not followed at all. Every figure `controller.draw_view` composes says in its footer which
+timepoints were contradicted and which wells are not confirmed or not checked (`identity_compute.identity_note`):
+a dataset analysed before the check existed reads `not_checked` until the audit command is run over it. Contents values are used only in a measurable state (`measured` / `empty`), whatever the table
 holds. `site_series` is one nanowell's rows in time order; an address the well never had is an empty frame.
 
 **Metrics** are the nanowell tracker's per-nanowell metrics table, NaN where undefined, with `exclusion_reason` naming the cause per

@@ -48,6 +48,9 @@ SUPPORTED_SCHEMES = frozenset({1})
 #: at which a nanowell has no row: the timepoint was not addressed, or it was not located at all.
 MEASURED, EMPTY, OCCLUDED, CLIPPED = "measured", "empty", "occluded", "clipped"
 UNADDRESSED, NOT_LOCATED = "unaddressed", "not_located"
+#: A timepoint whose addresses the identity check found naming other nanowells than the well's reference timepoint
+#: does (``pipeline.nanowell_identity``): its rows are kept out of every join over time, with the check's reason.
+IDENTITY_CONTRADICTED = "identity_contradicted"
 #: States whose contents metrics are defined (tracker §3.5).
 MEASURABLE = frozenset({MEASURED, EMPTY})
 
@@ -91,6 +94,9 @@ class NanowellData:
     roster_rules: dict = field(default_factory=dict)
     #: ``well -> why`` for a well an incremental run analysed again over every timepoint (tracker X35a-R8).
     reanalysed: dict = field(default_factory=dict)
+    #: ``well -> {timepoint -> (verdict, reason)}``: whether each timepoint's addresses name the same nanowells as
+    #: the well's reference timepoint (``pipeline.nanowell_identity``; ``not_checked`` without a current sidecar).
+    identity: dict = field(default_factory=dict)
     #: Where the run's files are, for the readers of images (crops, montages): the output folder holding
     #: ``nanowells/``, and the input folder holding ``<well>.zip`` (``None`` when it is not beside the data).
     out_dir: Path | None = None
@@ -322,6 +328,9 @@ class WellPart:
     problem: str = ""
     brightness: pd.DataFrame | None = None
     cell_table: Path | None = None          # the CSV holding its cells, for the Cells layer
+    #: ``timepoint -> (verdict, reason)`` from the identity check's sidecar (``pipeline.nanowell_identity.verdicts``):
+    #: ``not_checked`` for every timepoint when there is no current sidecar.
+    identity: dict = field(default_factory=dict)
 
 
 def read_well_part(folder: Path, well: str, cell_files, wells) -> WellPart:
@@ -352,10 +361,13 @@ def read_well_part(folder: Path, well: str, cell_files, wells) -> WellPart:
                                       "the well is left out.")
     tables: dict = {}
     brightness = _cell_brightness(_cell_files_of(well, cell_files, wells), well, tables)
+    from pipeline.nanowell_identity import verdicts
+
     return WellPart(well, table=table, grid=grid.get("timepoints") or {},
                     roster_rule=roster_rule(grid.get("array_radius")),
                     reanalysed=(grid.get("array_radius") or {}).get("reanalysed_because") or "",
-                    brightness=brightness, cell_table=tables.get(well))
+                    brightness=brightness, cell_table=tables.get(well),
+                    identity=verdicts(folder.parent, well, list(grid.get("timepoints") or {})))
 
 
 def _phase_token(sidecar: dict) -> str:
@@ -439,6 +451,7 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
     grids = {p.well: p.grid for p in parts if p.table is not None}
     roster_rules = {p.well: p.roster_rule for p in parts if p.table is not None}
     reanalysed = {p.well: p.reanalysed for p in parts if p.table is not None and p.reanalysed}
+    identity = {p.well: dict(p.identity) for p in parts if p.table is not None}
     problems = [p.problem for p in parts if p.problem]
     sites = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["well", "timepoint"])
     phase = _phase_token(sidecar)
@@ -469,7 +482,7 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
                         phase_token=str(options.get("phase_token") or sidecar.get("phase_token") or ""),
                         channels=channels, image_channels=image_channels, unmeasured_channels=unmeasured,
                         problems=problems, roster_rules=roster_rules,
-                        reanalysed=reanalysed, available=available, cell_tables=cell_tables)
+                        reanalysed=reanalysed, available=available, cell_tables=cell_tables, identity=identity)
 
 
 #: The columns of a nanowell run's cell table the Cells layer reads.

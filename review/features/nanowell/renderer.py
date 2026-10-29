@@ -32,6 +32,8 @@ from review.features.nanowell.distribution_compute import TIME, DistributionMode
 from review.features.nanowell.extremes_compute import caption, format_value
 from review.features.nanowell.starting_cells_compute import occupancy_in_filter
 from review.features.nanowell.full_montage_compute import fit_region
+from review.features.nanowell._identity_marks import mark_timepoints, split_segments
+from review.features.nanowell.identity_compute import marks_legend
 from review.features.nanowell.series_compute import baseline_text
 
 #: A dot's diameter, in points.
@@ -64,6 +66,13 @@ class HitMap:
             if d[k] <= best_d:
                 best, best_d = sites[k], float(d[k])
         return best
+
+
+def _mark_colours(muted: str) -> dict:
+    """The ink of each identity mark's band and word: the theme's warning and danger, and the secondary ink."""
+    from ui.theme import Colors
+
+    return {"inconclusive": Colors.warn, "contradicted": Colors.danger, "not_checked": muted}
 
 
 def _inks(ax) -> tuple[str, str, str]:
@@ -339,6 +348,11 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
                          fontsize=ANNOTATION_PT, color=muted, gid="nw-subwell"), muted=True)
     # The axis label goes under whatever the swarms wrote below the ticks.
     ax._aw_gutter_pt = lines_used * line + (ANNOTATION_PT + 4 if subwells else 0) + 4
+    marks = model.identity_marks if model.axis == TIME else {}
+    for swarm in panel.swarms:
+        if (swarm.well, swarm.label) in marks:
+            mark_timepoints(ax, [swarm.x], {swarm.x: marks[(swarm.well, swarm.label)]}, _mark_colours(muted),
+                            width=2 * half, fontsize=size, ground=inks[0])
     _draw_centres(ax, model, panel, ink)
     ax.grid(axis="y", alpha=0.3)
     return (len(panel.swarms) if density else 0), hidden
@@ -349,11 +363,20 @@ def _draw_centres(ax, model, panel, ink) -> None:
 
     No summary marker or interval is drawn beside a swarm: the swarm is the figure. The comparison with the
     control (only when **vs** names a group) is written as text at the height of the group's centre."""
-    for _well, points in panel.medians.items():
+    marks = model.identity_marks if model.axis == TIME else {}
+    for well, points in panel.medians.items():
         pts = [(px, py) for px, py in points if math.isfinite(py)]
-        if pts:
-            for line_ in ax.plot(*zip(*pts), color=ink, linewidth=1.2, marker="D", markersize=3.5, zorder=4):
-                _ink(line_)
+        if not pts:
+            continue
+        # A segment into or out of a timepoint whose nanowell identity is not confirmed is dashed.
+        unverified = {s.x for s in panel.swarms if s.well == well and (s.well, s.label) in marks}
+        xs, ys = zip(*pts)
+        for line_ in ax.plot(xs, ys, linestyle="none", color=ink, marker="D", markersize=3.5, zorder=4):
+            _ink(line_)
+        for pieces, style in zip(split_segments(xs, ys, unverified), ("-", "--")):
+            for (x0, y0), (x1, y1) in pieces:
+                for line_ in ax.plot([x0, x1], [y0, y1], color=ink, linewidth=1.2, linestyle=style, zorder=4):
+                    _ink(line_)
     for stat in panel.stats:
         if not math.isfinite(stat.centre):
             continue
@@ -1005,7 +1028,8 @@ def _state_text(row: dict) -> str:
 MAP_CMAP = "viridis"
 #: How a nanowell without a value is outlined, by its state (fill colouring by the metric).
 _STATE_STYLE = {"occluded": ("////", "solid"), "clipped": ("", "dashed"), "absent": ("", "dotted"),
-                "not_located": ("", "dotted"), "unaddressed": ("", "dotted")}
+                "not_located": ("", "dotted"), "unaddressed": ("", "dotted"),
+                "identity_contradicted": ("xx", "solid")}
 #: How each tile was placed (``pipeline/tile_register.py``), as the ``Colors`` token it is drawn in: on the lattice
 #: phase, by overlap correlation, or where the acquisition record put it when neither could be measured.
 _SOURCE_TOKENS = {"lattice": "success", "overlap": "accent", "recorded": "warn"}
@@ -1417,27 +1441,42 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
     scale = GRID_TYPE_SCALE if len(shown) > 1 else SINGLE_TYPE_SCALE
     in_hours = bool(shown) and all(p.in_hours for p in shown)
     drawn = without = 0
+    marked_kinds: set = set()
     for ax, panel in zip(axes, shown):
         _prepare_axes(ax, scale)
-        segments, occupancy = [], []
-        for _site, occ, y in panel.lines:
-            segments.append(np.column_stack([panel.times, y]))
-            occupancy.append(occ)
-        if segments:
-            screen, publication = _occupancy_colours(occupancy)
-            edges = (publication if _is_publication(ax) else screen)[1]
-            coll = LineCollection(segments, colors=edges, linewidths=0.5, alpha=0.45)
-            ax.add_collection(coll)
-            theme_paired_colours(coll, screen=("none", screen[1]), publication=("none", publication[1]))
+        # Each nanowell as two-point segments, so a segment into or out of a timepoint whose nanowell identity is
+        # not confirmed can be dashed (``_identity_marks``); the colours stay paired per segment.
+        unverified = set(panel.marks)
+        for dashed in (False, True):
+            segments, occupancy = [], []
+            for _site, occ, y in panel.lines:
+                pieces = split_segments(panel.times, y, unverified)[int(dashed)]
+                segments += pieces
+                occupancy += [occ] * len(pieces)
+            if segments:
+                screen, publication = _occupancy_colours(occupancy)
+                edges = (publication if _is_publication(ax) else screen)[1]
+                coll = LineCollection(segments, colors=edges, linewidths=0.5, alpha=0.45,
+                                      linestyles="--" if dashed else "-")
+                ax.add_collection(coll)
+                theme_paired_colours(coll, screen=("none", screen[1]), publication=("none", publication[1]))
         for cls, median in panel.class_medians.items():
             # A paired collection, like the thin lines, so a capture repaints it: drawn as a plain line it kept its
             # screen shade on publication white, where the 3+ median nearly vanished (roll-up review X14).
             screen, publication = _occupancy_colours([cls])
             colour = (publication if _is_publication(ax) else screen)[1]
-            thick = LineCollection([np.column_stack([panel.times, median])], colors=colour, linewidths=2.4,
-                                   zorder=4, label=f"{cls} at baseline")
-            ax.add_collection(thick)
-            theme_paired_colours(thick, screen=("none", screen[1]), publication=("none", publication[1]))
+            solid, dashed = split_segments(panel.times, median, unverified)
+            for pieces, style in ((solid, "-"), (dashed, "--")):
+                if not pieces:
+                    continue
+                thick = LineCollection(pieces, colors=colour, linewidths=2.4, zorder=4, linestyles=style,
+                                       label=f"{cls} at baseline" if style == "-" else None)
+                ax.add_collection(thick)
+                theme_paired_colours(thick, screen=("none", screen[1]), publication=("none", publication[1]))
+        span = float(np.ptp(panel.times)) if len(panel.times) > 1 else 1.0
+        marked_kinds.update(panel.marks.values())
+        mark_timepoints(ax, panel.times, panel.marks, _mark_colours(muted), width=0.04 * span or 0.3,
+                        fontsize=ANNOTATION_PT, ground=inks[0])
         if in_hours:
             ax.xaxis.set_major_locator(MaxNLocator(nbins=6, integer=True, min_n_ticks=3))
         else:
@@ -1470,8 +1509,13 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
             lines.append("Timepoints: " + " · ".join(f"{h:g} h {tp}" for tp, h in names.items()) + ".")
     if len(panels) > len(shown):
         lines.append(f"{len(panels) - len(shown)} more well(s) not drawn; select fewer wells.")
+    if marked_kinds:
+        lines.append(marks_legend(marked_kinds))
     if note:
         lines.insert(0, note)
+    # The panels sit above however many lines the footer holds (two were reserved, and four or five ran into the
+    # time axis's label), as the Distribution view's footer does.
+    fig.subplots_adjust(bottom=0.10 + _FOOTER_BASE + _LINE * max(2, len(lines)))
     for i, text in enumerate(reversed(lines)):
         _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=muted, gid="nw-traj-footer"),
              muted=True)

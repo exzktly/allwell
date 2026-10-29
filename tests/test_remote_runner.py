@@ -2035,6 +2035,7 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/nanowell_measure.py",
         "pipeline/nanowell_inspect.py",
         "pipeline/nanowell_frames.py",
+        "pipeline/nanowell_identity.py",
         "pipeline/nanowell_run.py",
         "pipeline/nanowell_task.py",
         "pipeline/nanowell_pattern_record.py",

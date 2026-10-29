@@ -137,6 +137,8 @@ UI_LANE_FILES: dict[str, str] = {
 NANOWELL_E2E_FILES = {
     "test_nanowell_run.py": "the (well, timepoint) task body on rendered tiles; 475 s",
     "test_nanowell_timepoint_frames.py": "a nanowell keeps its address across timepoints, on rendered tiles; 120 s",
+    "test_nanowell_identity.py": "the identity check on rendered montages, each fault injected; 22 s",
+    "test_nanowell_identity_run.py": "the identity check over the real run's output, and its mutation; 30 s",
     "test_nanowell_relabel.py": "Validate relabels a dataset whose timepoints were addressed a step apart; 150 s",
     "test_nanowell_infer.py": "array inference on rendered images; 210 s",
     "test_nanowell_cli.py": "process_microscopy.main in nanowell mode, end to end; 111 s",
@@ -163,6 +165,8 @@ NANOWELL_E2E_FILES = {
 #: above. ``scripts/test.sh --nanowell-features``. The description is each file's
 #: own docstring; membership is by subject, so no further reason is owed.
 NANOWELL_FEATURE_FILES: dict[str, str] = {
+    "test_nanowell_identity_review.py": "Review honours the identity check's verdicts (NANOWELL_IDENTITY_TRACKER C1-C3)",
+    "test_nanowell_identity_view.py": "The Nanowells page's Identity view: distances, blink, side by side, diagnostics (tracker D1-D5)",
     "test_nanowell_relabel_progress.py": "Validate's nanowell relabel says how far it has got, and streams a cell table",
     "test_a_nanowell_release_keeps_what_it_cannot_see.py": "A nanowell batch releases a well from the remote only on answers the host actually gave (row A4)",
     "test_an_unaddressed_nanowell_timepoint_offers_its_anchor.py": "A nanowell timepoint the run left unaddressed is named as such, and opens straight onto …",

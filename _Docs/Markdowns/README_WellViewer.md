@@ -5384,8 +5384,8 @@ use them.
 
 **Controls**
 
-- **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position* and
-  *Extremes*. Each view shows only the controls it uses.
+- **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
+  *Extremes* and *Identity*. Each view shows only the controls it uses.
 - **Metric** — what each dot is: cell count, confluence, brightness (mean per-cell intensity), site signal
   (integrated intensity above the empty nanowells' background), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
@@ -5623,6 +5623,66 @@ row is still written, flagged in `in_subset` with the subset (`subset`) and its 
 until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
 drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
 is opened again.
+
+**Is each nanowell the same nanowell at every timepoint?** Every comparison over time — fold changes,
+trajectories, starting cells, growth rate — pairs a nanowell with itself by its address. If one timepoint's
+addresses were assigned a step off, turned, mirrored, or one imaging tile was placed a step off, every nanowell
+there would be paired with a neighbour, and the numbers would look normal. So after each well the analysis checks
+the addresses against the images: it registers each timepoint's whole-well montage onto a reference timepoint's
+(the earliest whose central square was found) by the central square, which is the array's one feature that does not
+repeat, then confirms that every nanowell, carried through that registration, lands on the nanowell with its own
+address — within a quarter of the spacing between nanowells. It also checks that no imaging tile sits differently
+against the others than it did at the reference, and, on a plate of five or more wells with stage positions, that
+each well's array moved with the plate. Each timepoint gets one of:
+
+- **confirmed** (or **reference**) — the addresses were checked and agree;
+- **contradicted** — they do not. The figures leave that timepoint out of every comparison over time, counting its
+  nanowells as excluded with the reason "identity contradicted", and the footer names it; the line plots cross-hatch
+  it (xx) and label it, so the gap in the lines is explained. The analysis log says
+  what was found: *every address one lattice step off*, *a turn by 60°*, *a reflection*, *tile F3*, or a decoy
+  taken for the central square;
+- **inconclusive** — the check could not decide (no central square visible, the plate moved too far, the timepoint
+  had no addresses, the tiles were not acquired on one grid, or the array's outline and its central square disagree)
+  and the footer says so. **These timepoints are still used in every comparison over time**: inconclusive means
+  unverified, not wrong. In *Trajectories* and in *Distribution* over time each one is drawn hatched (//) and
+  labelled *inconclusive* at its place on the time axis, and every line into or out of it is dashed. Look at them
+  in the Identity view before relying on them;
+- **not checked** — the tables were analysed before this check existed, or changed after it ran (a Validate
+  relabel, a concatenation). The footer says so, and these timepoints are used as they are. When only some of a
+  well's timepoints are unchecked (a timepoint added later), the line plots dot-hatch those (..).
+
+When two timepoints disagree and nothing tells which is right, both are **contradicted**; when the earliest
+timepoint is the one that disagrees with the rest, the rest are kept and it is the one left out.
+
+What the check cannot see: a turn of the array by a symmetry it shares with the central square — a half turn
+(180°), or on a square lattice a quarter turn (90°). The array looks the same either way, so such a turn would be
+confirmed. A keyed plate is put back within a few degrees, so this matters only if the array itself can turn in its
+well. The check expects the plate to turn less than 30° between timepoints (45° on a square lattice).
+
+**The Identity view** shows the check for one well at one timepoint against the well's reference timepoint; the
+Well list says each well's worst verdict, and it opens on the first timepoint that is not confirmed. *Compare*
+chooses what it draws:
+
+- **Distance map** — every nanowell at its place, coloured by how far its address landed from itself in nanowell
+  spacings (the quarter-spacing limit is marked on the colour bar); failing nanowells are outlined in red, and an
+  imaging tile that sits differently than at the reference is drawn in red and named.
+- **Blink** — the two whole-well images alternating twice a second, the later one turned and moved onto the
+  reference by the registration, with addresses written on both. When the addresses are right the array and its
+  labels stay still; when they are wrong, the labels jump a nanowell or turn.
+- **Side by side** — the two images next to each other; point at a nanowell on either and it lights on both, with a
+  cross where the registration says it should be.
+- **Diagnostics** — how the central square was found: its match across the search area, how far it stands above the
+  next best place, and the turn and shift between the timepoints.
+
+To check a dataset analysed earlier without analysing it again, run
+`python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well): it writes
+`nanowells/<well>_identity.json` beside the tables, prints each well's verdicts, and Review picks them up the next
+time the dataset is opened. It exits 1 when any timepoint is contradicted and 2 when any is inconclusive. Add
+`--numbers` to print, in place of the summary, one CSV row per well and timepoint with the measurements each verdict
+was decided from (how clearly the square was found, how far the addresses landed, how far the array's outline, the
+tiles and the stage disagreed) and a short code for why a timepoint is not confirmed — numbers only, no images or
+paths, so they can be shared to check the thresholds against real plates:
+`python -m pipeline.nanowell_identity <output folder> --numbers > identity_numbers.csv`.
 
 ### Image Browser
 

@@ -95,7 +95,7 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
     _loaded(qtbot, page)
     seg = page.widgets.get("_nw_view_seg")
     assert [seg.segmentText(i) for i in range(seg.count())] == ["Distribution", "Array", "Trajectories", "Position",
-                                                                    "Extremes"]
+                                                                    "Extremes", "Identity"]
     assert _visible_scopes(page) == {"Metric", "Along x", "Baseline"}
     _choose_view(page, "array")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}
@@ -114,6 +114,11 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
     assert _visible_scopes(page) == {"Metric", "Baseline", "Timepoint"}
     _choose_view(page, "extremes")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint", "Extremes"}
+    # The Identity view draws no metric: its Metric and Baseline stay on the band, greyed, beside its well and
+    # timepoint.
+    _choose_view(page, "identity")
+    assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}
+    assert not page.widgets.get("_nw_metric_cb").isEnabled() and not page.widgets.get("_nw_baseline_cb").isEnabled()
 
 
 # ── V2: the Array view as the lattice map ────────────────────────────────────
@@ -124,7 +129,9 @@ def test_the_map_draws_the_chosen_well_and_the_timepoint_control_steps_its_timep
     title = [t.get_text() for ax in page.widgets.get("_nw_fig").axes for t in (ax.title, ax._left_title)]
     assert "A01 · t_c" in title                                       # the first well, at its first timepoint
     footer = _fig_texts(page, "nw-array-footer")
-    assert footer[0] == "4 nanowells in the roster · with a value 3 · measured 2 · empty 1 · occluded 1"
+    # The fixture's dataset carries no identity check, and the figure must say its addresses are unverified.
+    assert footer[0].startswith("Nanowell identity — A01 not checked")
+    assert footer[1] == "4 nanowells in the roster · with a value 3 · measured 2 · empty 1 · occluded 1"
     tp_cb = page.widgets.get("_nw_tp_cb")
     # The Plotting tabs' control: the timepoints in time order, named by their hours, the first one shown.
     assert [tp_cb.itemText(i) for i in range(tp_cb.count())] == ["0 h", "5 h"]
@@ -134,7 +141,7 @@ def test_the_map_draws_the_chosen_well_and_the_timepoint_control_steps_its_timep
     assert st.timepoint == "t_a"
     title = [ax._left_title.get_text() for ax in page.widgets.get("_nw_fig").axes]
     assert "A01 · t_a" in title
-    assert _fig_texts(page, "nw-array-footer")[0].startswith("4 nanowells in the roster · with a value 4 ·")
+    assert _fig_texts(page, "nw-array-footer")[1].startswith("4 nanowells in the roster · with a value 4 ·")
     well_cb = page.widgets.get("_nw_well_cb")
     assert [well_cb.itemText(i) for i in range(well_cb.count())] == ["A01", "B01"]
     well_cb.setCurrentIndex(1)
@@ -232,8 +239,8 @@ def test_a_per_nanowell_metric_on_trajectories_is_greyed_and_says_what_is_drawn(
     metric_cb = page.widgets.get("_nw_metric_cb")
     index = [metric_cb.itemData(i) for i in range(metric_cb.count())].index("occupancy_class")
     assert not metric_cb.model().item(index).isEnabled()
-    assert ("Occupancy at baseline (cells) has one value per nanowell, not one per timepoint, so Trajectories shows Cell count."
-            in _fig_texts(page, "nw-traj-footer"))
+    said = "Occupancy at baseline (cells) has one value per nanowell, not one per timepoint, so Trajectories shows Cell count."
+    assert any(line.startswith(said) for line in _fig_texts(page, "nw-traj-footer"))
 
 
 def test_position_keeps_its_timepoint_control_for_a_per_nanowell_metric(page, qtbot):

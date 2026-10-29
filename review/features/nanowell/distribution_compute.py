@@ -69,6 +69,7 @@ COHORT_REASON = "not measured at every timepoint"
 _REASON_LABELS = {
     "occluded": "occluded", "clipped": "clipped", "unaddressed": "no address", "not_located": "not located",
     "absent": "not in roster", "never measured": "never measured",
+    "identity_contradicted": "identity contradicted",
     "fused (no count)": "fused, no count", "no count": "no count", "no confluence": "no confluence",
     "no cells": "no cells", "no fluorescence": "no fluorescence",
     "seeded later": "seeded later (0 at baseline)", "empty at baseline": "empty at baseline",
@@ -167,6 +168,9 @@ class DistributionModel:
     #: The count at the baseline the *Subset* holds every kept nanowell to (``Subset.start_bounds``; ``(None, None)``:
     #: no bound), for the occupancy key, which greys the classes the subset removes.
     starting: tuple = (None, None)
+    #: ``(well, timepoint) -> verdict`` for the timepoints whose nanowell identity is not confirmed, which the time
+    #: axis hatches (``identity_compute.timepoint_marks``); empty along wells.
+    identity_marks: dict = field(default_factory=dict)
 
     def swarms(self):
         return [s for p in self.panels for s in p.swarms]

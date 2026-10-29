@@ -154,6 +154,16 @@ ROSTER: dict[str, list[tuple]] = {
     "Well %s — %s": [((W, "located 0h"), "I", "note", "")],
     "Well %s — %s.": [((W, "re-analysed because the array radius changed"), "W", "note", "")],
     "Well %s — anchor set by hand at %s.": [((W, "0h"), "I", "note", "")],
+    # the identity check (pipeline/nanowell_identity.py): a verdict on whether each address names the same nanowell
+    # at every timepoint, kept in nanowells/<well>_identity.json and shown by Review's figures and Identity view. It
+    # does not change what the run wrote, so the well's own outcome is its "done." line, as for an unaddressed
+    # timepoint above
+    "Well %s timepoint %s: nanowell identity %s against %s (%s)": [
+        ((W, "24h", "contradicted", "0h", "every address is one lattice step off"), "W", "note", "")],
+    "Well %s timepoint %s: nanowell identity contradicted by the stage positions (%s)": [
+        ((W, "24h", "172 um off the plate's motion"), "W", "note", "")],
+    "Well %s — no identity sidecar to record the stage cross-check in": [((W,), "W", "note", "")],
+    "Well %s — the montage archive cannot be read for the identity check: %s": [((W, "bad zip"), "W", "note", "")],
     "Well %s — registration reused from %s for %d of %d timepoint(s): %s.": [((W, "o", 1, 2, "0h"), "I", "note", "")],
     "Well %s — the grid record %s could not be read, so its registration is not reused (%s).":
         [((W, "g.json", "x"), "W", "note", "")],

@@ -53,7 +53,8 @@ def fetch_nanowell_tables(fetcher, well: str) -> int | None:
     dest = Path(run.local_output_dir) / NANOWELL_DIR
     pulled, whole = 0, True
     # The template is what a later incremental run falls back to for a crowded timepoint (tracker C16).
-    for name in (f"{well}.csv", f"{well}_grid.json", f"{well}_template.npz", f"{well}_segmenter_input.png"):
+    for name in (f"{well}.csv", f"{well}_grid.json", f"{well}_template.npz", f"{well}_segmenter_input.png",
+                 f"{well}_identity.json"):
         host, files, _bytes = fetcher._list_remote_glob(
             f"{fetcher.host.ssh_alias}:{run.remote_output_dir}/{NANOWELL_DIR}/{name}")
         if files is None:

@@ -6,8 +6,9 @@ array, not to the image, so the join holds even when the plate moved between acq
 **Every timepoint of the well is present for every nanowell.** A timepoint at which a nanowell has no
 number is a row with the state that explains why — ``occluded`` or ``clipped`` as recorded, ``unaddressed``
 (the timepoint was located but given no origin, so no row can be joined to an address), ``not_located``
-(the timepoint failed before any site was found) or ``absent`` (addressed, but this site is not in its
-roster). A gap therefore reads as "not seen", never as zero, and never as a shorter series.
+(the timepoint failed before any site was found), ``absent`` (addressed, but this site is not in its
+roster) or ``identity_contradicted`` (the identity check, ``pipeline.nanowell_identity``, found the timepoint's
+addresses naming other nanowells than the well's reference timepoint, so its rows are joined to nothing). A gap therefore reads as "not seen", never as zero, and never as a shorter series.
 
 **Undefined is NaN, never zero, and each metric's undefined cases are listed** (§3.10.1):
 
@@ -50,8 +51,9 @@ import math
 import numpy as np
 import pandas as pd
 
+from pipeline.nanowell_identity import CONTRADICTED
 from review.features.nanowell.collect import (
-    MEASURABLE, NOT_LOCATED, UNADDRESSED, NanowellData,
+    IDENTITY_CONTRADICTED, MEASURABLE, NOT_LOCATED, UNADDRESSED, NanowellData,
 )
 
 ABSENT = "absent"
@@ -115,7 +117,13 @@ def _addressed_grid(data: NanowellData) -> pd.DataFrame:
             order.append((well, tp, i))
     timeline = pd.DataFrame(order, columns=["well", "timepoint", "tp_order"])
     addressed = sites[sites["nw_q"].notna() & sites["nw_r"].notna()].drop(columns=["time_h"], errors="ignore")
-    keys = addressed[SITE_KEY].drop_duplicates()
+    contradicted = {(w, tp): why for w, tps in (getattr(data, "identity", None) or {}).items()
+                    for tp, (verdict, why) in tps.items() if verdict == CONTRADICTED}
+    # The nanowells followed are those some trusted timepoint names: an address only a contradicted timepoint
+    # holds is not a nanowell of the well.
+    trusted = ~pd.Series(pd.MultiIndex.from_arrays([addressed["well"].astype(str), addressed["timepoint"].astype(str)])
+                         .isin(list(contradicted)), index=addressed.index) if contradicted else True
+    keys = addressed[trusted][SITE_KEY].drop_duplicates() if contradicted else addressed[SITE_KEY].drop_duplicates()
     if keys.empty:
         return empty
     merged = keys.merge(timeline, on="well").merge(addressed, on=SITE_KEY + ["timepoint"], how="left")
@@ -134,6 +142,12 @@ def _addressed_grid(data: NanowellData) -> pd.DataFrame:
     explained = merged["state"].isin((UNADDRESSED, NOT_LOCATED))
     merged["reason"] = ""
     merged.loc[explained, "reason"] = [reasons.get(k) or _grid_reason(None) for k in here[explained.to_numpy()]]
+    # A timepoint the identity check contradicted names other nanowells than the reference does, so none of its
+    # rows may be joined to an address over time: it reads as not seen, with the check's reason, never as data.
+    if contradicted:
+        hit = pd.Series(here.isin(pd.MultiIndex.from_tuples(list(contradicted))), index=merged.index)
+        merged.loc[hit, "state"] = IDENTITY_CONTRADICTED
+        merged.loc[hit, "reason"] = [contradicted[k] for k in here[hit.to_numpy()]]
     merged["time_h"] = merged["timepoint"].map(data.times_h).astype(float)
     return merged.sort_values(SITE_KEY + ["tp_order"], kind="stable").reset_index(drop=True)
 
@@ -367,4 +381,11 @@ def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
     out = metrics.reindex(columns=columns)
     out["n_cells"] = metrics["n"]
     out["confluence"] = metrics["c"]
+    # A contradicted timepoint's row under this address belongs to another physical nanowell: none of what was
+    # measured there is this nanowell's, so the export carries the state and reason and blanks the rest.
+    foreign = metrics["state"].eq(IDENTITY_CONTRADICTED)
+    if foreign.any():
+        raw = ["fused", "partially_visible", "imaged_fraction", "visible_fraction", "area_est_cells",
+               "count_disagreement"] + [c for ch in channels for c in (f"brightness_{ch}", f"signal_{ch}")]
+        out.loc[foreign, raw] = np.nan
     return out

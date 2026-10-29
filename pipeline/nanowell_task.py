@@ -787,6 +787,12 @@ def _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, rec
     if staging_dir is not None:
         _write_montages(outcome, well_label, staging_dir)
         update_montage_archive(output_dir / f"{well_label}_out.zip", staging_dir, well_label, todo)
+        # Whether each address names the same nanowell at every timepoint, checked on what was just written
+        # (NANOWELL_IDENTITY_TRACKER B1). Without a montage archive written here nothing is checked, and the well
+        # reads as not checked rather than as a verdict on another run's montages.
+        from pipeline.nanowell_identity import check_after_run
+
+        check_after_run(output_dir, well_label, timepoints)
     # Failed means no rows were written for it. An unaddressed timepoint has rows (detected sites, no address) and
     # is not a failure of the run; it is a finding in the grid record, the completeness check and the end-of-run
     # summary, and the end-of-run pass may yet anchor it.
@@ -1310,6 +1316,9 @@ def nanowell_endgame(options, output_dir, well_zips, shared_kwargs_template, nuc
             log.warning("Unaddressed %s: %s", key, why)
     _record_reanchor(Path(output_dir) / "pipeline_info.json", summary)
     _check_plate_diameters(output_dir, settings_from_kwargs(shared_kwargs_template).key())
+    from pipeline.nanowell_identity import stage_check_after_run
+
+    stage_check_after_run(output_dir)
 
 
 def _check_plate_diameters(output_dir, settings: dict) -> None:

@@ -34,7 +34,18 @@ from services.remote_config import RemoteHost
 #: requested *while* the upload is still running: on a busy cluster the queue
 #: wait and the transfer then overlap instead of running end to end.
 UPLOAD_SENTINEL = ".aw_upload_complete"
-UPLOAD_HEARTBEAT = ".aw_upload_alive"
+#: The heartbeat sits in a folder of its own rather than beside everything else
+#: in the run directory. The run directory is where batches are staged, renamed
+#: and deleted while the pipeline runs, and many shared filesystems serialise
+#: updates within one directory, so a ``touch`` there queued behind that traffic.
+#: The app creates the folder with its first beat (``remote_heartbeat``); the
+#: remote's probe file for "now" goes beside the heartbeat, in the same folder.
+HEARTBEAT_DIR = ".aw_beat"
+UPLOAD_HEARTBEAT = f"{HEARTBEAT_DIR}/alive"
+#: Where an app older than the heartbeat folder beats. Read, never written: a run
+#: directory claimed or cleaned up by this app may belong to a session running an
+#: older one, and its fresh heartbeat there must still count as an owner.
+LEGACY_UPLOAD_HEARTBEAT = ".aw_upload_alive"
 #: Touched by the app to ask a running remote pipeline to suspend; the pipeline
 #: is told the path with ``--suspend_file`` and polls for it.
 SUSPEND_REQUEST = ".aw_suspend_request"

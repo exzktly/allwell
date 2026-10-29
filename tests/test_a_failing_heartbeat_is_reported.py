@@ -15,6 +15,7 @@ import time
 import types
 
 from services.remote_heartbeat import _UploadHeartbeat
+from services.remote_run_id import UPLOAD_HEARTBEAT
 from services.remote_wait_snippets import MID_BATCH_HEARTBEAT_STALE_S, UPLOAD_HEARTBEAT_STALE_S
 
 
@@ -88,7 +89,7 @@ def test_the_batched_run_wires_its_log_into_the_heartbeat(tmp_path, monkeypatch)
     real = p._runner._cache._ssh_run
 
     def ssh_run(argv, *, check, **kw):
-        if argv[0] == "touch" and str(argv[-1]).endswith(".aw_upload_alive") and beats["fail"]:
+        if argv[0] == "touch" and str(argv[-1]).endswith(UPLOAD_HEARTBEAT) and beats["fail"]:
             return types.SimpleNamespace(returncode=255, stdout="", stderr="")
         return real(argv, check=check, **kw)
 

@@ -259,6 +259,30 @@ def test_a_job_that_ended_before_the_run_was_ready_is_replaced(plate, host, remo
     assert "[remote] scheduler: requesting allocation via: env" in text, text
 
 
+def test_a_job_slurm_refused_says_why_when_the_run_is_ready(plate, host, remote, stop_fetchers, monkeypatch):
+    """Reported: the early job's ``srun`` was refused ("Requested node configuration is not available") and the
+    run then said only that the job had ended. The hand-over says the scheduler's own reason, so the line the run
+    ends on names the refusal rather than an exit code."""
+    jobs = remote.jobs
+    refusal = "srun: error: Unable to allocate resources: Requested node configuration is not available"
+
+    def refused_early(argv):
+        if not jobs.procs:
+            proc = FakeRemote._REAL_POPEN(["sh", "-c", f"echo '{refusal}'; exit 1"], stdout=subprocess.PIPE,
+                                          stderr=subprocess.STDOUT, text=True, bufsize=1)
+            proc.wait()
+            jobs.procs.append(proc)
+            return proc
+        return jobs(argv)
+
+    remote.install(monkeypatch, host, on_launch=refused_early)
+
+    _r, text = _run(plate, host, stop_fetchers)
+
+    assert (f"the node asked for early cannot take the run — it ended before the run was ready (exit 1): "
+            f"{refusal}; asking for one now") in text, text
+
+
 def test_a_run_that_stops_before_it_needs_a_node_gives_the_node_back(plate, host, remote, stop_fetchers):
     """Stopped while the plate is still being staged: the job is cancelled and its directory removed."""
     from services.remote_runner import RemoteRunner

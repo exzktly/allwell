@@ -2053,6 +2053,17 @@ reading it. The log names any it kept over budget for that reason.
     repeats the request beside the wait.
   - All-Well does not query the scheduler itself, so it can tell you the run is
     queued and for how long, but not *why*. The number is what lets you ask.
+  - **"Slurm has no node that can take this request."** When Slurm refuses the
+    scheduler command outright (its own words are *Requested node configuration
+    is not available*), no node the cluster can give matches what the command
+    asks for — usually a JupyterHub profile picked in the Remotes dialog that
+    asks for more CPUs, memory or GPUs, or a node type, than its partition has.
+    The run stops and says so in its headline, and the log shows the command as
+    it was sent beside the partition's nodes (how many of each, their CPUs,
+    memory in MB, features and GPUs), so you can see which value does not fit.
+    Change the scheduler command, or pick another profile, and run again. A run
+    whose node was asked for early says the same thing when the plate is ready,
+    and asks once more before giving up.
   - **On a cluster that powers idle nodes down**, the run first asks for a node
     that is already on, because those start at once — but only while one is
     sitting completely idle, and only if Slurm expects the job to start within

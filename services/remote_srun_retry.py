@@ -128,6 +128,9 @@ _BOOT_FAILURE_RE = "Something is wrong with the boot of the nodes|Node failure o
 #: output the run has started: a failure after it is not a boot failure, and
 #: the queue wait is over.
 ALLOCATION_GRANTED = "[remote] scheduler: allocation granted"
+#: What the wrapper says when Slurm refuses the request outright ("Requested node configuration is not
+#: available"): no node it could give matches the scheduler command. ``services.run_evidence`` reads it.
+NO_NODE_FITS = "[remote] scheduler: ERROR Slurm has no node that can take this request"
 
 #: What the wrapper exits with when :func:`queue_wait_seconds` passed without a
 #: node being granted — distinct from ``srun``'s own codes, so the run reports
@@ -508,6 +511,17 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         '$_aw_x — the cluster cannot start a node here; send these names to its '
         'admins, or add --exclude for them to the launcher"; ',
         "fi; ",
+        # 3d. Slurm refused the request itself: no node it could ever give matches it. Nothing is retried — the
+        # same words would be refused again — so the run says what it asked for beside what the partition's
+        # nodes have, which is what the user needs to fix the scheduler command.
+        'if [ "$_aw_rc" != 0 ] && [ "$_aw_go" = 0 ] '
+        "&& grep -q '^srun: .*Requested node configuration is not available' \"$_aw_err\"; then ",
+        f'echo "{NO_NODE_FITS} in {where} — the scheduler command asks for: {launcher_str}"; ',
+        f'echo "[remote] scheduler: the nodes in {where} (how many, CPUs, memory in MB, features, GPUs):"; ',
+        f"sinfo -h -N {part_words} -o '%c %m %f %G' 2>/dev/null | sort | uniq -c | head -n 12 "
+        "| sed 's/^ */[remote] scheduler:   /'; ",
+        'echo "[remote] scheduler: change the scheduler command in the Remotes dialog (or pick another '
+        'profile) so that every value fits one of these nodes"; fi; ',
         'rm -f "$_aw_err" "$_aw_rcf" "$_aw_pend" "$_aw_qto"; exit "$_aw_rc"; ',
         "done",
     ))

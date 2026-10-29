@@ -37,6 +37,9 @@ from pipeline.suspend import LOG_MARKER as SUSPEND_MARKER
 _RE_SLURM_CANCELLED = re.compile(
     r"\*\*\* (?:JOB|STEP) (?P<job>[\w.]+) ON (?P<node>\S+) CANCELLED AT (?P<at>\S+)"
     r"(?: DUE TO (?P<cause>[A-Z][A-Z _]*[A-Z]))?[^*]*\*\*\*")
+# Slurm refusing a request outright: its own line, and the srun wrapper's explanation beside it
+# (``remote_srun_retry.NO_NODE_FITS``). Cleared by a later grant: a retry that was granted is not a failure.
+_RE_NO_NODE_FITS = re.compile(r"Requested node configuration is not available")
 # The batch driver's own per-batch budget (``remote_commands``): a batch whose
 # pipeline outlived it is reported with its number.
 _RE_TIME_BUDGET = re.compile(r"batch (?P<batch>\d+)(?:/\d+)? exceeded its time budget")
@@ -95,6 +98,9 @@ class RunEvidence:
         self.budget_line = ""
         self.ssh_reason = ""
         self.job_id = ""
+        #: Slurm refused the scheduler command ("Requested node configuration is not available") and no grant
+        #: has followed: no node the cluster can give matches it.
+        self.no_node_fits = False
         #: True between a request for a node and its grant: nothing has run.
         self.waiting_for_node = False
 
@@ -115,8 +121,11 @@ class RunEvidence:
         job = _RE_JOB_ID.search(line)
         if job:
             self.job_id = job.group(1) or job.group(2)
+        if _RE_NO_NODE_FITS.search(line):
+            self.no_node_fits = True
         if _RE_NODE_GRANTED.search(line):
             self.waiting_for_node = False
+            self.no_node_fits = False
         elif _RE_NODE_REQUESTED.search(line):
             self.waiting_for_node = True
 
@@ -130,6 +139,11 @@ class RunEvidence:
         """
         resume = ("The wells that finished are kept; resume from the Analyze banner, or re-run "
                   "with 'incremental', to run the rest")
+        if self.no_node_fits:
+            return (f"{where} could not start: Slurm has no node that matches the scheduler command "
+                    "(Requested node configuration is not available). The log shows what the command asked "
+                    "for beside what the partition's nodes have; change the scheduler command in the Remotes "
+                    "dialog, or pick another profile, so that it fits one of them.\n")
         if self.cancelled is not None:
             job, node = self.cancelled.group("job"), self.cancelled.group("node")
             cause = (self.cancelled.group("cause") or "").strip()

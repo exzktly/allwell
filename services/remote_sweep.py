@@ -17,6 +17,7 @@ ended, its sidecar is removed, and the directory is nobody's.
 
 from __future__ import annotations
 
+import posixpath
 import subprocess
 from collections.abc import Callable, Iterable
 
@@ -24,6 +25,7 @@ from services import run_journal
 from services.remote_config import RemoteHost
 from services.remote_jobs import _only_my_job
 from services.remote_run_id import (
+    LEGACY_UPLOAD_HEARTBEAT,
     UPLOAD_HEARTBEAT,
     _local_input_dir_from_argv,
     legacy_argv_digests,
@@ -96,6 +98,7 @@ def _target_script(index: int, pidfile: str, heartbeat: str) -> str:
     ``AW_<VERDICT> <index> <job id> [detail]`` — or nothing, for no sidecar."""
     sidecar_q = _remote_quote(f"{pidfile}.slurm")
     hb_q = _remote_quote(heartbeat)
+    legacy_q = _remote_quote(f"{posixpath.dirname(pidfile)}/{LEGACY_UPLOAD_HEARTBEAT}")
     stale = UPLOAD_HEARTBEAT_STALE_S
     ended = "|".join(_ENDED_STATES)
     state = "awk 'NF {print $1; exit}'"
@@ -120,9 +123,12 @@ def _target_script(index: int, pidfile: str, heartbeat: str) -> str:
         f'_sc=$(stat -c %Y {sidecar_q} 2>/dev/null || '
         f'stat -f %m {sidecar_q} 2>/dev/null || echo ""); '
         f'if [ -z "$_sc" ]; then echo "AW_UNKNOWN {index} $_jid stat"; exit 0; fi; '
-        f'_hb=0; if [ -e {hb_q} ]; then '
-        f'_hb=$(stat -c %Y {hb_q} 2>/dev/null || '
-        f'stat -f %m {hb_q} 2>/dev/null || echo 0); fi; '
+        # The newest of the heartbeat and where an older app beats it, so a
+        # session still running an older app counts as this directory's owner.
+        f'_hb=0; for _aw_f in {hb_q} {legacy_q}; do if [ -e "$_aw_f" ]; then '
+        f'_aw_t=$(stat -c %Y "$_aw_f" 2>/dev/null || '
+        f'stat -f %m "$_aw_f" 2>/dev/null || echo 0); '
+        f'[ "$_aw_t" -gt "$_hb" ] && _hb=$_aw_t; fi; done; '
         f'if [ "$_hb" -ne 0 ] && [ "$((_now - $_hb))" -le {stale} ]; then '
         f'echo "AW_OWNED {index} $_jid"; exit 0; fi; '
         f'if [ "$((_now - $_sc))" -le {stale} ]; then '

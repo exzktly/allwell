@@ -10730,7 +10730,10 @@ written (a well whose archive this run did not write is not checked), and `stage
 `nanowell_endgame`; each logs a warning per timepoint that is not good, and a check that cannot run is logged
 and leaves no sidecar. The remote fetch (`remote_fetch_nanowells`) and batch resume (`remote_batch_resume`) carry
 the sidecar by exact name. `python -m pipeline.nanowell_identity <output_dir> [--well W]` audits an analysed
-dataset (exit 1 when any timepoint is contradicted, 2 when any is inconclusive). Pinned by
+dataset (exit 1 when any timepoint is contradicted, 2 when any is inconclusive); `--numbers` prints `number_rows`
+instead, one CSV row per well and timepoint (`NUMBER_COLUMNS`: peak, margin, turn, the refit's correction, the
+address distances' median, 95th percentile and maximum, loose and failing counts, the centre, square, tile and stage
+disagreements, and a `why` code), numbers only, for calibrating the thresholds on real plates. Pinned by
 `tests/test_nanowell_identity.py` (each fault injected into tables built from the renderer's ground truth: a step,
 the four hexagonal symmetries, a square lattice's 90° turn, a mirror, one tile a step off, a decoy square, no
 square, a stale sidecar, the stage check) and `tests/test_nanowell_identity_run.py` (over the real run's output:

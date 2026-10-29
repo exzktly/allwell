@@ -206,6 +206,7 @@ Measured by a reviewer on HEAD 4e2f6ba (scripts and logs under the session scrat
 
 | id | question | state | answer |
 |---|---|---|---|
+| Q0 | *How the Q rows get answered:* `python -m pipeline.nanowell_identity <output> --numbers` prints the measurements per (well, timepoint) as CSV, numbers only, so a real plate's can be shared and the thresholds set from them | done | `test_the_numbers_table_carries_the_measurements_and_no_sentences` |
 | Q1 | Is 0.25 pitch the right tolerance on real plates (thermal / swelling distortion across a 3 mm array)? | todo | |
 | Q2 | What margin does a real square give against its lattice-step neighbours? `MIN_MARGIN` (0.10) is set from rendered pairs: good 0.317–0.534, null ≤ 0.057 | todo | |
 | Q3 | Plates without a central square: stage cross-check only — is that acceptable? | todo | |

@@ -1230,22 +1230,85 @@ def audit(out_dir, wells=None) -> dict:
     return {well: read_sidecar(out_dir, well) or results[well] for well in results}
 
 
+#: The columns of :func:`number_rows`, the audit's ``--numbers`` table: measurements and verdict codes only, so the
+#: table can be shared to calibrate the thresholds (tracker Q1, Q2, Q4, Q5) without the images or the dataset's paths.
+NUMBER_COLUMNS = ("well", "timepoint", "verdict", "diagnosis", "why", "peak", "margin", "rotation_deg", "turned_deg",
+                  "refit_rotation_deg", "refit_scale", "compared", "failing", "loose", "median_pitches",
+                  "p95_pitches", "max_pitches", "centre_pitches", "square_pitches", "tile_moved_um", "stage_um")
+#: What :func:`number_rows` writes as ``why`` for a timepoint that is not good, from the first phrase of its reason it
+#: finds; the reason itself is not written, because it is a sentence rather than a number.
+_WHY = (("too near the edge of its montage", "square_at_montage_edge"), ("correlates at most", "peak"),
+        ("leads the next place", "margin"), ("edge of the search window", "search_edge"),
+        ("do not land on themselves", "addresses"), ("took something else", "decoy"),
+        ("fitted centre", "centre"), ("tile grid", "tile_grid"), ("sit differently", "tile"),
+        ("mirrored", "mirror"), ("lattice is", "lattice_kind"), ("cannot be told", "tie"),
+        ("in common with the reference", "too_few"), ("the timepoint is", "not_addressed"),
+        ("no montage", "no_montage"), ("central square", "no_reference_square"), ("rigid motion", "stage"))
+
+
+def number_rows(payloads: dict) -> list[dict]:
+    """One row per (well, timepoint) of the sidecars *payloads* (``well -> payload``), in :data:`NUMBER_COLUMNS`: the
+    numbers the verdict was decided from, ``None`` where the check never got as far, and a short ``why`` code for a
+    timepoint that is not good. ``refit_rotation_deg`` / ``refit_scale`` are how far the refit on matched sites moved
+    the turn and the scale; ``p95_pitches`` is the 95th percentile of the compared addresses' distances; ``stage_um``
+    the well's residual from the plate's motion."""
+    rows = []
+    for well, payload in sorted(payloads.items()):
+        if not payload:
+            continue
+        stage = (payload.get("stage") or {}).get("timepoints") or {}
+        for tp, entry in (payload.get("timepoints") or {}).items():
+            square = entry.get("square") or {}
+            refit = square.get("refined") or {}
+            distances = [d[2] for d in entry.get("distances") or ()]
+            moved = [m[1] for m in (entry.get("tiles") or {}).get("moved") or ()]
+            good = entry.get("verdict") in GOOD
+            reason = entry.get("reason") or ""
+            rows.append({
+                "well": well, "timepoint": tp, "verdict": entry.get("verdict"),
+                "diagnosis": (entry.get("diagnosis") or {}).get("kind"),
+                "why": None if good else next((code for phrase, code in _WHY if phrase in reason), "other"),
+                "peak": square.get("peak"), "margin": square.get("margin"), "rotation_deg": square.get("rotation_deg"),
+                "turned_deg": square.get("turned_deg"),
+                "refit_rotation_deg": (round(refit["rotation_deg"] - refit["registered_rotation_deg"], 4)
+                                       if refit else None),
+                "refit_scale": round(refit["scale"] / refit["registered_scale"] - 1, 6) if refit else None,
+                "compared": entry.get("compared"), "failing": entry.get("failing_count"),
+                "loose": entry.get("loose_count"), "median_pitches": entry.get("median_pitches"),
+                "p95_pitches": round(float(np.percentile(distances, 95)), 4) if distances else None,
+                "max_pitches": entry.get("max_pitches"), "centre_pitches": entry.get("centre_agreement_pitches"),
+                "square_pitches": entry.get("square_agreement_pitches"),
+                "tile_moved_um": round(max(moved), 1) if moved else None,
+                "stage_um": (stage.get(tp) or {}).get("residual_um")})
+    return rows
+
+
 def main(argv=None) -> int:
-    """``python -m pipeline.nanowell_identity <output_dir> [--well A01 ...]``: audit a dataset; exit 1 when any
-    timepoint is contradicted, 2 when none is but any is inconclusive, 0 when every timepoint is good."""
+    """``python -m pipeline.nanowell_identity <output_dir> [--well A01 ...] [--numbers]``: audit a dataset; exit 1
+    when any timepoint is contradicted, 2 when none is but any is inconclusive, 0 when every timepoint is good.
+    ``--numbers`` prints :func:`number_rows` as CSV in place of the summary."""
     import argparse
+    import sys
 
     parser = argparse.ArgumentParser(description="Check that each nanowell address names the same nanowell at "
                                                  "every timepoint, and write nanowells/<well>_identity.json.")
     parser.add_argument("output_dir")
     parser.add_argument("--well", action="append", dest="wells", help="check only this well (repeatable)")
+    parser.add_argument("--numbers", action="store_true",
+                        help="print one CSV row per well and timepoint with the measurements the verdict was decided "
+                             "from (no images or paths), instead of the summary")
     args = parser.parse_args(argv)
     if not (Path(args.output_dir) / NANOWELL_DIR).is_dir():
         print(f"{args.output_dir} holds no {NANOWELL_DIR}/ folder: it is not an analysed nanowell dataset")
         return 2
     results = audit(args.output_dir, args.wells)
-    for line in summary_lines(results):
-        print(line)
+    if args.numbers:
+        writer = csv.DictWriter(sys.stdout, fieldnames=NUMBER_COLUMNS, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(number_rows(results))
+    else:
+        for line in summary_lines(results):
+            print(line)
     verdict_set = {v.get("verdict") for p in results.values() if p for v in p["timepoints"].values()}
     return 1 if CONTRADICTED in verdict_set else 2 if INCONCLUSIVE in verdict_set else 0
 

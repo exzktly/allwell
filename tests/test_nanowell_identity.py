@@ -600,3 +600,26 @@ def test_a_peak_on_the_edge_of_the_search_is_not_a_lock(pair):
     finally:
         ni.SEARCH_PITCHES = original
     assert not match.ok and "edge of the search window" in match.reason
+
+
+
+def test_the_numbers_table_carries_the_measurements_and_no_sentences(pair, tmp_path, capsys):
+    """``--numbers``: one CSV row per well and timepoint, the values the verdict was decided from, a code for why a
+    timepoint is not good — what can be shared from a real plate to set the thresholds (tracker Q1, Q2, Q4, Q5)."""
+    import csv as _csv
+
+    ref, other = pair
+    hidden = _timepoint("T2", 8.0, (20.0, 10.0), 3, square=False)[0]
+    _write_dataset(tmp_path, "A01", {"T0": ref, "T1": other, "T2": hidden})
+    _write_dataset(tmp_path, "A02", {"T0": ref, "T1": _relabel(other, lambda a: (a[0] + 1, a[1]))})
+    assert ni.main([str(tmp_path), "--numbers"]) == 1
+    rows = {(r["well"], r["timepoint"]): r for r in _csv.DictReader(io.StringIO(capsys.readouterr().out))}
+    assert list(next(iter(rows.values()))) == list(ni.NUMBER_COLUMNS)
+    good, unseen, stepped = rows[("A01", "T1")], rows[("A01", "T2")], rows[("A02", "T1")]
+    assert (good["verdict"], good["why"], good["compared"], good["failing"]) == ("confirmed", "", "265", "0")
+    assert float(good["margin"]) >= ni.MIN_MARGIN and float(good["max_pitches"]) < 0.05
+    assert (unseen["verdict"], unseen["why"], unseen["compared"]) == ("inconclusive", "margin", "")
+    assert float(unseen["margin"]) < ni.MIN_MARGIN
+    assert (stepped["verdict"], stepped["diagnosis"], stepped["why"]) == ("contradicted", "step", "addresses")
+    assert float(stepped["p95_pitches"]) == pytest.approx(1.0, abs=0.01)
+    assert rows[("A01", "T0")]["verdict"] == "reference"

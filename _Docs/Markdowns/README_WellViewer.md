@@ -5677,7 +5677,12 @@ chooses what it draws:
 To check a dataset analysed earlier without analysing it again, run
 `python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well): it writes
 `nanowells/<well>_identity.json` beside the tables, prints each well's verdicts, and Review picks them up the next
-time the dataset is opened. It exits 1 when any timepoint is contradicted and 2 when any is inconclusive.
+time the dataset is opened. It exits 1 when any timepoint is contradicted and 2 when any is inconclusive. Add
+`--numbers` to print, in place of the summary, one CSV row per well and timepoint with the measurements each verdict
+was decided from (how clearly the square was found, how far the addresses landed, how far the array's outline, the
+tiles and the stage disagreed) and a short code for why a timepoint is not confirmed — numbers only, no images or
+paths, so they can be shared to check the thresholds against real plates:
+`python -m pipeline.nanowell_identity <output folder> --numbers > identity_numbers.csv`.
 
 ### Image Browser
 

@@ -81,6 +81,11 @@ _FRAME_EDGES = 2
 #: The views a batch run can draw, as the page names them. The Array view is drawn as its lattice map — the
 #: nanowells at their lattice places, filled by the metric (``ArrayLayers.preset("map")``): its image layers read a
 #: montage or the raw tiles per (well, timepoint) and are a check of one acquisition, not a figure for a folder.
+#: The page's Extremes and Identity views are not offered. Identity draws no metric — every figure here is one per
+#: ticked metric — and it is one figure per (well, timepoint) against that well's reference; two of its four modes
+#: (Blink, Side by side) exist only as interaction. ``draw_view(view="identity")`` draws its Distance map from the
+#: sidecar on disk when asked without the page's inputs, so offering it later is a roster entry and a per-timepoint
+#: loop, not a second implementation.
 VIEWS = (("distribution", "Distribution"), ("array", "Array map"), ("trajectories", "Trajectories"),
          ("position", "Position"))
 AXES = (("time", "Time"), ("wells", "Wells"))

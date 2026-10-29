@@ -165,11 +165,11 @@ was done about it.
 
 | id | item | state | evidence |
 |---|---|---|---|
-| D1 | Identity view registered; well and timepoint selectors | todo | |
-| D2 | Distance map with tile boundaries and verdict | todo | |
-| D3 | Blink comparator in the reference frame, addresses drawn | todo | |
-| D4 | Side-by-side with linked cursor | todo | |
-| D5 | Diagnostics panel: correlation surface, peak, margin, transform | todo | |
+| D1 | Identity view registered; well and timepoint selectors | done | `_identity_controller`, `_identity_render`, `identity_view`; `test_nanowell_identity_view.py` (21 tests) incl. one through the real page builder; removing `redraw`'s or `draw_view`'s identity branch fails it |
+| D2 | Distance map with tile boundaries and verdict | done | mutations: distances at the compared positions, moved tile not mapped back — each fails a test |
+| D3 | Blink comparator in the reference frame, addresses drawn | done | mutations: no resampling (agreement −0.13), labels not mapped back (gap 0 not 1 pitch), timer never started, tick ignoring a hidden page — each fails a test |
+| D4 | Side-by-side with linked cursor | done | mutations: hover predicting the compared site itself, hover not routed from the canvas — each fails a test |
+| D5 | Diagnostics panel: correlation surface, peak, margin, transform | done | mutation: peak marked at the expected square fails a test. The well combo shows each well's worst verdict on this view |
 
 ### E — evidence that the check works
 
@@ -200,5 +200,5 @@ was done about it.
 
 | id | item | state | evidence |
 |---|---|---|---|
-| F1 | ARCHITECTURE.md section on the identity check | done | §6.2i *Identity over time*, §6.2j *Joining*; the Identity view joins §6.2k with D |
-| F2 | README_WellViewer.md: the Identity view and the audit command | wip | the verdicts, the footers and the audit command are in *Nanowells*; the Identity view's paragraph waits on D |
+| F1 | ARCHITECTURE.md section on the identity check | done | §6.2i *Identity over time*, §6.2j *Joining*, §6.2k *The Identity view* |
+| F2 | README_WellViewer.md: the Identity view and the audit command | done | *Nanowells*: the verdicts, the footers, the Identity view, the audit command |

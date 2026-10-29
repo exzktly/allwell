@@ -11270,6 +11270,35 @@ so a ring nobody saw vanished instead of reading as wholly excluded. A drawn wel
 the timepoint is named in the footer. `numeric_values` reads the
 occupancy class as its lower bound (3+ as 3) for all three.
 
+**The Identity view** shows what the identity check (§6.2i *Identity over time*) found for one well at one timepoint
+against the well's reference. It is drawn through `controller.draw_view(view="identity")`, so it is one composition
+like the others; `_identity_controller.draw_identity` composes it from the sidecar (read itself when not handed one),
+`identity_compute` holds the Qt-free data (`distance_map`, `blink_frames`, `hover_target`, `diagnostics`,
+`identity_message`, `summary_lines`, `stage_line`, `worst_verdict`, `default_timepoint`), `_identity_render` draws it
+(every text a reader sees carries a `nw-identity-*` gid) and `identity_view` builds the *Compare* control and the
+Blink timer. Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
+included). Four modes, `NanowellState.identity_mode` (persisted; an unknown one falls back to `distance`):
+*Distance map* — each compared address at its reference's measured position (well frame, µm), filled by its
+distance in pitches (viridis 0–0.5, the tolerance marked on the colour bar), failing addresses outlined in
+`Colors.danger` (the sidecar's list plus every address beyond the tolerance, since the list is capped at
+`MAX_LISTED`), the compared timepoint's tiles mapped into the reference frame through the inverse registration with
+the moved ones drawn in red and named; *Blink* — the compared montage resampled onto the reference's pixel grid
+through `mapper` (at most 1,024 px a side, cached one pair at a time in `st.identity_frames`), the two frames drawn
+once and alternated by a 500 ms `QTimer` parented to the band that starts only when frames are on screen and stops on
+the first tick after the page, view, mode or figure changes; labels on the addresses whose q and r are multiples of
+three, each frame placing its own addresses, so wrong addresses visibly jump; *Side by side* — each montage in its own
+frame, and the pointer (`controller.on_motion`) lights the address under it on both, with a cross where the
+registration predicts the reference site lands (`hover_target`); *Diagnostics* — the correlation surface over
+`surface_box_um` with the peak, the runner-up, the reference square and the accepted square marked, and peak and
+margin against `MIN_PEAK` / `MIN_MARGIN`, the turn, scale and translation, the square agreement. With no sidecar it
+says the check has not been run and names the audit command; at the reference it says so. On this view the Well
+combo reads each well's worst verdict, and the timepoint shown by default is the well's first contradicted, then
+inconclusive or unchecked, then first non-reference timepoint. Montages are read on a worker through the page's
+`_fetch` store; the sidecar is read once per well until the dataset reloads, so an audit run while the page is open
+shows after the next load. Batch Export does not offer it (the reason is written beside its `VIEWS`: no metric, one
+figure per well and timepoint, two modes that exist only as interaction). Pinned by
+`tests/test_nanowell_identity_view.py`, including one test through the real page builder.
+
 **The Array view** is one well at one timepoint, every element of it a layer that is on or off, drawn by one
 renderer whatever is on, so a nanowell reads the same — and is clickable, pannable and zoomable — under every
 combination. Three presets set every layer at once (`state.ArrayLayers.preset`): `map` (lattice places filled by

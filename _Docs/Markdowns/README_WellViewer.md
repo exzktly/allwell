@@ -5358,8 +5358,8 @@ use them.
 
 **Controls**
 
-- **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position* and
-  *Extremes*. Each view shows only the controls it uses.
+- **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
+  *Extremes* and *Identity*. Each view shows only the controls it uses.
 - **Metric** — what each dot is: cell count, confluence, brightness (mean per-cell intensity), site signal
   (integrated intensity above the empty nanowells' background), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
@@ -5627,6 +5627,21 @@ timepoint is the one that disagrees with the rest, the rest are kept and it is t
 What the check cannot see: a *physical* half turn of the array (180°). The hexagonal lattice and the central square
 both look the same turned half way round, so an array that turned inside its well would be confirmed. A plate is
 keyed and cannot be put back half turned, so this matters only if the array itself can turn.
+
+**The Identity view** shows the check for one well at one timepoint against the well's reference timepoint; the
+Well list says each well's worst verdict, and it opens on the first timepoint that is not confirmed. *Compare*
+chooses what it draws:
+
+- **Distance map** — every nanowell at its place, coloured by how far its address landed from itself in nanowell
+  spacings (the quarter-spacing limit is marked on the colour bar); failing nanowells are outlined in red, and an
+  imaging tile that sits differently than at the reference is drawn in red and named.
+- **Blink** — the two whole-well images alternating twice a second, the later one turned and moved onto the
+  reference by the registration, with addresses written on both. When the addresses are right the array and its
+  labels stay still; when they are wrong, the labels jump a nanowell or turn.
+- **Side by side** — the two images next to each other; point at a nanowell on either and it lights on both, with a
+  cross where the registration says it should be.
+- **Diagnostics** — how the central square was found: its match across the search area, how far it stands above the
+  next best place, and the turn and shift between the timepoints.
 
 To check a dataset analysed earlier without analysing it again, run
 `python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well): it writes

@@ -307,6 +307,7 @@ def redraw(ctx) -> None:
     _call(ctx, "_nw_show_computing")
     _refresh_empty(ctx)
     if st.metrics is None or nanowell_empty_reason(ctx) is not None:
+        _identity().leave(ctx, st)
         return
     # The page's views share one figure; each keeps its own Properties settings, so a range typed for Distribution
     # never reaches the Array map or the Trajectories' hours (``plot_style.set_pref_scope``).
@@ -318,6 +319,10 @@ def redraw(ctx) -> None:
     metric, channel, note = resolve_metric(st.view, st.metric, page_channel_name(ctx), st.data.channels)
     well = page_well(ctx)
     st.extreme_axes = {}
+    if st.view == "identity":
+        _draw_identity_page(ctx, st, fig, canvas, well=well)
+        return
+    _identity().leave(ctx, st)
     if st.view == "extremes":
         _draw_extremes(ctx, st, fig, canvas, metric=metric, channel=channel, well=well, note=note)
         return
@@ -348,6 +353,30 @@ def redraw(ctx) -> None:
         st.model = model
     from review.core.plot_style import apply_export_style_to_current
 
+    apply_export_style_to_current(ctx, fig, canvas)
+    canvas.draw_idle()
+    redraw_detail(ctx)
+
+
+def _identity():
+    from review.features.nanowell import _identity_controller
+
+    return _identity_controller
+
+
+def _draw_identity_page(ctx, st, fig, canvas, *, well: str) -> None:
+    """The Identity view on the page: through :func:`draw_view`, with the sidecar, montages and Blink frames the page
+    holds (``_identity_controller.page_inputs``); the Blink timer follows what was drawn."""
+    from review.core.plot_style import apply_export_style_to_current
+
+    idc = _identity()
+    timepoint = idc.page_timepoint(st, well)
+    st.hits, st.drawn = None, None                       # nothing to click and nothing to zoom
+    _hits, drawn = draw_view(fig, "identity", st.metrics, st.data, groups=page_groups(ctx), metric=st.metric,
+                             channel=None, axis=st.axis, timepoint=timepoint, control=st.control,
+                             baseline=st.baseline, cohort=st.cohort, well=well, well_timepoint=timepoint,
+                             identity=idc.page_inputs(ctx, st, well, timepoint))
+    idc.after_draw(ctx, st, drawn)
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
     redraw_detail(ctx)
@@ -453,8 +482,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
               note: str = "", tableless=(), selected=(), responding_above: float | None = None,
               layers: ArrayLayers | None = None, image=None, image_note: str = "",
-              region=None, subset: ss.Subset = ss.Subset()) -> tuple[object, object]:
-    """Draw *view* (Distribution, Array, Trajectories or Position) into *fig*: ``(hit map, model)``.
+              region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None) -> tuple[object, object]:
+    """Draw *view* (Distribution, Array, Trajectories, Position or Identity) into *fig*: ``(hit map, model)``.
 
     **The one composition of each view**, called by the page and by Batch Export's Nanowells mode (tracker I4),
     so a saved batch figure is the page's figure for the same choices — the notes, the exclusions and the
@@ -466,7 +495,16 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     (tracker I9), which the Distribution view states the fraction responding at. *subset* is the page's
     *Subset* (``subset_compute``): every view but the Array draws only the nanowells inside it, saying how many it
     left out; the Array view draws them all and dims the rest.
+
+    The Identity view draws *well* at *well_timepoint* against the well's reference timepoint
+    (``_identity_controller.draw_identity``), with *identity* the page's inputs to it — its mode, the sidecar and
+    montages it holds — or, without them, the distance map from the sidecar on disk; its model is the
+    ``_identity_render.IdentityDrawn``. It has no metric, so the metric, Subset and grouping are not used.
     """
+    if view == "identity":
+        from review.features.nanowell._identity_controller import draw_identity
+
+        return None, draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
     wells = [w for members in groups.values() for w in members]
     all_metrics = metrics
     metrics, filtered = ss.apply(metrics, subset, baseline, [well] if view == "array" else wells, data)
@@ -560,6 +598,10 @@ def shown_timepoint(ctx) -> tuple[list, str]:
     if st.view == "array":
         well = page_well(ctx)
         return list(st.data.timepoints(well)), page_timepoint(ctx, well)
+    if st.view == "identity":
+        # One well's timepoint against its reference: its first not confirmed unless one is chosen.
+        well = page_well(ctx)
+        return list(st.data.timepoints(well)), _identity().page_timepoint(st, well)
     if st.view == "extremes":
         # One well's nanowells, ranked at one of its timepoints: its latest unless one is chosen (as U13).
         tps = list(st.data.timepoints(page_well(ctx)))
@@ -911,8 +953,12 @@ def _array_press(st, event) -> None:
 
 
 def on_motion(ctx, event) -> None:
-    """A drag on the Array view pans it; the pixels follow at once and the image is drawn again on release."""
+    """A drag on the Array view pans it; the pixels follow at once and the image is drawn again on release. On the
+    Identity view's *Side by side* the pointer lights the address under it."""
     st = _state(ctx)
+    if st is not None and st.view == "identity":
+        _identity().on_motion(ctx, event)
+        return
     if st is None or st.press is None or st.view != "array" or st.drawn is None or event.x is None:
         return
     x, y, xlim, ylim, inverse, _adding_ = st.press

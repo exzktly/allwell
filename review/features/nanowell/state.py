@@ -15,7 +15,10 @@ from review.features.nanowell.subset_compute import Subset
 from review.features.nanowell.subset_compute import restore as restore_subset
 
 AXES = ("time", "wells")            # what the Distribution view's x-axis carries
-VIEWS = ("distribution", "trajectories", "array", "position", "extremes")
+VIEWS = ("distribution", "trajectories", "array", "position", "extremes", "identity")
+#: The Identity view's modes (``identity_compute``): the distance map, the two montages blinked in one frame, the two
+#: side by side with a linked cursor, and the registration's correlation surface.
+IDENTITY_MODES = ("distance", "blink", "sides", "diagnostics")
 #: Views of earlier versions, and the view each is now. A page saved on Array map or Array QC opens on the Array
 #: view with the layers that view drew (:meth:`ArrayLayers.preset`).
 _RENAMED_VIEWS = {"array_map": "array", "array_qc": "array"}
@@ -146,6 +149,8 @@ class NanowellState:
     #: its ring or distance from the centre, its address, its imaging field. No conditions: every nanowell. See
     #: ``subset_compute``.
     subset: Subset = field(default_factory=Subset)
+    #: What the Identity view shows of the chosen timepoint against the well's reference (:data:`IDENTITY_MODES`).
+    identity_mode: str = "distance"
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
@@ -192,6 +197,11 @@ class NanowellState:
     tile_why: str = ""
     tile_pending: set = field(default_factory=set)       # (tile, level) reads on their way
     tile_bridges: list = field(default_factory=list)
+    # The Identity view: each well's identity sidecar as read (``None``: none current), the Blink frames resampled for
+    # a (well, timepoint, reference), and what the last draw put on screen (``_identity_render.IdentityDrawn``).
+    identity_sidecars: dict = field(default_factory=dict)
+    identity_frames: dict = field(default_factory=dict)
+    identity_drawn: object = None
 
     def release_tiles(self) -> None:
         """Stop the reads of the tiles held so far and let their pixels go: another well, timepoint or dataset."""
@@ -207,6 +217,7 @@ class NanowellState:
         self.region = self.region_for = self.press = self.drawn = None
         self.anchor_mode, self.array_message = False, ""
         self.extreme_axes = {}
+        self.identity_sidecars, self.identity_frames, self.identity_drawn = {}, {}, None
         self.release_tiles()
 
     def to_config(self) -> dict:
@@ -217,6 +228,7 @@ class NanowellState:
                 "crop_metrics": self.crop_metrics,
                 "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
+                "identity_mode": self.identity_mode,
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -233,6 +245,8 @@ class NanowellState:
             value = config.get(name)
             setattr(self, name, value if isinstance(value, str) else getattr(fresh, name))
         self.cohort = config.get("cohort") is True
+        mode = config.get("identity_mode")
+        self.identity_mode = mode if mode in IDENTITY_MODES else fresh.identity_mode
         self.subset = _subset_from(config)
         count = config.get("extremes_n")
         self.extremes_n = (count if isinstance(count, int) and not isinstance(count, bool)

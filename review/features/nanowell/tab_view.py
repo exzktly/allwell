@@ -25,6 +25,8 @@ from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
     BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut,
 )
+from review.features.nanowell.identity_compute import worst_verdict
+from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
 from review.features.nanowell.display_range_view import (
     build_display_range_button,
     refresh_display_range_buttons,
@@ -38,9 +40,9 @@ from widgets.owned_action import owned_action
 
 #: The views the page draws, in the order the switch lists them.
 VIEWS = (("distribution", "Distribution"), ("array", "Array"), ("trajectories", "Trajectories"),
-         ("position", "Position"), ("extremes", "Extremes"))
+         ("position", "Position"), ("extremes", "Extremes"), ("identity", "Identity"))
 #: The views that show one well, and so offer the well picker and the timepoint slider.
-ONE_WELL_VIEWS = ("array",)
+ONE_WELL_VIEWS = ("array", "identity")
 #: The views that show one well at one timepoint chosen from a list: the well picker and the timepoint combo.
 RANKED_WELL_VIEWS = ("extremes",)
 #: The views that draw values over time, where a metric with one value per nanowell has nothing to draw.
@@ -77,7 +79,9 @@ _VIEW_TIP = ("Distribution: one dot per nanowell, per well and timepoint.\n"
              "Trajectories: each nanowell's metric over time, with the median of each occupancy class.\n"
              "Position: the metric by ring from the central nanowell — an edge-effect check.\n"
              "Extremes: one well's nanowells with the largest and the smallest fold change of the Metric at the\n"
-             "Timepoint, each a row of its crops over every timepoint. Click a row for its detail.")
+             "Timepoint, each a row of its crops over every timepoint. Click a row for its detail.\n"
+             "Identity: whether one well's addresses name the same nanowells at the Timepoint as at its reference\n"
+             "timepoint — the identity check's distances, the montages blinked or side by side, and its registration.")
 _EXTREMES_TIP = ("How many nanowells each block shows: this many with the largest fold change and this many with the "
                  "smallest. A well with fewer shares them between the blocks, never showing one twice.")
 _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their well, so each line over time follows "
@@ -214,6 +218,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     grp_well = band.add_scope("Well", well_cb)
 
     array_controls = _build_array_controls(ctx, band)
+    identity_seg, grp_identity = build_identity_controls(ctx, band)
 
     # The Plotting tabs' timepoint control (Distribution, Heat Map): a LabeledComboBox painting its own
     # "Timepoint:" prefix, the timepoints in time order and named by their hours. One control for every view that
@@ -333,7 +338,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
     controls = (metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box,
-                responding_edit, extremes_spin, extremes_cells, extremes_numbers, *start.signalling,
+                responding_edit, extremes_spin, extremes_cells, extremes_numbers, identity_seg, *start.signalling,
                 *array_controls.signalling)
 
     def refresh_controls() -> None:
@@ -363,7 +368,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             _select(tp_cb, shown)
             well_cb.clear()
             for well in nwc.page_wells(ctx) if st.data else []:
-                well_cb.addItem(well, well)
+                # On the Identity view each well says its worst verdict, so a contradicted one is found at a glance.
+                worst = worst_verdict(st.data, well) if view == "identity" else None
+                well_cb.addItem(f"{well} · {worst.replace('_', ' ')}" if worst else well, well)
             _select(well_cb, nwc.page_well(ctx))
             control_cb.clear()
             control_cb.addItem("— none", "")
@@ -384,6 +391,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             cohort_box.setChecked(st.cohort)
             start.refresh(st)
             _refresh_array_controls(ctx, st, array, array_controls)
+            refresh_identity_controls(st, identity_seg, grp_identity, view == "identity")
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
             # applies to what it draws, so its box stays where it can be turned off.
@@ -699,7 +707,10 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
 
 def _metric_reaches_figure(st, view: str) -> bool:
     """Whether the Metric and Baseline controls change what *view* draws: on the Array view only through the
-    nanowells' fill or their written values, so not when neither is drawn."""
+    nanowells' fill or their written values, so not when neither is drawn; never on the Identity view, which draws
+    the identity check's distances and the montages, no metric."""
+    if view == "identity":
+        return False
     layers = nwc.drawn_layers(st)
     return view != "array" or (layers.nanowells and layers.colour == "metric") or layers.values
 

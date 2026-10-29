@@ -214,6 +214,10 @@ REUSE_CONTRACTS = {
         "diameter": "the matched filter the hexagonal tile fits find sites with",
         "working_pitch": "the fits' seed and the overlap search window, measured on this timepoint",
         "kind": "the lattice kind (hex or square) an inferred geometry fits every tile as",
+        "preferred": (
+            "the tile offsets the well's other timepoints agree on, given when a timepoint is registered again "
+            "because a pair sat a lattice step off (run_well's layout agreement). They change which whole lattice "
+            "vector a pair takes, so a placement solved without them is the very one being corrected"),
     },
     "scan_cache.load": {
         "size": (
@@ -1210,6 +1214,8 @@ def _changed(name: str, inputs: dict, monkeypatch) -> dict:
         out["pitch_um"] = 171.0
     elif name == "kind":
         out["kind"] = "square"
+    elif name == "preferred":
+        out["preferred"] = {("F0", "F1"): (90.0, 0.0)}
     else:
         raise AssertionError(f"no mutation written for {name!r}: add one beside its reason in REUSE_CONTRACTS")
     return out
@@ -1219,7 +1225,7 @@ def _registration_key(inputs: dict) -> str:
     from pipeline import nanowell_run as nr
 
     return nr.registration_key(inputs["record"], "A01", "0h", inputs["images"], inputs["settings"],
-                               inputs["pitch_um"], inputs["kind"])
+                               inputs["pitch_um"], inputs["kind"], preferred=inputs.get("preferred"))
 
 
 @pytest.mark.parametrize("key", sorted(REUSE_CONTRACTS[_REGISTRATION]))

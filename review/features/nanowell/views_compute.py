@@ -119,6 +119,10 @@ class TrajectoryPanel:
     in_hours: bool = False                # the times are recorded hours, not the timepoints' order
     #: x -> verdict for the timepoints whose nanowell identity is not confirmed (``identity_compute.timepoint_marks``)
     marks: dict = field(default_factory=dict)
+    #: Parallel to :attr:`lines`: per time, whether that value may be joined to the nanowell's others — False at a
+    #: contradicted timepoint and for a nanowell a partial one leaves out (``series_compute`` ``identity_ok``). Such a
+    #: value is drawn as a point of its own, joined to nothing, and is in no class median.
+    line_ok: list = field(default_factory=list)
 
 
 def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool = False,
@@ -140,7 +144,10 @@ def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool
         wide = rows.assign(_v=values).pivot_table(index=["nw_q", "nw_r"], columns="timepoint", values="_v",
                                                   aggfunc="first", dropna=False).reindex(columns=tps)
         occupancy = rows.drop_duplicates(["nw_q", "nw_r"]).set_index(["nw_q", "nw_r"])["occupancy_class"]
-        lines, empty = [], 0
+        joinable = (rows.assign(_ok=rows["identity_ok"].astype(float) if "identity_ok" in rows else 1.0)
+                    .pivot_table(index=["nw_q", "nw_r"], columns="timepoint", values="_ok", aggfunc="first",
+                                 dropna=False).reindex(index=wide.index, columns=tps).fillna(1.0))
+        lines, line_ok, empty = [], [], 0
         for (q, r), series in wide.iterrows():
             y = series.to_numpy(dtype=float)
             if not np.isfinite(y).any() or (cohort and not np.isfinite(y).all()):
@@ -148,16 +155,18 @@ def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool
                 continue
             occ = occupancy.get((q, r))
             lines.append(((well, int(q), int(r)), None if pd.isna(occ) else str(occ), y))
+            line_ok.append(joinable.loc[(q, r)].to_numpy(dtype=float) > 0.5)
         medians = {}
         for cls in ("0", "1", "2", "3+"):
-            ys = np.array([y for _s, occ, y in lines if occ == cls])
+            ys = np.array([np.where(ok, y, np.nan) for (_s, occ, y), ok in zip(lines, line_ok) if occ == cls])
             if len(ys):
                 with np.errstate(all="ignore"):
                     medians[cls] = np.array([np.nanmedian(col) if np.isfinite(col).any() else np.nan
                                              for col in ys.T])
         mine = (marks or {}).get(well) or {}
         out.append(TrajectoryPanel(well, xs, tps, lines, medians, empty, in_hours=bool(use_time),
-                                   marks={float(x): mine[tp] for x, tp in zip(xs, tps) if tp in mine}))
+                                   marks={float(x): mine[tp] for x, tp in zip(xs, tps) if tp in mine},
+                                   line_ok=line_ok))
     return out
 
 

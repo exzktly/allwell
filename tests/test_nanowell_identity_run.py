@@ -78,10 +78,10 @@ def _t1_misses_its_square_and_its_centre_is_a_step_off(monkeypatch):
     monkeypatch.setattr(nr, "locate_timepoint", locate)
 
 
-def _identity(outcome):
+def _identity(outcome, order=tuple(POSES)):
     montages = {tp: np.asarray(located.montage.image) for tp, located in outcome.located.items()
                 if located.montage is not None}
-    return ni.check_well({"timepoints": outcome.timepoints}, outcome.sites, montages, list(POSES))
+    return ni.check_well({"timepoints": outcome.timepoints}, outcome.sites, montages, list(order))
 
 
 def _run(record, images):
@@ -166,3 +166,117 @@ def test_a_run_writes_a_confirmed_identity_sidecar(tmp_path, monkeypatch, well):
     assert payload["reference"] == "T0" and payload["inputs"] == ni.inputs_digest(out, "A01")
     assert ni.verdicts(out, "A01", ["T0", "T1"]) == {
         "T0": (ni.REFERENCE, "the reference timepoint"), "T1": (ni.CONFIRMED, payload["timepoints"]["T1"]["reason"])}
+
+
+# ── U9a / U9b: a tile the stage recorded past half a pitch off ──────────────
+LAYOUT_POSES = {"T0": (7.0, (-600.0, -600.0), 1), "T1": (8.0, (-560.0, -630.0), 2), "T2": (6.5, (-620.0, -580.0), 3)}
+
+
+def _three_timepoints(cells):
+    """Three timepoints of a 2 x 2 well with the central square inside F0 alone (moved off every overlap), so only
+    what *cells* puts in the overlaps can break the lattice there; at T1 the stage recorded F1 0.62 pitch right."""
+    from tests._nanowell_run_fixture import PITCH, PX
+
+    record, images = None, {}
+    for tp, (rotation, shift, seed) in LAYOUT_POSES.items():
+        rendered, rec = build_well(timepoint=tp, seed=seed, rotation=rotation, array_shift_um=shift, cells=cells)
+        images[tp] = rendered.images
+        if record is None:
+            record = rec
+        else:
+            record["timepoints"].update(rec["timepoints"])
+            record["tiles"] += rec["tiles"]
+    for tile in record["tiles"]:
+        if tile["timepoint"] == "T1" and tile["field"] == "F1":
+            tile["mosaic_xy_px"] = [tile["mosaic_xy_px"][0] + 0.62 * PITCH / PX, tile["mosaic_xy_px"][1]]
+    return record, images
+
+
+def _layout_run(record, images):
+    return nr.run_well("A01", record, list(LAYOUT_POSES), lambda tp, tile: images[tp].get(tile), SETTINGS,
+                       segmenter=threshold_segmenter())
+
+
+def _f1_from_f0(outcome, tp):
+    positions = outcome.located[tp].positions
+    return np.subtract(positions["F1"], positions["F0"])
+
+
+def test_a_tile_a_step_off_at_one_timepoint_is_put_right_by_the_others(monkeypatch):
+    """The overlaps hold bare lattice, so T1's F0-F1 step comes from the stage and lands a pitch off. T0 and T2 agree
+    on where F1 sits; T1 is registered again with their layout, and its addresses then land on themselves."""
+    from pipeline import tile_register
+    from tests._nanowell_run_fixture import PITCH
+
+    monkeypatch.setattr(tile_register, "STEP_MIN_PEAK", float("inf"))     # content decides nothing here
+    record, images = _three_timepoints(cells=0)
+    outcome = _layout_run(record, images)
+    t1 = outcome.timepoints["T1"]
+    assert "tile_layout" in t1, "T1 was not registered again"
+    disagreed = {d["pair"]: d["um"] for d in t1["tile_layout"]["disagreed"]}
+    assert sorted(disagreed) == ["F0-F1", "F1-F2", "F1-F3"]            # every pair F1 is in, and only those
+    assert all(abs(um - PITCH) < 0.05 * PITCH for um in disagreed.values())
+    assert t1["tile_layout"]["compared_with"] == ["T0", "T2"]
+    assert t1["tile_layout"]["still_disagree"] == []
+    assert np.linalg.norm(_f1_from_f0(outcome, "T1") - _f1_from_f0(outcome, "T0")) < 0.1 * PITCH
+    steps = {s["pair"]: s["from"] for s in t1["registration"]["steps"]}
+    assert steps["F0-F1"] == tile_register.STEP_TIMEPOINTS
+    assert "tile_layout" not in outcome.timepoints["T0"] and "tile_layout" not in outcome.timepoints["T2"]
+    result = _identity(outcome, LAYOUT_POSES)
+    assert result["timepoints"]["T1"]["verdict"] in ni.GOOD, result["timepoints"]["T1"]["reason"]
+
+
+def test_cells_in_the_overlap_and_the_other_timepoints_put_the_tile_right_together():
+    """With cells in the overlaps, content settles T1's F0-F1 across the stage's 0.62-pitch error, but not every pair
+    F1 is in: F1-F3 leads by 0.48 where its noise asks for 0.52. The loop then cannot close, the first registration
+    falls back to the stage's whole-step layout, and the other timepoints put F1 right, with content's own decision
+    kept in the relocated registration. Content alone settling a tile is ``test_tile_register``'s, on wider overlaps."""
+    from pipeline import tile_register
+    from tests._nanowell_run_fixture import PITCH
+
+    record, images = _three_timepoints(cells=600)
+    outcome = _layout_run(record, images)
+    t1 = outcome.timepoints["T1"]
+    assert "tile_layout" in t1 and t1["tile_layout"]["still_disagree"] == []
+    assert {s["pair"]: s["from"] for s in t1["registration"]["steps"]}["F0-F1"] == tile_register.STEP_CONTENT
+    assert np.linalg.norm(_f1_from_f0(outcome, "T1") - _f1_from_f0(outcome, "T0")) < 0.1 * PITCH
+    assert _identity(outcome, LAYOUT_POSES)["timepoints"]["T1"]["verdict"] in ni.GOOD
+
+
+def test_a_kept_timepoint_s_layout_takes_part_in_the_agreement(monkeypatch):
+    """An incremental run adding T0 and T1 to a well whose T2 an earlier run kept: two new timepoints cannot say which
+    of them is wrong, the kept one's tile positions can."""
+    from pipeline import tile_register
+    from tests._nanowell_run_fixture import PITCH
+
+    monkeypatch.setattr(tile_register, "STEP_MIN_PEAK", float("inf"))
+    record, images = _three_timepoints(cells=0)
+    kept = nr.run_well("A01", record, ["T2"], lambda tp, tile: images[tp].get(tile), SETTINGS,
+                       segmenter=threshold_segmenter()).located["T2"].positions
+    alone = nr.run_well("A01", record, ["T0", "T1"], lambda tp, tile: images[tp].get(tile), SETTINGS,
+                        segmenter=threshold_segmenter())
+    assert "tile_layout" not in alone.timepoints["T1"]                 # two timepoints: no agreement to be had
+    together = nr.run_well("A01", record, ["T0", "T1"], lambda tp, tile: images[tp].get(tile), SETTINGS,
+                           segmenter=threshold_segmenter(), kept_layouts={"T2": kept})
+    assert "tile_layout" in together.timepoints["T1"], "T1 was not registered again"
+    assert together.timepoints["T1"]["tile_layout"]["compared_with"] == ["T0", "kept:T2"]
+    assert np.linalg.norm(_f1_from_f0(together, "T1") - _f1_from_f0(together, "T0")) < 0.1 * PITCH
+
+
+def test_a_corner_too_small_to_judge_never_outvotes_the_edges():
+    """Found by the end-to-end lane (tracker U9a): on this well the diagonal F0-F3 shares a corner of three square
+    pitches. Each candidate scored over its own shared region let the wrong one a step closer be judged on a larger
+    patch, where a painted cell sat one lattice vector from another (0.36 against the true corner's 0.08); content
+    took it, the loop could not close, and the solve put every tile tens of micrometres astray, so the timepoint found
+    no lattice at all. Every candidate is now judged on one region, against the noise of the others."""
+    from tests.test_nanowell_timepoint_frames import _painted_well
+
+    record, images = _painted_well({"T1": False}, {"T1": 3})
+    tiles = nr._images_for(record, "A01", "T1", lambda tp, tile: images[tp].get(tile))
+    located = nr.locate_timepoint("T1", record, "A01", tiles, SETTINGS)
+    assert located.status == nr.OK
+    rows = {t["tile"]: (t["left_um"], t["top_um"]) for t in located.grid["tiles"]}
+    origin = np.asarray(rows["F0"])
+    for tile, expected in (("F1", (2709.0, 0.0)), ("F2", (0.0, 2709.0)), ("F3", (2709.0, 2709.0))):
+        assert np.hypot(*(np.asarray(rows[tile]) - origin - expected)) < 1.0, tile
+    assert located.grid["registration_warnings"] == []

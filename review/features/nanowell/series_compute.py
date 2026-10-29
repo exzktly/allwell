@@ -27,7 +27,8 @@ metric                 value                                           undefined
 ``occupancy_class``    "0" / "1" / "2" / "3+" cells at baseline        no count at baseline
 =====================  ==============================================  ===========================================
 
-The site signal is the pipeline's interior sum *minus the empty sites' background*, so it is near zero for
+The nanowell fluorescence (the ``signal_<channel>`` columns) is the pipeline's interior sum *minus the empty sites'
+background*, so it is near zero for
 an empty nanowell and can be negative; a ratio over a baseline at or below zero has no meaning, which is the
 one undefined case this table adds to §3.10.1's ("no signal above background at baseline").
 
@@ -51,7 +52,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from pipeline.nanowell_identity import CONTRADICTED
+from pipeline.nanowell_identity import CONTRADICTED, NOT_CHECKED
 from review.features.nanowell.collect import (
     IDENTITY_CONTRADICTED, MEASURABLE, NOT_LOCATED, UNADDRESSED, NanowellData,
 )
@@ -107,7 +108,9 @@ def _grid_reason(block) -> str:
 def _addressed_grid(data: NanowellData) -> pd.DataFrame:
     """Every addressed nanowell of each well at every timepoint of that well, with a state for each row."""
     sites = data.sites
-    empty = sites.iloc[0:0].assign(reason=pd.Series(dtype=object), tp_order=pd.Series(dtype=int))
+    empty = sites.iloc[0:0].assign(reason=pd.Series(dtype=object), tp_order=pd.Series(dtype=int),
+                                   identity=pd.Series(dtype=object), identity_reason=pd.Series(dtype=object),
+                                   identity_ok=pd.Series(dtype=bool))
     if not len(sites):
         return empty
     located = sites[["well", "timepoint"]].drop_duplicates()
@@ -117,13 +120,7 @@ def _addressed_grid(data: NanowellData) -> pd.DataFrame:
             order.append((well, tp, i))
     timeline = pd.DataFrame(order, columns=["well", "timepoint", "tp_order"])
     addressed = sites[sites["nw_q"].notna() & sites["nw_r"].notna()].drop(columns=["time_h"], errors="ignore")
-    contradicted = {(w, tp): why for w, tps in (getattr(data, "identity", None) or {}).items()
-                    for tp, (verdict, why) in tps.items() if verdict == CONTRADICTED}
-    # The nanowells followed are those some trusted timepoint names: an address only a contradicted timepoint
-    # holds is not a nanowell of the well.
-    trusted = ~pd.Series(pd.MultiIndex.from_arrays([addressed["well"].astype(str), addressed["timepoint"].astype(str)])
-                         .isin(list(contradicted)), index=addressed.index) if contradicted else True
-    keys = addressed[trusted][SITE_KEY].drop_duplicates() if contradicted else addressed[SITE_KEY].drop_duplicates()
+    keys = addressed[SITE_KEY].drop_duplicates()
     if keys.empty:
         return empty
     merged = keys.merge(timeline, on="well").merge(addressed, on=SITE_KEY + ["timepoint"], how="left")
@@ -142,14 +139,33 @@ def _addressed_grid(data: NanowellData) -> pd.DataFrame:
     explained = merged["state"].isin((UNADDRESSED, NOT_LOCATED))
     merged["reason"] = ""
     merged.loc[explained, "reason"] = [reasons.get(k) or _grid_reason(None) for k in here[explained.to_numpy()]]
-    # A timepoint the identity check contradicted names other nanowells than the reference does, so none of its
-    # rows may be joined to an address over time: it reads as not seen, with the check's reason, never as data.
-    if contradicted:
-        hit = pd.Series(here.isin(pd.MultiIndex.from_tuples(list(contradicted))), index=merged.index)
-        merged.loc[hit, "state"] = IDENTITY_CONTRADICTED
-        merged.loc[hit, "reason"] = [contradicted[k] for k in here[hit.to_numpy()]]
+    _mark_identity(merged, here, data)
     merged["time_h"] = merged["timepoint"].map(data.times_h).astype(float)
     return merged.sort_values(SITE_KEY + ["tp_order"], kind="stable").reset_index(drop=True)
+
+
+def _mark_identity(merged: pd.DataFrame, here: pd.MultiIndex, data: NanowellData) -> None:
+    """Add ``identity`` (the timepoint's verdict), ``identity_reason`` and ``identity_ok`` to the joined rows, in place.
+
+    ``identity_ok`` is False on every row of a ``contradicted`` timepoint and on each nanowell a ``partial`` one leaves
+    out: those rows' addresses may name another nanowell than the reference's. Nothing measured at a timepoint is
+    hidden by it — a count is a count of *some* nanowell — but no comparison over time uses such a row: no fold change
+    from or to it, no growth rate through it, no occupancy class taken at it (``site_metrics``)."""
+    identity = getattr(data, "identity", None) or {}
+    excluded = getattr(data, "identity_excluded", None) or {}
+    keys = list(here)
+    verdicts = [identity.get(w, {}).get(tp, (NOT_CHECKED, "")) for w, tp in keys]
+    merged["identity"] = [v for v, _why in verdicts]
+    merged["identity_reason"] = [why for _v, why in verdicts]
+    out = [v == CONTRADICTED for v in merged["identity"]]
+    if excluded:
+        q = merged["nw_q"].to_numpy()
+        r = merged["nw_r"].to_numpy()
+        for i, (w, tp) in enumerate(keys):
+            left_out = excluded.get(w, {}).get(tp)
+            if left_out and (int(q[i]), int(r[i])) in left_out:
+                out[i] = True
+    merged["identity_ok"] = ~np.asarray(out, dtype=bool)
 
 
 def _baseline_rows(frame: pd.DataFrame, baseline: str, value: str) -> pd.Series:
@@ -186,8 +202,9 @@ def _ratio(top: pd.Series, bottom: pd.Series) -> pd.Series:
 
 
 def _growth(frame: pd.DataFrame) -> pd.Series:
-    """Least-squares slope of ln n against time per site, over timepoints with a time and n > 0 (≥ 3 of them)."""
-    usable = frame["n"].gt(0) & frame["time_h"].notna()
+    """Least-squares slope of ln n against time per site, over timepoints with a time, n > 0 and a confirmed (or not
+    contradicted) identity (≥ 3 of them)."""
+    usable = frame["n"].gt(0) & frame["time_h"].notna() & frame["identity_ok"]
     x = frame["time_h"].where(usable)
     y = np.log(frame["n"].where(usable))
     keys = [frame[k] for k in SITE_KEY]
@@ -226,19 +243,22 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST) -> pd.DataFrame:
             # Every addressed nanowell has a row at each of its well's timepoints, so only a well without the
             # named timepoint leaves a site with no baseline row: say so, rather than "never measured".
             frame[f"_base_state_{value}"] = frame[f"_base_state_{value}"].fillna(NO_BASELINE_TIMEPOINT)
-        base[value] = _at_baseline(frame, mask, value)
+        # A baseline whose identity is contradicted is no baseline: every fold change from it is undefined.
+        base[value] = _at_baseline(frame, mask, value).where(_at_baseline(frame, mask, "identity_ok") == True)  # noqa: E712
+        frame[f"_base_identity_{value}"] = _at_baseline(frame, mask, "identity_ok")
     frame["baseline_timepoint"] = frame["_base_tp_n"]           # the count's; see _baseline_rows for the others
     frame["baseline_state"] = frame["_base_state_n"]
     n0, c0 = base["n"], base["c"]
     frame["n0"] = n0
-    frame["count_fc"] = _ratio(frame["n"], n0)
-    frame["seeded_later"] = n0.eq(0) & frame["n"].gt(0)
-    both = frame["n"].notna() & n0.notna()
+    ok = frame["identity_ok"]
+    frame["count_fc"] = _ratio(frame["n"], n0).where(ok)
+    frame["seeded_later"] = n0.eq(0) & frame["n"].gt(0) & ok
+    both = frame["n"].notna() & n0.notna() & ok
     frame["log2_count_fc"] = np.log2((frame["n"] + 1) / (n0 + 1)).where(both)
-    frame["confluence_fc"] = _ratio(frame["c"], c0)
+    frame["confluence_fc"] = _ratio(frame["c"], c0).where(ok)
     for ch in data.channels:
-        frame[f"brightness_fc_{ch}"] = _ratio(frame[f"brightness_{ch}"], base[f"brightness_{ch}"])
-        frame[f"signal_fc_{ch}"] = _ratio(frame[f"signal_{ch}"], base[f"signal_{ch}"])
+        frame[f"brightness_fc_{ch}"] = _ratio(frame[f"brightness_{ch}"], base[f"brightness_{ch}"]).where(ok)
+        frame[f"signal_fc_{ch}"] = _ratio(frame[f"signal_{ch}"], base[f"signal_{ch}"]).where(ok)
     occupancy = pd.Series(pd.NA, index=frame.index, dtype="object")
     occupancy[n0.notna()] = np.where(n0[n0.notna()] >= 3, "3+", n0[n0.notna()].astype(int).astype(str))
     frame["occupancy_class"] = occupancy
@@ -258,7 +278,7 @@ def site_series(metrics: pd.DataFrame, well: str, q: int, r: int) -> pd.DataFram
 
 def crop_metric_lines(row, channel: str | None = None) -> list[str]:
     """What a crop of one nanowell at one timepoint is captioned with, one short item each: its computed
-    measurements there — the cell count, the confluence as a percentage, and the shared channel's site signal and
+    measurements there — the cell count, the confluence as a percentage, and the shared channel's nanowell fluorescence and
     brightness when the run measured them — in that order of importance, since a crop with room for one line writes
     as many as fit and the pop-out writes them all. A
     timepoint whose state carries no number says its state instead, and a measurement that is missing is left out
@@ -344,12 +364,21 @@ def exclusion_reason(metrics: pd.DataFrame, metric: str, channels=()) -> pd.Seri
         base_state_bad = ~metrics["baseline_state"].isin(MEASURABLE)
         out[~defined & base_state_bad] = "baseline " + metrics["baseline_state"].fillna(_NEVER).astype(str)
         out[~defined & ~base_state_bad] = "no count at baseline"
+        base_foreign = ~defined & ~base_state_bad & metrics["_base_identity_n"].eq(False)
+        out[base_foreign] = "baseline " + IDENTITY_CONTRADICTED
         return out
     out[~defined & state_bad] = metrics["state"].astype(str)
     rest = ~defined & ~state_bad & value_bad
     out[rest] = _value_reason(metrics, value)[rest]
     if kind == "fc":
         pending = ~defined & (out == "")
+        # A row, or its baseline, whose address may name another nanowell than the reference's joins nothing.
+        foreign = pending & ~metrics["identity_ok"]
+        out[foreign] = IDENTITY_CONTRADICTED
+        pending &= ~foreign
+        base_foreign = pending & metrics[f"_base_identity_{value}"].eq(False)
+        out[base_foreign] = "baseline " + IDENTITY_CONTRADICTED
+        pending &= ~base_foreign
         base_state = metrics[f"_base_state_{value}"]
         base_bad = pending & ~base_state.isin(MEASURABLE)
         out[base_bad] = "baseline " + base_state.fillna(_NEVER).astype(str)[base_bad]
@@ -370,7 +399,8 @@ def exclusion_reason(metrics: pd.DataFrame, metric: str, channels=()) -> pd.Seri
 
 def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
     """The export table (tracker D8): one row per site and timepoint, every value and metric, in a fixed order."""
-    columns = (["well", "nw_q", "nw_r", "nw_ring", "timepoint", "time_h", "state", "reason", "fused",
+    columns = (["well", "nw_q", "nw_r", "nw_ring", "timepoint", "time_h", "state", "reason", "identity",
+                "identity_ok", "fused",
                 "partially_visible", "imaged_fraction", "visible_fraction", "n_cells", "confluence",
                 "area_est_cells", "count_disagreement"]
                + [c for ch in channels for c in (f"brightness_{ch}", f"signal_{ch}")]
@@ -381,11 +411,4 @@ def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
     out = metrics.reindex(columns=columns)
     out["n_cells"] = metrics["n"]
     out["confluence"] = metrics["c"]
-    # A contradicted timepoint's row under this address belongs to another physical nanowell: none of what was
-    # measured there is this nanowell's, so the export carries the state and reason and blanks the rest.
-    foreign = metrics["state"].eq(IDENTITY_CONTRADICTED)
-    if foreign.any():
-        raw = ["fused", "partially_visible", "imaged_fraction", "visible_fraction", "area_est_cells",
-               "count_disagreement"] + [c for ch in channels for c in (f"brightness_{ch}", f"signal_{ch}")]
-        out.loc[foreign, raw] = np.nan
     return out

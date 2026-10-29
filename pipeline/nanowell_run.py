@@ -327,7 +327,7 @@ def _montage_to_common(point, montage) -> np.ndarray:
 #: The version of the registration step's algorithm (``tile_register`` and the per-tile lattice fits that feed it).
 #: It joins :func:`registration_key`, so positions an older algorithm solved are never taken for this one's. Raise it
 #: whenever a change there could move a tile.
-REGISTRATION_SCHEME = 2
+REGISTRATION_SCHEME = 3
 
 
 @dataclass(frozen=True)
@@ -337,20 +337,23 @@ class Placement:
     *tiles* are the grid block's ``tiles`` rows; *warnings* the registration's own (not the locating stage's);
     *key* the :func:`registration_key` it was solved under; *fitted* how many tiles' own lattice fits constrained
     it; *reused_from* the output folder whose grid record it was taken from, or ``None`` when this run registered
-    the tiles itself.
+    the tiles itself; *steps* how each pair's whole-vector choice was made (``{"pair", "from", "moved_um"}``, from
+    ``tile_register.choose_step``: the overlap's content, the pairs around it, the well's other timepoints, or the
+    stage), which is what to read when a tile sits a step off.
     """
     tiles: tuple
     warnings: tuple
     key: str
     fitted: int
     reused_from: str | None = None
+    steps: tuple = ()
 
     def positions(self) -> dict[str, tuple[float, float]]:
         return {t["tile"]: (float(t["left_um"]), float(t["top_um"])) for t in self.tiles}
 
 
 def registration_key(record: dict, well: str, timepoint: str, images: dict, settings: NanowellSettings,
-                     pitch_um: float, kind: str, diameter_um: float | None = None) -> str:
+                     pitch_um: float, kind: str, diameter_um: float | None = None, preferred: dict | None = None) -> str:
     """A digest of everything registration's result depends on, so stored positions are reused only when
     registering again would produce exactly them.
 
@@ -363,7 +366,9 @@ def registration_key(record: dict, well: str, timepoint: str, images: dict, sett
       plate re-exported with corrected images keeps its record but not its registration;
     * the geometry, nominal pitch and diameter, and the diameter measured on the tiles: how each tile's lattice is
       fitted (:func:`_tile_fit`);
-    * the working pitch and lattice kind measured on this timepoint: the fits' seed and the search window.
+    * the working pitch and lattice kind measured on this timepoint: the fits' seed and the search window;
+    * *preferred*, the tile offsets the well's other timepoints agree on, when the timepoint is registered again with
+      them (:func:`_agree_tile_layouts`): they can change a pair's whole-vector choice.
 
     Nothing about measurement or segmentation is in it (cell diameter, margin, occlusion and clipping thresholds,
     the segmenter): those act after registration, which is the point of reusing it.
@@ -378,7 +383,9 @@ def registration_key(record: dict, well: str, timepoint: str, images: dict, sett
         pixels.update(image.tobytes())
     payload = json.dumps([REGISTRATION_SCHEME, record_digest(record, well, timepoint), pixels.hexdigest(),
                           settings.geometry, settings.pitch_um, settings.diameter_um, float(pitch_um), kind,
-                          None if diameter_um is None else float(diameter_um)])
+                          None if diameter_um is None else float(diameter_um),
+                          None if preferred is None else sorted([f"{i}-{j}", round(float(x), 3), round(float(y), 3)]
+                                                                for (i, j), (x, y) in preferred.items())])
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -400,14 +407,19 @@ def stored_placement(candidates, key: str, tile_ids) -> Placement | None:
             continue
         if sorted(t["tile"] for t in rows) != sorted(tile_ids):
             continue
-        return Placement(rows, tuple(stored.get("warnings") or ()), key, fitted, str(folder))
+        return Placement(rows, tuple(stored.get("warnings") or ()), key, fitted, str(folder),
+                         tuple(stored.get("steps") or ()))
     return None
 
 
 def _solved_placement(registration, key: str, fitted: int) -> Placement:
+    from pipeline.tile_register import LATTICE
+
+    steps = tuple({"pair": f"{c.i}-{c.j}", "from": c.step_from, "moved_um": round(float(np.hypot(*c.step_moved_um)), 2)}
+                  for c in registration.constraints if c.source == LATTICE)
     return Placement(tuple({"tile": t.tile_id, "left_um": t.left_um, "top_um": t.top_um, "source": t.source,
                             "residual_um": t.residual_um, "correction_um": t.correction_um}
-                           for t in registration.tiles), tuple(registration.warnings), key, fitted)
+                           for t in registration.tiles), tuple(registration.warnings), key, fitted, steps=steps)
 
 
 def _grid_block(plan, placement: Placement | None, extra: dict, warnings=()) -> dict:
@@ -420,7 +432,8 @@ def _grid_block(plan, placement: Placement | None, extra: dict, warnings=()) -> 
         block["tiles"] = [dict(t) for t in placement.tiles]
         block["registration_warnings"] = list(placement.warnings) + list(warnings)
         block["registration"] = {"key": placement.key, "warnings": list(placement.warnings),
-                                 "tile_lattice_fits": placement.fitted, "reused_from": placement.reused_from}
+                                 "tile_lattice_fits": placement.fitted, "reused_from": placement.reused_from,
+                                 "steps": [dict(step) for step in placement.steps]}
     block.update(extra)
     return block
 
@@ -471,7 +484,7 @@ def _find_square(montage, detection, diameter: float, lattice_pitch: float, sett
 
 def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, settings: NanowellSettings, *,
                      plate_rigid=None, expected_shape: tuple[int, int] | None = None, stored=None,
-                     manual_anchor_um=None) -> Located:
+                     manual_anchor_um=None, preferred: dict | None = None) -> Located:
     """Place, register, montage and address one (well, timepoint). Never raises on bad data.
 
     *manual_anchor_um* is the anchor a person set for this timepoint (``util.nanowell_anchors``), in the well frame;
@@ -481,6 +494,8 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     own (``no_images``), not a smaller grid: a missing tile would change which sites it owns. *stored* is
     ``(folder, grid block)`` pairs for this timepoint from earlier runs: a placement among them solved under this
     timepoint's :func:`registration_key` is taken instead of registering the tiles again (:func:`stored_placement`).
+    *preferred* maps a pair of tiles to the offset the well's other timepoints agree it has
+    (``tile_register.agreed_offsets``), which settles a pair's whole-vector choice its overlap cannot.
     """
     from pipeline.nanowell_detect import detect_sites, estimate_lattice_fft
     from pipeline.nanowell_lattice import index_points, resolve_origin
@@ -511,14 +526,14 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     else:
         (pitch, pitch_source), kind = working_pitch(images, plan, px, settings), "auto"
     tile_diameter, diameter_info = _tile_diameter(images, plan, px, pitch)
-    key = registration_key(record, well, timepoint, images, settings, pitch, kind, tile_diameter)
+    key = registration_key(record, well, timepoint, images, settings, pitch, kind, tile_diameter, preferred)
     registration = stored_placement(stored, key, [p.tile_id for p in plan.placements])
     if registration is None:
         observations = [TileObservation(p.tile_id, (p.left_um, p.top_um), (p.width_um, p.height_um),
                                         _tile_fit(images[p.tile_id], px, settings, pitch, kind, tile_diameter))
                         for p in plan.placements]
         registration = _solved_placement(
-            register_tiles(observations, images=images, pixel_size_um=px, pitch_um=pitch), key,
+            register_tiles(observations, images=images, pixel_size_um=px, pitch_um=pitch, preferred=preferred), key,
             sum(o.fit is not None for o in observations))
     fitted = registration.fitted
     warnings = [] if fitted else [
@@ -2030,9 +2045,12 @@ def _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts) -
     another set of timepoints can move (review F21b)."""
     from pipeline.nanowell_measure import MEASURE_VERSION
 
+    # The registration's own key: the tiles' positions decide which pixels every nanowell is measured from, and a
+    # timepoint registered again with its well's agreed tile layout has moved a tile a lattice step (tracker U9b).
     key = {"radius_um": radius_um, "record_digest": outcome.timepoints[tp]["record_digest"],
            "located": [located.status, located.origin_method], "measure_version": MEASURE_VERSION,
-           "diameter_used_um": outcome.radius.get("diameter_used_um")}
+           "diameter_used_um": outcome.radius.get("diameter_used_um"),
+           "registration": (located.grid.get("registration") or {}).get("key")}
     if located.manual_anchor_um is not None:
         key["manual_anchor_um"] = list(located.manual_anchor_um)      # another click may be another site
     if roster is not None and settings.infer:
@@ -2204,13 +2222,70 @@ class _SiteCount:
             self._say()
 
 
+def _layout_pairs(located: Located) -> list[tuple[str, str]]:
+    """The neighbouring pairs of a located timepoint's tiles whose two tiles registration placed by lattice phase (the
+    pairs whose whole-vector choice can go wrong, and can be put right)."""
+    from pipeline.tile_register import LATTICE, TileObservation, neighbour_pairs
+
+    if located.plan is None or not located.positions:
+        return []
+    sources = {t.get("tile"): t.get("source") for t in located.grid.get("tiles") or ()}
+    pairs = neighbour_pairs([TileObservation(p.tile_id, (p.left_um, p.top_um), (p.width_um, p.height_um))
+                             for p in located.plan.placements])
+    return [(i, j) for i, j in pairs if sources.get(i) == LATTICE and sources.get(j) == LATTICE]
+
+
+def _agree_tile_layouts(outcome: WellOutcome, timepoints, kept_layouts, locate, note=None) -> None:
+    """Register again each timepoint whose tiles sit a lattice step from where the well's other timepoints agree.
+
+    The stage runs one tile program at every timepoint, so a pair of neighbouring tiles sits the same distance apart
+    each time, to the stage's repeatability. Registration fixes that distance only up to a whole lattice vector; it
+    settles the vector from the overlap's content where it can and from the stage's record otherwise, and a stage
+    error past half a pitch then places a tile a step off, with every nanowell in it named after a neighbour. The
+    timepoints together see it: ``tile_register.agreed_offsets`` takes, for each pair, the offset most of them agree on
+    (three timepoints at least, the earlier run's kept ones included from *kept_layouts*), and a timepoint with a pair
+    half a pitch or more from it is located again by *locate* (``f(tp, preferred, stem)``) with the agreed offsets,
+    which settle every pair its content cannot (``tile_register.choose_step``). Its grid block records the pairs that
+    disagreed (``tile_layout``). Content that disagrees with the agreement still wins, with a registration warning:
+    it was measured on that timepoint's own pixels.
+    """
+    from pipeline.tile_register import agreed_offsets, disagreeing_pairs, pair_offsets
+
+    located = {tp: outcome.located[tp] for tp in timepoints if outcome.located[tp].positions}
+    pitches = [loc.pitch_um for loc in located.values() if loc.pitch_um]
+    if not pitches:
+        return
+    pitch = float(np.median(pitches))
+    layouts = {tp: pair_offsets(loc.positions, _layout_pairs(loc)) for tp, loc in located.items()}
+    for tp, positions in (kept_layouts or {}).items():
+        if tp not in layouts and positions:
+            pairs = [(i, j) for i in positions for j in positions if i < j]
+            layouts[f"kept:{tp}"] = {pair: offset for pair, offset in pair_offsets(positions, pairs).items()
+                                     if any(pair in mine for mine in layouts.values())}
+    agreed = agreed_offsets(layouts, pitch)
+    for tp in located:
+        wrong = disagreeing_pairs(layouts[tp], agreed, pitch)
+        if not wrong:
+            continue
+        named = ", ".join(f"{i}-{j} ({distance:.0f} um)" for (i, j), distance in wrong)
+        if note is not None:
+            note(f"{tp}: tiles {named} sit a lattice step from where the well's other timepoints place them; "
+                 "registered again with their layout")
+        relocated = locate(tp, preferred=agreed, stem="_agreed")
+        still = disagreeing_pairs(pair_offsets(relocated.positions, _layout_pairs(relocated)), agreed, pitch)
+        outcome.timepoints[tp]["tile_layout"] = {
+            "disagreed": [{"pair": f"{i}-{j}", "um": round(distance, 2)} for (i, j), distance in wrong],
+            "still_disagree": [{"pair": f"{i}-{j}", "um": round(distance, 2)} for (i, j), distance in still],
+            "compared_with": sorted(name for name in layouts if name != tp)}
+
+
 def run_well(well: str, record: dict, timepoints, load_phase, settings: NanowellSettings, *,
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
              expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None,
              reference: dict | None = None, earliest_template=None, spill_dir=None, fixed_roster=None,
              kept_evidence: dict | None = None, stored_placements: dict | None = None,
              manual_anchors: Mapping = MappingProxyType({}), progress=None, site_progress=None,
-             note=None) -> WellOutcome:
+             note=None, kept_layouts: dict | None = None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -2221,7 +2296,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     timepoint to the same roster instead of choosing a new one. *checkpoint* has ``load(timepoint, key)``
     (a :class:`Measured` or ``None``) and ``save(timepoint, key, measured)``: a timepoint measured before
     the process was killed is taken back instead of measured again, but only under the same *key* (the
-    shared radius and the record's digest), because a different roster or tile placement makes it wrong.
+    shared radius, the record's digest and the registration's key), because a different roster or tile placement
+    makes it wrong.
     *reference* is a timepoint an earlier run kept (``timepoint``, ``pitch_um``, ``angle_deg``,
     ``roster_size`` from its grid block): the new timepoints are checked for consistency against it, as they
     would have been had they run together. *spill_dir*, when given, is where each timepoint's montage goes once
@@ -2235,7 +2311,10 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     *stored_placements* maps a timepoint to ``(folder, grid block)`` pairs from earlier runs' grid records, whose
     registration :func:`locate_timepoint` takes when it was solved from exactly this timepoint's inputs.
     *manual_anchors* maps a timepoint to the anchor a person set for it, in the well frame (``util.nanowell_anchors``).
-    *progress*, when given, is ``f(done, total)``, called as the work goes (:class:`_Steps`); *site_progress*, when
+    Once every timepoint is located, a timepoint whose tiles sit a lattice step from where the well's other timepoints
+    agree they sit is registered again with their layout (:func:`_agree_tile_layouts`); *kept_layouts* maps each
+    timepoint an earlier run kept to its registered tile positions (``{tile: (left, top)}``), which take part in that
+    agreement without being located again. *progress*, when given, is ``f(done, total)``, called as the work goes (:class:`_Steps`); *site_progress*, when
     given, is ``f(timepoint, done, total)``, the nanowells of the timepoint being measured that are segmented so far;
     *note*, when given, is ``f(text)``, told the scale Cellpose sees each timepoint at before it is measured (only when
     the count is Cellpose's, *segmenter* ``None``).
@@ -2243,20 +2322,24 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     outcome = WellOutcome(well)
     timepoints = list(timepoints)
     steps = _Steps(progress, len(timepoints), site_progress, note, settings, cellpose=segmenter is None)
-    for tp in timepoints:
-        located_after = _say_locating(note, record, well, tp)
+
+    def locate(tp, preferred=None, stem=""):
         images = _images_for(record, well, tp, load_phase)
         located = locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape,
                                    plate_rigid=(plate_rigid or {}).get(tp), stored=(stored_placements or {}).get(tp),
-                                   manual_anchor_um=manual_anchors.get(tp))
+                                   manual_anchor_um=manual_anchors.get(tp), preferred=preferred)
         if spill_dir is not None and located.montage is not None:
-            located.montage = _spill_montage(located.montage, Path(spill_dir), f"{well}_{tp}")
+            located.montage = _spill_montage(located.montage, Path(spill_dir), f"{well}_{tp}{stem}")
         outcome.located[tp] = located
         outcome.timepoints[tp] = dict(located.grid) or {"status": located.status, "reason": located.reason}
         outcome.timepoints[tp]["record_digest"] = record_digest(record, well, tp)
-        del images
-        located_after(located.status)
+        return located
+
+    for tp in timepoints:
+        located_after = _say_locating(note, record, well, tp)
+        located_after(locate(tp).status)
         steps.tick()
+    _agree_tile_layouts(outcome, timepoints, kept_layouts, locate, note)
     anchored = [tp for tp in timepoints if outcome.located[tp].status == OK]
     unaddressed = [tp for tp in timepoints if outcome.located[tp].status == UNADDRESSED]
     # An inferred array has a shared set of addresses instead of a shared radius, whatever its outline (X35).

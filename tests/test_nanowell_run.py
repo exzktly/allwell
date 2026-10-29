@@ -789,3 +789,15 @@ def test_a_kept_timepoint_flagged_a_roster_mismatch_says_nothing_about_the_rim()
              "consistency": "roster_mismatch"}]
     kept = nt._kept_evidence({"grid": {"array_radius": {"roster_rule": "evidence"}}, "sites": rows})
     assert kept == {"detected": {(3, 0)}, "imaged": {(3, 0)}, "origins": {}}
+
+
+def test_each_kept_timepoint_s_tile_positions_reach_the_layout_agreement():
+    """Tracker U9b: an incremental run's new timepoints are checked against the kept ones' registered tiles."""
+    from pipeline import nanowell_task as nt
+
+    tiles = [{"tile": "F0", "left_um": 0.0, "top_um": 0.0, "source": "lattice"},
+             {"tile": "F1", "left_um": "2709.5", "top_um": 1.25, "source": "lattice"}]
+    prior = {"kept": ["T0", "T1", "T2"], "grid": {"timepoints": {
+        "T0": {"tiles": tiles}, "T1": {"status": "no_images"}, "T2": {"tiles": [{"tile": "F0"}]}}}}
+    assert nt._kept_layouts(prior) == {"T0": {"F0": (0.0, 0.0), "F1": (2709.5, 1.25)}, "T1": {}}
+    assert nt._kept_layouts(None) is None

@@ -72,7 +72,7 @@ def _mark_colours(muted: str) -> dict:
     """The ink of each identity mark's band and word: the theme's warning and danger, and the secondary ink."""
     from ui.theme import Colors
 
-    return {"inconclusive": Colors.warn, "contradicted": Colors.danger, "not_checked": muted}
+    return {"inconclusive": Colors.warn, "partial": Colors.warn, "contradicted": Colors.danger, "not_checked": muted}
 
 
 def _inks(ax) -> tuple[str, str, str]:
@@ -521,7 +521,7 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     """
     fig.clear()
     outside = outside or {}
-    rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", "Brightness"), (f"signal_{channel}", "Site signal")]
+    rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", "Brightness"), (f"signal_{channel}", "Nanowell fluorescence")]
                                 if channel else [])
     if not series:
         return
@@ -1447,10 +1447,12 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
         # Each nanowell as two-point segments, so a segment into or out of a timepoint whose nanowell identity is
         # not confirmed can be dashed (``_identity_marks``); the colours stay paired per segment.
         unverified = set(panel.marks)
+        oks = panel.line_ok or [np.ones(len(panel.times), dtype=bool)] * len(panel.lines)
         for dashed in (False, True):
             segments, occupancy = [], []
-            for _site, occ, y in panel.lines:
-                pieces = split_segments(panel.times, y, unverified)[int(dashed)]
+            for (_site, occ, y), ok in zip(panel.lines, oks):
+                # A value that may belong to another nanowell is joined to nothing (drawn as a point below).
+                pieces = split_segments(panel.times, np.where(ok, y, np.nan), unverified)[int(dashed)]
                 segments += pieces
                 occupancy += [occ] * len(pieces)
             if segments:
@@ -1473,6 +1475,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
                                        label=f"{cls} at baseline" if style == "-" else None)
                 ax.add_collection(thick)
                 theme_paired_colours(thick, screen=("none", screen[1]), publication=("none", publication[1]))
+        _unjoined_points(ax, panel, oks)
         span = float(np.ptp(panel.times)) if len(panel.times) > 1 else 1.0
         marked_kinds.update(panel.marks.values())
         mark_timepoints(ax, panel.times, panel.marks, _mark_colours(muted), width=0.04 * span or 0.3,
@@ -1519,6 +1522,21 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
     for i, text in enumerate(reversed(lines)):
         _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=muted, gid="nw-traj-footer"),
              muted=True)
+
+
+def _unjoined_points(ax, panel, oks) -> None:
+    """Each value whose nanowell identity is contradicted, as a point of its occupancy colour joined to nothing: it
+    is a measurement of *some* nanowell, so it stays on the figure over the hatching, but not on a line."""
+    xs, ys, occupancy = [], [], []
+    for (_site, occ, y), ok in zip(panel.lines, oks):
+        loose = ~np.asarray(ok, dtype=bool) & np.isfinite(y)
+        xs += list(panel.times[loose])
+        ys += list(y[loose])
+        occupancy += [occ] * int(loose.sum())
+    if xs:
+        screen, publication = _occupancy_colours(occupancy)
+        colours = (publication if _is_publication(ax) else screen)[1]
+        ax.scatter(xs, ys, s=6, c=colours, alpha=0.6, linewidths=0, zorder=3, gid="nw-traj-unjoined")
 
 
 def _share_limits(axes) -> None:

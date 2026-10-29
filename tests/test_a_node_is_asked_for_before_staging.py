@@ -34,6 +34,7 @@ from tests._fake_remote import FakeRemote
 
 SCHEMA = "experiment:channel:well:fov:timepoint"
 WELLS = ("A01", "B02")
+SOURCED = "[test] the job sourced the command file it was handed"
 
 
 # ── the walltime a batched job is asked for ────────────────────────────────────
@@ -158,6 +159,11 @@ def remote(tmp_path, host, monkeypatch):
     from services.remote_upload import DatasetCache
 
     fake = FakeRemote(tmp_path / "remote-host")
+    # The command file the job is handed begins by sourcing conda (`_CONDA_ACTIVATE_SNIPPET`, which looks in
+    # `~/miniforge3` first). This one says it was reached and stops there, whatever conda the test machine has.
+    conda_sh = fake.root / "miniforge3" / "etc" / "profile.d" / "conda.sh"
+    conda_sh.parent.mkdir(parents=True)
+    conda_sh.write_text(f'echo "{SOURCED}"; exit 42\n')
     jobs = _Jobs(fake)
     fake.install(monkeypatch, host, on_launch=jobs)
     monkeypatch.setattr(DatasetCache, "ensure_uploaded",
@@ -220,11 +226,11 @@ def test_the_node_is_asked_for_before_planning_and_takes_the_run(plate, host, re
     assert "/reservations/" in remote.launched[0][-1]
     assert "[remote] scheduler: the run is handed to the node asked for early" in text, text
     assert "requesting allocation via: env" not in text.replace("early: requesting", ""), text
-    # The job ran the command file it was handed (it begins with conda, which this host lacks) and the run read
-    # that from its own stream, after the hand-over.
+    # The job ran the command file it was handed (it begins with conda, which this host answers with a marker)
+    # and the run read that from its own stream, after the hand-over.
     handed = text.find("the run is handed to the node asked for early")
-    sourced = text.find("cannot find conda.sh on remote")
-    assert handed < sourced, text
+    sourced = text.find(SOURCED)
+    assert -1 < handed < sourced, text
     pidfile = r._remote_runner._run.remote_pidfile
     assert os.readlink(remote.path(pidfile)).endswith("/run.pid")
     assert "/reservations/" in os.readlink(remote.path(pidfile))

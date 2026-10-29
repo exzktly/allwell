@@ -228,6 +228,8 @@ class Reservation:
         self._popen: subprocess.Popen | None = None
         self._pump: threading.Thread | None = None
         self._heartbeat: _UploadHeartbeat | None = None
+        #: The scheduler's last error line, said when the job ends before the run is handed to it.
+        self._last_error = ""
         # The request line has been logged, so the pane is counting a wait that a release must end.
         self._announced = False
 
@@ -293,6 +295,8 @@ class Reservation:
                     if self._taken:
                         self._lines.put(line)
                         continue
+                if line.startswith("srun: error:") or "scheduler: ERROR" in line:
+                    self._last_error = line.strip()
                 self._log(line)
         except (OSError, ValueError) as exc:
             self._log(f"[remote] scheduler: stopped reading the early allocation request ({exc})\n")
@@ -328,6 +332,8 @@ class Reservation:
             return False
         rc = self._popen.poll() if self._popen is not None else None
         why = "it was given back" if self._released else f"it ended before the run was ready (exit {rc})"
+        if self._last_error and not self._released:
+            why += f": {self._last_error}"
         self._log(f"[remote] scheduler: the node asked for early cannot take the run — {why}; asking for one "
                   "now.\n")
         self.release("it can no longer take the run")

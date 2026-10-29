@@ -488,3 +488,38 @@ def test_without_the_exclusion_a_queued_launch_is_left_alone(tmp_path):
     assert len(args) == 1
     assert not (tmp_path / "state" / "scancelled").exists()
     assert "still queued" not in out.stdout
+
+
+def test_a_request_no_node_can_ever_take_says_what_it_asked_for_and_what_the_nodes_have(tmp_path):
+    """Reported: a JupyterHub profile picked in the Remotes dialog asked for more than any node had, and the run
+    ended on srun's bare "Requested node configuration is not available" — nothing said which value did not fit.
+    Slurm's refusal is final (the same words would be refused again), so the wrapper prints the request beside the
+    partition's node shapes, one line per shape, and the run ends."""
+    from services.remote_srun_retry import NO_NODE_FITS
+
+    bindir = _fake_cluster(tmp_path, [("unavailable", "")], None)
+    _write_exe(bindir / "sinfo", (
+        'case "$*" in *"%c %m %f %G"*)\n'
+        '  printf "48 380000 dynamic,m8i.24xlarge (null)\\n48 380000 dynamic,m8i.24xlarge (null)\\n'
+        '8 30000 static,t3.2xlarge (null)\\n";;\n'
+        '*) printf "n01 idle~\\nn02 idle~\\nn03 idle~\\n";;\nesac\n'))
+    launcher = "srun --partition=gen --constraint=m8i.24xlarge --cpus-per-task=96 --mem=370G"
+    out, args, _ = _run(tmp_path, bindir, launcher)
+
+    assert out.returncode != 0
+    assert len(args) == 1, "a refusal Slurm will repeat was asked again"
+    assert f"{NO_NODE_FITS} in gen — the scheduler command asks for: srun --partition=gen" in out.stdout
+    assert "--cpus-per-task=96 --mem=370G" in out.stdout
+    assert "[remote] scheduler:   2 48 380000 dynamic,m8i.24xlarge (null)" in out.stdout
+    assert "[remote] scheduler:   1 8 30000 static,t3.2xlarge (null)" in out.stdout
+    assert "change the scheduler command in the Remotes dialog" in out.stdout
+
+
+def test_a_refusal_the_fallback_then_gets_past_says_nothing_of_the_sort(tmp_path):
+    """The awake-node preference's own refusal is retried and booted: not a request no node can take."""
+    from services.remote_srun_retry import NO_NODE_FITS
+
+    bindir = _fake_cluster(tmp_path, [("unavailable", ""), ("run", "n02")], _SINFO)
+    out, _args, _ = _run(tmp_path, bindir, "srun -p gpu --gres=gpu:1")
+    assert out.returncode == 0, out.stdout
+    assert NO_NODE_FITS not in out.stdout

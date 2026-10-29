@@ -49,7 +49,7 @@ _BATCH_DIR = re.compile(r"b\d+")
 #: What a finished well leaves in a remote output directory, as globs on the well label. The nanowell tables live
 #: under ``nanowells/`` and are only present for a nanowell run.
 _OUTPUT_GLOBS = ("{w}_out.zip", "*_{w}.csv", "*_{w}.csv.gz")
-_NANOWELL_FILES = ("{w}.csv", "{w}_grid.json", "{w}_template.npz")
+_NANOWELL_FILES = ("{w}.csv", "{w}_grid.json", "{w}_template.npz", "{w}_identity.json")
 
 
 @dataclass

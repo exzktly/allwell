@@ -141,6 +141,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/nanowell_measure.py",
     "pipeline/nanowell_inspect.py",
     "pipeline/nanowell_frames.py",
+    "pipeline/nanowell_identity.py",
     "pipeline/nanowell_run.py",
     "pipeline/nanowell_task.py",
     "pipeline/nanowell_pattern_record.py",

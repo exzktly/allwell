@@ -501,7 +501,7 @@ def _lattice_constraint(result, pair):
 def test_a_stage_error_past_half_a_pitch_is_put_right_by_the_overlap_s_content():
     """The stage recorded F1 0.62 pitch to the right. The lattice alone takes the nearer whole vector, a pitch
     from the truth (the test above); cells in the overlap break the lattice's periodicity and pick the right one."""
-    plan = TilePlan(2, 2, (300, 300), 0.15, PX)
+    plan = TilePlan(2, 2, (400, 400), 0.3, PX)
     rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=1800, rotation_deg=6,
                             noise_sigma=0.05, cells=400, seed=3, blur_px=1.0)
     observations = _off_by(_observations(rendered), "F1", 0.62 * PITCH)
@@ -515,6 +515,21 @@ def test_a_stage_error_past_half_a_pitch_is_put_right_by_the_overlap_s_content()
     # step would be averaged into the solve against them.
     assert _lattice_constraint(result, ("F1", "F2")).step_from == STEP_CHAINED
     assert result.warnings == ()
+
+
+def test_content_that_leaves_a_loop_open_gives_way_to_a_layout_that_closes():
+    """F1 recorded 0.62 pitch off. Content settles F0-F2 and F1-F3, but not F0-F1, whose stage pick is a step wrong:
+    the loop F0-F1-F3-F2 cannot close, and solving it as it stands would average F1 half a step astray, a placement
+    no timepoint has. The choices made without content close the loop (F1 a whole pitch off, which the well's other
+    timepoints then put right) and are used, with the reason named."""
+    plan = TilePlan(2, 2, (500, 500), 0.2, PX)
+    rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=1800, rotation_deg=6,
+                            noise_sigma=0.05, cells=400, seed=2, blur_px=1.0)
+    observations = _off_by(_observations(rendered), "F1", 0.62 * PITCH)
+    result = register_tiles(observations, images=rendered.images, pixel_size_um=PX, pitch_um=PITCH)
+    assert any("loops that do not close, so this pair's step is taken from the stage" in w for w in result.warnings)
+    assert {c.step_from for c in result.constraints if c.source == LATTICE} == {STEP_STAGE}
+    assert _error(result, rendered) == pytest.approx(PITCH, abs=1.0)
 
 
 def test_a_loop_whose_steps_contradict_one_another_is_warned_about():
@@ -539,22 +554,28 @@ def test_a_search_window_reaching_past_the_overlap_s_far_edge_does_not_raise():
     assert not result.ok and result.peak < MIN_PEAK          # scored, and noise matches nothing
 
 
-@pytest.mark.parametrize("seed", [1, 3])
-def test_the_content_never_picks_a_wrong_step(seed):
-    """Bare lattice with vignetting, the array's rim in some overlaps and two diagonal pairs meeting at a corner:
-    content decides only where it can, and every pair it decides is right. A corner that small, scored, led with a
-    wrong candidate on this render (``STEP_MIN_AREA_PITCH2``)."""
+@pytest.mark.parametrize("seed, cells", [(1, 0), (3, 0), (1, 400), (3, 400)])
+def test_the_content_never_picks_a_wrong_step(seed, cells):
+    """Vignetting, the array's rim in some overlaps, diagonal pairs meeting at a corner, and the stage's record a
+    pitch and more from the truth for F4: content decides only where it can, and every pair it decides is right."""
     plan = TilePlan(3, 3, (700, 700), 0.10, PX)
     extent = plan.step_um[0] * 2 + plan.extent_um[0]
     rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=0.40 * extent, rotation_deg=7,
-                            noise_sigma=0.05, blur_px=1.0, seed=seed, vignette=0.3, stage_jitter_um=20)
-    observations = _observations(rendered)
-    constraints, _ = lattice_phase_constraints(observations, images=rendered.images, pixel_size_um=PX)
-    decided = [c for c in constraints if c.step_from == STEP_CONTENT]
-    assert decided                                           # the rim decides some pairs
-    for c in decided + [c for c in constraints if c.step_from == STEP_STAGE]:
-        truth = np.subtract(rendered.true_left_top_um[c.j], rendered.true_left_top_um[c.i])
-        assert np.hypot(*(np.asarray(c.offset_um) - truth)) < 0.25 * PITCH, (c.i, c.j, c.step_from)
+                            noise_sigma=0.05, blur_px=1.0, seed=seed, vignette=0.3, stage_jitter_um=20, cells=cells)
+    for shifted in (False, True):
+        observations = _observations(rendered)
+        if shifted:
+            observations = _off_by(observations, "F4", 0.7 * PITCH)
+        constraints, _ = lattice_phase_constraints(observations, images=rendered.images, pixel_size_um=PX)
+        decided = [c for c in constraints if c.step_from in (STEP_CONTENT, STEP_CHAINED)]
+        if cells and not shifted:
+            # Cells give content something to decide on. With F4 shifted, what it decides about F4 leaves loops open
+            # against the stage's picks, and the layout falls back to the stage's
+            # (test_content_that_leaves_a_loop_open_gives_way_to_a_layout_that_closes).
+            assert decided
+        for c in decided:
+            truth = np.subtract(rendered.true_left_top_um[c.j], rendered.true_left_top_um[c.i])
+            assert np.hypot(*(np.asarray(c.offset_um) - truth)) < 0.25 * PITCH, (c.i, c.j, c.step_from)
 
 
 def test_the_other_timepoints_settle_a_step_the_content_cannot():
@@ -578,7 +599,7 @@ def test_the_other_timepoints_settle_a_step_the_content_cannot():
 
 
 def test_content_that_disagrees_with_the_other_timepoints_is_used_and_said():
-    plan = TilePlan(2, 2, (300, 300), 0.15, PX)
+    plan = TilePlan(2, 2, (400, 400), 0.3, PX)
     rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=DIAMETER, radius_um=1800, rotation_deg=6,
                             noise_sigma=0.05, cells=400, seed=3, blur_px=1.0)
     observations = _observations(rendered)

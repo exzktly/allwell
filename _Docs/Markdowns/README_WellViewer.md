@@ -5670,8 +5670,10 @@ other by the nanowell pattern they share, which says where a tile sits only up t
 spacing looks the same. The run settles which spacing in this order:
 
 1. **What is in the overlap.** Cells, debris, the central square and the edge of the array do not repeat, so the run
-   removes the repeating pattern from both tiles and matches what is left. When one placement clearly matches best,
-   it is used, whatever the stage recorded.
+   removes the repeating pattern from both tiles and matches what is left. When one placement matches clearly better
+   than every other — by well beyond what the overlap gives by chance — it is used, whatever the stage recorded. An
+   overlap with little in it, or one only a corner wide, decides nothing, which is the usual case: most corrections
+   come from step 3.
 2. **The tiles around it.** Tiles form closed loops, so once the overlap has settled some pairs, a pair between them
    (two tiles meeting only at a corner, say) must fit with them.
 3. **The well's other timepoints.** The microscope repeats the same tile layout at every timepoint, so when most
@@ -5679,6 +5681,10 @@ spacing looks the same. The run settles which spacing in this order:
    whole spacing off, that timepoint is placed again with their layout. Its grid record says which tiles disagreed
    and by how much (`tile_layout`).
 4. **The stage's record**, which is right as long as the stage was off by less than half a spacing.
+
+When what the overlaps decided and the stage's record for the rest cannot all be true at once (the tiles would not
+fit together), the run places the tiles by the record alone rather than half a spacing astray, and step 3 then
+corrects a tile left a whole spacing off.
 
 Each timepoint's grid record lists, for every pair of tiles, which of these settled it (`registration.steps`). A
 timepoint an earlier run kept is not placed again by an incremental run; analyse the plate again in full to put it

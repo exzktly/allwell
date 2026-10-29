@@ -256,3 +256,22 @@ def test_a_kept_timepoint_s_layout_takes_part_in_the_agreement(monkeypatch):
     assert "tile_layout" in together.timepoints["T1"], "T1 was not registered again"
     assert together.timepoints["T1"]["tile_layout"]["compared_with"] == ["T0", "kept:T2"]
     assert np.linalg.norm(_f1_from_f0(together, "T1") - _f1_from_f0(together, "T0")) < 0.1 * PITCH
+
+
+def test_a_corner_too_small_to_judge_never_outvotes_the_edges():
+    """Found by the end-to-end lane (tracker U9a): on this well the diagonal F0-F3 shares a corner of three square
+    pitches. Each candidate scored over its own shared region let the wrong one a step closer be judged on a larger
+    patch, where a painted cell sat one lattice vector from another (0.36 against the true corner's 0.08); content
+    took it, the loop could not close, and the solve put every tile tens of micrometres astray, so the timepoint found
+    no lattice at all. Every candidate is now judged on one region, against the noise of the others."""
+    from tests.test_nanowell_timepoint_frames import _painted_well
+
+    record, images = _painted_well({"T1": False}, {"T1": 3})
+    tiles = nr._images_for(record, "A01", "T1", lambda tp, tile: images[tp].get(tile))
+    located = nr.locate_timepoint("T1", record, "A01", tiles, SETTINGS)
+    assert located.status == nr.OK
+    rows = {t["tile"]: (t["left_um"], t["top_um"]) for t in located.grid["tiles"]}
+    origin = np.asarray(rows["F0"])
+    for tile, expected in (("F1", (2709.0, 0.0)), ("F2", (0.0, 2709.0)), ("F3", (2709.0, 2709.0))):
+        assert np.hypot(*(np.asarray(rows[tile]) - origin - expected)) < 1.0, tile
+    assert located.grid["registration_warnings"] == []

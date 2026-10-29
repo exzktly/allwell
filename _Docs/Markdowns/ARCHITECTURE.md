@@ -9908,16 +9908,27 @@ in this order:
    leave the lattice standing in exactly the strip that overlaps the next tile —
    and band-passed at 0.04 / 0.25 pitch with normalised convolution. Every
    candidate offset a whole vector apart within two pitches of the recorded one
-   is scored by the Pearson correlation of the two reduced tiles' shared pixels
-   (`candidate_scores`, best of the 3 × 3 pixels around it). Cells, debris, the
-   central square and the array's rim decide it; bare lattice cannot. The best
-   must reach `STEP_MIN_PEAK` 0.25 and lead the runner-up by `STEP_MIN_MARGIN`
-   0.12, and a candidate sharing less than `STEP_MIN_AREA_PITCH2` (six square
-   pitches, half a pitch wide) is not scored: two diagonal neighbours sharing a
-   corner of about three square pitches led with a wrong candidate on renders,
-   while shared edges never did. A straight stretch of rim is itself periodic
-   along its tangent, so it leaves neighbouring candidates close and decides
-   nothing — which the margin, not the peak, catches.
+   is scored by the Pearson correlation of the two reduced tiles over **one
+   common region**: the pixels of the first tile that the recorded offset says
+   the two share (`candidate_scores`, best of the 3 × 3 pixels around each
+   candidate). Scoring each candidate over its own shared region judged a
+   candidate that puts the tiles closer on more of the first tile, and on a
+   rendered well a wrong candidate a step closer matched a cell outside the true
+   overlap against one a lattice vector away (0.36 against the true corner's
+   0.08). A candidate whose part of the region is at least `STEP_MIN_AREA_PITCH2`
+   (six square pitches, half a pitch wide) may win; one with at least
+   `STEP_COMPETE_AREA_PITCH2` (1.5, a quarter pitch wide) only competes. The
+   winner must reach `STEP_MIN_PEAK` 0.25 and lead every other candidate by
+   `STEP_MIN_MARGIN` 0.12 and by `STEP_MARGIN_SPREADS` (three) times the robust
+   spread of the losers' scores, which is the noise the region gives where the
+   tiles do not match: a region of a few square pitches holds only a few dozen
+   independent samples once band-passed, and a fixed lead is a fraction of its
+   noise there. Cells, debris, the central square and the array's rim decide it;
+   bare lattice cannot. A straight stretch of rim is itself periodic along its
+   tangent, so it leaves neighbouring candidates close and decides nothing. Two
+   diagonal neighbours at a 10 % overlap share a corner too small to win on, so
+   they are settled by the loops. A stage error large enough to leave the common
+   region thin decides nothing either, and falls to the next source.
 2. **The loops** (`chained`, `_settle_by_loops`). Tiles form loops (a 2 × 2 grid's
    four edges and two diagonals) and every loop must close: the content-decided
    pairs are solved alone, and a pair joining two tiles they reach takes the
@@ -9932,14 +9943,23 @@ in this order:
    nothing in that pair's data to say so — the limit `test_tile_register` pins
    for registration without images.
 
-After every choice the pairs are solved together, and a pair the solve misses by a
-quarter pitch or more is warned about (`_mark_open_loops`): one pair of its loop is
-a whole step wrong, and which one is not decidable from the loop alone. One tile
-wrong in every pair it is in closes all its loops, so this catches a wrong
-decision among several pairs, not a single tile the stage misplaced. On renders
-(12 conditions of cells, camera noise 0.05–0.2, vignetting 0–0.3, with and without
-a 0.7-pitch stage error, 1,920 pair decisions) content decided 4–50 % of pairs
-and none wrongly; noise 0.2 is where it stops deciding. The overlap correlation
+After every choice the pairs are solved together (`_open_loops`). When some pair
+misses the joint solve by a quarter pitch or more and content took part, content's
+choices and the others contradict one another: typically content settled one
+pair of a tile and the stage's pick for another pair of it is a step wrong.
+Solving that as it stands would average the tile half a step astray, a placement
+no timepoint has, so the choices made without content (the other timepoints',
+else the stage's) are used instead whenever they close, each such pair warned
+about; a layout a whole step off is what the timepoints' agreement can then put
+right. A loop that still does not close is warned about pair by pair: which pair
+of it is wrong is not decidable from the loop alone. One tile wrong in every pair
+it is in closes all its loops, so a single tile the stage misplaced shows only
+across timepoints. On renders (three families: 3 × 3 grids at a 10 % overlap, 2 ×
+3 grids at 8 %, and 2 × 2 wells with painted cells; cells, camera noise
+0.05–0.2, vignetting 0–0.3; with and without a 0.7-pitch stage error on one
+tile), content and the loops settled 528 pair choices and none wrongly. Content
+decides a minority of pairs (about 5–13 % of them, fewer under a stage error),
+so most stage errors are put right by the timepoints' agreement, not here. The overlap correlation
 below is then centred on the chosen lattice offset rather than the recorded one,
 so a corrected pair is not searched half a pitch from where it now sits.
 

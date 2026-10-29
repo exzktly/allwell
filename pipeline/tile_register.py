@@ -94,11 +94,24 @@ STEP_REACH_PITCHES = 2.0
 #: 0.4-0.9 and leads by 0.3 or more; an overlap of bare lattice scores under 0.1 at every candidate (tracker U9).
 STEP_MIN_PEAK = 0.25
 STEP_MIN_MARGIN = 0.12
+#: The lead must also be this many times the spread of the losing candidates' scores (1.4826 x their median absolute
+#: deviation): those scores are what the region gives where the tiles do not match, so their spread is the noise a
+#: lead has to clear. A fixed lead is not enough: a region of a few square pitches holds a few dozen independent
+#: samples once band-passed, and on a rendered well wrong candidates scored up to 0.34 there (tracker U9a).
+STEP_MARGIN_SPREADS = 3.0
+#: Losing candidates needed to measure that spread; with fewer, content decides nothing.
+_STEP_MIN_LOSERS = 4
 #: A candidate is scored only on a shared region at least this large, in square pitches, and half a pitch wide on
 #: each axis. Two diagonal neighbours share a corner of about three square pitches at a 10 % overlap; on rendered
 #: plates a corner that small led with a wrong candidate (0.25 against the true one's 0.07) where a shared edge of
 #: twenty or more square pitches never did (tracker U9).
 STEP_MIN_AREA_PITCH2 = 6.0
+#: A candidate sharing less than :data:`STEP_MIN_AREA_PITCH2` cannot win, but one sharing at least this many square
+#: pitches, a quarter pitch wide, is still scored and competes: the winner must lead it too. Two diagonal neighbours at
+#: a 10 % overlap share a corner of about three square pitches, while the wrong candidate a step closer shares about
+#: eight; scored alone, that candidate won on a rendered well with the right one never in the contest, and the tile
+#: went three quarters of a pitch astray in the solve (tracker U9a).
+STEP_COMPETE_AREA_PITCH2 = 1.5
 #: The aperiodic images are block-averaged until a pitch spans about this many pixels.
 _STEP_PITCH_PX = 16
 #: The band the aperiodic images are correlated in, Gaussian widths in pitches (as the identity check's).
@@ -210,7 +223,28 @@ def lattice_phase_constraints(tiles, *, images: dict | None = None, pixel_size_u
                              preferred=None if preferred is None else preferred.get((i, j)))
         pairs.append(_Pair(i, j, phase, basis, recorded, pitch, sigma, choice))
     _settle_by_loops(tiles, pairs)
-    _mark_open_loops(tiles, pairs)
+    if _open_loops(tiles, pairs) and any(p.choice.source in (STEP_CONTENT, STEP_CHAINED) for p in pairs):
+        # Content's choices contradict one another: one of them is wrong and the loops cannot say which. The choices
+        # made without content (the well's other timepoints, else the stage) are used instead when they close.
+        plain = [_Pair(p.i, p.j, p.phase, p.basis, p.recorded, p.pitch, p.sigma,
+                       choose_step(p.i, p.j, p.phase, p.basis, p.recorded,
+                                   preferred=None if preferred is None else preferred.get((p.i, p.j))))
+                 for p in pairs]
+        if not _open_loops(tiles, plain):
+            for old, new in zip(pairs, plain):
+                if old.choice.source in (STEP_CONTENT, STEP_CHAINED):
+                    new.choice = StepChoice(new.choice.offset_um, new.choice.source, old.choice.peak,
+                                            old.choice.margin,
+                                            f"{new.i}-{new.j}: the overlaps' content placed the tiles in loops that "
+                                            f"do not close, so this pair's step is taken from the {new.choice.source} "
+                                            f"instead")
+            pairs = plain
+    for pair, miss in _open_loops(tiles, pairs):
+        if not pair.choice.warning:
+            pair.choice = StepChoice(pair.choice.offset_um, pair.choice.source, pair.choice.peak, pair.choice.margin,
+                                     f"{pair.i}-{pair.j}: the tiles' loop does not close: the solve places this pair "
+                                     f"{miss:.0f} um from its own lattice offset, so one pair in the loop is a whole "
+                                     f"step wrong")
     constraints = []
     for pair in pairs:
         step, error, _ = _nearest_lattice_vector(pair.phase - pair.recorded, pair.basis)
@@ -284,24 +318,23 @@ def _components(edges) -> dict[str, int]:
     return {n: names.index(root(n)) for n in list(parent)}
 
 
-def _mark_open_loops(tiles, pairs: list[_Pair]) -> None:
-    """Warn on each pair whose chosen offset the tiles' loops do not close around.
+def _open_loops(tiles, pairs: list[_Pair]) -> list[tuple[_Pair, float]]:
+    """Each pair whose chosen offset the tiles' loops do not close around, with how far the joint solve misses it.
 
-    After every choice the pairs are solved together; a pair whose offset the solve misses by a quarter pitch or more
-    sits in a loop whose whole-vector choices contradict one another (one of them is a step wrong). It is reported,
-    never repaired: which pair of the loop is wrong is not decidable from the loop alone.
+    After every choice the pairs are solved together; a pair the solve misses by a quarter pitch or more sits in a
+    loop whose whole-vector choices contradict one another (one of them is a step wrong). Which pair of the loop is
+    wrong is not decidable from the loop alone.
     """
     if len(pairs) < 3:
-        return
+        return []
     solved = solve_placements(tiles, [PairConstraint(p.i, p.j, tuple(p.choice.offset_um), p.sigma, LATTICE)
                                       for p in pairs]).positions()
+    out = []
     for pair in pairs:
         miss = float(np.linalg.norm(np.subtract(solved[pair.j], solved[pair.i]) - pair.choice.offset_um))
-        if miss >= 0.25 * pair.pitch and not pair.choice.warning:
-            pair.choice = StepChoice(pair.choice.offset_um, pair.choice.source, pair.choice.peak, pair.choice.margin,
-                                     f"{pair.i}-{pair.j}: the tiles' loop does not close: the solve places this pair "
-                                     f"{miss:.0f} um from its own lattice offset, so one pair in the loop is a whole "
-                                     f"step wrong")
+        if miss >= 0.25 * pair.pitch:
+            out.append((pair, miss))
+    return out
 
 
 # ── the whole-vector choice ──────────────────────────────────────────────────
@@ -371,14 +404,21 @@ class _AperiodicTiles:
         return self._made[tile_id]
 
 
-def _shared_correlation(a, b, dx: int, dy: int, min_side: int, min_area: int) -> float:
-    """Pearson correlation of *a* and *b* over the pixels they share with *b*'s origin at ``(dx, dy)`` in *a*;
-    NaN when the shared rectangle is narrower than *min_side* on either axis, holds fewer than *min_area* pixels
-    known in both, or is flat."""
-    ha, wa = a.shape
-    hb, wb = b.shape
-    x0, x1 = max(0, dx), min(wa, dx + wb)
-    y0, y1 = max(0, dy), min(ha, dy + hb)
+def _shared_rect(shape_a, shape_b, dx: int, dy: int, within=None) -> tuple[int, int, int, int]:
+    """``(x0, x1, y0, y1)`` in *a* of the pixels *a* and *b* share with *b*'s origin at ``(dx, dy)`` in *a*, cut to
+    *within* (another such rectangle) when given; empty ranges when they share nothing."""
+    x0, x1 = max(0, dx), min(shape_a[1], dx + shape_b[1])
+    y0, y1 = max(0, dy), min(shape_a[0], dy + shape_b[0])
+    if within is not None:
+        x0, x1, y0, y1 = max(x0, within[0]), min(x1, within[1]), max(y0, within[2]), min(y1, within[3])
+    return x0, x1, y0, y1
+
+
+def _shared_correlation(a, b, dx: int, dy: int, min_side: int, min_area: int, within=None) -> float:
+    """Pearson correlation of *a* and *b* over the pixels they share with *b*'s origin at ``(dx, dy)`` in *a*, only
+    those inside *within* (``(x0, x1, y0, y1)`` in *a*) when given; NaN when that rectangle is narrower than *min_side*
+    on either axis, holds fewer than *min_area* pixels known in both, or is flat."""
+    x0, x1, y0, y1 = _shared_rect(a.shape, b.shape, dx, dy, within)
     if x1 - x0 < min_side or y1 - y0 < min_side or (x1 - x0) * (y1 - y0) < min_area:
         return math.nan
     fa = a[y0:y1, x0:x1]
@@ -401,11 +441,21 @@ class StepChoice:
     warning: str = ""
 
 
-def candidate_scores(i: str, j: str, phase, basis, recorded, reduced: _AperiodicTiles) -> list[tuple[float, np.ndarray]]:
-    """``(score, offset)`` for every offset ``phase - L`` (*L* a lattice vector) within :data:`STEP_REACH_PITCHES`
-    of *recorded*, scored by the aperiodic correlation of the two tiles' shared pixels; the best of the 3 x 3
-    pixels around each candidate is kept, so a candidate is not marked down for rounding. Candidates sharing less
-    than :data:`STEP_MIN_AREA_PITCH2` are left out, so two tiles meeting only at a corner seldom decide anything."""
+def candidate_scores(i: str, j: str, phase, basis, recorded,
+                     reduced: _AperiodicTiles) -> list[tuple[float, np.ndarray, bool]]:
+    """``(score, offset, may_win)`` for every offset ``phase - L`` (*L* a lattice vector) within
+    :data:`STEP_REACH_PITCHES` of *recorded*, best first, scored by the aperiodic correlation of the two tiles' shared
+    pixels; the best of the 3 x 3 pixels around each candidate is kept, so a candidate is not marked down for
+    rounding.
+
+    Every candidate is judged on the same pixels of tile *i*: those the recorded offset says the two tiles share. A
+    candidate scored over its own shared region was judged on more of tile *i* the closer it put the tiles, and on a
+    rendered well a wrong candidate a step closer matched a cell outside the true overlap with one a lattice vector
+    away (0.36 against the true offset's 0.08). On one common region, the content that decides is the content the
+    stage says both tiles saw. The cost: a stage error large enough to leave that region thin decides nothing, and the
+    pair falls to the next source. A candidate whose part of the region is at least :data:`STEP_MIN_AREA_PITCH2`
+    (half a pitch wide) may win; one with at least :data:`STEP_COMPETE_AREA_PITCH2` (a quarter pitch wide) only
+    competes; thinner ones are left out."""
     pitch = min(float(np.linalg.norm(basis[:, 0])), float(np.linalg.norm(basis[:, 1])))
     ri, rj = reduced.get(i, basis), reduced.get(j, basis)
     if ri is None or rj is None:
@@ -413,6 +463,9 @@ def candidate_scores(i: str, j: str, phase, basis, recorded, reduced: _Aperiodic
     (a, um), (b, _) = ri, rj
     min_side = max(4, int(round(0.5 * pitch / um)))
     min_area = int(round(STEP_MIN_AREA_PITCH2 * (pitch / um) ** 2))
+    compete_side = max(2, int(round(0.25 * pitch / um)))
+    compete_area = int(round(STEP_COMPETE_AREA_PITCH2 * (pitch / um) ** 2))
+    region = _shared_rect(a.shape, b.shape, *(int(round(v)) for v in np.asarray(recorded) / um))
     inverse = np.linalg.inv(basis)
     centre = np.round(inverse @ (phase - recorded))
     span = int(math.ceil(2 * STEP_REACH_PITCHES)) + 1       # lattice coordinates wide enough for any basis angle
@@ -423,10 +476,13 @@ def candidate_scores(i: str, j: str, phase, basis, recorded, reduced: _Aperiodic
             if np.linalg.norm(offset - recorded) > STEP_REACH_PITCHES * pitch:
                 continue
             ex, ey = (int(round(v)) for v in offset / um)
-            scores = [_shared_correlation(a, b, ex + sx, ey + sy, min_side, min_area) for sx in (-1, 0, 1) for sy in (-1, 0, 1)]
+            scores = [_shared_correlation(a, b, ex + sx, ey + sy, compete_side, compete_area, region)
+                      for sx in (-1, 0, 1) for sy in (-1, 0, 1)]
             scores = [v for v in scores if math.isfinite(v)]
             if scores:
-                out.append((max(scores), offset))
+                x0, x1, y0, y1 = _shared_rect(a.shape, b.shape, ex, ey, region)
+                may_win = min(x1 - x0, y1 - y0) >= min_side and (x1 - x0) * (y1 - y0) >= min_area
+                out.append((max(scores), offset, may_win))
     return sorted(out, key=lambda c: -c[0])
 
 
@@ -434,8 +490,9 @@ def choose_step(i: str, j: str, phase, basis, recorded, *, reduced: _AperiodicTi
                 preferred=None) -> StepChoice:
     """The offset ``phase - L`` for one pair, *L* the whole lattice vector chosen, and where the choice came from.
 
-    In order: the overlap's content when it is decisive (the best candidate scores at least :data:`STEP_MIN_PEAK`
-    and leads the runner-up by :data:`STEP_MIN_MARGIN`); else the candidate nearest *preferred*, the offset the well's
+    In order: the overlap's content when it is decisive (the best candidate shares enough to win, scores at least
+    :data:`STEP_MIN_PEAK` and leads every other candidate scored by :data:`STEP_MIN_MARGIN` and by
+    :data:`STEP_MARGIN_SPREADS` times the spread of their scores); else the candidate nearest *preferred*, the offset the well's
     other timepoints agree on; else the candidate nearest the recorded offset. A content choice that disagrees with
     *preferred* is used and warned about: it was measured on this timepoint's own pixels.
     """
@@ -446,7 +503,10 @@ def choose_step(i: str, j: str, phase, basis, recorded, *, reduced: _AperiodicTi
         scored = candidate_scores(i, j, phase, basis, recorded, reduced)
         if len(scored) >= 2:
             peak, margin = scored[0][0], scored[0][0] - scored[1][0]
-            if peak >= STEP_MIN_PEAK and margin >= STEP_MIN_MARGIN:
+            losers = np.asarray([c[0] for c in scored[1:]])
+            spread = 1.4826 * float(np.median(np.abs(losers - np.median(losers)))) if len(losers) >= _STEP_MIN_LOSERS \
+                else math.inf
+            if peak >= STEP_MIN_PEAK and margin >= max(STEP_MIN_MARGIN, STEP_MARGIN_SPREADS * spread) and scored[0][2]:
                 offset = scored[0][1]
                 warning = ""
                 if preferred is not None and np.linalg.norm(offset - np.asarray(preferred)) > pitch / 2:

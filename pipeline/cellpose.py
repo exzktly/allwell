@@ -353,6 +353,11 @@ def _segment_cellpose_many(
     crop within a pixel or two of where a call of its own puts it, so its masks can differ from that call's by
     those pixels' effect, not by the crop's content. Cellpose 3 has no such batching: there each image is its own
     call, as before.
+
+    The network runs ``NETWORK_BATCH`` tiles a pass. Cellpose then builds each image's masks one at a time, which on
+    an A10G took 0.27 s a nanowell against the network's 0.05 s, so on the Cellpose ``pipeline.cellpose_masks`` was
+    proven against it is asked for the flows only (``compute_masks=False``) and the masks are built there for the
+    whole batch at once. On any other Cellpose 4, Cellpose builds them.
     """
     images = [np.asarray(im) for im in images]
     if not images:
@@ -374,8 +379,47 @@ def _segment_cellpose_many(
         stack[i, y:y + im.shape[0], x:x + im.shape[1], 0] = (im.astype(np.float32) - lo) / (hi - lo if hi > lo else 1.0)
     diam = float(diameter) if diameter and diameter > 0 else None
     capped = {} if max_size_fraction is None else {"max_size_fraction": float(max_size_fraction)}
+    from pipeline import cellpose_masks
+
+    ours = cellpose_masks.supported(cellpose_masks.installed_version())
     result = model.eval(stack, diameter=diam, flow_threshold=flow_threshold, cellprob_threshold=cellprob_threshold,
-                        normalize=False, **capped)
+                        normalize=False, batch_size=NETWORK_BATCH, compute_masks=not ours, **capped)
     CELLPOSE_SECONDS["timed"] += len(images)              # a call of several images is one Cellpose 4 times
-    masks = np.asarray(result[0], dtype=np.int32).reshape(len(images), h, w)
+    if ours:
+        masks = _batched_masks(model, result[1], len(images), (h, w), diameter=diam, flow_threshold=flow_threshold,
+                               cellprob_threshold=cellprob_threshold, max_size_fraction=max_size_fraction)
+    else:
+        masks = np.asarray(result[0], dtype=np.int32).reshape(len(images), h, w)
     return [masks[i, y:y + im.shape[0], x:x + im.shape[1]] for i, (im, (y, x)) in enumerate(zip(images, at))]
+
+
+#: Network tiles Cellpose runs per pass for a batch of nanowell crops (its ``eval(batch_size=…)``; its own default
+#: is 8). A crop at the default scale is one 256-pixel tile, so 32 runs a whole batch of ``CROP_BATCH`` crops in one
+#: pass. Cellpose-SAM's activations for 32 tiles are a few GB at most, against an A10G's 24 GB shared by the
+#: ``CELLPOSE_WORKERS_PER_GPU`` workers. Batching changes only how many tiles share a pass, not what each tile is.
+NETWORK_BATCH = 32
+
+
+def _batched_masks(model, flows, n: int, shape, *, diameter, flow_threshold, cellprob_threshold,
+                   max_size_fraction) -> np.ndarray:
+    """``(n, H, W)`` labels from the flows Cellpose's ``eval(compute_masks=False)`` returned for a batch, built
+    together by ``pipeline.cellpose_masks`` rather than one image at a time, with Cellpose's own defaults for what
+    the caller does not set. Times itself into ``CELLPOSE_SECONDS["masks"]``, since Cellpose logs no mask time for
+    a call that builds none."""
+    import inspect
+    import time
+
+    from pipeline import cellpose_masks
+
+    started = time.perf_counter()
+    defaults = inspect.signature(model.eval).parameters
+    dP = np.asarray(flows[1], dtype=np.float32).reshape(2, n, *shape)
+    cellprob = np.asarray(flows[2], dtype=np.float32).reshape(n, *shape)
+    labels = cellpose_masks.batch_masks(
+        dP, cellprob, niter=cellpose_masks.default_niter(diameter), cellprob_threshold=cellprob_threshold,
+        flow_threshold=flow_threshold, min_size=defaults["min_size"].default,
+        max_size_fraction=(defaults["max_size_fraction"].default if max_size_fraction is None
+                           else float(max_size_fraction)),
+        device=model.device)
+    CELLPOSE_SECONDS["masks"] += time.perf_counter() - started
+    return np.stack([np.asarray(m, dtype=np.int32) for m in labels])

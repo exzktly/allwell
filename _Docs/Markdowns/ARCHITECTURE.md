@@ -10431,8 +10431,10 @@ How much of that image the segmenter is given is `segment_scope` (`SEGMENT_SCOPE
 new run, gives it each owned nanowell's crop, `CROP_REACH` (1.2) radii around the centre
 (`nanowell_measure.segment_sites`) — `CROP_BATCH` (32) crops a call to a segmenter that offers `segment_many`
 (Cellpose's: `pipeline.cellpose._segment_cellpose_many` centres them in a common shape padded with 0 and makes one
-Cellpose 4 `eval` of the `(N, H, W, 1)` stack, which runs 8 crops' network tiles per pass and computes each crop's
-masks on its own; on Cellpose 3 it is one call per crop), one call per crop otherwise — drops from each crop the
+Cellpose 4 `eval` of the `(N, H, W, 1)` stack with `batch_size=NETWORK_BATCH` (32: a whole batch's tiles in one
+network pass, against Cellpose's own 8); on the Cellpose `pipeline/cellpose_masks.py` reproduces (`SUPPORTED_VERSION`,
+the pin) that call is `compute_masks=False` and the batch's masks are built there, together; on another Cellpose 4,
+Cellpose builds each crop's masks on its own; on Cellpose 3 it is one call per crop), one call per crop otherwise — drops from each crop the
 objects whose centroid lies in another nanowell's counting circle (`_own_labels`: at a pitch under about 2.4 radii a
 crop reaches into its neighbour's circle, and the part of a neighbour's cell it saw, pasted first, kept those pixels
 from that cell's own crop, which then counted it a second time), renumbers each crop's labels and pastes them into a
@@ -10466,6 +10468,25 @@ range to all of them, so they read `-lo / (hi - lo)` (about -1 on camera counts)
 path leaves a flat channel at. Loading a model sets the `cellpose.dynamics`, `cellpose.models` and `cellpose.core`
 loggers to WARNING (a batch's tqdm progress is INFO) and adds `_CellposeChatter`, which drops the two warnings a batch
 makes as a matter of course ("3D stack used…", once per batch; "no seeds found…", once per empty crop). `cellpose.models` stays at INFO so the filter sees Cellpose's per-call timings ("network run in …", "masks created in …"), which it adds to `CELLPOSE_SECONDS` before dropping every INFO line; `nanowell_task._log_sites` snapshots it at a timepoint's first line and reports the network's and the masks' seconds per nanowell on every later one. Among the INFO lines this hides is "No cell pixels found.", printed for every image without a cell (once per empty nanowell on the crop path), named no well and was the only thing a long count printed; `_log_sites` reports the count instead. Before a timepoint is measured, `run_well(note=…)` logs `cellpose_scale_text` — pixel size, the cell diameter in pixels, Cellpose's resize factor (30 px over it, or none under `resize` `none`) and a crop's side before and after — through `_Steps.scale`, only when the count is Cellpose's.
+
+**Building a batch's masks together** (`pipeline/cellpose_masks.py`, Qt-free, in the remote manifest, Torch and
+Cellpose imported inside its functions). Cellpose 4 builds each image's masks on its own: following the flows (about
+200 small GPU steps) and, for the flow-error check, diffusing each mask's flows back out (twice its image's largest
+mask extent). On a nanowell crop each step touches a few thousand pixels, so the GPU waits on the loop: reported on an
+A10G, 0.05 s a nanowell for the network and 0.27 s for its masks. `batch_masks` runs both loops once for the batch and
+keeps the rest per crop, so each crop's masks are Cellpose's for that crop alone, up to label numbering.
+`_follow_flows_batched` is Cellpose's `steps_interp` with a batch dimension (every crop of a batch has the same
+shape, so the size normalisation is the same, and `grid_sample` reads each point from its own image).
+`_masks_to_flows_batched` lays the crops' masks side by side with Cellpose's one pixel of padding round each and
+diffuses them together, each crop stopping at its own number of steps — the count is per image in Cellpose, and a
+batch's largest mask is not each crop's. Seeds (`dynamics.get_masks_torch`), the area cap, the flow-error comparison
+and hole filling are Cellpose's per-crop functions, whose cost is per mask, not per step. Because it copies two of
+Cellpose's loops and calls its internals, it runs only on `SUPPORTED_VERSION` (4.1.1, `requirements-remote-cellpose.txt`'s
+pin); `min_size` and the default `max_size_fraction` are read from `eval`'s own signature and `niter` follows
+`eval`'s rule (`default_niter`). Cellpose logs no mask time for a call that builds none, so `_batched_masks` adds its
+own to `CELLPOSE_SECONDS["masks"]`, and the progress line's split reads as before.
+`tests/test_cellpose_batched_masks.py` compares the batch with Cellpose's own per-crop masks where Cellpose and Torch
+are installed (not in CI), and holds the wiring with a fake model everywhere.
 
 For its first measured timepoint `run_well` also keeps a sample of what the segmenter was given (`_Steps.inspect` → `measure_timepoint(inspect=…)` → `_tile_contents(keep=…)` → `_keep_crops`): `pipeline/nanowell_inspect.inspection_sites` picks the `PER_GROUP` (8) nanowells nearest the array's centre and the 8 farthest, and each is cut from the image the segmenter received, on the scale it was given it at (`segmenter_scale`), with the labels it returned, the counting circle (`circle`: the fitted centre and `INTERIOR_FRACTION` of the fitted radius, in the crop's pixels) and the labels `count_cells` counted (`counted`), so `_keep_crops` runs after the count. The sheet outlines counted labels green and the rest red, and draws the circle yellow. `WellOutcome.inspection` carries them to `nanowell_task`, which writes `nanowells/<well>_segmenter_input.png` (`nanowell_inspect.write_sheet`; the PNG is encoded with `zlib`, nothing else, because it runs on the remote worker), and `remote_fetch_nanowells.fetch_nanowell_tables` pulls it with the tables. It exists because Test detection runs on the app's own machine, where a Torch that cannot load stops it. `tile` is one call on the whole tile (`segment_tile`), and
 is what options that name no scope mean (`LEGACY_SEGMENT_SCOPE`), with the same key and digest-alias treatment as

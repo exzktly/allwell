@@ -280,7 +280,9 @@ nanowells' range without the shift.
 While a run counts, its log says how far it is: `Well A01 — 24h: 120/400 nanowells segmented (1.5 s each, about
 7 min 0 s left; per nanowell, Cellpose's network 0.20 s, its masks 1.10 s)`, about every tenth of a timepoint's
 nanowells. The last part is Cellpose's own timing, so a slow count says whether the GPU's network or the step that
-turns its output into cells is taking the time. Before each timepoint is counted, a line gives the scale Cellpose sees
+turns its output into cells is taking the time. On the pinned Cellpose that second step is built for a whole
+batch of nanowells at once rather than one nanowell at a time, which gives each nanowell the same cells and takes a
+fraction of the time; on any other Cellpose version, Cellpose builds them itself, one at a time. Before each timepoint is counted, a line gives the scale Cellpose sees
 it at: `Well A01 — 24h: Cellpose cpsam at 0.65 um/px — a cell of 10 um is 15.4 px, so Cellpose resizes each image
 x1.95; a nanowell's crop is 185 px, 360 px as the network sees it` (with **Resize** set to *None* it says Cellpose is
 set not to resize). Cellpose's own *No cell pixels found.* — which it

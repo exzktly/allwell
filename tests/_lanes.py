@@ -236,6 +236,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
 #: the bootstrap and the Remotes dialogs. ``scripts/test.sh --remote``.
 REMOTE_FILES: dict[str, str] = {
     "test_a_batched_restart_reuses_the_remote.py": "A restarted batched run looks at the remote before it uploads or runs anything",
+    "test_a_node_is_asked_for_before_staging.py": "A scheduled run queues its job before the plate is staged and hands it the run once it is ready",
     "test_a_batched_resume_does_not_download_first.py": "A batched resume starts the run at once; wells already here are painted, whatever the …",
     "test_a_batched_subset_run_finds_its_wells.py": "A remote run split into batches can be limited to named wells",
     "test_a_failed_remote_listing_keeps_the_data.py": "A remote command that failed is never read as nothing there: the fetch keeps the well, verify fails closed",

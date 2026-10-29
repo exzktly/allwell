@@ -38,6 +38,7 @@ from services.remote_wait_snippets import (
     UPLOAD_WAIT_POLL_S,
     UPLOAD_WAIT_TIMEOUT_S,
     _heartbeat_stale_snippet,
+    _wait_for_handover_snippet,
     _wait_for_upload_snippet,
 )
 
@@ -493,6 +494,84 @@ def _compose_remote_cmd(
         f"exec {_remote_join(remote_argv)}"
     )
     return _launch(launcher, inner, remote_pidfile, queue_wait_s=queue_wait_s)
+
+
+
+# ── an allocation asked for before the run exists (services.remote_reservation) ──
+def _compose_reservation_cmd(
+    launcher: str,
+    remote_pidfile: str,
+    command_file: str,
+    heartbeat: str,
+    *,
+    queue_wait_s: int = 0,
+) -> str:
+    """The login-shell command that queues a job before the app knows what it will run.
+
+    The same launch as :func:`_compose_remote_cmd` and :func:`_compose_driver_cmd`
+    — the login PID or ``srun``'s recorded in *remote_pidfile*, the job's
+    ``$SLURM_JOB_ID`` in ``<pidfile>.slurm`` from inside the allocation, the
+    ``allocation granted`` line the dashboard reads — but what the allocation
+    runs is a wait for *command_file* (:func:`_wait_for_handover_snippet`), which
+    it then sources in the same shell. The app writes that file once staging has
+    decided the run: :func:`_handover_job_body` for a single-shot run,
+    :func:`_handover_driver_body` for a batched one.
+
+    Conda is activated by the command file rather than here, because which
+    environment a run needs is read off the pipeline's own arguments
+    (``cellpose_env_selector``), and those are not decided yet either.
+    """
+    slurm_sidecar_q = _remote_quote(f"{remote_pidfile}.slurm")
+    inner = (
+        f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
+        f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
+        f'on ${{SLURMD_NODENAME:-$(hostname)}} '
+        f'(partition ${{SLURM_JOB_PARTITION:-?}})"; '
+        f"{_wait_for_handover_snippet(command_file, heartbeat)}"
+        f". {_remote_quote(command_file)}"
+    )
+    return _launch(launcher.strip(), inner, remote_pidfile, queue_wait_s=queue_wait_s)
+
+
+def _handover_prefix(env_selector: EnvSelector, scratch_dir: str) -> str:
+    """What every command file starts with: conda, the environment check, the scratch export."""
+    return (f"{_CONDA_ACTIVATE_SNIPPET}; "
+            f"{_conda_env_guard(env_selector)}; "
+            f"{_remote_scratch_export(scratch_dir)}")
+
+
+def _handover_job_body(
+    remote_argv: list[str],
+    *,
+    env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
+    upload_sentinel: str = "",
+    upload_heartbeat: str = "",
+    scratch_dir: str = "",
+) -> str:
+    """A single-shot run's command file: the tail of :func:`_compose_remote_cmd`'s scheduled shape.
+
+    Conda, the environment check and the scratch export, then the wait for the
+    upload's sentinel (the reserved node is usually granted before the plate has
+    finished uploading), then the pipeline, ``exec``'d so it replaces the
+    allocation's shell exactly as it does on the ordinary launch.
+    """
+    wait = (_wait_for_upload_snippet(upload_sentinel, upload_heartbeat)
+            if upload_sentinel else "")
+    return (f"{_handover_prefix(env_selector, scratch_dir)}"
+            f"{wait}"
+            f"exec {_remote_join(remote_argv)}\n")
+
+
+def _handover_driver_body(
+    driver_script: str,
+    *,
+    env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
+    scratch_dir: str = "",
+) -> str:
+    """A batched run's command file: :func:`_batch_driver_snippet` behind the same prefix."""
+    return (f"{_handover_prefix(env_selector, scratch_dir)}"
+            f'echo "[remote] scheduler: this allocation is held for every batch"; '
+            f"{driver_script}\n")
 
 
 #: The first thing a launched job script does: any copy but the scheduler's first task leaves before it touches the

@@ -39,7 +39,8 @@ class SlurmJob:
 
 
 def on_sched(job: SlurmJob, state: str, job_id: str) -> SlurmJob:
-    """Fold one ``sched`` event (``waiting`` / ``queued`` / ``granted``).
+    """Fold one ``sched`` event (``waiting`` / ``queued`` / ``granted``, and for a job queued before staging
+    ``waiting-early`` / ``handed`` / ``early-ended``).
 
     A request for an allocation starts a new job: whatever the previous one
     was, it is no longer the one this run is waiting on, so its node's specs
@@ -47,8 +48,12 @@ def on_sched(job: SlurmJob, state: str, job_id: str) -> SlurmJob:
     """
     if state == "granted":
         return replace(job, state=OPEN, job_id=job_id or job.job_id)
-    if state == "waiting":
+    if state in ("waiting", "waiting-early"):
         return SlurmJob(state=QUEUED)
+    if state == "handed":
+        return job              # the job queued before staging took the run: it is the same job
+    if state == "early-ended":
+        return SlurmJob()       # given back unused
     # "queued" — the scheduler's own line naming the id of the job we asked for.
     return replace(job, state=QUEUED, job_id=job_id or job.job_id)
 

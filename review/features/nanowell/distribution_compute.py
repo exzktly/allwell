@@ -69,6 +69,7 @@ COHORT_REASON = "not measured at every timepoint"
 _REASON_LABELS = {
     "occluded": "occluded", "clipped": "clipped", "unaddressed": "no address", "not_located": "not located",
     "absent": "not in roster", "never measured": "never measured",
+    "identity_contradicted": "identity contradicted",
     "fused (no count)": "fused, no count", "no count": "no count", "no confluence": "no confluence",
     "no cells": "no cells", "no fluorescence": "no fluorescence",
     "seeded later": "seeded later (0 at baseline)", "empty at baseline": "empty at baseline",

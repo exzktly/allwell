@@ -481,6 +481,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if again:
         note = " ".join(filter(None, [note, f"{', '.join(again)}: analysed again over every timepoint when a timepoint "
                                             "was added, so their earlier timepoints' numbers were rewritten."]))
+    # Whether each address names one nanowell over time is checked per timepoint; a figure over wells not all
+    # confirmed says so, and names the contradicted timepoints it left out (NANOWELL_IDENTITY_TRACKER C3).
+    from review.features.nanowell.identity_compute import identity_note
+
+    note = " ".join(filter(None, [note, identity_note(data, [well] if view == "array" else wells)]))
     if view == "array":
         dimmed = frozenset() if filtered is None else filtered.outside_sites
         if filtered is not None:

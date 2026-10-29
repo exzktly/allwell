@@ -107,31 +107,38 @@ States: `todo`, `wip`, `done` (implemented and pinned by a test watched failing 
 
 | id | item | state | evidence |
 |---|---|---|---|
-| A1 | Lattice residual image (image minus mean of its nearest-neighbour lattice shifts) | todo | |
-| A2 | Square registration: NCC of the reference's residual patch, turned and scaled, over the other's residual; peak, margin, surface | todo | |
-| A3 | Rotation from folded lattice angles, scale from pitch ratio, mirror mismatch | todo | |
-| A4 | Address test: distance and nearest-address, tolerance 0.25 pitch | todo | |
-| A5 | Diagnosis: step, rotation / reflection, tile, scattered | todo | |
-| A6 | Verdicts and reasons; reference selection | todo | |
-| A7 | Sidecar `<well>_identity.json` with input digest; stale sidecar reads `not_checked` | todo | |
-| A8 | Stage cross-check across wells | todo | |
+| A1 | Lattice residual image (image minus mean of its nearest-neighbour lattice shifts) | done | `test_nanowell_identity.py::test_the_square_is_told_from_its_neighbours_only_after_the_lattice_is_cancelled` |
+| A1a | *Finding:* is the residual needed? Measured on the rendered pair: plain correlation of the square peaks 0.983 against 0.975 one step away (margin 0.007); on the residual 0.552 against 0.234 (margin 0.318) | done | same test: the plain margin is asserted under 0.05 and the check `inconclusive` without the residual |
+| A2 | Square registration: NCC of the reference's residual patch, turned and scaled, over the other's residual; peak, margin, surface | done | `test_a_moved_and_turned_plate_with_moved_cells_is_confirmed`, `test_a_plate_moved_two_pitches_is_still_found` |
+| A3 | Rotation from folded lattice angles, scale from pitch ratio, mirror mismatch | done | `test_a_mirrored_lattice_is_contradicted` (mutation: removing the mirror test fails it); rotation asserted 2.0° in the clean pair |
+| A4 | Address test: distance and nearest-address, tolerance 0.25 pitch | done | mutation `if d > TOLERANCE_PITCHES or landed != a` → `if False` fails the step, all four hexagonal symmetry cases, the square-lattice turn and the audit test |
+| A5 | Diagnosis: step, rotation / reflection, tile, scattered | done | step / symmetry / tile tests assert the diagnosis by name |
+| A5a | *Finding:* a tile placed a lattice step off moves its sites' positions and addresses together, so every address still lands on itself in the common frame: the address test is blind to it. Added A9 | done | `test_one_tile_a_step_off_is_contradicted_and_named` |
+| A6 | Verdicts and reasons; reference selection | done | `test_a_well_with_no_accepted_square_is_inconclusive_throughout`, `test_an_unaddressed_timepoint_is_inconclusive_not_confirmed` |
+| A7 | Sidecar `<well>_identity.json` with input digest; stale sidecar reads `not_checked` | done | `test_the_sidecar_is_written_read_and_goes_stale_with_its_tables` (mutation: disabling the digest check fails it) |
+| A8 | Stage cross-check across wells | done | `test_the_stage_cross_check_flags_the_well_off_the_plate_s_motion` |
+| A8a | *Finding:* with four wells the rigid fit absorbs a well a pitch off (172 um became residuals of 26 to 103 um on all four) and accused a good well. `STAGE_MIN_WELLS = 5` | done | `test_the_stage_cross_check_accuses_no_well_on_too_few_wells` |
+| A9 | Tile layout test: each tile's registered position relative to the grid must not change between timepoints by a quarter pitch | done | mutation `"ok": not moved` → `"ok": True` fails the tile test |
+| A10 | Decoy square: the correlation peak must sit on the square the run accepted | done | mutation removing the agreement test fails `test_a_decoy_square_the_run_accepted_is_contradicted` |
 
 ### B — integration
 
 | id | item | state | evidence |
 |---|---|---|---|
-| B1 | Run the check at the end of each nanowell well (`nanowell_task._finish_well`), log a warning per failure | todo | |
-| B2 | Remote fetch and batch-resume carry `<well>_identity.json` | todo | |
-| B3 | Offline audit: `python -m pipeline.nanowell_identity <output_dir>` over an existing dataset | todo | |
-| B4 | Remote manifest lists the module | todo | |
+| B1 | Run the check at the end of each nanowell well (`nanowell_task._finish_well`), log a warning per failure | done | `test_nanowell_identity_run.py::test_a_run_writes_a_confirmed_identity_sidecar` (through `process_microscopy.main`) |
+| B1a | Stage cross-check at the end of the plate (`nanowell_endgame`) | done | runs after the plate diameters; exercised by the same end-to-end run (one well: reference none, nothing flagged) |
+| B2 | Remote fetch and batch-resume carry `<well>_identity.json` | done | `test_remote_fetch_nanowells.py` lists and pulls it |
+| B3 | Offline audit: `python -m pipeline.nanowell_identity <output_dir>` over an existing dataset | done | `test_the_audit_command_writes_sidecars_and_exits_by_the_worst_verdict` |
+| B4 | Remote manifest lists the module | done | `services/remote_manifest.py`; `test_remote_manifest.py` |
 
 ### C — downstream
 
 | id | item | state | evidence |
 |---|---|---|---|
-| C1 | Review reads the sidecars into `NanowellData.identity` | todo | |
-| C2 | Cross-timepoint metrics leave out `contradicted` timepoints (`identity_contradicted`) | todo | |
-| C3 | Figures footnote wells with `inconclusive` / `not_checked` timepoints | todo | |
+| C1 | Review reads the sidecars into `NanowellData.identity` | done | `test_nanowell_identity_review.py::test_a_contradicted_timepoint_joins_nothing_and_says_why` |
+| C2 | Cross-timepoint metrics leave out `contradicted` timepoints (`identity_contradicted`), and an address only such a timepoint holds is not followed | done | same file, two tests; mutation (no timepoint marked) fails both |
+| C3 | Figures footnote wells with `contradicted`, `inconclusive` or `not_checked` timepoints, through `controller.draw_view` (the page and Batch Export) | done | `test_the_page_s_figures_carry_the_note`, `test_the_footer_note_follows_the_verdicts`; mutation removing the note fails it |
+| C3a | *Finding:* every dataset analysed before this check now says "not checked" in its footers, by design (unverified is not verified). Two page tests pinned the old first footer line and were updated to read the note first; the audit command fills the sidecars of an old dataset | done | `test_nanowell_page_views_ui.py` |
 
 ### D — GUI (Nanowells page, Identity view)
 
@@ -147,16 +154,16 @@ States: `todo`, `wip`, `done` (implemented and pinned by a test watched failing 
 
 | id | item | state | evidence |
 |---|---|---|---|
-| E1 | Clean pair (moved and turned plate) is `confirmed` | todo | |
-| E2 | Whole-well step is `contradicted`, diagnosed as that step | todo | |
-| E3 | 60° (hex) and 90° (square) symmetry turn is `contradicted`, diagnosed as a rotation | todo | |
-| E4 | Mirror is `contradicted` | todo | |
-| E5 | One tile a step off is `contradicted`, diagnosed as that tile | todo | |
-| E6 | Decoy square accepted by the run is `contradicted` | todo | |
-| E7 | No square at the reference / anywhere is `inconclusive` | todo | |
-| E8 | A stale sidecar reads `not_checked` | todo | |
-| E9 | End to end through `process_microscopy.main`: the sidecar is written and `confirmed` | todo | |
-| E10 | Mutation: with `_settle_steps` disabled, a timepoint a step off is caught | todo | |
+| E1 | Clean pair (moved and turned plate, cells redrawn) is `confirmed` | done | `test_a_moved_and_turned_plate_with_moved_cells_is_confirmed` |
+| E2 | Whole-well step is `contradicted`, diagnosed as that step | done | `test_a_whole_well_step_is_contradicted_and_named` |
+| E3 | 60° / 120° / 180° (hex) and 90° (square) symmetry turn is `contradicted`, diagnosed as a turn | done | `test_a_turn_or_reflection_by_the_hexagonal_lattice_s_symmetry_is_contradicted`, `test_a_90_degree_turn_of_a_square_lattice_is_contradicted` |
+| E4 | Reflection and mirror are `contradicted` | done | same parametrised test (reflection), `test_a_mirrored_lattice_is_contradicted` |
+| E5 | One tile a step off is `contradicted`, diagnosed as that tile | done | `test_one_tile_a_step_off_is_contradicted_and_named`, `test_failures_confined_to_one_tile_are_diagnosed_as_that_tile` |
+| E6 | Decoy square accepted by the run is `contradicted` | done | `test_a_decoy_square_the_run_accepted_is_contradicted` |
+| E7 | No square at the reference / anywhere is `inconclusive` | done | `test_a_timepoint_where_the_square_cannot_be_seen_is_inconclusive`, `test_a_well_with_no_accepted_square_is_inconclusive_throughout` |
+| E8 | A stale sidecar reads `not_checked` | done | `test_the_sidecar_is_written_read_and_goes_stale_with_its_tables`, `test_a_sidecar_for_other_tables_is_not_believed` |
+| E9 | End to end through `process_microscopy.main`: the sidecar is written and `confirmed` | done | `test_nanowell_identity_run.py::test_a_run_writes_a_confirmed_identity_sidecar` |
+| E10 | Mutation on the run's own output: with `_settle_steps` disabled, a timepoint anchored a step off is caught and named a step; with it, `confirmed` | done | `test_nanowell_identity_run.py`, two tests |
 
 ### Q — open questions (need real data)
 

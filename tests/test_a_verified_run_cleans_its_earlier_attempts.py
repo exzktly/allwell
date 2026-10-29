@@ -177,6 +177,7 @@ def test_the_heartbeat_age_decides(tmp_path, monkeypatch, age_s, kept):
     _remote(tmp_path, monkeypatch)
     staging, local = _attempts(tmp_path, "run-1", "run-2")
     beat = staging / "runs" / "run-1" / UPLOAD_HEARTBEAT
+    beat.parent.mkdir(parents=True, exist_ok=True)
     beat.touch()
     os.utime(beat, (time.time() - age_s, time.time() - age_s))
     _cleanup(_runner(staging, local, "run-2", out_of="run-1"))

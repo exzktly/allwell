@@ -5628,9 +5628,10 @@ each well's array moved with the plate. Each timepoint gets one of:
 When two timepoints disagree and nothing tells which is right, both are **contradicted**; when the earliest
 timepoint is the one that disagrees with the rest, the rest are kept and it is the one left out.
 
-What the check cannot see: a *physical* half turn of the array (180°). The hexagonal lattice and the central square
-both look the same turned half way round, so an array that turned inside its well would be confirmed. A plate is
-keyed and cannot be put back half turned, so this matters only if the array itself can turn.
+What the check cannot see: a turn of the array by a symmetry it shares with the central square — a half turn
+(180°), or on a square lattice a quarter turn (90°). The array looks the same either way, so such a turn would be
+confirmed. A keyed plate is put back within a few degrees, so this matters only if the array itself can turn in its
+well. The check expects the plate to turn less than 30° between timepoints (45° on a square lattice).
 
 **The Identity view** shows the check for one well at one timepoint against the well's reference timepoint; the
 Well list says each well's worst verdict, and it opens on the first timepoint that is not confirmed. *Compare*

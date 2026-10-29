@@ -9,9 +9,11 @@ another by construction. This module checks the result against evidence the addr
 1. **The montages are registered on the central square.** The square is the array's one aperiodic landmark, so
    the reference timepoint's montage patch around it is correlated over the other timepoint's montage. A plain
    correlation would peak almost as high one lattice step away (a round nanowell shares the square's
-   surroundings), so both are first replaced by their *lattice residual* (:func:`lattice_residual`): the image
-   minus the mean of itself shifted by each nearest-neighbour lattice vector, which cancels everything periodic
-   and leaves the square, the cells, debris and the rim. The rotation is the difference of the two timepoints'
+   surroundings), so both are first replaced by their *aperiodic part* (:func:`aperiodic`): the lattice residual
+   (:func:`lattice_residual`, the image minus the mean of itself shifted by each nearest-neighbour lattice vector,
+   which cancels everything periodic and leaves the square, the cells, debris and the rim), band-passed so camera
+   noise and slow illumination do not drown it. The margin of the peak over the next place decides whether the
+   square was found. The rotation is the difference of the two timepoints'
    lattice angles folded to the smallest turn, the scale the ratio of their pitches.
 2. **Every address is mapped through that registration and must land on itself**: within
    :data:`TOLERANCE_PITCHES` of the same address at the other timepoint, and nearer to it than to any other site.
@@ -89,11 +91,15 @@ TOLERANCE_PITCHES = 0.25
 SEARCH_PITCHES = 4.0
 #: Half the side of the patch correlated around the square, in pitches: the square and its first ring.
 PATCH_PITCHES = 1.5
-#: The correlation peak's least lead over the best correlation more than half a pitch from it. A synthetic choice
-#: (tracker Q2): on rendered plates the square's lattice-residual peak leads by 0.4 and more.
-MIN_MARGIN = 0.15
-#: The least correlation at the peak for the square to count as found.
-MIN_PEAK = 0.3
+#: The correlation peak's least lead over the best correlation more than half a pitch from it: what tells a square
+#: found from a nothing found. Measured on the band-passed residual (rendered pairs, tracker S4): 18 good pairs led by
+#: 0.317 to 0.534; 48 pairs with no square to find (none drawn, hidden, a decoy) by at most 0.057. A bubble's rim a
+#: pitch or two from the square, a colony over it or a thousand cells left good pairs at 0.10 to 0.12, so the
+#: threshold sits there, 1.75 times the null's highest. Not calibrated on a real plate (tracker Q2).
+MIN_MARGIN = 0.10
+#: The least correlation at the peak. Not what separates a square from none (a null's peak reached 0.445 while its
+#: margin stayed under 0.06): a floor against a lock on nearly nothing, below every good pair measured (0.588 up).
+MIN_PEAK = 0.15
 #: The fewest addresses two timepoints must share for the address test to decide anything.
 MIN_COMPARED = 6
 #: How far a correlation peak may sit from the square the run accepted at that timepoint, in pitches.
@@ -108,6 +114,13 @@ CENTRE_AGREEMENT_PITCHES = 0.75
 #: Beyond this many pitches, two timepoints' tiles sit so differently against one another that they were not
 #: acquired on one tile grid, and the layout test does not apply (the timepoint is then ``inconclusive``).
 LAYOUT_REACH_PITCHES = 3.0
+#: Beyond this many pitches the rim-fitted centres disagree more than any rim fit is loose (half a pitch on a real
+#: plate), so the registration followed something that moved against the array: contradicted, not withheld. A decoy
+#: two or three sites off put them 1.75 and 3.0 pitches apart on rendered plates (tracker S1).
+CENTRE_CONTRADICTS_PITCHES = 1.5
+#: The share of compared addresses that may land nearest themselves but beyond the tolerance before that is a pattern
+#: rather than a few sites' fitted positions (one site of 265 a quarter pitch off contradicted a well: tracker S6).
+LOOSE_SHARE = 0.02
 #: The fewest wells addressed at both timepoints for the stage cross-check to accuse one. With four, the rigid fit
 #: absorbs a well a pitch off and spreads it over the rest (a 172 um error left residuals of 26 to 103 um on all
 #: four), so a good well can read as the bad one.
@@ -346,12 +359,15 @@ class SquareMatch:
     scale: float = 1.0
     surface: list | None = None                   # the correlation surface, reduced to SURFACE_SIDE samples a side
     surface_box_um: list | None = None            # [left, top, right, bottom] of the surface, common frame
+    turned_deg: float = 0.0                       # a turn beyond the lattice angle's fold the lock needed (hex only)
+    refined: dict | None = None                   # the rotation and scale refit on the matched sites (compare)
 
     @property
     def as_dict(self) -> dict:
         return {"ok": self.ok, "reason": self.reason, "found_um": _round(self.found_um), "peak": _r3(self.peak),
                 "runner_up": _r3(self.runner_up), "margin": _r3(self.margin), "rotation_deg": round(self.rotation_deg, 4),
-                "scale": round(self.scale, 6), "surface": self.surface, "surface_box_um": _round(self.surface_box_um)}
+                "scale": round(self.scale, 6), "surface": self.surface, "surface_box_um": _round(self.surface_box_um),
+                "turned_deg": self.turned_deg, "refined": self.refined}
 
 
 def _r3(value):
@@ -391,63 +407,88 @@ def search_centres(ref: Timepoint, other: Timepoint) -> list[tuple[float, float]
     return centres
 
 
-def register_on_square(ref: Timepoint, other: Timepoint) -> SquareMatch:
-    """Correlate the reference's lattice-residual patch around its square over *other*'s lattice residual.
+#: The band the lattice residual is correlated in, as Gaussian widths in pitches: detail finer than 0.04 of a pitch is
+#: camera noise, and structure coarser than a quarter of one is illumination, a bubble's rim or a colony's mass. On
+#: rendered pairs the plain residual left good pairs under any usable peak threshold at camera noise 0.2, a 6-pixel
+#: blur, a thousand cells, or the 50 um format at 4.3 um/px; this band took 25 of 28 such pairs to a lock 14 did
+#: without it, with the null's margin no higher (tracker S3).
+BANDPASS_PITCHES = (0.04, 0.25)
 
-    The patch is turned by the folded difference of the two lattice angles and scaled by the ratio of pitches
-    before it is correlated, so the result is a similarity transform taking the reference's square to
-    ``found_um``. The search covers :data:`SEARCH_PITCHES` around every point :func:`search_centres` names."""
+
+def aperiodic(image: np.ndarray, pitch_px: float, angle_deg: float, kind: str) -> np.ndarray:
+    """:func:`lattice_residual`, band-passed by a difference of Gaussians (:data:`BANDPASS_PITCHES`)."""
     from scipy import ndimage
-    from skimage.feature import match_template
 
-    if not (ref.lattice_ok and other.lattice_ok):
-        return SquareMatch(False, "a montage or its lattice is missing")
-    rotation = fold_rotation(other.angle_deg - ref.angle_deg, ref.kind)
-    scale = other.pitch / ref.pitch
+    residual = lattice_residual(image, pitch_px, angle_deg, kind)
+    fine, coarse = (max(0.5, f * pitch_px) for f in BANDPASS_PITCHES)
+    return ndimage.gaussian_filter(residual, fine) - ndimage.gaussian_filter(residual, coarse)
+
+
+@dataclass
+class _Search:
+    """*other*'s aperiodic image over the search box, and where in it a template's centre may go."""
+    image: np.ndarray
+    x0: int
+    y0: int
+    half: int                     # the template's half-side, pixels
+    pitch_px: float
+    centres: np.ndarray           # the search centres, the other's montage pixels
+
+
+def _search_box(ref: Timepoint, other: Timepoint, half: int) -> _Search | str:
     pitch_o = other.pitch / other.um_per_px
-    pitch_r = ref.pitch / ref.um_per_px
-    half_o = max(4, int(round(PATCH_PITCHES * pitch_o)))
-    # The reference's residual around its square, sampled on the other's pixel grid through the inverse transform.
-    centre_r = _to_px(ref, ref.square_um)
-    reach_r = int(math.ceil((PATCH_PITCHES * math.sqrt(2) + 1.5) * pitch_r)) + 2
-    crop_r, (x0r, y0r) = _crop(ref.pixels(), centre_r, reach_r)
-    if min(crop_r.shape) < 2 * reach_r - 2:
-        return SquareMatch(False, "the reference's square is too near the edge of its montage to be read",
-                           rotation_deg=rotation, scale=scale)
-    resid_r = lattice_residual(crop_r, pitch_r, ref.angle_deg, ref.kind)
-    grid = np.arange(-half_o, half_o + 1, dtype=float) * other.um_per_px          # other-frame offsets, um
-    gx, gy = np.meshgrid(grid, grid)
-    inverse = np.linalg.inv(scale * _screen_rotation(rotation))
-    offsets = np.stack((gx.ravel(), gy.ravel()))
-    back = inverse @ offsets / ref.um_per_px                                        # reference pixels
-    coords = np.stack((back[1] + centre_r[1] - y0r, back[0] + centre_r[0] - x0r))
-    template = ndimage.map_coordinates(resid_r, coords, order=1, mode="nearest").reshape(gx.shape)
-    if float(template.std()) <= 1e-6:
-        return SquareMatch(False, "the reference's square shows nothing aperiodic to correlate",
-                           rotation_deg=rotation, scale=scale)
-    # The other's residual over the search box.
     centres = np.array([_to_px(other, c) for c in search_centres(ref, other)])
-    span = SEARCH_PITCHES * pitch_o + half_o + 1.5 * pitch_o + 2
+    span = SEARCH_PITCHES * pitch_o + half + 1.5 * pitch_o + 2
     h, w = other.pixels().shape
     bx0, by0 = int(max(0, math.floor(centres[:, 0].min() - span))), int(max(0, math.floor(centres[:, 1].min() - span)))
     bx1 = int(min(w, math.ceil(centres[:, 0].max() + span) + 1))
     by1 = int(min(h, math.ceil(centres[:, 1].max() + span) + 1))
     box = other.pixels()[by0:by1, bx0:bx1]
-    if min(box.shape) <= 2 * half_o + 1:
-        return SquareMatch(False, "the other timepoint's montage does not reach where the square should be",
-                           rotation_deg=rotation, scale=scale)
-    resid_o = lattice_residual(box, pitch_o, other.angle_deg, other.kind)
-    surface = match_template(resid_o, template.astype(np.float32))
-    # Only positions whose template lies clear of the residual's continued border, and within the search radius.
+    if min(box.shape) <= 2 * half + 1:
+        return "the other timepoint's montage does not reach where the square should be"
+    return _Search(aperiodic(box, pitch_o, other.angle_deg, other.kind), bx0, by0, half, pitch_o, centres)
+
+
+def _template(ref: Timepoint, other: Timepoint, rotation: float, scale: float, half: int) -> np.ndarray | str:
+    """The reference's aperiodic patch around its square, sampled on the other's pixel grid through the inverse of
+    the turn by *rotation* and the *scale*."""
+    from scipy import ndimage
+
+    pitch_r = ref.pitch / ref.um_per_px
+    centre_r = _to_px(ref, ref.square_um)
+    reach_r = int(math.ceil((PATCH_PITCHES * math.sqrt(2) + 1.5) * pitch_r)) + 2
+    crop_r, (x0r, y0r) = _crop(ref.pixels(), centre_r, reach_r)
+    if min(crop_r.shape) < 2 * reach_r - 2:
+        return "the reference's square is too near the edge of its montage to be read"
+    resid_r = aperiodic(crop_r, pitch_r, ref.angle_deg, ref.kind)
+    grid = np.arange(-half, half + 1, dtype=float) * other.um_per_px                # other-frame offsets, um
+    gx, gy = np.meshgrid(grid, grid)
+    back = np.linalg.inv(scale * _screen_rotation(rotation)) @ np.stack((gx.ravel(), gy.ravel())) / ref.um_per_px
+    coords = np.stack((back[1] + centre_r[1] - y0r, back[0] + centre_r[0] - x0r))
+    template = ndimage.map_coordinates(resid_r, coords, order=1, mode="nearest").reshape(gx.shape)
+    if float(template.std()) <= 1e-6:
+        return "the reference's square shows nothing aperiodic to correlate"
+    return template.astype(np.float32)
+
+
+def _match_at(ref: Timepoint, other: Timepoint, search: _Search, rotation: float, scale: float) -> SquareMatch:
+    """The square correlated at one turn: the best place, its lead over the best place more than half a pitch
+    from it, and the gates (:data:`MIN_PEAK`, :data:`MIN_MARGIN`, a peak not on the window's edge)."""
+    from skimage.feature import match_template
+
+    template = _template(ref, other, rotation, scale, search.half)
+    if isinstance(template, str):
+        return SquareMatch(False, template, rotation_deg=rotation, scale=scale)
+    surface = match_template(search.image, template)
+    half, pitch_o = search.half, search.pitch_px
     yy, xx = np.mgrid[0:surface.shape[0], 0:surface.shape[1]]
-    cx, cy = xx + half_o + bx0, yy + half_o + by0
     inside = np.zeros(surface.shape, dtype=bool)
-    for c in centres:
-        inside |= np.hypot(cx - c[0], cy - c[1]) <= SEARCH_PITCHES * pitch_o
+    for c in search.centres:
+        inside |= np.hypot(xx + half + search.x0 - c[0], yy + half + search.y0 - c[1]) <= SEARCH_PITCHES * pitch_o
     # The residual continues the box's edge, so a template that reaches within a pitch of it reads artefact.
     border = int(math.ceil(pitch_o)) + 1
-    bh, bw = box.shape
-    inside &= ((xx >= border) & (yy >= border) & (xx + 2 * half_o < bw - border) & (yy + 2 * half_o < bh - border))
+    bh, bw = search.image.shape
+    inside &= (xx >= border) & (yy >= border) & (xx + 2 * half < bw - border) & (yy + 2 * half < bh - border)
     valid = np.where(inside, surface, -np.inf)
     if not np.isfinite(valid).any():
         return SquareMatch(False, "no place in the search window can be correlated", rotation_deg=rotation,
@@ -455,14 +496,14 @@ def register_on_square(ref: Timepoint, other: Timepoint) -> SquareMatch:
     iy, ix = np.unravel_index(int(np.argmax(valid)), valid.shape)
     peak = float(valid[iy, ix])
     dy, dx = _subpixel(valid, iy, ix)
-    found = _to_um(other, (ix + dx + half_o + bx0, iy + dy + half_o + by0))
-    away = np.hypot(xx - ix, yy - iy) > 0.5 * pitch_o
-    rest = valid[away & np.isfinite(valid)]
+    found = _to_um(other, (ix + dx + half + search.x0, iy + dy + half + search.y0))
+    rest = valid[(np.hypot(xx - ix, yy - iy) > 0.5 * pitch_o) & np.isfinite(valid)]
     runner = float(rest.max()) if rest.size else float("nan")
     margin = peak - runner if math.isfinite(runner) else peak
-    reduced, box_um = _reduce_surface(np.where(inside, surface, np.nan), other, bx0 + half_o, by0 + half_o)
+    reduced, box_um = _reduce_surface(np.where(inside, surface, np.nan), other, search.x0 + half, search.y0 + half)
     match = SquareMatch(True, "", (float(found[0]), float(found[1])), peak, runner if math.isfinite(runner) else None,
                         margin, rotation, scale, reduced, box_um)
+    window = inside[max(0, iy - 1):iy + 2, max(0, ix - 1):ix + 2]
     if peak < MIN_PEAK:
         match.ok, match.reason = False, (f"the reference's square correlates at most {peak:.2f} anywhere in the search "
                                          f"window, under the {MIN_PEAK:g} a match needs")
@@ -470,7 +511,49 @@ def register_on_square(ref: Timepoint, other: Timepoint) -> SquareMatch:
         match.ok, match.reason = False, (f"the square's best match ({peak:.2f}) leads the next place more than half a "
                                          f"pitch away by only {margin:.2f}, under {MIN_MARGIN:g}: something else in the "
                                          "window looks as much like it")
+    elif window.size < 9 or not window.all():
+        # The best place is on the window's edge: the square may lie beyond it, and this is only the nearest thing
+        # inside that looks like it (a plate moved just over the search radius, tracker S7).
+        match.ok, match.reason = False, ("the square's best match lies on the edge of the search window, so the square "
+                                         "itself may lie beyond it: the plate moved further than the search reaches")
     return match
+
+
+#: The turns beyond the lattice angle's fold a hexagonal plate is also correlated at when the folded one finds no
+#: square. The lattice angle reads a turn only modulo 60°, so a plate turned 37° between timepoints reads −23°; the
+#: square breaks every one of these turns but 180°, which it shares with the lattice and nothing in the image can
+#: tell (tracker R5, S2). A square lattice shares all its turns with the square, so it has none.
+HEX_TURNS_DEG = (60.0, 120.0, -60.0, -120.0)
+
+
+def register_on_square(ref: Timepoint, other: Timepoint) -> SquareMatch:
+    """Correlate the reference's aperiodic patch around its square over *other*'s (:func:`aperiodic`).
+
+    The patch is turned by the folded difference of the two lattice angles and scaled by the ratio of pitches, so
+    the result is a similarity transform taking the reference's square to ``found_um``. When that finds no square on
+    a hexagonal lattice, the turns of :data:`HEX_TURNS_DEG` beyond the fold are tried too, and the clearest lock
+    among them is kept with its turn recorded (``turned_deg``). The search covers :data:`SEARCH_PITCHES` around
+    every point :func:`search_centres` names.
+
+    **Assumed**: between two timepoints the plate turns less than 30° (hexagonal) or 45° (square lattice), or by a
+    turn the square breaks. A turn by a symmetry the lattice and the square share (180° on either, 90° on a square
+    lattice) registers as no turn at all, and labels folded the same way are confirmed (tracker S2)."""
+    if not (ref.lattice_ok and other.lattice_ok):
+        return SquareMatch(False, "a montage or its lattice is missing")
+    rotation = fold_rotation(other.angle_deg - ref.angle_deg, ref.kind)
+    scale = other.pitch / ref.pitch
+    search = _search_box(ref, other, max(4, int(round(PATCH_PITCHES * other.pitch / other.um_per_px))))
+    if isinstance(search, str):
+        return SquareMatch(False, search, rotation_deg=rotation, scale=scale)
+    match = _match_at(ref, other, search, rotation, scale)
+    if match.ok or ref.kind == "square":
+        return match
+    best = None
+    for turn in HEX_TURNS_DEG:
+        alternative = _match_at(ref, other, search, rotation + turn, scale)
+        if alternative.ok and (best is None or alternative.margin > best.margin):
+            best, best.turned_deg = alternative, turn
+    return best or match
 
 
 def _subpixel(surface: np.ndarray, iy: int, ix: int) -> tuple[float, float]:
@@ -514,6 +597,45 @@ def mapper(ref: Timepoint, match: SquareMatch):
     return apply
 
 
+#: How far, in degrees and as a fraction, a refit on the matched sites may move the turn and scale the lattice angles
+#: and pitches gave. The refit corrects an estimate's error (a pitch 3 % off left the rim 0.25 pitch out, an angle
+#: 1.5° off 0.23 pitch: tracker S5); a larger move is not an estimate's error, and is left for the address test.
+REFINE_LIMITS = (2.0, 0.05)
+
+
+def refine(ref: Timepoint, other: Timepoint, match: SquareMatch) -> None:
+    """Refit *match*'s turn and scale on the sites its transform overlays, in place, the square kept where it locked.
+
+    Sites are paired by **position** — each mapped reference site with the other timepoint's nearest within 0.4 of
+    a pitch — never by address, so the refit cannot absorb a wrong address: relabelled sites sit where they sat. As
+    complex numbers about the two squares, ``z_other = c · z_ref``, solved by least squares; ``c`` is the scale and
+    the turn. Kept only within :data:`REFINE_LIMITS`; ``match.refined`` records it either way."""
+    from scipy.spatial import cKDTree
+
+    if not ref.sites or not other.sites:
+        return
+    names = list(ref.sites)
+    points = np.array([ref.sites[a] for a in names])
+    mapped = mapper(ref, match)(points)
+    targets = np.array(list(other.sites.values()))
+    distance, index = cKDTree(targets).query(mapped)
+    paired = distance <= 0.4 * other.pitch
+    if paired.sum() < MIN_COMPARED:
+        return
+    zr = (points[paired] - np.asarray(ref.square_um)) @ np.array([1.0, 1j])
+    zo = (targets[index[paired]] - np.asarray(match.found_um)) @ np.array([1.0, 1j])
+    c = complex(np.vdot(zr, zo) / np.vdot(zr, zr))
+    # A screen turn by θ (y down) multiplies x + iy by e^(−iθ).
+    turn, scale = -math.degrees(math.atan2(c.imag, c.real)), abs(c)
+    moved = (abs((turn - match.rotation_deg + 180) % 360 - 180), abs(scale / match.scale - 1))
+    kept = moved[0] <= REFINE_LIMITS[0] and moved[1] <= REFINE_LIMITS[1]
+    match.refined = {"rotation_deg": round(turn, 4), "scale": round(scale, 6), "sites": int(paired.sum()),
+                     "kept": kept, "registered_rotation_deg": round(match.rotation_deg, 4),
+                     "registered_scale": round(match.scale, 6)}
+    if kept:
+        match.rotation_deg, match.scale = turn, scale
+
+
 # ── the address test ─────────────────────────────────────────────────────────
 @dataclass
 class AddressTest:
@@ -523,6 +645,14 @@ class AddressTest:
     max_pitches: float | None = None
     pairs: list = field(default_factory=list)     # (reference address, landed address) for every mapped site
     distances: dict = field(default_factory=dict)  # (q, r) -> distance in pitches, every compared address
+    #: Of :attr:`failing`, how many landed nearest their own address but beyond the tolerance: a site whose fitted
+    #: position is off, not a wrong name (a wrong name lands nearer another site).
+    loose: int = 0
+
+    @property
+    def wrong(self) -> int:
+        """How many addresses landed on another address's site."""
+        return len(self.failing) - self.loose
 
 
 def address_test(ref: Timepoint, other: Timepoint, transform) -> AddressTest:
@@ -555,6 +685,7 @@ def address_test(ref: Timepoint, other: Timepoint, transform) -> AddressTest:
             out.compared += 1
             if d > TOLERANCE_PITCHES or landed != a:
                 out.failing.append([a[0], a[1], round(d, 3), landed[0], landed[1], other.owners.get(a, "")])
+                out.loose += landed == a
         elif nd <= tol and landed != a:
             out.compared += 1
             out.failing.append([a[0], a[1], None, landed[0], landed[1], other.owners.get(landed, "")])
@@ -667,6 +798,8 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
         if not layout["ok"]:
             result.update(verdict=CONTRADICTED, reason=layout["reason"])
         return result
+    refine(ref, other, match)
+    result["square"] = match.as_dict
     transform = mapper(ref, match)
     test = address_test(ref, other, transform)
     diagnosis = diagnose(test, ref.kind)
@@ -682,9 +815,16 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
         centre = float(np.hypot(*(transform(ref.centre_um)[0] - np.asarray(other.centre_um)))) / other.pitch
         result["centre_agreement_pitches"] = round(centre, 4)
     problems = []
-    if test.failing:
+    # A site that lands nearest its own address but beyond the tolerance has a fitted position that is off; a few
+    # are measurement, many are a pattern (a turn the registration missed). One wrong name is a wrong name.
+    loose_allowed = max(2, int(LOOSE_SHARE * test.compared))
+    if test.wrong or test.loose > loose_allowed:
         problems.append(f"{len(test.failing)} of {test.compared} addresses do not land on themselves: "
                         f"{diagnosis['detail']}")
+    if centre is not None and centre >= CENTRE_CONTRADICTS_PITCHES:
+        problems.append(f"the array's fitted centre lands {centre:.2f} pitch from this timepoint's once registered on "
+                        "the square, further than any rim fit is loose: the registration followed something that "
+                        "moved against the array (a decoy taken for the square)")
     if agreement is not None and agreement > SQUARE_AGREEMENT_PITCHES:
         problems.append(f"the square the run accepted at this timepoint is {agreement:.2f} pitch from where the "
                         "reference's square correlates: the run took something else for the square")
@@ -702,8 +842,11 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
                             "from this timepoint's once registered on the square: the square may have moved against "
                             "the array (a decoy), or a fitted rim is loose")
     else:
-        result.update(verdict=CONFIRMED, reason=f"{test.compared} addresses land on themselves, at most "
-                                                f"{test.max_pitches:.2f} pitch off")
+        loose = (f"; {test.loose} land nearest themselves but beyond {TOLERANCE_PITCHES:g} pitch (a site's fitted "
+                 "position off)") if test.loose else ""
+        result.update(verdict=CONFIRMED, reason=f"{test.compared - test.loose} of {test.compared} addresses land on "
+                                                f"themselves, at most {test.max_pitches:.2f} pitch off" + loose)
+    result["loose_count"] = test.loose
     return result
 
 

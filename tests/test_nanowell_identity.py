@@ -32,11 +32,11 @@ PITCH = 172.0
 TILE = "F3"
 
 
-def _timepoint(name, rotation, shift, seed, *, square=True, lattice="hex"):
+def _timepoint(name, rotation, shift, seed, *, square=True, lattice="hex", noise=0.05, blur=1.0, cells=60):
     plan = TilePlan(2, 2, (700, 700), 0.1, PX)
     radius = 0.26 * (plan.step_um[0] + plan.extent_um[0])
     rendered = render_tiles(plan, pitch_um=PITCH, diameter_um=100.0, radius_um=radius, rotation_deg=rotation,
-                            noise_sigma=0.05, blur_px=1.0, seed=seed, cells=60, debris=20, array_shift_um=shift,
+                            noise_sigma=noise, blur_px=blur, seed=seed, cells=cells, debris=20, array_shift_um=shift,
                             square_centre=square, lattice=lattice)
     montage = build_montage(rendered.images, rendered.true_left_top_um, PX)
     centre = tuple(rendered.array.origin)
@@ -99,7 +99,7 @@ def test_the_square_is_told_from_its_neighbours_only_after_the_lattice_is_cancel
     """Plain correlation of the square peaks almost as high one lattice step away (a round nanowell shares its
     surroundings); the lattice residual is what makes the square unique. Without it the check must not decide."""
     ref, other = pair
-    assert ni.register_on_square(ref, other).margin >= 0.25
+    assert ni.register_on_square(ref, other).margin >= 0.3
     monkeypatch.setattr(ni, "lattice_residual", lambda image, *args, **kwargs: np.asarray(image, dtype=np.float32))
     plain = ni.register_on_square(ref, other)
     assert plain.margin < 0.05 and not plain.ok
@@ -190,7 +190,7 @@ def test_a_timepoint_where_the_square_cannot_be_seen_is_inconclusive(pair):
     ref, _ = pair
     hidden = _timepoint("T1", 9.0, (60.0, -40.0), 2, square=False)[0]
     result = ni.compare(ref, hidden)
-    assert result["verdict"] == ni.INCONCLUSIVE and "correlates at most" in result["reason"]
+    assert result["verdict"] == ni.INCONCLUSIVE and "leads the next place" in result["reason"]
 
 
 def test_a_well_with_no_accepted_square_is_inconclusive_throughout(pair):
@@ -516,3 +516,87 @@ def test_a_well_s_memory_does_not_grow_with_its_timepoints(pair):
     peak_for(2)                                           # first imports (scikit-image, scipy) are not the check's
     grown = peak_for(8) - peak_for(2)
     assert grown < 1.5 * one, f"the peak grew by {grown / one:.1f} montages over six more timepoints"
+
+
+
+# ── the stress test's findings (tracker S) ───────────────────────────────────
+def test_a_noisy_blurred_crowded_pair_is_still_confirmed(pair):
+    """S3: camera noise 0.3, a 2.5-pixel blur and 600 cells left the square under the old peak threshold; the
+    band-passed residual finds it."""
+    ref, _ = pair
+    rough = _timepoint("T1", 9.0, (60.0, -40.0), 7, noise=0.3, blur=2.5, cells=600)[0]
+    result = ni.compare(ref, rough)
+    assert result["verdict"] == ni.CONFIRMED, result["reason"]
+    assert result["square"]["margin"] >= ni.MIN_MARGIN
+
+
+def test_a_pitch_estimate_three_percent_off_is_refitted_not_accused(pair):
+    """S5: the turn and scale are refitted on sites paired by position, so an estimate's error is not a wrong name."""
+    ref, other = pair
+    off = copy.deepcopy(other)
+    off.pitch = other.pitch * 1.03
+    off.angle_deg = other.angle_deg + 1.2
+    result = ni.compare(ref, off)
+    assert result["verdict"] == ni.CONFIRMED, result["reason"]
+    refined = result["square"]["refined"]
+    assert refined["kept"] and refined["scale"] == pytest.approx(1.0, abs=0.005)
+    assert result["max_pitches"] < 0.1
+
+
+def test_the_refit_cannot_absorb_a_wrong_name(pair):
+    """Paired by position, never by address: a relabelled timepoint's sites sit where they sat."""
+    ref, other = pair
+    result = ni.compare(ref, _relabel(other, lambda a: (a[0] + 1, a[1])))
+    assert result["verdict"] == ni.CONTRADICTED
+    assert abs(result["square"]["refined"]["rotation_deg"] - result["square"]["refined"]["registered_rotation_deg"]) < 0.1
+
+
+def test_one_site_a_quarter_pitch_out_is_not_a_wrong_well(pair):
+    """S6: one site of 265 fitted 0.3 pitch off its place, still nearest its own address, flipped the timepoint."""
+    ref, other = pair
+    loose = copy.deepcopy(other)
+    loose.sites[(2, 1)] = tuple(np.add(other.sites[(2, 1)], (0.3 * PITCH, 0.0)))
+    result = ni.compare(ref, loose)
+    assert result["verdict"] == ni.CONFIRMED and result["loose_count"] == 1
+    many = copy.deepcopy(other)
+    for a in list(other.sites)[:20]:
+        many.sites[a] = tuple(np.add(other.sites[a], (0.3 * PITCH, 0.0)))
+    assert ni.compare(ref, many)["verdict"] == ni.CONTRADICTED
+
+
+def test_a_decoy_followed_two_sites_off_is_contradicted_by_the_array_s_outline(pair):
+    """S1: with the square hidden, a square-like decoy two sites off taken by the run is the best square there and
+    the correlation follows it: every address then lands on itself. The rim-fitted centre does not move with it."""
+    ref, other = pair
+    decoy = copy.deepcopy(other)
+    decoy.centre_um = tuple(np.add(other.centre_um, 2 * _a1(other)))
+    result = ni.compare(ref, decoy)
+    assert result["verdict"] == ni.CONTRADICTED and "decoy" in result["reason"]
+    assert result["failing_count"] == 0
+
+
+def test_a_hexagonal_plate_turned_past_the_fold_is_caught(pair):
+    """R5: turned 40°, the lattice angle reads −20°; without the square the run labels it 60° off. The folded turn
+    finds no square, the turns beyond the fold do, and the labels are contradicted."""
+    ref, _ = pair
+    turned = _timepoint("T1", 7.0 + 40.0, (60.0, -40.0), 2)[0]
+    folded = _relabel(turned, lambda a: (a[0] + a[1], -a[0]))         # the labels a fit 60° short would give
+    folded.angle_deg = turned.angle_deg - 60.0
+    result = ni.compare(ref, folded)
+    assert result["square"]["turned_deg"] in (60.0, -120.0)
+    assert result["verdict"] == ni.CONTRADICTED
+
+
+def test_a_peak_on_the_edge_of_the_search_is_not_a_lock(pair):
+    """S7: a plate moved just past the search radius put the best place on the window's edge, up to half a pitch
+    off. With the search shrunk under the true shift the square is out of reach and the edge is not taken."""
+    ref, other = pair
+    far = copy.deepcopy(other)
+    far.square_um, far.centre_um = None, None
+    original = ni.SEARCH_PITCHES
+    try:
+        ni.SEARCH_PITCHES = 0.35                         # the square sits 0.42 pitch from the reference's place
+        match = ni.register_on_square(ref, far)
+    finally:
+        ni.SEARCH_PITCHES = original
+    assert not match.ok and "edge of the search window" in match.reason

@@ -10648,17 +10648,30 @@ margin and ratio rule, or the timepoint was anchored on it); every other timepoi
 verdicts compose. **Registration on the square** (`register_on_square`): the reference's montage patch around its
 square (1.5 pitches each side) is correlated (normalised cross-correlation) over the other timepoint's montage within
 4 pitches of where the square is expected (the same common-frame point, the square the run accepted there, the
-array's fitted centre). Both images are first replaced by their **lattice residual** (`lattice_residual`): the image
-minus the mean of itself shifted by each nearest-neighbour lattice vector, which cancels the periodic array and
-leaves the square (unlike any of its neighbours), cells, debris and the rim. Without it the square's correlation
-peak is not unique: on a rendered pair the plain correlation read 0.983 at the square and 0.975 one step away; the
-residual reads 0.552 against 0.234. The patch is turned by the two timepoints' lattice angles' difference folded to
-the smallest turn and scaled by their pitch ratio. The peak must reach `MIN_PEAK` (0.3) and lead the best place more
-than half a pitch from it by `MIN_MARGIN` (0.15; a synthetic choice, tracker Q2), or the timepoint is
-`inconclusive`. **Address test** (`address_test`): every reference address is mapped through the similarity
+array's fitted centre). Both images are first replaced by their **aperiodic part** (`aperiodic`): the lattice
+residual (`lattice_residual`, the image minus the mean of itself shifted by each nearest-neighbour lattice vector,
+which cancels the periodic array and leaves the square, unlike any of its neighbours, cells, debris and the rim),
+band-passed by a difference of Gaussians at 0.04 and 0.25 of a pitch (`BANDPASS_PITCHES`: finer is camera noise,
+coarser is illumination, a bubble's rim or a colony's mass). Without the residual the square's peak is not unique:
+on a rendered pair the plain correlation read 0.983 at the square and 0.975 one step away. Without the band-pass,
+camera noise 0.2, a 6-pixel blur, a thousand cells or the 50 µm format at 4.3 µm/px left good pairs unlocked. The
+patch is turned by the two timepoints' lattice angles' difference folded to the smallest turn and scaled by their
+pitch ratio. **What separates a found square from none is the margin** — the peak's lead over the best place more
+than half a pitch from it — not the peak: measured on rendered pairs, 18 good pairs led by 0.317 to 0.534 and 48 with
+no square to find (none drawn, hidden, a decoy) by at most 0.057, while a null's peak reached 0.445. `MIN_MARGIN` is
+0.10 (a bubble's rim near the square, a colony over it or a thousand cells left good pairs at 0.10 to 0.12) and
+`MIN_PEAK` 0.15 a floor only; both synthetic (tracker Q2). A peak on the edge of the search window is not a lock (the
+square may lie beyond it). On a hexagonal lattice, when the folded turn finds no square, the turns 60° and 120°
+either way beyond the fold are tried (`HEX_TURNS_DEG`), since the lattice angle reads a turn only modulo 60° and the
+square breaks every such turn but 180°; the clearest lock is kept with `turned_deg`. **Refit** (`refine`): the
+turn and scale are refitted on the sites the registration overlays, paired by position — never by address, so a
+wrong name cannot be absorbed — with the square pinned, within 2° and 5 % (`REFINE_LIMITS`): a pitch estimate 3 %
+off had left the rim a quarter pitch out. **Address test** (`address_test`): every reference address is mapped through the similarity
 transform the match gives (`mapper`) and must land within `TOLERANCE_PITCHES` (0.25) of the same address in the
 other timepoint's `nanowells/<well>.csv` positions, and nearer it than any other site; an address only the
-reference holds fails when its mapped point lands on a site carrying another address. `diagnose` reads the
+reference holds fails when its mapped point lands on a site carrying another address. A site that lands nearest its own address but beyond the tolerance has a fitted position that
+is off, not a wrong name; up to two of them or 2 % (`LOOSE_SHARE`) are counted (`loose_count`) and do not contradict,
+while one address landing on another's site does: one site a quarter pitch out had contradicted a 265-site well. `diagnose` reads the
 addresses the mapped sites landed on: one constant lattice step, one element of the lattice's point group
 (`point_group`: twelve on a hexagonal lattice, eight on a square one — a turn by 60°, 90°, 120° or 180°, or a
 reflection) explaining at least 80 % of them, failures confined to one tile, or `scattered`. **Tile layout**
@@ -10675,7 +10688,12 @@ mirrored flag that differs from the reference's, or a lattice of another kind, i
 **Second landmark**: the square is the registration's only landmark, so a square-like decoy the run accepted at both
 timepoints that moved a site between them would be followed; the reference's rim-fitted array centre, mapped
 through the registration, must land within `CENTRE_AGREEMENT_PITCHES` (0.75) of the other's, or the timepoint is
-`inconclusive` — not contradicted, because a fitted circle is loose by up to half a pitch on a real plate.
+`inconclusive` — not contradicted, because a fitted circle is loose by up to half a pitch on a real plate — and
+beyond `CENTRE_CONTRADICTS_PITCHES` (1.5) it is contradicted: with the square hidden and a square-like nanowell two
+or three sites off taken by the run, the correlation follows it (it is the best square there) and every address lands
+on itself, while the rim-fitted centres sat 1.75 and 3.0 pitches apart. The converse — the run right, the square
+hidden, and the correlation following a decoy — contradicts correct addresses; it fails safe (the rows are left out),
+and nothing in one timepoint's image tells the two apart.
 **Verdicts**: `confirmed`, `contradicted` (any failure above), `inconclusive` (no reference square, no montage, a
 peak or margin too low, an unaddressed timepoint, fewer than `MIN_COMPARED` addresses in common, a tile layout from
 another grid, a rim centre that disagrees), `reference`, and `not_checked` for a timepoint never tested; only
@@ -10686,8 +10704,10 @@ the square is the central nanowell by convention), earliest first. A reference a
 every correct timepoint contradicted, so when the contradicted timepoints agree on one step or symmetry and are at
 least as many as those confirmed, the first of them is tried as the reference too, and the one more timepoints
 agree with is kept; alike, the one whose square carries `(0, 0)`; otherwise both groups are `contradicted`, as the
-run leaves both frames of a tie unaddressed. **Limitation**: a *physical* 180° turn of the array is confirmed — the
-hexagonal lattice and the square share the 180° symmetry, so nothing in the images tells it from no turn. A keyed
+run leaves both frames of a tie unaddressed. **Limitation**: the check assumes the plate turns less than 30° (hexagonal) or 45° (square lattice)
+between timepoints, or by a turn the square breaks. A *physical* turn by a symmetry the lattice and the square share
+— 180° on either lattice, 90° on a square one — registers as no turn, and labels folded the same way are confirmed;
+nothing in the images tells it from no turn. A keyed
 plate cannot turn so; only an array that turns inside its well could. The tests' symmetry cases relabel addresses on
 unturned positions, which is the run's failure mode, not this one. **Stage cross-check**
 (`stage_check`, plate level): each timepoint's well origins in stage coordinates (`origin_stage_um`) are fitted to

@@ -119,9 +119,22 @@ def test_an_attempt_beating_its_heartbeat_is_kept(tmp_path, monkeypatch):
 
     _remote(tmp_path, monkeypatch)
     staging, local = _attempts(tmp_path, "run-1", "run-2", "run-3")
-    (staging / "runs" / "run-2" / UPLOAD_HEARTBEAT).touch()
+    beat = staging / "runs" / "run-2" / UPLOAD_HEARTBEAT
+    beat.parent.mkdir(parents=True, exist_ok=True)
+    beat.touch()
     log = _cleanup(_runner(staging, local, "run-3", out_of="run-1"))
     assert (staging / "runs" / "run-2").is_dir() and "heartbeat" in log, log
+
+
+def test_an_attempt_beating_where_an_older_app_beats_is_kept(tmp_path, monkeypatch):
+    """A session still on an app that beats the run directory's root is a live owner too."""
+    from services.remote_run_id import LEGACY_UPLOAD_HEARTBEAT
+
+    _remote(tmp_path, monkeypatch)
+    staging, local = _attempts(tmp_path, "run-1", "run-2", "run-3")
+    (staging / "runs" / "run-2" / LEGACY_UPLOAD_HEARTBEAT).touch()
+    log = _cleanup(_runner(staging, local, "run-3", out_of="run-1"))
+    assert (staging / "runs" / "run-2").is_dir() and "it is still beating its heartbeat" in log, log
 
 
 def test_an_attempt_holding_output_not_brought_home_is_kept(tmp_path, monkeypatch):

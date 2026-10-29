@@ -9,6 +9,7 @@ driver's wait between batches and its watchdog beside each batch — is
 
 from __future__ import annotations
 
+import posixpath
 import threading
 import time
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from services.remote_wait_snippets import (
     UPLOAD_HEARTBEAT_S,
     UPLOAD_HEARTBEAT_STALE_S,
 )
+from services.remote_run_id import HEARTBEAT_DIR
 from util.aw_safe import swallowed
 
 if TYPE_CHECKING:
@@ -30,6 +32,23 @@ if TYPE_CHECKING:
 #: against a remote that gives the node back after two.
 WARN_AFTER_FAILURES = 2
 ERROR_AFTER_FAILURES = 3
+
+#: How long one beat's ``touch`` may take before it counts as missed. Not the beat
+#: interval: on a cluster whose shared filesystem is busy (a GPU batch writing
+#: masks and images as fast as it can), a ``touch`` can take more than 30 s while
+#: ssh itself answers at once, and a beat abandoned at 30 s was counted as missed
+#: even though it would have landed a few seconds later. The beats run one at a
+#: time on one thread, so a long allowance cannot queue them up; it only has to
+#: leave a beat that lands at the very end of it inside the remote's tolerance —
+#: the next beat starts ``UPLOAD_HEARTBEAT_S`` after the last one that landed, so
+#: the remote sees a gap of at most ``UPLOAD_HEARTBEAT_S + BEAT_TIMEOUT_S``, which
+#: must stay under ``UPLOAD_HEARTBEAT_STALE_S``.
+#: ``tests/test_a_slow_heartbeat_is_measured_and_tolerated.py`` holds that sum.
+BEAT_TIMEOUT_S = 75
+
+#: A beat that took at least this long is logged with its duration, landed or not,
+#: so a run on a stalling filesystem leaves a record of how long the stalls were.
+SLOW_BEAT_S = 10
 
 
 def _reason(stderr) -> str:
@@ -64,10 +83,18 @@ class _UploadHeartbeat:
     def __init__(self, cache: "DatasetCache", path: str,
                  interval_s: float = UPLOAD_HEARTBEAT_S, *,
                  log_fn: Callable[[str], None] | None = None,
-                 batched: bool = False, clock: Callable[[], float] = time.time) -> None:
+                 batched: bool = False, clock: Callable[[], float] = time.time,
+                 beat_timeout_s: float = BEAT_TIMEOUT_S,
+                 monotonic: Callable[[], float] = time.monotonic) -> None:
         self._cache = cache
         self._path = path
         self._interval = interval_s
+        self._beat_timeout = beat_timeout_s
+        self._monotonic = monotonic
+        # The heartbeat lives in a folder of its own inside the run directory (see
+        # ``remote_run_id.HEARTBEAT_DIR``); nothing else creates that folder, so the
+        # first beat does. A heartbeat elsewhere (a reservation's) needs nothing.
+        self._needs_dir = posixpath.basename(posixpath.dirname(path)) == HEARTBEAT_DIR
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         # A failing beat used to be invisible until the remote acted on the silence — gave the node back, or
@@ -82,18 +109,27 @@ class _UploadHeartbeat:
         """One touch, now. Called once before the job starts waiting, so the
         first thing it looks at is a heartbeat that already exists.
 
-        Bounded by the beat interval rather than the default: a touch that has
-        not landed by the time the next one is due is not going to help, and
-        letting them queue up would leave the thread minutes behind while the
-        remote reads the silence as an app that died.
+        Bounded by :data:`BEAT_TIMEOUT_S` rather than the default: long enough
+        for a filesystem that is slow to update one file, short enough that a
+        beat landing at the very end of it still reaches the remote before the
+        remote reads the silence as an app that died. A beat that took
+        :data:`SLOW_BEAT_S` or longer is logged with how long it took.
         """
+        if self._needs_dir:
+            self._make_dir()
+        started = self._monotonic()
         try:
             result = self._cache._ssh_run(["touch", self._path], check=False,
-                                          timeout_s=self._interval)
+                                          timeout_s=self._beat_timeout)
         except Exception:
             self._missed(None)
             raise
         rc = getattr(result, "returncode", None)
+        took = self._monotonic() - started
+        if took >= SLOW_BEAT_S:
+            self._log(f"[remote] the heartbeat took {took:.0f} s to "
+                      + ("reach the host" if rc == 0 else f"fail (ssh exit {rc})")
+                      + " — the host's filesystem or connection is slow to answer\n")
         if rc == 0:
             if self._failures >= WARN_AFTER_FAILURES:
                 self._log(f"[remote] the heartbeat is reaching the host again after {self._failures} missed beat(s)\n")
@@ -101,11 +137,19 @@ class _UploadHeartbeat:
         else:
             self._missed(rc, _reason(getattr(result, "stderr", "")))
 
+    def _make_dir(self) -> None:
+        """Create the heartbeat's folder, once. A failure is not fatal here: the
+        ``touch`` that follows fails too, and is counted and reported as a miss."""
+        result = self._cache._ssh_run(["mkdir", "-p", posixpath.dirname(self._path)],
+                                      check=False, timeout_s=self._beat_timeout)
+        if getattr(result, "returncode", None) == 0:
+            self._needs_dir = False
+
     def _missed(self, rc: int | None, why: str = "") -> None:
         """Count a beat that did not land, and say so at the 2nd and 3rd in a row.
 
         *why* is what ssh (or ``ssh_control``, for a timeout) said, so the log
-        names the failure — "Connection reset", "did not answer within 30s" —
+        names the failure — "Connection reset", "did not answer within 75s" —
         and not only its exit code.
         """
         self._failures += 1

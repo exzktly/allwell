@@ -1513,6 +1513,9 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
         lines.append(marks_legend(marked_kinds))
     if note:
         lines.insert(0, note)
+    # The panels sit above however many lines the footer holds (two were reserved, and four or five ran into the
+    # time axis's label), as the Distribution view's footer does.
+    fig.subplots_adjust(bottom=0.10 + _FOOTER_BASE + _LINE * max(2, len(lines)))
     for i, text in enumerate(reversed(lines)):
         _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=muted, gid="nw-traj-footer"),
              muted=True)

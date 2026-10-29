@@ -159,6 +159,7 @@ def _wire(monkeypatch, version):
     monkeypatch.setattr(cp, "cellpose_major", lambda version=None: 4)
     monkeypatch.setattr(cm, "installed_version", lambda: version)
     monkeypatch.setattr(cp, "CELLPOSE_SECONDS", {"network": 0.0, "masks": 0.0, "timed": 0.0})
+    monkeypatch.setattr(cp, "_NETWORK_BATCHES", {})
     built = []
 
     def batch_masks(dP, cellprob, **kw):

@@ -54,6 +54,7 @@ def _install(monkeypatch, major: int, *, cuda: bool = True, bf16: bool = True, t
     # The fake builds its own masks; Cellpose's flows, which pipeline.cellpose_masks reads, it does not return.
     monkeypatch.setattr("pipeline.cellpose_masks.installed_version", lambda: None)
     monkeypatch.setattr(cp, "_CELLPOSE_MODELS", {})
+    monkeypatch.setattr(cp, "_NETWORK_BATCHES", {})
     return calls
 
 

@@ -354,7 +354,8 @@ def _segment_cellpose_many(
     those pixels' effect, not by the crop's content. Cellpose 3 has no such batching: there each image is its own
     call, as before.
 
-    The network runs ``NETWORK_BATCH`` tiles a pass. Cellpose then builds each image's masks one at a time, which on
+    The network runs up to ``NETWORK_BATCH`` tiles a pass, as many as this worker's share of the GPU holds
+    (``_network_batch``), halved for the rest of the run if the GPU runs out of memory. Cellpose then builds each image's masks one at a time, which on
     an A10G took 0.27 s a nanowell against the network's 0.05 s, so on the Cellpose ``pipeline.cellpose_masks`` was
     proven against it is asked for the flows only (``compute_masks=False``) and the masks are built there for the
     whole batch at once. On any other Cellpose 4, Cellpose builds them.
@@ -382,8 +383,9 @@ def _segment_cellpose_many(
     from pipeline import cellpose_masks
 
     ours = cellpose_masks.supported(cellpose_masks.installed_version())
-    result = model.eval(stack, diameter=diam, flow_threshold=flow_threshold, cellprob_threshold=cellprob_threshold,
-                        normalize=False, batch_size=NETWORK_BATCH, compute_masks=not ours, **capped)
+    result = _eval_halving_on_oom(
+        model, str(model_type or DEFAULT_MODEL), stack, diameter=diam, flow_threshold=flow_threshold,
+        cellprob_threshold=cellprob_threshold, normalize=False, compute_masks=not ours, **capped)
     CELLPOSE_SECONDS["timed"] += len(images)              # a call of several images is one Cellpose 4 times
     if ours:
         masks = _batched_masks(model, result[1], len(images), (h, w), diameter=diam, flow_threshold=flow_threshold,
@@ -393,11 +395,99 @@ def _segment_cellpose_many(
     return [masks[i, y:y + im.shape[0], x:x + im.shape[1]] for i, (im, (y, x)) in enumerate(zip(images, at))]
 
 
-#: Network tiles Cellpose runs per pass for a batch of nanowell crops (its ``eval(batch_size=…)``; its own default
-#: is 8). A crop at the default scale is one 256-pixel tile, so 32 runs a whole batch of ``CROP_BATCH`` crops in one
-#: pass. Cellpose-SAM's activations for 32 tiles are a few GB at most, against an A10G's 24 GB shared by the
-#: ``CELLPOSE_WORKERS_PER_GPU`` workers. Batching changes only how many tiles share a pass, not what each tile is.
+#: The most network tiles Cellpose runs per pass for a batch of nanowell crops (its ``eval(batch_size=…)``; its own
+#: default is 8). A crop at the default scale is one 256-pixel tile, so 32 runs a whole batch of ``CROP_BATCH`` crops
+#: in one pass, and more would only matter for crops over 256 px. On a GPU the batch is this or what the worker's
+#: share of the GPU's memory holds, whichever is smaller (``_network_batch``). Batching changes how many tiles share
+#: a pass, not what each tile is, though a GPU's matrix kernels may round a pass of another size differently.
 NETWORK_BATCH = 32
+
+#: Tiles in the one pass a worker runs to measure what a tile costs in GPU memory, before its first batch.
+PROBE_TILES = 4
+
+#: The share of a GPU's memory the workers on it may plan to fill. The rest is for what Torch's allocator does not
+#: count — each process's CUDA context (a few hundred MB) and fragmentation — and for the mask step.
+GPU_HEADROOM = 0.8
+
+#: Each worker's network batch by model, measured once (``_network_batch``) and halved on running out of memory.
+_NETWORK_BATCHES: dict[str, int] = {}
+
+
+def batch_for_memory(total_bytes: float, weights_bytes: float, tile_bytes: float, sharers: int,
+                     ceiling: int = NETWORK_BATCH) -> int:
+    """How many tiles a pass may hold: this worker's share of the GPU's memory (``GPU_HEADROOM`` of it, split among
+    *sharers* workers), less its own model's weights, over what one tile costs; at least 1, at most *ceiling*."""
+    share = total_bytes * GPU_HEADROOM / max(1, sharers) - weights_bytes
+    if tile_bytes <= 0:
+        return ceiling
+    return max(1, min(ceiling, int(share // tile_bytes)))
+
+
+def _gpu_sharers() -> int:
+    """The workers sharing this worker's GPU, as the run told it (``pipeline.parallelism.GPU_SHARERS_ENV``); 1 when
+    it was not told, which is a single process (Test detection) or a caller outside a run."""
+    from pipeline.parallelism import GPU_SHARERS_ENV
+
+    try:
+        return max(1, int(os.environ.get(GPU_SHARERS_ENV, "1")))
+    except ValueError:
+        return 1
+
+
+def _network_batch(model, key: str) -> int:
+    """This worker's network batch for *key*'s model: ``NETWORK_BATCH`` off a GPU; on one, what its share of the
+    GPU's memory holds, measured once with a pass of ``PROBE_TILES`` blank tiles and logged."""
+    if key in _NETWORK_BATCHES:
+        return _NETWORK_BATCHES[key]
+    device = getattr(model, "device", None)
+    if getattr(device, "type", None) != "cuda":
+        _NETWORK_BATCHES[key] = NETWORK_BATCH
+        return NETWORK_BATCH
+    import torch
+
+    index = device.index if device.index is not None else torch.cuda.current_device()
+    total = float(torch.cuda.get_device_properties(index).total_memory)
+    weights = float(sum(p.numel() * p.element_size() for p in model.net.parameters()))
+    torch.cuda.synchronize(index)
+    before = torch.cuda.memory_allocated(index)
+    torch.cuda.reset_peak_memory_stats(index)
+    model.eval(np.zeros((PROBE_TILES, 256, 256, 1), np.float32), batch_size=PROBE_TILES, normalize=False,
+               compute_masks=False)
+    tile = (torch.cuda.max_memory_allocated(index) - before) / PROBE_TILES
+    sharers = _gpu_sharers()
+    batch = batch_for_memory(total, weights, tile, sharers)
+    log.info("Cellpose %s network batch: %d tiles a pass (a tile takes %.0f MB; %d worker(s) share cuda:%d's %.1f GB, "
+             "this one's model %.1f GB).", key, batch, tile / 2 ** 20, sharers, index, total / 2 ** 30,
+             weights / 2 ** 30)
+    _NETWORK_BATCHES[key] = batch
+    return batch
+
+
+def _is_out_of_memory(exc: BaseException) -> bool:
+    """Whether *exc* is Torch running out of GPU memory: its own ``OutOfMemoryError`` (a ``RuntimeError``), or the
+    message older Torch and cuDNN raise it with."""
+    return isinstance(exc, RuntimeError) and (type(exc).__name__ == "OutOfMemoryError"
+                                              or "out of memory" in str(exc).lower())
+
+
+def _eval_halving_on_oom(model, key: str, stack, **kw):
+    """``model.eval(stack, batch_size=…)`` at this worker's network batch; when the GPU runs out of memory, the same
+    call again at half the batch, which the worker then keeps, down to one tile a pass. The result does not depend
+    on the batch: it says how many tiles share a pass, not which. A tile that does not fit alone still fails."""
+    batch = _network_batch(model, key)
+    while True:
+        try:
+            return model.eval(stack, batch_size=batch, **kw)
+        except RuntimeError as exc:
+            if batch <= 1 or not _is_out_of_memory(exc):
+                raise
+            import torch
+
+            torch.cuda.empty_cache()
+            smaller = max(1, batch // 2)
+            log.warning("Cellpose %s ran out of GPU memory at %d tiles a pass; using %d for the rest of this worker's "
+                        "run (worker %d).", key, batch, smaller, os.getpid())
+            batch = _NETWORK_BATCHES[key] = smaller
 
 
 def _batched_masks(model, flows, n: int, shape, *, diameter, flow_threshold, cellprob_threshold,

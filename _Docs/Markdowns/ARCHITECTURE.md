@@ -10431,8 +10431,9 @@ How much of that image the segmenter is given is `segment_scope` (`SEGMENT_SCOPE
 new run, gives it each owned nanowell's crop, `CROP_REACH` (1.2) radii around the centre
 (`nanowell_measure.segment_sites`) — `CROP_BATCH` (32) crops a call to a segmenter that offers `segment_many`
 (Cellpose's: `pipeline.cellpose._segment_cellpose_many` centres them in a common shape padded with 0 and makes one
-Cellpose 4 `eval` of the `(N, H, W, 1)` stack with `batch_size=NETWORK_BATCH` (32: a whole batch's tiles in one
-network pass, against Cellpose's own 8); on the Cellpose `pipeline/cellpose_masks.py` reproduces (`SUPPORTED_VERSION`,
+Cellpose 4 `eval` of the `(N, H, W, 1)` stack at the worker's network batch — at most `NETWORK_BATCH` (32: a whole
+batch's tiles in one pass, against Cellpose's own 8), fewer where the worker's share of its GPU holds fewer
+(`_network_batch`, below); on the Cellpose `pipeline/cellpose_masks.py` reproduces (`SUPPORTED_VERSION`,
 the pin) that call is `compute_masks=False` and the batch's masks are built there, together; on another Cellpose 4,
 Cellpose builds each crop's masks on its own; on Cellpose 3 it is one call per crop), one call per crop otherwise — drops from each crop the
 objects whose centroid lies in another nanowell's counting circle (`_own_labels`: at a pitch under about 2.4 radii a
@@ -10487,6 +10488,22 @@ pin); `min_size` and the default `max_size_fraction` are read from `eval`'s own 
 own to `CELLPOSE_SECONDS["masks"]`, and the progress line's split reads as before.
 `tests/test_cellpose_batched_masks.py` compares the batch with Cellpose's own per-crop masks where Cellpose and Torch
 are installed (not in CI), and holds the wiring with a fake model everywhere.
+
+**The network batch** (`pipeline.cellpose._network_batch`, `batch_for_memory`, `_eval_halving_on_oom`). Off a GPU it
+is `NETWORK_BATCH`. On one, a worker measures once, before its first batch, what a tile costs: one pass of
+`PROBE_TILES` (4) blank tiles between Torch's `reset_peak_memory_stats` and `max_memory_allocated`, over the tiles.
+Its share is `GPU_HEADROOM` (0.8; the rest is each process's CUDA context, which the allocator does not count,
+fragmentation and the mask step) of the GPU's total memory over the workers sharing it, less its own model's
+weights; the batch is that over a tile, between 1 and `NETWORK_BATCH`, logged once per worker and model. The total,
+not the free memory, is divided, because the workers load at different moments and an early one's allocator still
+holds memory a later one would read as taken. The workers sharing a GPU are counted by the main process
+(`ParallelPlan.gpu_sharers`: the workers spread over the GPUs, rounded up; a `--workers` that overrides the cap is
+counted as given) and handed to the spawned workers in `parallelism.GPU_SHARERS_ENV`, set by
+`export_gpu_sharers` in `process_microscopy.main` before any pool exists; a process not told (Test detection) takes
+the GPU as its own. A pass that still runs out of memory (`OutOfMemoryError`, or a `RuntimeError` saying so) empties
+Torch's cache and runs again at half the batch, which the worker keeps for the rest of its run, with a warning; one
+tile that does not fit fails as before. The batch decides how many tiles share a pass, not which tiles or what they
+hold; a GPU's matrix kernels may round a pass of another size in the last bits. `tests/test_cellpose_network_batch.py`.
 
 For its first measured timepoint `run_well` also keeps a sample of what the segmenter was given (`_Steps.inspect` → `measure_timepoint(inspect=…)` → `_tile_contents(keep=…)` → `_keep_crops`): `pipeline/nanowell_inspect.inspection_sites` picks the `PER_GROUP` (8) nanowells nearest the array's centre and the 8 farthest, and each is cut from the image the segmenter received, on the scale it was given it at (`segmenter_scale`), with the labels it returned, the counting circle (`circle`: the fitted centre and `INTERIOR_FRACTION` of the fitted radius, in the crop's pixels) and the labels `count_cells` counted (`counted`), so `_keep_crops` runs after the count. The sheet outlines counted labels green and the rest red, and draws the circle yellow. `WellOutcome.inspection` carries them to `nanowell_task`, which writes `nanowells/<well>_segmenter_input.png` (`nanowell_inspect.write_sheet`; the PNG is encoded with `zlib`, nothing else, because it runs on the remote worker), and `remote_fetch_nanowells.fetch_nanowell_tables` pulls it with the tables. It exists because Test detection runs on the app's own machine, where a Torch that cannot load stops it. `tile` is one call on the whole tile (`segment_tile`), and
 is what options that name no scope mean (`LEGACY_SEGMENT_SCOPE`), with the same key and digest-alias treatment as
@@ -11740,7 +11757,9 @@ chose and, on CPU, what Torch reported), `pipeline.parallelism` (the run's
 worker count and threads per worker, and the Cellpose GPU plan: GPUs are
 counted in the main process from `CUDA_VISIBLE_DEVICES` or `nvidia-smi -L`
 without importing Torch, and Cellpose runs are capped at
-`CELLPOSE_WORKERS_PER_GPU` workers per GPU unless `--workers` is given;
+`CELLPOSE_WORKERS_PER_GPU` workers per GPU unless `--workers` is given, and
+the workers on each GPU are counted for the network batch, `gpu_sharers`, which
+`export_gpu_sharers` hands to the pool in `GPU_SHARERS_ENV`;
 `--cpu_only` stays StarDist's switch because a remote host's `cpu_only` is
 written from the login node's TensorFlow, which is false on most clusters;
 `tests/test_cellpose_uses_the_gpu.py`; and `slurm_cpu_shortfall`, a run-log

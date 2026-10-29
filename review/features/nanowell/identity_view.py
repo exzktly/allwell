@@ -10,6 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer
 
 from review.features.nanowell import _identity_controller as idc
+from review.features.nanowell import controller as nwc
 from review.features.nanowell.state import IDENTITY_MODES
 
 #: The modes as the switch lists them.
@@ -33,7 +34,7 @@ def build_identity_controls(ctx, band):
     for key, label in MODES:
         seg.addSegment(text=label, data=key)
     seg.setToolTip(_MODE_TIP)
-    seg.currentChanged.connect(lambda idx: idc.set_mode(ctx, MODES[idx][0]))
+    seg.currentChanged.connect(lambda idx: nwc.set_identity_mode(ctx, MODES[idx][0]))
     ctx.widgets.register("_nw_identity_mode_seg", seg)
     timer = QTimer(band)
     timer.setInterval(idc.BLINK_MS)

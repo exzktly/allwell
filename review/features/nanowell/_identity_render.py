@@ -25,6 +25,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from review.features.nanowell.identity_compute import DISTANCE_TOP_PITCHES
+
 from review.features.nanowell.renderer import (
     _FOOTER_BASE, _LINE, _PREF_PT, GRID_TYPE_SCALE, MAP_CMAP, _ink, _inks, render_message,
 )
@@ -125,7 +127,6 @@ def render_distance(fig, pair, dmap, lines: list[str]) -> IdentityDrawn:
     from matplotlib.colors import Normalize
     from matplotlib.patches import Polygon
 
-    from review.features.nanowell.identity_compute import DISTANCE_TOP_PITCHES
     from ui.theme import Colors
 
     lines = list(lines) + [f"Each nanowell at its position at {pair.reference} (µm, the reference's frame), filled by "

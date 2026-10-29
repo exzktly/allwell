@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 
 from review.features.nanowell import _identity_render as ir
+from review.features.nanowell.image_compute import read_montage, tile_boxes
 from review.features.nanowell import identity_compute as ic
 from review.features.nanowell.state import IDENTITY_MODES
 
@@ -28,8 +29,6 @@ BLINK_MS = 500
 
 
 def _tile_sizes(data, well: str, timepoint: str) -> dict:
-    from review.features.nanowell.image_compute import tile_boxes
-
     return {t.tile: (t.width_um, t.height_um) for t in tile_boxes(data, well, timepoint)
             if t.width_um and t.height_um}
 
@@ -91,12 +90,6 @@ def draw_identity(fig, data, *, well: str, timepoint: str, mode: str = "distance
 
 
 # ── the page ─────────────────────────────────────────────────────────────────
-def _nwc():
-    from review.features.nanowell import controller
-
-    return controller
-
-
 def page_sidecar(st, well: str):
     """The well's sidecar as the page holds it: read once per well and dataset (``None``: none current)."""
     from pipeline.nanowell_identity import read_sidecar
@@ -114,11 +107,9 @@ def page_timepoint(st, well: str) -> str:
     return st.timepoint if st.timepoint in tps else ic.default_timepoint(st.data, well, tps)
 
 
-def _images(ctx, st, well: str, timepoint: str, reference: str | None) -> dict:
-    """Both montages from the page's montage store, each read on a worker the first time it is asked for."""
-    from review.features.nanowell.image_compute import read_montage
-
-    nwc = _nwc()
+def _images(ctx, st, well: str, timepoint: str, reference: str | None, fetch) -> dict:
+    """Both montages from the page's montage store, each read on a worker the first time it is asked for, through
+    the page's *fetch* (``controller._fetch``, handed in so this module never imports the controller)."""
     out, waiting, why = {}, False, []
     data = st.data
     for name, tp in (("reference", reference), ("compared", timepoint)):
@@ -133,19 +124,19 @@ def _images(ctx, st, well: str, timepoint: str, reference: str | None) -> dict:
             continue
         out[name] = None
         waiting = True
-        nwc._fetch(ctx, "montages", (well, tp), lambda tp=tp: read_montage(data, well, tp),
-                   failed=lambda message: (None, f"The montage could not be read: {message}"))
+        fetch(ctx, "montages", (well, tp), lambda tp=tp: read_montage(data, well, tp),
+              failed=lambda message: (None, f"The montage could not be read: {message}"))
     out["why"] = " ".join(filter(None, ["Reading the montages…" if waiting else "", *why]))
     return out
 
 
-def page_inputs(ctx, st, well: str, timepoint: str) -> dict:
+def page_inputs(ctx, st, well: str, timepoint: str, fetch) -> dict:
     """What the page hands :func:`draw_identity`: its mode, the sidecar it holds, the montages Blink and Side by
     side draw (read only for those modes), and its Blink frames."""
     payload = page_sidecar(st, well)
     images = None
     if st.identity_mode in ("blink", "sides") and payload is not None:
-        images = _images(ctx, st, well, timepoint, payload.get("reference"))
+        images = _images(ctx, st, well, timepoint, payload.get("reference"), fetch)
     return {"mode": st.identity_mode, "payload": payload, "images": images, "frames_cache": st.identity_frames}
 
 
@@ -221,13 +212,3 @@ def on_motion(ctx, event) -> None:
             canvas.draw_idle()
 
 
-def set_mode(ctx, mode: str) -> None:
-    """Choose what the Identity view shows (``state.IDENTITY_MODES``); kept with the page's settings."""
-    st = ctx.state.feature_slice("nanowell")
-    if st is None or mode not in IDENTITY_MODES or st.identity_mode == mode:
-        return
-    st.identity_mode = mode
-    nwc = _nwc()
-    nwc._save_soon(ctx)
-    nwc._call(ctx, "_nw_refresh_controls")
-    nwc.redraw(ctx)

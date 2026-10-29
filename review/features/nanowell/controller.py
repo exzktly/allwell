@@ -27,13 +27,17 @@ from review.features.nanowell.distribution_compute import (
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, one_to_one
 from review.features.nanowell import extremes_compute as ec
+from review.features.nanowell import _identity_controller as idc
+from review.features.nanowell.identity_compute import identity_note
 from review.features.nanowell import subset_compute as ss
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
     render_position, render_site_detail, render_trajectories,
 )
-from review.features.nanowell.state import IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS
+from review.features.nanowell.state import (
+    IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
+)
 from review.features.nanowell.series_compute import crop_metric_lines, long_format, site_metrics, site_series
 
 log = logging.getLogger("review")
@@ -307,7 +311,7 @@ def redraw(ctx) -> None:
     _call(ctx, "_nw_show_computing")
     _refresh_empty(ctx)
     if st.metrics is None or nanowell_empty_reason(ctx) is not None:
-        _identity().leave(ctx, st)
+        idc.leave(ctx, st)
         return
     # The page's views share one figure; each keeps its own Properties settings, so a range typed for Distribution
     # never reaches the Array map or the Trajectories' hours (``plot_style.set_pref_scope``).
@@ -322,7 +326,7 @@ def redraw(ctx) -> None:
     if st.view == "identity":
         _draw_identity_page(ctx, st, fig, canvas, well=well)
         return
-    _identity().leave(ctx, st)
+    idc.leave(ctx, st)
     if st.view == "extremes":
         _draw_extremes(ctx, st, fig, canvas, metric=metric, channel=channel, well=well, note=note)
         return
@@ -358,24 +362,17 @@ def redraw(ctx) -> None:
     redraw_detail(ctx)
 
 
-def _identity():
-    from review.features.nanowell import _identity_controller
-
-    return _identity_controller
-
-
 def _draw_identity_page(ctx, st, fig, canvas, *, well: str) -> None:
     """The Identity view on the page: through :func:`draw_view`, with the sidecar, montages and Blink frames the page
     holds (``_identity_controller.page_inputs``); the Blink timer follows what was drawn."""
     from review.core.plot_style import apply_export_style_to_current
 
-    idc = _identity()
     timepoint = idc.page_timepoint(st, well)
     st.hits, st.drawn = None, None                       # nothing to click and nothing to zoom
     _hits, drawn = draw_view(fig, "identity", st.metrics, st.data, groups=page_groups(ctx), metric=st.metric,
                              channel=None, axis=st.axis, timepoint=timepoint, control=st.control,
                              baseline=st.baseline, cohort=st.cohort, well=well, well_timepoint=timepoint,
-                             identity=idc.page_inputs(ctx, st, well, timepoint))
+                             identity=idc.page_inputs(ctx, st, well, timepoint, _fetch))
     idc.after_draw(ctx, st, drawn)
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
@@ -502,9 +499,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     ``_identity_render.IdentityDrawn``. It has no metric, so the metric, Subset and grouping are not used.
     """
     if view == "identity":
-        from review.features.nanowell._identity_controller import draw_identity
-
-        return None, draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
+        return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
     wells = [w for members in groups.values() for w in members]
     all_metrics = metrics
     metrics, filtered = ss.apply(metrics, subset, baseline, [well] if view == "array" else wells, data)
@@ -521,8 +516,6 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                             "was added, so their earlier timepoints' numbers were rewritten."]))
     # Whether each address names one nanowell over time is checked per timepoint; a figure over wells not all
     # confirmed says so, and names the contradicted timepoints it left out (NANOWELL_IDENTITY_TRACKER C3).
-    from review.features.nanowell.identity_compute import identity_note
-
     note = " ".join(filter(None, [note, identity_note(data, [well] if view == "array" else wells)]))
     if view == "array":
         dimmed = frozenset() if filtered is None else filtered.outside_sites
@@ -601,7 +594,7 @@ def shown_timepoint(ctx) -> tuple[list, str]:
     if st.view == "identity":
         # One well's timepoint against its reference: its first not confirmed unless one is chosen.
         well = page_well(ctx)
-        return list(st.data.timepoints(well)), _identity().page_timepoint(st, well)
+        return list(st.data.timepoints(well)), idc.page_timepoint(st, well)
     if st.view == "extremes":
         # One well's nanowells, ranked at one of its timepoints: its latest unless one is chosen (as U13).
         tps = list(st.data.timepoints(page_well(ctx)))
@@ -952,12 +945,23 @@ def _array_press(st, event) -> None:
     st.press = (event.x, event.y, ax.get_xlim(), ax.get_ylim(), ax.transData.inverted().frozen(), _adding(event))
 
 
+def set_identity_mode(ctx, mode: str) -> None:
+    """Choose what the Identity view shows (``state.IDENTITY_MODES``); kept with the page's settings."""
+    st = _state(ctx)
+    if st is None or mode not in IDENTITY_MODES or st.identity_mode == mode:
+        return
+    st.identity_mode = mode
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
+
+
 def on_motion(ctx, event) -> None:
     """A drag on the Array view pans it; the pixels follow at once and the image is drawn again on release. On the
     Identity view's *Side by side* the pointer lights the address under it."""
     st = _state(ctx)
     if st is not None and st.view == "identity":
-        _identity().on_motion(ctx, event)
+        idc.on_motion(ctx, event)
         return
     if st is None or st.press is None or st.view != "array" or st.drawn is None or event.x is None:
         return

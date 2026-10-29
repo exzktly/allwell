@@ -142,6 +142,15 @@ was done about it.
 | R10 | `choose_reference` does not require the reference's status to be `ok` | done | `reference_candidates` requires status `ok`. `test_an_unaddressed_timepoint_is_never_the_reference` |
 | R11 | The stage tolerance (0.25 pitch) is uncalibrated and a flag overrules a good image verdict | blocked | needs a real plate's stage repeatability: Q5 |
 
+### U — first real-data report (after #1103 merged)
+
+| id | finding | state | evidence |
+|---|---|---|---|
+| U1 | **Almost every well comes back `contradicted` on real data**; the reporter points at nanowells mapped from a corner tile | todo | |
+| U2 | The Identity view's *Diagnostics* is unintelligible | todo | |
+| U3 | Every Identity sub-view must zoom | todo | |
+| U4 | A contradicted (or otherwise not confirmed) timepoint must not be replaced by the hatching: its datapoints stay drawn, the hatch is a background behind them | todo | |
+
 ### S — registration stress test (renders swept over turn, shift, noise, blur, cells, bubbles, lighting, decoys, pixel size, format)
 
 Measured by a reviewer on HEAD 4e2f6ba (scripts and logs under the session scratchpad `stress/`).

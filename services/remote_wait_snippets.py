@@ -200,3 +200,42 @@ def _wait_for_upload_snippet(sentinel: str, heartbeat: str = "") -> str:
         f'sleep {UPLOAD_WAIT_POLL_S}; done; '
         f'echo "[remote] scheduler: input is complete — starting the pipeline"; '
     )
+
+
+def _wait_for_handover_snippet(command_file: str, heartbeat: str) -> str:
+    """Shell that blocks until the app hands the job its command, or gives the node back.
+
+    The job an early allocation request starts (``services.remote_reservation``)
+    is queued before the app knows what the run will be: the plate is still
+    being planned and staged on this machine, and the run directory, the
+    pipeline's arguments and the batch count all come out of that. So the job
+    waits for *command_file*, which the app writes once — atomically, by a
+    rename — when the run is ready, and then runs it in this same shell.
+
+    The same two clocks as :func:`_wait_for_upload_snippet` decide when to stop
+    waiting: a heartbeat silent for ``UPLOAD_HEARTBEAT_STALE_S`` means the app
+    is gone, and ``UPLOAD_WAIT_TIMEOUT_S`` of polls no fresh heartbeat vouched
+    for is the backstop. Both edges are announced, because a job granted a node
+    while the app is still planning looks exactly like a job that has hung.
+    """
+    command_q = _remote_quote(command_file)
+    waited = max(1, int(UPLOAD_WAIT_TIMEOUT_S // UPLOAD_WAIT_POLL_S))
+    init, stale = _heartbeat_stale_snippet(
+        heartbeat,
+        f"[remote] ERROR the app stopped responding while it prepared the run "
+        f"({UPLOAD_HEARTBEAT_STALE_S}s without a heartbeat) — giving the node back")
+    return (
+        f'if [ ! -f {command_q} ]; then '
+        f'echo "[remote] scheduler: node granted; waiting for the app to finish '
+        f'preparing the run…"; fi; '
+        f'_aw_w=0; _aw_fresh=0; {init}'
+        f'while [ ! -f {command_q} ]; do '
+        f'{stale}'
+        f'[ "$_aw_fresh" = 1 ] || _aw_w=$((_aw_w+1)); '
+        f'if [ "$_aw_w" -gt {waited} ]; then '
+        f'echo "[remote] ERROR the app never handed the run over — giving the node '
+        f'back after {UPLOAD_WAIT_TIMEOUT_S}s with no heartbeat to say it was still preparing"; '
+        f'exit {_UPLOAD_WAIT_EXIT}; fi; '
+        f'sleep {UPLOAD_WAIT_POLL_S}; done; '
+        f'echo "[remote] scheduler: the run is ready — starting it on this node"; '
+    )

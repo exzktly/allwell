@@ -60,7 +60,7 @@ from services.remote_commands import (
     BATCH_STAGED,
     HOLD_DIR,
     _batch_driver_snippet,
-    _compose_driver_cmd, batch_pipeline_argv, pack_for_login_shell,
+    _compose_driver_cmd, _handover_driver_body, batch_pipeline_argv, pack_for_login_shell,
 )
 from services.remote_run_id import (
     _compute_run_id,
@@ -376,9 +376,13 @@ class _BatchedRemoteProcess:
         log_fn: Callable[[str], None] | None = None,
         progress_fn: Callable[[float], None] | None = None,
         stop_event: threading.Event | None = None,
+        reservation=None,
     ):
         self._runner = runner
         self._zipped = zipped
+        # A job queued before staging (`services.remote_reservation`): `_start_driver` hands it the driver rather
+        # than asking for a node of its own, when it still can.
+        self._reservation = reservation
         self._local_output_dir = local_output_dir
         self._pipeline_argv = pipeline_argv
         self._batch_size = max(1, batch_size)
@@ -692,13 +696,6 @@ class _BatchedRemoteProcess:
         # The budget for one batch is what the operator wrote before this
         # change: their --time sized a single launch.
         per_batch_s = launcher_time_seconds(host.launch_command)
-        launcher, note = scale_launcher_time(host.launch_command, total)
-        if note:
-            self._log(note)
-        # One hand-off for the run rather than one per batch — there is one
-        # queue wait now, and this is the line that says it is happening.
-        self._log(_scheduler_handoff_lines(launcher))
-
         driver = _batch_driver_snippet(run_dir, n_batches, remote_argv,
                                        heartbeat, per_batch_s,
                                        link_blanks=(
@@ -706,26 +703,17 @@ class _BatchedRemoteProcess:
                                            if blanks else ()),
                                        suspend_request=paths.suspend_request,
                                        final_pass=self._final_pass)
-        # A connection of its own: the heartbeat's shared master hanging, or being closed to recover it, must not end
-        # the stream — and through the PTY's SIGHUP the batch — with it (`RemoteHost.ssh_argv`).
-        ssh_argv = host.ssh_argv(allocate_tty=True, share_connection=False) + [pack_for_login_shell(
-            _compose_driver_cmd(launcher, run.remote_pidfile, driver,
-                                env_selector=self._runner.env_selector,
-                                scratch_dir=host.remote_scratch_dir, queue_wait_s=queue_wait_seconds(host)))
-        ]
-        proc = subprocess.Popen(
-            ssh_argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            # The remote (Linux) pipeline logs UTF-8 — including the em-dash in
-            # "Well X — done." Decode as UTF-8 so those markers survive on a
-            # cp1252 Windows client; otherwise the dashboard's per-well Process
-            # tracking never matches.
-            **TEXT_UTF8,
-            bufsize=1,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-            **own_process_group_kwargs(),
-        )
+        # The job queued before staging, sized then for every batch the plate could hold, takes the driver when it
+        # still can; otherwise one is asked for now.
+        proc = None
+        reservation = getattr(self, "_reservation", None)
+        if reservation is not None:
+            proc = reservation.hand_over(
+                _handover_driver_body(driver, env_selector=self._runner.env_selector,
+                                      scratch_dir=host.remote_scratch_dir),
+                run_pidfile=run.remote_pidfile, run_heartbeat=heartbeat)
+        if proc is None:
+            proc = self._launch_driver(host, run, driver, total)
         with self._current_proc_lock:
             self._current_proc = proc
         self._n_batches = total     # the final pass too: the driver lost during it is lost, not stopped
@@ -739,6 +727,35 @@ class _BatchedRemoteProcess:
             name="aw-batch-driver-reader")
         self._reader.start()
         return self._upload_blanks()        # now the node request is in, not before it
+
+    def _launch_driver(self, host, run, driver: str, total: int) -> subprocess.Popen:
+        """Ask the scheduler for the node the driver holds for the whole run, and start the ssh that waits on it."""
+        launcher, note = scale_launcher_time(host.launch_command, total)
+        if note:
+            self._log(note)
+        # One hand-off for the run rather than one per batch — there is one
+        # queue wait now, and this is the line that says it is happening.
+        self._log(_scheduler_handoff_lines(launcher))
+        # A connection of its own: the heartbeat's shared master hanging, or being closed to recover it, must not end
+        # the stream — and through the PTY's SIGHUP the batch — with it (`RemoteHost.ssh_argv`).
+        ssh_argv = host.ssh_argv(allocate_tty=True, share_connection=False) + [pack_for_login_shell(
+            _compose_driver_cmd(launcher, run.remote_pidfile, driver,
+                                env_selector=self._runner.env_selector,
+                                scratch_dir=host.remote_scratch_dir, queue_wait_s=queue_wait_seconds(host)))
+        ]
+        return subprocess.Popen(
+            ssh_argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            # The remote (Linux) pipeline logs UTF-8 — including the em-dash in
+            # "Well X — done." Decode as UTF-8 so those markers survive on a
+            # cp1252 Windows client; otherwise the dashboard's per-well Process
+            # tracking never matches.
+            **TEXT_UTF8,
+            bufsize=1,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            **own_process_group_kwargs(),
+        )
 
     def _release_driver(self) -> None:
         """Stop the heartbeat and hand back an allocation nobody is feeding.
@@ -760,6 +777,10 @@ class _BatchedRemoteProcess:
         if heartbeat is not None:
             with swallow("stopping the upload heartbeat"):
                 heartbeat.stop()
+        reservation = getattr(self, "_reservation", None)
+        if reservation is not None:     # a no-op once the driver took it
+            with swallow("giving back the node asked for early"):
+                reservation.release("the run ended before it needed a node")
         if not getattr(self, "_owns_allocation", False):
             return          # never launched: nothing here is ours to cancel
         lock = getattr(self, "_current_proc_lock", None)

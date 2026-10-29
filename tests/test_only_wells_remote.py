@@ -102,7 +102,9 @@ def _run(monkeypatch, tmp_path, zipped, *, only_wells, opts_extra=None):
         estimate=lambda z: types.SimpleNamespace(format=lambda: "est"),
         spawn=spawn, verify_and_cleanup=lambda ok, **k: True,
         close_remote_job=lambda **k: None, cancel=lambda proc: None,
-        can_request_suspend=False)
+        can_request_suspend=False,
+        # A host with no scheduler: nothing is queued while the plate is staged.
+        reserve_allocation=lambda **k: None)
     r = pr.PipelineRunner()
     r._remote = types.SimpleNamespace(name="h")
     r._remote_runner = remote

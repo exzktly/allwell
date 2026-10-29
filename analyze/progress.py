@@ -138,6 +138,8 @@ class AnalyzeProgressMixin:
         self._run_remote = bool(remote)
         self._run_phase = _PHASE_PREPARE
         self._run_ended = False
+        self._sched_early = False
+        self._sched_granted_job = ""
         self._render_headline()
         self._silence_warned_at = None
         if self._run_remote:
@@ -343,7 +345,24 @@ class AnalyzeProgressMixin:
         nothing said it was queued. Two separate causes — the batched launcher
         announced nothing, and ``set_transfer(None)`` fires only on a *compute*
         event, which by definition has not happened yet while the job waits.
+
+        A job asked for before staging (``waiting-early``) is waited for while
+        the run is still being prepared here, so its clock runs on the status
+        line but the run is not moved into the queued or launch phase until the
+        run is handed to it (``handed``): until then the headline says what this
+        machine is doing. ``early-ended`` is that job given back unused.
         """
+        if state in ("waiting-early", "handed", "early-ended") or (
+                getattr(self, "_sched_early", False) and state != "granted"):
+            self._on_early_scheduler(state, job_id, launcher)
+            return
+        if state == "granted" and getattr(self, "_sched_early", False):
+            self._stop_scheduler_timer()
+            self._sched_granted_job = job_id or "?"
+            self._set_scheduler_status(
+                f"Allocation granted{f' — job {job_id}' if job_id else ''}; "
+                f"the node waits while this machine prepares the run…")
+            return
         if state == "granted":
             self._stop_scheduler_timer()
             self._set_scheduler_status(
@@ -362,6 +381,42 @@ class AnalyzeProgressMixin:
         # "queued" carries the job id, "waiting" the launcher; each arrives in
         # its own line, so keep whichever we have rather than overwriting one
         # with the other's blank.
+        if job_id:
+            self._sched_job = job_id
+        if launcher:
+            self._sched_launcher = launcher
+        self._render_scheduler()
+        timer = getattr(self, "_sched_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setInterval(1000)
+            timer.timeout.connect(self._render_scheduler)
+            self._sched_timer = timer
+        if not timer.isActive():
+            timer.start()
+
+    def _on_early_scheduler(self, state: str, job_id: str, launcher: str) -> None:
+        """The job queued before staging: count its wait without changing the run's phase (see
+        :meth:`_on_scheduler`), and move the run into the scheduler's phases once it is handed the run."""
+        if state == "early-ended":
+            self._sched_early = False
+            self._sched_granted_job = ""
+            self._stop_scheduler_timer()
+            self._clear_scheduler_status()
+            return
+        if state == "handed":
+            self._sched_early = False
+            granted, self._sched_granted_job = getattr(self, "_sched_granted_job", ""), ""
+            if granted:
+                self._on_scheduler("granted", "" if granted == "?" else granted, "")
+            else:
+                self._on_scheduler("waiting", "", "")
+            return
+        # "waiting-early", or a request the job's own launcher repeated while it waits (a node that failed to boot).
+        self._sched_early = True
+        if getattr(self, "_sched_since", None) is None:
+            self._sched_since = _time.monotonic()
+            self._sched_breadcrumb_at = self._sched_since
         if job_id:
             self._sched_job = job_id
         if launcher:

@@ -92,7 +92,9 @@ def _run(inp: Path, out: Path, opts: dict, *, host_extras=(), argv_sent: list | 
         estimate=lambda z: types.SimpleNamespace(format=lambda: "est"),
         spawn=spawn, verify_and_cleanup=lambda ok, **k: True,
         close_remote_job=lambda **k: None, cancel=lambda proc: None,
-        can_request_suspend=False, _host_argv_extras=lambda _filter: list(host_extras))
+        can_request_suspend=False, _host_argv_extras=lambda _filter: list(host_extras),
+        # A host with no scheduler: nothing is queued while the plate is staged.
+        reserve_allocation=lambda **k: None)
     args = build_pipeline_args(Path("process_microscopy.py"), inp, out, opts)
     r._run_pipeline_remote(inp, out, args, opts)
     lines = []

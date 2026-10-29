@@ -172,6 +172,13 @@ def _first_session_is_running(plate, host, remote, stop_fetchers) -> str:
     return os.path.dirname(pidfile)
 
 
+def _run_launches(remote) -> list:
+    """The launches of a pipeline or batch driver into a run directory. A run also queues a job of its own before
+    it is staged (``services.remote_reservation``), in a directory of its own; this stand-in host answers that job as
+    already ended, so the run releases it and launches the ordinary way, and these tests are about the latter."""
+    return [argv for argv in remote.launched if "/reservations/" not in argv[-1]]
+
+
 def _second_session(plate, host, stop_fetchers, **opts_extra):
     from services.pipeline_service import build_pipeline_args
 
@@ -191,7 +198,7 @@ def _second_session(plate, host, stop_fetchers, **opts_extra):
 def test_a_refused_second_session_leaves_the_first_session_s_job_running(
         plate, host, remote, stop_fetchers, batch_size):
     run_dir = _first_session_is_running(plate, host, remote, stop_fetchers)
-    launches = len(remote.launched)
+    launches = len(_run_launches(remote))
 
     r, text = _second_session(plate, host, stop_fetchers, remote_batch_size=batch_size)
     if r._remote_runner._run is not None:
@@ -201,7 +208,7 @@ def test_a_refused_second_session_leaves_the_first_session_s_job_running(
     assert scancelled(remote.jobs) == [], (
         f"the refused second session cancelled the first session's job:\n{text}")
     assert (remote.jobs / LIVE_JOB).read_text() == "RUNNING"
-    assert len(remote.launched) == launches, (
+    assert len(_run_launches(remote)) == launches, (
         f"the second session launched a second allocation into the first one's run directory:\n{text}")
     assert "another session" in text, text
     assert remote.path(run_dir + "/run.pid.slurm").read_text().strip() == LIVE_JOB, (
@@ -284,14 +291,14 @@ def test_a_resume_cancels_the_earlier_attempt_s_abandoned_job(
     resume is about to write. Cancelled, and the log says whose it was."""
     earlier = _an_earlier_attempt_is_still_running(
         plate, host, remote, stop_fetchers, heartbeat_age=600)
-    launches = len(remote.launched)
+    launches = len(_run_launches(remote))
 
     r, text = _second_session(plate, host, stop_fetchers, remote_batch_size=batch_size)
 
     assert scancelled(remote.jobs) == [f"-u {_me()} {EARLIER_JOB}"], text
     assert f"cancelled a job left over from an earlier run of this dataset ({EARLIER_JOB}, " \
            f"in an earlier attempt's run directory, {earlier})" in text, text
-    assert len(remote.launched) == launches + 1, f"the resume did not go ahead:\n{text}"
+    assert len(_run_launches(remote)) == launches + 1, f"the resume did not go ahead:\n{text}"
 
 
 @pytest.mark.parametrize("batch_size", [2, 0], ids=["batched", "single-shot"])
@@ -302,12 +309,12 @@ def test_a_resume_is_refused_while_the_earlier_attempt_is_still_fed(
     pipelines writing one output. The run stops and says what to do."""
     earlier = _an_earlier_attempt_is_still_running(
         plate, host, remote, stop_fetchers, heartbeat_age=0)
-    launches = len(remote.launched)
+    launches = len(_run_launches(remote))
 
     r, text = _second_session(plate, host, stop_fetchers, remote_batch_size=batch_size)
 
     assert scancelled(remote.jobs) == [], text
-    assert len(remote.launched) == launches, f"a second pipeline was launched:\n{text}"
+    assert len(_run_launches(remote)) == launches, f"a second pipeline was launched:\n{text}"
     assert (f"another session is already running this exact dataset and configuration on this "
             f"host (job {EARLIER_JOB}, in an earlier attempt's run directory, {earlier}") in text, text
     assert f"scancel {EARLIER_JOB}" in text

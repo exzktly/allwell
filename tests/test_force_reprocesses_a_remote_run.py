@@ -82,7 +82,9 @@ def _run_remote(tmp_path: Path, **opts_extra):
         estimate=lambda z: types.SimpleNamespace(format=lambda: "est"),
         spawn=spawn, verify_and_cleanup=lambda ok, **k: True,
         close_remote_job=lambda **k: None, cancel=lambda proc: None,
-        can_request_suspend=False)
+        can_request_suspend=False,
+        # A host with no scheduler: nothing is queued while the plate is staged.
+        reserve_allocation=lambda **k: None)
     opts = {"filename_schema": SCHEMA, "filename_sep": "_",
             "fluor_tokens": ["GFP"], "nuclear_token": "DAPI",
             "csv_prefix": "measurements", **opts_extra}

@@ -305,6 +305,28 @@ def _job_events(line: str) -> list[tuple[str, object]]:
     return events
 
 
+def _sched_events(line: str) -> list[tuple[str, object]]:
+    """``("sched", (state, job id, launcher))`` for the lines marking the ends of a wait for a node."""
+    events: list[tuple[str, object]] = []
+    msr = _RE_SCHED_REQUEST.search(line)
+    if msr:
+        events.append(("sched", ("waiting-early" if msr.group("early") else "waiting", "",
+                                 msr.group("launcher").strip())))
+    if _RE_SCHED_HANDED.search(line):
+        events.append(("sched", ("handed", "", "")))
+    if _RE_SCHED_EARLY_ENDED.search(line):
+        events.append(("sched", ("early-ended", "", "")))
+    msq = _RE_SCHED_QUEUED.search(line)
+    if msq:
+        events.append(("sched", ("queued", msq.group(1), "")))
+    for pattern in (_RE_SCHED_GRANTED, _RE_SCHED_ALLOCATED):
+        msg = pattern.search(line)
+        if msg:
+            events.append(("sched", ("granted", msg.group(1), "")))
+            break
+    return events
+
+
 def _well_outcome_events(line: str) -> list[tuple[str, object]]:
     """``("well_partial", (well, why))`` for a marker saying a well's output is
     short, ``("well_stage", (well, "error"))`` for a worker's own failure line,
@@ -335,7 +357,12 @@ def _well_outcome_events(line: str) -> list[tuple[str, object]]:
 # whose scheduler words them differently still gets the wait announced and timed
 # off our own lines, and loses only the id.
 _RE_SCHED_REQUEST = re.compile(
-    r"\[remote\] scheduler: (?:batch \d+: )?requesting allocation via: (.+)")
+    r"\[remote\] scheduler: (?:batch \d+: |(?P<early>early: ))?requesting allocation via: (?P<launcher>.+)")
+# A job queued before staging (``services.remote_reservation``) is asked for with ``early:`` on its request line,
+# because the run goes on preparing while it waits: the pane counts the wait without calling the run queued. These
+# are its two ends: the run handed to it, or it given back unused.
+_RE_SCHED_HANDED = re.compile(r"\[remote\] scheduler: the run is handed to the node asked for early")
+_RE_SCHED_EARLY_ENDED = re.compile(r"\[remote\] scheduler: giving back the node asked for early")
 _RE_SCHED_GRANTED = re.compile(
     r"\[remote\] scheduler: allocation granted — job (\S+)")
 _RE_SCHED_QUEUED = re.compile(
@@ -465,11 +492,50 @@ _STATE_PATTERNS: tuple[re.Pattern, ...] = (
     _RE_MODE_WELLS, _RE_WELL_START, _RE_WELL_DONE_ID, _RE_WELL_FAIL, _RE_WELL_UPTODATE,
     _RE_WELL_SKIP, _RE_REMOTE_UPTODATE, _RE_WELL_WORKER_FAIL, _RE_WELL_NOT_STARTED,
     *(p for p, _why in _PARTIAL_MARKERS), _RE_REMOTE_UP_WELL, _RE_FETCH_ZIP, _RE_FETCH_CSV,
-    _RE_THRESH_WELL, _RE_SCHED_REQUEST, _RE_SCHED_GRANTED, _RE_SCHED_QUEUED,
+    _RE_THRESH_WELL, _RE_SCHED_REQUEST, _RE_SCHED_HANDED, _RE_SCHED_EARLY_ENDED, _RE_SCHED_GRANTED, _RE_SCHED_QUEUED,
     _RE_SCHED_ALLOCATED, _RE_JOB_CLOSED, _RE_JOB_UNKNOWN, _RE_WELL_REANCHORING, _RE_WELL_REANCHORED,
     _RE_WELL_REANCHOR_FAILED, _RE_WELL_REANCHOR_UNCHANGED, _RE_WELL_HELD,
     _RE_WELL_REFETCHED, _RE_WELL_REFETCH_SHORT,
 )
+
+
+def _remote_batch_size(opts: dict) -> int:
+    """The run's ``remote_batch_size``: ``0`` (single-shot) when unset or unreadable."""
+    try:
+        return max(0, int(opts.get("remote_batch_size", 0) or 0))
+    except (ValueError, TypeError):
+        return 0
+
+
+class _EarlyAllocation:
+    """The scheduler job a remote run queues before it is staged (:mod:`services.remote_reservation`).
+
+    :meth:`request` is staging's ``on_well_count`` hook, so the job is asked for once, as soon as the run's
+    largest possible well count is known; :attr:`reservation` is handed to the launch; :meth:`release` gives back
+    a job no launch took, whatever ended the run first.
+    """
+
+    def __init__(self, remote_runner, *, batch_size: int, nanowell: bool,
+                 log_fn: Callable[[str], None], stop_event: threading.Event) -> None:
+        self._runner = remote_runner
+        self._batch_size = batch_size
+        self._nanowell = nanowell
+        self._log = log_fn
+        self._stop = stop_event
+        self._asked = False
+        self.reservation = None
+
+    def request(self, n_wells: int) -> None:
+        if self._asked:
+            return
+        self._asked = True
+        self.reservation = self._runner.reserve_allocation(
+            n_wells=n_wells, batch_size=self._batch_size, nanowell=self._nanowell,
+            log_fn=self._log, stop_event=self._stop)
+
+    def release(self, reason: str) -> None:
+        if self.reservation is not None:
+            self.reservation.release(reason)
 
 
 def carries_state(line: str) -> bool:
@@ -701,17 +767,7 @@ class ProgressTracker:
         # ``status`` because the GUI has to start and stop a clock, not just
         # write a string — a wait that does not visibly count up is the hang it
         # was mistaken for.
-        msr = _RE_SCHED_REQUEST.search(line)
-        if msr:
-            events.append(("sched", ("waiting", "", msr.group(1).strip())))
-        msq = _RE_SCHED_QUEUED.search(line)
-        if msq:
-            events.append(("sched", ("queued", msq.group(1), "")))
-        for _pat in (_RE_SCHED_GRANTED, _RE_SCHED_ALLOCATED):
-            msg = _pat.search(line)
-            if msg:
-                events.append(("sched", ("granted", msg.group(1), "")))
-                break
+        events.extend(_sched_events(line))
         # What the granted node is, and the end of the job — for the Analyze
         # pane's job indicator. "Closed" has two sources: the batched driver
         # handing its allocation back, and the runner noting that the remote
@@ -2414,6 +2470,11 @@ class PipelineRunner:
         assert self._remote is not None
         zipped = None
         regate_argv = None
+        batch_size = _remote_batch_size(opts)
+        # The scheduler job, queued as soon as staging knows how many wells the run can hold — before it plans or
+        # rewrites a single archive — so the queue wait overlaps staging (services.remote_reservation).
+        early = _EarlyAllocation(self._remote_runner, batch_size=batch_size, nanowell="--nanowell_format" in args,
+                                 log_fn=lambda m: self._enqueue(("line", m)), stop_event=self._stop_requested)
         # This machine drives the run for its whole length; one that sleeps
         # stops it on the cluster (services.sleep_guard). Released in `finally`.
         awake = SleepGuard(log_fn=lambda m: self._enqueue(("line", m)))
@@ -2456,6 +2517,7 @@ class PipelineRunner:
                 # Only the named wells (and the blanks) are planned and rewritten; the scope below still decides
                 # what is uploaded.
                 only_wells=opts.get("only_wells"),
+                on_well_count=early.request,
             )
             zipped = drop_finished(zipped, finished)
             scope = self._scope_remote_run(zipped, opts, args)
@@ -2474,10 +2536,6 @@ class PipelineRunner:
 
             _on_xfer_progress = TransferProgress(self._enqueue)
 
-            try:
-                batch_size = int(opts.get("remote_batch_size", 0) or 0)
-            except (ValueError, TypeError):
-                batch_size = 0
             proc = self._spawn_tracked(lambda: self._remote_runner.spawn(
                 zipped,
                 output_dir,
@@ -2485,10 +2543,11 @@ class PipelineRunner:
                 output_filter=output_filter,
                 log_fn=lambda m: self._enqueue(("line", m)),
                 progress_fn=_on_xfer_progress,
-                batch_size=max(0, batch_size),
+                batch_size=batch_size,
                 # What Stop sets first. Without it the upload never heard a
                 # Stop: it ran to the end and the pipeline was launched.
                 stop_event=self._stop_requested,
+                reservation=early.reservation,
             ))
             if proc is None:
                 self._enqueue(("line", "[info] Remote run cancelled before launch.\n"))
@@ -2605,6 +2664,9 @@ class PipelineRunner:
             # The reader has usually done it already; this covers a run that
             # failed before it had a stream. No-op on direct-execution hosts.
             self._settle_remote_job()
+            # A job queued before staging that no launch took — the run refused, found nothing to send, failed or
+            # was stopped first — is given back. A no-op once the run took it.
+            early.release("the run ended before it needed a node")
             if zipped is not None and zipped.cleanup is not None:
                 try:
                     zipped.cleanup()

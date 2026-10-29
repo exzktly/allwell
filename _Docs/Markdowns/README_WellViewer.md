@@ -850,8 +850,8 @@ because the recorded values describe the remote host.
 output — from the run's own record where there is one, otherwise from the
 `pipeline_info.json` beside it, so it works on plates you ran long ago. Nothing
 changes until you press it, so anything you have already typed is safe. The
-reprocessing options — **force**, the per-well force list, **incremental**, and
-**Only these wells** — are deliberately *not* restored: they describe what the last run was told to do,
+reprocessing options — **force**, the per-well force list, **incremental**,
+**Only these wells** and **Skip these wells** — are deliberately *not* restored: they describe what the last run was told to do,
 not what you want this one to do. A plate that was forced once would otherwise
 be forced again the moment you loaded its settings back. Both buttons sit on
 their own row beneath the report, so the text has the full width of the sidebar.
@@ -1443,6 +1443,18 @@ skip what is done".
   finished, are run as asked, and the log says so. A remote nanowell run that
   would have to pick up a named well is refused, naming the well; choose **Redo it**
   to redo just the named wells in full, or run on this computer.
+- **Skip these wells.** Comma-separated wells to leave out of this run — a well
+  with a bad acquisition, say, or one you are not ready to analyse. A skipped
+  well is not processed, and its output and its records in `pipeline_info.json`
+  are left exactly as they are; every other well runs. With **Only these wells**
+  filled in as well, the run processes the wells named there that are not
+  skipped. A well named in both **Skip these wells** and **Force these wells** is
+  skipped, and the log says so. A well the input does not hold (or a typo) is
+  noted in the log and otherwise ignored; skipping every well refuses the run.
+  When the run starts it says which wells it skips, and the log lists the wells
+  that run. It works the same way for remote runs, including batched ones. Like
+  **Only these wells**, it is never filled in from a previous run's settings,
+  but a queued job keeps it.
 - **Force these wells.** Comma-separated wells to reprocess in full, whatever
   else the run decides. This is the only thing that recovers a well whose
   `<WELL>_out.zip` exists but whose measurements CSV is missing: its own

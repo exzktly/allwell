@@ -48,8 +48,8 @@ from pathlib import Path
 from collections.abc import Callable
 
 from util.well_token import blank_wells_for_run, canonical_well_label
-from pipeline.well_skip import _canonical_force_wells
-from services.input_resolution_service import has_well_zip
+from pipeline.well_skip import _canonical_force_wells, skip_wells_scope
+from services.input_resolution_service import has_well_zip, iter_all_well_tokens
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost
 from services.remote_runner import (
@@ -1769,6 +1769,39 @@ class PipelineRunner:
             return False
         return True
 
+    def _apply_skip_wells(self, opts: dict, input_dir: Path) -> dict | None:
+        """*opts* with *Skip these wells* turned into the ``--only_wells`` subset that runs every other well
+        (:func:`pipeline.well_skip.skip_wells_scope`); ``None`` when the skip leaves nothing to run, which is
+        reported. Here rather than on the form because the plate's wells are known only once the input folder is
+        resolved — and so a local, remote and batched run all get the same subset."""
+        skip = list(opts.get("skip_wells") or ())
+        if not skip:
+            return opts
+        plate = iter_all_well_tokens(input_dir, filename_schema=opts["filename_schema"],
+                                     filename_sep=opts["filename_sep"])
+        if not plate and not opts.get("only_wells"):
+            self._enqueue_error(f"Skip these wells needs the input's well list, and no well could be read from "
+                                f"{input_dir}. Check the input folder and the filename schema.\n")
+            return None
+        scope = skip_wells_scope(opts.get("only_wells"), skip, plate, opts.get("force_wells"))
+        if scope.refusal:
+            self._enqueue_error(scope.refusal + "\n")
+            return None
+        if scope.absent:
+            self._enqueue(("line", f"[warn] Skip these wells: {', '.join(scope.absent)} not in the input — "
+                                   "nothing to skip there.\n"))
+        if scope.unforced:
+            self._enqueue(("line", f"[warn] {', '.join(scope.unforced)} named in both Force these wells and Skip "
+                                   "these wells: skipped.\n"))
+        if scope.only_wells is None:
+            return opts
+        if scope.skipped:
+            self._enqueue(("line", f"[info] Skipping {len(scope.skipped)} well(s): {', '.join(scope.skipped)}. "
+                                   f"Their output is left as it is; {len(scope.only_wells)} well(s) run.\n"))
+        forced = [w for w in opts.get("force_wells") or ()
+                  if (_canonical_force_wells([w]) or {w}).isdisjoint(set(scope.unforced))]
+        return {**opts, "only_wells": scope.only_wells, "force_wells": forced}
+
     def _enqueue_error(self, message: str) -> None:
         """Queue a failure. The queue itself records the cancel state."""
         self._enqueue(("error", message))
@@ -1982,6 +2015,9 @@ class PipelineRunner:
             # creating the output directory first meant a form the pipeline
             # could not be launched from still left an empty ``out/`` behind,
             # for a run that never started and left nothing to explain it.
+            opts = self._apply_skip_wells(opts, input_dir)
+            if opts is None:
+                return
             args = build_pipeline_args(pipeline, input_dir, output_dir, opts)
             try:
                 output_dir.mkdir(parents=True, exist_ok=True)

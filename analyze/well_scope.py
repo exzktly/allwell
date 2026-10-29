@@ -7,12 +7,15 @@ pair. It was two checkboxes, which allowed a fourth state the pipeline resolved
 silently (``--force`` wins, ``--incremental`` is ignored) and which a tooltip
 had to explain.
 
-Then the two per-well fields.
+Then the three per-well fields.
 
 *Only these wells* narrows a run to a subset of the plate
-(``process_microscopy --only_wells``); *Force these wells* re-segments named
-wells from scratch (``--force_wells``). Both are visible fields rather than
-hidden run state, because both change what a run does to wells the user may not
+(``process_microscopy --only_wells``); *Skip these wells* leaves named wells out
+of it — the run takes them off the plate's well list and runs the rest as that
+same subset (``PipelineRunner._apply_skip_wells``), so a skipped well's output
+and records are left as they are; *Force these wells* re-segments named wells
+from scratch (``--force_wells``). All three are visible fields rather than
+hidden run state, because each changes what a run does to wells the user may not
 be looking at, so they must never be something the user cannot see or clear.
 The two "complete this run" handoffs (Datasets → Validate & Repair, Review →
 Home) fill them with the wells that still need work.
@@ -53,6 +56,14 @@ ONLY_WELLS_TIP = (
     "wells to regenerate named ones. This field is never restored from a "
     "previous run's settings: a subset is a decision for this run only.")
 
+SKIP_WELLS_TIP = (
+    "Comma-separated wells to leave out of this run: they are not processed, "
+    "and their output and records in pipeline_info.json are left exactly as "
+    "they are. Every other well runs (or, with Only these wells, every well "
+    "named there that is not skipped). A skipped well is skipped even if Force "
+    "these wells names it. A named well the input does not hold is reported "
+    "in the log. Never restored from a previous run's settings.")
+
 FORCE_WELLS_TIP = (
     "Comma-separated wells to reprocess in full, whatever else the run "
     "decides. A well whose <WELL>_out.zip exists but whose measurements "
@@ -84,6 +95,9 @@ class AnalyzeRunScopeMixin:
         only = self._only_wells_edit.text().strip()
         if only:
             parts.append(f"only {only}")
+        skipped = self._skip_wells_edit.text().strip()
+        if skipped:
+            parts.append(f"skip {skipped}")
         forced = self._force_wells_edit.text().strip()
         if forced:
             parts.append(f"redo {forced}")
@@ -104,9 +118,10 @@ class AnalyzeRunScopeMixin:
 
 
 def build_well_scope_rows(form, sec: QWidget) -> None:
-    """Add the two rows to *sec*, storing ``_only_wells_edit`` and
-    ``_force_wells_edit`` on *form* (the ``AnalyzeTab``)."""
+    """Add the three rows to *sec*, storing ``_only_wells_edit``,
+    ``_skip_wells_edit`` and ``_force_wells_edit`` on *form* (the ``AnalyzeTab``)."""
     for label, attr, tip in (("Only these wells", "_only_wells_edit", ONLY_WELLS_TIP),
+                             ("Skip these wells", "_skip_wells_edit", SKIP_WELLS_TIP),
                              ("Force these wells", "_force_wells_edit", FORCE_WELLS_TIP)):
         row = form._row(sec, label)
         edit = QLineEdit(row)
@@ -117,6 +132,7 @@ def build_well_scope_rows(form, sec: QWidget) -> None:
 
 
 def well_scope_options(form) -> dict:
-    """The run options the two fields contribute."""
+    """The run options the three fields contribute."""
     return {"only_wells": parse_well_list(form._only_wells_edit.text()),
+            "skip_wells": parse_well_list(form._skip_wells_edit.text()),
             "force_wells": parse_well_list(form._force_wells_edit.text())}

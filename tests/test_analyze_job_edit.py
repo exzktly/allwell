@@ -50,6 +50,7 @@ _OPTS = {
     "incremental": False,
     "force_wells": ["A1", "B2"],
     "only_wells": ["A1", "B2", "C3"],
+    "skip_wells": ["D4"],
     "cpu_only": True,
     "allow_low_disk": True,
     # The two image-storage options, both off (their defaults are on), in the

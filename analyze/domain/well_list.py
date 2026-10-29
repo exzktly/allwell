@@ -1,5 +1,5 @@
-"""The well lists the Analyze form takes as text: *Only these wells* and
-*Force these wells*.
+"""The well lists the Analyze form takes as text: *Only these wells*,
+*Skip these wells* and *Force these wells*.
 
 Qt-free so the parse is testable without a form, and one function so the two
 fields cannot disagree about what a separator is.
@@ -35,6 +35,15 @@ def only_wells_note(opts) -> str:
     shown = ", ".join(wells[:8]) + ("…" if len(wells) > 8 else "")
     return (f"Only {len(wells)} well(s) will run ({shown}); every other "
             "well's output is left as it is.")
+
+
+def skip_wells_note(opts) -> str:
+    """The sentence a run with *Skip these wells* announces itself with, or ``""``."""
+    wells = [str(w) for w in (opts or {}).get("skip_wells") or ()]
+    if not wells:
+        return ""
+    shown = ", ".join(wells[:8]) + ("…" if len(wells) > 8 else "")
+    return f"{len(wells)} well(s) will be skipped ({shown}); their output is left as it is."
 
 
 def incremental_is_moot(opts) -> bool:

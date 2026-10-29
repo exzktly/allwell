@@ -27,7 +27,7 @@ from PySide6.QtWidgets import QPushButton, QWidget
 
 from analyze.domain.job_edit import AnalyzeJobEditMixin
 from analyze.run_problems import AnalyzeRunProblemsMixin, RunProblem
-from analyze.domain.well_list import incremental_is_moot, only_wells_note
+from analyze.domain.well_list import incremental_is_moot, only_wells_note, skip_wells_note
 from core.safe import swallowed
 from services.pipeline_service import find_pipeline_script
 from services.run_detect import (
@@ -117,7 +117,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
             # under the layout the form shows.
             self._log_line(self._detection_note, "INFO")
             self._dashboard.set_status(self._detection_note)
-        scope = only_wells_note(spec.opts)
+        scope = " ".join(n for n in (only_wells_note(spec.opts), skip_wells_note(spec.opts)) if n)
         if scope:
             # Same reason, and the status names both when both apply.
             self._log_line(scope, "INFO")

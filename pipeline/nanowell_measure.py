@@ -1067,7 +1067,7 @@ def segment_tile(rim_image, segmenter, *, lowhigh: tuple[float, float] | None = 
     return labels.astype(np.int64)
 
 
-def _label_sums(labels):
+def _label_sums(labels) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
     """Per object of *labels*, from one pass over its pixels: ``(ids, counts, sum_y, sum_x)``, the positive labels
     present (ascending) with each one's pixel count and the sums of its pixels' rows and columns. ``None`` for labels
     that are not whole numbers, which nothing here counts by.

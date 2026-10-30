@@ -244,15 +244,15 @@ def rim_focus(image, pixel_size_um: float, geometry: SiteGeometry) -> float | No
     """
     if geometry.geometry != FITTED:
         return None
-    image = np.asarray(image, dtype=np.float64)
-    h, w = image.shape
+    h, w = np.shape(image)
     cx, cy = geometry.centre_um[0] / pixel_size_um - 0.5, geometry.centre_um[1] / pixel_size_um - 0.5
     r = geometry.radius_um / pixel_size_um
     half = int(math.ceil(1.6 * r)) + 2
     x0, y0 = int(round(cx)) - half, int(round(cy)) - half
     if x0 < 0 or y0 < 0 or x0 + 2 * half + 1 > w or y0 + 2 * half + 1 > h:
         return None
-    patch = image[y0:y0 + 2 * half + 1, x0:x0 + 2 * half + 1]
+    # Only the patch is converted: converting the whole tile first copied it in float64 once per nanowell.
+    patch = np.asarray(np.asarray(image)[y0:y0 + 2 * half + 1, x0:x0 + 2 * half + 1], dtype=np.float64)
     yy, xx = np.mgrid[0:2 * half + 1, 0:2 * half + 1]
     mask = np.hypot(xx + x0 - cx, yy + y0 - cy) <= r
     value = edge_focus(patch, mask)

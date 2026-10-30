@@ -27,7 +27,7 @@ import numpy as np
 from pipeline import nanowell_measure as nm
 from pipeline import nanowell_run as nr
 from pipeline.run_report import withdraw_seal
-from pipeline.zip_members import ZipMemberReader
+from pipeline.nanowell_tiles import WellTiles, read_native
 from util.csv_gz import existing_csv
 from util.timepoint import parse_hours
 
@@ -80,7 +80,7 @@ def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
 
 def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
                     template_path, staging_dir, settings_key, scratch_dir, expected_shape, stored_placements=None,
-                    manual_anchors=MappingProxyType({})):
+                    manual_anchors=MappingProxyType({}), release=None):
     """``run_well`` over *todo* on what an earlier run kept (*prior*, or ``None``): ``(outcome, fixed radius,
     fixed roster, kept template)``. *expected_shape* is a described grid's shape: a well short of a whole row or
     column is incomplete, which a record's positions alone could not show."""
@@ -96,7 +96,7 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
                           expected_shape=expected_shape, stored_placements=stored_placements,
                           manual_anchors=manual_anchors, progress=lambda done, total: _log_steps(well_label, done, total),
                           site_progress=lambda tp, done, total: _log_sites(well_label, tp, done, total),
-                          note=lambda text: log.info("Well %s — %s", well_label, text))
+                          note=lambda text: log.info("Well %s — %s", well_label, text), release=release)
     return outcome, fixed, fixed_roster, saved
 
 
@@ -680,7 +680,8 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
 
     *grouper*, *parse*, *write_csv* are ``process_microscopy``'s ``find_image_groups_in_zip``,
     ``parse_filename`` and ``_write_single_csv``. The tiles are never unpacked: each is read out of the archive
-    in place when a timepoint loads it (:class:`pipeline.zip_members.ZipMemberReader`). Unpacking the whole
+    in place when a timepoint loads it (:class:`pipeline.zip_members.ZipMemberReader`, through
+    :class:`pipeline.nanowell_tiles.WellTiles`, which keeps it until its timepoint is measured). Unpacking the whole
     well first — every tile of every timepoint, phase and fluorescence — held a remote batch silent for about ten
     minutes after ``Found N image group(s)`` on a cluster whose scratch is the networked home directory.
     *scratch_dir* now holds only the located montages (``.montages``) and the caller removes it. With
@@ -725,28 +726,34 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         return _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
                                Path(prior_dir or output_dir) / NANOWELL_DIR / template_path.name, staging_dir,
                                settings_key, scratch_dir, tuple(pattern["grid"]) if described else None, placements,
-                               manual)
+                               manual, tiles.release)
 
     def load_phase(tp, tile) -> np.ndarray | None:
         found = index.get((tp, tile))
-        return None if found is None else _read_tif(members.open(found[0]))
+        return None if found is None else tiles.tile((tp, Path(found[0]).name), found[0], read_native)
 
     def channel_loader(position):
         def load(tp, tile) -> np.ndarray | None:
             found = index.get((tp, tile))
             if found is None or position >= len(found[1]):
                 return None
-            return _read_tif(members.open(found[1][position]))
+            return tiles.tile((tp, Path(found[1][position]).name), found[1][position], read_native)
         return load
 
     channels = {t: channel_loader(k) for k, t in enumerate(fluor_tokens)}
     template_path = output_dir / NANOWELL_DIR / f"{well_label}{TEMPLATE_SUFFIX}"
-    members = ZipMemberReader(zip_path)
+    # Every tile is read once and kept until its timepoint is measured, as far as memory allows: a phase tile is read
+    # to locate its timepoint and again to measure it, a fluorescence tile for its floor level and its intensities.
+    # Sized by the timepoints this run reads: an incremental run that adds one timepoint to a long well estimates one.
+    wanted = set(todo)
+    tiles = WellTiles(zip_path, well_label, [name for (tp, _fov), (nuclear, fluors) in index.items() if tp in wanted
+                                             for name in (nuclear, *fluors)])
     try:
         return _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints,
                             digest, prior, todo, run, staging_dir, write_csv, template_path)
     finally:
-        members.close()
+        log.info("Well %s — %s.", well_label, tiles.summary())
+        tiles.close()
 
 
 def _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints, digest,

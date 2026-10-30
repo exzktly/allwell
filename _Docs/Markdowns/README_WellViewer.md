@@ -277,6 +277,23 @@ brightness, not the contrast of its cells. Runs made before this counted with th
 settings say so; on the command line, `--nanowell_segment_scale tile` does the same, and `nanowells` uses the
 nanowells' range without the shift.
 
+A nanowell worker spreads its well over the cores the run gives it: it places and registers several timepoints at
+once, measures a timepoint's tiles in parallel while Cellpose works on the GPU one batch at a time, and prepares the
+next timepoint while the current one is on the GPU. The numbers it writes are exactly those of a one-thread run. It
+also keeps each tile in memory from the moment it is first read until its timepoint has been measured, so the
+cluster's shared filesystem is read once per tile instead of twice. How much it keeps is limited by the memory the
+job may use — a Slurm job's `--mem`, not the whole node's — shared among the workers. When that is too little and the
+plate is on a network filesystem, the well's archive is copied to the node's own disk (`$SLURM_TMPDIR`, else
+`$TMPDIR`, else the system temporary folder, never a memory-backed one) first, one worker at a time, and the copy
+disappears when the well ends, even if the run is killed. On macOS and Windows, which do not say how much memory is
+free, nothing is kept and every tile is read as before. Each well's log says which it did:
+`Well A01 — 510 tile(s) kept in memory between locating and measuring (…)`. When Cellpose has no GPU to run on, a
+worker measures one tile at a time, since Cellpose then uses every core itself. Setting the environment variable
+`ALLWELL_NANOWELL_THREADS=1` on the machine that runs the pipeline makes every worker do one thing at a time again.
+For a remote run, put `export ALLWELL_NANOWELL_THREADS=1` in the remote account's `~/.bash_profile` when runs are
+scheduled through Slurm (the run's shell on the node is a login shell), or in `~/.bashrc` when they run on the host
+directly.
+
 While a run counts, its log says how far it is: `Well A01 — 24h: 120/400 nanowells segmented (1.5 s each, about
 7 min 0 s left; per nanowell, Cellpose's network 0.20 s, its masks 1.10 s)`, about every tenth of a timepoint's
 nanowells. The last part is Cellpose's own timing, so a slow count says whether the GPU's network or the step that

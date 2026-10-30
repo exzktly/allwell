@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import threading
 import sys
 import zipfile
 
@@ -147,14 +148,16 @@ def reanchored(tmp_path_factory):
 def _run_reanchoring(tmp_path, dark_rim=()):
     plate, truth = _write_plate(tmp_path, dark_rim)
     real_locate, real_resolve = nr.locate_timepoint, lattice.resolve_origin
-    state = {"target": False}
+    # Per thread: run_well locates timepoints on several threads at once, and locate_timepoint and the resolve_origin
+    # it calls run on one thread, so a flag shared by the process would blind whichever timepoint resolves next.
+    state = threading.local()
 
     def locate(tp, record, well, *args, **kwargs):
-        state["target"] = (well, tp) == ("B02", "24h")
+        state.target = (well, tp) == ("B02", "24h")
         return real_locate(tp, record, well, *args, **kwargs)
 
     def resolve(fit, *, fiducial=None, array_centre=None, plate_rigid=None, **rest):
-        if state["target"]:
+        if getattr(state, "target", False):
             fiducial = array_centre = None                   # a well whose square and boundary give nothing
         return real_resolve(fit, fiducial=fiducial, array_centre=array_centre, plate_rigid=plate_rigid, **rest)
 

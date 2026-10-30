@@ -15,6 +15,7 @@ this: every timepoint is measured on one shared roster, so the sets agree by con
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import replace
 
 import numpy as np
@@ -35,17 +36,17 @@ def _off_by(monkeypatch, steps: dict) -> None:
     """Move the fitted array centre of each timepoint in *steps* by that many ``a1`` steps, as a fitted circle left
     loose by a hexagonal rim would: the timepoint is then anchored that many sites off when it has no square."""
     real_detect, real_locate = nd.detect_sites, nr.locate_timepoint
-    current = {"tp": None}
+    current = threading.local()           # per thread: run_well locates timepoints on several at once
 
     def detect(*args, **kwargs):
         fit = real_detect(*args, **kwargs)
-        k = steps.get(current["tp"], 0)
+        k = steps.get(getattr(current, "tp", None), 0)
         if k and fit.ok and fit.boundary_centre_um is not None:
             fit = replace(fit, boundary_centre_um=tuple(np.asarray(fit.boundary_centre_um) + k * np.asarray(fit.fit.a1)))
         return fit
 
     def locate(tp, *args, **kwargs):
-        current["tp"] = tp
+        current.tp = tp
         return real_locate(tp, *args, **kwargs)
 
     monkeypatch.setattr(nd, "detect_sites", detect)

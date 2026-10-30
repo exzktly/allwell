@@ -47,8 +47,10 @@ Positions in micrometres are in the frame where pixel ``i`` covers
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 import math
+import threading
 
 import numpy as np
 
@@ -230,8 +232,11 @@ def modal_stack(stack, share: float = MODAL_SHARE, *, min_values: int = 1) -> np
             out[where] = np.median(values, axis=0)
             continue
         start = np.argmin(values[m - 1:] - values[:n - m + 1], axis=0)
-        window = np.take_along_axis(values, start[None, :] + np.arange(m)[:, None], axis=0)
-        out[where] = np.median(window, axis=0)
+        # The window is a run of sorted values, so its median is its middle value (two, for an even width): those
+        # are taken and handed to np.median, which then does exactly what it did over the whole window.
+        columns = np.arange(values.shape[1])
+        middle = [values[start + (m - 1) // 2, columns]] + ([values[start + m // 2, columns]] if m % 2 == 0 else [])
+        out[where] = np.median(np.stack(middle), axis=0)
     return out
 
 
@@ -248,7 +253,8 @@ def as_fallback(earliest: Template | None) -> Template | None:
 
 
 def build_template(crops, *, interior_radius_px: float, min_sites: int = MIN_TEMPLATE_SITES,
-                   earliest: Template | None = None, max_crops: int = TEMPLATE_MAX_CROPS) -> Template | None:
+                   earliest: Template | None = None, max_crops: int = TEMPLATE_MAX_CROPS,
+                   raw_half: int | None = None) -> Template | None:
     """The empty-nanowell template: each pixel's modal level (:func:`modal_stack`) over every usable crop.
 
     *crops* are levelled crops (:func:`level_crops`) of the sites that are visible and imaged (the caller decides
@@ -260,13 +266,36 @@ def build_template(crops, *, interior_radius_px: float, min_sites: int = MIN_TEM
     well clipped or occluded) *earliest* is returned as it stands, ``source="earliest"``; without one the crops are
     used anyway and marked ``own_sparse``. ``None`` when no crop is usable at all. The template is in site-centred
     coordinates, so it stays valid after the plate is put back and the lattice has moved.
+
+    *raw_half*, when given, says *crops* are not yet levelled: they are raw crops (:func:`site_crops`) of that
+    half-width, levelled here exactly as ``build_template(level_crops(crops, raw_half))`` would level them, but only
+    the ones the template is taken over. The levels come from every crop either way; the levelled pixels are then
+    at most *max_crops* crops' rather than a whole well's, which is most of the time and memory of a template.
     """
-    crops = np.asarray(crops, dtype=np.float64)
+    if raw_half is None:
+        crops = np.asarray(crops, dtype=np.float64)
+    else:
+        crops = np.asarray(crops)
     if crops.ndim != 3 or len(crops) == 0:
         return as_fallback(earliest)
     half = crops.shape[1] // 2
     disk = _disk(half, interior_radius_px)
-    positions = np.flatnonzero(~np.isnan(crops[:, disk]).any(axis=1))
+    if raw_half is None:
+        usable = ~np.isnan(crops[:, disk]).any(axis=1)
+
+        def levelled(positions):
+            return crops[positions]
+    else:
+        plan = _levelling(crops, raw_half)
+        good = np.zeros(len(crops), dtype=bool) if plan is None else plan.two_point | plan.scale_only
+        # A levelled crop is NaN where its raw crop is, or everywhere when it has no level (_levelled).
+        usable = np.where(good, ~np.isnan(crops[:, disk]).any(axis=1), not disk.any())
+
+        def levelled(positions):
+            if plan is None:
+                return np.full((len(positions),) + crops.shape[1:], np.nan)
+            return _levelled(crops, plan, positions)
+    positions = np.flatnonzero(usable)
     candidates = len(positions)
     if candidates == 0:
         return as_fallback(earliest)
@@ -278,7 +307,7 @@ def build_template(crops, *, interior_radius_px: float, min_sites: int = MIN_TEM
         source = SOURCE_OWN
     if candidates > max_crops:
         positions = positions[np.unique(np.linspace(0, candidates - 1, max_crops).round().astype(int))]
-    array = modal_stack(crops[positions], min_values=min(min_sites, len(positions)))
+    array = modal_stack(levelled(positions), min_values=min(min_sites, len(positions)))
     return Template(array, half, source, len(positions), candidates, None, tuple(int(k) for k in positions))
 
 
@@ -344,16 +373,64 @@ def crop_levels(crops, half: int) -> tuple[np.ndarray, np.ndarray]:
     twenty cells to a nanowell, and its median is then the cells' level; the surround is the lattice between
     nanowells, which holds no cells, so its median is its level. The crop's half-width carries 30 % headroom over
     1.05 site radii, so the site radius is the half-width over 1.365."""
-    crops = np.asarray(crops, dtype=np.float64).reshape(-1, 2 * half + 1, 2 * half + 1)
+    # Flat, so a region is a boolean index over one axis (over two it took longer than the levels themselves), and
+    # converted to float64 once taken, not before: a whole well's crops are half a gigabyte in float64.
+    crops = np.asarray(crops).reshape(-1, (2 * half + 1) ** 2)
     yy, xx = np.mgrid[-half:half + 1, -half:half + 1]
-    r = np.hypot(xx, yy)
+    r = np.hypot(xx, yy).ravel()
     site = half / (TEMPLATE_HEADROOM * SUPPRESSION_RADIUS)
-    floor, surround = crops[:, r <= FLOOR_RADIUS * site], crops[:, r >= SURROUND_RADIUS * site]
+    floor = np.asarray(crops[:, r <= FLOOR_RADIUS * site], dtype=np.float64)
+    surround = np.asarray(crops[:, r >= SURROUND_RADIUS * site], dtype=np.float64)
     import warnings
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)                # an all-NaN region is a NaN level, by design
-        return np.array([modal_level(f) for f in floor]), np.nanmedian(surround, axis=1)
+        # modal_stack is modal_level per crop, all at once, wherever no value is infinite (it sorts -inf in among
+        # the values it keeps, where modal_level drops it).
+        floors = np.array([modal_level(f) for f in floor]) if np.isinf(floor).any() else modal_stack(floor.T)
+        return floors, np.nanmedian(surround, axis=1)
+
+
+@dataclass(frozen=True)
+class _Levelling:
+    """How :func:`level_crops` brings each of a set of crops to the shared floor and surround."""
+    floors: np.ndarray
+    surrounds: np.ndarray
+    ratio: float
+    two_point: np.ndarray               # crops mapped by floor and surround both
+    scale_only: np.ndarray              # crops scaled by their surround alone; the rest have no level and are NaN
+
+
+def _levelling(crops, half: int) -> _Levelling | None:
+    """The levels :func:`level_crops` maps *crops* (float64) by; ``None`` when no crop has any."""
+    floors, surrounds = crop_levels(crops, half)
+    good = np.isfinite(floors) & np.isfinite(surrounds) & (surrounds > 0)
+    if not good.any():
+        return None
+    ratio = float(np.median(floors[good] / surrounds[good]))
+    contrast = surrounds - floors
+    two_point = good & (np.abs(contrast) >= MIN_LEVEL_CONTRAST * surrounds) & (abs(1 - ratio) >= MIN_LEVEL_CONTRAST)
+    return _Levelling(floors, surrounds, ratio, two_point, good & ~two_point)
+
+
+def _levelled(crops, plan: _Levelling, which) -> np.ndarray:
+    """``level_crops(crops)[which]``, levelling only those crops, in place on one copy of them: the same operations
+    on the same values in the same order (``a * b`` is ``b * a`` in floating point, and so is ``a + b``)."""
+    which = np.asarray(which)
+    out = np.array(crops[which], dtype=np.float64)
+    two_point, scale_only = plan.two_point[which], plan.scale_only[which]
+    floors, surrounds = plan.floors[which], plan.surrounds[which]
+    if two_point.any():
+        mapped = out[two_point]
+        mapped -= floors[two_point, None, None]
+        mapped *= 1 - plan.ratio
+        mapped /= (surrounds - floors)[two_point, None, None]
+        mapped += plan.ratio
+        out[two_point] = mapped
+    if scale_only.any():
+        out[scale_only] /= surrounds[scale_only, None, None]
+    out[~(two_point | scale_only)] = np.nan
+    return out
 
 
 def level_crops(crops, half: int) -> np.ndarray:
@@ -367,25 +444,30 @@ def level_crops(crops, half: int) -> np.ndarray:
     only. A crop with no surround on the image is NaN, and :func:`build_template` skips it.
     """
     crops = np.asarray(crops, dtype=np.float64)
-    floors, surrounds = crop_levels(crops, half)
-    good = np.isfinite(floors) & np.isfinite(surrounds) & (surrounds > 0)
-    out = np.full(crops.shape, np.nan)
-    if not good.any():
-        return out
-    ratio = float(np.median(floors[good] / surrounds[good]))
-    contrast = surrounds - floors
-    two_point = good & (np.abs(contrast) >= MIN_LEVEL_CONTRAST * surrounds) & (abs(1 - ratio) >= MIN_LEVEL_CONTRAST)
-    scale_only = good & ~two_point
-    out[two_point] = ratio + (1 - ratio) * (crops[two_point] - floors[two_point, None, None]) \
-        / contrast[two_point, None, None]
-    out[scale_only] = crops[scale_only] / surrounds[scale_only, None, None]
-    return out
+    plan = _levelling(crops, half)
+    return np.full(crops.shape, np.nan) if plan is None else _levelled(crops, plan, np.arange(len(crops)))
+
+
+#: The last few templates' own levels (:func:`template_levels`), each beside the template it belongs to so a hit is
+#: that very object, never another one that came to share its id. Every site's level asks for its template's, and
+#: computing them took a timepoint's template through its floor and surround once a nanowell.
+_TEMPLATE_LEVELS: list = []
+_TEMPLATE_LEVELS_KEPT = 8
+_TEMPLATE_LEVELS_LOCK = threading.Lock()
 
 
 def template_levels(template: Template) -> tuple[float, float]:
     """The template's own ``(floor, surround)``: what every site is brought to."""
+    with _TEMPLATE_LEVELS_LOCK:
+        for kept, levels in _TEMPLATE_LEVELS:
+            if kept is template:
+                return levels
     floors, surrounds = crop_levels(np.asarray(template.array, dtype=np.float64)[None], template.half)
-    return float(floors[0]), float(surrounds[0])
+    levels = (float(floors[0]), float(surrounds[0]))
+    with _TEMPLATE_LEVELS_LOCK:
+        _TEMPLATE_LEVELS.insert(0, (template, levels))
+        del _TEMPLATE_LEVELS[_TEMPLATE_LEVELS_KEPT:]
+    return levels
 
 
 def offset_identifiable(template: Template) -> bool:
@@ -497,7 +579,7 @@ def rim_suppress(image, pixel_size_um: float, template: Template, geometries,
     """
     from scipy import ndimage
 
-    image = np.asarray(image, dtype=np.float64)
+    image = np.asarray(image)                 # each site's pixels are taken to float64 as they are read, not the tile
     h, w = image.shape
     out = np.ones((h, w))
     floor = _template_floor(template)
@@ -517,15 +599,17 @@ def rim_suppress(image, pixel_size_um: float, template: Template, geometries,
         y0, y1 = max(int(math.floor(cy - reach)), 0), min(int(math.ceil(cy + reach)) + 1, h)
         if x1 <= x0 or y1 <= y0:
             continue
-        yy, xx = np.mgrid[y0:y1, x0:x1]
-        inside = np.hypot(xx - cx, yy - cy) <= reach
-        dx, dy = xx - cx + template.half, yy - cy + template.half
-        valid = inside & (dx >= 0) & (dx <= 2 * template.half) & (dy >= 0) & (dy <= 2 * template.half)
+        # A row and a column broadcast, not two full grids: the same numbers at every pixel, in the same order.
+        across, down = np.arange(x0, x1) - cx, np.arange(y0, y1) - cy
+        dx, dy = across + template.half, down + template.half
+        valid = (np.hypot(across[None, :], down[:, None]) <= reach) \
+            & ((dx >= 0) & (dx <= 2 * template.half))[None, :] & ((dy >= 0) & (dy <= 2 * template.half))[:, None]
         if not valid.any():
             continue
-        values = ndimage.map_coordinates(template.array, [dy[valid], dx[valid]], order=1, mode="nearest")
+        rows, columns = np.nonzero(valid)
+        values = ndimage.map_coordinates(template.array, [dy[rows], dx[columns]], order=1, mode="nearest")
         window = out[y0:y1, x0:x1]
-        pixels = image[y0:y1, x0:x1][valid]
+        pixels = np.asarray(image[y0:y1, x0:x1][valid], dtype=np.float64)
         if levels is not None and g.index in levels:
             offset, gain = levels[g.index]
             pixels = (pixels - offset) / gain
@@ -543,9 +627,45 @@ def _departure(rim_image, smoothing: float = 1.0) -> np.ndarray:
     return np.abs(ndimage.gaussian_filter(rim - 1.0, smoothing))
 
 
+#: How far :func:`_departure`'s smoothing reaches, in pixels: scipy's Gaussian of sigma *s* is cut at
+#: ``int(truncate * s + 0.5)`` with its default ``truncate`` of 4.
+def _smoothing_reach(smoothing: float) -> int:
+    return int(4.0 * float(smoothing) + 0.5)
+
+
+def _departure_at(rim_image, ys, xs, smoothing: float = 1.0) -> np.ndarray:
+    """:func:`_departure` of the whole tile at pixels ``(ys, xs)``, computed on the window around them only.
+
+    The Gaussian reaches ``_smoothing_reach`` pixels, so a window that takes in that margin round the pixels — or
+    stops at the tile's own edge, where scipy reflects the tile as it would reflect the window — gives each of them
+    the very value the whole tile's smoothing gives it: each axis's pass sums the same neighbours in the same order.
+    Smoothing a 2048-pixel tile once for every few dozen nanowells read from it was most of the measuring's cost."""
+    from scipy import ndimage
+
+    if not len(ys):
+        return np.empty(0)
+    h, w = np.shape(rim_image)
+    reach = _smoothing_reach(smoothing)
+    y0, y1 = max(int(ys.min()) - reach, 0), min(int(ys.max()) + reach + 1, h)
+    x0, x1 = max(int(xs.min()) - reach, 0), min(int(xs.max()) + reach + 1, w)
+    window = np.asarray(np.asarray(rim_image)[y0:y1, x0:x1], dtype=np.float64)
+    window = np.where(np.isfinite(window), window, 1.0)
+    return np.abs(ndimage.gaussian_filter(window - 1.0, smoothing))[ys - y0, xs - x0]
+
+
 def _all_finite(rim_image, pixel_size_um, g, fraction) -> bool:
     ys, xs = _interior_pixels(np.shape(rim_image), pixel_size_um, g, fraction)
     return bool(len(ys)) and bool(np.isfinite(np.asarray(rim_image)[ys, xs]).all())
+
+
+#: The last few sites' interiors (:func:`_interior_pixels`), as the boolean disk over its bounding box and that box's
+#: corner, by everything the disk is computed from. A site's interior is asked for about ten times a timepoint
+#: (departures, confluence, the segmenter's scale and view, area, fluorescence, how much of it is imaged), nearly
+#: always by the same tile's measuring within moments; the distances were most of each call. 512 masks of a
+#: nanowell's interior are about 10 MB.
+_INTERIORS: OrderedDict = OrderedDict()
+_INTERIORS_KEPT = 512
+_INTERIORS_LOCK = threading.Lock()
 
 
 def _interior_pixels(shape, pixel_size_um, g, fraction):
@@ -556,9 +676,22 @@ def _interior_pixels(shape, pixel_size_um, g, fraction):
     y0, y1 = max(int(math.floor(cy - reach)), 0), min(int(math.ceil(cy + reach)) + 1, h)
     if x1 <= x0 or y1 <= y0:
         return np.empty(0, dtype=int), np.empty(0, dtype=int)
-    yy, xx = np.mgrid[y0:y1, x0:x1]
-    keep = np.hypot(xx - cx, yy - cy) <= reach
-    return yy[keep], xx[keep]
+    key = (x0, x1, y0, y1, cx, cy, reach)                   # the window and every number the mask is made of
+    with _INTERIORS_LOCK:
+        keep = _INTERIORS.get(key)
+        if keep is not None:
+            _INTERIORS.move_to_end(key)
+    if keep is None:
+        # Broadcast from a column and a row rather than two full grids: the same distances, so the same pixels, in
+        # the same row-major order.
+        keep = np.hypot(np.arange(x0, x1)[None, :] - cx, np.arange(y0, y1)[:, None] - cy) <= reach
+        keep.setflags(write=False)
+        with _INTERIORS_LOCK:
+            _INTERIORS[key] = keep
+            while len(_INTERIORS) > _INTERIORS_KEPT:
+                _INTERIORS.popitem(last=False)
+    ys, xs = np.nonzero(keep)                               # fresh arrays: a caller may do what it likes with them
+    return ys + y0, xs + x0
 
 
 #: A site whose interior is less than this share on the image is not measured (a quadrant is not a site).
@@ -593,13 +726,12 @@ def site_departures(rim_image, pixel_size_um: float, geometries, *, fraction: fl
     tiles of a timepoint (:func:`threshold_from_departures`); every *stride*-th pixel of each, to bound the memory a
     well of a thousand nanowells takes. A site with a non-finite pixel in its interior gives nothing: a site with a
     hole is not a calibration."""
-    departure = _departure(rim_image)
     values = []
     for g in geometries:
         if not _all_finite(rim_image, pixel_size_um, g, fraction):
             continue
-        ys, xs = _interior_pixels(departure.shape, pixel_size_um, g, fraction)
-        values.append(departure[ys[::stride], xs[::stride]])
+        ys, xs = _interior_pixels(np.shape(rim_image), pixel_size_um, g, fraction)
+        values.append(_departure_at(rim_image, ys, xs)[::stride])
     return values
 
 
@@ -655,15 +787,14 @@ def site_confluence(rim_image, pixel_size_um: float, geometries, threshold: floa
     ``None`` for a site with under half its interior on the image or any non-finite pixel in it, and
     for every site when there is no threshold. 0.0 is a measurement: an empty nanowell.
     """
-    departure = _departure(rim_image)
     out = []
     for g in geometries:
-        ys, xs = _interior_pixels(departure.shape, pixel_size_um, g, fraction)
+        ys, xs = _interior_pixels(np.shape(rim_image), pixel_size_um, g, fraction)
         if (threshold is None or not _covered(len(ys), pixel_size_um, g, fraction)
                 or not _all_finite(rim_image, pixel_size_um, g, fraction)):
             out.append(None)
         else:
-            out.append(float(np.mean(departure[ys, xs] > threshold)))
+            out.append(float(np.mean(_departure_at(rim_image, ys, xs) > threshold)))
     return out
 
 
@@ -907,14 +1038,8 @@ def _own_labels(labels, win, own, geometries, pixel_size_um: float):
     if not others or not labels.any():
         return labels
     ids, centroids = _label_centroids(labels)
-    y0, x0 = win[0].start, win[1].start
-    drop = []
-    for label, (x, y) in zip(ids, centroids):
-        for g in others:
-            cx, cy = g.centre_um[0] / pixel_size_um - 0.5, g.centre_um[1] / pixel_size_um - 0.5
-            if math.hypot(x + x0 - cx, y + y0 - cy) <= INTERIOR_FRACTION * g.radius_um / pixel_size_um:
-                drop.append(label)
-                break
+    inside = _first_site_within(centroids, others, pixel_size_um, INTERIOR_FRACTION, (win[1].start, win[0].start))
+    drop = [label for label, site in zip(ids, inside) if site is not None]
     if drop:
         labels = np.where(np.isin(labels, drop), 0, labels)
     return labels
@@ -942,14 +1067,73 @@ def segment_tile(rim_image, segmenter, *, lowhigh: tuple[float, float] | None = 
     return labels.astype(np.int64)
 
 
+def _label_sums(labels):
+    """Per object of *labels*, from one pass over its pixels: ``(ids, counts, sum_y, sum_x)``, the positive labels
+    present (ascending) with each one's pixel count and the sums of its pixels' rows and columns. ``None`` for labels
+    that are not whole numbers, which nothing here counts by.
+
+    A centroid is a sum of whole-number coordinates over a count, both exact in float64 at any tile size, so the
+    centroids this gives are ``ndimage.center_of_mass``'s and ``regionprops``'s to the last bit; what those cost is a
+    ``np.unique`` sort of the whole tile, or a Python object per cell, which this does not."""
+    labels = np.asarray(labels)
+    if labels.dtype.kind not in "iu" or labels.ndim != 2:
+        return None
+    ys, xs = np.nonzero(labels > 0)
+    found = labels[ys, xs]
+    if not found.size:
+        return found, np.zeros(0, dtype=np.intp), np.zeros(0), np.zeros(0)
+    if int(found.max()) <= 8 * labels.size:
+        index = found.astype(np.intp)
+        every = np.bincount(index)
+        ids = np.flatnonzero(every)
+        counts = every[ids]
+        sum_y, sum_x = np.bincount(index, weights=ys)[ids], np.bincount(index, weights=xs)[ids]
+        return ids.astype(labels.dtype), counts, sum_y, sum_x
+    ids, index = np.unique(found, return_inverse=True)          # labels too large to count by directly
+    return ids, np.bincount(index), np.bincount(index, weights=ys), np.bincount(index, weights=xs)
+
+
 def _label_centroids(labels):
-    from scipy import ndimage
-    ids = np.unique(labels)
-    ids = ids[ids > 0]
+    """The labels present (ascending) and each one's centroid as ``(x, y)`` (:func:`_label_sums`)."""
+    sums = _label_sums(labels)
+    if sums is None:
+        from scipy import ndimage
+        ids = np.unique(labels)
+        ids = ids[ids > 0]
+        if not len(ids):
+            return ids, np.empty((0, 2))
+        centres = np.array(ndimage.center_of_mass(np.ones_like(labels), labels, ids))        # (y, x)
+        return ids, centres[:, ::-1]
+    ids, counts, sum_y, sum_x = sums
     if not len(ids):
         return ids, np.empty((0, 2))
-    centres = np.array(ndimage.center_of_mass(np.ones_like(labels), labels, ids))        # (y, x)
-    return ids, centres[:, ::-1]
+    return ids, np.column_stack((sum_x / counts, sum_y / counts))
+
+
+def _first_site_within(centroids, sites, pixel_size_um: float, fraction: float, offset=(0.0, 0.0)) -> list:
+    """For each centroid ``(x, y)`` (plus *offset*, ``(x0, y0)``), the first of *sites* whose counting circle
+    (*fraction* of its radius) holds it, or ``None``: what a loop over the sites in order with ``math.hypot``
+    decides, which is what decides here. Arrays only narrow each centroid to the sites within a hair of the circle
+    (a relative 1e-9, far beyond any rounding of the squared distance), so the answer is the loop's to the bit and
+    the cost is a few candidates a cell rather than every site of the tile."""
+    out: list = [None] * len(centroids)
+    if not len(centroids) or not sites:
+        return out
+    cx = np.array([g.centre_um[0] / pixel_size_um - 0.5 for g in sites])
+    cy = np.array([g.centre_um[1] / pixel_size_um - 0.5 for g in sites])
+    reach = np.array([fraction * g.radius_um / pixel_size_um for g in sites])
+    x = np.asarray(centroids, dtype=np.float64)[:, 0] + offset[0]
+    y = np.asarray(centroids, dtype=np.float64)[:, 1] + offset[1]
+    near = (x[:, None] - cx[None, :]) ** 2 + (y[:, None] - cy[None, :]) ** 2 <= (reach * (1 + 1e-9)) ** 2 + 1e-12
+    for k, j in zip(*np.nonzero(near)):              # row-major: each centroid's candidates in the sites' order
+        if out[k] is not None:
+            continue
+        g = sites[j]
+        sx, sy = g.centre_um[0] / pixel_size_um - 0.5, g.centre_um[1] / pixel_size_um - 0.5
+        px, py = centroids[k]
+        if math.hypot(px + offset[0] - sx, py + offset[1] - sy) <= fraction * g.radius_um / pixel_size_um:
+            out[k] = j
+    return out
 
 
 def count_cells(labels, pixel_size_um: float, geometries, *, owned=None,
@@ -971,12 +1155,9 @@ def count_cells(labels, pixel_size_um: float, geometries, *, owned=None,
     ids, centroids = _label_centroids(np.asarray(labels))
     counted = {g.index: [] for g in geometries if owned is None or g.index in owned}
     sites = [g for g in geometries if g.index in counted]
-    for label, (x, y) in zip(ids, centroids):
-        for g in sites:
-            cx, cy = g.centre_um[0] / pixel_size_um - 0.5, g.centre_um[1] / pixel_size_um - 0.5
-            if math.hypot(x - cx, y - cy) <= fraction * g.radius_um / pixel_size_um:
-                counted[g.index].append(int(label))
-                break
+    for label, site in zip(ids, _first_site_within(centroids, sites, pixel_size_um, fraction)):
+        if site is not None:
+            counted[sites[site].index].append(int(label))
     return {index: SiteCount(index, len(found), tuple(found)) for index, found in counted.items()}
 
 
@@ -988,33 +1169,55 @@ class AreaEstimate:
     count_disagreement: bool | None     # None when the area estimate is undefined
 
 
+#: The steps two dilations by the cross reach: every offset within two steps along rows and columns.
+_WITHIN_TWO_STEPS = tuple((dy, dx) for dy in range(-2, 3) for dx in range(-2, 3) if 0 < abs(dy) + abs(dx) <= 2)
+
+
+def _touching_labels(labels) -> set:
+    """The positive labels with another object's pixel (any label but 0 and their own) within two steps along rows
+    and columns of one of theirs: what dilating each object twice by the cross and looking under it finds.
+
+    Only an object's own outline (a pixel with a different value beside it) needs looking from: a pixel two steps
+    from another object is either on the outline or one step from an outline pixel that is one step from it. Off the
+    tile is nothing, as it was in each object's window."""
+    labels = np.asarray(labels)
+    h, w = labels.shape
+    pad = np.pad(labels, 2)
+    centre = pad[2:h + 2, 2:w + 2]
+    outline = np.zeros((h, w), dtype=bool)
+    for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        outline |= pad[2 + dy:h + 2 + dy, 2 + dx:w + 2 + dx] != centre
+    ys, xs = np.nonzero(outline & (centre > 0))
+    mine = centre[ys, xs]
+    hit = np.zeros(len(ys), dtype=bool)
+    for dy, dx in _WITHIN_TWO_STEPS:
+        other = pad[ys + 2 + dy, xs + 2 + dx]
+        hit |= (other != 0) & (other != mine)
+    return set(np.unique(mine[hit]).tolist())
+
+
 def isolated_cell_area_um2(labels, pixel_size_um: float, counts: dict) -> float | None:
     """Median area of the counted cells that touch no other cell and no image edge; ``None`` if none.
 
     A cell cut by the tile edge is too small to stand for a cell, and one touching another may be
     half a clump. A clump that touches nothing still passes as one cell: contact cannot tell it
     from a large cell, so where clumps predominate the area count inherits their undercount.
-    """
-    from scipy import ndimage
 
+    "Touching" is another object within two steps along rows and columns (:func:`_touching_labels`), and every
+    object is looked at in one pass over the tile's outlines rather than a dilation of a window per cell.
+    """
     labels = np.asarray(labels)
-    h, w = labels.shape
-    boxes = ndimage.find_objects(labels)
-    areas = []
-    for count in counts.values():
-        for label in count.labels:
-            box = boxes[label - 1] if 0 < label <= len(boxes) else None
-            if box is None:
-                continue
-            y0, y1 = max(box[0].start - 3, 0), min(box[0].stop + 3, h)
-            x0, x1 = max(box[1].start - 3, 0), min(box[1].stop + 3, w)
-            if box[0].start == 0 or box[1].start == 0 or box[0].stop == h or box[1].stop == w:
-                continue
-            window = labels[y0:y1, x0:x1]
-            grown = ndimage.binary_dilation(window == label, iterations=2)
-            if any(o not in (0, label) for o in np.unique(window[grown])):
-                continue
-            areas.append(float(np.sum(window == label)) * pixel_size_um ** 2)
+    sums = _label_sums(labels)
+    if sums is None:
+        raise TypeError(f"Labels must be whole numbers, not {labels.dtype}")
+    ids, sizes = sums[0].tolist(), sums[1].tolist()
+    present = dict(zip(ids, sizes))
+    if not present:
+        return None
+    on_edge = set(np.unique(np.concatenate((labels[0], labels[-1], labels[:, 0], labels[:, -1]))).tolist())
+    touching = _touching_labels(labels)
+    areas = [float(present[label]) * pixel_size_um ** 2 for count in counts.values() for label in count.labels
+             if label in present and label not in on_edge and label not in touching]
     return float(np.median(areas)) if areas else None
 
 
@@ -1061,31 +1264,35 @@ def cell_table(labels, pixel_size_um: float, geometries, counts: dict, addresses
     ``mean_<name>``. Columns are lists, ready for a DataFrame.
     """
     from scipy import ndimage
-    from skimage.measure import regionprops
 
     labels = np.asarray(labels)
+    sums = _label_sums(labels)
+    if sums is None:
+        raise TypeError(f"Labels must be whole numbers, not {labels.dtype}")
     site_of = {label: index for index, count in counts.items() for label in count.labels}
     columns = {"site_index": [], "address_q": [], "address_r": [], "x_um": [], "y_um": [], "area_um2": [],
                "label": []}
     for name in (intensity or {}):
         columns[f"mean_{name}"] = []
-    regions = [region for region in regionprops(labels) if region.label in site_of]
+    # The counted cells present, by label, with ``regionprops``'s centroid and area (:func:`_label_sums`, exact).
+    ids, sizes, sum_y, sum_x = sums
+    rows = [k for k, label in enumerate(ids.tolist()) if label in site_of]
+    kept = [int(ids[k]) for k in rows]
     # Every cell's mean on every channel in one labelled pass per channel, rather than a full-tile mask per cell
     # per channel — that was ~18 ms a cell, a quarter of an hour a timepoint on a dense well (roll-up review X22).
-    kept = [region.label for region in regions]
     means = {name: ndimage.mean(np.asarray(image, dtype=np.float64), labels=labels, index=kept) if kept else []
              for name, image in (intensity or {}).items()}
-    for position, region in enumerate(regions):
-        index = site_of[region.label]
+    for position, (k, label) in enumerate(zip(rows, kept)):
+        index = site_of[label]
         address = addresses.get(index)
-        cy, cx = region.centroid
+        cy, cx = sum_y[k] / sizes[k], sum_x[k] / sizes[k]
         columns["site_index"].append(index)
         columns["address_q"].append(None if address is None else int(address[0]))
         columns["address_r"].append(None if address is None else int(address[1]))
         columns["x_um"].append(float(tile_origin_um[0] + (cx + 0.5) * pixel_size_um))
         columns["y_um"].append(float(tile_origin_um[1] + (cy + 0.5) * pixel_size_um))
-        columns["area_um2"].append(float(region.area) * pixel_size_um ** 2)
-        columns["label"].append(int(region.label))
+        columns["area_um2"].append(float(sizes[k]) * pixel_size_um ** 2)
+        columns["label"].append(label)
         for name in (intensity or {}):
             columns[f"mean_{name}"].append(float(means[name][position]))
     return columns

@@ -968,7 +968,7 @@ def _pooled_template(located: Located, images: dict, settings: NanowellSettings,
         # Levelled together: the floor-to-surround ratio every crop is brought to is the whole well's median.
         raw = np.concatenate(crops)
         del crops
-        template = nm.build_template(nm.level_crops(raw, half),
+        template = nm.build_template(raw, raw_half=half,
                                      interior_radius_px=nm.SUPPRESSION_RADIUS * settings.diameter_um / 2 / px,
                                      earliest=earliest)
     return template or nm.as_fallback(earliest)

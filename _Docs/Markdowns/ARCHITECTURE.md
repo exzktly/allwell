@@ -10344,7 +10344,9 @@ different sub-pixel positions line up. The run (`nanowell_run._pooled_template`)
 fully imaged, fitted site, levels them together (`level_crops`: each crop's floor and surround, `crop_levels`, are
 mapped onto the well's median floor-to-surround ratio, so neither a tile's gain nor its offset changes a crop), and
 `build_template` takes each pixel's modal level over them, up to `TEMPLATE_MAX_CROPS` (400) taken evenly through the
-well. A crop's **floor** is its modal level inside 0.6 of the site radius — under cells, still the bare floor's —
+well. The run hands `build_template` the raw crops (`raw_half=`): the well's ratio still comes from every crop
+(`_levelling`), but only the crops the template is taken over are levelled (`_levelled`), which on a well of 1,400
+nanowells is a third of them and avoids a half-gigabyte float64 copy of the rest. A crop's **floor** is its modal level inside 0.6 of the site radius — under cells, still the bare floor's —
 and its **surround** the median beyond 1.2 radii, the lattice between nanowells, which holds no cells. With floor and
 surround too alike to fix both (`MIN_LEVEL_CONTRAST`) a crop is scaled by its surround only. With fewer than
 `MIN_TEMPLATE_SITES` usable crops `build_template` returns the well's earliest template through `as_fallback` — the
@@ -10545,7 +10547,9 @@ one; all four are `None` for a site not measured. A site with no cell is a zero,
 tile is an error, not a missing key.
 
 **The second count.** `area_estimate` divides each site's labelled interior area by the
-median area of isolated cells (touching no other cell and no image edge; a clump that
+median area of isolated cells (touching no other cell and no image edge — another object within two steps along
+rows and columns, what dilating a cell twice by the cross reaches, found for every cell at once from the tile's
+outlines by `_touching_labels`; a clump that
 touches nothing still passes as one cell, so where clumps predominate the area count
 inherits their undercount) and flags `count_disagreement` when it differs from the
 segmented count by at least one cell and by more than 30 % of the larger, because a clump
@@ -10660,6 +10664,23 @@ unmeasurable. Much of the
 work holds the interpreter lock, so threads alone gain little; overlapping it with the GPU is where the time goes:
 on a rendered well of 361 nanowells x 4 timepoints at 0.65 µm/px, with a stand-in segmenter holding the lock 0.08 s a
 nanowell, 284 s serially and 159 s on 4 threads, measuring within 15 % of the 116 s the GPU's share sets.
+
+**The measuring's arithmetic does no work it does not need, and every shortcut gives the old numbers to the bit.**
+Measuring a nanowell was about 0.12 s of CPU, more than half of each nanowell's time on a GPU node, so its hot spots
+compute the same values from less: cell centroids, pixel counts and the cell table's centroids and areas come from
+one `bincount` pass over the labelled pixels (`nanowell_measure._label_sums`; a centroid is a whole-number sum over a
+count, exact in float64, so it is `ndimage.center_of_mass`'s and `regionprops`'s), the cells that touch another from
+the tile's outlines in one pass (`_touching_labels`) rather than a dilation per cell, the site a centroid counts for
+from a vectorised shortlist that `math.hypot` then decides in the old order (`_first_site_within`), a site's interior
+mask from a small cache keyed by every number it is made of (`_interior_pixels`, `_INTERIORS_KEPT` masks, about
+10 MB), the confluence's smoothing over a window around each site (`_departure_at`, the Gaussian's reach as margin),
+the template's own levels once per template (`template_levels`), its crops' floors in one `modal_stack`
+(`crop_levels`, which falls back to a per-crop `modal_level` where a value is infinite, since `modal_stack` keeps
+`-inf` among its values), the rim focus over the patch `edge_focus` reads (`nanowell_sites.rim_focus`: the disk
+and `EDGE_REACH_PX` beyond it), and the template's levelled crops only where it uses them (above).
+`tests/test_nanowell_measure_fast_paths.py` keeps the code each replaced, verbatim, and holds each against it on
+inputs where a wrong rewrite differs (objects exactly two and three steps apart, overlapping counting circles,
+signed zeros, infinities, NaN crops, more crops than the template takes).
 
 **Each tile is read from its archive once** (`nanowell_tiles.WellTiles`, opened by `nanowell_task.process_well_zip`).
 A phase tile is read to locate its timepoint and, since every timepoint is located before any is measured, again

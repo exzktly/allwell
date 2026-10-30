@@ -686,7 +686,8 @@ def refine_sites(image, pixel_size_um: float, sites_um, nominal_diameter_um: flo
         raise ValueError(f"A nanowell is {nominal_px:.1f} px in radius at this pixel size; per-site fitting "
                          f"needs at least {MIN_REFINE_RADIUS_PX:g} px (use a finer image for refinement)")
     if contrast is None:
-        contrast = 0.4 * float(np.percentile(image, 98) - np.percentile(image, 5))
+        high, low = np.percentile(image, [98, 5])     # one partition of the tile for both: the same two values
+        contrast = 0.4 * float(high - low)
     relaxed = set(relaxed)
     fits: list[SiteGeometry | None] = []
     for index, site in enumerate(np.asarray(sites_um, dtype=float)):

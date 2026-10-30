@@ -10652,7 +10652,9 @@ behind the worker's one re-entrant lock (`serialised`), so a worker never has tw
 tiles' CPU work overlaps the GPU's. When the count is Cellpose's and the run found no GPU
 (`nanowell_parallel.gpu_in_use`: `parallelism.GPU_SHARERS_ENV` unset), tiles are measured one at a time and nothing
 is prepared ahead: Cellpose then runs on Torch's own threads, there is no GPU time to overlap, and more threads would
-only compete for the same cores.
+only compete for the same cores. Each well logs, through `run_well`'s *note*, how many timepoints it locates at once
+and how many tiles it measures at once, with what decided each (`_locate_threads_why`, `_tile_threads_why`: the
+thread count, memory, or Cellpose on a CPU), and whether timepoints are prepared ahead.
 **The next timepoint is prepared while this one's tiles are on the GPU**: `measure_timepoint` is
 `_prepare_timepoint` (geometry, visibility, coverage, template, levels) then `_finish_timepoint`, and `run_well`
 prepares timepoint *k*+1 on one background thread as soon as *k* is prepared, with the earliest template a serial
@@ -11889,7 +11891,9 @@ the workers on each GPU are counted for the network batch, `gpu_sharers`, which
 `export_gpu_sharers` hands to the pool in `GPU_SHARERS_ENV`, beside the run's worker count in
 `ALLWELL_POOL_WORKERS` (a worker's memory share, `nanowell_parallel.worker_memory_budget`);
 `--cpu_only` stays StarDist's switch because a remote host's `cpu_only` is
-written from the login node's TensorFlow, which is false on most clusters;
+written from the login node's TensorFlow, which is false on most clusters, and a
+label-free worker's `Worker N ready` line (`process_microscopy._worker_init`)
+names no device for it, since that device note is TensorFlow's;
 `tests/test_cellpose_uses_the_gpu.py`; and `slurm_cpu_shortfall`, a run-log
 warning when a Slurm job was given one or two of a larger node's CPUs — what a
 scheduler command with no `--cpus-per-task` gets — naming the cause and the
@@ -13370,8 +13374,15 @@ The same method turns an ssh exit of 255 into "Connection to <host> lost
 (<ssh's own reason>)", with what the job probe found (still running, no longer
 running, or — with the host unreachable — may still be running) and that Resume
 downloads the wells it finished; ssh's reason lines (`Timeout, server … not
-responding`, `Connection … closed`, `Broken pipe`, …) are classed ERROR by
-`classify_log_line` via `run_evidence.is_ssh_reason`.
+responding`, `Connection to … closed by remote host`, `Broken pipe`, …) are
+classed ERROR by `classify_log_line` via `run_evidence.is_ssh_reason`. ssh's
+bare sign-off, `Connection to <host> closed.`, is deliberately not among them:
+ssh prints it whenever a session holding a PTY ends, and the run's output
+stream always holds one (`-tt`), so every clean run's stream ends with it —
+just before `Fetcher.flush_and_join` logs `draining fetcher: N well(s)` and
+fetches the remaining wells over connections of their own. Matched as a reason,
+it painted every clean run's sign-off red, and the prefix match cut ssh's
+`closed by remote host` short in the headline of a real break.
 
 **A Stop is confirmed on the host too.** The kill and the `scancel` behind Stop
 are ssh round trips on the cancel thread, and with the network down they fail

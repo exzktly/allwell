@@ -142,7 +142,9 @@ def classify_log_line(line: str) -> str:
         return _TAG_TO_LEVEL[tag.group(1).lower()]
     if is_ssh_reason(line):
         # ssh saying why the connection broke ("Timeout, server … not
-        # responding", "Connection … closed", "Broken pipe") carries none of
+        # responding", "Connection … closed by remote host", "Broken pipe" —
+        # never the bare "Connection to … closed." sign-off every clean run's
+        # PTY stream ends with; see run_evidence._RE_SSH_REASON) carries none of
         # the words below and read as INFO — the one line that explained a
         # run's end, painted as routine (tracker D3).
         return "ERROR"

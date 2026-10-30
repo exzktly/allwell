@@ -287,7 +287,10 @@ plate is on a network filesystem, the well's archive is copied to the node's own
 `$TMPDIR`, else the system temporary folder, never a memory-backed one) first, one worker at a time, and the copy
 disappears when the well ends, even if the run is killed. On macOS and Windows, which do not say how much memory is
 free, nothing is kept and every tile is read as before. Each well's log says which it did:
-`Well A01 — 510 tile(s) kept in memory between locating and measuring (…)`. When Cellpose has no GPU to run on, a
+`Well A01 — 510 tile(s) kept in memory between locating and measuring (…)`. It also says what the well's threads
+were given and what limited them: `Well A01 — locating 3 of 17 timepoint(s) at once (memory: …)` and
+`Well A01 — measuring up to 7 tile(s) at once (the worker's 7 threads); the next timepoint is prepared while this one
+is on the GPU`. When Cellpose has no GPU to run on, a
 worker measures one tile at a time, since Cellpose then uses every core itself. Setting the environment variable
 `ALLWELL_NANOWELL_THREADS=1` on the machine that runs the pipeline makes every worker do one thing at a time again.
 For a remote run, put `export ALLWELL_NANOWELL_THREADS=1` in the remote account's `~/.bash_profile` when runs are
@@ -1575,7 +1578,9 @@ archives and outputs are always written as per-well `.zip` archives. See
     go to the remote at a time, which bounds its disk. It has no effect on
     the GPU.
 - **CPU-only.** Forces TensorFlow (StarDist) to ignore the GPU. It does not
-  affect Cellpose.
+  affect Cellpose. A Cellpose run's `Worker N ready (…)` lines therefore name no
+  device: each worker's Cellpose says where it runs when its model loads
+  (`Cellpose cpsam on GPU cuda:0 (…)`).
 - **Cellpose and the GPU.** Cellpose runs on a GPU whenever the machine it
   runs on has one that its Torch install can use — on a cluster, the compute
   node your launcher's `--gres=gpu…` granted. The run log says so twice: a

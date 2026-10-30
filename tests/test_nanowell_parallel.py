@@ -285,3 +285,25 @@ def test_a_record_without_tile_sizes_is_not_limited(monkeypatch):
     for meta in record["timepoints"].values():
         meta.pop("tile_size_px")
     assert nr._locate_threads(record, "A01", ["0h", "24h"], threads=5) == 5
+
+
+def test_each_limit_names_itself(monkeypatch):
+    """The run log says what decided each well's thread counts, so a run that gained less than expected says why."""
+    from pipeline.nanowell_tiles import CACHE_SHARE
+
+    monkeypatch.setattr(par, "_usable_cpus", lambda: 64)
+    per_tp = 30 * 2048 * 2048 * 4 * nr.LOCATE_TILE_COPIES + nr.MONTAGE_WORK_BYTES
+    monkeypatch.setattr(par, "worker_memory_budget", lambda: int(2.5 * per_tp / (1 - CACHE_SHARE)))
+    n, why = nr._locate_threads_why(_record(30), "A01", ["0h", "24h"], threads=7)
+    assert n == 2 and why.startswith("memory: ") and "holds 2" in why
+    monkeypatch.setattr(par, "worker_memory_budget", lambda: 1 << 50)
+    assert nr._locate_threads_why(_record(30), "A01", ["0h"], threads=7) == (7, "the worker's 7 threads")
+    assert nr._locate_threads_why(_record(30), "A01", ["0h"], threads=1) == (1, "the worker has one thread")
+    monkeypatch.setenv(par.THREADS_ENV, "6")
+    monkeypatch.setattr(par, "gpu_in_use", lambda environ=None: False)
+    assert nr._tile_threads_why(_prepared(cellpose=True)) == (1, "Cellpose has no GPU here and uses every core itself")
+    monkeypatch.setattr(par, "gpu_in_use", lambda environ=None: True)
+    assert nr._tile_threads_why(_prepared(cellpose=True)) == (6, "the worker's 6 threads")
+    monkeypatch.setattr(par, "worker_memory_budget", lambda: 1)
+    n, why = nr._tile_threads_why(_prepared(cellpose=True))
+    assert n == 1 and why.startswith("memory: ")

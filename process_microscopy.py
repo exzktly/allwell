@@ -1774,8 +1774,16 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
     # TF model — skip the (heavy, network-touching) load entirely. Cellpose
     # lazy-loads its torch model on first use; classical needs none.
     if segmentation_method not in _STARDIST_METHODS:
-        log.info("Worker %d ready (%s; label-free '%s' — StarDist not loaded).",
-                 os.getpid(), device_note, segmentation_method)
+        # The device note above is TensorFlow's, for StarDist, and --cpu_only is StarDist's switch only: a remote
+        # host's cpu_only is written from its login node's TensorFlow, so it read "CPU-only (--cpu_only)" on a GPU
+        # node whose Cellpose ran on the GPU. Cellpose chooses its own device (pipeline.cellpose._cellpose_device)
+        # and logs it when its model loads, so this line names no device for it.
+        if segmentation_method in _CELLPOSE_METHODS:
+            log.info("Worker %d ready (label-free '%s'; Cellpose loads on first use and logs the device it runs on; "
+                     "StarDist not loaded, so --cpu_only does not apply).", os.getpid(), segmentation_method)
+        else:
+            log.info("Worker %d ready (label-free '%s'; no segmentation model to load).",
+                     os.getpid(), segmentation_method)
         return
 
     log.info("Worker %d loading StarDist (%s, %s).", os.getpid(), device_note, thr_note)

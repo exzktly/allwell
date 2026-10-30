@@ -1281,7 +1281,7 @@ review/
 │   ├── nanowell/     collect.py, series_compute.py, summary_compute.py,
 │   │                 beeswarm_compute.py, distribution_compute.py, renderer.py,
 │   │                 controller.py, state.py, tab_view.py, view_state_io.py,
-│   │                 cell_scope_compute.py  ← the Nanowells page: nanowell
+│   │                 cell_scope_compute.py, moving_compute.py  ← the Nanowells page: nanowell
 │   │                 tables, per-nanowell metrics, the Distribution beeswarm
 │   │                 and site detail [removable]
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
@@ -4257,8 +4257,10 @@ its lattice map — `ArrayLayers.preset("map")`, no image, since the image layer
 a montage or the raw tiles per acquisition) and
 one CSV of `distribution_compute.wells_summary`, the per-well summary prepared as
 the Distribution view prepares it (per-nanowell metrics at each well's first
-timepoint, the fixed cohort when ticked), with the exclusions spelled out by
-reason and a row naming each of the group's wells with no nanowell table. A
+timepoint, the fixed cohort when ticked, then the moving average when set), with the exclusions spelled
+out by reason, the window each row used in its `moving_average` column (empty when off or for a per-nanowell
+metric, `distribution_compute.moving_window_for`), and a row naming each of the group's wells with no nanowell
+table. A
 group's replicate sets stay sets and its solo wells stand alone, as the page
 groups a selection (`_figure_groups`); a group with no nanowell table at all is
 skipped and says so. An Array map asked for a timepoint a well was not imaged at
@@ -10675,7 +10677,9 @@ behind the worker's one re-entrant lock (`serialised`), so a worker never has tw
 tiles' CPU work overlaps the GPU's. When the count is Cellpose's and the run found no GPU
 (`nanowell_parallel.gpu_in_use`: `parallelism.GPU_SHARERS_ENV` unset), tiles are measured one at a time and nothing
 is prepared ahead: Cellpose then runs on Torch's own threads, there is no GPU time to overlap, and more threads would
-only compete for the same cores.
+only compete for the same cores. Each well logs, through `run_well`'s *note*, how many timepoints it locates at once
+and how many tiles it measures at once, with what decided each (`_locate_threads_why`, `_tile_threads_why`: the
+thread count, memory, or Cellpose on a CPU), and whether timepoints are prepared ahead.
 **The next timepoint is prepared while this one's tiles are on the GPU**: `measure_timepoint` is
 `_prepare_timepoint` (geometry, visibility, coverage, template, levels) then `_finish_timepoint`, and `run_well`
 prepares timepoint *k*+1 on one background thread as soon as *k* is prepared, with the earliest template a serial
@@ -11354,6 +11358,22 @@ and the footer states the cohort as kept of sites. `well_summary(reasons=…)`, 
 and `views_compute.trajectory_panels(cohort=…)` all apply it, so the beeswarm, the summaries and the trajectory
 medians follow the same nanowells.
 
+**The moving average** (`moving_compute`, `NanowellState.moving`, the *Moving average* spin box on *Distribution*
+and *Trajectories*; 0 is off, the spin box shows its minimum, 1, as *Off*). With a window of *N* (2 to
+`MAX_WINDOW`, 9), a nanowell's value at a timepoint is the mean of its values at that timepoint and the *N − 1*
+before it in its well's timepoint order (`tp_order`) — a trailing window counted in timepoints, not hours. A value
+is averaged only from a complete window: every timepoint of it present as a row, with a value, and joinable over
+time (`identity_ok`). It is never averaged over fewer timepoints than asked for, since such a value would draw
+exactly like a full one. A value the window leaves undefined is counted among the exclusions with its reason —
+"before the first full window" (the well's first *N − 1* timepoints), "has a gap" (a timepoint without a value, or
+without a row, so a window never reaches past a hole in the series) or "not joinable" — while a value already
+undefined at its own timepoint keeps its own reason (`moving_compute.apply`). The fixed cohort is decided on the
+measured values first, then the average is taken: decided on the averages, no nanowell would have one at the
+first timepoint and the cohort would be empty. `distribution_model(moving=…)`, `wells_summary(moving=…)` and
+`trajectory_panels(moving=…)` apply it, so the beeswarm, the summary CSV and the trajectory lines use the same
+numbers, and both figures' footers state the window (`moving_compute.describe`). Per-nanowell metrics have no
+values over time and ignore it; Array, Position, Extremes and Identity draw one timepoint and do not use it.
+
 **The subset** (`subset_compute`, `NanowellState.subset`, the *Subset* control and its editor in `subset_view`). A
 `Subset` is a tuple of `Condition`s and a *match* (`all` or `any`); no conditions is every nanowell. A condition
 names a field (`field_choices`): `n0` — *Starting cells*, the count at the baseline, the number the occupancy colours
@@ -11896,7 +11916,9 @@ the workers on each GPU are counted for the network batch, `gpu_sharers`, which
 `export_gpu_sharers` hands to the pool in `GPU_SHARERS_ENV`, beside the run's worker count in
 `ALLWELL_POOL_WORKERS` (a worker's memory share, `nanowell_parallel.worker_memory_budget`);
 `--cpu_only` stays StarDist's switch because a remote host's `cpu_only` is
-written from the login node's TensorFlow, which is false on most clusters;
+written from the login node's TensorFlow, which is false on most clusters, and a
+label-free worker's `Worker N ready` line (`process_microscopy._worker_init`)
+names no device for it, since that device note is TensorFlow's;
 `tests/test_cellpose_uses_the_gpu.py`; and `slurm_cpu_shortfall`, a run-log
 warning when a Slurm job was given one or two of a larger node's CPUs — what a
 scheduler command with no `--cpus-per-task` gets — naming the cause and the
@@ -13377,8 +13399,15 @@ The same method turns an ssh exit of 255 into "Connection to <host> lost
 (<ssh's own reason>)", with what the job probe found (still running, no longer
 running, or — with the host unreachable — may still be running) and that Resume
 downloads the wells it finished; ssh's reason lines (`Timeout, server … not
-responding`, `Connection … closed`, `Broken pipe`, …) are classed ERROR by
-`classify_log_line` via `run_evidence.is_ssh_reason`.
+responding`, `Connection to … closed by remote host`, `Broken pipe`, …) are
+classed ERROR by `classify_log_line` via `run_evidence.is_ssh_reason`. ssh's
+bare sign-off, `Connection to <host> closed.`, is deliberately not among them:
+ssh prints it whenever a session holding a PTY ends, and the run's output
+stream always holds one (`-tt`), so every clean run's stream ends with it —
+just before `Fetcher.flush_and_join` logs `draining fetcher: N well(s)` and
+fetches the remaining wells over connections of their own. Matched as a reason,
+it painted every clean run's sign-off red, and the prefix match cut ssh's
+`closed by remote host` short in the headline of a real break.
 
 **A Stop is confirmed on the host too.** The kill and the `scancel` behind Stop
 are ssh round trips on the cancel thread, and with the network down they fail

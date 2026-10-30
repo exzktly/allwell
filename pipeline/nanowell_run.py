@@ -1638,13 +1638,36 @@ def _thread_share() -> int | None:
     return None if budget is None else int(budget * (1 - CACHE_SHARE))
 
 
+def _say(note, text: str) -> None:
+    """*text* to *note*, when there is one."""
+    if note is not None:
+        note(text)
+
+
+def _measuring_text(prepared: _Prepared, ahead: bool, threads: int) -> str:
+    """What a well's measuring was given, for its log: tiles at once and why, and whether timepoints are prepared
+    ahead and, when not, why not."""
+    tiles_at_once, tiles_why = _tile_threads_why(prepared)
+    if ahead:
+        overlap = "the next timepoint is prepared while this one is on the GPU"
+    else:
+        overlap = ("no timepoint is prepared ahead ("
+                   + ("the worker has one thread" if threads <= 1 else "Cellpose has no GPU here") + ")")
+    return f"measuring up to {tiles_at_once} tile(s) at once ({tiles_why}); {overlap}"
+
+
 def _locate_threads(record: dict, well: str, timepoints, threads: int) -> int:
-    """How many of *timepoints* to locate at once: the worker's *threads*, fewer when the largest timepoint
-    (``LOCATE_TILE_COPIES`` float32 copies of its tiles, sized from the record's ``tile_size_px``, and
+    """How many of *timepoints* to locate at once (:func:`_locate_threads_why`)."""
+    return _locate_threads_why(record, well, timepoints, threads)[0]
+
+
+def _locate_threads_why(record: dict, well: str, timepoints, threads: int) -> tuple[int, str]:
+    """``(how many of *timepoints* to locate at once, what decided it)``: the worker's *threads*, fewer when the largest
+    timepoint (``LOCATE_TILE_COPIES`` float32 copies of its tiles, sized from the record's ``tile_size_px``, and
     ``MONTAGE_WORK_BYTES``) would not fit that many times in the threads' share of memory (:func:`_thread_share`).
     A record without tile sizes, or a machine that does not say how much memory is free, is not limited."""
     if threads <= 1:
-        return 1
+        return 1, "the worker has one thread"
     largest = 0
     for tp in timepoints:
         size = ((record.get("timepoints") or {}).get(tp) or {}).get("tile_size_px") or {}
@@ -1655,26 +1678,41 @@ def _locate_threads(record: dict, well: str, timepoints, threads: int) -> int:
         largest = max(largest, per_tile * _tile_count(record, well, tp) + MONTAGE_WORK_BYTES)
     share = _thread_share()
     if not largest or share is None:
-        return threads
-    return max(1, min(threads, share // largest))
+        return threads, f"the worker's {threads} threads"
+    fits = share // largest
+    if fits < threads:
+        return max(1, fits), (f"memory: {share / 2 ** 30:.1f} GB for the worker's threads holds {max(1, fits)} at "
+                              f"about {largest / 2 ** 30:.1f} GB a timepoint")
+    return threads, f"the worker's {threads} threads"
 
 
 def _tile_threads(prep: _Prepared) -> int:
-    """How many of a timepoint's tiles to measure at once: the worker's threads, fewer when that many tiles' working
-    memory (``TILE_WORK_BYTES_PER_PX``) would not fit in the threads' share beside this timepoint's tiles and the
-    next one's, being prepared; one when the count is Cellpose's on a CPU, whose own threads already use the cores
-    and which nothing else could overlap with."""
+    """How many of a timepoint's tiles to measure at once (:func:`_tile_threads_why`)."""
+    return _tile_threads_why(prep)[0]
+
+
+def _tile_threads_why(prep: _Prepared) -> tuple[int, str]:
+    """``(how many of a timepoint's tiles to measure at once, what decided it)``: the worker's threads, fewer when
+    that many tiles' working memory (``TILE_WORK_BYTES_PER_PX``) would not fit in the threads' share beside this
+    timepoint's tiles and the next one's, being prepared; one when the count is Cellpose's on a CPU, whose own
+    threads already use the cores and which nothing else could overlap with."""
     from pipeline.nanowell_parallel import gpu_in_use, thread_budget
 
     threads = thread_budget()
-    if threads <= 1 or (prep.cellpose and not gpu_in_use()):
-        return 1
+    if threads <= 1:
+        return 1, "the worker has one thread"
+    if prep.cellpose and not gpu_in_use():
+        return 1, "Cellpose has no GPU here and uses every core itself"
     pixels = max((np.asarray(img).size for img in prep.images.values()), default=0)
     share = _thread_share()
     if not pixels or share is None:
-        return threads
+        return threads, f"the worker's {threads} threads"
     held = 2 * sum(np.asarray(img).nbytes for img in prep.images.values())
-    return max(1, min(threads, (share - held) // (pixels * TILE_WORK_BYTES_PER_PX)))
+    fits = (share - held) // (pixels * TILE_WORK_BYTES_PER_PX)
+    if fits < threads:
+        return max(1, fits), (f"memory: {share / 2 ** 30:.1f} GB for the worker's threads, {held / 2 ** 30:.1f} GB of "
+                              f"it two timepoints' tiles")
+    return threads, f"the worker's {threads} threads"
 
 
 def _say_locating(note, record: dict, well: str, timepoint: str):
@@ -2563,7 +2601,9 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
 
     # Timepoints are located independently of one another, so they run on the worker's threads; each is adopted in
     # time order, which keeps every dict and record this builds as a serial loop builds it (pipeline.nanowell_parallel).
-    located_in_order = ordered_results(located_and_said, timepoints, _locate_threads(record, well, timepoints, threads))
+    at_once, why = _locate_threads_why(record, well, timepoints, threads)
+    _say(note, f"locating {min(at_once, len(timepoints))} of {len(timepoints)} timepoint(s) at once ({why})")
+    located_in_order = ordered_results(located_and_said, timepoints, at_once)
     try:
         for tp, located in zip(timepoints, located_in_order):
             adopt(tp, located)
@@ -2636,6 +2676,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     # known once the timepoint before it is prepared, so each is prepared with what a serial loop would give it.
     # Not for Cellpose on a CPU: there is no GPU time to overlap, and its own threads already use the cores.
     ahead = (nanowell_ahead() if threads > 1 and (segmenter is not None or gpu_in_use()) else None)
+    said_threads = False
     started: dict = {}
 
     def start(i, earliest_now):
@@ -2652,6 +2693,9 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
                 prepared = started.pop(tp).result()
                 start(i + 1, _next_earliest(earliest, prepared.out.template))
                 steps.scale(located)
+                if not said_threads:                             # once a well: what measuring it got, and why
+                    said_threads = True
+                    _say(note, _measuring_text(prepared, ahead is not None, threads))
                 measured = measure_timepoint(located, prepared.images, settings, radius_um, segmenter=segmenter,
                                              channels=prepared.channels, earliest_template=earliest, roster=roster,
                                              on_segmented=steps.sites(tp), inspect=steps.inspect(tp),

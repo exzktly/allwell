@@ -287,7 +287,10 @@ plate is on a network filesystem, the well's archive is copied to the node's own
 `$TMPDIR`, else the system temporary folder, never a memory-backed one) first, one worker at a time, and the copy
 disappears when the well ends, even if the run is killed. On macOS and Windows, which do not say how much memory is
 free, nothing is kept and every tile is read as before. Each well's log says which it did:
-`Well A01 — 510 tile(s) kept in memory between locating and measuring (…)`. When Cellpose has no GPU to run on, a
+`Well A01 — 510 tile(s) kept in memory between locating and measuring (…)`. It also says what the well's threads
+were given and what limited them: `Well A01 — locating 3 of 17 timepoint(s) at once (memory: …)` and
+`Well A01 — measuring up to 7 tile(s) at once (the worker's 7 threads); the next timepoint is prepared while this one
+is on the GPU`. When Cellpose has no GPU to run on, a
 worker measures one tile at a time, since Cellpose then uses every core itself. Setting the environment variable
 `ALLWELL_NANOWELL_THREADS=1` on the machine that runs the pipeline makes every worker do one thing at a time again.
 For a remote run, put `export ALLWELL_NANOWELL_THREADS=1` in the remote account's `~/.bash_profile` when runs are
@@ -1585,7 +1588,9 @@ archives and outputs are always written as per-well `.zip` archives. See
     go to the remote at a time, which bounds its disk. It has no effect on
     the GPU.
 - **CPU-only.** Forces TensorFlow (StarDist) to ignore the GPU. It does not
-  affect Cellpose.
+  affect Cellpose. A Cellpose run's `Worker N ready (…)` lines therefore name no
+  device: each worker's Cellpose says where it runs when its model loads
+  (`Cellpose cpsam on GPU cuda:0 (…)`).
 - **Cellpose and the GPU.** Cellpose runs on a GPU whenever the machine it
   runs on has one that its Torch install can use — on a cluster, the compute
   node your launcher's `--gres=gpu…` granted. The run log says so twice: a
@@ -2252,11 +2257,17 @@ reading it. The log names any it kept over budget for that reason.
   warning means something is worth a look, not that the run has failed.
 - **A dropped connection is reported as one.** If the connection to the host
   breaks during a remote run, the headline says *Connection to `<host>` lost*
-  with ssh's own reason (*Timeout, server … not responding*, *Connection …
-  closed*, *Broken pipe*), the log shows that line in red, and the message says
-  whether the job is still running on the host, no longer running, or — when
-  the host cannot be reached to ask — may still be running. Resume downloads the
-  wells it finished and runs the rest.
+  with ssh's own reason (*Timeout, server … not responding*, *Connection to …
+  closed by remote host*, *Broken pipe*), the log shows that line in red, and
+  the message says whether the job is still running on the host, no longer
+  running, or — when the host cannot be reached to ask — may still be running.
+  Resume downloads the wells it finished and runs the rest.
+- **"Connection to `<host>` closed." on its own is not a failure.** ssh prints
+  it whenever the job's output stream ends, including after every run that
+  finished cleanly, so it appears in plain text. The downloads use connections
+  of their own, which is why *draining fetcher: N well(s) still queued for
+  download* can follow it: the job has ended on the host and the app is still
+  fetching the wells it finished last.
 - Either way the wells already finished keep their results, so nothing you have
   waited for is thrown away — Suspend just also keeps the fields in progress and
   saves you re-entering the form.
@@ -5519,6 +5530,14 @@ brightness fold change needs counted cells at both timepoints.
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
   measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
   the footer gives the cohort's size.
+- **Moving average** (on *Distribution* and *Trajectories*) — *Off*, or 2 to 9 timepoints: each nanowell's
+  value at a timepoint becomes the mean of its values at that timepoint and the ones before it, that many in
+  all. The window counts timepoints, not hours, so with unevenly spaced acquisitions it covers a different
+  stretch of time at each step. A value is averaged only when the nanowell has a value at every timepoint of
+  its window, so the first timepoints (before a full window), and any window with a gap or a timepoint whose
+  nanowell identity is not confirmed, have no value; they are counted among the exclusions with that reason
+  rather than averaged over fewer timepoints. With *Fixed cohort* ticked too, the cohort is chosen from the
+  measured values and then averaged. The footer states the window.
 - **Responding above** (on *Distribution*) — the number a nanowell's value must be above to count as
   responding, for the metric shown. Set one for each metric you use (a fold change, a count, a confluence, an
   intensity); each is remembered separately, and a channel's brightness separately from another's. The figure
@@ -6638,8 +6657,8 @@ figure and an empty file.
 (Distribution, Array map, Trajectories or Position), tick the **Metrics**, and
 set **Along x**, **Baseline** (Earliest, First measurable or one of the dataset's
 timepoints), **Timepoint** (Latest, Earliest or one of the
-dataset's) and **Fixed cohort** as on the page — each greyed where it does not
-reach the view. **Responding above** asks for a number for each ticked metric,
+dataset's), **Fixed cohort** and **Moving average** as on the page — each greyed where it does not
+reach the view; the summary CSV's `moving_average` column gives the window each row used. **Responding above** asks for a number for each ticked metric,
 filled in from the page's where you set one there, and the run will not start
 while any is empty. **Subset** — *Use the page's subset*, ticked by default, draws
 with the Nanowells page's Subset, named beside the box each time the panel opens (build or

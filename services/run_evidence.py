@@ -48,9 +48,20 @@ _RE_TIME_BUDGET = re.compile(r"batch (?P<batch>\d+)(?:/\d+)? exceeded its time b
 #: phrase rather than on a prefix: OpenSSH prints them bare ("Timeout, server …"),
 #: prefixed ("client_loop: send disconnect: Broken pipe") or from its multiplexer
 #: ("mux_client_request_session: …"). ``classify_log_line`` calls these errors.
+#:
+#: ``Connection to <host> closed by remote host`` is a break; the bare
+#: ``Connection to <host> closed.`` is not. ssh prints the bare form as its
+#: sign-off whenever a session that holds a PTY ends — and the run's output
+#: stream always holds one (``-tt``), so every remote job that finishes cleanly
+#: ends its stream with it, just before the fetcher drains the wells still
+#: queued for download on connections of their own. Matching the bare form
+#: painted every clean run's last ssh line red, reading as a connection that
+#: dropped before the downloads. On a real break ssh says why first ("closed by
+#: remote host", "Timeout, server …", "Broken pipe"), so the bare sign-off is
+#: never the reason itself.
 _RE_SSH_REASON = re.compile(
     r"(Timeout, server \S+ not responding"
-    r"|Connection to \S+ closed"
+    r"|Connection to \S+ closed by remote host"
     r"|Connection closed by \S+"
     r"|Connection reset by \S+"
     r"|client_loop: send disconnect"

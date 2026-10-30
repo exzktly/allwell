@@ -202,6 +202,54 @@ def test_an_ssh_drop_quotes_ssh_and_never_says_the_job_closed(qtbot, tmp_path, m
     assert _outcome(out) == "error"
 
 
+#: ssh's sign-off when a session holding a PTY ends — every clean remote run's stream (``-tt``) ends with it.
+SSH_SIGNOFF = "Connection to hpc closed.\r\n"
+#: ssh's own words when the far end drops the session — a break, not a sign-off.
+SSH_REMOTE_CLOSE = "Connection to hpc closed by remote host.\r\n"
+
+
+def test_ssh_s_sign_off_on_a_clean_run_is_not_painted_as_an_error(qtbot, tmp_path, monkeypatch, host):
+    """A clean run's stream ends with ssh's bare "Connection to hpc closed." and then the fetcher drains on
+    connections of its own. Painted red, the sign-off read as the link dropping before the downloads."""
+    from services.pipeline_runner import classify_log_line
+
+    runner, out = _runner(tmp_path, monkeypatch, lines=[DONE, SSH_SIGNOFF], rc=0)
+    tab, _told, lines = _drain_into_tab(qtbot, runner)
+
+    signoff = [(t, tag) for t, tag in lines if "Connection to hpc closed" in t]
+    assert signoff, f"the sign-off never reached the log: {lines}"
+    assert classify_log_line(SSH_SIGNOFF) == "INFO"
+    assert not tab._dashboard.headline_text().startswith("Failed"), tab._dashboard.headline_text()
+    assert _outcome(out) != "error"
+
+
+def test_ssh_s_remote_close_is_still_an_error_and_is_quoted_over_the_sign_off(
+        qtbot, tmp_path, monkeypatch, host):
+    """ssh prints the bare sign-off after the real reason; the headline quotes the reason, not the sign-off."""
+    from services.pipeline_runner import classify_log_line
+
+    host.add_job("4242", "RUNNING")
+    host.go_down()
+    runner, out = _runner(tmp_path, monkeypatch, lines=[DONE, SSH_REMOTE_CLOSE, SSH_SIGNOFF], rc=255)
+    tab, _told, _lines = _drain_into_tab(qtbot, runner)
+
+    assert classify_log_line(SSH_REMOTE_CLOSE) == "ERROR"
+    assert tab._dashboard.headline_text() == (
+        "Failed — Connection to hpc lost (Connection to hpc closed by remote host).")
+    assert _outcome(out) == "error"
+
+
+def test_a_sign_off_alone_is_never_taken_as_the_reason_a_connection_broke():
+    """An exit of 255 whose only ssh line is the sign-off has no reason to quote — not "closed" as the cause."""
+    from services.run_evidence import RunEvidence
+
+    ev = RunEvidence()
+    ev.note(DONE)
+    ev.note(SSH_SIGNOFF)
+    assert ev.ssh_reason == ""
+    assert ev.connection_lost("hpc").startswith("Connection to hpc lost. ")
+
+
 def test_after_a_drop_the_job_the_host_still_lists_is_named(qtbot, tmp_path, monkeypatch, host):
     """The network is back by the time the run ends: the backstop cancels the job, and says so."""
     host.add_job("4242", "RUNNING")

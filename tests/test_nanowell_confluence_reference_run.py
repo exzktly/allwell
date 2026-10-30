@@ -32,6 +32,8 @@ LOADED, EMPTY = "A01", "H12"          # the reference sorts last, so running it 
 #: empty well its median nanowell reads 0.73; read against itself (the defect) 0.013. At two per nanowell the cells
 #: are still the minority of the floor and the self-read gives 0.25, which could not tell the two apart.
 DENSE = 6
+#: The module's fixture runs a two-well plate (about 100 s under a loaded lane), inside its first test's timeout.
+pytestmark = pytest.mark.timeout(400)
 
 
 def _cells(rendered, per_site, seed):

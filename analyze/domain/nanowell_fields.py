@@ -172,6 +172,14 @@ def nanowell_enabled(opts: dict) -> bool:
     return bool(str(opts.get("nanowell_format") or "").strip())
 
 
+def _empty_well_errors(opts: dict) -> list[str]:
+    """The empty reference well, when one is named, must be a plate well (``pipeline.nanowell_reference``)."""
+    empty_well = str(opts.get("nanowell_empty_well") or "").strip()
+    if empty_well and canonical_well_label(empty_well) is None:
+        return [f"Empty reference well {empty_well!r} is not a plate well (e.g. H12)."]
+    return []
+
+
 def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]:
     """Human-readable errors for the nanowell options; nothing when the section is off.
 
@@ -201,9 +209,7 @@ def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]
     model = str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]).strip()
     if model not in {value for value, _label in CELLPOSE_MODEL_CHOICES}:
         errors.append(f"Nanowell Cellpose model {model!r} is not one this version knows.")
-    empty_well = str(opts.get("nanowell_empty_well") or "").strip()
-    if empty_well and canonical_well_label(empty_well) is None:
-        errors.append(f"Empty reference well {empty_well!r} is not a plate well (e.g. H12).")
+    errors += _empty_well_errors(opts)
     source = registration_from_error(str(opts.get(REGISTRATION_FROM_KEY) or ""))
     if source:
         errors.append(source)

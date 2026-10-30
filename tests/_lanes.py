@@ -167,6 +167,7 @@ NANOWELL_E2E_FILES = {
 #: above. ``scripts/test.sh --nanowell-features``. The description is each file's
 #: own docstring; membership is by subject, so no further reason is owed.
 NANOWELL_FEATURE_FILES: dict[str, str] = {
+    "test_nanowell_confluence_reference.py": "confluence against the empty reference well, on a painted scene",
     "test_nanowell_parallel.py": "A nanowell worker's threads: results in order, one segmenter call at a time, budgets",
     "test_nanowell_tiles.py": "A nanowell well's tiles read from its archive once, or from a node-local copy",
     "test_nanowell_identity_review.py": "Review honours the identity check's verdicts (NANOWELL_IDENTITY_TRACKER C1-C3)",

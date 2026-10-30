@@ -680,7 +680,8 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
 
     *grouper*, *parse*, *write_csv* are ``process_microscopy``'s ``find_image_groups_in_zip``,
     ``parse_filename`` and ``_write_single_csv``. The tiles are never unpacked: each is read out of the archive
-    in place when a timepoint loads it (:class:`pipeline.zip_members.ZipMemberReader`). Unpacking the whole
+    in place when a timepoint loads it (:class:`pipeline.zip_members.ZipMemberReader`, through
+    :class:`pipeline.nanowell_tiles.WellTiles`, which keeps it until its timepoint is measured). Unpacking the whole
     well first — every tile of every timepoint, phase and fluorescence — held a remote batch silent for about ten
     minutes after ``Found N image group(s)`` on a cluster whose scratch is the networked home directory.
     *scratch_dir* now holds only the located montages (``.montages``) and the caller removes it. With

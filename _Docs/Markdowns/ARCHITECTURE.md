@@ -10616,6 +10616,42 @@ only with no outline fitted is it the sites detected. Consistency of pitch and r
 timepoint; the lattice angle is not checked within one well, because the plate's rotation between timepoints
 is only measurable across wells.
 
+**Threads inside a worker** (`pipeline/nanowell_parallel.py`, `pipeline/nanowell_tiles.py`; both Qt-free and in
+the remote manifest). A nanowell run on a GPU node runs few workers — each holds a Cellpose model, and more than two
+on one card lost the run heartbeat to the shared filesystem — and the plan gives each the node's remaining cores as
+`OMP_NUM_THREADS`; `nanowell_parallel.thread_budget` reads that (or `ALLWELL_NANOWELL_THREADS`, which `1` makes
+serial). `run_well` uses them three ways, and adopts every result in the serial order (`ordered_results`), so every
+dict, row, note and inspection crop is what a serial run builds — `tests/test_nanowell_threads_change_nothing.py`
+compares a rendered well's outputs, serialised, serial against threaded. **Timepoints are located on the threads**
+(they are independent until the tile-layout agreement), as many at once as `_locate_threads` lets fit in the worker's
+memory share (`LOCATE_TILE_COPIES` float32 copies of a timepoint's tiles, sized from the record's `tile_size_px`).
+**A timepoint's tiles are measured on the threads** (`_finish_timepoint`), the segmenter behind the worker's one
+lock (`serialised`), so a worker never has two Cellpose calls in flight and the tiles' CPU work overlaps the GPU's.
+**The next timepoint is prepared while this one's tiles are on the GPU**: `measure_timepoint` is
+`_prepare_timepoint` (geometry, visibility, coverage, template, levels) then `_finish_timepoint`, and `run_well`
+prepares timepoint *k*+1 on one background thread as soon as *k* is prepared, with the earliest template a serial
+loop would give it (`_next_earliest`); it still measures each through `measure_timepoint(prepared=…)`. Much of the
+work holds the interpreter lock, so threads alone gain little; overlapping it with the GPU is where the time goes:
+on a rendered well of 361 nanowells x 4 timepoints at 0.65 µm/px, with a stand-in segmenter holding the lock 0.08 s a
+nanowell, 284 s serially and 159 s on 4 threads, measuring within 15 % of the 116 s the GPU's share sets.
+
+**Each tile is read from its archive once** (`nanowell_tiles.WellTiles`, opened by `nanowell_task.process_well_zip`).
+A phase tile is read to locate its timepoint and, since every timepoint is located before any is measured, again
+to measure it; a fluorescence tile for its floor level (`_normalise`) and again for its intensities. `WellTiles`
+keeps each, decoded in its own dtype and keyed by `(timepoint, member)` (a file read as phase and as a channel is one
+tile), from its first read until `run_well` releases its timepoint (`release=`, once it is measured or found
+unmeasurable), within `CACHE_SHARE` (half) of the worker's memory share (`worker_memory_budget`: `MEMORY_SHARE` of
+`/proc/meminfo`'s `MemAvailable` over `ALLWELL_POOL_WORKERS`, which `parallelism.export_gpu_sharers` sets before the
+pool spawns); a tile without room is read again, and a machine that cannot say how much memory is free keeps
+nothing. A tile comes back as the float32 a fresh read gives, as a fresh copy. When memory cannot hold the whole well
+(estimated from the members' uncompressed sizes) and the archive is on a network filesystem (`filesystem_type`, the
+longest `/proc/mounts` entry containing it, in `NETWORK_FILESYSTEMS`), the archive is first copied to the node's own
+disk (`local_temp_dir`: `$SLURM_TMPDIR`, `$TMPDIR`, the system temp dir, the first that is writable and local) when it
+has room for every worker's copy plus `LOCAL_COPY_HEADROOM`, and removed with the well. Each well logs one line on
+how its tiles were read (`WellTiles.summary`). The run's scratch stays where it was: it holds the resume checkpoints,
+which a node-local directory wiped at the end of a job would lose. `tests/test_nanowell_tiles.py`,
+`tests/test_nanowell_parallel.py`.
+
 **Agreeing on the tile layout** (`run_well` → `_agree_tile_layouts`; `tile_register.pair_offsets`,
 `agreed_offsets`, `disagreeing_pairs`). The stage runs one tile program at every timepoint, so neighbouring tiles
 sit the same distance apart each time, to the stage's repeatability, and a whole-vector choice gone wrong is a pitch
@@ -11759,7 +11795,8 @@ counted in the main process from `CUDA_VISIBLE_DEVICES` or `nvidia-smi -L`
 without importing Torch, and Cellpose runs are capped at
 `CELLPOSE_WORKERS_PER_GPU` workers per GPU unless `--workers` is given, and
 the workers on each GPU are counted for the network batch, `gpu_sharers`, which
-`export_gpu_sharers` hands to the pool in `GPU_SHARERS_ENV`;
+`export_gpu_sharers` hands to the pool in `GPU_SHARERS_ENV`, beside the run's worker count in
+`ALLWELL_POOL_WORKERS` (a worker's memory share, `nanowell_parallel.worker_memory_budget`);
 `--cpu_only` stays StarDist's switch because a remote host's `cpu_only` is
 written from the login node's TensorFlow, which is false on most clusters;
 `tests/test_cellpose_uses_the_gpu.py`; and `slurm_cpu_shortfall`, a run-log

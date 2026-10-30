@@ -56,12 +56,29 @@ retried: the app saw the stream end and reported the allocation lost.
    a narrow race — the job allocated between ``squeue`` and ``scancel`` — in
    which a job that had just started is cancelled and asked for again; nothing
    is lost but the start.
-3. **Retries a boot failure** up to :data:`SRUN_BOOT_RETRIES` times, adding the
-   node(s) ``srun`` named to ``--exclude`` each time so Slurm picks another.
-   Each retry prints a line saying which node failed, and a ``requesting
-   allocation via:`` line that puts the Analyze progress view back into its
-   queue-wait state. When the retries are spent it names every node that failed,
-   for the cluster's admins.
+3. **Retries a boot failure for as long as it takes**, adding the node(s)
+   ``srun`` named to ``--exclude`` each time so Slurm picks another. There is no
+   retry count: some clusters' nodes routinely take longer to boot, or to be
+   granted, than the cluster's ``ResumeTimeout`` allows, and a run that gave up
+   after a fixed number of tries failed on exactly those clusters. The one bound
+   is the host's **Max queue wait** (below), which a user who wants no bound
+   sets to *Wait indefinitely*. Each retry waits :data:`BOOT_RETRY_PAUSE_S`
+   first, so a node that fails at once does not turn the loop into a stream of
+   requests to the controller, and prints a line saying which node failed and
+   every node that has failed so far (the list for the cluster's admins), then a
+   ``requesting allocation via:`` line that puts the Analyze progress view back
+   into its queue-wait state. When the exclusions have ruled out every node
+   that could take the request, Slurm refuses it ("Requested node configuration
+   is not available"); the wrapper then forgets the nodes that failed to boot —
+   Slurm may have brought them back by now, and a refusal is not a reason to
+   stop — and asks again with only the user's own exclusions.
+
+   Because the loop can now run for hours between ``srun`` processes, the
+   wrapper writes its **own** PID to the pidfile at the top of every attempt
+   and before each pause; the attempt's ``srun`` then overwrites it. So the ``kill -TERM $(cat
+   <pidfile>)`` cancel channel stops the loop itself when Stop lands between
+   two attempts, rather than finding the previous ``srun`` already gone and
+   letting the loop ask for another node.
 
 Exclusions the user wrote into the launcher (``--exclude`` / ``-x``) are kept:
 Slurm takes the *last* ``--exclude`` it is given, so the wrapper removes the
@@ -88,8 +105,10 @@ from __future__ import annotations
 import re
 import shlex
 
-#: How many times a launch that fails to boot its node is retried.
-SRUN_BOOT_RETRIES = 3
+#: How long the wrapper waits before asking again after a node failed to boot. There is no retry count (the
+#: host's Max queue wait is the only bound), so this is what keeps a node that fails at once from turning the loop
+#: into a stream of requests to the Slurm controller. Short beside a typical boot, which takes minutes.
+BOOT_RETRY_PAUSE_S = 30
 
 #: ``sinfo %t`` states of a node that is powered on. Anything else — ``idle~``,
 #: ``idle#``, ``down``, ``drain``, ``fail`` … — is excluded while an awake node
@@ -375,15 +394,17 @@ def one_task(tokens: list[str]) -> list[str]:
 def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
                      err_file_q: str, *, start_slack_s: int = START_SLACK_S,
                      pending_fallback_s: int = PENDING_FALLBACK_S,
-                     queue_wait_s: int = 0) -> str:
+                     queue_wait_s: int = 0,
+                     boot_retry_pause_s: int = BOOT_RETRY_PAUSE_S) -> str:
     """The login-shell command that runs ``<launcher> bash -lc <inner>`` with the
     awake-node preference, the boot-failure retry and the queue-wait deadline.
 
     *inner_quoted* is the inner script already quoted for the login shell, and
     must print :data:`ALLOCATION_GRANTED` first thing;
     *remote_pidfile_q* and *err_file_q* are already shell-quoted paths.
-    *start_slack_s* and *pending_fallback_s* are :data:`START_SLACK_S` and
-    :data:`PENDING_FALLBACK_S`; the tests shorten them. *queue_wait_s* is the
+    *start_slack_s*, *pending_fallback_s* and *boot_retry_pause_s* are
+    :data:`START_SLACK_S`, :data:`PENDING_FALLBACK_S` and
+    :data:`BOOT_RETRY_PAUSE_S`; the tests shorten them. *queue_wait_s* is the
     host's Max queue wait (:func:`queue_wait_seconds`), ``0`` for none.
 
     Raises ``ValueError`` for a launcher that would send the job's output
@@ -401,16 +422,19 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
     part_words = '${_aw_part:+-p "$_aw_part"}'
     where = partition or "the default partitions"
     merge = "tr , '\\n' | grep -v '^$' | sort -u | paste -sd, -"
-    total = SRUN_BOOT_RETRIES + 1
     granted = shlex.quote(ALLOCATION_GRANTED)
     return "".join((
         f"_aw_pid={remote_pidfile_q}; _aw_err={err_file_q}; _aw_rcf={err_file_q}.rc; _aw_pend={err_file_q}.pend; ",
         f"_aw_qto={err_file_q}.qto; ",
-        f"_aw_part={part_q}; _aw_x={shlex.quote(','.join(user_excl))}; ",
+        f"_aw_part={part_q}; _aw_x={shlex.quote(','.join(user_excl))}; _aw_ux=$_aw_x; ",
         # The queue wait is timed from the first request, across every attempt below: it is how long the run
         # has waited for a node, whatever the wrapper did in the meantime.
-        "_aw_try=1; _aw_awake=1; _aw_t0=$(date +%s); ",
+        "_aw_try=1; _aw_awake=1; _aw_failed=''; _aw_t0=$(date +%s); ",
         "while :; do ",
+        # Between attempts no srun is running, so the cancel channel (`kill -TERM $(cat <pidfile>)`) must reach
+        # this shell: its PID is the pidfile's until the attempt's srun overwrites it.
+        'echo $$ > "$_aw_pid"; ',
+        _queue_deadline_passed(queue_wait_s),
         # 1. Nodes that are not powered on, while at least one is.
         '_aw_asleep=""; ',
         'if [ "$_aw_awake" = 1 ] && command -v sinfo >/dev/null 2>&1; then ',
@@ -502,15 +526,25 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         "_aw_bad=$(sed -nE 's/^srun: .*Nodes ([^ ]+) are still not ready.*/\\1/p; "
         f"s/^srun: .*Node failure on ([^ ]+).*/\\1/p' \"$_aw_err\" | {merge}); ",
         f"_aw_x=$(printf '%s,%s' \"$_aw_x\" \"$_aw_bad\" | {merge}); ",
-        f'if [ "$_aw_try" -le {SRUN_BOOT_RETRIES} ]; then ',
+        f"_aw_failed=$(printf '%s,%s' \"$_aw_failed\" \"$_aw_bad\" | {merge}); ",
+        # No retry count: the host's Max queue wait (its watchdog is timed from the first request) is the bound.
         'echo "[remote] scheduler: node(s) ${_aw_bad:-?} failed to boot — '
-        f'requesting another node (retry $_aw_try of {SRUN_BOOT_RETRIES})"; ',
+        f'requesting another node in {int(boot_retry_pause_s)} s (retry $_aw_try; failed to boot so far: '
+        '$_aw_failed)"; ',
+        'echo $$ > "$_aw_pid"; ' f'sleep {int(boot_retry_pause_s)}; ',
         f'echo "[remote] scheduler: requesting allocation via: {launcher_str} --exclude=$_aw_x"; ',
-        "_aw_try=$((_aw_try+1)); continue; fi; ",
-        f'echo "[remote] scheduler: ERROR nodes failed to boot on all {total} attempts: '
-        '$_aw_x — the cluster cannot start a node here; send these names to its '
-        'admins, or add --exclude for them to the launcher"; ',
+        "_aw_try=$((_aw_try+1)); continue; ",
         "fi; ",
+        # 3c'. Excluding the nodes that failed to boot has ruled out every node that could take the request.
+        # Not a reason to stop: forget them (Slurm may have them back by now) and ask again.
+        'if [ "$_aw_rc" != 0 ] && [ "$_aw_go" = 0 ] && [ "$_aw_x" != "$_aw_ux" ] '
+        "&& grep -q '^srun: .*Requested node configuration is not available' \"$_aw_err\"; then ",
+        '_aw_x=$_aw_ux; ',
+        'echo "[remote] scheduler: every node that can take this request has failed to boot at least once '
+        f'($_aw_failed) — trying them again in {int(boot_retry_pause_s)} s"; ',
+        'echo $$ > "$_aw_pid"; ' f'sleep {int(boot_retry_pause_s)}; ',
+        f'echo "[remote] scheduler: requesting allocation via: {launcher_str}${{_aw_x:+ --exclude=$_aw_x}}"; ',
+        "continue; fi; ",
         # 3d. Slurm refused the request itself: no node it could ever give matches it. Nothing is retried — the
         # same words would be refused again — so the run says what it asked for beside what the partition's
         # nodes have, which is what the user needs to fix the scheduler command.
@@ -549,12 +583,33 @@ def _queue_deadline(queue_wait_s: int, granted_q: str) -> str:
     )
 
 
+def _max_wait_words(queue_wait_s: int) -> str:
+    return f"{queue_wait_s // 60} min" if queue_wait_s % 60 == 0 else f"{queue_wait_s} s"
+
+
+def _queue_deadline_passed(queue_wait_s: int) -> str:
+    """Before an attempt: when *queue_wait_s* has already passed since the first request, stop with
+    :data:`QUEUE_WAIT_EXIT`. The watchdog of :func:`_queue_deadline` only lives while an attempt runs and looks
+    once a second, so attempts that each fail at once — a node whose boot fails immediately — would otherwise
+    retry for ever whatever the host's Max queue wait says. ``""`` when there is no deadline."""
+    if queue_wait_s <= 0:
+        return ""
+    return (
+        f'if [ $(( $(date +%s) - _aw_t0 )) -ge {int(queue_wait_s)} ]; then '
+        'rm -f "$_aw_err" "$_aw_rcf" "$_aw_pend" "$_aw_qto"; '
+        f'echo "[remote] scheduler: ERROR no node was granted within {_max_wait_words(queue_wait_s)}, this host\'s '
+        'Max queue wait${_aw_failed:+ (failed to boot: $_aw_failed)} — stopped. Raise Max queue wait for this host '
+        'in Remotes (Wait indefinitely never gives up), or start the run again when the cluster is less busy"; '
+        f'exit {QUEUE_WAIT_EXIT}; fi; '
+    )
+
+
 def _queue_deadline_reached(queue_wait_s: int) -> str:
     """After an attempt: when :func:`_queue_deadline` fired, say so — naming the setting and the wait —
     and exit :data:`QUEUE_WAIT_EXIT` rather than read the cancelled ``srun``'s failure as anything else."""
     if queue_wait_s <= 0:
         return ""
-    wait = f"{queue_wait_s // 60} min" if queue_wait_s % 60 == 0 else f"{queue_wait_s} s"
+    wait = _max_wait_words(queue_wait_s)
     return (
         'if [ -f "$_aw_qto" ]; then _aw_qj=$(cat "$_aw_qto"); '
         'rm -f "$_aw_err" "$_aw_rcf" "$_aw_pend" "$_aw_qto"; '

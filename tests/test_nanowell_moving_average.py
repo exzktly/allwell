@@ -178,3 +178,20 @@ def test_the_window_is_saved_and_restored(page, qtbot):  # noqa: F811
         assert st.moving == 0
     st.apply_config({"moving": 99})
     assert st.moving == mvc.MAX_WINDOW
+
+
+def test_the_page_s_trajectories_are_drawn_from_the_averages(page, qtbot, monkeypatch):  # noqa: F811
+    """At the renderer's door: the panels the page hands to it, not a recomputation beside it."""
+    st = _loaded(qtbot, page)
+    page.state.selection.selected_wells = {"A01"}
+    nwc.nw_on_selection_changed(page)
+    drawn = []
+    real = nwc.render_trajectories
+    monkeypatch.setattr(nwc, "render_trajectories", lambda fig, panels, **kw: (drawn.append(panels),
+                                                                              real(fig, panels, **kw)))
+    nwc.set_moving(page, 2)
+    nwc.set_view(page, "trajectories")
+    lines = {site[1]: y[1] for site, _occ, y in drawn[-1][0].lines}
+    assert lines == {0: 1.5, 1: 3.0, 2: 1.5}
+    assert st.moving == 2
+

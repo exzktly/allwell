@@ -537,7 +537,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         rows = [frame] + [pd.DataFrame([{"group": grp.name, "well": w, "note": "no nanowell table"}])
                           for w in tableless]
         out = pd.concat(rows, ignore_index=True)
-        for column in ("n_sites", "n_used", "tp_order"):   # counts stay counts
+        for column in ("n_sites", "n_used", "tp_order", "moving_average"):   # counts stay counts
             if column in out.columns:
                 out[column] = out[column].astype("Int64")
         lead = ["group", "metric", "channel", "well", "timepoint", "time_h", "baseline"]

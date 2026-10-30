@@ -449,7 +449,15 @@ says how much light was added across the well (`offset_range`) and what share of
 cells (`cell_share`); over half is noted, because the texture threshold then reads low. One limit: where most
 nanowells hold a cell at the **same** place (cells gathered at the lowest point of a curved floor), that cell
 becomes part of the empty-nanowell picture there and is not counted. One texture threshold serves every tile of a
-timepoint, so every nanowell that was seen has a confluence. Results measured this way carry a measurement version: adding timepoints to a dataset
+timepoint.
+
+**Confluence needs an empty first image.** Confluence is read as texture against an empty nanowell, so the well's
+earliest timepoint must be imaged **before cells are loaded**: its nanowells define what empty looks like, and every
+later timepoint is measured against them. If more than 5 % of the nanowells at that first image already hold a
+counted cell — or nothing was counted there — the well has **no confluence at all** (blank, never 0), and the grid
+record and the run log say why (`confluence_reference` in `<well>_grid.json`). Calibrated on cells instead, a
+nanowell half covered read as 1-3 %. Because an empty start has 0 % confluence, a confluence fold change needs a
+named-timepoint baseline rather than the earliest. Results measured this way carry a measurement version: adding timepoints to a dataset
 measured by an earlier version analyses the well again in full, and Merge Plates refuses to combine two datasets
 measured by different versions. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image

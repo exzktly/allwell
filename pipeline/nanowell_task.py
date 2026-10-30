@@ -785,6 +785,17 @@ def _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, rec
         nr.flag_template_drift(outcome.timepoints, timepoints)
     rank = {tp: k for k, tp in enumerate(timepoints)}
     all_sites = sorted((prior["sites"] if prior else []) + outcome.sites, key=lambda r: rank[r["timepoint"]])
+    # Confluence is calibrated against the well's earliest template and is undefined unless it was imaged empty.
+    # The reference is what run_well measured against: an earlier run's saved template when there is one (it was
+    # handed in as the earliest), else the first own template this run built.
+    candidates = [tp for tp in (None if saved is None else saved[1],
+                                None if outcome.earliest_template is None else outcome.earliest_template[0])
+                  if tp is not None]
+    reference_tp = min(candidates, key=lambda tp: rank.get(tp, len(rank))) if candidates else None
+    verdict = nr.require_empty_start(all_sites, outcome.timepoints, reference_tp)
+    if verdict["status"] != "empty":
+        log.warning("Well %s — confluence undefined (%s reference at %s): it is calibrated against an empty start",
+                    well_label, verdict["status"], verdict["timepoint"])
     all_cells = sorted((prior["cells"] if prior else []) + records, key=lambda r: rank[r["timepoint"]])
     withdraw_seal(output_dir, well_label)         # the tables and archive are rewritten from here
     if all_cells:

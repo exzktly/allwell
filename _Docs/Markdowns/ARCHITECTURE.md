@@ -10424,6 +10424,22 @@ further out and are never taken in. Against a floor-only threshold it reads 1.04
 past about 60 % the cells reach down into the floor's values and the threshold is theirs. It returns the share above it (`cell_share`, on the block), and a share over a half is a note.
 `site_confluence` is the share of a site's interior above the threshold. It is `None`, not zero, with no site to
 calibrate against or with under half the interior on the image (a quadrant is not a site); 0.0 is a measurement.
+That threshold, and the template, are only an empty nanowell's when the nanowells they were read from were empty,
+and on a plate loaded before its first image no timepoint has an empty nanowell: both are then the cells' own
+texture, and a nanowell half covered reads 1-2 % (painted, 52 % true coverage). So confluence is **calibrated
+against an empty start**. The well's earliest own template is its reference, carrying the threshold measured at its
+timepoint (`Template.texture_cut`, saved with the template and in the checkpoint); every timepoint's confluence is
+read against it (`nanowell_run._confluence_basis`): its sites are brought to the reference template's levels
+(`_site_levels` against it, so exposure and light changing between timepoints cancel) and divided by it on a second
+rim-suppressed tile when the timepoint's own template differs (`_tile_confluence`), and the reference threshold is
+the cut. Counting, levels for the count, and fluorescence still use the timepoint's own template. Whether the
+reference timepoint was empty is decided after the well is measured, over every row including kept ones
+(`nanowell_run.require_empty_start`, called by `nanowell_task._finish_well`): `empty` when at most
+`EMPTY_START_MAX_LOADED` (5 %) of its counted nanowells hold a cell, `loaded` above that, `unverified` when nothing
+there was counted, `none` with no reference. Anything but `empty` sets the whole well's confluence to `None` and
+writes a note on every timepoint; the verdict is each grid block's `confluence_reference`. The default-baseline
+confluence fold change is then undefined by construction (an empty baseline is 0); a named-timepoint baseline gives
+one. Test detection measures a single timepoint, which is its own reference and is not judged.
 Because "departs from the floor" includes the optical halo of a cell, it reads high: on the synthetic scene it lies
 between the painted coverage and the coverage of a disk 3 px larger in radius, which makes it a monotone measure of
 loading rather than an area.

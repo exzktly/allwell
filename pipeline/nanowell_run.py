@@ -992,6 +992,10 @@ class Normalisation:
     tile_backgrounds: dict = field(default_factory=dict)  # fluorescence channel -> tile -> that tile's floor level
     block: dict = field(default_factory=dict)            # what the grid record says about it
     notes: list = field(default_factory=list)
+    #: ``(template, levels, threshold)`` confluence is read against (:func:`_confluence_basis`): the well's earliest
+    #: template, every site brought to its levels, and the threshold measured where it was built. ``None`` reads it
+    #: against the timepoint's own template, levels and threshold, which only the reference timepoint itself does.
+    confluence: tuple | None = None
 
 
 #: A site's floor-to-surround contrast, which sets its gain, is the median of the contrasts read within this many
@@ -1161,6 +1165,61 @@ def _normalise(located, images, template, by_tile, geoms, channels, pitch_um: fl
     return out
 
 
+def _confluence_basis(located, images, template, earliest, norm: Normalisation, by_tile, geoms, pitch_um: float,
+                      out: "Measured") -> tuple:
+    """``(template, levels, threshold)`` a timepoint's confluence is read against: always the well's reference.
+
+    Confluence is texture against an empty nanowell, so both what "empty" looks like (the template) and how much
+    texture the bare floor shows by itself (the threshold) must come from nanowells that are empty. Taken from the
+    timepoint being measured, they are the cells' own texture once every nanowell holds cells — a plate loaded before
+    its first image, which is every plate whose cells were seeded first, read 0-3 % at 50 % coverage. So the well's
+    earliest own template is the reference, with the threshold measured at its timepoint (``Template.texture_cut``),
+    and every later timepoint brings its sites to that template's levels (light and exposure move between
+    timepoints; the floor does not) and reads its texture against that threshold. Whether the reference timepoint
+    was in fact empty is only known once its cells are counted; :func:`require_empty_start` decides that for the
+    well, and makes the whole well's confluence undefined when it was not.
+
+    *earliest* ``None`` means this timepoint builds the reference: its own template is returned carrying its own
+    threshold, and put on ``out.template`` so the timepoints after it inherit it."""
+    from pipeline import nanowell_measure as nm
+
+    if earliest is None:
+        own = replace(template, texture_cut=norm.threshold)
+        out.template["_object"] = own
+        return own, norm.levels, norm.threshold
+    if earliest.texture_cut is None:
+        out.notes.append("The well's confluence reference carries no texture threshold: confluence is undefined")
+        return earliest, {}, None
+    if template.array is earliest.array:                 # this timepoint already measures against the reference
+        return earliest, norm.levels, earliest.texture_cut
+    tiles = [t for t in by_tile if t is not None]
+    fitted = {t: _local_fit(t, by_tile[t], located, geoms, earliest)[0] for t in tiles}
+    levels = _site_levels(located, images, earliest, fitted, geoms, pitch_um, nm.offset_identifiable(earliest))[0]
+    return earliest, levels, earliest.texture_cut
+
+
+def _tile_confluence(owner, indices, located, images, geoms, template, norm: Normalisation, fit_sites, rim) -> dict:
+    """Each of *fit_sites*' confluence against ``norm.confluence`` (:func:`_confluence_basis`), reusing *rim* (the
+    tile divided by the timepoint's own template) when the reference is that template under the same levels. A site
+    the reference template does not cover, or that has no level against it, is ``None``."""
+    from pipeline import nanowell_measure as nm
+
+    px = located.pixel_size_um
+    basis = norm.confluence or (template, norm.levels, norm.threshold)
+    reference, levels, threshold = basis
+    out = dict.fromkeys((g.index for g in fit_sites))
+    if reference.array is template.array and levels is norm.levels:
+        out.update(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, threshold)))
+        return out
+    if threshold is None:
+        return out
+    sites = [g for g in _local_fit(owner, indices, located, geoms, reference)[0] if g.index in levels]
+    if sites:
+        rim_ref = nm.rim_suppress(images[owner], px, reference, sites, levels=levels)
+        out.update(zip((g.index for g in sites), nm.site_confluence(rim_ref, px, sites, threshold)))
+    return {i: out.get(i) for i in (g.index for g in fit_sites)}
+
+
 def _tile_contents(owner, indices, located, images, settings, geoms, addresses, template, segment, channels,
                    kind=None, norm: "Normalisation | None" = None, on_segmented=None, keep=None):
     """Counts, confluence, area estimate, fluorescence and focus for the sites one tile owns, and its cell rows.
@@ -1183,8 +1242,8 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     if not fit_sites:
         return {}, {}, notes
     rim = nm.rim_suppress(images[owner], px, template, fit_sites, levels=norm.levels)
-    # The timepoint's one threshold, from every tile's nanowells (``_normalise``), not this tile's alone.
-    confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, norm.threshold)))
+    # Against the well's reference (its earliest template and threshold, ``_confluence_basis``), not this tile's.
+    confluence = _tile_confluence(owner, indices, located, images, geoms, template, norm, fit_sites, rim)
     # Each site as the segmenter receives it, written beside its count so a zero the segmenter could not have
     # avoided (cells a few per cent of the tile's range) is told apart from an empty nanowell.
     # Scaled (and, under the nanowells scale, rims and lattice blanked) as the segmenter is given it.
@@ -1401,6 +1460,8 @@ def _prepare_timepoint(located: Located, images: dict, settings: NanowellSetting
     if template is not None:
         norm = _normalise(located, images, template, by_tile, geoms, channels, located.pitch_um or settings.pitch_um)
         out.levels = norm.levels
+        norm.confluence = _confluence_basis(located, images, template, earliest_template, norm, by_tile, geoms,
+                                            located.pitch_um or settings.pitch_um, out)
         out.template["normalisation"] = norm.block
         out.notes += norm.notes
         for channel, well_level in norm.backgrounds.items():
@@ -1479,6 +1540,56 @@ class WellOutcome:
     diameter_source: str | None = None                   # where the well's one diameter came from (_settle_diameter)
     #: (timepoint, {site index: crop as the segmenter saw it}) for the first timepoint measured (pipeline.nanowell_inspect)
     inspection: tuple | None = None
+
+
+#: The well's reference timepoint counts as empty when at most this share of its counted nanowells holds a cell: a few
+#: nanowells with debris Cellpose took for a cell do not disqualify an unloaded plate, and a loaded one is far above it.
+EMPTY_START_MAX_LOADED = 0.05
+_EMPTY_START_NOTE = "Confluence is undefined for this well"
+
+
+def require_empty_start(sites: list, blocks: dict, reference_tp) -> dict:
+    """Make the well's confluence undefined unless its reference timepoint was imaged empty; the verdict, recorded.
+
+    Every timepoint's confluence is read against the template and texture threshold of *reference_tp*, the well's
+    earliest own template (:func:`_confluence_basis`). Those describe an empty nanowell only if that timepoint's
+    nanowells were empty, which its cell counts say: it is ``empty`` when at most ``EMPTY_START_MAX_LOADED`` of its
+    counted nanowells hold a cell, ``loaded`` above that, and ``unverified`` when nothing at it was counted
+    (counting off, or no measured nanowell). Anything but ``empty`` sets ``confluence`` to ``None`` on every row of
+    *sites* — undefined, never 0, since a 0 is a measurement — and says why in every timepoint's notes. The verdict
+    goes on every block of *blocks* as ``confluence_reference``. Run over every row of the well, kept ones included,
+    so an incremental run judges the same reference a full one would; running it again changes nothing."""
+    from pipeline import nanowell_measure as nm
+
+    counted = [r for r in sites if r.get("timepoint") == reference_tp and r.get("state") in (nm.EMPTY, nm.MEASURED)
+               and r.get("n_cells") is not None]
+    loaded = sum(1 for r in counted if r["n_cells"] > 0) / len(counted) if counted else None
+    if reference_tp is None:
+        status, why = "none", "no timepoint of it built an empty-nanowell template"
+    elif loaded is None:
+        status, why = "unverified", (f"its earliest timepoint ({reference_tp}), which confluence is calibrated "
+                                     "against, had no cells counted, so it cannot be shown to be empty")
+    elif loaded > EMPTY_START_MAX_LOADED:
+        status, why = "loaded", (f"{loaded:.0%} of the nanowells at its earliest timepoint ({reference_tp}) already "
+                                 "hold cells; confluence is calibrated against an empty start, so image the well "
+                                 "before cells are loaded")
+    else:
+        status, why = "empty", ""
+    record = {"timepoint": reference_tp, "status": status, "loaded_share": loaded, "nanowells_counted": len(counted),
+              "max_loaded_share": EMPTY_START_MAX_LOADED}
+    note = f"{_EMPTY_START_NOTE}: {why}" if why else None
+    for block in blocks.values():
+        if not isinstance(block, dict):
+            continue
+        block["confluence_reference"] = dict(record)
+        if "notes" in block:
+            block["notes"] = [n for n in block["notes"] if not str(n).startswith(_EMPTY_START_NOTE)]
+            if note:
+                block["notes"].append(note)
+    if note:
+        for row in sites:
+            row["confluence"] = None
+    return record
 
 
 _DRIFT_NOTE = "The empty-nanowell template departs from the earliest timepoint's"

@@ -87,11 +87,11 @@ def _serialised(outcome) -> str:
                        "inspection": inspection}, default=_plain)
 
 
-def _run(monkeypatch, record, images, threads: int, segmenter, release=None):
+def _run(monkeypatch, record, images, threads: int, segmenter, release=None, note=None):
     monkeypatch.setenv(par.THREADS_ENV, str(threads))
     return nr.run_well("A01", record, ["0h", "24h", "48h"], lambda tp, tile: images.get((tp, tile)), SETTINGS,
                        segmenter=segmenter, progress=lambda d, n: None, site_progress=lambda tp, d, n: None,
-                       release=release)
+                       release=release, note=note)
 
 
 @pytest.fixture
@@ -126,11 +126,18 @@ def test_a_threaded_well_writes_what_a_serial_one_writes_and_never_overlaps_two_
         assert any(r["n_cells"] is not None for r in outcome.sites if r["timepoint"] == "24h")
 
 
-def test_every_timepoint_s_tiles_are_released_once_it_is_measured(monkeypatch, well):
+def test_every_timepoint_s_tiles_are_released_once_it_is_measured_and_the_log_says_what_the_well_got(monkeypatch,
+                                                                                                      well):
     record, images = well
-    released = []
-    _run(monkeypatch, record, images, 3, _Segmenter().build(), release=released.append)
+    released, notes = [], []
+    monkeypatch.setattr(par, "worker_memory_budget", lambda *a, **k: 1 << 40)    # memory decides nothing here
+    monkeypatch.setattr(par, "_usable_cpus", lambda: 64)
+    _run(monkeypatch, record, images, 3, _Segmenter().build(), release=released.append, note=notes.append)
     assert released == ["0h", "24h", "48h"]
+    said = [n for n in notes if "at once" in n]
+    assert said == ["locating 3 of 3 timepoint(s) at once (the worker's 3 threads)",
+                    "measuring up to 3 tile(s) at once (the worker's 3 threads); "
+                    "the next timepoint is prepared while this one is on the GPU"]
 
 
 def test_the_next_timepoint_is_prepared_while_this_one_is_measured(monkeypatch, well):

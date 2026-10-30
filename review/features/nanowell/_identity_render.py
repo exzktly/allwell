@@ -31,6 +31,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from review.features.nanowell import identity_focus_compute as fc
 from review.features.nanowell.identity_compute import DISTANCE_TOP_PITCHES, STATUS_CLASSES
 
 from review.features.nanowell.renderer import (
@@ -478,8 +479,6 @@ def attach_hover_labels(drawn: IdentityDrawn) -> None:
     ``widgets.mpl_toolbar``): on the Distance map the reference's addresses; on Blink the shown frame's own — the
     compared timepoint's mapped into the reference's frame, so a wrong address reads as its wrong name; on *Side by
     side* each montage's own timepoint's. Diagnostics draws no nanowells and gets none."""
-    from review.features.nanowell import identity_focus_compute as fc
-
     pair = drawn.pair
     ref, other = pair.ref, pair.other
     kind = getattr(ref, "kind", None) or "hex"

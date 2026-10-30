@@ -92,11 +92,14 @@ _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their 
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
 _GO_TO_TIP = ("Show this nanowell on Identity ▸ Blink: its well's two montages alternating, zoomed onto it, with its "
               "address ringed — to see whether its address names the same nanowell over time.")
-_METRIC_TIP = ("What each dot is. Brightness is the mean intensity of the cells in a nanowell; nanowell "
-               "fluorescence is the whole nanowell's summed intensity minus what an empty nanowell gives, so it "
-               "counts every cell's light (and nothing else) and is near zero for an empty one. Both, and their fold "
-               "changes, are of the fluorescence channel chosen beside this (Channel); they are greyed when the run "
-               "measured no fluorescence.")
+_METRIC_TIP = ("What each dot is.\n"
+               "Brightness: how bright the cells are — the average of the counted cells' mean intensities, the same "
+               "for one cell or ten equally bright ones; blank for a nanowell with no counted cell.\n"
+               "Nanowell fluorescence: how much light the whole nanowell gives off above its bare floor — every "
+               "interior pixel summed minus the tile's floor level, no segmentation needed; near zero when empty, "
+               "and it grows with both the number of cells and their brightness.\n"
+               "Both, and their fold changes, are of the channel chosen beside this (Channel); they are greyed when "
+               "the run measured no fluorescence.")
 _CHANNEL_TIP = ("The fluorescence channel Brightness and Nanowell fluorescence (and their fold changes) are drawn for, on every "
                 "view and in the site detail. A channel the run read but did not measure in the nanowells is listed "
                 "greyed, with why.")

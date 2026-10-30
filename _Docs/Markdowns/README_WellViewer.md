@@ -5431,13 +5431,37 @@ use them.
 
 - **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
   *Extremes* and *Identity*. Each view shows only the controls it uses.
-- **Metric** — what each dot is: cell count, confluence, brightness (the mean intensity of the cells in the
-  nanowell), **nanowell fluorescence** (the whole nanowell's summed intensity minus what an empty nanowell gives —
-  all the light its cells give off, near zero for an empty nanowell; it grows with both how many cells there are
-  and how bright each is, where brightness follows only the latter), their fold changes against the baseline,
+- **Metric** — what each dot is: cell count, confluence, **brightness** and **nanowell fluorescence** (both
+  explained under *Brightness and nanowell fluorescence* below), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
   ln count against time, per hour, over at least three timepoints with cells) and occupancy at baseline.
   Brightness and nanowell fluorescence, and their fold changes, are of the fluorescence channel chosen in **Channel**.
+**Brightness and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
+but they answer different questions.
+
+- **Brightness <channel>** is *how bright the cells are*. It is the average, over the cells counted in the
+  nanowell, of each cell's mean pixel intensity inside its segmented outline. It does not change with how many cells
+  there are: one cell at 800 or ten cells at 800 both give 800. Nothing is subtracted, so it is in the image's own
+  units, background included. It needs segmented cells: a nanowell with no counted cell has no brightness (blank,
+  not zero).
+- **Nanowell fluorescence <channel>** is *how much light the whole nanowell gives off above its empty floor*. It
+  is the sum of every pixel inside the nanowell (within 90 % of its radius, clear of the rim) minus the floor's level times
+  the number of pixels. The floor's level is read from the same imaging tile — the typical level of the nanowells'
+  bare floor in that channel, with or without cells on it — so no empty nanowell is needed. It uses no
+  segmentation, so it counts light from cells the segmentation missed too. An empty nanowell reads near zero and
+  can come out slightly negative.
+
+So nanowell fluorescence grows with *both* the number of cells and how bright each one is; brightness follows only
+the second. Ten cells as bright as one cell give about ten times the nanowell fluorescence and the same
+brightness. With a nuclear stain such as DAPI, nanowell fluorescence tracks the amount of nuclear material — close
+to cell number — and brightness tracks staining or DNA content per nucleus (a dividing or condensing nucleus is
+brighter). Use brightness to ask whether the cells changed; use nanowell fluorescence to ask how much stained
+material is in the nanowell, including when cells clump and the count is unreliable.
+
+Their fold changes divide each timepoint by the baseline. A nanowell fluorescence at or below zero at the baseline
+gives no fold change ("no signal above background at baseline"), since a ratio over nothing has no meaning; a
+brightness fold change needs counted cells at both timepoints.
+
 - **Channel** — beside Metric, on every view: the fluorescence channel Brightness and Nanowell fluorescence are drawn for,
   in the figures, the site detail and the crop captions. It starts on the channel the Plotting tabs use when the
   run measured it, else on the first channel it measured. A channel the run read but did not measure in the

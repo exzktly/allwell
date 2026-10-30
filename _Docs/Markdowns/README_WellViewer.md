@@ -2067,7 +2067,13 @@ reading it. The log names any it kept over budget for that reason.
   while this machine prepares the run…*), and once the run is ready it is handed
   to that node. If the run is still queued by then, the headline says *Queued on
   the scheduler — waiting for a node…*, and the log repeats the wait every couple
-  of minutes together with the exact request that was made. A batched run holds
+  of minutes together with the exact request that was made. On a cluster that
+  powers idle nodes down, Slurm first picks a node and then boots it; while it
+  boots the status line reads *Node allocated, waiting for it to boot — 14m02s
+  (job 4812345)*. A node that fails to boot is asked for again, and the clock
+  keeps counting from the first request rather than starting over, because the
+  host's Max queue wait is measured the same way. Only the job's own first line
+  from the node (*allocation granted*) ends the wait. A batched run holds
   one node for every batch, so it queues once. A run that turns out to need no
   node — everything already finished on the host, nothing left to send, a
   refusal, or a Stop — gives the queued job back at once; a job that ended

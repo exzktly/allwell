@@ -13499,7 +13499,15 @@ nothing. The same holds once the job is *queued*: the request file is read only
 by a running pipeline, so a Suspend pressed while `RunEvidence.waiting_for_node`
 (between the allocation request — the spawn's own line, which is why the
 evidence reads every line at `_enqueue` rather than only the stream — and the
-grant or a well starting) is `_queued_suspend`: it stops the run and reports it
+grant or a well starting) is `_queued_suspend`. The grant is the job's own
+`[remote] scheduler: allocation granted` line from inside the allocation, never
+Slurm's `srun: job N has been allocated resources`: on a cluster that powers
+nodes down that line names a node Slurm has only begun to boot, which can fail
+to come up, after which the `srun` wrapper asks for another. The tracker
+reports it as its own `sched` state, `allocated`, which the Analyze pane shows
+as *Node allocated, waiting for it to boot* on the same clock (it neither stops
+nor restarts the wait, which runs from the first request as the wrapper's Max
+queue wait does) and the job indicator keeps dimmed as queued. Such a Suspend is `_queued_suspend`: it stops the run and reports it
 through the `suspended` event as "suspended before it started: its job was
 still queued for a node, so the queued job was cancelled". A queued job has no
 `.slurm` sidecar for the backstop to cancel, so after a Stop or such a Suspend

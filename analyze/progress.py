@@ -378,6 +378,10 @@ class AnalyzeProgressMixin:
         if getattr(self, "_sched_since", None) is None:
             self._sched_since = _time.monotonic()
             self._sched_breadcrumb_at = self._sched_since
+        # "allocated" is Slurm picking a node that may still have to boot. The
+        # wait goes on — the boot can fail and the wrapper then asks again — so
+        # the clock keeps counting from the first request.
+        self._sched_booting = state == "allocated"
         # "queued" carries the job id, "waiting" the launcher; each arrives in
         # its own line, so keep whichever we have rather than overwriting one
         # with the other's blank.
@@ -414,6 +418,7 @@ class AnalyzeProgressMixin:
             return
         # "waiting-early", or a request the job's own launcher repeated while it waits (a node that failed to boot).
         self._sched_early = True
+        self._sched_booting = state == "allocated"
         if getattr(self, "_sched_since", None) is None:
             self._sched_since = _time.monotonic()
             self._sched_breadcrumb_at = self._sched_since
@@ -438,8 +443,10 @@ class AnalyzeProgressMixin:
             return
         waited = _time.monotonic() - since
         job = getattr(self, "_sched_job", "")
+        what = ("Node allocated, waiting for it to boot" if getattr(self, "_sched_booting", False)
+                else "Waiting for the scheduler")
         self._set_scheduler_status(
-            f"Waiting for the scheduler — {_fmt_secs(waited)}"
+            f"{what} — {_fmt_secs(waited)}"
             f"{f' (job {job})' if job else ''}")
         last = getattr(self, "_sched_breadcrumb_at", since)
         if waited > 0 and _time.monotonic() - last >= self._SCHED_BREADCRUMB_S:
@@ -482,6 +489,7 @@ class AnalyzeProgressMixin:
         self._sched_since = None
         self._sched_job = ""
         self._sched_launcher = ""
+        self._sched_booting = False
 
     def _update_eta(self, done: int, total: int) -> None:
         # Remember the latest progress snapshot so the tick timer can

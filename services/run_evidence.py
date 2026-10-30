@@ -78,14 +78,16 @@ _RE_JOB_ID = re.compile(
     r"(?:srun: job (\d+) (?:queued|has been allocated)|allocation granted — job (\d+))", re.IGNORECASE)
 
 # The two ends of a wait for a node: the app's own request line (single-shot
-# and batched) or Slurm's "queued", then the grant, the node's own line, or a
-# well starting — anything that means the pipeline is running.
+# and batched) or Slurm's "queued", then the job's own line from inside the
+# allocation, or a well starting — anything that means the pipeline is running.
+# Slurm's "has been allocated resources" is not one: it names the node Slurm
+# picked, which on a cluster that powers nodes down has yet to boot and may fail
+# to, after which the wrapper asks for another (``services.remote_srun_retry``).
 _RE_NODE_REQUESTED = re.compile(
     r"\[remote\] scheduler: (?:batch \d+: |early: )?requesting allocation via|srun: job \d+ queued and waiting",
     re.IGNORECASE)
 _RE_NODE_GRANTED = re.compile(
-    r"\[remote\] scheduler: allocation granted|srun: job \d+ has been allocated"
-    r"|Well \S+\s+\S+\s+starting", re.IGNORECASE)
+    r"\[remote\] scheduler: allocation granted|Well \S+\s+\S+\s+starting", re.IGNORECASE)
 
 #: What each slurmstepd cause means, said for the person reading the headline.
 _CAUSE_WORDS = {

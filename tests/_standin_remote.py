@@ -338,6 +338,20 @@ jid = jobs_edit(_next_id)
 sys.stdout.write(f"srun: job {jid} queued and waiting for resources\n")
 sys.stdout.write(f"srun: job {jid} has been allocated resources\n")
 sys.stdout.flush()
+# A powered-down node that Slurm picked and could not boot (``StandinCluster.boot_failures``): what srun prints
+# on an AWS ParallelCluster host when the instance never comes up, then it gives the allocation back.
+_boots = os.path.join(cluster, "boot_failures")
+_left = int(open(_boots).read() or 0) if os.path.exists(_boots) else 0
+if _left > 0:
+    open(_boots, "w").write(str(_left - 1))
+    _slow = os.path.join(cluster, "boot_seconds")
+    time.sleep(float(open(_slow).read()) if os.path.exists(_slow) else 0.0)
+    node = f"queue-dy-standin-{jid}"
+    sys.stdout.write(f"srun: error: Node failure on {node}\n"
+                     f"srun: error: Nodes {node} are still not ready\n"
+                     "srun: error: Something is wrong with the boot of the nodes.\n")
+    sys.stdout.flush()
+    sys.exit(1)
 env = dict(os.environ, SLURM_JOB_ID=jid, SLURMD_NODENAME="standin-node1", SLURM_JOB_PARTITION=partition)
 try:
     import ctypes
@@ -644,6 +658,14 @@ class StandinCluster(StandinHost):
     def cancelled(self) -> list[str]:
         path = self.cluster / "cancelled"
         return path.read_text().split() if path.exists() else []
+
+    def boot_failures(self, n: int, *, seconds: float = 0.0) -> None:
+        """Make the next *n* ``srun`` calls get a node that fails to boot: Slurm's "queued" and "allocated"
+        lines, then ``Node failure`` / ``still not ready`` / ``Something is wrong with the boot of the nodes``
+        and exit 1, as srun does on a cluster whose powered-down node never came up. Each failure comes
+        *seconds* after the allocation, the time the node spent trying to boot."""
+        (self.cluster / "boot_failures").write_text(str(n), encoding="utf-8")
+        (self.cluster / "boot_seconds").write_text(str(seconds), encoding="utf-8")
 
     def node_failure(self) -> list[str]:
         """Kill every running job's processes outright, as a node that died does; its ``srun`` then says

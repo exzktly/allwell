@@ -22,8 +22,10 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
                              ProgressTracker; never written to the log.
     sched         tuple      (state, job_id, launcher) — the run is queued on a
                              remote scheduler, or has just been granted its
-                             node. ``state`` is "waiting" | "queued" | "granted";
-                             ``job_id`` is "" until the scheduler names it.
+                             node. ``state`` is "waiting" | "queued" |
+                             "allocated" (Slurm picked a node that may still
+                             have to boot) | "granted" (the job is running on
+                             it); ``job_id`` is "" until the scheduler names it.
     slurm_job     tuple      ("specs", {field: value}) — what the node a job was
                              granted is (``pipeline.slurm_node``); or
                              ("closed", {}) — the job is no longer open. Both
@@ -321,11 +323,15 @@ def _sched_events(line: str) -> list[tuple[str, object]]:
     msq = _RE_SCHED_QUEUED.search(line)
     if msq:
         events.append(("sched", ("queued", msq.group(1), "")))
-    for pattern in (_RE_SCHED_GRANTED, _RE_SCHED_ALLOCATED):
-        msg = pattern.search(line)
-        if msg:
-            events.append(("sched", ("granted", msg.group(1), "")))
-            break
+    msa = _RE_SCHED_ALLOCATED.search(line)
+    if msa:
+        # Slurm has picked a node, which on a cluster that powers nodes down is
+        # when its boot begins. Not the job starting: the boot can still fail,
+        # and the wrapper then asks again (``services.remote_srun_retry``).
+        events.append(("sched", ("allocated", msa.group(1), "")))
+    msg = _RE_SCHED_GRANTED.search(line)
+    if msg:
+        events.append(("sched", ("granted", msg.group(1), "")))
     return events
 
 
@@ -348,7 +354,10 @@ def _well_outcome_events(line: str) -> list[tuple[str, object]]:
 
 # A scheduler-backed host queues the pipeline rather than starting it, and a
 # queue wait is indistinguishable from a hang: the upload finishes, the log
-# stops. Four lines mark the two ends of that wait.
+# stops. Four lines mark the two ends of that wait. Only the app's own line from
+# inside the allocation ends it: Slurm's "has been allocated resources" names the
+# node it picked, and on a cluster that powers nodes down that node has yet to
+# boot — and may fail to, after which the wrapper asks for another.
 #
 # The first and last are the app's own (``_scheduler_handoff_lines`` and the
 # echo from inside the allocation), so their wording is ours to keep. The two

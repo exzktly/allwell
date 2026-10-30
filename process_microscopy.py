@@ -2848,8 +2848,7 @@ def process_well_zips(
         threads_per_worker=threads_per_worker,
         shared_kwargs_template=shared_kwargs_template, mode_label="Zip",
         # Zip staging (extract + images) lives under the scratch base.
-        stale_sweep=lambda out: sweep_run_scratch(out, settings_key,
-                                                   extra_extract=True),
+        stale_sweep=lambda out: sweep_run_scratch(out, settings_key, extra_extract=True),
         # File existence alone answered "already done" whatever the run was
         # configured to compute, and whether or not the well had finished: a
         # changed segmenter kept the old numbers, a well wound down part way

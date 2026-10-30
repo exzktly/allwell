@@ -293,7 +293,10 @@ def dunnett_vs_control(control_name: str, control_values,
     import scipy.stats as _st
 
     try:
-        res = _st.dunnett(*[v for _n, v in usable], control=ctrl)
+        # Seeded: scipy integrates Dunnett's p by randomised quasi-Monte Carlo, so an unseeded call answers a
+        # small p differently each time (7.5e-06 and then 2.3e-05 for the same samples) — the module's promise
+        # that nothing here is random, broken for the one test whose p a reader quotes against a control.
+        res = _st.dunnett(*[v for _n, v in usable], control=ctrl, random_state=_BOOTSTRAP_SEED)
         stats = [float(s) for s in np.atleast_1d(res.statistic)]
         ps = [float(p) for p in np.atleast_1d(res.pvalue)]
     except Exception as exc:

@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -60,10 +61,14 @@ _wells_summary = _lazy("review.features.nanowell.distribution_compute", "wells_s
 _metric_labels = _lazy("review.features.nanowell.distribution_compute", "metric_labels")
 _metric_column = _lazy("review.features.nanowell.distribution_compute", "metric_column")
 _match_channel = _lazy("review.features.nanowell.distribution_compute", "match_channel")
+_moving_window_for = _lazy("review.features.nanowell.distribution_compute", "moving_window_for")
+_moving_max = _lazy("review.features.nanowell.moving_compute", "max_window")
 _format_cut = _lazy("review.features.nanowell.distribution_compute", "format_cut")
 _parse_threshold = _lazy("review.features.nanowell.controller", "parse_threshold")
 _load_nanowell_data = _lazy("review.features.nanowell.collect", "load_nanowell_data")
 _site_metrics = _lazy("review.features.nanowell.series_compute", "site_metrics")
+_gate_tally = _lazy("review.features.nanowell.controller", "gate_tally")
+_gate_note = _lazy("review.features.nanowell.cell_gate_compute", "note")
 _baseline_at = _lazy("review.features.nanowell.series_compute", "baseline_at")
 _render_message = _lazy("review.features.nanowell.renderer", "render_message")
 _apply_subset = _lazy("review.features.nanowell.subset_compute", "apply")
@@ -139,6 +144,15 @@ class NanowellBatchExportPanel(BatchExportPanel):
         self._cohort_box.setToolTip("Distribution and Trajectories: only the nanowells with a value at every "
                                     "timepoint of their well, as the page's Fixed cohort box.")
         row.addWidget(self._cohort_box)
+        self._moving_spin = QSpinBox()
+        self._moving_spin.setRange(1, _moving_max())       # 1 is off, as on the page
+        self._moving_spin.setSpecialValueText("Moving average: off")
+        self._moving_spin.setPrefix("Moving average: ")
+        self._moving_spin.setSuffix(" timepoints")
+        self._moving_spin.setToolTip("Distribution and Trajectories: each nanowell's value as the mean over this "
+                                     "many timepoints ending at it, as the page's Moving average control. The "
+                                     "summary CSV's moving_average column says the window each row used.")
+        row.addWidget(self._moving_spin)
         row.addStretch(1)
         layout.addLayout(row)
 
@@ -254,6 +268,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         view = self._view_cb.currentData()
         self._axis_cb.setEnabled(view == "distribution")
         self._cohort_box.setEnabled(view in ("distribution", "trajectories"))
+        self._moving_spin.setEnabled(view in ("distribution", "trajectories"))
         self._tp_cb.setEnabled(view in ("distribution", "array", "position"))
 
     def _refresh_timepoints(self) -> None:
@@ -319,14 +334,18 @@ class NanowellBatchExportPanel(BatchExportPanel):
         return {"view": self._view_cb.currentData(), "axis": self._axis_cb.currentData(),
                 "baseline": self._baseline_cb.currentData(), "timepoint": self._tp_cb.currentData(),
                 "cohort": self._cohort_box.isChecked(), "metrics": self._selected_metrics(),
+                "moving": self._moving_spin.value() if self._moving_spin.value() >= 2 else 0,
                 "fmt": self._fmt_cb.currentText(), "channel": self._ctx.state.channel.active_channel,
                 "thresholds": self._thresholds()[0], "subset": self._subset()}
 
     def _load(self, baseline: str, wells) -> tuple | None:
-        """``(data, metrics)`` for the open dataset's *wells* at *baseline*, or ``None`` with the user told why.
+        """``(data, metrics, gate_note)`` for the open dataset's *wells* at *baseline*, or ``None`` with the user
+        told why.
 
         The Nanowells page reads only the wells it draws, so its tables are used only when they hold every one of
-        *wells* that has a table; otherwise exactly *wells* are read here."""
+        *wells* that has a table; otherwise exactly *wells* are read here. The cells Home's Cell Gating leaves out
+        are taken out of the counts and brightness exactly as on the page (``cell_gate_compute``), and
+        *gate_note* is the sentence saying so (``""`` when it leaves nothing out)."""
         data_dir = self._ctx.state.dataset.data_dir
         st = self._ctx.state.feature_slice("nanowell")
         data = getattr(st, "data", None)
@@ -351,7 +370,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                 "None of the groups' wells has a nanowell table (out/nanowells/), so there is "
                                 "nothing to export in this mode.")
             return None
-        return data, _site_metrics(data, baseline)
+        gate = _gate_tally(self._ctx, data)
+        return data, _site_metrics(data, baseline, gate), _gate_note(gate)
 
     def _run_batch(self) -> None:
         if self._run_is_refused():
@@ -378,7 +398,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
         loaded = self._load(settings["baseline"], {w for g in groups for w in g.wells})
         if loaded is None:
             return
-        data, metrics = loaded
+        data, metrics, gate_note = loaded
+        settings = {**settings, "gate_note": gate_note}
         self._log_sample_definitions_snapshot(groups)
         used_stems: set = set()
 
@@ -418,6 +439,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         tables, labels = [], _metric_labels()
         for metric in settings["metrics"]:
             drawn, channel, note = _resolve_metric(view, metric, settings["channel"], data.channels)
+            note = " ".join(filter(None, [note, settings.get("gate_note", "")]))
             # The cut was set for the ticked metric. When another is drawn in its place (a channel metric with no
             # channel), applying it there would count against a number chosen for something else.
             cut = settings["thresholds"].get(metric) if drawn == metric else None
@@ -437,11 +459,12 @@ class NanowellBatchExportPanel(BatchExportPanel):
                         _draw_view(fig, view, metrics, data, groups=groups, metric=drawn, channel=channel,
                                    axis=settings["axis"], timepoint=self._timepoint_for(data, wells, settings),
                                    control="", baseline=settings["baseline"], cohort=settings["cohort"],
-                                   well=well or "", well_timepoint=shown if well else "",
+                                   moving=settings["moving"], well=well or "", well_timepoint=shown if well else "",
                                    note=note, tableless=tableless, responding_above=cut,
                                    subset=settings["subset"])
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
+                                         "moving": settings["moving"],
                                          "well": well or "", "timepoint": shown,
                                          "subset": settings["subset"]}
                     if view == "array":                  # a gallery record restores the layers it was drawn with
@@ -453,13 +476,15 @@ class NanowellBatchExportPanel(BatchExportPanel):
             # The summary is of the nanowells the figure drew: the Subset first, as on the page.
             kept, filtered = _apply_subset(metrics, settings["subset"], settings["baseline"], wells, data)
             said = " ".join(filter(None, [_subset_note(filtered) if filtered is not None else "", note]))
+            over_time = view in ("distribution", "trajectories")
+            moving = _moving_window_for(drawn, settings["moving"]) if over_time else 0
             table = (_wells_summary(kept, wells, drawn, channels=data.channels, channel=channel,
-                                    cohort=settings["cohort"] and view in ("distribution", "trajectories"),
-                                    responding_above=cut)
+                                    cohort=settings["cohort"] and over_time, responding_above=cut, moving=moving)
                      if filtered is None or filtered.kept else None)
             if table is not None:
                 tables.append(table.assign(metric=drawn, channel=channel or "", requested_metric=metric,
-                                           group=grp.name, note=said, responding_above=cut))
+                                           group=grp.name, note=said, responding_above=cut,
+                                           moving_average=moving or None))
         try:
             self._write_summary(self._out_path(write_dir, f"{safe}_summary.csv"), tables, grp, tableless,
                                 settings)
@@ -520,7 +545,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         rows = [frame] + [pd.DataFrame([{"group": grp.name, "well": w, "note": "no nanowell table"}])
                           for w in tableless]
         out = pd.concat(rows, ignore_index=True)
-        for column in ("n_sites", "n_used", "tp_order"):   # counts stay counts
+        for column in ("n_sites", "n_used", "tp_order", "moving_average"):   # counts stay counts
             if column in out.columns:
                 out[column] = out[column].astype("Int64")
         lead = ["group", "metric", "channel", "well", "timepoint", "time_h", "baseline"]

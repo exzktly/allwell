@@ -138,11 +138,11 @@ def test_the_load_runs_off_the_event_loop_and_a_stale_result_never_replaces_a_ne
     real = controller.site_metrics
     calls = []
 
-    def slow(data, baseline):
+    def slow(data, baseline, gate=None):
         if baseline == "earliest":
             time.sleep(1.5)                       # the first request is the slow one, so it arrives last
         calls.append(baseline)
-        return real(data, baseline)
+        return real(data, baseline, gate)
 
     monkeypatch.setattr(controller, "site_metrics", slow)
     st = ctx_state = page.state.feature_slice("nanowell")

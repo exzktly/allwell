@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from review.features.nanowell import moving_compute
 from review.features.nanowell.collect import MEASURABLE
 
 _SQRT3_2 = math.sqrt(3.0) / 2.0
@@ -126,11 +127,13 @@ class TrajectoryPanel:
 
 
 def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool = False,
-                      marks: dict | None = None) -> list[TrajectoryPanel]:
+                      marks: dict | None = None, moving: int = 0) -> list[TrajectoryPanel]:
     """One panel per well: a line per nanowell over time, and the median of each occupancy class. With *cohort*,
     only the nanowells with a value at every timepoint are drawn and pooled (tracker I8); the rest are counted
     among those not drawn. *marks* is ``well -> {timepoint -> verdict}`` for the timepoints whose nanowell identity
-    is not confirmed, carried onto each panel by its x position."""
+    is not confirmed, carried onto each panel by its x position. *moving* draws each line as its moving average
+    over that many timepoints (``moving_compute``; 0 is off); the cohort is still decided on the measured values,
+    and a nanowell with no complete window anywhere is counted among those not drawn."""
     out = []
     for well in wells:
         rows = metrics[metrics["well"] == well]
@@ -140,7 +143,11 @@ def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool
         use_time = order["time_h"].notna().all()
         xs = (order["time_h"] if use_time else order["tp_order"]).to_numpy(dtype=float)
         tps = list(order["timepoint"])
-        values = numeric_values(rows, column)
+        measured = numeric_values(rows, column)
+        values, _why = moving_compute.moving_mean(rows, measured, moving)
+        complete = (rows.assign(_m=measured.notna().astype(float))
+                    .pivot_table(index=["nw_q", "nw_r"], columns="timepoint", values="_m", aggfunc="first",
+                                 dropna=False).reindex(columns=tps).fillna(0.0))
         wide = rows.assign(_v=values).pivot_table(index=["nw_q", "nw_r"], columns="timepoint", values="_v",
                                                   aggfunc="first", dropna=False).reindex(columns=tps)
         occupancy = rows.drop_duplicates(["nw_q", "nw_r"]).set_index(["nw_q", "nw_r"])["occupancy_class"]
@@ -150,7 +157,7 @@ def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool
         lines, line_ok, empty = [], [], 0
         for (q, r), series in wide.iterrows():
             y = series.to_numpy(dtype=float)
-            if not np.isfinite(y).any() or (cohort and not np.isfinite(y).all()):
+            if not np.isfinite(y).any() or (cohort and not (complete.loc[(q, r)].to_numpy() > 0.5).all()):
                 empty += 1
                 continue
             occ = occupancy.get((q, r))

@@ -1281,7 +1281,7 @@ review/
 │   ├── nanowell/     collect.py, series_compute.py, summary_compute.py,
 │   │                 beeswarm_compute.py, distribution_compute.py, renderer.py,
 │   │                 controller.py, state.py, tab_view.py, view_state_io.py,
-│   │                 cell_scope_compute.py  ← the Nanowells page: nanowell
+│   │                 cell_scope_compute.py, moving_compute.py  ← the Nanowells page: nanowell
 │   │                 tables, per-nanowell metrics, the Distribution beeswarm
 │   │                 and site detail [removable]
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
@@ -4257,8 +4257,10 @@ its lattice map — `ArrayLayers.preset("map")`, no image, since the image layer
 a montage or the raw tiles per acquisition) and
 one CSV of `distribution_compute.wells_summary`, the per-well summary prepared as
 the Distribution view prepares it (per-nanowell metrics at each well's first
-timepoint, the fixed cohort when ticked), with the exclusions spelled out by
-reason and a row naming each of the group's wells with no nanowell table. A
+timepoint, the fixed cohort when ticked, then the moving average when set), with the exclusions spelled
+out by reason, the window each row used in its `moving_average` column (empty when off or for a per-nanowell
+metric, `distribution_compute.moving_window_for`), and a row naming each of the group's wells with no nanowell
+table. A
 group's replicate sets stay sets and its solo wells stand alone, as the page
 groups a selection (`_figure_groups`); a group with no nanowell table at all is
 skipped and says so. An Array map asked for a timepoint a well was not imaged at
@@ -11328,6 +11330,22 @@ timepoint" (labelled "outside the fixed cohort"), so it is counted among the exc
 and the footer states the cohort as kept of sites. `well_summary(reasons=…)`, `distribution_model(cohort=…)`
 and `views_compute.trajectory_panels(cohort=…)` all apply it, so the beeswarm, the summaries and the trajectory
 medians follow the same nanowells.
+
+**The moving average** (`moving_compute`, `NanowellState.moving`, the *Moving average* spin box on *Distribution*
+and *Trajectories*; 0 is off, the spin box shows its minimum, 1, as *Off*). With a window of *N* (2 to
+`MAX_WINDOW`, 9), a nanowell's value at a timepoint is the mean of its values at that timepoint and the *N − 1*
+before it in its well's timepoint order (`tp_order`) — a trailing window counted in timepoints, not hours. A value
+is averaged only from a complete window: every timepoint of it present as a row, with a value, and joinable over
+time (`identity_ok`). It is never averaged over fewer timepoints than asked for, since such a value would draw
+exactly like a full one. A value the window leaves undefined is counted among the exclusions with its reason —
+"before the first full window" (the well's first *N − 1* timepoints), "has a gap" (a timepoint without a value, or
+without a row, so a window never reaches past a hole in the series) or "not joinable" — while a value already
+undefined at its own timepoint keeps its own reason (`moving_compute.apply`). The fixed cohort is decided on the
+measured values first, then the average is taken: decided on the averages, no nanowell would have one at the
+first timepoint and the cohort would be empty. `distribution_model(moving=…)`, `wells_summary(moving=…)` and
+`trajectory_panels(moving=…)` apply it, so the beeswarm, the summary CSV and the trajectory lines use the same
+numbers, and both figures' footers state the window (`moving_compute.describe`). Per-nanowell metrics have no
+values over time and ignore it; Array, Position, Extremes and Identity draw one timepoint and do not use it.
 
 **The subset** (`subset_compute`, `NanowellState.subset`, the *Subset* control and its editor in `subset_view`). A
 `Subset` is a tuple of `Condition`s and a *match* (`all` or `any`); no conditions is every nanowell. A condition

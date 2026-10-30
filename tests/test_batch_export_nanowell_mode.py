@@ -49,7 +49,8 @@ def _drawn(monkeypatch):
     real = controller.draw_view
 
     def spy(fig, view, *args, **kwargs):
-        calls.append({"view": view, **{k: kwargs[k] for k in ("metric", "groups", "well", "tableless", "cohort")}})
+        calls.append({"view": view, **{k: kwargs[k] for k in ("metric", "groups", "well", "tableless", "cohort",
+                                                                  "moving")}})
         return real(fig, view, *args, **kwargs)
 
     monkeypatch.setattr(nanowell_panel, "_draw_view", spy)     # the panel's own handle on it
@@ -255,3 +256,27 @@ def test_the_page_s_subset_is_used_and_the_csv_is_of_the_nanowells_kept(panel, t
     assert rows and {int(r["n_sites"]) for r in rows} == {1}
     assert {r["subset"] for r in rows} == {"Starting cells ≥1"}
     assert all(r["note"].startswith("Starting cells ≥1 (count at the earliest timepoint): 1 of ") for r in rows)
+
+
+def test_the_moving_average_reaches_the_figure_and_the_csv_says_which_window_each_row_used(panel, tmp_path,
+                                                                                          monkeypatch):
+    """The panel's window is passed to the page's composition, and the summary is the page's summary at that
+    window — not the measured one, which a run that dropped the setting on the way to the CSV would write."""
+    from review.features.nanowell.collect import load_nanowell_data
+    from review.features.nanowell.distribution_compute import wells_summary
+    from review.features.nanowell.series_compute import site_metrics
+
+    p, ctx = panel
+    calls = _drawn(monkeypatch)
+    assert p._run_settings()["moving"] == 0
+    p._moving_spin.setValue(2)
+    p._run_batch()
+    assert [c["moving"] for c in calls] == [2, 2]
+    rows = [r for r in csv.DictReader((tmp_path / "export" / "nanowell_Drug_A_summary.csv").open())
+            if r["metric"] == "n" and r["well"] == "A01"]
+    data = load_nanowell_data(ctx.state.dataset.data_dir)
+    expected = wells_summary(site_metrics(data, "earliest"), ["A01"], "n", channels=data.channels, moving=2)
+    measured = wells_summary(site_metrics(data, "earliest"), ["A01"], "n", channels=data.channels)
+    assert list(expected["n_used"]) != list(measured["n_used"])          # the fixture can tell the two apart
+    assert [(r["timepoint"], int(r["n_used"]), r["moving_average"]) for r in rows] == [
+        (t, int(u), "2") for t, u in zip(expected["timepoint"], expected["n_used"])]

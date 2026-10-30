@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 
+from review.features.nanowell.moving_compute import clamp_window
 from review.features.nanowell.series_compute import is_baseline
 from review.features.nanowell.statistics_compute import TEST_KEYS as STATS_TESTS
 from review.features.nanowell.statistics_compute import UNITS as STATS_UNITS
@@ -124,6 +125,8 @@ class NanowellState:
     selected_sites: list = field(default_factory=list)  # [[well, q, r], ...] — not a plate selection
     control: str = ""                       # the group compared against on *Along x: Wells* ("" = none)
     cohort: bool = False                    # only nanowells with a value at every timepoint (tracker I8)
+    #: The moving average's window in timepoints on Distribution and Trajectories; 0 is off (``moving_compute``).
+    moving: int = 0
     layers: ArrayLayers = field(default_factory=ArrayLayers)   # what the Array view draws
     #: The user's "responding above" cut per metric column (``brightness_fc_GFP``, ``n``; tracker I9). A metric
     #: with none has no fraction responding: there is no default cut.
@@ -255,6 +258,7 @@ class NanowellState:
     def to_config(self) -> dict:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
+                "moving": self.moving,
                 "extremes_n": self.extremes_n, "extremes_tps": list(self.extremes_tps), "crop_cells": self.crop_cells,
                 "channel": self.channel, "image_channel": self.image_channel,
                 "crop_metrics": self.crop_metrics, "popout_labels": self.popout_labels,
@@ -279,6 +283,7 @@ class NanowellState:
             value = config.get(name)
             setattr(self, name, value if isinstance(value, str) else getattr(fresh, name))
         self.cohort = config.get("cohort") is True
+        self.moving = clamp_window(config.get("moving"))
         mode = config.get("identity_mode")
         self.identity_mode = mode if mode in IDENTITY_MODES else fresh.identity_mode
         colour = config.get("identity_colour")

@@ -10648,7 +10648,9 @@ behind the worker's one re-entrant lock (`serialised`), so a worker never has tw
 tiles' CPU work overlaps the GPU's. When the count is Cellpose's and the run found no GPU
 (`nanowell_parallel.gpu_in_use`: `parallelism.GPU_SHARERS_ENV` unset), tiles are measured one at a time and nothing
 is prepared ahead: Cellpose then runs on Torch's own threads, there is no GPU time to overlap, and more threads would
-only compete for the same cores.
+only compete for the same cores. Each well logs, through `run_well`'s *note*, how many timepoints it locates at once
+and how many tiles it measures at once, with what decided each (`_locate_threads_why`, `_tile_threads_why`: the
+thread count, memory, or Cellpose on a CPU), and whether timepoints are prepared ahead.
 **The next timepoint is prepared while this one's tiles are on the GPU**: `measure_timepoint` is
 `_prepare_timepoint` (geometry, visibility, coverage, template, levels) then `_finish_timepoint`, and `run_well`
 prepares timepoint *k*+1 on one background thread as soon as *k* is prepared, with the earliest template a serial

@@ -27,6 +27,7 @@ from review.features.nanowell.distribution_compute import (
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, one_to_one
 from review.features.nanowell import extremes_compute as ec
+from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
@@ -390,7 +391,7 @@ def redraw(ctx) -> None:
     st.hits, model = draw_view(
         fig, st.view, st.metrics, st.data, groups=page_groups(ctx), metric=metric, channel=channel,
         axis=st.axis, timepoint=shown_timepoint(ctx)[1] if st.view == "position" else st.timepoint,
-        control=st.control, baseline=st.baseline, cohort=st.cohort, well=well,
+        control=st.control, baseline=st.baseline, cohort=st.cohort, moving=st.moving, well=well,
         well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
@@ -524,7 +525,7 @@ def set_display_range(ctx, low, high) -> None:
 
 def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
-              note: str = "", tableless=(), selected=(), responding_above: float | None = None,
+              note: str = "", tableless=(), selected=(), responding_above: float | None = None, moving: int = 0,
               layers: ArrayLayers | None = None, image=None, image_note: str = "",
               region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position or Identity) into *fig*: ``(hit map, model)``.
@@ -538,7 +539,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     The hit map is ``None`` for views with nothing to click. *responding_above* is the user's cut for *metric*
     (tracker I9), which the Distribution view states the fraction responding at. *subset* is the page's
     *Subset* (``subset_compute``): every view but the Array draws only the nanowells inside it, saying how many it
-    left out; the Array view draws them all and dims the rest.
+    left out; the Array view draws them all and dims the rest. *moving* is the moving average's window in
+    timepoints (``moving_compute``; 0 is off), which Distribution and Trajectories apply and the other views,
+    each of one timepoint or one value per nanowell, do not.
 
     The Identity view draws *well* at *well_timepoint* against the well's reference timepoint
     (``_identity_controller.draw_identity``), with *identity* the page's inputs to it — its mode, the sidecar and
@@ -578,8 +581,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if view == "trajectories":
         marks = {w: timepoint_marks(data, w) for w in wells}
         render_trajectories(fig, vc.trajectory_panels(metrics, wells, metric_column(metric, channel), cohort=cohort,
-                                                      marks=marks),
-                            cohort=cohort, label=_label(metric, channel), time_source=data.time_source, note=note)
+                                                      marks=marks, moving=moving),
+                            cohort=cohort, label=_label(metric, channel), time_source=data.time_source,
+                            note=" ".join(filter(None, [mvc.describe(moving), note])))
         return None, None
     if view == "position":
         series, missing = vc.position_series(metrics, wells, timepoint, metric_column(metric, channel),
@@ -593,7 +597,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         return None, None
     model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
-                               baseline=baseline, cohort=cohort, responding_above=responding_above)
+                               baseline=baseline, cohort=cohort, responding_above=responding_above,
+                               moving=moving)
     model.starting = subset.start_bounds()
     if model.axis == TIME:
         model.identity_marks = {(w, tp): v for w in wells for tp, v in timepoint_marks(data, w).items()}
@@ -1676,6 +1681,11 @@ def set_extremes_n(ctx, count: int) -> None:
 
 def set_cohort(ctx, on: bool) -> None:
     _set(ctx, "cohort", bool(on))
+
+
+def set_moving(ctx, window: int) -> None:
+    """The moving average's window in timepoints; 0 (or 1) turns it off."""
+    _set(ctx, "moving", mvc.clamp_window(window))
 
 
 def set_metric(ctx, metric: str) -> None:

@@ -34,6 +34,7 @@ from review.features.nanowell.display_range_view import (
 )
 from review.features.nanowell.series_compute import baseline_at, baseline_timepoint
 from review.features.nanowell.subset_view import build_subset_control
+from review.features.nanowell.moving_compute import MAX_WINDOW
 from review.features.nanowell.state import EXTREMES_MAX_N
 from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
@@ -89,6 +90,10 @@ _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their 
                "one set of nanowells. Off, each timepoint's median is over whichever nanowells could be measured "
                "then. The others are counted as outside the fixed cohort. See also Subset, which chooses nanowells "
                "by how many cells they held at the baseline, a metric, their position or their imaging field.")
+_MOVING_TIP = ("Moving average: each nanowell's value at a timepoint becomes the mean of its values at that timepoint "
+               "and the ones before it, this many in all (timepoints, not hours). A value is averaged only when the "
+               "nanowell has a value at every timepoint of its window, so the first timepoints and any window with "
+               "a gap have none; they are counted among the exclusions. Off draws each timepoint as measured.")
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
 _GO_TO_TIP = ("Show this nanowell on Identity ▸ Blink: its well's two montages alternating, zoomed onto it, with its "
               "address ringed — to see whether its address names the same nanowell over time.")
@@ -224,6 +229,15 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_cohort_box", cohort_box)
     grp_cohort = band.add_scope("", cohort_box)
 
+    moving_spin = QSpinBox()
+    moving_spin.setRange(1, MAX_WINDOW)          # 1 is off, shown as "Off"; a window of one timepoint averages nothing
+    moving_spin.setSpecialValueText("Off")
+    moving_spin.setSuffix(" timepoints")
+    moving_spin.setToolTip(_MOVING_TIP)
+    moving_spin.valueChanged.connect(lambda value: nwc.set_moving(ctx, value))
+    reg.register("_nw_moving_spin", moving_spin)
+    grp_moving = band.add_scope("Moving average", moving_spin)
+
     well_cb = QComboBox()
     well_cb.setToolTip(_WELL_TIP)
     well_cb.currentIndexChanged.connect(lambda _i: nwc.set_well(ctx, well_cb.currentData() or ""))
@@ -352,7 +366,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     def page_visible() -> bool:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
-    controls = (metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box,
+    controls = (metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, moving_spin,
                 responding_edit, extremes_spin, extremes_cells, extremes_numbers, *identity.signalling, *start.signalling,
                 *array_controls.signalling)
 
@@ -410,7 +424,11 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
             # applies to what it draws, so its box stays where it can be turned off.
-            grp_cohort.setVisible((distribution and not per_nanowell) or view == "trajectories")
+            # The moving average is offered exactly where the cohort is: both act on values over time.
+            over_time = (distribution and not per_nanowell) or view == "trajectories"
+            grp_cohort.setVisible(over_time)
+            moving_spin.setValue(max(st.moving, 1))
+            grp_moving.setVisible(over_time)
             grp_control.setVisible(wells_axis)
             column = nwc.drawn_metric_column(ctx)
             cut = st.thresholds.get(column) if column else None

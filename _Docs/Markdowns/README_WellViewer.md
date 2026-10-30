@@ -5520,6 +5520,14 @@ brightness fold change needs counted cells at both timepoints.
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
   measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
   the footer gives the cohort's size.
+- **Moving average** (on *Distribution* and *Trajectories*) — *Off*, or 2 to 9 timepoints: each nanowell's
+  value at a timepoint becomes the mean of its values at that timepoint and the ones before it, that many in
+  all. The window counts timepoints, not hours, so with unevenly spaced acquisitions it covers a different
+  stretch of time at each step. A value is averaged only when the nanowell has a value at every timepoint of
+  its window, so the first timepoints (before a full window), and any window with a gap or a timepoint whose
+  nanowell identity is not confirmed, have no value; they are counted among the exclusions with that reason
+  rather than averaged over fewer timepoints. With *Fixed cohort* ticked too, the cohort is chosen from the
+  measured values and then averaged. The footer states the window.
 - **Responding above** (on *Distribution*) — the number a nanowell's value must be above to count as
   responding, for the metric shown. Set one for each metric you use (a fold change, a count, a confluence, an
   intensity); each is remembered separately, and a channel's brightness separately from another's. The figure
@@ -6639,8 +6647,8 @@ figure and an empty file.
 (Distribution, Array map, Trajectories or Position), tick the **Metrics**, and
 set **Along x**, **Baseline** (Earliest, First measurable or one of the dataset's
 timepoints), **Timepoint** (Latest, Earliest or one of the
-dataset's) and **Fixed cohort** as on the page — each greyed where it does not
-reach the view. **Responding above** asks for a number for each ticked metric,
+dataset's), **Fixed cohort** and **Moving average** as on the page — each greyed where it does not
+reach the view; the summary CSV's `moving_average` column gives the window each row used. **Responding above** asks for a number for each ticked metric,
 filled in from the page's where you set one there, and the run will not start
 while any is empty. **Subset** — *Use the page's subset*, ticked by default, draws
 with the Nanowells page's Subset, named beside the box each time the panel opens (build or

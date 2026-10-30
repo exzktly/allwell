@@ -393,9 +393,12 @@ def test_rim_focus_on_the_narrow_patch_is_the_whole_patch_s():
     rng = np.random.default_rng(6)
     measured = 0
     for trial in range(200):
-        h, w = int(rng.integers(60, 240)), int(rng.integers(60, 240))
         r_px = float(rng.uniform(4, 60))
-        g = SiteGeometry(0, (float(rng.uniform(0, w * PX)), float(rng.uniform(0, h * PX))), r_px * PX, FITTED)
+        h, w = int(rng.integers(int(3.6 * r_px) + 8, int(3.6 * r_px) + 80)), int(rng.integers(int(3.6 * r_px) + 8,
+                                                                                         int(3.6 * r_px) + 80))
+        edge = 0.0 if trial % 10 == 0 else 1.7 * r_px + 3               # a tenth may run off the image
+        g = SiteGeometry(0, (float(rng.uniform(edge, w - edge)) * PX, float(rng.uniform(edge, h - edge)) * PX),
+                         r_px * PX, FITTED)
         cx, cy = g.centre_um[0] / PX - 0.5, g.centre_um[1] / PX - 0.5
         yy, xx = np.mgrid[0:h, 0:w]
         disk = (np.hypot(xx - cx, yy - cy) <= r_px).astype(float)
@@ -406,7 +409,7 @@ def test_rim_focus_on_the_narrow_patch_is_the_whole_patch_s():
         want = _old_rim_focus(image, PX, g)
         assert ns.rim_focus(image, PX, g) == want
         measured += want is not None
-    assert measured > 40
+    assert measured > 120
 
 
 def _crops(rng, n, half):
@@ -434,6 +437,24 @@ def test_crop_levels_are_each_crop_s_modal_level_and_surround_median():
     infinite[7, half, half] = np.inf
     got, want = nm.crop_levels(infinite, half), _old_crop_levels(infinite, half)
     assert all(np.array_equal(a, b, equal_nan=True) for a, b in zip(got, want))
+
+
+def test_a_crop_with_minus_infinity_takes_modal_level_s_floor():
+    """``modal_stack`` sorts -inf in among the values it keeps and so drops the largest finite one; ``modal_level``
+    drops the -inf. They differ when the densest window holds the largest value: a tight cluster at the top."""
+    half = 20
+    yy, xx = np.mgrid[-half:half + 1, -half:half + 1]
+    floor = np.hypot(xx, yy) <= nm.FLOOR_RADIUS * half / (nm.TEMPLATE_HEADROOM * nm.SUPPRESSION_RADIUS)
+    rng = np.random.default_rng(13)
+    crop = np.full((2 * half + 1,) * 2, 100.0)
+    k = int(floor.sum())
+    # Denser toward the top (a square root's spacing shrinks), so the densest window ends at the largest value.
+    values = np.concatenate((rng.uniform(0, 1000, k - k // 3), 2000 + 10 * np.sqrt(np.linspace(0, 1, k // 3))))
+    values[0] = -np.inf
+    crop[floor] = values
+    got, want = nm.crop_levels(crop[None], half), _old_crop_levels(crop[None], half)
+    assert np.array_equal(got[0], want[0]) and np.array_equal(got[1], want[1])
+    assert nm.modal_stack(crop[floor][:, None]) != want[0]           # the case the guard exists for
 
 
 def test_modal_stack_takes_the_median_of_the_window_s_middle():
@@ -480,12 +501,16 @@ def test_an_interior_kept_between_calls_is_the_one_computed_afresh():
             want = _old_interior_pixels(shape, PX, g, nm.INTERIOR_FRACTION)
             assert np.array_equal(ys, want[0]) and np.array_equal(xs, want[1])
             ys[:] = -1                               # a caller writing into what it was given spoils nothing
-    # Two sites with the same window and a centre a hair apart are two masks, not one.
-    a = SiteGeometry(0, (50.0, 50.0), 20.0, FITTED)
-    b = SiteGeometry(1, (50.0 + 1e-9, 50.0), 20.0, FITTED)
-    for g in (a, b, a):
+    # Two sites with the same window and reach but centres half a pixel apart are two masks, not one: a key of the
+    # window alone would hand the second the first's.
+    reach = 10.0
+    radius_um = reach * PX / nm.INTERIOR_FRACTION
+    a = SiteGeometry(0, ((20.1 + 0.5) * PX, (40.3 + 0.5) * PX), radius_um, FITTED)
+    b = SiteGeometry(1, ((20.6 + 0.5) * PX, (40.3 + 0.5) * PX), radius_um, FITTED)
+    wants = [_old_interior_pixels((200, 200), PX, g, nm.INTERIOR_FRACTION) for g in (a, b)]
+    assert not np.array_equal(wants[0][1], wants[1][1])          # the fixture tells the two apart
+    for g, want in ((a, wants[0]), (b, wants[1]), (a, wants[0])):
         got = nm._interior_pixels((200, 200), PX, g, nm.INTERIOR_FRACTION)
-        want = _old_interior_pixels((200, 200), PX, g, nm.INTERIOR_FRACTION)
         assert all(np.array_equal(p, q) for p, q in zip(got, want))
     assert len(nm._INTERIORS) <= nm._INTERIORS_KEPT
 

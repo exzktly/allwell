@@ -2379,7 +2379,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
              reference: dict | None = None, earliest_template=None, spill_dir=None, fixed_roster=None,
              kept_evidence: dict | None = None, stored_placements: dict | None = None,
              manual_anchors: Mapping = MappingProxyType({}), progress=None, site_progress=None,
-             note=None, kept_layouts: dict | None = None) -> WellOutcome:
+             note=None, kept_layouts: dict | None = None, release=None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -2411,7 +2411,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     agreement without being located again. *progress*, when given, is ``f(done, total)``, called as the work goes (:class:`_Steps`); *site_progress*, when
     given, is ``f(timepoint, done, total)``, the nanowells of the timepoint being measured that are segmented so far;
     *note*, when given, is ``f(text)``, told the scale Cellpose sees each timepoint at before it is measured (only when
-    the count is Cellpose's, *segmenter* ``None``).
+    the count is Cellpose's, *segmenter* ``None``). *release*, when given, is ``f(timepoint)``, called once nothing
+    will read that timepoint's tiles again (``pipeline.nanowell_tiles.WellTiles.release``).
     """
     from pipeline.nanowell_parallel import ordered_results, thread_budget
 
@@ -2496,6 +2497,10 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     earliest = earliest_template
     measurable = set(anchored) | set(unaddressed)
     steps.skip(timepoints, measurable)
+    release = release or (lambda _tp: None)
+    for tp in timepoints:
+        if tp not in measurable:
+            release(tp)
     order = [t for t in timepoints if t in measurable]                 # in time, so "earliest" means it
     keys = {tp: _checkpoint_key(outcome, tp, outcome.located[tp], radius_um, roster, settings, shifts) for tp in order}
     kept = {tp: checkpoint.load(tp, keys[tp]) if checkpoint is not None else None for tp in order}
@@ -2531,6 +2536,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
                 if checkpoint is not None:
                     checkpoint.save(tp, keys[tp], measured)
             earliest = _next_earliest(earliest, measured.template)
+            release(tp)
             _record_measured(outcome, tp, measured, consistency, reference, anchored, steps)
     finally:
         if ahead is not None:

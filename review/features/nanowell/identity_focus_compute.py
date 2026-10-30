@@ -145,3 +145,52 @@ def focus_limits(home_xlim, home_ylim, centre, half: float) -> tuple[tuple[float
     shrink = min(1.0, 2.0 * half / min(abs(width), abs(height)))
     cx, cy = float(centre[0]), float(centre[1])
     return ((cx - width * shrink / 2, cx + width * shrink / 2), (cy - height * shrink / 2, cy + height * shrink / 2))
+
+
+# ── the address under the pointer ────────────────────────────────────────────
+#: How far from a site, in spacings, the pointer still names it: half the spacing, the nearest another site can be.
+HOVER_NAMES_PITCHES = 0.5
+
+
+def address_text(address, kind: str = "hex") -> str:
+    """``q,r · ring R.k``: an address as the page draws it and as the run's tables label it."""
+    from util.nanowell_address import NanowellAddress
+
+    q, r = int(address[0]), int(address[1])
+    try:
+        ring = NanowellAddress(q, r, kind=kind).label
+    except ValueError:
+        return f"nanowell {q},{r}"
+    return f"nanowell {q},{r} · ring {ring}"
+
+
+class SiteFinder:
+    """The nearest site to a point among *sites* (``{(q, r): (x, y)}``), within :data:`HOVER_NAMES_PITCHES` of
+    *pitch*; built once per drawn panel, asked on every pointer move."""
+
+    def __init__(self, sites: dict, pitch: float | None, kind: str = "hex", prefix: str = "") -> None:
+        self.names = list(sites)
+        self.xy = np.array([sites[a] for a in self.names], dtype=float).reshape(-1, 2)
+        self.limit = HOVER_NAMES_PITCHES * float(pitch) if pitch else 0.0
+        self.kind, self.prefix = kind, prefix
+
+    def address(self, x, y) -> tuple | None:
+        if not self.names or x is None or y is None or not self.limit:
+            return None
+        gap = np.hypot(self.xy[:, 0] - float(x), self.xy[:, 1] - float(y))
+        k = int(np.argmin(gap))
+        return self.names[k] if gap[k] <= self.limit else None
+
+    def __call__(self, x, y) -> str | None:
+        """What the pointer's readout says at (*x*, *y*): the address there, or ``None`` between nanowells."""
+        address = self.address(x, y)
+        return None if address is None else self.prefix + address_text(address, self.kind)
+
+
+def mapped_sites(sites: dict, transform) -> dict:
+    """*sites* carried through *transform* (rows of points in, rows out); ``{}`` without one."""
+    if not sites or transform is None:
+        return {}
+    names = list(sites)
+    xy = transform(np.array([sites[a] for a in names], dtype=float))
+    return {a: (float(x), float(y)) for a, (x, y) in zip(names, xy)}

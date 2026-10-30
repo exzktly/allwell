@@ -251,6 +251,17 @@ if _HAVE_MPL:
                 return
 
             text = f"x = {event.xdata:.3g}   ·   y = {event.ydata:.3g}"
+            # An axes may name what is under the pointer: ``ax._aw_hover_label(x, y)`` returns a string to lead the
+            # readout with, or ``None`` where there is nothing to name. The widget knows nothing of what it names.
+            label = getattr(ax, "_aw_hover_label", None)
+            if callable(label):
+                try:
+                    named = label(event.xdata, event.ydata)
+                except Exception:
+                    swallowed()
+                    named = None
+                if named:
+                    text = f"{named}   ·   {text}"
 
             # Don't pop a hover chip on an empty axis — before data is
             # loaded the canvas is blank and a caption on bare grid lines

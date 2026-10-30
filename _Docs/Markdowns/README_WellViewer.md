@@ -5664,6 +5664,11 @@ draws, and only those: opening it with nothing selected reads nothing, and each 
 is selected and kept, so selecting it again is instant. While a newly selected well is read the page shows
 *Computing…*.
 
+**Excluding a well.** On the views that show a **Well** box (Array, Identity, Extremes), **Exclude** beside it
+leaves that well out of every figure on the Nanowells page and out of *Save nanowell data*; each figure then says
+which wells are left out. It applies only to this page — the well stays in the rest of Review — and is remembered with
+the page's settings. **Excluded (n) ▾** on the band brings back one well or all of them.
+
 **Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
 draws as one long CSV, with the baseline and where the times came from; with a Subset set, every
 row is still written, flagged in `in_subset` with the subset (`subset`) and its baseline (`subset_baseline`) beside it. Right after you change the baseline it waits:
@@ -5772,7 +5777,15 @@ onto it and stay there as you change the timepoint, the well or the mode, and a 
 far its address landed from itself. A ring marks where the reference puts the nanowell; a cross marks where the later
 timepoint's nanowell of the same name lands. On a correct timepoint they sit together; when the addresses name other
 nanowells, the cross sits on a neighbour. Clear the box to go back to the whole view. The box is greyed on
-Diagnostics, which shows the central square rather than the array.
+Diagnostics, which shows the central square rather than the array. **Origin** beside the box goes to nanowell
+`0,0`, the centre the addresses count from.
+
+Pointing at a nanowell names it beside the pointer — `T1 · nanowell 2,-1 · ring 2.9` — before its `x · y`. On Blink
+it names the address the frame on screen gives it, so a wrong address reads as its wrong name when the frame flips.
+Blink's labels are bold with a dark outline, green on the reference and amber on the later timepoint.
+
+**Go to nanowell**, in the header above the crops in the side panel and at the top of the pop-out window, shows the
+selected nanowell on Identity ▸ Blink, in its well and zoomed onto it.
 
 To check a dataset analysed earlier without analysing it again, run
 `python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well): it writes

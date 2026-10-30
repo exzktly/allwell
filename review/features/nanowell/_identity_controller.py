@@ -54,6 +54,8 @@ def draw_identity(fig, data, *, well: str, timepoint: str, mode: str = "distance
     itself, or no reference."""
     drawn = _draw_mode(fig, data, well=well, timepoint=timepoint, mode=mode, payload=payload, images=images,
                        frames_cache=frames_cache, note=note, colour=colour)
+    if drawn is not None:
+        ir.attach_hover_labels(drawn)
     marks = fc.focus_marks(drawn.pair, focus) if drawn is not None else None
     if marks is not None:
         ir.draw_focus(fig, drawn, marks, fc.focus_centres(marks, drawn.mode))

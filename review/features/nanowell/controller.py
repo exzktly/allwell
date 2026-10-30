@@ -161,8 +161,47 @@ def tableless_wells(ctx) -> list[str]:
 def page_groups(ctx) -> dict:
     """``group -> wells`` for the page: replicate sets over the active wells only (gap G9 of the plan)."""
     st = _state(ctx)
-    have = [w for w in active_wells(ctx) if st is None or st.data is None or w in set(st.data.wells)]
+    excluded = set(st.excluded_wells) if st is not None else set()
+    have = [w for w in active_wells(ctx) if (st is None or st.data is None or w in set(st.data.wells))
+            and w not in excluded]
     return replicate_groups(ctx, have) if have else {}
+
+
+def excluded_note(ctx) -> str:
+    """The sentence every figure on the page carries while wells are excluded from it: which, and where to bring
+    them back — a figure drawn short of a selected well says so (CLAUDE.md §7)."""
+    st = _state(ctx)
+    if st is None or not st.excluded_wells:
+        return ""
+    selected = set(active_wells(ctx))
+    shown = [w for w in st.excluded_wells if w in selected] or list(st.excluded_wells)
+    return f"Excluded on this page: {', '.join(shown)} (restore from Excluded on the band)."
+
+
+def set_well_excluded(ctx, well: str, excluded: bool) -> None:
+    """Leave *well* out of every figure on the page (or bring it back); kept with the page's settings. The rest of
+    Review is untouched: this is the page's choice of wells, not the dataset's inclusion."""
+    st = _state(ctx)
+    if st is None or not well:
+        return
+    wells = [w for w in st.excluded_wells if w != well] + ([well] if excluded else [])
+    if sorted(wells) == sorted(st.excluded_wells):
+        return
+    st.excluded_wells = sorted(wells)
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
+
+
+def restore_every_well(ctx) -> None:
+    """Bring back every well excluded on the page."""
+    st = _state(ctx)
+    if st is None or not st.excluded_wells:
+        return
+    st.excluded_wells = []
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
 
 
 def _empty(title: str, hint: str):
@@ -195,6 +234,10 @@ def nanowell_empty_reason(ctx) -> EmptyReason | None:
         chosen = [w for w in active_wells(ctx) if w in set(available)]
         if chosen and st.computing:
             return _empty("Reading the nanowell tables…", "The figure appears when they are loaded.")
+        if chosen and set(chosen) <= set(st.excluded_wells):
+            return _empty("Every selected well is excluded on this page.",
+                          f"Excluded: {', '.join(chosen)}. Restore them from Excluded on the band, or select "
+                          "other wells on the plate.")
         if chosen:
             return _empty("None of the selected wells' nanowell tables could be used.",
                           " ".join(st.data.problems))
@@ -324,10 +367,11 @@ def redraw(ctx) -> None:
     if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
         return                                           # the right metrics are on their way
     metric, channel, note = resolve_metric(st.view, st.metric, page_channel_name(ctx), st.data.channels)
+    note = " ".join(filter(None, [note, excluded_note(ctx)]))
     well = page_well(ctx)
     st.extreme_axes = {}
     if st.view == "identity":
-        _draw_identity_page(ctx, st, fig, canvas, well=well)
+        _draw_identity_page(ctx, st, fig, canvas, well=well, note=note)
         return
     idc.leave(ctx, st)
     if st.view == "extremes":
@@ -365,7 +409,7 @@ def redraw(ctx) -> None:
     redraw_detail(ctx)
 
 
-def _draw_identity_page(ctx, st, fig, canvas, *, well: str) -> None:
+def _draw_identity_page(ctx, st, fig, canvas, *, well: str, note: str = "") -> None:
     """The Identity view on the page: through :func:`draw_view`, with the sidecar, montages and Blink frames the page
     holds (``_identity_controller.page_inputs``); the Blink timer follows what was drawn."""
     from review.core.plot_style import apply_export_style_to_current
@@ -375,7 +419,7 @@ def _draw_identity_page(ctx, st, fig, canvas, *, well: str) -> None:
     _hits, drawn = draw_view(fig, "identity", st.metrics, st.data, groups=page_groups(ctx), metric=st.metric,
                              channel=None, axis=st.axis, timepoint=timepoint, control=st.control,
                              baseline=st.baseline, cohort=st.cohort, well=well, well_timepoint=timepoint,
-                             identity=idc.page_inputs(ctx, st, well, timepoint, _fetch))
+                             note=note, identity=idc.page_inputs(ctx, st, well, timepoint, _fetch))
     idc.after_draw(ctx, st, drawn)
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
@@ -1262,6 +1306,24 @@ def pop_out_crops(ctx) -> None:
     large, and draw it. The window follows the selection until it is closed; the page's own view is untouched."""
     _call(ctx, "_nw_open_popout")
     draw_popout(ctx)
+
+
+def go_to_site_in_blink(ctx) -> None:
+    """**Go to nanowell**: show the nanowell whose crops are shown (:func:`crops_site`) on the Identity view's Blink,
+    in its well, zoomed onto it (``identity_focus_compute``) — at the page's timepoint when the well has it, else the
+    one the view opens on."""
+    st = _state(ctx)
+    site = crops_site(st)
+    if site is None:
+        ctx.notify.set_status("Select a nanowell first: Go to nanowell shows the selected one on Identity ▸ Blink.")
+        return
+    well, q, r = site
+    st.view, st.well, st.identity_mode = "identity", well, "blink"
+    st.identity_focus = f"{int(q)},{int(r)}"
+    st.identity_zoom, st.identity_zoom_for = {}, None
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
 
 
 def draw_popout(ctx) -> None:

@@ -1038,3 +1038,136 @@ def test_the_page_s_nanowell_box_goes_to_the_address_keeps_it_across_timepoints_
     drawn = st.identity_drawn
     assert st.identity_focus == "" and drawn.focus is None
     assert (drawn.axes["map"].get_xlim(), drawn.axes["map"].get_ylim()) == drawn.home["map"]
+
+
+# ── the address under the pointer ────────────────────────────────────────────
+def test_the_pointer_names_the_address_under_it_by_the_shown_frame_s_own_names(dataset):
+    _out, _data, ref, other = dataset
+    fig, drawn = _draw(dataset, "A01")
+    label = drawn.axes["map"]._aw_hover_label
+    assert label(*ref.sites[(1, 0)]) == "T0 · nanowell 1,0 · ring 1.0"
+    assert label(*ref.sites[(0, -1)]) == "T0 · nanowell 0,-1 · ring 1.4"
+    midway = np.add(ref.sites[(0, 0)], ref.sites[(1, 0)]) / 2 + (0.0, 0.3 * ref.pitch)
+    assert label(*midway) is None                                           # between nanowells: nothing named
+    # Blink on A02, whose compared timepoint calls each nanowell by its neighbour's name: at the reference's 0,0 the
+    # reference frame says 0,0 and the compared frame says 1,0 — the wrong name, as that frame labels it.
+    _fig, blink = _draw(dataset, "A02", mode="blink", images=_montages(dataset, "A02"))
+    label = blink.axes["map"]._aw_hover_label
+    assert label(*ref.sites[(0, 0)]) == "T0 · nanowell 0,0 · ring 0.0"
+    ir.show_frame(blink, 1)
+    assert label(*ref.sites[(0, 0)]) == "T1 · nanowell 1,0 · ring 1.0"
+    # Side by side: each montage names its own timepoint's addresses, in its own frame.
+    _fig, sides = _draw(dataset, "A01", mode="sides")
+    assert sides.axes["compared"]._aw_hover_label(*other.sites[(0, 1)]) == "T1 · nanowell 0,1 · ring 1.1"
+    _fig, diag = _draw(dataset, "A01", mode="diagnostics")
+    assert not any(hasattr(ax, "_aw_hover_label") for ax in diag.axes.values())
+
+
+def test_the_canvas_readout_leads_with_what_the_axes_names_under_the_pointer(qtbot):
+    from matplotlib.backend_bases import MouseEvent
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    from widgets.mpl_toolbar import MplToolbar
+
+    fig = Figure(figsize=(4, 3))
+    canvas = FigureCanvasQTAgg(fig)
+    ax = fig.add_subplot()
+    ax.plot([0, 10], [0, 10])
+    ax._aw_hover_label = lambda x, y: "nanowell 2,-1" if x > 5 else None
+    toolbar = MplToolbar(canvas)
+    qtbot.addWidget(toolbar)
+    canvas.draw()
+    for at, text in (((8.0, 4.0), "nanowell 2,-1   ·   x = 8   ·   y = 4"), ((2.0, 4.0), "x = 2   ·   y = 4")):
+        x, y = ax.transData.transform(at)
+        toolbar._on_mouse_move(MouseEvent("motion_notify_event", canvas, x, y))
+        assert toolbar._chip.text() == text
+    toolbar._chip.hide()
+
+
+# ── Origin, Go to nanowell, Exclude ──────────────────────────────────────────
+def test_origin_goes_to_nanowell_0_0(page, qtbot):
+    from review.features.nanowell.tab_view import VIEWS
+    from tests.test_nanowell_page import _loaded
+
+    ctx = page
+    st = _loaded(qtbot, ctx)
+    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    ctx.widgets.get("_nw_identity_origin_btn").click()
+    assert st.identity_focus == "0,0" and ctx.widgets.get("_nw_identity_focus_edit").text() == "0,0"
+    drawn = st.identity_drawn
+    assert _centre(drawn.axes["map"]) == pytest.approx(drawn.pair.ref.sites[(0, 0)])
+
+
+@pytest.mark.parametrize("button", ["_nw_strip_go_to_btn", "_nw_popout_go_to_btn"])
+def test_go_to_nanowell_shows_the_crops_nanowell_on_blink_zoomed_onto_it(page, qtbot, button):
+    from review.features.nanowell.tab_view import VIEWS
+    from tests.test_nanowell_page import _loaded
+
+    ctx = page
+    st = _loaded(qtbot, ctx)
+    _choose(ctx, "_nw_view_seg", "distribution", [k for k, _l in VIEWS])
+    st.selected_sites = [("A02", 1, -1)]
+    nwc.pop_out_crops(ctx)                                                  # builds the pop-out and its button
+    ctx.widgets.get(button).click()
+    assert (st.view, st.well, st.identity_mode, st.identity_focus) == ("identity", "A02", "blink", "1,-1")
+    assert ctx.widgets.get("_nw_view_seg").currentData() == "identity"
+    qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.mode == "blink", timeout=20000)
+    drawn = st.identity_drawn
+    assert drawn.pair.well == "A02"
+    assert _centre(drawn.axes["map"]) == pytest.approx(drawn.pair.ref.sites[(1, -1)])
+    ctx.widgets.get("_nw_popout").hide()
+
+
+def test_go_to_nanowell_without_a_selection_says_what_to_do(page, qtbot):
+    from tests.test_nanowell_page import _loaded
+
+    ctx = page
+    st = _loaded(qtbot, ctx)
+    st.selected_sites = []
+    view = st.view
+    nwc.go_to_site_in_blink(ctx)
+    assert st.view == view and st.identity_focus == ""
+
+
+def test_a_well_excluded_on_the_band_leaves_every_figure_and_comes_back(page, qtbot):
+    from review.features.nanowell.tab_view import VIEWS
+    from tests.test_nanowell_page import _loaded
+
+    ctx = page
+    st = _loaded(qtbot, ctx)
+    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    well_cb = ctx.widgets.get("_nw_well_cb")
+    well_cb.setCurrentIndex(well_cb.findData("A02"))
+    excluded_btn = ctx.widgets.get("_nw_excluded_wells_btn")
+    assert not excluded_btn.isVisibleTo(ctx.window)
+    ctx.widgets.get("_nw_exclude_well_btn").click()
+    assert st.excluded_wells == ["A02"] and nwc.page_wells(ctx) == ["A01"]
+    assert [well_cb.itemData(i) for i in range(well_cb.count())] == ["A01"]
+    assert st.identity_drawn.pair.well == "A01"
+    footer = " ".join(_page_texts(ctx, "nw-identity-footer"))
+    assert "Excluded on this page: A02 (restore from Excluded on the band)." in footer
+    assert excluded_btn.isVisibleTo(ctx.window) and excluded_btn.text() == "Excluded (1) ▾"
+    assert st.to_config()["excluded_wells"] == ["A02"]
+    # Excluding the last one empties the page and says why.
+    ctx.widgets.get("_nw_exclude_well_btn").click()
+    assert nwc.nanowell_empty_reason(ctx).title == "Every selected well is excluded on this page."
+    [restore_a01, restore_a02, _sep, restore_all] = excluded_btn.menu().actions()
+    assert (restore_a01.text(), restore_a02.text(), restore_all.text()) == (
+        "Restore A01", "Restore A02", "Restore every well")
+    restore_a02.trigger()
+    assert st.excluded_wells == ["A01"] and nwc.page_wells(ctx) == ["A02"]
+    excluded_btn.menu().actions()[0].trigger()
+    assert st.excluded_wells == [] and nwc.page_wells(ctx) == ["A01", "A02"]
+    assert not excluded_btn.isVisibleTo(ctx.window)
+    assert "Excluded on this page" not in " ".join(_page_texts(ctx, "nw-identity-footer"))
+
+
+def test_the_excluded_wells_are_kept_with_the_page_s_settings_and_junk_is_dropped():
+    from review.features.nanowell.state import NanowellState
+
+    st = NanowellState()
+    st.apply_config({"excluded_wells": ["B02", "A01", "A01", 3, ""]})
+    assert st.excluded_wells == ["A01", "B02"]
+    st.apply_config({"excluded_wells": "A01"})
+    assert st.excluded_wells == []

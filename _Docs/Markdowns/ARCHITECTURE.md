@@ -11515,7 +11515,7 @@ like the others; `_identity_controller.draw_identity` composes it from the sidec
 `identity_compute` holds the Qt-free data (`distance_map`, `blink_frames`, `hover_target`, `diagnostics`,
 `identity_message`, `summary_lines`, `stage_line`, `worst_verdict`, `default_timepoint`), `_identity_render` draws it
 (every text a reader sees carries a `nw-identity-*` gid; the Diagnostics figure is `_identity_diagnostics_render`)
-and `identity_view` builds the *Compare* and *Colour* controls and the Blink timer. Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
+and `identity_view` builds the *Compare* and *Colour* controls, the *Nanowell* box with **Origin**, and the Blink timer. Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
 included). Four modes, `NanowellState.identity_mode` (persisted; an unknown one falls back to `distance`):
 *Distance map* — each compared address at its reference's measured position (well frame, µm), coloured by
 `NanowellState.identity_colour` (`IDENTITY_COLOURS`, persisted): `distance` fills it by its distance in pitches
@@ -11564,6 +11564,18 @@ a timepoint does not hold it, or why the text is not an address. `_identity_zoom
 (`focus_centres`, `focus_limits`: `FOCUS_HALF_PITCHES` spacings to the nearer edge, in the full view's proportions,
 widened on Side by side so the moved compared site stays in view) whenever the well, timepoint or mode changes, and
 keeps that as the zoom. Diagnostics draws crops about the square, so the box is greyed there (`FOCUS_MODES`).
+**Origin** beside the box goes to `0,0`. **Go to nanowell** — in the site detail's crop header and in the pop-out
+window's header (`tab_view._go_to_button`) — calls `controller.go_to_site_in_blink`, which takes the crops' nanowell
+(`crops_site`) to the Identity view's Blink in its well, focused on its address.
+
+The pointer's readout names the nanowell under it: `_identity_render.attach_hover_labels` sets
+`axes._aw_hover_label` to an `identity_focus_compute.SiteFinder` (nearest site within half a spacing, written
+`<timepoint> · nanowell q,r · ring R.k`), which `widgets.mpl_toolbar`'s hover chip leads its `x · y` with — a generic
+hook, the widget knowing nothing of nanowells. The Distance map names the reference's addresses, Blink the shown
+frame's own (the compared timepoint's mapped into the reference's frame, so a wrong address reads as its wrong name),
+Side by side each montage's own; Diagnostics none. Blink's address labels are bold, `BLINK_LABEL_PT`, stroked in
+`Colors.surface` (`_halo`) and coloured per frame (`BLINK_LABEL_COLOURS`: success for the reference, warn for the
+compared timepoint), as is each frame's name, so they read on any brightness of montage.
 
 With no sidecar it
 says the check has not been run and names the audit command; at the reference it says so. On this view the Well
@@ -11573,6 +11585,14 @@ inconclusive or unchecked, then first non-reference timepoint. Montages are read
 shows after the next load. Batch Export does not offer it (the reason is written beside its `VIEWS`: no metric, one
 figure per well and timepoint, two modes that exist only as interaction). Pinned by
 `tests/test_nanowell_identity_view.py`, including one test through the real page builder.
+
+**Excluding a well on the page.** The band's **Exclude** (beside the Well combo) adds the well to
+`NanowellState.excluded_wells` (sorted, persisted with the page's settings); `controller.page_groups` drops those
+wells, so every view, the Well combo and *Save nanowell data* leave them out, while the rest of Review is untouched —
+it is the page's choice of wells, not an inclusion layer. Every figure's note carries `controller.excluded_note`
+("Excluded on this page: …") so a figure short of a selected well says so; the empty state names the case where every
+selected well is excluded. *Excluded (n) ▾* (`exclude_view`), shown only while any is excluded, restores
+one or all (`set_well_excluded`, `restore_every_well`).
 
 **The Array view** is one well at one timepoint, every element of it a layer that is on or off, drawn by one
 renderer whatever is on, so a nanowell reads the same — and is clickable, pannable and zoomable — under every

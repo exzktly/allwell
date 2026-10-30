@@ -272,6 +272,27 @@ def render_distance(fig, pair, dmap, lines: list[str], status=None) -> IdentityD
 
 
 # ── Blink ────────────────────────────────────────────────────────────────────
+#: Blink's address labels, in points, bold and haloed: they sit on a greyscale montage of any brightness, so each is
+#: stroked in the app's darkest surface and drawn in a bright colour that differs between the two frames.
+BLINK_LABEL_PT = 9.0
+#: Each frame's label colour, as a theme lookup (the theme can change while the page is open): the reference's
+#: green, the compared timepoint's amber — both bright on dark and on light grey, and told apart as the frames flip.
+BLINK_LABEL_COLOURS = (lambda: _theme().success, lambda: _theme().warn)
+
+
+def _theme():
+    from ui.theme import Colors
+
+    return Colors
+
+
+def _halo() -> list:
+    """A dark outline round a text, so it reads on a bright pixel as well as a dark one."""
+    from matplotlib import patheffects
+
+    return [patheffects.withStroke(linewidth=2.6, foreground=_theme().surface)]
+
+
 def render_blink(fig, pair, frames, lines: list[str]) -> IdentityDrawn:
     """The reference montage and the compared one resampled into its pixel grid, one shown at a time, each with its
     own addresses' labels. Frame 0 (the reference) is shown; :func:`show_frame` flips to the other."""
@@ -288,17 +309,21 @@ def render_blink(fig, pair, frames, lines: list[str]) -> IdentityDrawn:
     from ui.theme import Colors
 
     sets = []
+    halo = _halo()
     for k, (image, labels, name) in enumerate(((frames.reference, frames.ref_labels, f"{pair.reference} (reference)"),
                                               (frames.compared, frames.compared_labels,
                                                f"{pair.timepoint}, mapped into {pair.reference}'s frame"))):
         artists = [ax.imshow(np.ma.masked_invalid(image), cmap="gray", vmin=0, vmax=255, extent=frames.extent,
                              interpolation="nearest", zorder=0, gid=f"nw-identity-blink-{k}")]
-        colour = Colors.accent if k == 0 else Colors.warn
+        colour = BLINK_LABEL_COLOURS[k]()
         for (q, r), x, y in labels:
-            artists.append(ax.text(x, y, f"{q},{r}", fontsize=6.5, color=colour, ha="center", va="center",
-                                   clip_on=True, zorder=3, gid=f"nw-identity-label-{k}"))
-        artists.append(_ink(ax.text(0.01, 0.99, name, transform=ax.transAxes, fontsize=8, color=ink, va="top",
-                                    gid="nw-identity-frame")))
+            artists.append(ax.text(x, y, f"{q},{r}", fontsize=BLINK_LABEL_PT, fontweight="bold", color=colour,
+                                   ha="center", va="center", clip_on=True, zorder=3, path_effects=halo,
+                                   gid=f"nw-identity-label-{k}"))
+        artists.append(ax.text(0.01, 0.99, name, transform=ax.transAxes, fontsize=8.5, fontweight="bold",
+                               color=colour, va="top", path_effects=halo, gid="nw-identity-frame",
+                               bbox={"boxstyle": "round,pad=0.3", "facecolor": Colors.surface, "alpha": 0.8,
+                                     "edgecolor": colour}))
         sets.append(artists)
     drawn.frames = sets
     x0, x1, y1, y0 = frames.extent
@@ -446,6 +471,30 @@ def draw_focus(fig, drawn: IdentityDrawn, marks, centres: dict) -> None:
         if ax is not None and xy is not None:
             ax.plot([xy[0]], [xy[1]], marker="x", markersize=12, mew=2.2, color=Colors.accent, zorder=8,
                     gid="nw-identity-focus-cross")
+
+
+def attach_hover_labels(drawn: IdentityDrawn) -> None:
+    """Name the nanowell under the pointer in the canvas's readout (``axes._aw_hover_label``, read by
+    ``widgets.mpl_toolbar``): on the Distance map the reference's addresses; on Blink the shown frame's own — the
+    compared timepoint's mapped into the reference's frame, so a wrong address reads as its wrong name; on *Side by
+    side* each montage's own timepoint's. Diagnostics draws no nanowells and gets none."""
+    from review.features.nanowell import identity_focus_compute as fc
+
+    pair = drawn.pair
+    ref, other = pair.ref, pair.other
+    kind = getattr(ref, "kind", None) or "hex"
+    pitch = getattr(ref, "pitch", None) or getattr(other, "pitch", None)
+    ref_sites, other_sites = getattr(ref, "sites", None) or {}, getattr(other, "sites", None) or {}
+    if drawn.mode == "distance":
+        drawn.axes["map"]._aw_hover_label = fc.SiteFinder(ref_sites, pitch, kind, f"{pair.reference} · ")
+    elif drawn.mode == "blink":
+        finders = (fc.SiteFinder(ref_sites, pitch, kind, f"{pair.reference} · "),
+                   fc.SiteFinder(fc.mapped_sites(other_sites, pair.inverse), pitch, kind, f"{pair.timepoint} · "))
+        drawn.axes["map"]._aw_hover_label = lambda x, y: finders[drawn.frame % 2](x, y)
+    elif drawn.mode == "sides":
+        drawn.axes["reference"]._aw_hover_label = fc.SiteFinder(ref_sites, pitch, kind, f"{pair.reference} · ")
+        drawn.axes["compared"]._aw_hover_label = fc.SiteFinder(other_sites, getattr(other, "pitch", None) or pitch,
+                                                               kind, f"{pair.timepoint} · ")
 
 
 def render_identity_message(fig, text: str) -> None:

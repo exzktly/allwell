@@ -80,12 +80,34 @@ def build_identity_controls(ctx, band) -> IdentityControls:
     colour = _segments(COLOURS, _COLOUR_TIP, lambda key: nwc.set_identity_colour(ctx, key))
     ctx.widgets.register("_nw_identity_colour_seg", colour)
     focus = _focus_box(ctx)
+    origin = _origin_button(ctx, focus)
     timer = QTimer(band)
     timer.setInterval(idc.BLINK_MS)
     timer.timeout.connect(lambda: idc.blink_tick(ctx))
     ctx.widgets.register("_nw_blink_timer", timer)
     return IdentityControls(seg, colour, band.add_scope("Compare", seg), band.add_scope("Colour", colour), focus,
-                            band.add_scope("Nanowell", focus))
+                            band.add_scope("Nanowell", focus, origin))
+
+
+_ORIGIN_TIP = ("Go to the origin: nanowell 0,0, the centre of the array the addresses count from (ring 0).")
+
+
+def _origin_button(ctx, edit):
+    """**Origin**, beside the box: goes to nanowell 0,0."""
+    from PySide6.QtWidgets import QPushButton
+
+    origin = QPushButton("Origin")
+    origin.setProperty("variant", "secondary")
+    origin.setToolTip(_ORIGIN_TIP)
+    origin.clicked.connect(lambda _=False: go_to(ctx, edit, "0,0"))
+    ctx.widgets.register("_nw_identity_origin_btn", origin)
+    return origin
+
+
+def go_to(ctx, edit, text: str) -> None:
+    """Write *text* in the box and go to it, as typing it and pressing Enter does."""
+    edit.setText(text)
+    nwc.set_identity_focus(ctx, text)
 
 
 def _focus_box(ctx):
@@ -115,7 +137,7 @@ def refresh_identity_controls(st, controls: IdentityControls, on_view: bool) -> 
     if controls.focus is not None:
         controls.focus_group.setVisible(on_view)
         goes = mode in FOCUS_MODES
-        controls.focus.setEnabled(goes)
+        controls.focus_group.setEnabled(goes)
         controls.focus.setToolTip(_FOCUS_TIP if goes else _FOCUS_OFF_TIP)
         if not controls.focus.hasFocus() and controls.focus.text().strip() != st.identity_focus:
             controls.focus.setText(st.identity_focus)       # the reader's typing is never overwritten

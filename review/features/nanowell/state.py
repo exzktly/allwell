@@ -160,6 +160,9 @@ class NanowellState:
     #: The nanowell the Identity view goes to, as typed in its *Nanowell* box (``identity_focus_compute``); ``""``:
     #: none. Not kept with the page's settings: an address belongs to the dataset being looked at.
     identity_focus: str = ""
+    #: The wells left out of every figure on the page by hand (the band's *Exclude*), sorted; the rest of Review is
+    #: untouched. Kept with the page's settings.
+    excluded_wells: list = field(default_factory=list)
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
@@ -245,6 +248,7 @@ class NanowellState:
                 "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
+                "excluded_wells": list(self.excluded_wells),
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -266,6 +270,8 @@ class NanowellState:
         colour = config.get("identity_colour")
         self.identity_colour = colour if colour in IDENTITY_COLOURS else fresh.identity_colour
         self.subset = _subset_from(config)
+        wells = config.get("excluded_wells")
+        self.excluded_wells = sorted({w for w in wells if isinstance(w, str) and w}) if isinstance(wells, list) else []
         count = config.get("extremes_n")
         self.extremes_n = (count if isinstance(count, int) and not isinstance(count, bool)
                            and 1 <= count <= EXTREMES_MAX_N else fresh.extremes_n)

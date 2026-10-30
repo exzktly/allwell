@@ -26,6 +26,7 @@ from review.features.nanowell.distribution_compute import (
     BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut,
 )
 from review.features.nanowell.identity_compute import worst_verdict
+from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
 from review.features.nanowell.display_range_view import (
     build_display_range_button,
@@ -89,6 +90,8 @@ _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their 
                "then. The others are counted as outside the fixed cohort. See also Subset, which chooses nanowells "
                "by how many cells they held at the baseline, a metric, their position or their imaging field.")
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
+_GO_TO_TIP = ("Show this nanowell on Identity ▸ Blink: its well's two montages alternating, zoomed onto it, with its "
+              "address ringed — to see whether its address names the same nanowell over time.")
 _METRIC_TIP = ("What each dot is. Brightness is the mean intensity of the cells in a nanowell; nanowell "
                "fluorescence is the whole nanowell's summed intensity minus what an empty nanowell gives, so it "
                "counts every cell's light (and nothing else) and is near zero for an empty one. Both, and their fold "
@@ -218,7 +221,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     well_cb.setToolTip(_WELL_TIP)
     well_cb.currentIndexChanged.connect(lambda _i: nwc.set_well(ctx, well_cb.currentData() or ""))
     reg.register("_nw_well_cb", well_cb)
-    grp_well = band.add_scope("Well", well_cb)
+    exclusion = build_exclude_controls(ctx, well_cb)
+    grp_well = band.add_scope("Well", well_cb, exclusion.exclude)
+    exclusion.excluded_group = band.add_scope("", exclusion.excluded)
 
     array_controls = _build_array_controls(ctx, band)
     identity = build_identity_controls(ctx, band)
@@ -407,6 +412,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position" or view in RANKED_WELL_VIEWS
                               or view in ONE_WELL_VIEWS)
             grp_well.setVisible(view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS)
+            exclusion.refresh(st, well_cb)
             extremes_spin.setValue(st.extremes_n)
             extremes_cells.setChecked(st.crop_cells)
             extremes_numbers.setChecked(st.crop_metrics)
@@ -619,8 +625,19 @@ def _crops_header(ctx, parent) -> QHBoxLayout:
     row.addWidget(_cells_box(ctx, "_nw_strip_cells_box"))
     row.addWidget(_image_channel_combo(ctx, "_nw_strip_image_channel_cb"))
     row.addWidget(build_display_range_button(ctx, "_nw_strip_range_btn"))
+    row.addWidget(_go_to_button(ctx, "_nw_strip_go_to_btn", parent))
     row.addWidget(button)
     return row
+
+
+def _go_to_button(ctx, name: str, parent) -> QPushButton:
+    """**Go to nanowell**: the crops' nanowell on Identity ▸ Blink (``controller.go_to_site_in_blink``)."""
+    button = QPushButton("Go to nanowell", parent)
+    button.setProperty("variant", "secondary")
+    button.setToolTip(_GO_TO_TIP)
+    button.clicked.connect(lambda _=False: nwc.go_to_site_in_blink(ctx))
+    ctx.widgets.register(name, button)
+    return button
 
 
 def _popout_window(ctx):
@@ -635,6 +652,10 @@ def _popout_window(ctx):
     window.setWindowTitle("Nanowell crops")
     layout = QVBoxLayout(window)
     layout.setContentsMargins(0, 0, 0, 0)
+    header = QHBoxLayout()
+    header.addStretch(1)
+    header.addWidget(_go_to_button(ctx, "_nw_popout_go_to_btn", window))
+    layout.addLayout(header)
     card = PlotCard(window, figsize=(_FIG_W, _FIG_H * 0.8), constrained=False, header=False)
     card.setFigureTitle("")
     layout.addWidget(card)

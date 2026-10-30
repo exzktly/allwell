@@ -210,6 +210,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_lattice.py": "Recover geometry against independently known lattice coordinates",
     "test_nanowell_levels.py": "Bringing a nanowell to the template's levels before dividing by it (``nanowell_measure`` …",
     "test_nanowell_manual_anchor.py": "Anchors set by hand for nanowell wells whose central square the run could not find …",
+    "test_nanowell_measure_fast_paths.py": "The measuring's fast paths compute exactly what the code they replaced did",
     "test_nanowell_ownership.py": "Ownership checks calculate seam geometry without using the implementation",
     "test_nanowell_page.py": "The Nanowells page driven through its real builder, worker and canvas, in a minimal shell …",
     "test_nanowell_counts_follow_cell_gating.py": "The Nanowells page counts only the cells Home's Cell Gating includes …",

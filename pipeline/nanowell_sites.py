@@ -17,7 +17,7 @@ import math
 
 import numpy as np
 
-from pipeline.field_quality import edge_focus
+from pipeline.field_quality import EDGE_REACH_PX, edge_focus
 from pipeline.nanowell_detect import FITTED, SiteGeometry
 from pipeline.nanowell_lattice import ArrayBoundary, LatticeFit
 
@@ -111,10 +111,11 @@ def _disk_pixels(image_shape, centre_px, inner: float, outer: float):
     y0, y1 = max(int(math.floor(centre_px[1] - outer)), 0), min(int(math.ceil(centre_px[1] + outer)) + 1, h)
     if x1 <= x0 or y1 <= y0:
         return np.empty(0, dtype=int), np.empty(0, dtype=int)
-    yy, xx = np.mgrid[y0:y1, x0:x1]
-    distance = np.hypot(xx - centre_px[0], yy - centre_px[1])
-    keep = (distance >= inner) & (distance <= outer)
-    return yy[keep], xx[keep]
+    # A row and a column broadcast rather than two full grids: the same distances, so the same pixels, in the same
+    # row-major order.
+    distance = np.hypot(np.arange(x0, x1)[None, :] - centre_px[0], np.arange(y0, y1)[:, None] - centre_px[1])
+    ys, xs = np.nonzero((distance >= inner) & (distance <= outer))
+    return ys + y0, xs + x0
 
 
 def site_visibility(image, pixel_size_um: float, geometries, *, mask=None, neighbours: int = 12
@@ -154,7 +155,7 @@ def site_visibility(image, pixel_size_um: float, geometries, *, mask=None, neigh
         bright_at = np.array([f[1] for f in fitted])
         dark_at = np.array([f[2] for f in fitted])
         k = min(neighbours, len(fitted))
-    fallback = (float(np.percentile(image, 90)), float(np.percentile(image, 10)))
+    fallback = None             # the whole image's percentiles, read only if a site needs them (two whole-montage sorts)
     out = []
     for g, disk, ring in pack:
         if not len(disk[0]):
@@ -165,6 +166,8 @@ def site_visibility(image, pixel_size_um: float, geometries, *, mask=None, neigh
             near = np.atleast_1d(near)
             bright, dark = float(np.median(bright_at[near])), float(np.median(dark_at[near]))
         else:
+            if fallback is None:
+                fallback = tuple(float(v) for v in np.percentile(image, [90, 10]))
             bright, dark = fallback
         midpoint, span = (bright + dark) / 2, bright - dark
         values = image[disk]
@@ -251,10 +254,17 @@ def rim_focus(image, pixel_size_um: float, geometry: SiteGeometry) -> float | No
     x0, y0 = int(round(cx)) - half, int(round(cy)) - half
     if x0 < 0 or y0 < 0 or x0 + 2 * half + 1 > w or y0 + 2 * half + 1 > h:
         return None
+    # edge_focus profiles only the pixels within EDGE_REACH_PX of the rim. A patch reaching EDGE_REACH_PX and two
+    # pixels past the disk holds every one of them, and gives each the same distance to the rim as the whole patch
+    # does: the whole disk is in it, and so is the ring of pixels around the disk's bounding box, which is nearer any
+    # pixel inside than anything beyond it. So the profile, and the value, are the whole patch's to the bit, from
+    # half its pixels or fewer.
+    near = min(half, int(math.ceil(r + EDGE_REACH_PX)) + 2)
+    x0, y0 = x0 + half - near, y0 + half - near
     # Only the patch is converted: converting the whole tile first copied it in float64 once per nanowell.
-    patch = np.asarray(np.asarray(image)[y0:y0 + 2 * half + 1, x0:x0 + 2 * half + 1], dtype=np.float64)
-    yy, xx = np.mgrid[0:2 * half + 1, 0:2 * half + 1]
-    mask = np.hypot(xx + x0 - cx, yy + y0 - cy) <= r
+    patch = np.asarray(np.asarray(image)[y0:y0 + 2 * near + 1, x0:x0 + 2 * near + 1], dtype=np.float64)
+    columns, rows = np.arange(x0, x0 + 2 * near + 1), np.arange(y0, y0 + 2 * near + 1)
+    mask = np.hypot(columns[None, :] - cx, rows[:, None] - cy) <= r
     value = edge_focus(patch, mask)
     return None if value is None else float(value)
 

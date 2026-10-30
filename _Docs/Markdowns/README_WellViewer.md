@@ -2247,11 +2247,17 @@ reading it. The log names any it kept over budget for that reason.
   warning means something is worth a look, not that the run has failed.
 - **A dropped connection is reported as one.** If the connection to the host
   breaks during a remote run, the headline says *Connection to `<host>` lost*
-  with ssh's own reason (*Timeout, server … not responding*, *Connection …
-  closed*, *Broken pipe*), the log shows that line in red, and the message says
-  whether the job is still running on the host, no longer running, or — when
-  the host cannot be reached to ask — may still be running. Resume downloads the
-  wells it finished and runs the rest.
+  with ssh's own reason (*Timeout, server … not responding*, *Connection to …
+  closed by remote host*, *Broken pipe*), the log shows that line in red, and
+  the message says whether the job is still running on the host, no longer
+  running, or — when the host cannot be reached to ask — may still be running.
+  Resume downloads the wells it finished and runs the rest.
+- **"Connection to `<host>` closed." on its own is not a failure.** ssh prints
+  it whenever the job's output stream ends, including after every run that
+  finished cleanly, so it appears in plain text. The downloads use connections
+  of their own, which is why *draining fetcher: N well(s) still queued for
+  download* can follow it: the job has ended on the host and the app is still
+  fetching the wells it finished last.
 - Either way the wells already finished keep their results, so nothing you have
   waited for is thrown away — Suspend just also keeps the fields in progress and
   saves you re-entering the form.
@@ -5436,13 +5442,37 @@ use them.
 
 - **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
   *Extremes* and *Identity*. Each view shows only the controls it uses.
-- **Metric** — what each dot is: cell count, confluence, brightness (the mean intensity of the cells in the
-  nanowell), **nanowell fluorescence** (the whole nanowell's summed intensity minus what an empty nanowell gives —
-  all the light its cells give off, near zero for an empty nanowell; it grows with both how many cells there are
-  and how bright each is, where brightness follows only the latter), their fold changes against the baseline,
+- **Metric** — what each dot is: cell count, confluence, **brightness** and **nanowell fluorescence** (both
+  explained under *Brightness and nanowell fluorescence* below), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
   ln count against time, per hour, over at least three timepoints with cells) and occupancy at baseline.
   Brightness and nanowell fluorescence, and their fold changes, are of the fluorescence channel chosen in **Channel**.
+**Brightness and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
+but they answer different questions.
+
+- **Brightness** (of the chosen channel, e.g. *Brightness DAPI*) is *how bright the cells are*. It is the average, over the cells counted in the
+  nanowell, of each cell's mean pixel intensity inside its segmented outline. It does not change with how many cells
+  there are: one cell at 800 or ten cells at 800 both give 800. Nothing is subtracted, so it is in the image's own
+  units, background included. It needs segmented cells: a nanowell with no counted cell has no brightness (blank,
+  not zero).
+- **Nanowell fluorescence** (e.g. *Nanowell fluorescence DAPI*) is *how much light the whole nanowell gives off above its empty floor*. It
+  is the sum of every pixel inside the nanowell (within 90 % of its radius, clear of the rim) minus the floor's level times
+  the number of pixels. The floor's level is read from the same imaging tile — the typical level of the nanowells'
+  bare floor in that channel, with or without cells on it — so no empty nanowell is needed. It uses no
+  segmentation, so it counts light from cells the segmentation missed too. An empty nanowell reads near zero and
+  can come out slightly negative.
+
+So nanowell fluorescence grows with *both* the number of cells and how bright each one is; brightness follows only
+the second. Ten cells as bright as one cell give about ten times the nanowell fluorescence and the same
+brightness. With a nuclear stain such as DAPI, nanowell fluorescence tracks the amount of nuclear material — close
+to cell number — and brightness tracks staining or DNA content per nucleus (a dividing or condensing nucleus is
+brighter). Use brightness to ask whether the cells changed; use nanowell fluorescence to ask how much stained
+material is in the nanowell, including when cells clump and the count is unreliable.
+
+Their fold changes divide each timepoint by the baseline. A nanowell fluorescence at or below zero at the baseline
+gives no fold change ("no signal above background at baseline"), since a ratio over nothing has no meaning; a
+brightness fold change needs counted cells at both timepoints.
+
 - **Channel** — beside Metric, on every view: the fluorescence channel Brightness and Nanowell fluorescence are drawn for,
   in the figures, the site detail and the crop captions. It starts on the channel the Plotting tabs use when the
   run measured it, else on the first channel it measured. A channel the run read but did not measure in the
@@ -5641,7 +5671,10 @@ the crop is cut from the lower-resolution montage instead, and the caption under
 timepoint with no crop says why. **Pop out**, above the strip, opens the crops large in a window of their own —
 one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a change
 between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
-it like any window. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted on every
+it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Range**
+(the display range), **Cells**, **Metrics** (the measurements under each crop), **Labels** (each crop's timepoint
+and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
+Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted on every
 crop — the strip, the pop-out and the Extremes montage — as the Array view's *Cells* layer does on the array (the
 run keeps no cell outlines). It is one setting, also offered on the Extremes view, and kept with the page's
 settings. The caption counts the dots, and a well without a cell table is named there rather than shown as empty.
@@ -5668,6 +5701,11 @@ Selecting nanowells does not change the plate selection.
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
 is selected and kept, so selecting it again is instant. While a newly selected well is read the page shows
 *Computing…*.
+
+**Excluding a well.** On the views that show a **Well** box (Array, Identity, Extremes), **Exclude** beside it
+leaves that well out of every figure on the Nanowells page and out of *Save nanowell data*; each figure then says
+which wells are left out. It applies only to this page — the well stays in the rest of Review — and is remembered with
+the page's settings. **Excluded (n) ▾** on the band brings back one well or all of them.
 
 **Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
 draws as one long CSV, with the baseline and where the times came from; with a Subset set, every
@@ -5770,6 +5808,22 @@ chooses what it draws:
 Every Compare mode zooms with the scroll wheel and pans by dragging. Side by side's two images move together, as do
 Diagnostics' two images. The zoom stays while the same well, timepoint and mode are shown and resets when any of them
 changes.
+
+To look at one nanowell, type its address in the **Nanowell** box and press Enter — as the addresses are written on
+the images (`q,r`, for example `-2,3`) or as a ring label such as `3.7`. The Distance map, Blink and Side by side zoom
+onto it and stay there as you change the timepoint, the well or the mode, and a sentence at the top right says how
+far its address landed from itself. A ring marks where the reference puts the nanowell; a cross marks where the later
+timepoint's nanowell of the same name lands. On a correct timepoint they sit together; when the addresses name other
+nanowells, the cross sits on a neighbour. Clear the box to go back to the whole view. The box is greyed on
+Diagnostics, which shows the central square rather than the array. **Origin** beside the box goes to nanowell
+`0,0`, the centre the addresses count from.
+
+Pointing at a nanowell names it beside the pointer — `T1 · nanowell 2,-1 · ring 2.9` — before its `x · y`. On Blink
+it names the address the frame on screen gives it, so a wrong address reads as its wrong name when the frame flips.
+Blink's labels are bold with a dark outline, green on the reference and amber on the later timepoint.
+
+**Go to nanowell**, in the header above the crops in the side panel and at the top of the pop-out window, shows the
+selected nanowell on Identity ▸ Blink, in its well and zoomed onto it.
 
 To check a dataset analysed earlier without analysing it again, run
 `python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well): it writes

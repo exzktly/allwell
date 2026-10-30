@@ -1,5 +1,5 @@
 """The Identity view's controls on the Nanowells page's band: the *Compare* mode switch, the Distance map's *Colour*
-switch, and the Blink timer.
+switch, the *Nanowell* box that goes to one nanowell, and the Blink timer.
 
 Every control writes through the controller, which redraws; the timer belongs to the band, so it is deleted with the
 page, and the controller starts it only while Blink frames are on screen and stops it on the first tick after they
@@ -14,6 +14,7 @@ from PySide6.QtCore import QTimer
 
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell import controller as nwc
+from review.features.nanowell.identity_focus_compute import FOCUS_MODES
 from review.features.nanowell.state import IDENTITY_COLOURS, IDENTITY_MODES
 
 #: The modes as the switch lists them.
@@ -37,6 +38,14 @@ _COLOUR_TIP = ("What the Distance map colours each nanowell by:\n"
                "Auto: Status unless the timepoint is confirmed.")
 
 
+_FOCUS_TIP = ("Go to one nanowell: type its address and press Enter. Write it as the addresses are drawn, q,r\n"
+              "(for example -2,3), or as a ring label such as 3.7. The view zooms onto it and keeps it as you change\n"
+              "the timepoint, the well or the mode; a ring marks where each timepoint puts the address, and a cross\n"
+              "where the other timepoint's address of that name lands — apart when the address names another\n"
+              "nanowell. Clear the box to go back to the whole view.")
+_FOCUS_OFF_TIP = "Diagnostics draws the central square and its match, not the array: there is no nanowell to go to."
+
+
 @dataclass
 class IdentityControls:
     """The Identity view's band controls and the scope groups that show or hide them."""
@@ -44,10 +53,12 @@ class IdentityControls:
     colour: object
     mode_group: object
     colour_group: object
+    focus: object = None
+    focus_group: object = None
 
     @property
     def signalling(self) -> tuple:
-        return self.mode, self.colour
+        return tuple(w for w in (self.mode, self.colour, self.focus) if w is not None)
 
 
 def _segments(items, tip: str, on_choice):
@@ -68,11 +79,51 @@ def build_identity_controls(ctx, band) -> IdentityControls:
     ctx.widgets.register("_nw_identity_mode_seg", seg)
     colour = _segments(COLOURS, _COLOUR_TIP, lambda key: nwc.set_identity_colour(ctx, key))
     ctx.widgets.register("_nw_identity_colour_seg", colour)
+    focus = _focus_box(ctx)
+    origin = _origin_button(ctx, focus)
     timer = QTimer(band)
     timer.setInterval(idc.BLINK_MS)
     timer.timeout.connect(lambda: idc.blink_tick(ctx))
     ctx.widgets.register("_nw_blink_timer", timer)
-    return IdentityControls(seg, colour, band.add_scope("Compare", seg), band.add_scope("Colour", colour))
+    return IdentityControls(seg, colour, band.add_scope("Compare", seg), band.add_scope("Colour", colour), focus,
+                            band.add_scope("Nanowell", focus, origin))
+
+
+_ORIGIN_TIP = ("Go to the origin: nanowell 0,0, the centre of the array the addresses count from (ring 0).")
+
+
+def _origin_button(ctx, edit):
+    """**Origin**, beside the box: goes to nanowell 0,0."""
+    from PySide6.QtWidgets import QPushButton
+
+    origin = QPushButton("Origin")
+    origin.setProperty("variant", "secondary")
+    origin.setToolTip(_ORIGIN_TIP)
+    origin.clicked.connect(lambda _=False: go_to(ctx, edit, "0,0"))
+    ctx.widgets.register("_nw_identity_origin_btn", origin)
+    return origin
+
+
+def go_to(ctx, edit, text: str) -> None:
+    """Write *text* in the box and go to it, as typing it and pressing Enter does."""
+    edit.setText(text)
+    nwc.set_identity_focus(ctx, text)
+
+
+def _focus_box(ctx):
+    """The *Nanowell* box: Enter goes to the address typed; clearing it goes back to the whole view."""
+    from PySide6.QtWidgets import QLineEdit
+
+    edit = QLineEdit()
+    edit.setPlaceholderText("q,r")
+    edit.setClearButtonEnabled(True)
+    edit.setToolTip(_FOCUS_TIP)
+    edit.setMaxLength(24)
+    edit.setFixedWidth(edit.fontMetrics().horizontalAdvance("M" * 8))
+    edit.returnPressed.connect(lambda: nwc.set_identity_focus(ctx, edit.text()))
+    edit.textChanged.connect(lambda text: nwc.set_identity_focus(ctx, "") if not text.strip() else None)
+    ctx.widgets.register("_nw_identity_focus_edit", edit)
+    return edit
 
 
 def refresh_identity_controls(st, controls: IdentityControls, on_view: bool) -> None:
@@ -83,3 +134,10 @@ def refresh_identity_controls(st, controls: IdentityControls, on_view: bool) -> 
                                      else IDENTITY_COLOURS[0])
     controls.mode_group.setVisible(on_view)
     controls.colour_group.setVisible(on_view and mode == "distance")
+    if controls.focus is not None:
+        controls.focus_group.setVisible(on_view)
+        goes = mode in FOCUS_MODES
+        controls.focus_group.setEnabled(goes)
+        controls.focus.setToolTip(_FOCUS_TIP if goes else _FOCUS_OFF_TIP)
+        if not controls.focus.hasFocus() and controls.focus.text().strip() != st.identity_focus:
+            controls.focus.setText(st.identity_focus)       # the reader's typing is never overwritten

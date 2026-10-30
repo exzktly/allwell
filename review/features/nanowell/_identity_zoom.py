@@ -9,11 +9,13 @@ the limits to the axes and every axes linked with it (``IdentityDrawn.links``), 
 The zoom is kept on the state (``NanowellState.identity_zoom``) as each axes' limits by its name, for one
 ``(well, timepoint, mode)``: a redraw of the same one — the montages arriving, a setting changed — puts the limits
 back (:func:`restore`), and another well, timepoint or mode, or a figure with nothing to zoom, starts at the full
-view. Blink's timer only flips which frame is visible, so it never touches the limits.
+view — or, when the reader has gone to a nanowell (the *Nanowell* box), centred on it; going to one forgets the kept
+zoom so the next draw centres on it. Blink's timer only flips which frame is visible, so it never touches the limits.
 """
 
 from __future__ import annotations
 
+from review.features.nanowell import identity_focus_compute as fc
 from review.features.nanowell import zoom_compute as zc
 
 
@@ -41,11 +43,27 @@ def restore(st, drawn) -> None:
     key = (drawn.pair.well, drawn.pair.timepoint, drawn.mode)
     if key != st.identity_zoom_for:
         st.identity_zoom, st.identity_zoom_for = {}, key
+        _go_to_focus(st, drawn)
         return
     for name, (xlim, ylim) in st.identity_zoom.items():
         if name in drawn.home:
             drawn.axes[name].set_xlim(*xlim)
             drawn.axes[name].set_ylim(*ylim)
+
+
+def _go_to_focus(st, drawn) -> None:
+    """Centre each panel on the nanowell the reader went to (``IdentityDrawn.focus_centres``), in the full view's
+    proportions, and keep it as the zoom — so the montages arriving keep it, and a pan or the wheel starts from it."""
+    marks = drawn.focus
+    half = fc.focus_half(marks, drawn.mode) if marks is not None else None
+    if half is None:
+        return
+    for name, centre in drawn.focus_centres.items():
+        if name in drawn.home and centre is not None:
+            xlim, ylim = fc.focus_limits(*drawn.home[name], centre, half)
+            drawn.axes[name].set_xlim(*xlim)
+            drawn.axes[name].set_ylim(*ylim)
+            st.identity_zoom[name] = (xlim, ylim)
 
 
 def forget(st) -> None:

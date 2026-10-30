@@ -26,6 +26,7 @@ from review.features.nanowell.distribution_compute import (
     BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut,
 )
 from review.features.nanowell.identity_compute import worst_verdict
+from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
 from review.features.nanowell.display_range_view import (
     build_display_range_button,
@@ -89,11 +90,16 @@ _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their 
                "then. The others are counted as outside the fixed cohort. See also Subset, which chooses nanowells "
                "by how many cells they held at the baseline, a metric, their position or their imaging field.")
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
-_METRIC_TIP = ("What each dot is. Brightness is the mean intensity of the cells in a nanowell; nanowell "
-               "fluorescence is the whole nanowell's summed intensity minus what an empty nanowell gives, so it "
-               "counts every cell's light (and nothing else) and is near zero for an empty one. Both, and their fold "
-               "changes, are of the fluorescence channel chosen beside this (Channel); they are greyed when the run "
-               "measured no fluorescence.")
+_GO_TO_TIP = ("Show this nanowell on Identity ▸ Blink: its well's two montages alternating, zoomed onto it, with its "
+              "address ringed — to see whether its address names the same nanowell over time.")
+_METRIC_TIP = ("What each dot is.\n"
+               "Brightness: how bright the cells are — the average of the counted cells' mean intensities, the same "
+               "for one cell or ten equally bright ones; blank for a nanowell with no counted cell.\n"
+               "Nanowell fluorescence: how much light the whole nanowell gives off above its bare floor — every "
+               "interior pixel summed minus the tile's floor level, no segmentation needed; near zero when empty, "
+               "and it grows with both the number of cells and their brightness.\n"
+               "Both, and their fold changes, are of the channel chosen beside this (Channel); they are greyed when "
+               "the run measured no fluorescence.")
 _CHANNEL_TIP = ("The fluorescence channel Brightness and Nanowell fluorescence (and their fold changes) are drawn for, on every "
                 "view and in the site detail. A channel the run read but did not measure in the nanowells is listed "
                 "greyed, with why.")
@@ -113,6 +119,10 @@ _EXTREMES_TPS_TIP = ("The timepoints the montage shows as columns. Fewer columns
 _REFIT_MS = 60
 _CROP_METRICS_TIP = ("Write each crop's numbers on it: its fold change in the corner and a line of its metrics along "
                      "its foot. Off leaves the crops bare; the row labels still give each nanowell's rank and value.")
+_POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same setting as the Extremes view's Metrics.")
+_POPOUT_LABELS_TIP = ("Write each crop's timepoint over it and the line under the figure saying where the crops were "
+                      "cut from and on what brightness scale. Off leaves the crops bare; the title still names the "
+                      "nanowell and channel.")
 _CROP_CELLS_TIP = ("Draw a dot at the centre of each cell the run counted on every crop — the strip, the pop-out and "
                    "the Extremes montage — as the Array view's Cells layer does. The run keeps no cell outlines, so "
                    "a dot is all there is to draw.")
@@ -218,7 +228,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     well_cb.setToolTip(_WELL_TIP)
     well_cb.currentIndexChanged.connect(lambda _i: nwc.set_well(ctx, well_cb.currentData() or ""))
     reg.register("_nw_well_cb", well_cb)
-    grp_well = band.add_scope("Well", well_cb)
+    exclusion = build_exclude_controls(ctx, well_cb)
+    grp_well = band.add_scope("Well", well_cb, exclusion.exclude)
+    exclusion.excluded_group = band.add_scope("", exclusion.excluded)
 
     array_controls = _build_array_controls(ctx, band)
     identity = build_identity_controls(ctx, band)
@@ -407,15 +419,12 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position" or view in RANKED_WELL_VIEWS
                               or view in ONE_WELL_VIEWS)
             grp_well.setVisible(view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS)
+            exclusion.refresh(st, well_cb)
             extremes_spin.setValue(st.extremes_n)
             extremes_cells.setChecked(st.crop_cells)
             extremes_numbers.setChecked(st.crop_metrics)
             extremes_tps.refresh()
-            strip_cells = reg.get_or_none("_nw_strip_cells_box")
-            if strip_cells is not None:
-                blocked_strip = strip_cells.blockSignals(True)
-                strip_cells.setChecked(st.crop_cells)
-                strip_cells.blockSignals(blocked_strip)
+            _sync_crop_boxes(ctx, st)
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
         finally:
             for w, b in zip(controls, blocked):
@@ -484,7 +493,21 @@ def _fill_channels(combo, data, channel) -> None:
 
 #: The image-channel controls, one setting (``NanowellState.image_channel``) offered beside the crop strip, on the
 #: Extremes view and beside the Array view's Image.
-_IMAGE_CHANNEL_COMBOS = ("_nw_strip_image_channel_cb", "_nw_extremes_image_channel_cb", "_nw_array_image_channel_cb")
+_IMAGE_CHANNEL_COMBOS = ("_nw_strip_image_channel_cb", "_nw_extremes_image_channel_cb", "_nw_array_image_channel_cb",
+                         "_nw_popout_image_channel_cb")
+#: The crop checkboxes built outside the band (beside the strip, in the pop-out), each with the setting it shows:
+#: ``refresh_controls`` puts every one that exists back on the state.
+_CROP_BOXES = (("_nw_strip_cells_box", "crop_cells"), ("_nw_popout_cells_box", "crop_cells"),
+               ("_nw_popout_metrics_box", "crop_metrics"), ("_nw_popout_labels_box", "popout_labels"))
+
+
+def _sync_crop_boxes(ctx, st) -> None:
+    for name, attr in _CROP_BOXES:
+        box = ctx.widgets.get_or_none(name)
+        if box is not None:
+            blocked = box.blockSignals(True)
+            box.setChecked(bool(getattr(st, attr)))
+            box.blockSignals(blocked)
 
 
 def _image_channel_combo(ctx, name: str) -> QComboBox:
@@ -619,8 +642,19 @@ def _crops_header(ctx, parent) -> QHBoxLayout:
     row.addWidget(_cells_box(ctx, "_nw_strip_cells_box"))
     row.addWidget(_image_channel_combo(ctx, "_nw_strip_image_channel_cb"))
     row.addWidget(build_display_range_button(ctx, "_nw_strip_range_btn"))
+    row.addWidget(_go_to_button(ctx, "_nw_strip_go_to_btn", parent))
     row.addWidget(button)
     return row
+
+
+def _go_to_button(ctx, name: str, parent) -> QPushButton:
+    """**Go to nanowell**: the crops' nanowell on Identity ▸ Blink (``controller.go_to_site_in_blink``)."""
+    button = QPushButton("Go to nanowell", parent)
+    button.setProperty("variant", "secondary")
+    button.setToolTip(_GO_TO_TIP)
+    button.clicked.connect(lambda _=False: nwc.go_to_site_in_blink(ctx))
+    ctx.widgets.register(name, button)
+    return button
 
 
 def _popout_window(ctx):
@@ -635,6 +669,7 @@ def _popout_window(ctx):
     window.setWindowTitle("Nanowell crops")
     layout = QVBoxLayout(window)
     layout.setContentsMargins(0, 0, 0, 0)
+    layout.addLayout(_popout_controls(ctx, window))
     card = PlotCard(window, figsize=(_FIG_W, _FIG_H * 0.8), constrained=False, header=False)
     card.setFigureTitle("")
     layout.addWidget(card)
@@ -643,7 +678,33 @@ def _popout_window(ctx):
     ctx.widgets.register("_nw_popout_fig", card.figure)
     ctx.widgets.register("_nw_popout_canvas", card.canvas)
     card.plotThemeChanged.connect(lambda _m: nwc.draw_popout(ctx))
+    refresh = ctx.widgets.get_or_none("_nw_refresh_controls")
+    if callable(refresh):
+        refresh()                                        # the new controls start on the page's settings
     return window
+
+
+def _popout_controls(ctx, window) -> QHBoxLayout:
+    """The pop-out's own row of controls, so its crops are set where they are looked at: the image channel, the
+    display range, the counted cells, the numbers and the labels on the crops, and **Go to nanowell**. Each is the
+    page's one setting (the strip and the Extremes view show the same), kept in step by ``refresh_controls``."""
+    row = QHBoxLayout()
+    row.addWidget(_image_channel_combo(ctx, "_nw_popout_image_channel_cb"))
+    row.addWidget(build_display_range_button(ctx, "_nw_popout_range_btn"))
+    row.addWidget(_cells_box(ctx, "_nw_popout_cells_box"))
+    metrics = QCheckBox("Metrics", window)
+    metrics.setToolTip(_POPOUT_METRICS_TIP)
+    metrics.toggled.connect(lambda on: nwc.set_crop_metrics(ctx, on))
+    ctx.widgets.register("_nw_popout_metrics_box", metrics)
+    labels = QCheckBox("Labels", window)
+    labels.setToolTip(_POPOUT_LABELS_TIP)
+    labels.toggled.connect(lambda on: nwc.set_popout_labels(ctx, on))
+    ctx.widgets.register("_nw_popout_labels_box", labels)
+    row.addWidget(metrics)
+    row.addWidget(labels)
+    row.addStretch(1)
+    row.addWidget(_go_to_button(ctx, "_nw_popout_go_to_btn", window))
+    return row
 
 
 class _PopoutWindow(QWidget):

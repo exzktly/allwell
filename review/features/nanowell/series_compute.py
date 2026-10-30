@@ -27,9 +27,10 @@ metric                 value                                           undefined
 ``occupancy_class``    "0" / "1" / "2" / "3+" cells at baseline        no count at baseline
 =====================  ==============================================  ===========================================
 
-The nanowell fluorescence (the ``signal_<channel>`` columns) is the pipeline's interior sum *minus the empty sites'
-background*, so it is near zero for
-an empty nanowell and can be negative; a ratio over a baseline at or below zero has no meaning, which is the
+The nanowell fluorescence (the ``signal_<channel>`` columns) is the pipeline's interior sum minus the tile's floor
+level times the interior's pixel count (``nanowell_measure.site_fluorescence``; the floor level is the median over the
+tile's nanowells of each one's modal interior level, so no empty nanowell is needed), so it is near zero for an empty
+nanowell and can be negative; a ratio over a baseline at or below zero has no meaning, which is the
 one undefined case this table adds to §3.10.1's ("no signal above background at baseline").
 
 **Baseline** (§3.10.1): ``"earliest"`` — the well's earliest timepoint, so a site unmeasurable there has no

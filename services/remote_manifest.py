@@ -163,6 +163,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # pipeline/cellpose.py inside the batched segment call, so a host without it
     # fails on the first nanowell rather than at start-up.
     "pipeline/cellpose_masks.py",
+    # Threads inside a nanowell worker (locating timepoints, measuring tiles) and
+    # the lock its segmenter sits behind. Imported by pipeline/nanowell_run.py.
+    "pipeline/nanowell_parallel.py",
     # Worker count, threads per worker and the Cellpose GPU plan. Imported by
     # process_microscopy at module scope, so the remote needs it to start.
     "pipeline/parallelism.py",

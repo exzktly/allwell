@@ -20,6 +20,7 @@ Positions are in micrometres in the registration's common frame (the "well frame
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 import math
 import time
@@ -1312,6 +1313,42 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     *inspect*, when given, is filled with the crops of a sample of nanowells as the segmenter saw them
     (``nanowell_inspect.inspection_sites``): what ``nanowells/<well>_segmenter_input.png`` draws.
     """
+    return _finish_timepoint(_prepare_timepoint(located, images, settings, array_radius_um, segmenter=segmenter,
+                                                channels=channels, earliest_template=earliest_template, roster=roster,
+                                                count_cells=count_cells),
+                             on_segmented=on_segmented, inspect=inspect)
+
+
+@dataclass
+class _Prepared:
+    """A timepoint measured up to its tiles' contents (:func:`_prepare_timepoint`): the geometry, visibility,
+    coverage, template and levels every tile is measured against, and the rows' notes so far. What
+    :func:`_finish_timepoint` needs, so the next timepoint can be prepared while this one's tiles are on the GPU."""
+    located: Located
+    images: dict
+    settings: NanowellSettings
+    channels: dict | None
+    out: Measured
+    addressed: bool
+    addresses: list
+    points_m: object
+    detected: list
+    report: object
+    fused: set
+    kind: object
+    geoms: dict
+    by_tile: dict
+    visibility: list
+    coverage: list
+    template: object
+    segment: object
+    norm: object
+
+
+def _prepare_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float | None, *,
+                       segmenter=None, channels: dict | None = None, earliest_template=None, roster=None,
+                       count_cells: bool = True) -> _Prepared:
+    """The first half of :func:`measure_timepoint`: everything before any tile's contents are measured."""
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_detect import FITTED, MIN_REFINE_RADIUS_PX
     from pipeline.nanowell_sites import check_format
@@ -1366,17 +1403,45 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
             if borrowed:
                 out.notes.append(f"{len(borrowed)} tile(s) gave no {channel} floor level of their own "
                                  f"({', '.join(borrowed)}): their fluorescence background is the well's")
+    return _Prepared(located, images, settings, channels, out, addressed, addresses, points_m, detected, report, fused,
+                     kind, geoms, by_tile, visibility, coverage, template, segment, norm)
+
+
+def _finish_timepoint(prep: _Prepared, *, on_segmented=None, inspect: dict | None = None) -> Measured:
+    """The second half of :func:`measure_timepoint`: every tile's contents, then a row for every roster site."""
+    from pipeline import nanowell_measure as nm
+    from pipeline.nanowell_parallel import ordered_results, serialised, synchronised, thread_budget
+
+    located, images, settings, channels, out = prep.located, prep.images, prep.settings, prep.channels, prep.out
+    addressed, addresses, points_m, detected = prep.addressed, prep.addresses, prep.points_m, prep.detected
+    report, fused, kind, geoms, by_tile = prep.report, prep.fused, prep.kind, prep.geoms, prep.by_tile
+    visibility, coverage, template, segment, norm = (prep.visibility, prep.coverage, prep.template, prep.segment,
+                                                     prep.norm)
     contents: dict[int, dict] = {}
     imaged = {owner: indices for owner, indices in by_tile.items() if owner is not None and template is not None}
     sites = _SiteCount(on_segmented if segment is not None else None, sum(map(len, imaged.values())))
     keep = _inspection(inspect, points_m, imaged, segment)
-    for owner, indices in imaged.items():
+    # A tile's contents depend on nothing another tile computes, so tiles run on the worker's threads, the segmenter
+    # behind the worker's one lock (one Cellpose call in flight); the results are merged in tile order, as a serial
+    # loop merges them, and each tile keeps its own crops for the inspection sheet until then.
+    threads = thread_budget()
+    tile_segment = serialised(segment) if segment is not None and threads > 1 else segment
+    tick = synchronised(sites.tick) if threads > 1 else sites.tick
+
+    def tile(item):
+        owner, indices = item
+        own_keep = None if keep is None else (keep[0], {})
         got, table, notes = _tile_contents(owner, indices, located, images, settings, geoms, addresses, template,
-                                           segment, channels, kind, norm, on_segmented=sites.tick, keep=keep)
+                                           tile_segment, channels, kind, norm, on_segmented=tick, keep=own_keep)
+        return got, table, notes, own_keep
+
+    for got, table, notes, own_keep in ordered_results(tile, imaged.items(), threads):
         contents.update(got)
         out.notes += notes
         for name, values in table.items():
             out.cells.setdefault(name, []).extend(values)
+        if own_keep is not None:
+            keep[1].update(own_keep[1])
     sites.close()
     for i, address in enumerate(addresses):
         got = contents.get(i)
@@ -1466,6 +1531,35 @@ def record_digest(record: dict, well: str, timepoint: str) -> str:
     payload = json.dumps([tiles, meta.get("tile_size_px"), meta.get("pixel_size_um"),
                           meta.get("declared_overlap_percent")], sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+#: Copies of a timepoint's tiles, as float32, that locating one holds at its peak: the tiles themselves and the
+#: per-tile working images of the lattice fits and the montage. An estimate that errs high, used only to keep the
+#: timepoints located at once inside the worker's share of memory (:func:`_locate_threads`).
+LOCATE_TILE_COPIES = 4
+
+
+def _locate_threads(record: dict, well: str, timepoints, threads: int) -> int:
+    """How many of *timepoints* to locate at once: the worker's *threads*, fewer when the largest timepoint's tiles
+    (``LOCATE_TILE_COPIES`` float32 copies of them, sized from the record's ``tile_size_px``) would not fit that many
+    times in its share of memory (``nanowell_parallel.worker_memory_budget``). A record without tile sizes, or a
+    machine that does not say how much memory is free, is not limited."""
+    from pipeline.nanowell_parallel import worker_memory_budget
+
+    if threads <= 1:
+        return 1
+    largest = 0
+    for tp in timepoints:
+        size = ((record.get("timepoints") or {}).get(tp) or {}).get("tile_size_px") or {}
+        try:
+            per_tile = int(size["x"]) * int(size["y"]) * 4 * LOCATE_TILE_COPIES
+        except (KeyError, TypeError, ValueError):
+            continue
+        largest = max(largest, per_tile * _tile_count(record, well, tp))
+    budget = worker_memory_budget()
+    if not largest or budget is None:
+        return threads
+    return max(1, min(threads, budget // largest))
 
 
 def _say_locating(note, record: dict, well: str, timepoint: str):
@@ -2319,25 +2413,42 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     *note*, when given, is ``f(text)``, told the scale Cellpose sees each timepoint at before it is measured (only when
     the count is Cellpose's, *segmenter* ``None``).
     """
+    from pipeline.nanowell_parallel import ordered_results, thread_budget
+
     outcome = WellOutcome(well)
     timepoints = list(timepoints)
     steps = _Steps(progress, len(timepoints), site_progress, note, settings, cellpose=segmenter is None)
+    threads = thread_budget()
 
-    def locate(tp, preferred=None, stem=""):
+    def located_for(tp, preferred=None, stem=""):
         images = _images_for(record, well, tp, load_phase)
         located = locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape,
                                    plate_rigid=(plate_rigid or {}).get(tp), stored=(stored_placements or {}).get(tp),
                                    manual_anchor_um=manual_anchors.get(tp), preferred=preferred)
         if spill_dir is not None and located.montage is not None:
             located.montage = _spill_montage(located.montage, Path(spill_dir), f"{well}_{tp}{stem}")
+        return located
+
+    def adopt(tp, located):
         outcome.located[tp] = located
         outcome.timepoints[tp] = dict(located.grid) or {"status": located.status, "reason": located.reason}
         outcome.timepoints[tp]["record_digest"] = record_digest(record, well, tp)
         return located
 
-    for tp in timepoints:
+    def locate(tp, preferred=None, stem=""):
+        return adopt(tp, located_for(tp, preferred, stem))
+
+    def located_and_said(tp):
         located_after = _say_locating(note, record, well, tp)
-        located_after(locate(tp).status)
+        located = located_for(tp)
+        located_after(located.status)
+        return located
+
+    # Timepoints are located independently of one another, so they run on the worker's threads; each is adopted in
+    # time order, which keeps every dict and record this builds as a serial loop builds it (pipeline.nanowell_parallel).
+    for tp, located in zip(timepoints, ordered_results(located_and_said, timepoints,
+                                                       _locate_threads(record, well, timepoints, threads))):
+        adopt(tp, located)
         steps.tick()
     _agree_tile_layouts(outcome, timepoints, kept_layouts, locate, note)
     anchored = [tp for tp in timepoints if outcome.located[tp].status == OK]
@@ -2385,50 +2496,95 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     earliest = earliest_template
     measurable = set(anchored) | set(unaddressed)
     steps.skip(timepoints, measurable)
-    for tp in [t for t in timepoints if t in measurable]:          # in time, so "earliest" means it
-        located = outcome.located[tp]
-        key = _checkpoint_key(outcome, tp, located, radius_um, roster, settings, shifts)
-        measured = checkpoint.load(tp, key) if checkpoint is not None else None
-        if measured is None:
-            steps.scale(located)
-            images = _images_for(record, well, tp, load_phase)
-            loaders = {name: (lambda tile, _f=f, _tp=tp: _f(_tp, tile)) for name, f in (channels or {}).items()}
-            measured = measure_timepoint(located, images, settings, radius_um, segmenter=segmenter,
-                                         channels=loaders, earliest_template=earliest, roster=roster,
-                                         on_segmented=steps.sites(tp), inspect=steps.inspect(tp))
-            del images
-            if checkpoint is not None:
-                checkpoint.save(tp, key, measured)
-        if earliest is None and measured.template.get("_object") is not None \
-                and measured.template["source"] != "earliest":
-            earliest = measured.template["_object"]
-        if outcome.earliest_template is None and measured.template.get("_object") is not None \
-                and measured.template["source"] != "earliest":
-            outcome.earliest_template = (tp, measured.template["_object"])
-        block = outcome.timepoints[tp]
-        agree = consistency.get(tp)
-        block.update(consistency=None if agree is None else agree.status,
-                     consistency_detail="" if agree is None else agree.detail, angle_checked=False,
-                     radius_flag=outcome.radius["flags"].get(tp),
-                     radius_deviation_um=outcome.radius["deviations_um"].get(tp),
-                     roster_size=len(measured.sites),
-                     template={k: v for k, v in measured.template.items() if k != "_object"},
-                     notes=list(measured.notes))
-        status = None if agree is None else agree.status
-        if (reference is not None and status == "consistent" and tp in anchored
-                and len(measured.sites) != reference["roster_size"]):
-            status = "roster_mismatch"
-            block["consistency_detail"] = (f"{len(measured.sites)} addresses against {reference['roster_size']} "
-                                           f"at {reference['timepoint']}")
-        block["consistency"] = status
-        for row in measured.sites:
-            row["consistency"] = status
-        outcome.sites.extend(measured.sites)
-        for name, values in measured.cells.items():
-            outcome.cells.setdefault(name, []).extend(values)
-        outcome.cells.setdefault("timepoint", []).extend([tp] * len(measured.cells.get("label", ())))
-        steps.tick()
+    order = [t for t in timepoints if t in measurable]                 # in time, so "earliest" means it
+    keys = {tp: _checkpoint_key(outcome, tp, outcome.located[tp], radius_um, roster, settings, shifts) for tp in order}
+    kept = {tp: checkpoint.load(tp, keys[tp]) if checkpoint is not None else None for tp in order}
+
+    def prepare(tp, earliest_now):
+        images = _images_for(record, well, tp, load_phase)
+        loaders = {name: (lambda tile, _f=f, _tp=tp: _f(_tp, tile)) for name, f in (channels or {}).items()}
+        return _prepare_timepoint(outcome.located[tp], images, settings, radius_um, segmenter=segmenter,
+                                  channels=loaders, earliest_template=earliest_now, roster=roster)
+
+    # With threads to spare, the next timepoint is prepared (geometry, template, levels: CPU) while this one's tiles
+    # are measured (the GPU's part). A timepoint's preparation needs only the earliest template so far, which is
+    # known once the timepoint before it is prepared, so each is prepared with what a serial loop would give it.
+    ahead = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nanowell-ahead") if threads > 1 else None
+    started: dict = {}
+
+    def start(i, earliest_now):
+        if i < len(order) and kept[order[i]] is None and order[i] not in started:
+            started[order[i]] = (ahead.submit(prepare, order[i], earliest_now) if ahead is not None
+                                 else _Ready(prepare, order[i], earliest_now))
+
+    try:
+        for i, tp in enumerate(order):
+            located = outcome.located[tp]
+            measured = kept[tp]
+            if measured is None:
+                start(i, earliest)
+                prepared = started.pop(tp).result()
+                start(i + 1, _next_earliest(earliest, prepared.out.template))
+                steps.scale(located)
+                measured = _finish_timepoint(prepared, on_segmented=steps.sites(tp), inspect=steps.inspect(tp))
+                del prepared
+                if checkpoint is not None:
+                    checkpoint.save(tp, keys[tp], measured)
+            earliest = _next_earliest(earliest, measured.template)
+            _record_measured(outcome, tp, measured, consistency, reference, anchored, steps)
+    finally:
+        if ahead is not None:
+            ahead.shutdown(wait=True, cancel_futures=True)
     flag_template_drift(outcome.timepoints, timepoints)     # the caller re-runs it over kept timepoints too
     steps.finish()
     outcome.inspection = steps.inspected
     return outcome
+
+
+class _Ready:
+    """A preparation run when it is asked for, with a future's ``result()``: :func:`run_well`'s serial path, which
+    prepares each timepoint just before measuring it, as it always did."""
+
+    def __init__(self, fn, *args):
+        self._fn, self._args = fn, args
+
+    def result(self):
+        return self._fn(*self._args)
+
+
+def _next_earliest(earliest, template: dict):
+    """The template a sparse later timepoint falls back to, once a timepoint's own *template* block is known: the
+    first own template in time (one that is not itself the earliest's)."""
+    if earliest is None and template.get("_object") is not None and template["source"] != "earliest":
+        return template["_object"]
+    return earliest
+
+
+def _record_measured(outcome: WellOutcome, tp, measured, consistency, reference, anchored, steps) -> None:
+    """A measured (or checkpointed) timepoint's rows, cells and grid block, added to *outcome* in time order."""
+    if outcome.earliest_template is None and measured.template.get("_object") is not None \
+            and measured.template["source"] != "earliest":
+        outcome.earliest_template = (tp, measured.template["_object"])
+    block = outcome.timepoints[tp]
+    agree = consistency.get(tp)
+    block.update(consistency=None if agree is None else agree.status,
+                 consistency_detail="" if agree is None else agree.detail, angle_checked=False,
+                 radius_flag=outcome.radius["flags"].get(tp),
+                 radius_deviation_um=outcome.radius["deviations_um"].get(tp),
+                 roster_size=len(measured.sites),
+                 template={k: v for k, v in measured.template.items() if k != "_object"},
+                 notes=list(measured.notes))
+    status = None if agree is None else agree.status
+    if (reference is not None and status == "consistent" and tp in anchored
+            and len(measured.sites) != reference["roster_size"]):
+        status = "roster_mismatch"
+        block["consistency_detail"] = (f"{len(measured.sites)} addresses against {reference['roster_size']} "
+                                       f"at {reference['timepoint']}")
+    block["consistency"] = status
+    for row in measured.sites:
+        row["consistency"] = status
+    outcome.sites.extend(measured.sites)
+    for name, values in measured.cells.items():
+        outcome.cells.setdefault(name, []).extend(values)
+    outcome.cells.setdefault("timepoint", []).extend([tp] * len(measured.cells.get("label", ())))
+    steps.tick()

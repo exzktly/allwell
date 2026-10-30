@@ -54,6 +54,7 @@ import numpy as np
 import pandas as pd
 
 from pipeline.nanowell_identity import CONTRADICTED, NOT_CHECKED
+from review.features.nanowell import cell_gate_compute
 from review.features.nanowell.collect import (
     IDENTITY_CONTRADICTED, MEASURABLE, NOT_LOCATED, UNADDRESSED, NanowellData,
 )
@@ -218,13 +219,16 @@ def _growth(frame: pd.DataFrame) -> pd.Series:
     return ((k * sxy - sx * sy) / denominator.where(ok)).where(ok)
 
 
-def site_metrics(data: NanowellData, baseline: str = EARLIEST) -> pd.DataFrame:
+def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None) -> pd.DataFrame:
     """One row per (well, nanowell, timepoint) with the measured values and every §3.10.1 metric.
 
     Columns, beyond the site table's own: ``state`` (with Review's ``unaddressed`` / ``not_located`` /
     ``absent``), ``reason``, ``time_h``, ``baseline_timepoint``, ``baseline_state``, the masked values ``n``,
     ``c`` and per channel ``brightness_<ch>`` / ``signal_<ch>``, and the metrics listed in the module
     docstring.
+
+    *gate* (``cell_gate_compute.GateTally``) is the cells Home's Cell Gating leaves out: they are taken out of
+    ``n`` and ``brightness_<ch>`` before anything is computed from them. ``None`` keeps the run's own counts.
     """
     if not is_baseline(baseline):
         raise ValueError(f"baseline must be one of {BASELINES} or a timepoint, not {baseline!r}")
@@ -235,6 +239,7 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST) -> pd.DataFrame:
     for ch in data.channels:
         frame[f"brightness_{ch}"] = frame[f"brightness_{ch}"].where(measurable)
         frame[f"signal_{ch}"] = frame[f"{ch}_integrated"].where(measurable)
+    cell_gate_compute.apply(frame, gate, data.channels)
     base = {}
     for value in ["n", "c"] + [f"{kind}_{ch}" for ch in data.channels for kind in ("brightness", "signal")]:
         mask = _baseline_rows(frame, baseline, value)

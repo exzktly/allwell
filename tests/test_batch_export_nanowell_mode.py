@@ -193,7 +193,7 @@ def test_tables_loaded_by_load_into_are_reused_by_the_batch_run(panel, monkeypat
     controller.load_into(st, ctx.state.dataset.data_dir)
     assert st.loaded_for == (str(ctx.state.dataset.data_dir), "earliest")
     monkeypatch.setattr(nanowell_panel, "_load_nanowell_data", lambda _path, **_kw: pytest.fail("read the tables again"))
-    data, _metrics = p._load("earliest", st.data.wells)
+    data, _metrics, _note = p._load("earliest", st.data.wells)
     assert data is st.data
     controller.set_baseline(st, "first_measurable")
     assert st.loaded_for == (str(ctx.state.dataset.data_dir), "first_measurable")
@@ -212,7 +212,7 @@ def test_a_batch_run_reads_the_wells_it_exports_when_the_page_has_not(panel, mon
     asked = []
     monkeypatch.setattr(nanowell_panel, "_load_nanowell_data",
                         lambda path, wells=None: asked.append(wells) or load_nanowell_data(path, wells=wells))
-    data, _metrics = p._load("earliest", ["A01", "B07"])
+    data, _metrics, _note = p._load("earliest", ["A01", "B07"])
     assert asked == [["A01", "B07"]] and data.wells == ["A01"]       # B07 has no table, so it is not read
     st.data = data
     assert p._load("earliest", ["A01", "B07"])[0] is data and len(asked) == 1     # now held: not read again

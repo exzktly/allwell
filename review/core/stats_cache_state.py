@@ -45,6 +45,10 @@ class StatsCacheState:
 
     cache: dict = field(default_factory=dict)
     populations: PopulationStore = field(default_factory=PopulationStore)
+    #: Raised by every invalidation that may change which cells are counted (every one that drops the
+    #: populations). A surface that computes from the included cells outside this cache — the Nanowells page's
+    #: gated counts — records the version it computed at and recomputes when it moves.
+    population_version: int = 0
 
     def invalidate(self, *, keep_populations: bool = False) -> None:
         """Drop every result; drop the populations too unless *keep_populations*.
@@ -56,3 +60,4 @@ class StatsCacheState:
         self.cache.clear()
         if not keep_populations:
             self.populations.clear()
+            self.population_version += 1

@@ -67,6 +67,8 @@ _format_cut = _lazy("review.features.nanowell.distribution_compute", "format_cut
 _parse_threshold = _lazy("review.features.nanowell.controller", "parse_threshold")
 _load_nanowell_data = _lazy("review.features.nanowell.collect", "load_nanowell_data")
 _site_metrics = _lazy("review.features.nanowell.series_compute", "site_metrics")
+_gate_tally = _lazy("review.features.nanowell.controller", "gate_tally")
+_gate_note = _lazy("review.features.nanowell.cell_gate_compute", "note")
 _baseline_at = _lazy("review.features.nanowell.series_compute", "baseline_at")
 _render_message = _lazy("review.features.nanowell.renderer", "render_message")
 _apply_subset = _lazy("review.features.nanowell.subset_compute", "apply")
@@ -337,10 +339,13 @@ class NanowellBatchExportPanel(BatchExportPanel):
                 "thresholds": self._thresholds()[0], "subset": self._subset()}
 
     def _load(self, baseline: str, wells) -> tuple | None:
-        """``(data, metrics)`` for the open dataset's *wells* at *baseline*, or ``None`` with the user told why.
+        """``(data, metrics, gate_note)`` for the open dataset's *wells* at *baseline*, or ``None`` with the user
+        told why.
 
         The Nanowells page reads only the wells it draws, so its tables are used only when they hold every one of
-        *wells* that has a table; otherwise exactly *wells* are read here."""
+        *wells* that has a table; otherwise exactly *wells* are read here. The cells Home's Cell Gating leaves out
+        are taken out of the counts and brightness exactly as on the page (``cell_gate_compute``), and
+        *gate_note* is the sentence saying so (``""`` when it leaves nothing out)."""
         data_dir = self._ctx.state.dataset.data_dir
         st = self._ctx.state.feature_slice("nanowell")
         data = getattr(st, "data", None)
@@ -365,7 +370,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                 "None of the groups' wells has a nanowell table (out/nanowells/), so there is "
                                 "nothing to export in this mode.")
             return None
-        return data, _site_metrics(data, baseline)
+        gate = _gate_tally(self._ctx, data)
+        return data, _site_metrics(data, baseline, gate), _gate_note(gate)
 
     def _run_batch(self) -> None:
         if self._run_is_refused():
@@ -392,7 +398,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
         loaded = self._load(settings["baseline"], {w for g in groups for w in g.wells})
         if loaded is None:
             return
-        data, metrics = loaded
+        data, metrics, gate_note = loaded
+        settings = {**settings, "gate_note": gate_note}
         self._log_sample_definitions_snapshot(groups)
         used_stems: set = set()
 
@@ -432,6 +439,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         tables, labels = [], _metric_labels()
         for metric in settings["metrics"]:
             drawn, channel, note = _resolve_metric(view, metric, settings["channel"], data.channels)
+            note = " ".join(filter(None, [note, settings.get("gate_note", "")]))
             # The cut was set for the ticked metric. When another is drawn in its place (a channel metric with no
             # channel), applying it there would count against a number chosen for something else.
             cut = settings["thresholds"].get(metric) if drawn == metric else None

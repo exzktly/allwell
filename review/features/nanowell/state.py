@@ -174,6 +174,11 @@ class NanowellState:
     metrics: object = None                  # series_compute.site_metrics(data, baseline)
     load_error: str = ""
     loaded_for: object = None               # (data_dir, baseline) the data and metrics were computed for
+    #: The cells Home's Cell Gating leaves out of the metrics (``cell_gate_compute.GateTally``), and the
+    #: ``stats_cache.population_version`` they were tallied at: a gating edit moves the version and the page
+    #: recomputes (``controller.ensure_loaded``).
+    gate: object = None
+    gated_for: object = None
     #: The wells the data was read for (the page's wells when it asked, a well without a table included), and
     #: each well's parts as read (``collect.WellPart``) for the data dir in ``parts_for``, so a well selected again
     #: is not read again. Only the wells the page draws are read (``controller.ensure_loaded``).
@@ -235,6 +240,7 @@ class NanowellState:
 
     def reset_data(self) -> None:
         self.data, self.metrics, self.load_error, self.loaded_for = None, None, "", None
+        self.gate, self.gated_for = None, None
         self.loaded_wells, self.well_parts, self.parts_for = frozenset(), {}, None
         self.crops, self.montages, self.fetching, self.fetch_bridges = {}, {}, set(), []
         self.region = self.region_for = self.press = self.drawn = None

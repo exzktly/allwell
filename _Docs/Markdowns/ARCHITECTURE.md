@@ -11700,7 +11700,9 @@ With no sidecar it
 says the check has not been run and names the audit command; at the reference it says so. On this view the Well
 combo reads each well's worst verdict, and the timepoint shown by default is the well's first contradicted, then
 inconclusive or unchecked, then first non-reference timepoint. Montages are read on a worker through the page's
-`_fetch` store; the sidecar is read once per well until the dataset reloads, so an audit run while the page is open
+`_fetch` store. A `_fetch` read lets go of its worker bridge as soon as it delivers, and redraws nothing when the
+page's canvas no longer exists as a Qt object (`_page_alive`) — a read can outlive the window that asked for it, and
+redrawing then reached into deleted widgets. The sidecar is read once per well until the dataset reloads, so an audit run while the page is open
 shows after the next load. Batch Export does not offer it (the reason is written beside its `VIEWS`: no metric, one
 figure per well and timepoint, two modes that exist only as interaction). Pinned by
 `tests/test_nanowell_identity_view.py`, including one test through the real page builder.

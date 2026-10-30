@@ -196,7 +196,10 @@ def test_clicking_a_nanowell_on_the_map_selects_it_and_cuts_its_crop_from_the_mo
     caption = [t.get_text() for t in detail.texts if t.get_gid() == "nw-crop-caption"]
     assert caption == ["Crops (phase image): A01 · q 1, r 0, from the montage, at its lower resolution; one brightness scale; "
                        "from the montage: the input archive is not beside this dataset"]
-    assert st.fetch_bridges == [] and st.fetching == set()           # nothing kept once delivered
+    # Nothing kept once delivered. The crops arriving is not every read finishing — the redraw they cause can
+    # start others — so the reads are waited out first, and then not one bridge may be left behind.
+    qtbot.waitUntil(lambda: not st.fetching, timeout=20000)
+    assert st.fetch_bridges == []
 
 
 def test_a_crop_job_that_fails_says_so_on_the_figure_and_is_not_relaunched(page, qtbot, monkeypatch):
@@ -320,3 +323,35 @@ def test_on_a_real_run_the_map_click_selects_the_lit_nanowell_and_its_crop_is_fu
     boxes = [p for p in fig.axes[0].patches if p.get_gid() == "nw-array-tile-box"]
     assert len(fig.axes[0].images) == 1 and len(boxes) == 4                      # four sized tile outlines
     assert _texts(ctx, "nw-array-unsized") == []
+
+
+def test_a_read_that_finishes_after_the_page_is_gone_draws_nothing_and_lets_its_worker_go(page, qtbot):
+    """A worker's read can outlive the page that asked for it — the window closed mid-read, or, in this suite, the
+    widgets a test built deleted while a crop or montage read was still in flight. Delivering it then redrew into
+    deleted Qt widgets: ``RuntimeError: Internal C++ object (QComboBox) already deleted`` out of
+    ``refresh_controls``, raised on the GUI thread, after the test that started the read had passed."""
+    import threading
+
+    from PySide6.QtCore import QCoreApplication, QEvent, Qt as _Qt
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    _loaded(qtbot, page)
+    st = page.state.feature_slice("nanowell")
+    release = threading.Event()
+
+    def slow_read():
+        release.wait(10)
+        return "a montage"
+
+    nwc._fetch(page, "montages", ("A01", "t_c"), slow_read, failed=lambda message: message)
+    assert len(st.fetch_bridges) == 1
+    # Matplotlib's own idle redraws, queued by the load, run first: they belong to the canvas, not to the read.
+    qtbot.wait(100)
+    # The page's widgets go; the windows the test harness registered stay, so its own teardown can close them.
+    for window in QApplication.topLevelWidgets():
+        for child in window.findChildren(QWidget, options=_Qt.FindDirectChildrenOnly):
+            child.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    release.set()
+    qtbot.waitUntil(lambda: not st.fetching, timeout=10000)
+    assert st.fetch_bridges == [], "the worker's bridge was kept after it delivered"

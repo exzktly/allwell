@@ -2242,11 +2242,17 @@ reading it. The log names any it kept over budget for that reason.
   warning means something is worth a look, not that the run has failed.
 - **A dropped connection is reported as one.** If the connection to the host
   breaks during a remote run, the headline says *Connection to `<host>` lost*
-  with ssh's own reason (*Timeout, server … not responding*, *Connection …
-  closed*, *Broken pipe*), the log shows that line in red, and the message says
-  whether the job is still running on the host, no longer running, or — when
-  the host cannot be reached to ask — may still be running. Resume downloads the
-  wells it finished and runs the rest.
+  with ssh's own reason (*Timeout, server … not responding*, *Connection to …
+  closed by remote host*, *Broken pipe*), the log shows that line in red, and
+  the message says whether the job is still running on the host, no longer
+  running, or — when the host cannot be reached to ask — may still be running.
+  Resume downloads the wells it finished and runs the rest.
+- **"Connection to `<host>` closed." on its own is not a failure.** ssh prints
+  it whenever the job's output stream ends, including after every run that
+  finished cleanly, so it appears in plain text. The downloads use connections
+  of their own, which is why *draining fetcher: N well(s) still queued for
+  download* can follow it: the job has ended on the host and the app is still
+  fetching the wells it finished last.
 - Either way the wells already finished keep their results, so nothing you have
   waited for is thrown away — Suspend just also keeps the fields in progress and
   saves you re-entering the form.

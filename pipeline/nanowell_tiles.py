@@ -13,7 +13,9 @@ been measured (``run_well(release=…)``), as far as the worker's share of memor
 timepoints). A tile the cache has no room for is read again, as before. When the cache cannot hold the whole well
 and the archive is on a network filesystem, the archive is first copied to the node's own disk
 (:func:`local_temp_dir`: ``$SLURM_TMPDIR``, ``$TMPDIR``, the system's temporary directory) when that has room for
-it, so the reads the cache cannot spare come off local disk; the copy is removed with the well.
+it, so the reads the cache cannot spare come off local disk. The copy is opened and unlinked at once (Linux, the only
+platform that copies), so it is gone the moment the well ends or its worker is killed. A machine that cannot say how
+much memory is free (not Linux) keeps nothing in memory and reads every tile in place, as before.
 
 A tile comes back as the float32 array the archive's TIF reads as — a fresh copy each time, as a fresh read was — so
 nothing downstream can tell the cache is there except by the time it takes. Stdlib, numpy and tifffile only.
@@ -24,6 +26,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -51,6 +54,16 @@ NETWORK_FILESYSTEMS = frozenset({
 #: Free space the node's disk must keep beyond the copies every worker may be making at once.
 LOCAL_COPY_HEADROOM = 1 << 30
 
+#: Filesystems that hold their files in memory: a copy there is memory taken exactly when memory was short, and it
+#: counts against the job's own limit.
+MEMORY_FILESYSTEMS = frozenset({"tmpfs", "ramfs", "devtmpfs"})
+
+
+def _unescape(field: str) -> str:
+    """A ``/proc/mounts`` field with its octal escapes (``\\040`` space, ``\\011`` tab, ``\\012`` newline,
+    ``\\134`` backslash) decoded."""
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
+
 
 def filesystem_type(path: Path | str, mounts: str = "/proc/mounts") -> str | None:
     """The type of the filesystem *path* is on, from the longest mount point containing it; ``None`` where the
@@ -63,7 +76,7 @@ def filesystem_type(path: Path | str, mounts: str = "/proc/mounts") -> str | Non
                 fields = line.split()
                 if len(fields) < 3:
                     continue
-                point = fields[1].replace("\\040", " ")
+                point = _unescape(fields[1])
                 inside = target == point or target.startswith(point.rstrip("/") + "/") or point == "/"
                 if inside and len(point) >= len(best):
                     best, kind = point, fields[2]
@@ -79,13 +92,15 @@ def is_network(path: Path | str) -> bool:
 
 def local_temp_dir(environ=None) -> Path | None:
     """The node's own disk for a temporary copy: the first of ``$SLURM_TMPDIR``, ``$TMPDIR`` and the system's
-    temporary directory that exists, is writable and is not on a network filesystem; ``None`` when none is."""
+    temporary directory that exists, is writable and is neither on a network filesystem nor held in memory
+    (``MEMORY_FILESYSTEMS``); ``None`` when none is."""
     environ = os.environ if environ is None else environ
     for raw in (environ.get("SLURM_TMPDIR"), environ.get("TMPDIR"), tempfile.gettempdir()):
         if not raw:
             continue
         folder = Path(raw)
-        if folder.is_dir() and os.access(folder, os.W_OK) and not is_network(folder):
+        if (folder.is_dir() and os.access(folder, os.W_OK) and not is_network(folder)
+                and filesystem_type(folder) not in MEMORY_FILESYSTEMS):
             return folder
     return None
 
@@ -121,14 +136,26 @@ class WellTiles:
         self.kept = self.reread = self.refused = 0
         self._seen: set = set()
         self.estimate = _phase_bytes(self.zip_path, phase_names)
-        self.copy: Path | None = None
+        self.copy: Path | None = None             # the node-local copy's path, readable for as long as it is open
+        self._copy_fd: int | None = None
         self.copy_note = ""
         network = is_network(self.zip_path) if network is None else network
-        if self.estimate > self.budget and network:
+        if network and self._copy_pays():
             self._copy_locally(local_dir, par.pool_workers() if workers is None else workers)
         self.reader = ZipMemberReader(self.copy or self.zip_path)
 
+    def _copy_pays(self) -> bool:
+        """Whether copying the archive reads less off the network than reading it in place: in place, the tiles are
+        read once and those the cache has no room for again (``estimate - budget`` more); copied, the whole archive is
+        read once, every timepoint's tiles and channels, so an incremental run that wants one timepoint of a long
+        well copies nothing."""
+        uncached = self.estimate - self.budget
+        return uncached > 0 and self.zip_path.stat().st_size < self.estimate + uncached
+
     def _copy_locally(self, local_dir: Path | None, workers: int) -> None:
+        """Copy the archive to *local_dir* (or :func:`local_temp_dir`), one worker at a time on a node (a lock file
+        beside the copies), and open it unlinked where the platform allows, so a worker killed mid-well leaves
+        nothing on the node's disk: the file lives for as long as it is open."""
         folder = local_dir or local_temp_dir()
         if folder is None:
             self.copy_note = "no node-local disk to copy the archive to"
@@ -141,13 +168,18 @@ class WellTiles:
         target = folder / f"allwell_{self.well}_{os.getpid()}_{self.zip_path.name}"
         started = time.monotonic()
         try:
-            shutil.copyfile(self.zip_path, target)
+            with _one_copy_at_a_time(folder):
+                shutil.copyfile(self.zip_path, target)
         except OSError as exc:
             target.unlink(missing_ok=True)
             self.copy_note = f"copying it to {folder} failed ({exc})"
             return
-        self.copy = target
-        self.copy_note = f"copied to {folder} in {time.monotonic() - started:.0f} s"
+        self.copy, self.copy_note = target, f"copied to {folder} in {time.monotonic() - started:.0f} s"
+        proc_fd = Path("/proc/self/fd")
+        if proc_fd.is_dir():
+            self._copy_fd = os.open(target, os.O_RDONLY)
+            target.unlink()
+            self.copy = proc_fd / str(self._copy_fd)          # each open of it is a fresh handle on the same file
 
     def tile(self, key, member, read: Callable) -> np.ndarray:
         """The float32 tile *key* — ``(timepoint, member)``, so a file read as phase and as a channel is one tile — from
@@ -194,9 +226,39 @@ class WellTiles:
         with self._lock:
             self._tiles.clear()
             self._held = 0
-        if self.copy is not None:
+        if self._copy_fd is not None:
+            os.close(self._copy_fd)
+            self._copy_fd = None
+        elif self.copy is not None:
             self.copy.unlink(missing_ok=True)
-            self.copy = None
+        self.copy = None
+
+
+class _one_copy_at_a_time:
+    """An exclusive lock on a file in *folder* while one archive is copied there, so the node's workers copy one at a
+    time rather than all at the start of their wells, which is the burst on the shared filesystem the copy is meant to
+    avoid. Where ``fcntl`` is missing (not POSIX) it does nothing; nothing copies there anyway."""
+
+    def __init__(self, folder: Path):
+        self.path = Path(folder) / ".allwell_archive_copy.lock"
+        self.handle = None
+
+    def __enter__(self):
+        try:
+            import fcntl
+        except ImportError:
+            return self
+        self.handle = open(self.path, "a")
+        fcntl.flock(self.handle, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        if self.handle is not None:
+            import fcntl
+
+            fcntl.flock(self.handle, fcntl.LOCK_UN)
+            self.handle.close()
+            self.handle = None
 
 
 def read_native(fileobj) -> np.ndarray:

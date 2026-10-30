@@ -744,7 +744,10 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     template_path = output_dir / NANOWELL_DIR / f"{well_label}{TEMPLATE_SUFFIX}"
     # Every tile is read once and kept until its timepoint is measured, as far as memory allows: a phase tile is read
     # to locate its timepoint and again to measure it, a fluorescence tile for its floor level and its intensities.
-    tiles = WellTiles(zip_path, well_label, [name for nuclear, fluors in index.values() for name in (nuclear, *fluors)])
+    # Sized by the timepoints this run reads: an incremental run that adds one timepoint to a long well estimates one.
+    wanted = set(todo)
+    tiles = WellTiles(zip_path, well_label, [name for (tp, _fov), (nuclear, fluors) in index.items() if tp in wanted
+                                             for name in (nuclear, *fluors)])
     try:
         return _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints,
                             digest, prior, todo, run, staging_dir, write_csv, template_path)

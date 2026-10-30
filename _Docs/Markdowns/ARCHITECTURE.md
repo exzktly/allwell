@@ -10629,17 +10629,32 @@ is only measurable across wells.
 the remote manifest). A nanowell run on a GPU node runs few workers — each holds a Cellpose model, and more than two
 on one card lost the run heartbeat to the shared filesystem — and the plan gives each the node's remaining cores as
 `OMP_NUM_THREADS`; `nanowell_parallel.thread_budget` reads that (or `ALLWELL_NANOWELL_THREADS`, which `1` makes
-serial). `run_well` uses them three ways, and adopts every result in the serial order (`ordered_results`), so every
-dict, row, note and inspection crop is what a serial run builds — `tests/test_nanowell_threads_change_nothing.py`
-compares a rendered well's outputs, serialised, serial against threaded. **Timepoints are located on the threads**
-(they are independent until the tile-layout agreement), as many at once as `_locate_threads` lets fit in the worker's
-memory share (`LOCATE_TILE_COPIES` float32 copies of a timepoint's tiles, sized from the record's `tile_size_px`).
-**A timepoint's tiles are measured on the threads** (`_finish_timepoint`), the segmenter behind the worker's one
-lock (`serialised`), so a worker never has two Cellpose calls in flight and the tiles' CPU work overlaps the GPU's.
+serial), never more than the CPUs the process's affinity mask allows. The threads are the process's own pool, made
+once and kept for the worker's life, and one background thread beside it (`_pool`, `ahead`): a pool made per
+timepoint started fresh threads for every timepoint, each opening its own archive handles and calling Cellpose from
+a thread Torch had not seen. `ordered_results` runs at most the threads it is given at once, yields in the items'
+order, cancels what has not started and waits for what has when its caller stops or raises, and runs serially when
+called from one of the pool's own threads. `run_well` uses them three ways, and adopts every result in the serial
+order, so every dict, row, note and inspection crop is what a serial run builds —
+`tests/test_nanowell_threads_change_nothing.py` compares a rendered well's outputs, serialised, serial against
+threaded, with one timepoint falling back to the earliest template. **Timepoints are located on the threads** (they
+are independent until the tile-layout agreement), as many at once as `_locate_threads` lets fit in the threads' share
+of memory (`_thread_share`: the worker's budget less the tile cache's `CACHE_SHARE` of it), a timepoint counted as
+`LOCATE_TILE_COPIES` float32 copies of its tiles, sized from the record's `tile_size_px`, plus `MONTAGE_WORK_BYTES`
+(the montage's float64 arrays at the 4096-pixel cap, measured at 803-850 MiB above the inputs of a 2 x 2 well).
+**A timepoint's tiles are measured on the threads** (`_finish_timepoint`, `_tile_threads`: as many as fit beside
+this timepoint's and the next one's tiles at `TILE_WORK_BYTES_PER_PX`, measured at 40 bytes a pixel), the segmenter
+behind the worker's one re-entrant lock (`serialised`), so a worker never has two Cellpose calls in flight and the
+tiles' CPU work overlaps the GPU's. When the count is Cellpose's and the run found no GPU
+(`nanowell_parallel.gpu_in_use`: `parallelism.GPU_SHARERS_ENV` unset), tiles are measured one at a time and nothing
+is prepared ahead: Cellpose then runs on Torch's own threads, there is no GPU time to overlap, and more threads would
+only compete for the same cores.
 **The next timepoint is prepared while this one's tiles are on the GPU**: `measure_timepoint` is
 `_prepare_timepoint` (geometry, visibility, coverage, template, levels) then `_finish_timepoint`, and `run_well`
 prepares timepoint *k*+1 on one background thread as soon as *k* is prepared, with the earliest template a serial
-loop would give it (`_next_earliest`); it still measures each through `measure_timepoint(prepared=…)`. Much of the
+loop would give it (`_next_earliest`); it still measures each through `measure_timepoint(prepared=…)`. Each
+timepoint's tiles are released from the tile cache (`run_well(release=…)`) once it is measured or found
+unmeasurable. Much of the
 work holds the interpreter lock, so threads alone gain little; overlapping it with the GPU is where the time goes:
 on a rendered well of 361 nanowells x 4 timepoints at 0.65 µm/px, with a stand-in segmenter holding the lock 0.08 s a
 nanowell, 284 s serially and 159 s on 4 threads, measuring within 15 % of the 116 s the GPU's share sets.
@@ -10650,13 +10665,23 @@ to measure it; a fluorescence tile for its floor level (`_normalise`) and again 
 keeps each, decoded in its own dtype and keyed by `(timepoint, member)` (a file read as phase and as a channel is one
 tile), from its first read until `run_well` releases its timepoint (`release=`, once it is measured or found
 unmeasurable), within `CACHE_SHARE` (half) of the worker's memory share (`worker_memory_budget`: `MEMORY_SHARE` of
-`/proc/meminfo`'s `MemAvailable` over `ALLWELL_POOL_WORKERS`, which `parallelism.export_gpu_sharers` sets before the
-pool spawns); a tile without room is read again, and a machine that cannot say how much memory is free keeps
-nothing. A tile comes back as the float32 a fresh read gives, as a fresh copy. When memory cannot hold the whole well
-(estimated from the members' uncompressed sizes) and the archive is on a network filesystem (`filesystem_type`, the
-longest `/proc/mounts` entry containing it, in `NETWORK_FILESYSTEMS`), the archive is first copied to the node's own
-disk (`local_temp_dir`: `$SLURM_TMPDIR`, `$TMPDIR`, the system temp dir, the first that is writable and local) when it
-has room for every worker's copy plus `LOCAL_COPY_HEADROOM`, and removed with the well. Each well logs one line on
+`memory_available` over `ALLWELL_POOL_WORKERS`, which `parallelism.export_gpu_sharers` sets before the pool spawns).
+`memory_available` is the least of `/proc/meminfo`'s `MemAvailable`, which inside a job or container shows the whole
+node, what the process's memory cgroup and each ancestor setting a limit still allow (`cgroup_headroom`, v1 and v2),
+and Slurm's `SLURM_MEM_PER_NODE` or `SLURM_MEM_PER_CPU` allocation (`slurm_allocation`). A tile without room is read
+again. A machine that cannot say how much memory is free (macOS, Windows) keeps nothing and reads every tile as it
+did before the cache existed. A tile comes back as the float32 a fresh read gives, as a fresh copy. The estimate is the uncompressed size of the
+members of the timepoints this run reads, so an incremental run adding one timepoint estimates that one. When the
+archive is on a network filesystem (`filesystem_type`, the longest `/proc/mounts` entry containing it, its octal
+escapes decoded, in `NETWORK_FILESYSTEMS`) and copying it reads less than reading in place would (`_copy_pays`: the
+archive's size against the estimate plus the part the cache cannot hold, read twice), it is first copied to the
+node's own disk (`local_temp_dir`: `$SLURM_TMPDIR`, `$TMPDIR`, the system temp dir, the first that is writable, not
+on the network and not held in memory, `MEMORY_FILESYSTEMS`) when that has room for every worker's copy plus
+`LOCAL_COPY_HEADROOM`. The node's workers copy one at a time (`_one_copy_at_a_time`, an `flock` on a file beside the
+copies), and the copy is opened and unlinked at once and read through `/proc/self/fd/<n>`, so it is gone when the well
+ends or its worker is killed. The archive's reader (`pipeline/zip_members.ZipMemberReader`) lends each read a free
+handle and opens another only when every open one is in use, so a well holds as many handles as it ever read at
+once. Each well logs one line on
 how its tiles were read (`WellTiles.summary`). The run's scratch stays where it was: it holds the resume checkpoints,
 which a node-local directory wiped at the end of a job would lose. `tests/test_nanowell_tiles.py`,
 `tests/test_nanowell_parallel.py`.

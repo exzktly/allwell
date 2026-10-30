@@ -20,7 +20,7 @@ Positions are in micrometres in the registration's common frame (the "well frame
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, wait
 from dataclasses import dataclass, field, replace
 import math
 import time
@@ -1346,6 +1346,8 @@ class _Prepared:
     template: object
     segment: object
     norm: object
+    #: Whether *segment* is the production Cellpose (no segmenter handed in): on a CPU it runs on Torch's own threads.
+    cellpose: bool = False
 
 
 def _prepare_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float | None, *,
@@ -1407,13 +1409,14 @@ def _prepare_timepoint(located: Located, images: dict, settings: NanowellSetting
                 out.notes.append(f"{len(borrowed)} tile(s) gave no {channel} floor level of their own "
                                  f"({', '.join(borrowed)}): their fluorescence background is the well's")
     return _Prepared(located, images, settings, channels, out, addressed, addresses, points_m, detected, report, fused,
-                     kind, geoms, by_tile, visibility, coverage, template, segment, norm)
+                     kind, geoms, by_tile, visibility, coverage, template, segment, norm,
+                     cellpose=segmenter is None and count_cells)
 
 
 def _finish_timepoint(prep: _Prepared, *, on_segmented=None, inspect: dict | None = None) -> Measured:
     """The second half of :func:`measure_timepoint`: every tile's contents, then a row for every roster site."""
     from pipeline import nanowell_measure as nm
-    from pipeline.nanowell_parallel import ordered_results, serialised, synchronised, thread_budget
+    from pipeline.nanowell_parallel import ordered_results, serialised, synchronised
 
     located, images, settings, channels, out = prep.located, prep.images, prep.settings, prep.channels, prep.out
     addressed, addresses, points_m, detected = prep.addressed, prep.addresses, prep.points_m, prep.detected
@@ -1427,7 +1430,7 @@ def _finish_timepoint(prep: _Prepared, *, on_segmented=None, inspect: dict | Non
     # A tile's contents depend on nothing another tile computes, so tiles run on the worker's threads, the segmenter
     # behind the worker's one lock (one Cellpose call in flight); the results are merged in tile order, as a serial
     # loop merges them, and each tile keeps its own crops for the inspection sheet until then.
-    threads = thread_budget()
+    threads = _tile_threads(prep)
     tile_segment = serialised(segment) if segment is not None and threads > 1 else segment
     tick = synchronised(sites.tick) if threads > 1 else sites.tick
 
@@ -1536,19 +1539,37 @@ def record_digest(record: dict, well: str, timepoint: str) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-#: Copies of a timepoint's tiles, as float32, that locating one holds at its peak: the tiles themselves and the
-#: per-tile working images of the lattice fits and the montage. An estimate that errs high, used only to keep the
-#: timepoints located at once inside the worker's share of memory (:func:`_locate_threads`).
-LOCATE_TILE_COPIES = 4
+#: Copies of a timepoint's tiles, as float32, that locating one holds beside the montage: the tiles themselves and
+#: the per-tile working images of the lattice fits and registration. Measured with tracemalloc on 9 tiles of 2048
+#: pixels at 0.65 um/px: 609 MiB in all for 144 MiB of tiles (3.2x, the montage included), which this and
+#: ``MONTAGE_WORK_BYTES`` estimate at 1,456 MiB.
+LOCATE_TILE_COPIES = 3
+#: What locating a timepoint holds whatever its tile count: ``tile_register.build_montage``'s float64 sum, weight and
+#: blend at the 4096-pixel cap, about 128 MiB each, and the detection on the montage. Measured with tracemalloc at
+#: 803-850 MiB above the inputs on a 2 x 2 well of 2048-pixel tiles, where four tile copies alone would have
+#: estimated 256 MiB; rounded up.
+MONTAGE_WORK_BYTES = 1 << 30
+#: A tile's working memory while its contents are measured (``_tile_contents``: the rim-suppressed tile, the
+#: segmenter's input, departures, labels — float64 and int64 images of the tile's size): measured with tracemalloc
+#: at 40 bytes a pixel on a 2048-pixel tile at 0.65 um/px, rounded up.
+TILE_WORK_BYTES_PER_PX = 48
+
+
+def _thread_share() -> int | None:
+    """What the worker's threads may plan to hold: its memory share less the tile cache's part of it
+    (``nanowell_tiles.CACHE_SHARE``); ``None`` where the memory available cannot be read."""
+    from pipeline.nanowell_parallel import worker_memory_budget
+    from pipeline.nanowell_tiles import CACHE_SHARE
+
+    budget = worker_memory_budget()
+    return None if budget is None else int(budget * (1 - CACHE_SHARE))
 
 
 def _locate_threads(record: dict, well: str, timepoints, threads: int) -> int:
-    """How many of *timepoints* to locate at once: the worker's *threads*, fewer when the largest timepoint's tiles
-    (``LOCATE_TILE_COPIES`` float32 copies of them, sized from the record's ``tile_size_px``) would not fit that many
-    times in its share of memory (``nanowell_parallel.worker_memory_budget``). A record without tile sizes, or a
-    machine that does not say how much memory is free, is not limited."""
-    from pipeline.nanowell_parallel import worker_memory_budget
-
+    """How many of *timepoints* to locate at once: the worker's *threads*, fewer when the largest timepoint
+    (``LOCATE_TILE_COPIES`` float32 copies of its tiles, sized from the record's ``tile_size_px``, and
+    ``MONTAGE_WORK_BYTES``) would not fit that many times in the threads' share of memory (:func:`_thread_share`).
+    A record without tile sizes, or a machine that does not say how much memory is free, is not limited."""
     if threads <= 1:
         return 1
     largest = 0
@@ -1558,11 +1579,29 @@ def _locate_threads(record: dict, well: str, timepoints, threads: int) -> int:
             per_tile = int(size["x"]) * int(size["y"]) * 4 * LOCATE_TILE_COPIES
         except (KeyError, TypeError, ValueError):
             continue
-        largest = max(largest, per_tile * _tile_count(record, well, tp))
-    budget = worker_memory_budget()
-    if not largest or budget is None:
+        largest = max(largest, per_tile * _tile_count(record, well, tp) + MONTAGE_WORK_BYTES)
+    share = _thread_share()
+    if not largest or share is None:
         return threads
-    return max(1, min(threads, budget // largest))
+    return max(1, min(threads, share // largest))
+
+
+def _tile_threads(prep: _Prepared) -> int:
+    """How many of a timepoint's tiles to measure at once: the worker's threads, fewer when that many tiles' working
+    memory (``TILE_WORK_BYTES_PER_PX``) would not fit in the threads' share beside this timepoint's tiles and the
+    next one's, being prepared; one when the count is Cellpose's on a CPU, whose own threads already use the cores
+    and which nothing else could overlap with."""
+    from pipeline.nanowell_parallel import gpu_in_use, thread_budget
+
+    threads = thread_budget()
+    if threads <= 1 or (prep.cellpose and not gpu_in_use()):
+        return 1
+    pixels = max((np.asarray(img).size for img in prep.images.values()), default=0)
+    share = _thread_share()
+    if not pixels or share is None:
+        return threads
+    held = 2 * sum(np.asarray(img).nbytes for img in prep.images.values())
+    return max(1, min(threads, (share - held) // (pixels * TILE_WORK_BYTES_PER_PX)))
 
 
 def _say_locating(note, record: dict, well: str, timepoint: str):
@@ -2417,7 +2456,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     the count is Cellpose's, *segmenter* ``None``). *release*, when given, is ``f(timepoint)``, called once nothing
     will read that timepoint's tiles again (``pipeline.nanowell_tiles.WellTiles.release``).
     """
-    from pipeline.nanowell_parallel import ordered_results, thread_budget
+    from pipeline.nanowell_parallel import ahead as nanowell_ahead
+    from pipeline.nanowell_parallel import gpu_in_use, ordered_results, thread_budget
 
     outcome = WellOutcome(well)
     timepoints = list(timepoints)
@@ -2450,10 +2490,13 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
 
     # Timepoints are located independently of one another, so they run on the worker's threads; each is adopted in
     # time order, which keeps every dict and record this builds as a serial loop builds it (pipeline.nanowell_parallel).
-    for tp, located in zip(timepoints, ordered_results(located_and_said, timepoints,
-                                                       _locate_threads(record, well, timepoints, threads))):
-        adopt(tp, located)
-        steps.tick()
+    located_in_order = ordered_results(located_and_said, timepoints, _locate_threads(record, well, timepoints, threads))
+    try:
+        for tp, located in zip(timepoints, located_in_order):
+            adopt(tp, located)
+            steps.tick()
+    finally:
+        located_in_order.close()            # on a raise here, nothing goes on locating behind it
     _agree_tile_layouts(outcome, timepoints, kept_layouts, locate, note)
     anchored = [tp for tp in timepoints if outcome.located[tp].status == OK]
     unaddressed = [tp for tp in timepoints if outcome.located[tp].status == UNADDRESSED]
@@ -2517,7 +2560,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     # With threads to spare, the next timepoint is prepared (geometry, template, levels: CPU) while this one's tiles
     # are measured (the GPU's part). A timepoint's preparation needs only the earliest template so far, which is
     # known once the timepoint before it is prepared, so each is prepared with what a serial loop would give it.
-    ahead = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nanowell-ahead") if threads > 1 else None
+    # Not for Cellpose on a CPU: there is no GPU time to overlap, and its own threads already use the cores.
+    ahead = (nanowell_ahead() if threads > 1 and (segmenter is not None or gpu_in_use()) else None)
     started: dict = {}
 
     def start(i, earliest_now):
@@ -2545,8 +2589,10 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
             release(tp)
             _record_measured(outcome, tp, measured, consistency, reference, anchored, steps)
     finally:
-        if ahead is not None:
-            ahead.shutdown(wait=True, cancel_futures=True)
+        if ahead is not None:                # the thread is the process's: stop this well's work on it, not it
+            for future in started.values():
+                future.cancel()
+            wait([f for f in started.values() if isinstance(f, Future)])
     flag_template_drift(outcome.timepoints, timepoints)     # the caller re-runs it over kept timepoints too
     steps.finish()
     outcome.inspection = steps.inspected

@@ -90,13 +90,61 @@ def test_an_archive_on_a_network_filesystem_that_memory_cannot_hold_is_read_from
     local = tmp_path / "node"
     local.mkdir()
     well = tiles.WellTiles(archive, "A01", members, budget=0, network=True, local_dir=local, workers=2)
-    assert well.copy is not None and well.copy.parent == local and well.reader.zip_path == well.copy
-    tile = well.tile(("0h", "F0"), members[0], tiles.read_native)
-    assert np.array_equal(tile, nt._read_tif(zipfile.ZipFile(archive).open(f"inner/{Path(members[0]).name}")))
+    assert well.copy is not None and well.reader.zip_path == well.copy
+    # Open and already unlinked: a worker killed now leaves nothing on the node's disk.
+    assert list(local.glob("allwell_*")) == [] and str(well.copy).startswith("/proc/self/fd/")
+    for k in range(2):                                   # each read opens the unlinked copy afresh
+        tile = well.tile(("0h", f"F{k}"), members[k], tiles.read_native)
+        assert np.array_equal(tile, nt._read_tif(zipfile.ZipFile(archive).open(f"inner/{Path(members[k]).name}")))
     assert "copied to" in well.summary()
-    copy = well.copy
     well.close()
-    assert not copy.exists() and archive.exists()
+    assert list(local.glob("allwell_*")) == [] and archive.exists()
+
+
+def test_reading_one_timepoint_of_a_long_well_copies_nothing(tmp_path):
+    """An incremental run that adds one timepoint estimates that timepoint's tiles: copying the whole archive to read
+    them would read every timepoint off the network to spare one re-read."""
+    archive, members = _archive(tmp_path, n=6)
+    local = tmp_path / "node"
+    local.mkdir()
+    well = tiles.WellTiles(archive, "A01", members[:1], budget=0, network=True, local_dir=local)
+    assert well.copy is None and well.reader.zip_path == archive
+    well.close()
+
+
+def test_memory_backed_temporary_folders_are_not_the_node_s_disk(tmp_path, monkeypatch):
+    shm = tmp_path / "shm"
+    disk = tmp_path / "disk"
+    shm.mkdir()
+    disk.mkdir()
+    monkeypatch.setattr(tiles, "is_network", lambda path: False)
+    monkeypatch.setattr(tiles, "filesystem_type", lambda path, mounts="/proc/mounts":
+                        "tmpfs" if Path(path) == shm else "ext4")
+    assert tiles.local_temp_dir({"SLURM_TMPDIR": str(shm), "TMPDIR": str(disk)}) == disk
+
+
+def test_workers_on_one_node_copy_one_at_a_time(tmp_path):
+    import threading
+    import time
+
+    state = {"in": 0, "most": 0}
+    lock = threading.Lock()
+
+    def copy():
+        with tiles._one_copy_at_a_time(tmp_path):
+            with lock:
+                state["in"] += 1
+                state["most"] = max(state["most"], state["in"])
+            time.sleep(0.05)
+            with lock:
+                state["in"] -= 1
+
+    threads = [threading.Thread(target=copy) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert state["most"] == 1
 
 
 def test_no_copy_when_the_node_s_disk_has_no_room_or_the_archive_is_local_or_memory_holds_it(tmp_path, monkeypatch):
@@ -127,11 +175,13 @@ def test_the_filesystem_is_read_from_the_longest_mount_point_containing_the_path
     mounts.write_text("/dev/vda / ext4 rw 0 0\n"
                       "server:/export /shared nfs4 rw 0 0\n"
                       "server:/export/deep /shared/local-ish xfs rw 0 0\n"
-                      "tmpfs /tmp tmpfs rw 0 0\n")
+                      "tmpfs /scratchmem tmpfs rw 0 0\n"
+                      "server:/b /mnt/my\\040plates nfs rw 0 0\n")
     assert tiles.filesystem_type("/shared/plate/in/A01.zip", str(mounts)) == "nfs4"
     assert tiles.filesystem_type("/shared/local-ish/x", str(mounts)) == "xfs"
     assert tiles.filesystem_type("/sharedness/x", str(mounts)) == "ext4"     # a prefix that is not a parent
-    assert tiles.filesystem_type("/tmp/x", str(mounts)) == "tmpfs"
+    assert tiles.filesystem_type("/scratchmem/x", str(mounts)) == "tmpfs"
+    assert tiles.filesystem_type("/mnt/my plates/in/A01.zip", str(mounts)) == "nfs"   # an escaped space
     assert tiles.filesystem_type("/x", str(tmp_path / "missing")) is None
 
 

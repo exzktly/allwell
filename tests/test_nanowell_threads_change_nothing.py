@@ -40,11 +40,11 @@ def well():
 
 
 class _Segmenter:
-    """Cellpose's call shape (a range, the area cap, batches of crops) with a deterministic threshold inside, and a
-    count of how many of its calls were ever in flight at once."""
+    """Cellpose's call shape (a range, the area cap, batches of crops) with a deterministic threshold inside, a count
+    of how many of its calls were ever in flight at once, and the threads that made them."""
 
     def __init__(self):
-        self.lock, self.inside, self.most = threading.Lock(), 0, 0
+        self.lock, self.inside, self.most, self.threads = threading.Lock(), 0, 0, set()
 
     def _labels(self, crop, lowhigh):
         lo, hi = lowhigh
@@ -58,6 +58,7 @@ class _Segmenter:
             with self.lock:
                 self.inside += 1
                 self.most = max(self.most, self.inside)
+                self.threads.add(threading.get_ident())
             try:
                 return [self._labels(c, lowhigh) for c in images]
             finally:
@@ -86,13 +87,30 @@ def _serialised(outcome) -> str:
                        "inspection": inspection}, default=_plain)
 
 
-def _run(monkeypatch, record, images, threads: int, segmenter):
+def _run(monkeypatch, record, images, threads: int, segmenter, release=None):
     monkeypatch.setenv(par.THREADS_ENV, str(threads))
     return nr.run_well("A01", record, ["0h", "24h", "48h"], lambda tp, tile: images.get((tp, tile)), SETTINGS,
-                       segmenter=segmenter, progress=lambda d, n: None, site_progress=lambda tp, d, n: None)
+                       segmenter=segmenter, progress=lambda d, n: None, site_progress=lambda tp, d, n: None,
+                       release=release)
 
 
-def test_a_threaded_well_writes_what_a_serial_one_writes_and_never_overlaps_two_segmenter_calls(monkeypatch, well):
+@pytest.fixture
+def sparse_24h(monkeypatch):
+    """24h has too few usable nanowells for a template of its own, so it falls back to the earliest timepoint's: the
+    one input the timepoint prepared ahead takes from the timepoint before it."""
+    real = nr._pooled_template
+
+    def pooled(located, images, settings, geoms, by_tile, visibility, coverage, earliest):
+        if located.timepoint == "24h":
+            from pipeline import nanowell_measure as nm
+            return nm.as_fallback(earliest)
+        return real(located, images, settings, geoms, by_tile, visibility, coverage, earliest)
+
+    monkeypatch.setattr(nr, "_pooled_template", pooled)
+
+
+def test_a_threaded_well_writes_what_a_serial_one_writes_and_never_overlaps_two_segmenter_calls(monkeypatch, well,
+                                                                                               sparse_24h):
     record, images = well
     serial = _run(monkeypatch, record, images, 1, _Segmenter().build())
     counted = _Segmenter()
@@ -100,6 +118,19 @@ def test_a_threaded_well_writes_what_a_serial_one_writes_and_never_overlaps_two_
     assert serial.sites and serial.cells.get("label")              # the fixture measures something to compare
     assert _serialised(threaded) == _serialised(serial)
     assert counted.most == 1
+    assert len(counted.threads) > 1                                # the tiles did run on several threads
+    # 24h was measured against 0h's template, which it can only have had if it was prepared after 0h's was known:
+    # a timepoint prepared ahead with a stale earliest has no template and counts nothing, serially or threaded.
+    for outcome in (serial, threaded):
+        assert outcome.timepoints["24h"]["template"]["source"] == "earliest"
+        assert any(r["n_cells"] is not None for r in outcome.sites if r["timepoint"] == "24h")
+
+
+def test_every_timepoint_s_tiles_are_released_once_it_is_measured(monkeypatch, well):
+    record, images = well
+    released = []
+    _run(monkeypatch, record, images, 3, _Segmenter().build(), release=released.append)
+    assert released == ["0h", "24h", "48h"]
 
 
 def test_the_next_timepoint_is_prepared_while_this_one_is_measured(monkeypatch, well):
@@ -145,6 +176,7 @@ def test_a_well_through_the_task_reads_each_phase_tile_from_its_archive_once(tmp
         return real(self, name)
 
     monkeypatch.setattr(zip_members.ZipMemberReader, "read", counting)
+    monkeypatch.setattr(par, "worker_memory_budget", lambda *a, **k: 1 << 34)   # not the host's memory: pinned
     monkeypatch.setenv(par.THREADS_ENV, "3")
     out = run_plate(monkeypatch, plate, "out")
     assert (out / "nanowells" / "A01_grid.json").is_file()

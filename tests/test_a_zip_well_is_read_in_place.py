@@ -137,23 +137,27 @@ def test_the_reader_resolves_members_the_way_the_grouper_names_them(tmp_path):
             reader.read("missing.tif")
 
 
-def test_each_thread_reads_through_its_own_handle_and_close_closes_them_all(tmp_path):
+def test_reads_borrow_a_handle_so_threads_that_come_and_go_do_not_pile_handles_up_and_close_closes_them_all(
+        tmp_path):
+    """A handle per thread, kept for the well, piled up when a nanowell well made a thread pool per timepoint: every
+    new thread opened another handle and re-read the archive's directory. A read now borrows a free handle."""
     zip_path = tmp_path / "C03.zip"
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr("a.tif", b"payload")
     reader = ZipMemberReader(zip_path)
-    handles: list[zipfile.ZipFile] = []
-
-    def _read():
-        assert reader.read("a.tif") == b"payload"
-        handles.append(reader._local.zf)
-
-    threads = [threading.Thread(target=_read) for _ in range(3)]
-    for t in threads:
+    for _ in range(5):                                   # five threads, one after another: one handle serves them all
+        t = threading.Thread(target=lambda: reader.read("a.tif"))
         t.start()
-    for t in threads:
         t.join()
-    assert len({id(h) for h in handles}) == 3
+    assert reader.open_handles == 1
+    held = reader._borrow()                              # a read in flight: the next read needs a handle of its own
+    got = []
+    t = threading.Thread(target=lambda: got.append(reader.read("a.tif")))
+    t.start()
+    t.join()
+    assert got == [b"payload"] and reader.open_handles == 2 and held[0] is not reader._free[-1][0]
+    reader._give_back(held)
+    handles = list(reader._handles)
     reader.close()
     assert all(h.fp is None for h in handles)
     with pytest.raises(ValueError, match="closed"):

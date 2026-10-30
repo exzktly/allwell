@@ -32,8 +32,8 @@ LOADED, EMPTY = "A01", "H12"          # the reference sorts last, so running it 
 #: empty well its median nanowell reads 0.73; read against itself (the defect) 0.013. At two per nanowell the cells
 #: are still the minority of the floor and the self-read gives 0.25, which could not tell the two apart.
 DENSE = 6
-#: The module's fixture runs a two-well plate (about 100 s under a loaded lane), inside its first test's timeout.
-pytestmark = pytest.mark.timeout(400)
+#: A two-well plate run takes about 80 s under a loaded lane, past the lane's 90 s default with any contention.
+pytestmark = pytest.mark.timeout(300)
 
 
 def _cells(rendered, per_site, seed):
@@ -111,53 +111,32 @@ def _well(out, well):
     return sites[sites["state"].isin(["measured", "empty"])], grid["timepoints"]["0h"]
 
 
-@pytest.fixture(scope="module")
-def with_reference(tmp_path_factory):
-    mp = pytest.MonkeyPatch()
-    try:
-        yield _run(mp, _plate(tmp_path_factory.mktemp("ref"), {LOADED: DENSE, EMPTY: 0}),
-                   "--nanowell_empty_well", EMPTY)
-    finally:
-        mp.undo()
+def test_a_loaded_well_is_read_against_the_empty_well_measured_before_it(tmp_path, monkeypatch):
+    """One plate run, every claim on it: a module fixture shared by several tests is built once per worker under
+    ``--dist load`` (measured: twice, 83 s and 76 s, in one lane).
 
-
-def test_the_reference_well_runs_first(with_reference):
-    _out, order = with_reference
+    The reference sorts last and runs first; it is saved empty; and the loaded well, six cells of 4 px in radius in
+    each nanowell of 11.6 px, reads its median nanowell above 0.5 against it (measured 0.73; read against itself,
+    the defect, 0.013), while the empty well reads zero."""
+    out, order = _run(monkeypatch, _plate(tmp_path, {LOADED: DENSE, EMPTY: 0}), "--nanowell_empty_well", EMPTY)
     assert order == [EMPTY, LOADED]
-
-
-def test_the_reference_is_saved_empty(with_reference):
-    out, _ = with_reference
     index = nref.read_index(out)
     assert index["well"] == EMPTY and index["timepoints"]["0h"]["status"] == nref.EMPTY
-    _seen, block = _well(out, EMPTY)
-    assert block["confluence_reference"]["status"] == nref.EMPTY
-
-
-def test_a_loaded_well_reads_its_cells_against_the_empty_well(with_reference):
-    """Six cells of 4 px in radius in each nanowell of 11.6 px: most of the interior. Read against itself (the defect)
-    the loaded well's median nanowell read 0.013; against the empty well 0.73."""
-    out, _ = with_reference
     loaded, block = _well(out, LOADED)
-    empty, _ = _well(out, EMPTY)
+    empty, empty_block = _well(out, EMPTY)
+    assert empty_block["confluence_reference"]["status"] == nref.EMPTY
     assert loaded["confluence"].notna().all() and empty["confluence"].notna().all()
     assert loaded["confluence"].median() > 0.5 and loaded["confluence"].quantile(0.1) > 0.4
     assert empty["confluence"].median() == 0.0
     assert not any(str(n).startswith(nref.NOTE_PREFIX) for n in block["notes"])
 
 
-def test_without_a_reference_no_well_has_a_confluence(tmp_path, monkeypatch):
-    out, _order = _run(monkeypatch, _plate(tmp_path, {LOADED: 2}))
-    loaded, block = _well(out, LOADED)
-    assert len(loaded) and loaded["confluence"].isna().all()           # blank, never 0
-    assert loaded["n_cells"].notna().all()                              # the count does not depend on it
-    assert any("no empty reference well was named" in str(n) for n in block["notes"])
-
-
-def test_a_reference_that_holds_cells_gives_no_confluence(tmp_path, monkeypatch):
-    out, _order = _run(monkeypatch, _plate(tmp_path, {LOADED: 2, EMPTY: 2}), "--nanowell_empty_well", EMPTY)
+def test_a_reference_well_that_holds_cells_gives_no_confluence(tmp_path, monkeypatch):
+    """The reference alone, loaded: its own verdict says so, and its confluence is blank with the reason. That every
+    other well then reads none is ``nanowell_reference.load``'s, covered without a plate run."""
+    out, _order = _run(monkeypatch, _plate(tmp_path, {EMPTY: 2}), "--nanowell_empty_well", EMPTY)
     assert nref.read_index(out)["timepoints"]["0h"]["status"] == nref.LOADED
-    for well in (LOADED, EMPTY):
-        seen, block = _well(out, well)
-        assert len(seen) and seen["confluence"].isna().all()
-        assert any(str(n).startswith(nref.NOTE_PREFIX) and "not empty" in str(n) for n in block["notes"])
+    seen, block = _well(out, EMPTY)
+    assert len(seen) and seen["confluence"].isna().all()                # blank, never 0
+    assert seen["n_cells"].notna().all()                                # the count does not depend on it
+    assert any(str(n).startswith(nref.NOTE_PREFIX) and "not empty" in str(n) for n in block["notes"])

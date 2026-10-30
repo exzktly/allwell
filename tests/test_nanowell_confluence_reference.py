@@ -197,3 +197,19 @@ def test_the_reference_well_s_own_loaded_timepoints_lose_their_confluence():
     assert [r["confluence"] for r in sites] == [None, None, 0.0, 0.0]
     assert len(blocks["0h"]["notes"]) == 1 and blocks["12h"]["notes"] == []
     assert blocks["0h"]["confluence_reference"]["status"] == nref.LOADED
+
+
+def test_a_well_is_given_the_reference_the_run_names(tmp_path, reference):
+    """``nanowell_task._confluence_reference_for``, the one call that decides what a well reads against: itself
+    when it is the reference, the saved reference otherwise, and nothing, with the reason, when none is named."""
+    from pipeline import nanowell_task as nt
+
+    _, template = reference
+    settings = _settings(empty_well="H12")
+    path = tmp_path / nt.NANOWELL_DIR / "A01_template.npz"           # the well's own template path, as the task has it
+    assert nt._confluence_reference_for("H12", settings, path) is nref.OWN
+    assert "has not been measured" in nt._confluence_reference_for("A01", settings, path).at("0h")[1]
+    nref.save(tmp_path, "H12", settings, {"0h": (template, nref.verdict(_rows([0] * 10)))})
+    assert nt._confluence_reference_for("A01", settings, path).at("0h")[0] is not None
+    unnamed = nt._confluence_reference_for("A01", _settings(), path)
+    assert unnamed.at("0h")[0] is None and "no empty reference well was named" in unnamed.at("0h")[1]

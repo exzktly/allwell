@@ -5462,6 +5462,17 @@ Their fold changes divide each timepoint by the baseline. A nanowell fluorescenc
 gives no fold change ("no signal above background at baseline"), since a ratio over nothing has no meaning; a
 brightness fold change needs counted cells at both timepoints.
 
+**Cell Gating applies here too.** A nanowell's cell count, and its brightness, use only the cells the rest of
+Review counts: the size and shape gate, cells excluded by hand, the crop, the scatter gates and the field and focus
+exclusions set on Home ▸ [Cell Gating](#cell-gating). So to drop objects by size from the nanowells, set *min area* /
+*max area* there. Each nanowell's count is the run's count less the cells gated out of it, and brightness is
+averaged over the cells kept; everything computed from the count follows — fold changes, growth rate, occupancy,
+*Starting cells* and the *Subset* conditions. Confluence and nanowell fluorescence are measured from the
+nanowell's pixels rather than from its segmented cells, so a gate cannot change them. While a gate leaves any cell
+out, every figure says how many (*Cell Gating leaves out N of M cells …*), and Batch Export's Nanowells mode exports
+the same numbers with the same sentence. A well whose per-cell table cannot be read keeps the run's own counts, and
+the sentence names it.
+
 - **Channel** — beside Metric, on every view: the fluorescence channel Brightness and Nanowell fluorescence are drawn for,
   in the figures, the site detail and the crop captions. It starts on the channel the Plotting tabs use when the
   run measured it, else on the first channel it measured. A channel the run read but did not measure in the

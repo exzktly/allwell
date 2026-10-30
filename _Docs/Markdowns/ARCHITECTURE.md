@@ -4588,6 +4588,10 @@ from regressing):
   cue. `tests/test_a_threshold_edit_reads_nothing.py` holds a real threshold
   edit to zero reads for the aggregates, the CDF and both image-side memos,
   to an emptied results cache, and a plain invalidation to a read for each.
+  The same plain invalidation raises `StatsCacheState.population_version`, the
+  core "which cells count changed" counter for a surface that computes from the
+  included cells outside this cache and cannot rely on a feature slice's
+  counter existing — the Nanowells page's gated counts key on it.
   The cache is not the Statistics feature's `StatsState`; the
   dataset-level `get_all_timepoints` lives in `data/data_loading.py`, not
   `scatter`.
@@ -11317,6 +11321,22 @@ restore runs before the data is read. Batch Export's Nanowells panel fills its o
 `subset_compute._where` (the subset sentence). The growth rate is the least-squares slope of
 ln n against hours over at least three timepoints with n > 0. A plate of 96 wells × 1,000 nanowells × 10
 timepoints takes about 5 s to compute.
+
+**Cell Gating reaches the counts** (`cell_gate_compute`, `controller.gate_tally` / `gated_metrics`). The run's
+`n_cells` is a count of per-cell rows carrying the nanowell's address, so the cells the analysis leaves out
+(`data_loading.df_included_mask` — curation, the QC size and shape gate, crop, scatter gates, field and focus
+layers) are tallied per `(well, timepoint, nw_q, nw_r)` from the row cache (`get_rows`, the well's own label or
+the label registered for the CSV `NanowellData.cell_tables` names). `site_metrics(data, baseline, gate)` subtracts
+them from `n` — never recounting, so with nothing gated out every count is the run's own — and replaces
+`brightness_<ch>` with the kept cells' mean, before any baseline, fold change, growth rate or occupancy class is
+computed, so the *Subset* and *Starting cells* follow. Only rows with a count change: an occluded nanowell keeps no
+count. Confluence and `signal_<ch>` are pixel measurements and are not touched. `cell_gate_compute.note` is the
+figure's sentence while anything is left out, naming wells whose rows could not be read (they keep the run's
+counts). The tally runs on the page's load worker with the metrics; `NanowellState.gated_for` records the
+`StatsCacheState.population_version` it was taken at, which every invalidation that drops the populations raises,
+so `ensure_loaded` and `redraw` recompute when Cell Gating changes. Batch Export's Nanowells panel calls the same
+`gate_tally` in `_load`, so an export never disagrees with the page. `tests/test_nanowell_counts_follow_cell_gating.py`
+drives the real QC gate through the page and through the panel.
 
 **The fixed cohort** (`distribution_compute.fixed_cohort`, `NanowellState.cohort`, the *Fixed cohort* box on
 *Distribution* and *Trajectories*). Off, the median at each timepoint is over whichever nanowells could be

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from review.core.ui_helpers import EmptyReason
 
 from domain.nanowell_roster import mixed_rules_note
+from review.features.nanowell import cell_gate_compute as cg
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
@@ -261,14 +262,67 @@ def _call(ctx, name: str) -> None:
         fn()
 
 
-def _metrics_of(data, baseline: str) -> pd.DataFrame | None:
+def _metrics_of(data, baseline: str, gate=None) -> pd.DataFrame | None:
     """The metrics of *data*, ``None`` with no data; with no well read yet (nothing selected) an empty table, so
     the page counts as loaded and says what to select rather than reading on."""
     if data is None:
         return None
     if not len(data.sites):
         return pd.DataFrame(columns=["well", "timepoint", "nw_q", "nw_r", "state"])
-    return site_metrics(data, baseline)
+    return site_metrics(data, baseline, gate)
+
+
+def gate_version(ctx) -> int:
+    """The version of which cells the analysis includes (``StatsCacheState.population_version``): every gating,
+    curation or QC edit moves it."""
+    return int(getattr(ctx.state.stats_cache, "population_version", 0))
+
+
+def _cell_label(ctx, well: str, data) -> str | None:
+    """The row cache's label for the per-cell CSV holding *well*'s cells: the well's own name, else the label
+    registered for the CSV the nanowell tables found its cells in (``NanowellData.cell_tables``)."""
+    paths = ctx.state.dataset.well_paths
+    if well in paths:
+        return well
+    table = (getattr(data, "cell_tables", None) or {}).get(well)
+    if table is None:
+        return None
+    wanted = Path(table).resolve()
+    return next((label for label, path in paths.items() if Path(path).resolve() == wanted), None)
+
+
+def gate_tally(ctx, data) -> cg.GateTally | None:
+    """The cells Home's Cell Gating leaves out of *data*'s wells (``cell_gate_compute``), read from the row
+    cache with the inclusion every other figure uses. Safe on a worker: the row cache is read there by the
+    gating pass too. ``None`` with no data."""
+    from review.data.data_loading import df_included_mask, get_rows
+
+    if data is None or not len(data.sites):
+        return None
+    per_well, unread = [], []
+    for well in data.wells:
+        label = _cell_label(ctx, well, data)
+        if label is None:
+            counted = pd.to_numeric(data.sites.loc[data.sites["well"] == well, "n_cells"], errors="coerce")
+            if counted.gt(0).any():                      # a well with no cell at all has nothing to gate
+                unread.append(well)
+            continue
+        try:
+            frame = get_rows(ctx, label)
+        except Exception as exc:                         # a well that cannot be read keeps the run's counts
+            log.warning("Nanowells: the cells of %s could not be read for Cell Gating (%s); its counts are the "
+                        "run's own", well, exc)
+            unread.append(well)
+            continue
+        if frame is not None and len(frame):
+            per_well.append((well, frame, df_included_mask(frame).to_numpy()))
+    return cg.tally(per_well, unread)
+
+
+def gated_metrics(ctx, data, baseline: str) -> pd.DataFrame | None:
+    """:func:`site_metrics` with the cells Home's Cell Gating leaves out taken out — what the page draws and
+    Batch Export exports, so the two never disagree."""
+    return _metrics_of(data, baseline, gate_tally(ctx, data))
 
 
 def ensure_loaded(ctx, *, force: bool = False) -> None:
@@ -290,9 +344,10 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         st.well_parts, st.parts_for, st.loaded_wells = {}, str(data_dir or ""), frozenset()
     wells = wanted | st.loaded_wells
     key = (str(data_dir or ""), st.baseline)
-    if not force and st.computing and st.pending_for == (key, wells):
+    version = gate_version(ctx)
+    if not force and st.computing and st.pending_for == (key, wells, version):
         return                                           # this very request is already running
-    if not force and st.loaded_for == key and wanted <= st.loaded_wells:
+    if not force and st.loaded_for == key and wanted <= st.loaded_wells and st.gated_for == version:
         if st.computing:
             # The current data is what is wanted again (a baseline changed and changed back): whatever is
             # running is for another key and now stale, so it must not land when it finishes.
@@ -302,25 +357,30 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         return
     st.request += 1
     request, baseline = st.request, st.baseline
-    st.computing, st.pending_for = True, (key, wells)
+    st.computing, st.pending_for = True, (key, wells, version)
     same_wells = wanted <= st.loaded_wells and st.loaded_for is not None and st.loaded_for[0] == key[0]
     previous = st.data if same_wells else None
     parts = dict(st.well_parts)                          # the worker's own copy: it adds the wells it reads
 
     def job():
+        # The cells Home's Cell Gating leaves out are tallied here too, at the version asked for: an edit made
+        # while this runs moves the version, and the next draw asks again (``redraw``).
         if previous is not None:
-            return previous, _metrics_of(previous, baseline), "", parts
+            gate = gate_tally(ctx, previous)
+            return previous, _metrics_of(previous, baseline, gate), "", parts, gate
         try:
             data = load_nanowell_data(Path(data_dir), wells=sorted(wells), parts=parts) if data_dir else None
         except NanowellSchemeError as exc:
-            return None, None, str(exc), parts
-        return data, _metrics_of(data, baseline), "", parts
+            return None, None, str(exc), parts, None
+        gate = gate_tally(ctx, data)
+        return data, _metrics_of(data, baseline, gate), "", parts, gate
 
     def done(result):
         if request != st.request:
             return                                       # a newer request has been made; this one is stale
-        data, metrics, error, read = result
+        data, metrics, error, read, gate = result
         st.data, st.metrics, st.load_error = data, metrics, error
+        st.gate, st.gated_for = gate, version
         st.loaded_for, st.computing = key, False
         if st.parts_for == key[0]:
             st.well_parts, st.loaded_wells = read, wells
@@ -335,6 +395,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
             return
         st.reset_data()
         st.computing, st.load_error, st.loaded_for = False, f"Loading failed: {message}", key
+        st.gated_for = version                           # failed at this version: a redraw must not retry it
         _call(ctx, "_nw_refresh_controls")
         redraw(ctx)
 
@@ -349,9 +410,11 @@ def redraw(ctx) -> None:
     fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
     if st is None or fig is None or canvas is None:
         return
-    if st.loaded_for is not None and st.loaded_for[1] != st.baseline and not st.computing:
-        # The baseline changed without a load (a reset, a restore): what is on hand was computed for another
-        # one, so fetch the right metrics rather than draw fold changes against the wrong baseline.
+    stale_gate = st.loaded_for is not None and st.gated_for != gate_version(ctx)
+    if st.loaded_for is not None and (st.loaded_for[1] != st.baseline or stale_gate) and not st.computing:
+        # The baseline changed without a load (a reset, a restore), or Cell Gating changed which cells count:
+        # what is on hand was computed for something else, so fetch the right metrics rather than draw fold
+        # changes against the wrong baseline or counts that hold cells the gate has left out.
         ensure_loaded(ctx)
     _call(ctx, "_nw_refresh_controls")
     _call(ctx, "_nw_show_computing")
@@ -367,7 +430,7 @@ def redraw(ctx) -> None:
     if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
         return                                           # the right metrics are on their way
     metric, channel, note = resolve_metric(st.view, st.metric, page_channel_name(ctx), st.data.channels)
-    note = " ".join(filter(None, [note, excluded_note(ctx)]))
+    note = " ".join(filter(None, [note, excluded_note(ctx), cg.note(st.gate)]))
     well = page_well(ctx)
     st.extreme_axes = {}
     if st.view == "identity":
